@@ -8,6 +8,7 @@ import {
   type ToolEvent,
 } from "@/lib/db"
 import { HermesError, respondToApproval, streamChat, type ChatMessage } from "@/lib/hermes"
+import { randomId } from "@/lib/utils"
 
 /**
  * Sends a turn to Hermes and persists the streamed reply into IndexedDB as it arrives.
@@ -39,7 +40,7 @@ export async function sendMessage(conversationId: string, text: string) {
   const history = await getMessages(conversationId)
   const now = Date.now()
   const userMessage: Message = {
-    id: crypto.randomUUID(),
+    id: randomId(),
     conversationId,
     role: "user",
     content,
@@ -47,7 +48,7 @@ export async function sendMessage(conversationId: string, text: string) {
     createdAt: now,
   }
   const reply: Message = {
-    id: crypto.randomUUID(),
+    id: randomId(),
     conversationId,
     role: "assistant",
     content: "",

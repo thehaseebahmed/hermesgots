@@ -1,5 +1,7 @@
 import Dexie, { type EntityTable } from "dexie"
 
+import { randomId } from "@/lib/utils"
+
 export type ThemePreference = "system" | "light" | "dark"
 
 export interface Settings {
@@ -99,9 +101,9 @@ export async function saveSettings(patch: Partial<Omit<Settings, "id">>) {
 export async function createConversation(): Promise<Conversation> {
   const now = Date.now()
   const conversation: Conversation = {
-    id: crypto.randomUUID(),
+    id: randomId(),
     title: "New chat",
-    hermesSessionId: `memento-${crypto.randomUUID()}`,
+    hermesSessionId: `memento-${randomId()}`,
     createdAt: now,
     updatedAt: now,
   }

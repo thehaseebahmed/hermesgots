@@ -16,7 +16,7 @@ export function Composer({
 }: {
   busy: boolean
   disabled?: boolean
-  onSend: (text: string) => void
+  onSend: (text: string) => Promise<void> | void
   onStop: () => void
 }) {
   const [value, setValue] = useState("")
@@ -26,8 +26,10 @@ export function Composer({
   const submit = (event?: FormEvent) => {
     event?.preventDefault()
     if (!canSend) return
-    onSend(value)
+    const text = value
     setValue("")
+    // Hand the text back if it never made it into the chat, unless something new was typed.
+    void Promise.resolve(onSend(text)).catch(() => setValue((current) => current || text))
     textarea.current?.focus()
   }
 
