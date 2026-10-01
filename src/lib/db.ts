@@ -91,6 +91,24 @@ db.version(1).stores({
   messages: "id, conversationId, [conversationId+createdAt]",
 })
 
+/** WebKit's IndexedDB can stall forever in installed PWAs; fail loudly instead of hanging a send. */
+export function withTimeout<T>(promise: Promise<T>, step: string, ms = 5000): Promise<T> {
+  let timer: number | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = window.setTimeout(
+      () => reject(new Error(`Saving timed out (${step}). Try reopening the app.`)),
+      ms,
+    )
+  })
+  return Promise.race([promise, timeout]).finally(() => window.clearTimeout(timer))
+}
+
+/** iOS can drop the IndexedDB connection while the app is in the background. */
+export async function reopenDb() {
+  db.close()
+  await db.open()
+}
+
 export async function getSettings(): Promise<Settings> {
   return { ...DEFAULT_SETTINGS, ...(await db.settings.get("settings")) }
 }

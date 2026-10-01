@@ -38,7 +38,15 @@ import {
   useMessageScroller,
 } from "@/components/ui/message-scroller"
 import { sendMessage, stopMessage } from "@/lib/chat"
-import { DEFAULT_SETTINGS, createConversation, db, deleteConversation, getMessages } from "@/lib/db"
+import {
+  DEFAULT_SETTINGS,
+  createConversation,
+  db,
+  deleteConversation,
+  getMessages,
+  reopenDb,
+  withTimeout,
+} from "@/lib/db"
 
 const SUGGESTIONS = [
   "What can you do on my machine?",
@@ -125,11 +133,19 @@ export function ChatPage() {
     try {
       let conversationId = id
       if (!conversationId) {
-        conversationId = (await createConversation()).id
+        conversationId = (await withTimeout(createConversation(), "new chat")).id
         navigate(`/c/${conversationId}`)
       }
       await sendMessage(conversationId, text)
     } catch (error) {
+      console.error(error)
+      // A stalled or dropped connection may recover on a fresh one, so the retry has a chance.
+      if (
+        error instanceof Error &&
+        /timed out|DatabaseClosed|Indexed Database/i.test(`${error.name} ${error.message}`)
+      ) {
+        void reopenDb().catch(console.error)
+      }
       toast.error(error instanceof Error ? error.message : "Couldn't send your message.")
       throw error
     }

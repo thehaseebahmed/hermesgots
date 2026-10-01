@@ -2,6 +2,7 @@ import {
   db,
   getMessages,
   getSettings,
+  withTimeout,
   type ApprovalChoice,
   type Message,
   type MessageStats,
@@ -31,13 +32,14 @@ function titleFrom(text: string) {
 
 export async function sendMessage(conversationId: string, text: string) {
   const content = text.trim()
-  if (!content || controllers.has(conversationId)) return
+  if (!content) return
+  if (controllers.has(conversationId)) throw new Error("Hermes is still replying.")
 
-  const settings = await getSettings()
-  const conversation = await db.conversations.get(conversationId)
-  if (!conversation) return
+  const settings = await withTimeout(getSettings(), "settings")
+  const conversation = await withTimeout(db.conversations.get(conversationId), "chat")
+  if (!conversation) throw new Error("This chat no longer exists.")
 
-  const history = await getMessages(conversationId)
+  const history = await withTimeout(getMessages(conversationId), "history")
   const now = Date.now()
   const userMessage: Message = {
     id: randomId(),
@@ -57,13 +59,16 @@ export async function sendMessage(conversationId: string, text: string) {
     createdAt: now + 1,
   }
 
-  await db.transaction("rw", db.messages, db.conversations, async () => {
-    await db.messages.bulkAdd([userMessage, reply])
-    await db.conversations.update(conversationId, {
-      updatedAt: now,
-      ...(history.length === 0 ? { title: titleFrom(content) } : {}),
-    })
-  })
+  await withTimeout(
+    db.transaction("rw", db.messages, db.conversations, async () => {
+      await db.messages.bulkAdd([userMessage, reply])
+      await db.conversations.update(conversationId, {
+        updatedAt: now,
+        ...(history.length === 0 ? { title: titleFrom(content) } : {}),
+      })
+    }),
+    "message",
+  )
 
   const transcript: ChatMessage[] = [...history, userMessage]
     .filter((m) => m.status === "done" || (m.role === "assistant" && m.content))
