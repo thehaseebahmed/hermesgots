@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Link, useNavigate, useParams } from "react-router"
+import { toast } from "sonner"
 import { EllipsisIcon, PencilIcon, PlusIcon, SettingsIcon, Trash2Icon } from "lucide-react"
 
 import { ApprovalCard } from "@/components/chat/approval-card"
@@ -121,12 +122,17 @@ export function ChatPage() {
   }, [id, conversation, navigate])
 
   const send = async (text: string) => {
-    let conversationId = id
-    if (!conversationId) {
-      conversationId = (await createConversation()).id
-      navigate(`/c/${conversationId}`)
+    try {
+      let conversationId = id
+      if (!conversationId) {
+        conversationId = (await createConversation()).id
+        navigate(`/c/${conversationId}`)
+      }
+      await sendMessage(conversationId, text)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't send your message.")
+      throw error
     }
-    void sendMessage(conversationId, text)
   }
 
   const host = (() => {
@@ -209,7 +215,7 @@ export function ChatPage() {
           </MessageScroller>
         </MessageScrollerProvider>
       ) : (
-        <EmptyState configured={configured} onPick={send} />
+        <EmptyState configured={configured} onPick={(text) => void send(text).catch(() => {})} />
       )}
 
       <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
