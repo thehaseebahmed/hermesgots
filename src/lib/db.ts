@@ -36,6 +36,9 @@ export interface ApprovalRequest {
   command?: string
   description?: string
   choices: ApprovalChoice[]
+  /** Reply length and time when Hermes asked, so the thread can place the card where it happened. */
+  contentOffset?: number
+  requestedAt?: number
   /** Set once the user answers (or the turn ends without an answer). */
   resolved?: ApprovalChoice | "expired"
 }

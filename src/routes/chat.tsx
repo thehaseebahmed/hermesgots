@@ -1,12 +1,13 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Link, useNavigate, useParams } from "react-router"
 import { EllipsisIcon, PencilIcon, PlusIcon, SettingsIcon, Trash2Icon } from "lucide-react"
 
+import { ApprovalCard } from "@/components/chat/approval-card"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
-import { Mascot } from "@/components/mascot"
+import { Bot } from "@/components/bot"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,6 +34,7 @@ import {
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
+  useMessageScroller,
 } from "@/components/ui/message-scroller"
 import { sendMessage, stopMessage } from "@/lib/chat"
 import { DEFAULT_SETTINGS, createConversation, db, deleteConversation, getMessages } from "@/lib/db"
@@ -52,7 +54,7 @@ function EmptyState({
 }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 pt-24 pb-8 text-center">
-      <Mascot className="size-20" />
+      <Bot animate className="size-24" />
       <div className="space-y-1.5">
         <h1 className="text-2xl font-semibold tracking-tight">Hey, I'm Hermes</h1>
         <p className="max-w-sm text-sm text-muted-foreground">
@@ -84,6 +86,17 @@ function EmptyState({
   )
 }
 
+/** The approval card temporarily replaces the composer; once answered, follow the reply again. */
+function FollowAfterApproval({ pending }: { pending: boolean }) {
+  const { scrollToEnd } = useMessageScroller()
+  const wasPending = useRef(pending)
+  useEffect(() => {
+    if (wasPending.current && !pending) scrollToEnd({ behavior: "smooth" })
+    wasPending.current = pending
+  }, [pending, scrollToEnd])
+  return null
+}
+
 export function ChatPage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -100,6 +113,7 @@ export function ChatPage() {
   const resolved = { ...DEFAULT_SETTINGS, ...settings }
   const configured = Boolean(resolved.baseUrl.trim())
   const busy = messages?.some((m) => m.status === "streaming") ?? false
+  const awaitingApproval = messages?.find((m) => m.approval && !m.approval.resolved)
 
   // A deleted (or unknown) conversation id falls back to a fresh chat.
   useEffect(() => {
@@ -171,7 +185,6 @@ export function ChatPage() {
       <ChatHeader
         title={conversation?.title ?? "New chat"}
         subtitle={busy ? "Writing…" : host}
-        busy={busy}
         actions={actions}
       />
 
@@ -192,6 +205,7 @@ export function ChatPage() {
               </MessageScrollerContent>
             </MessageScrollerViewport>
             <MessageScrollerButton />
+            <FollowAfterApproval pending={Boolean(awaitingApproval)} />
           </MessageScroller>
         </MessageScrollerProvider>
       ) : (
@@ -199,12 +213,18 @@ export function ChatPage() {
       )}
 
       <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
-        <Composer
-          busy={busy}
-          disabled={!configured}
-          onSend={send}
-          onStop={() => id && stopMessage(id)}
-        />
+        {awaitingApproval ? (
+          <div className="mx-auto w-full max-w-3xl">
+            <ApprovalCard message={awaitingApproval} />
+          </div>
+        ) : (
+          <Composer
+            busy={busy}
+            disabled={!configured}
+            onSend={send}
+            onStop={() => id && stopMessage(id)}
+          />
+        )}
       </div>
 
       <AlertDialog open={renaming} onOpenChange={setRenaming}>
