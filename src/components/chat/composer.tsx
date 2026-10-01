@@ -88,9 +88,7 @@ export function Composer({
       setDismissed(true)
       return
     }
-    // Enter sends on devices with a hardware keyboard; on touch keyboards Enter is a newline.
-    const coarse = window.matchMedia("(pointer: coarse)").matches
-    if (event.key === "Enter" && !event.shiftKey && !coarse) {
+    if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault()
       submit()
     }
@@ -118,6 +116,7 @@ export function Composer({
             if (!event.target.value.startsWith("/")) setDismissed(false)
           }}
           onKeyDown={onKeyDown}
+          enterKeyHint="send"
           role={menuOpen ? "combobox" : undefined}
           aria-expanded={menuOpen ? true : undefined}
           aria-controls={menuOpen ? listId : undefined}
