@@ -11,6 +11,30 @@ import { Spinner } from "@/components/ui/spinner"
 import type { Message, ToolEvent } from "@/lib/db"
 import { formatDuration } from "@/lib/format"
 
+type Part = { kind: "text"; at: number; text: string } | { kind: "tools"; tools: ToolEvent[] }
+
+/** Interleaves a slice of the reply (starting at `start`) with the tools run during it. */
+function toParts(content: string, tools: ToolEvent[], start: number): Part[] {
+  const end = start + content.length
+  const parts: Part[] = []
+  let cursor = start
+  const pushText = (to: number) => {
+    const text = content.slice(cursor - start, to - start)
+    if (text.trim()) parts.push({ kind: "text", at: cursor, text })
+    cursor = to
+  }
+  const sorted = [...tools].sort((a, b) => (a.contentOffset ?? 0) - (b.contentOffset ?? 0))
+  for (const tool of sorted) {
+    const at = Math.min(Math.max(tool.contentOffset ?? 0, cursor), end)
+    if (at > cursor) pushText(at)
+    const last = parts.at(-1)
+    if (last?.kind === "tools") last.tools.push(tool)
+    else parts.push({ kind: "tools", tools: [tool] })
+  }
+  if (cursor < end) pushText(end)
+  return parts
+}
+
 function Stats({ message }: { message: Message }) {
   const stats = message.stats
   if (!stats) return null
@@ -106,48 +130,35 @@ export function MessageItem({ message, showStats }: { message: Message; showStat
 
   return (
     <div className="flex flex-col gap-3">
-      <AssistantRow tools={toolsBefore} content={before}>
-        {!split && footer}
-      </AssistantRow>
+      <AssistantRow parts={toParts(before, toolsBefore, 0)}>{!split && footer}</AssistantRow>
       {/* A pending approval lives in the composer slot; once answered it sits in the thread, unattributed. */}
       {approval?.resolved && <ApprovalCard message={message} />}
-      {split && (
-        <AssistantRow tools={toolsAfter} content={after}>
-          {footer}
-        </AssistantRow>
-      )}
+      {split && <AssistantRow parts={toParts(after, toolsAfter, offset)}>{footer}</AssistantRow>}
     </div>
   )
 }
 
-function AssistantRow({
-  tools,
-  content,
-  children,
-}: {
-  tools: ToolEvent[]
-  content: string
-  children?: ReactNode
-}) {
+function AssistantRow({ parts, children }: { parts: Part[]; children?: ReactNode }) {
   return (
     <MessageRow align="start" className="gap-2">
       <MessageAvatar className="mb-6 size-8 bg-transparent">
         <Bot className="size-8" />
       </MessageAvatar>
       <MessageContent className="gap-2">
-        {tools.length > 0 && (
-          <div className="flex w-full max-w-xl flex-col">
-            {tools.map((tool) => (
-              <ToolCard key={tool.toolCallId} tool={tool} />
-            ))}
-          </div>
-        )}
-        {content && (
-          <Bubble variant="muted" className="max-w-[min(100%,42rem)]">
-            <BubbleContent className="px-4 py-3 text-[15px]">
-              <Markdown>{content}</Markdown>
-            </BubbleContent>
-          </Bubble>
+        {parts.map((part) =>
+          part.kind === "tools" ? (
+            <div key={part.tools[0].toolCallId} className="flex w-full max-w-xl flex-col">
+              {part.tools.map((tool) => (
+                <ToolCard key={tool.toolCallId} tool={tool} />
+              ))}
+            </div>
+          ) : (
+            <Bubble key={part.at} variant="muted" className="max-w-[min(100%,42rem)]">
+              <BubbleContent className="px-4 py-3 text-[15px]">
+                <Markdown>{part.text}</Markdown>
+              </BubbleContent>
+            </Bubble>
+          ),
         )}
         {children}
       </MessageContent>

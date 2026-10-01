@@ -126,6 +126,7 @@ export async function sendMessage(conversationId: string, text: string) {
               label: event.label ?? event.tool,
               status: event.status,
               startedAt: Date.now(),
+              contentOffset: draft.content.length,
             })
           }
           draft.tools = [...draft.tools]
