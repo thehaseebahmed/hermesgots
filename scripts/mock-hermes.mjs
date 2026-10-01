@@ -108,6 +108,16 @@ http
     if (url.pathname === "/v1/models") {
       return json(res, 200, { object: "list", data: [{ id: "hermes-agent", object: "model", owned_by: "hermes" }] })
     }
+    if (url.pathname === "/v1/skills") {
+      return json(res, 200, {
+        object: "list",
+        data: [
+          { name: "github-pr-workflow", description: "Open, review and land pull requests.", category: "github" },
+          { name: "log-triage", description: "Find the noisy lines in a pile of logs.", category: "ops" },
+          { name: "plan", description: "Write a step-by-step plan before touching anything.", category: null },
+        ],
+      })
+    }
     if (req.method === "POST" && url.pathname === "/v1/chat/completions") {
       return streamCompletion(req, res, await readBody(req))
     }

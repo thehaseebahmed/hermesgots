@@ -223,6 +223,24 @@ export async function listModels(config: HermesConfig): Promise<string[]> {
   return Array.isArray(body?.data) ? body.data.map((m: { id: string }) => m.id) : []
 }
 
+export interface Skill {
+  name: string
+  description?: string | null
+  category?: string | null
+}
+
+export async function listSkills(config: HermesConfig): Promise<Skill[]> {
+  const response = await request(endpoint(config.baseUrl, "/skills"), {
+    headers: headers(config),
+  })
+  const body = await response.json()
+  // The code returns an OpenAI-style list; the docs show a bare array. Accept both.
+  const data: unknown = Array.isArray(body) ? body : body?.data
+  return Array.isArray(data)
+    ? data.filter((s): s is Skill => typeof s?.name === "string" && s.name.length > 0)
+    : []
+}
+
 export async function checkHealth(config: HermesConfig) {
   const response = await request(`${serverRoot(config.baseUrl)}/health`, {
     headers: headers(config),

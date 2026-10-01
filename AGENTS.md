@@ -70,6 +70,8 @@ These behaviours were verified against Hermes's `gateway/platforms/api_server*.p
 - Approvals are answered with `POST /v1/runs/{completion_id}/approval` and a body of `{ choice }`.
 - `X-Hermes-Session-Id` continues a session. Hermes only accepts it when `API_SERVER_KEY` is set.
 - Hermes's CORS setup does not expose response headers, which is why the client mints its own session ids.
+- `GET /v1/skills` lists skills for the `/` menu. The code returns `{ object: "list", data }` (the docs show a bare array), and on some versions it returns a 500, so the menu must work without it.
+- The API server does **not** expand `/skill-name` messages (only the CLI and messaging gateway do). The composer sends them literally and the model decides what to do with them.
 - If you change how the API is used, update `scripts/mock-hermes.mjs` to match.
 
 ## Conventions
