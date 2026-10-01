@@ -1,0 +1,86 @@
+# AGENTS.md
+
+Guidance for AI coding agents (and humans) working on Memento: a playful, minimal PWA companion for [Hermes Agent](https://github.com/NousResearch/hermes-agent).
+
+## Commands
+
+```bash
+pnpm install
+pnpm dev         # Vite dev server
+pnpm mock        # fake Hermes API on :8642 (say "clean up" to trigger an approval)
+pnpm lint        # oxlint
+pnpm typecheck   # tsc -b
+pnpm build       # typecheck + production build (also generates the service worker)
+pnpm format      # prettier (with the Tailwind class sorter) over src/
+```
+
+Before you commit, run `pnpm lint`, `pnpm typecheck` and `pnpm build`. All three must pass.
+
+## Git commits
+
+**Always use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).** The format is:
+
+```
+<type>(<optional scope>): <imperative summary, lower case, no trailing period>
+
+<optional body: what changed and why>
+```
+
+- Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`.
+- Scopes, when they help: `chat`, `settings`, `bots`, `hermes`, `db`, `pwa`, `ui`, `deps`.
+- Breaking changes: put `!` after the type or scope (e.g. `feat(db)!: ...`) and add a `BREAKING CHANGE:` footer.
+- Keep the summary line to 72 characters or fewer.
+- Use one logical change per commit.
+- Examples:
+  - `feat(chat): show approvals in place of the composer`
+  - `fix(hermes): handle CRLF line endings in SSE frames`
+  - `docs: document the HTTPS requirement for remote Hermes servers`
+
+PR titles follow the same format. Fill in `.github/pull_request_template.md` for every PR.
+
+## Stack
+
+- Vite, React 19, TypeScript and Tailwind v4.
+- React Router (`src/App.tsx`).
+- **shadcn/ui on Base UI**, `base-maia` style (`components.json`). Components live in `src/components/ui/`.
+  - Base UI uses the `render` prop, not Radix's `asChild`.
+  - Use shadcn components wherever one fits before writing your own.
+  - Add new ones with `pnpm dlx shadcn@latest add <name>`. Leave the generated files alone unless there's a reason to change them.
+- Dexie (IndexedDB) for all app data. `vite-plugin-pwa` handles the manifest and service worker. Deployed on Netlify (`netlify.toml`).
+
+## Layout
+
+| Path | What lives there |
+| --- | --- |
+| `src/lib/hermes.ts` | Hermes API client and SSE parser |
+| `src/lib/chat.ts` | Send/stop a turn and stream it into IndexedDB; approval answers |
+| `src/lib/db.ts` | Dexie schema, types, settings helpers |
+| `src/routes/` | `chat.tsx`, `settings.tsx`, `bots.tsx` (gallery) |
+| `src/components/chat/` | Message rendering, tool and approval cards, composer, header |
+| `src/components/bots.tsx` | Bot character definitions (SVG). `bot.tsx` renders them |
+| `src/index.css` | Theme tokens (light and dark) and bot/typing animations |
+| `scripts/mock-hermes.mjs` | Dev-only Hermes stand-in |
+
+## Hermes API
+
+These behaviours were verified against Hermes's `gateway/platforms/api_server*.py`. Check the source again before relying on anything new.
+
+- The client uses `POST /v1/chat/completions` with `stream: true`.
+- The stream interleaves named SSE events with the normal chunks: `hermes.tool.progress`, `hermes.status` and `approval.request`.
+- Approvals are answered with `POST /v1/runs/{completion_id}/approval` and a body of `{ choice }`.
+- `X-Hermes-Session-Id` continues a session. Hermes only accepts it when `API_SERVER_KEY` is set.
+- Hermes's CORS setup does not expose response headers, which is why the client mints its own session ids.
+- If you change how the API is used, update `scripts/mock-hermes.mjs` to match.
+
+## Conventions
+
+- **The UI renders from Dexie live queries.** Streaming writes into IndexedDB (throttled), and components never hold stream state.
+- **If you change the schema, bump the Dexie version** in `src/lib/db.ts` and keep existing data loading.
+- **Every screen must work at phone (390px) and tablet (≥768px) widths, in light and dark mode.**
+  - Use the theme tokens. Don't hard-code colours, except for the fixed character palettes in the bots.
+  - Respect safe-area insets.
+  - Keep touch targets at 44px or larger.
+- **Bots:** they are still by default. Only the header (and the empty-state hero) passes `animate`. Animations must respect `prefers-reduced-motion`.
+- **Assets must be original or properly licensed.** Never copy third-party characters, mascots or brand assets, even as "inspiration" copies.
+- **Never commit secrets.** API keys live only in the user's browser.
+- Match the surrounding code: Prettier style (no semicolons, 100 columns) and few comments. Comments explain *why*.
