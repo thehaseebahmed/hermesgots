@@ -333,6 +333,12 @@ function SettingsForm({ stored }: { stored: Settings | null }) {
             </AlertDialog>
           </CardContent>
         </Card>
+
+        <p className="text-center text-xs text-muted-foreground">
+          Memento v{__APP_VERSION__}
+          <br />
+          Built {new Date(__BUILD_TIME__).toLocaleString()}
+        </p>
       </div>
     </div>
   )
