@@ -29,6 +29,8 @@ export interface ToolEvent {
   status: "running" | "completed"
   startedAt: number
   endedAt?: number
+  /** Length of the reply text when the tool started, so it renders where it happened. */
+  contentOffset?: number
 }
 
 export type ApprovalChoice = "once" | "session" | "always" | "deny"
