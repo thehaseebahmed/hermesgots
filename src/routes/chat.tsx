@@ -229,6 +229,7 @@ export function ChatPage() {
             disabled={!configured}
             onSend={send}
             onStop={() => id && stopMessage(id)}
+            onCommand={(command) => navigate(command === "new" ? "/" : "/settings")}
           />
         )}
       </div>
