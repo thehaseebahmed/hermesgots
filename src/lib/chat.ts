@@ -136,6 +136,8 @@ export async function sendMessage(conversationId: string, text: string) {
             command: event.command,
             description: event.description,
             choices: event.choices?.length ? event.choices : ["once", "deny"],
+            contentOffset: draft.content.length,
+            requestedAt: Date.now(),
           }
           touch()
         },

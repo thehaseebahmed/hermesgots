@@ -1,13 +1,14 @@
+import type { ReactNode } from "react"
 import { AlertCircleIcon } from "lucide-react"
 
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { Markdown } from "@/components/chat/markdown"
 import { ToolCard } from "@/components/chat/tool-card"
-import { Mascot } from "@/components/mascot"
+import { Bot } from "@/components/bot"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Message as MessageRow, MessageAvatar, MessageContent } from "@/components/ui/message"
 import { Spinner } from "@/components/ui/spinner"
-import type { Message } from "@/lib/db"
+import type { Message, ToolEvent } from "@/lib/db"
 import { formatDuration } from "@/lib/format"
 
 function Stats({ message }: { message: Message }) {
@@ -67,12 +68,71 @@ export function MessageItem({ message, showStats }: { message: Message; showStat
 
   const streaming = message.status === "streaming"
   const tools = message.tools ?? []
-  const showTyping = streaming && !message.content
+  const approval = message.approval
+  const awaitingApproval = Boolean(approval && !approval.resolved)
 
+  // An answered approval splits the reply in two so the card sits where it happened:
+  // everything Hermes said and ran before asking, the card, then everything after.
+  const split = approval?.resolved && approval.contentOffset !== undefined
+  const offset = split ? approval.contentOffset! : message.content.length
+  const before = message.content.slice(0, offset)
+  const after = message.content.slice(offset)
+  const askedAt = approval?.requestedAt ?? Infinity
+  const toolsBefore = split ? tools.filter((t) => t.startedAt <= askedAt) : tools
+  const toolsAfter = split ? tools.filter((t) => t.startedAt > askedAt) : []
+
+  const showTyping = streaming && (!message.content || awaitingApproval)
+  const typingStatus = awaitingApproval ? "Waiting for your approval…" : message.statusText
+  const footer = (
+    <>
+      {showTyping && <TypingBubble status={typingStatus} />}
+      {streaming && message.content && message.statusText && !awaitingApproval && (
+        <div className="px-1 text-xs text-muted-foreground">{message.statusText}</div>
+      )}
+      {message.status === "error" && (
+        <Bubble variant="destructive">
+          <BubbleContent className="flex items-start gap-2 px-4 py-3">
+            <AlertCircleIcon className="mt-0.5 size-4 shrink-0" />
+            <span>{message.statusText ?? "Something went wrong."}</span>
+          </BubbleContent>
+        </Bubble>
+      )}
+      {message.status === "stopped" && !message.content && (
+        <div className="px-1 text-xs text-muted-foreground">Stopped</div>
+      )}
+      {showStats && !streaming && <Stats message={message} />}
+    </>
+  )
+
+  return (
+    <div className="flex flex-col gap-3">
+      <AssistantRow tools={toolsBefore} content={before}>
+        {!split && footer}
+      </AssistantRow>
+      {/* A pending approval lives in the composer slot; once answered it sits in the thread, unattributed. */}
+      {approval?.resolved && <ApprovalCard message={message} />}
+      {split && (
+        <AssistantRow tools={toolsAfter} content={after}>
+          {footer}
+        </AssistantRow>
+      )}
+    </div>
+  )
+}
+
+function AssistantRow({
+  tools,
+  content,
+  children,
+}: {
+  tools: ToolEvent[]
+  content: string
+  children?: ReactNode
+}) {
   return (
     <MessageRow align="start" className="gap-2">
       <MessageAvatar className="mb-6 size-8 bg-transparent">
-        <Mascot busy={streaming} className="size-7" />
+        <Bot className="size-8" />
       </MessageAvatar>
       <MessageContent className="gap-2">
         {tools.length > 0 && (
@@ -82,40 +142,14 @@ export function MessageItem({ message, showStats }: { message: Message; showStat
             ))}
           </div>
         )}
-
-        {message.content && (
+        {content && (
           <Bubble variant="muted" className="max-w-[min(100%,42rem)]">
             <BubbleContent className="px-4 py-3 text-[15px]">
-              <Markdown>{message.content}</Markdown>
+              <Markdown>{content}</Markdown>
             </BubbleContent>
           </Bubble>
         )}
-
-        {showTyping && <TypingBubble status={message.statusText} />}
-        {streaming && message.content && message.statusText && (
-          <div className="px-1 text-xs text-muted-foreground">{message.statusText}</div>
-        )}
-
-        {message.status === "error" && (
-          <Bubble variant="destructive">
-            <BubbleContent className="flex items-start gap-2 px-4 py-3">
-              <AlertCircleIcon className="mt-0.5 size-4 shrink-0" />
-              <span>{message.statusText ?? "Something went wrong."}</span>
-            </BubbleContent>
-          </Bubble>
-        )}
-
-        {message.status === "stopped" && !message.content && (
-          <div className="px-1 text-xs text-muted-foreground">Stopped</div>
-        )}
-
-        {message.approval && (
-          <div className="w-full max-w-xl">
-            <ApprovalCard message={message} />
-          </div>
-        )}
-
-        {showStats && !streaming && <Stats message={message} />}
+        {children}
       </MessageContent>
     </MessageRow>
   )

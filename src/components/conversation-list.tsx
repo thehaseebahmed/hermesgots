@@ -2,7 +2,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { NavLink, useNavigate } from "react-router"
 import { PlusIcon, SettingsIcon } from "lucide-react"
 
-import { Mascot } from "@/components/mascot"
+import { Bot } from "@/components/bot"
 import { Button } from "@/components/ui/button"
 import { db } from "@/lib/db"
 import { cn } from "@/lib/utils"
@@ -26,7 +26,7 @@ export function ConversationList({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-2 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-3">
-        <Mascot className="size-7" />
+        <Bot className="size-8" />
         <span className="flex-1 text-lg font-semibold tracking-tight">Memento</span>
         <Button
           variant="outline"

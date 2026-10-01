@@ -43,7 +43,14 @@ export function ApprovalCard({ message }: { message: Message }) {
   }
 
   return (
-    <Card size="sm" className={cn("w-full rounded-3xl border ring-0", resolved && "opacity-70")}>
+    <Card
+      size="sm"
+      className={cn(
+        "w-full rounded-3xl border ring-0",
+        !resolved && "shadow-xl shadow-black/10 dark:shadow-black/40",
+        resolved && "opacity-70",
+      )}
+    >
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base text-warning">
           <ShieldAlertIcon className="size-5" />

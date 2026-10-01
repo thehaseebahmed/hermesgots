@@ -3,6 +3,7 @@ import { useTheme } from "next-themes"
 import { Route, Routes } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
+import { BotsPage } from "@/routes/bots"
 import { ChatPage } from "@/routes/chat"
 import { SettingsPage } from "@/routes/settings"
 
@@ -27,6 +28,7 @@ export default function App() {
           <Route index element={<ChatPage />} />
           <Route path="c/:id" element={<ChatPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="bots" element={<BotsPage />} />
           <Route path="*" element={<ChatPage />} />
         </Route>
       </Routes>

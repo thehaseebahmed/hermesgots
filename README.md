@@ -2,7 +2,8 @@
 
 A playful, minimal companion app for [Hermes Agent](https://github.com/NousResearch/hermes-agent). It's an installable PWA for phones and tablets, with light and dark themes.
 
-- **Chat** streams replies from Hermes's OpenAI-compatible API, including live tool cards and dangerous-command **approval** prompts (Once / Session / Always / Deny).
+- **Chat** streams replies from Hermes's OpenAI-compatible API, with live tool cards. When Hermes asks to run a dangerous command, an **approval** card (Once / Session / Always / Deny) takes the place of the message bar. Once you answer, the card moves into the thread at the point where Hermes asked.
+- **Bots**: 8 fluffy, animated SVG characters (see `/bots`). Bolt is hardcoded for now. The header bot is animated, and the bots next to messages stay still.
 - **Settings**: API URL and key, model picker, theme, reply stats, and clearing local data.
 - Chats and settings are stored on the device in **IndexedDB** (via Dexie). Theme preference lives in `localStorage` so the first paint doesn't flash.
 
