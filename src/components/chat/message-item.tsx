@@ -136,7 +136,7 @@ function AssistantRow({
       </MessageAvatar>
       <MessageContent className="gap-2">
         {tools.length > 0 && (
-          <div className="flex w-full max-w-xl flex-col gap-2">
+          <div className="flex w-full max-w-xl flex-col">
             {tools.map((tool) => (
               <ToolCard key={tool.toolCallId} tool={tool} />
             ))}
