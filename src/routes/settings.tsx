@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTheme } from "next-themes"
 import { MenuIcon, MonitorIcon, MoonIcon, SunIcon } from "lucide-react"
@@ -35,6 +36,7 @@ function SettingsForm({ stored }: { stored: Settings | null }) {
   const openDrawer = useOpenDrawer()
   const settings = { ...DEFAULT_SETTINGS, ...stored }
   const { theme, setTheme } = useTheme()
+  const [clearing, setClearing] = useState(false)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -106,7 +108,7 @@ function SettingsForm({ stored }: { stored: Settings | null }) {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <AlertDialog>
+            <AlertDialog open={clearing} onOpenChange={setClearing}>
               <AlertDialogTrigger render={<Button variant="destructive" />}>
                 Clear local data
               </AlertDialogTrigger>
@@ -125,6 +127,7 @@ function SettingsForm({ stored }: { stored: Settings | null }) {
                     onClick={async () => {
                       await clearAllData()
                       forgetLocalKey()
+                      setClearing(false)
                       toast.success("Local data cleared")
                     }}
                   >
