@@ -26,6 +26,8 @@ export interface Profile {
   contextModel?: string
   contextSource?: "models.dev" | "manual"
   createdAt: number
+  /** Last change to the config, the clock sync merges on. */
+  updatedAt: number
 }
 
 export interface Conversation {
@@ -38,6 +40,10 @@ export interface Conversation {
   hermesSessionId: string
   createdAt: number
   updatedAt: number
+  /** Last change to anything sync carries (title included), the clock it merges on. */
+  changedAt: number
+  /** Hermes rows still on the server before the oldest local message, for "Load earlier". */
+  olderOffset?: number
 }
 
 export interface ToolEvent {
@@ -115,6 +121,20 @@ export interface CronRun {
   checked?: boolean
 }
 
+/** A local deletion sync hasn't pushed yet: `bot:<profileId>` or `chat:<conversationId>`. */
+export interface Tombstone {
+  id: string
+  deletedAt: number
+  profileId: string
+}
+
+/** This device's copy of the sync key, imported non-extractable so script can use but not read it. */
+export interface VaultKey {
+  id: "key"
+  userId: string
+  key: CryptoKey
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   id: "settings",
   showStats: true,
@@ -133,6 +153,8 @@ export const db = new Dexie("memento") as Dexie & {
   conversations: EntityTable<Conversation, "id">
   messages: EntityTable<Message, "id">
   cronRuns: EntityTable<CronRun, "id">
+  tombstones: EntityTable<Tombstone, "id">
+  vault: EntityTable<VaultKey, "id">
 }
 
 db.version(1).stores({
@@ -148,13 +170,18 @@ export function pickBotId(taken: string[]) {
   return pool[Math.floor(Math.random() * pool.length)].id
 }
 
-function newProfile(fields: Partial<Omit<Profile, "id" | "createdAt">>, taken: string[]): Profile {
+function newProfile(
+  fields: Partial<Omit<Profile, "id" | "createdAt" | "updatedAt">>,
+  taken: string[],
+): Profile {
+  const now = Date.now()
   return {
     ...DEFAULT_PROFILE,
     botId: pickBotId(taken),
     ...fields,
     id: randomId(),
-    createdAt: Date.now(),
+    createdAt: now,
+    updatedAt: now,
   }
 }
 
@@ -207,6 +234,24 @@ db.version(4).stores({
   cronRuns: "id, profileId, [profileId+jobId+startedAt]",
 })
 
+// v5: change clocks and deletion tombstones for sync, and this device's sync key.
+db.version(5)
+  .stores({ tombstones: "id", vault: "id" })
+  .upgrade(async (tx) => {
+    await tx
+      .table("profiles")
+      .toCollection()
+      .modify((profile: Profile) => {
+        profile.updatedAt ??= profile.createdAt
+      })
+    await tx
+      .table("conversations")
+      .toCollection()
+      .modify((conversation: Conversation) => {
+        conversation.changedAt ??= conversation.updatedAt
+      })
+  })
+
 db.on("populate", (tx) => seedProfile(tx))
 
 export async function getSettings(): Promise<Settings> {
@@ -233,7 +278,9 @@ export async function setActiveProfile(id: string) {
   await saveSettings({ activeProfileId: id })
 }
 
-export async function addProfile(fields: Partial<Omit<Profile, "id" | "createdAt">> = {}) {
+export async function addProfile(
+  fields: Partial<Omit<Profile, "id" | "createdAt" | "updatedAt">> = {},
+) {
   const taken = (await db.profiles.toArray()).map((profile) => profile.botId)
   const profile = newProfile(fields, taken)
   await db.profiles.add(profile)
@@ -241,18 +288,24 @@ export async function addProfile(fields: Partial<Omit<Profile, "id" | "createdAt
 }
 
 export async function updateProfile(id: string, patch: Partial<Omit<Profile, "id">>) {
-  await db.profiles.update(id, patch)
+  await db.profiles.update(id, { ...patch, updatedAt: Date.now() })
 }
 
-/** Deletes a profile and its chats. The last profile can't be deleted. */
-export async function deleteProfile(id: string) {
-  await db.transaction("rw", db.profiles, db.conversations, db.messages, db.cronRuns, async () => {
-    if ((await db.profiles.count()) <= 1) return
+/**
+ * Deletes a profile and its chats. The last profile can't be deleted. `remote` is a deletion sync
+ * pulled from another device, which needs no tombstone of its own.
+ */
+export async function deleteProfile(id: string, { remote = false } = {}) {
+  const tables = [db.profiles, db.conversations, db.messages, db.cronRuns, db.tombstones]
+  return db.transaction("rw", tables, async () => {
+    if ((await db.profiles.count()) <= 1) return false
     const ids = await conversationsOf(id).primaryKeys()
     await db.messages.where("conversationId").anyOf(ids).delete()
     await db.cronRuns.where("profileId").equals(id).delete()
     await db.conversations.bulkDelete(ids)
     await db.profiles.delete(id)
+    if (!remote) await db.tombstones.put({ id: `bot:${id}`, deletedAt: Date.now(), profileId: id })
+    return true
   })
 }
 
@@ -272,15 +325,32 @@ export async function createConversation(profileId: string): Promise<Conversatio
     hermesSessionId: `memento-${randomId()}`,
     createdAt: now,
     updatedAt: now,
+    changedAt: now,
   }
   await db.conversations.add(conversation)
   return conversation
 }
 
-export async function deleteConversation(id: string) {
-  await db.transaction("rw", db.conversations, db.messages, async () => {
+/** Every change to a chat's synced fields goes through here so sync sees it. */
+export async function updateConversation(
+  id: string,
+  patch: Partial<Omit<Conversation, "id" | "changedAt">>,
+) {
+  await db.conversations.update(id, { ...patch, changedAt: Date.now() })
+}
+
+export async function deleteConversation(id: string, { remote = false } = {}) {
+  await db.transaction("rw", db.conversations, db.messages, db.tombstones, async () => {
+    const conversation = await db.conversations.get(id)
     await db.messages.where("conversationId").equals(id).delete()
     await db.conversations.delete(id)
+    if (conversation && !remote) {
+      await db.tombstones.put({
+        id: `chat:${id}`,
+        deletedAt: Date.now(),
+        profileId: conversation.profileId,
+      })
+    }
   })
 }
 
@@ -292,7 +362,15 @@ export async function getMessages(conversationId: string) {
 }
 
 export async function clearAllData() {
-  const tables = [db.conversations, db.messages, db.settings, db.profiles, db.cronRuns]
+  const tables = [
+    db.conversations,
+    db.messages,
+    db.settings,
+    db.profiles,
+    db.cronRuns,
+    db.tombstones,
+    db.vault,
+  ]
   await db.transaction("rw", tables, async () => {
     await Promise.all(tables.map((table) => table.clear()))
     await db.profiles.add(newProfile({}, []))

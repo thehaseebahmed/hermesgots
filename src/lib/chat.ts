@@ -6,6 +6,7 @@ import {
   type Message,
   type MessageStats,
   type ToolEvent,
+  updateConversation,
 } from "@/lib/db"
 import {
   getSessionTitle,
@@ -49,7 +50,7 @@ async function syncTitle(conversationId: string, config: HermesConfig, sessionId
     const conversation = await db.conversations.get(conversationId)
     if (!conversation || conversation.titleEdited) return
     if (title && title !== conversation.title)
-      await db.conversations.update(conversationId, { title })
+      await updateConversation(conversationId, { title })
   }
 }
 
@@ -91,7 +92,7 @@ export async function sendMessage(conversationId: string, text: string, queuedId
   await db.transaction("rw", db.messages, db.conversations, async () => {
     if (queuedId) await db.messages.delete(queuedId)
     await db.messages.bulkAdd([userMessage, reply])
-    await db.conversations.update(conversationId, {
+    await updateConversation(conversationId, {
       updatedAt: now,
       ...(history.length === 0 && !conversation.titleEdited ? { title: titleFrom(content) } : {}),
     })
@@ -218,7 +219,7 @@ export async function sendMessage(conversationId: string, text: string, queuedId
     }
     dirty = true
     await flush()
-    await db.conversations.update(conversationId, { updatedAt: endedAt })
+    await updateConversation(conversationId, { updatedAt: endedAt })
   }
   if (draft.status !== "done") return
   // Hermes only keys the session by our id when the profile has an API key.
