@@ -46,9 +46,7 @@ function message(error: unknown) {
 export function AccountSettings() {
   const sync = useSyncState()
   const [busy, setBusy] = useState(false)
-  const [code, setCode] = useState("")
   const [recoveryCode, setRecoveryCode] = useState<string>()
-  const [copied, setCopied] = useState(false)
 
   const { account } = sync
   if (account.status === "loading" || account.status === "unavailable") return null
@@ -127,53 +125,7 @@ export function AccountSettings() {
               </Button>
             )}
 
-            {sync.vault === "locked" && (
-              <>
-                {sync.passkeys && supportsPasskeys() && (
-                  <Button
-                    className="self-start"
-                    disabled={busy}
-                    onClick={() => run(unlockSyncWithPasskey)}
-                  >
-                    <FingerprintIcon data-icon="inline-start" />
-                    Unlock with passkey
-                  </Button>
-                )}
-                <form
-                  className="flex flex-col gap-3"
-                  onSubmit={(e) => {
-                    e.preventDefault()
-                    void run(async () => {
-                      await unlockSyncWithRecoveryCode(code)
-                      setCode("")
-                    })
-                  }}
-                >
-                  <Field>
-                    <FieldLabel htmlFor="recovery-code">Recovery code</FieldLabel>
-                    <Input
-                      id="recovery-code"
-                      autoComplete="off"
-                      autoCapitalize="characters"
-                      autoCorrect="off"
-                      spellCheck={false}
-                      placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
-                      className="font-mono"
-                      value={code}
-                      onChange={(e) => setCode(e.target.value)}
-                    />
-                  </Field>
-                  <Button
-                    type="submit"
-                    variant="outline"
-                    className="self-start"
-                    disabled={busy || !code.trim()}
-                  >
-                    Unlock
-                  </Button>
-                </form>
-              </>
-            )}
+            {sync.vault === "locked" && <UnlockSync />}
 
             {sync.error && (
               <p className="text-sm text-destructive" role="alert">
@@ -211,42 +163,112 @@ export function AccountSettings() {
         )}
       </CardContent>
 
-      <AlertDialog open={Boolean(recoveryCode)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Your recovery code</AlertDialogTitle>
-            <AlertDialogDescription>
-              Save this code. It's the only way back in without your passkey.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <div className="flex items-center gap-2 rounded-2xl bg-muted p-3">
-            <code className="min-w-0 flex-1 font-mono text-sm select-all">{recoveryCode}</code>
-            <Button
-              variant="ghost"
-              size="icon-lg"
-              className="size-11 shrink-0"
-              aria-label="Copy recovery code"
-              onClick={async () => {
-                await navigator.clipboard.writeText(recoveryCode ?? "")
-                setCopied(true)
-              }}
-            >
-              {copied ? <CheckIcon /> : <CopyIcon />}
-            </Button>
-          </div>
-          <AlertDialogFooter>
-            <AlertDialogAction
-              onClick={() => {
-                setRecoveryCode(undefined)
-                setCopied(false)
-              }}
-            >
-              I've saved it
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <RecoveryCodeDialog code={recoveryCode} onDone={() => setRecoveryCode(undefined)} />
     </Card>
+  )
+}
+
+/** Unlocks sync on this device with a passkey or the recovery code. */
+export function UnlockSync() {
+  const sync = useSyncState()
+  const [busy, setBusy] = useState(false)
+  const [code, setCode] = useState("")
+
+  const run = async (action: () => Promise<void>) => {
+    setBusy(true)
+    try {
+      await action()
+    } catch (error) {
+      toast.error(message(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      {sync.passkeys && supportsPasskeys() && (
+        <Button className="self-start" disabled={busy} onClick={() => run(unlockSyncWithPasskey)}>
+          <FingerprintIcon data-icon="inline-start" />
+          Unlock with passkey
+        </Button>
+      )}
+      <form
+        className="flex flex-col gap-3"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void run(async () => {
+            await unlockSyncWithRecoveryCode(code)
+            setCode("")
+          })
+        }}
+      >
+        <Field>
+          <FieldLabel htmlFor="recovery-code">Recovery code</FieldLabel>
+          <Input
+            id="recovery-code"
+            autoComplete="off"
+            autoCapitalize="characters"
+            autoCorrect="off"
+            spellCheck={false}
+            placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
+            className="font-mono"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+          />
+        </Field>
+        <Button
+          type="submit"
+          variant="outline"
+          className="self-start"
+          disabled={busy || !code.trim()}
+        >
+          Unlock
+        </Button>
+      </form>
+    </>
+  )
+}
+
+/** Shows a freshly made recovery code until the user confirms they saved it. */
+export function RecoveryCodeDialog({ code, onDone }: { code?: string; onDone: () => void }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <AlertDialog open={Boolean(code)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Your recovery code</AlertDialogTitle>
+          <AlertDialogDescription>
+            Save this code. It's the only way back in without your passkey.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <div className="flex items-center gap-2 rounded-2xl bg-muted p-3">
+          <code className="min-w-0 flex-1 font-mono text-sm select-all">{code}</code>
+          <Button
+            variant="ghost"
+            size="icon-lg"
+            className="size-11 shrink-0"
+            aria-label="Copy recovery code"
+            onClick={async () => {
+              await navigator.clipboard.writeText(code ?? "")
+              setCopied(true)
+            }}
+          >
+            {copied ? <CheckIcon /> : <CopyIcon />}
+          </Button>
+        </div>
+        <AlertDialogFooter>
+          <AlertDialogAction
+            onClick={() => {
+              setCopied(false)
+              onDone()
+            }}
+          >
+            I've saved it
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }
 
