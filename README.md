@@ -24,7 +24,7 @@ Add the following to `~/.hermes/.env` and restart the gateway:
 
 ```bash
 API_SERVER_ENABLED=true
-API_SERVER_KEY=<your 64-character key>    # required; generate one at https://randomkeygen.com/api-key
+API_SERVER_KEY=<your 64-character key>    # required; generate one with `openssl rand -hex 32`
 API_SERVER_CORS_ORIGINS=https://<your-site>.netlify.app
 ```
 

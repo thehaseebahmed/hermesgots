@@ -226,19 +226,9 @@ function Code({ children }: { children: ReactNode }) {
 function ServerStep({ onNext }: { onNext: () => void }) {
   const [method, setMethod] = useState<"env" | "dashboard">("env")
   const generate = (
-    <li>
-      <p>
-        Generate a 64-character key at{" "}
-        <a
-          href="https://randomkeygen.com/api-key"
-          target="_blank"
-          rel="noreferrer"
-          className="font-medium underline underline-offset-4"
-        >
-          randomkeygen.com/api-key
-        </a>
-        .
-      </p>
+    <li className="space-y-2">
+      <p>Generate a 64-character key:</p>
+      <CopyBlock label="Copy key command" text="openssl rand -hex 32" />
     </li>
   )
   const origin = window.location.origin
@@ -283,7 +273,7 @@ function ServerStep({ onNext }: { onNext: () => void }) {
           {generate}
           <li>
             <p>
-              Run <Code>hermes dashboard</Code> and open <Code>http://127.0.0.1:9119</Code>.
+              Run <Code>hermes dashboard</Code> and open <Code>http://localhost:9119</Code>.
             </p>
           </li>
           <li>
