@@ -1,5 +1,5 @@
 import { useId, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react"
-import { ArrowUpIcon, ListPlusIcon, SquareIcon } from "lucide-react"
+import { ArrowUpIcon, SquareIcon } from "lucide-react"
 
 import { SlashMenu } from "@/components/chat/slash-menu"
 import {
@@ -37,7 +37,7 @@ export function Composer({
   leading?: ReactNode
   disabled?: boolean
   onSend: (text: string) => Promise<void> | void
-  /** Called instead of `onSend` while a reply is streaming. */
+  /** Called instead of `onSend` while a reply is streaming: Enter queues the message. */
   onQueue: (text: string) => Promise<void> | void
   onStop: () => void
   onCommand: (command: LocalCommand) => void
@@ -123,7 +123,7 @@ export function Composer({
       )}
       <InputGroup className="bg-background shadow-lg shadow-black/5 has-[textarea]:rounded-[1.75rem] dark:bg-input/30">
         {leading && (
-          <InputGroupAddon align="inline-start" className="self-end pb-1.5 pl-1.5">
+          <InputGroupAddon align="inline-start" className="self-end pb-1.5 pl-2.5">
             {leading}
           </InputGroupAddon>
         )}
@@ -154,34 +154,33 @@ export function Composer({
           disabled={disabled}
           rows={1}
           className={cn(
-            "max-h-48 min-h-12 py-3.5 text-base md:text-[15px]",
+            "max-h-48 min-h-14 py-4 text-base md:text-[15px]",
             leading ? "pr-5 pl-2" : "px-5",
           )}
           aria-label="Message"
         />
-        <InputGroupAddon align="inline-end" className="gap-1.5 self-end pr-1.5 pb-1.5">
-          {busy && (
+        <InputGroupAddon align="inline-end" className="self-end pr-2.5 pb-1.5">
+          {busy ? (
             <InputGroupButton
               type="button"
               variant="secondary"
               size="icon-sm"
-              className="size-9 rounded-full"
+              className="size-11 rounded-full"
               onClick={onStop}
               aria-label="Stop"
             >
               <SquareIcon className="fill-current" />
             </InputGroupButton>
-          )}
-          {(!busy || canSend) && (
+          ) : (
             <InputGroupButton
               type="submit"
               variant="default"
               size="icon-sm"
-              className="size-9 rounded-full"
+              className="size-11 rounded-full"
               disabled={!canSend}
-              aria-label={busy ? "Queue message" : "Send"}
+              aria-label="Send"
             >
-              {busy ? <ListPlusIcon /> : <ArrowUpIcon />}
+              <ArrowUpIcon />
             </InputGroupButton>
           )}
         </InputGroupAddon>
