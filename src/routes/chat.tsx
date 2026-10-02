@@ -38,7 +38,7 @@ import {
   MessageScrollerViewport,
   useMessageScroller,
 } from "@/components/ui/message-scroller"
-import { sendMessage, stopMessage } from "@/lib/chat"
+import { queueMessage, sendMessage, stopMessage } from "@/lib/chat"
 import {
   DEFAULT_SETTINGS,
   createConversation,
@@ -237,6 +237,7 @@ export function ChatPage() {
                       message={message}
                       showStats={resolved.showStats}
                       botId={profile?.botId}
+                      busy={busy}
                     />
                   </MessageScrollerItem>
                 ))}
@@ -266,6 +267,7 @@ export function ChatPage() {
             busy={busy}
             disabled={!configured}
             onSend={send}
+            onQueue={(text) => (id ? queueMessage(id, text) : send(text))}
             onStop={() => id && stopMessage(id)}
             onCommand={(command) => navigate(command === "new" ? "/" : "/settings")}
             connection={{ baseUrl: profile?.baseUrl ?? "", apiKey: profile?.apiKey ?? "" }}

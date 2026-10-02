@@ -40,7 +40,8 @@ async function profileFor(profileId?: string) {
   return (profileId && (await db.profiles.get(profileId))) || getActiveProfile()
 }
 
-export async function sendMessage(conversationId: string, text: string) {
+/** `queuedId` sends a queued message, keeping its id so the bubble doesn't remount. */
+export async function sendMessage(conversationId: string, text: string, queuedId?: string) {
   const content = text.trim()
   if (!content || controllers.has(conversationId)) return
 
@@ -52,7 +53,7 @@ export async function sendMessage(conversationId: string, text: string) {
   const history = await getMessages(conversationId)
   const now = Date.now()
   const userMessage: Message = {
-    id: randomId(),
+    id: queuedId ?? randomId(),
     conversationId,
     role: "user",
     content,
@@ -70,6 +71,7 @@ export async function sendMessage(conversationId: string, text: string) {
   }
 
   await db.transaction("rw", db.messages, db.conversations, async () => {
+    if (queuedId) await db.messages.delete(queuedId)
     await db.messages.bulkAdd([userMessage, reply])
     await db.conversations.update(conversationId, {
       updatedAt: now,
@@ -200,6 +202,31 @@ export async function sendMessage(conversationId: string, text: string) {
     await flush()
     await db.conversations.update(conversationId, { updatedAt: endedAt })
   }
+  // A stop or an error pauses the queue: the user probably wants to look before it carries on.
+  if (draft.status === "done") await sendNextQueued(conversationId)
+}
+
+/** Holds a message until the current reply finishes. */
+export async function queueMessage(conversationId: string, text: string) {
+  const content = text.trim()
+  if (!content) return
+  await db.messages.add({
+    id: randomId(),
+    conversationId,
+    role: "user",
+    content,
+    status: "queued",
+    createdAt: Date.now(),
+  })
+}
+
+export async function sendNextQueued(conversationId: string) {
+  const next = (await getMessages(conversationId)).find((m) => m.status === "queued")
+  if (next) await sendMessage(conversationId, next.content, next.id)
+}
+
+export async function removeQueued(id: string) {
+  await db.messages.delete(id)
 }
 
 export function stopMessage(conversationId: string) {

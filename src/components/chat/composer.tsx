@@ -1,5 +1,5 @@
 import { useId, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react"
-import { ArrowUpIcon, SquareIcon } from "lucide-react"
+import { ArrowUpIcon, ListPlusIcon, SquareIcon } from "lucide-react"
 
 import { SlashMenu } from "@/components/chat/slash-menu"
 import {
@@ -22,6 +22,7 @@ export function Composer({
   busy,
   disabled,
   onSend,
+  onQueue,
   onStop,
   onCommand,
   connection,
@@ -36,6 +37,8 @@ export function Composer({
   leading?: ReactNode
   disabled?: boolean
   onSend: (text: string) => Promise<void> | void
+  /** Called instead of `onSend` while a reply is streaming. */
+  onQueue: (text: string) => Promise<void> | void
   onStop: () => void
   onCommand: (command: LocalCommand) => void
 }) {
@@ -44,7 +47,7 @@ export function Composer({
   const [active, setActive] = useState(0)
   const textarea = useRef<HTMLTextAreaElement>(null)
   const listId = useId()
-  const canSend = value.trim().length > 0 && !busy && !disabled
+  const canSend = value.trim().length > 0 && !disabled
 
   const query = /^\/(\S*)$/.exec(value)?.[1]
   const slash = useSlashItems(query !== undefined && !disabled, query ?? "", connection)
@@ -74,7 +77,9 @@ export function Composer({
     const text = value
     setValue("")
     // Hand the text back if it never made it into the chat, unless something new was typed.
-    void Promise.resolve(onSend(text)).catch(() => setValue((current) => current || text))
+    void Promise.resolve((busy ? onQueue : onSend)(text)).catch(() =>
+      setValue((current) => current || text),
+    )
     textarea.current?.focus()
   }
 
@@ -139,7 +144,13 @@ export function Composer({
           aria-activedescendant={
             menuOpen && slash.items.length ? optionId(listId, activeIndex) : undefined
           }
-          placeholder={disabled ? "Connect to Hermes in Settings first" : `Message ${botName}…`}
+          placeholder={
+            disabled
+              ? "Connect to Hermes in Settings first"
+              : busy
+                ? "Queue a message…"
+                : `Message ${botName}…`
+          }
           disabled={disabled}
           rows={1}
           className={cn(
@@ -148,8 +159,8 @@ export function Composer({
           )}
           aria-label="Message"
         />
-        <InputGroupAddon align="inline-end" className="self-end pb-2">
-          {busy ? (
+        <InputGroupAddon align="inline-end" className="gap-1.5 self-end pb-2">
+          {busy && (
             <InputGroupButton
               type="button"
               variant="secondary"
@@ -160,16 +171,17 @@ export function Composer({
             >
               <SquareIcon className="fill-current" />
             </InputGroupButton>
-          ) : (
+          )}
+          {(!busy || canSend) && (
             <InputGroupButton
               type="submit"
               variant="default"
               size="icon-sm"
               className="size-9 rounded-full"
               disabled={!canSend}
-              aria-label="Send"
+              aria-label={busy ? "Queue message" : "Send"}
             >
-              <ArrowUpIcon />
+              {busy ? <ListPlusIcon /> : <ArrowUpIcon />}
             </InputGroupButton>
           )}
         </InputGroupAddon>
