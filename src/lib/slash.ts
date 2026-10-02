@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react"
 
-import { getSettings } from "@/lib/db"
-import { listSkills, type Skill } from "@/lib/hermes"
+import { listSkills, type HermesConfig, type Skill } from "@/lib/hermes"
 
 export type LocalCommand = "new" | "settings"
 
@@ -26,11 +25,14 @@ export type SkillsState =
 
 // One request per server for the life of the page; a failure is forgotten so the next open retries.
 const requests = new Map<string, Promise<Skill[]>>()
-let lastLoaded: Skill[] | null = null
+const loaded = new Map<string, Skill[]>()
 
-async function loadSkills() {
-  const { baseUrl, apiKey } = await getSettings()
-  const key = `${baseUrl}\n${apiKey}`
+function cacheKey({ baseUrl, apiKey }: HermesConfig) {
+  return `${baseUrl}\n${apiKey}`
+}
+
+async function loadSkills({ baseUrl, apiKey }: HermesConfig) {
+  const key = cacheKey({ baseUrl, apiKey })
   let pending = requests.get(key)
   if (!pending) {
     pending = listSkills({ baseUrl, apiKey })
@@ -54,25 +56,33 @@ function matches(items: SlashItem[], query: string) {
 }
 
 /** Local commands plus Hermes's skills, filtered by `query`. Skills load the first time it opens. */
-export function useSlashItems(open: boolean, query: string) {
-  const [state, setState] = useState<SkillsState>(
-    lastLoaded ? { status: "ok", skills: lastLoaded } : { status: "loading" },
-  )
+export function useSlashItems(open: boolean, query: string, config: HermesConfig) {
+  const key = cacheKey(config)
+  const [result, setResult] = useState<{ key: string; state: SkillsState } | null>(null)
+  const cached = loaded.get(key)
+  const state: SkillsState =
+    result?.key === key
+      ? result.state
+      : cached
+        ? { status: "ok", skills: cached }
+        : { status: "loading" }
 
+  const { baseUrl, apiKey } = config
   useEffect(() => {
     if (!open) return
     let cancelled = false
-    loadSkills().then(
+    const key = cacheKey({ baseUrl, apiKey })
+    loadSkills({ baseUrl, apiKey }).then(
       (skills) => {
-        lastLoaded = skills
-        if (!cancelled) setState({ status: "ok", skills })
+        loaded.set(key, skills)
+        if (!cancelled) setResult({ key, state: { status: "ok", skills } })
       },
-      () => !cancelled && setState({ status: "error" }),
+      () => !cancelled && setResult({ key, state: { status: "error" } }),
     )
     return () => {
       cancelled = true
     }
-  }, [open])
+  }, [open, baseUrl, apiKey])
 
   const skills: SlashItem[] =
     state.status === "ok" ? state.skills.map((skill) => ({ kind: "skill", ...skill })) : []

@@ -38,7 +38,14 @@ import {
   useMessageScroller,
 } from "@/components/ui/message-scroller"
 import { sendMessage, stopMessage } from "@/lib/chat"
-import { DEFAULT_SETTINGS, createConversation, db, deleteConversation, getMessages } from "@/lib/db"
+import {
+  DEFAULT_SETTINGS,
+  createConversation,
+  db,
+  deleteConversation,
+  getActiveProfile,
+  getMessages,
+} from "@/lib/db"
 
 const SUGGESTIONS = [
   "What can you do on my machine?",
@@ -47,17 +54,21 @@ const SUGGESTIONS = [
 ]
 
 function EmptyState({
+  name,
+  botId,
   configured,
   onPick,
 }: {
+  name: string
+  botId?: string
   configured: boolean
   onPick: (text: string) => void
 }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 pt-24 pb-8 text-center">
-      <Bot animate className="size-24" />
+      <Bot id={botId} animate className="size-24" />
       <div className="space-y-1.5">
-        <h1 className="text-2xl font-semibold tracking-tight">Hey, I'm Hermes</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Hey, I'm {name}</h1>
         <p className="max-w-sm text-sm text-muted-foreground">
           {configured
             ? "Ask me anything. I can run tools on your machine and I'll ask before doing anything risky."
@@ -106,13 +117,18 @@ export function ChatPage() {
     async () => (id ? ((await db.conversations.get(id)) ?? null) : undefined),
     [id],
   )
+  // A chat talks to its own bot; a new chat goes to the selected one.
+  const profile = useLiveQuery(async () => {
+    const owner = id ? (await db.conversations.get(id))?.profileId : undefined
+    return ((owner && (await db.profiles.get(owner))) || (await getActiveProfile())) ?? null
+  }, [id])
   const messages = useLiveQuery(() => (id ? getMessages(id) : []), [id])
   const [renaming, setRenaming] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [title, setTitle] = useState("")
 
   const resolved = { ...DEFAULT_SETTINGS, ...settings }
-  const configured = Boolean(resolved.baseUrl.trim())
+  const configured = Boolean(profile?.baseUrl.trim())
   const busy = messages?.some((m) => m.status === "streaming") ?? false
   const awaitingApproval = messages?.find((m) => m.approval && !m.approval.resolved)
 
@@ -125,7 +141,8 @@ export function ChatPage() {
     try {
       let conversationId = id
       if (!conversationId) {
-        conversationId = (await createConversation()).id
+        if (!profile) return
+        conversationId = (await createConversation(profile.id)).id
         navigate(`/c/${conversationId}`)
       }
       await sendMessage(conversationId, text)
@@ -137,7 +154,7 @@ export function ChatPage() {
 
   const host = (() => {
     try {
-      return new URL(resolved.baseUrl).host
+      return new URL(profile?.baseUrl ?? "").host
     } catch {
       return "not connected"
     }
@@ -190,7 +207,8 @@ export function ChatPage() {
     <div className="relative flex min-h-0 flex-1 flex-col">
       <ChatHeader
         title={conversation?.title ?? "New chat"}
-        subtitle={busy ? "Writing…" : host}
+        subtitle={busy ? "Writing…" : profile ? `${profile.name} · ${host}` : host}
+        botId={profile?.botId}
         actions={actions}
       />
 
@@ -205,7 +223,11 @@ export function ChatPage() {
                     messageId={message.id}
                     scrollAnchor={message.role === "user"}
                   >
-                    <MessageItem message={message} showStats={resolved.showStats} />
+                    <MessageItem
+                      message={message}
+                      showStats={resolved.showStats}
+                      botId={profile?.botId}
+                    />
                   </MessageScrollerItem>
                 ))}
               </MessageScrollerContent>
@@ -215,7 +237,12 @@ export function ChatPage() {
           </MessageScroller>
         </MessageScrollerProvider>
       ) : (
-        <EmptyState configured={configured} onPick={(text) => void send(text).catch(() => {})} />
+        <EmptyState
+          name={profile?.name ?? "Hermes"}
+          botId={profile?.botId}
+          configured={configured}
+          onPick={(text) => void send(text).catch(() => {})}
+        />
       )}
 
       <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
@@ -230,6 +257,8 @@ export function ChatPage() {
             onSend={send}
             onStop={() => id && stopMessage(id)}
             onCommand={(command) => navigate(command === "new" ? "/" : "/settings")}
+            connection={{ baseUrl: profile?.baseUrl ?? "", apiKey: profile?.apiKey ?? "" }}
+            botName={profile?.name}
           />
         )}
       </div>

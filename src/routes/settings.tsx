@@ -1,19 +1,10 @@
 import { useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTheme } from "next-themes"
-import {
-  CheckIcon,
-  CopyIcon,
-  EyeIcon,
-  EyeOffIcon,
-  MenuIcon,
-  MonitorIcon,
-  MoonIcon,
-  PlugZapIcon,
-  SunIcon,
-} from "lucide-react"
+import { CheckIcon, CopyIcon, MenuIcon, MonitorIcon, MoonIcon, SunIcon } from "lucide-react"
 import { toast } from "sonner"
 
+import { BotSettings } from "@/components/bot-settings"
 import { useOpenDrawer } from "@/components/drawer-context"
 import {
   AlertDialog,
@@ -26,31 +17,12 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-} from "@/components/ui/input-group"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { DEFAULT_SETTINGS, clearAllData, db, saveSettings, type Settings } from "@/lib/db"
-import { checkHealth, listModels } from "@/lib/hermes"
-
-type Connection =
-  { state: "idle" } | { state: "testing" } | { state: "ok" } | { state: "error"; message: string }
 
 function SetupSnippet() {
   const [copied, setCopied] = useState(false)
@@ -92,32 +64,6 @@ function SettingsForm({ stored }: { stored: Settings | null }) {
   const openDrawer = useOpenDrawer()
   const settings = { ...DEFAULT_SETTINGS, ...stored }
   const { theme, setTheme } = useTheme()
-  const [showKey, setShowKey] = useState(false)
-  const [models, setModels] = useState<string[]>([])
-  const [connection, setConnection] = useState<Connection>({ state: "idle" })
-
-  // Local drafts so typing isn't fighting the live query; persisted on every change.
-  const [baseUrl, setBaseUrl] = useState(settings.baseUrl)
-  const [apiKey, setApiKey] = useState(settings.apiKey)
-
-  const test = async () => {
-    setConnection({ state: "testing" })
-    const config = { baseUrl, apiKey }
-    try {
-      await checkHealth(config)
-      const ids = await listModels(config)
-      setModels(ids)
-      if (ids.length && !ids.includes(settings.model)) await saveSettings({ model: ids[0] })
-      setConnection({ state: "ok" })
-    } catch (error) {
-      setConnection({
-        state: "error",
-        message: error instanceof Error ? error.message : String(error),
-      })
-    }
-  }
-
-  const modelOptions = Array.from(new Set([settings.model, ...models])).filter(Boolean)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -137,109 +83,7 @@ function SettingsForm({ stored }: { stored: Settings | null }) {
       </header>
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pb-[max(2rem,env(safe-area-inset-bottom))]">
-        <Card className="rounded-3xl">
-          <CardHeader>
-            <CardTitle>Hermes connection</CardTitle>
-            <CardDescription>
-              Memento talks to your Hermes Agent's OpenAI-compatible API server.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="base-url">API base URL</FieldLabel>
-                <Input
-                  id="base-url"
-                  inputMode="url"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  placeholder="http://localhost:8642/v1"
-                  value={baseUrl}
-                  onChange={(e) => {
-                    setBaseUrl(e.target.value)
-                    setConnection({ state: "idle" })
-                    void saveSettings({ baseUrl: e.target.value.trim() })
-                  }}
-                />
-                <FieldDescription>
-                  Hermes listens on port 8642 by default. From this HTTPS site, anything other than
-                  localhost must be served over HTTPS.
-                </FieldDescription>
-              </Field>
-
-              <Field>
-                <FieldLabel htmlFor="api-key">API key</FieldLabel>
-                <InputGroup>
-                  <InputGroupInput
-                    id="api-key"
-                    type={showKey ? "text" : "password"}
-                    autoComplete="off"
-                    spellCheck={false}
-                    placeholder="API_SERVER_KEY"
-                    value={apiKey}
-                    onChange={(e) => {
-                      setApiKey(e.target.value)
-                      setConnection({ state: "idle" })
-                      void saveSettings({ apiKey: e.target.value.trim() })
-                    }}
-                  />
-                  <InputGroupAddon align="inline-end">
-                    <InputGroupButton
-                      size="icon-xs"
-                      aria-label={showKey ? "Hide key" : "Show key"}
-                      onClick={() => setShowKey((v) => !v)}
-                    >
-                      {showKey ? <EyeOffIcon /> : <EyeIcon />}
-                    </InputGroupButton>
-                  </InputGroupAddon>
-                </InputGroup>
-                <FieldDescription>
-                  Stored only in this browser. Required for Hermes to keep one session per chat.
-                </FieldDescription>
-              </Field>
-
-              <Field>
-                <FieldLabel htmlFor="model">Model</FieldLabel>
-                <Select
-                  value={settings.model}
-                  onValueChange={(value) => value && saveSettings({ model: value })}
-                >
-                  <SelectTrigger id="model" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {modelOptions.map((id) => (
-                      <SelectItem key={id} value={id}>
-                        {id}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <FieldDescription>
-                  Test the connection to load the models Hermes advertises.
-                </FieldDescription>
-              </Field>
-
-              <div className="flex flex-wrap items-center gap-3">
-                <Button onClick={test} disabled={connection.state === "testing"}>
-                  <PlugZapIcon data-icon="inline-start" />
-                  {connection.state === "testing" ? "Testing…" : "Test connection"}
-                </Button>
-                {connection.state === "ok" && (
-                  <Badge className="bg-primary/15 text-primary dark:bg-primary/30 dark:text-sidebar-primary">
-                    Connected
-                  </Badge>
-                )}
-              </div>
-              {connection.state === "error" && (
-                <p className="text-sm text-destructive" role="alert">
-                  {connection.message}
-                </p>
-              )}
-            </FieldGroup>
-          </CardContent>
-        </Card>
+        <BotSettings />
 
         <Card className="rounded-3xl">
           <CardHeader>
@@ -299,7 +143,7 @@ function SettingsForm({ stored }: { stored: Settings | null }) {
           <CardHeader>
             <CardTitle>Data</CardTitle>
             <CardDescription>
-              Chats and settings are cached on this device in IndexedDB.
+              Bots, chats and settings are cached on this device in IndexedDB.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -311,8 +155,8 @@ function SettingsForm({ stored }: { stored: Settings | null }) {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Clear everything?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    Deletes all chats and settings stored in this browser. Sessions on your Hermes
-                    server are untouched.
+                    Deletes all bots, chats and settings stored in this browser. Sessions on your
+                    Hermes server are untouched.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
@@ -321,8 +165,6 @@ function SettingsForm({ stored }: { stored: Settings | null }) {
                     variant="destructive"
                     onClick={async () => {
                       await clearAllData()
-                      setBaseUrl(DEFAULT_SETTINGS.baseUrl)
-                      setApiKey("")
                       toast.success("Local data cleared")
                     }}
                   >

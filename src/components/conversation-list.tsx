@@ -1,10 +1,11 @@
 import { useLiveQuery } from "dexie-react-hooks"
-import { NavLink, useNavigate } from "react-router"
+import { NavLink, useMatch, useNavigate } from "react-router"
 import { PlusIcon, SettingsIcon } from "lucide-react"
 
 import { Bot } from "@/components/bot"
+import { BotCard } from "@/components/bot-card"
 import { Button } from "@/components/ui/button"
-import { db } from "@/lib/db"
+import { conversationsOf, db, getActiveProfile, listProfiles, setActiveProfile } from "@/lib/db"
 import { cn } from "@/lib/utils"
 
 function relativeDay(timestamp: number) {
@@ -16,12 +17,54 @@ function relativeDay(timestamp: number) {
   return new Date(timestamp).toLocaleDateString([], { month: "short", day: "numeric" })
 }
 
+/** Every bot (Hermes profile) in a horizontal strip; picking one filters the chats below. */
+function BotStrip({ onNavigate }: { onNavigate?: () => void }) {
+  const navigate = useNavigate()
+  const openChat = useMatch("/c/:id")?.params.id
+  const profiles = useLiveQuery(listProfiles, [])
+  const active = useLiveQuery(getActiveProfile, [])
+
+  const select = async (profileId: string) => {
+    // The open chat belongs to its own bot, so switching bots leaves it for a fresh chat.
+    const chat = openChat ? await db.conversations.get(openChat) : undefined
+    await setActiveProfile(profileId)
+    if (chat && chat.profileId !== profileId) navigate("/")
+  }
+
+  return (
+    <div
+      role="group"
+      aria-label="Bots"
+      className="flex [scrollbar-width:none] gap-2 overflow-x-auto px-4 pt-1 pb-3 [&::-webkit-scrollbar]:hidden"
+    >
+      {profiles?.map((profile) => (
+        <BotCard
+          key={profile.id}
+          botId={profile.botId}
+          name={profile.name}
+          selected={profile.id === active?.id}
+          onClick={() => void select(profile.id)}
+        />
+      ))}
+      <BotCard
+        name="Add bot"
+        icon={<PlusIcon className="size-5" />}
+        className="border border-dashed border-foreground/25 bg-transparent ring-0"
+        onClick={() => {
+          navigate("/settings#bots")
+          onNavigate?.()
+        }}
+      />
+    </div>
+  )
+}
+
 export function ConversationList({ onNavigate }: { onNavigate?: () => void }) {
   const navigate = useNavigate()
-  const conversations = useLiveQuery(
-    () => db.conversations.orderBy("updatedAt").reverse().toArray(),
-    [],
-  )
+  const conversations = useLiveQuery(async () => {
+    const profile = await getActiveProfile()
+    return profile ? conversationsOf(profile.id).reverse().toArray() : []
+  }, [])
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -41,6 +84,8 @@ export function ConversationList({ onNavigate }: { onNavigate?: () => void }) {
           <PlusIcon />
         </Button>
       </div>
+
+      <BotStrip onNavigate={onNavigate} />
 
       <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-2" aria-label="Conversations">
         {conversations?.length === 0 && (
