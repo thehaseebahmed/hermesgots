@@ -42,8 +42,11 @@ export interface Conversation {
   updatedAt: number
   /** Last change to anything sync carries (title included), the clock it merges on. */
   changedAt: number
-  /** Hermes rows still on the server before the oldest local message, for "Load earlier". */
-  olderOffset?: number
+  /**
+   * Set while Hermes holds older transcript rows than this device loaded: the oldest loaded row's
+   * id, and roughly how many newer rows to skip to reach it.
+   */
+  olderThan?: { id: number; offset: number }
 }
 
 export interface ToolEvent {

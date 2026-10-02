@@ -299,6 +299,46 @@ export async function getSessionTitle(
   }
 }
 
+/** A stored transcript row, as `GET /api/sessions/{id}/messages` returns it. */
+export interface SessionMessage {
+  id: number
+  role: "system" | "user" | "assistant" | "tool"
+  content?: string | null
+  tool_call_id?: string | null
+  tool_calls?: { id?: string; function?: { name?: string } }[] | string | null
+  tool_name?: string | null
+  /** Unix seconds. */
+  timestamp?: number | null
+  reasoning?: string | null
+  reasoning_content?: string | null
+  display_kind?: string | null
+  finish_reason?: string | null
+}
+
+/**
+ * One page of a session's transcript, counted back from the newest row (`offset` rows skipped)
+ * but returned oldest first. A 404 means Hermes has no such session.
+ */
+export async function listSessionMessages(
+  config: HermesConfig,
+  sessionId: string,
+  { limit, offset }: { limit: number; offset: number },
+): Promise<SessionMessage[]> {
+  const query = new URLSearchParams({ order: "latest", limit: `${limit}`, offset: `${offset}` })
+  try {
+    const response = await request(
+      `${serverRoot(config.baseUrl)}/api/sessions/${encodeURIComponent(sessionId)}/messages?${query}`,
+      { headers: headers(config) },
+    )
+    const body = await response.json()
+    const data: unknown = body?.data
+    return Array.isArray(data) ? data.filter((m) => typeof m?.id === "number") : []
+  } catch (error) {
+    if (error instanceof HermesError && error.status === 404) return []
+    throw error
+  }
+}
+
 /** Hermes's newest execution-ledger row for a job (newer versions only). */
 export interface CronExecution {
   status: "claimed" | "running" | "completed" | "failed" | "unknown"

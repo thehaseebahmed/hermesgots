@@ -5,7 +5,8 @@
 // Cron jobs live on /api/jobs, and their past runs show up as /api/sessions?source=cron. Like
 // Hermes, a run that died on provider errors still ends `cron_complete`, behind a `failed_turn` row.
 // Chats are titled like Hermes does: a slice of the opener at once, a "model" title a moment later,
-// readable on GET /api/sessions/{id}. Sessions are keyed by X-Hermes-Session-Id when a key is sent.
+// readable on GET /api/sessions/{id}. Sessions are keyed by X-Hermes-Session-Id when a key is sent,
+// and their transcripts page back from GET /api/sessions/{id}/messages?order=latest&limit&offset.
 //
 //   pnpm mock            # then point Settings at http://localhost:8642/v1
 
@@ -15,6 +16,8 @@ import { randomUUID } from "node:crypto"
 const PORT = Number(process.env.PORT ?? 8642)
 const pendingApprovals = new Map()
 const chatTitles = new Map()
+const transcripts = new Map()
+let lastRowId = 0
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const cors = {
@@ -134,6 +137,23 @@ function titleChat(req, opener) {
   setTimeout(() => chatTitles.set(sessionId, title), 2000)
 }
 
+/** Stores a transcript row the way Hermes's session DB does, for keyed sessions only. */
+function record(req, row) {
+  const sessionId = req.headers["x-hermes-session-id"]
+  if (!sessionId || !req.headers.authorization) return
+  if (!transcripts.has(sessionId)) transcripts.set(sessionId, [])
+  transcripts.get(sessionId).push({ id: ++lastRowId, session_id: sessionId, timestamp: Date.now() / 1000, ...row })
+}
+
+/** Hermes pages `latest` back from the newest row but returns each page oldest first. */
+function pageRows(rows, params) {
+  const limit = Math.min(Number(params.get("limit") ?? 500), 500)
+  const offset = Number(params.get("offset") ?? 0)
+  return params.get("order") === "oldest"
+    ? rows.slice(offset, offset + limit)
+    : rows.slice().reverse().slice(offset, offset + limit).reverse()
+}
+
 async function streamCompletion(req, res, body) {
   const id = `chatcmpl-${randomUUID().replace(/-/g, "").slice(0, 29)}`
   const created = Math.floor(Date.now() / 1000)
@@ -142,6 +162,8 @@ async function streamCompletion(req, res, body) {
   let closed = false
   let pieces = 0
   titleChat(req, last)
+  record(req, { role: "user", content: last })
+  let spoken = ""
   req.on("close", () => (closed = true))
 
   res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", ...cors })
@@ -154,6 +176,7 @@ async function streamCompletion(req, res, body) {
     for (const piece of text.match(/\S+\s*|\s+/g) ?? []) {
       if (closed) return
       pieces += 1
+      spoken += piece
       chunk({ content: piece })
       await sleep(25)
     }
@@ -167,6 +190,8 @@ async function streamCompletion(req, res, body) {
   frame({ tool: "terminal", emoji: "💻", label: "du -sh /var/log/* | sort -rh | head", toolCallId, status: "running" }, "hermes.tool.progress")
   await sleep(1400)
   frame({ tool: "terminal", toolCallId, status: "completed" }, "hermes.tool.progress")
+  record(req, { role: "assistant", content: null, tool_calls: [{ id: toolCallId, type: "function", function: { name: "terminal", arguments: "{}" } }] })
+  record(req, { role: "tool", tool_call_id: toolCallId, tool_name: "terminal", content: "2.1G nginx\n1.4G postgres\n0.7G app" })
 
   await say(
     "Here's where the space is going under `/var/log`:\n\n" +
@@ -210,6 +235,7 @@ async function streamCompletion(req, res, body) {
   const calls = /clean|delete/i.test(last) ? 3 : 2
   const prompt_tokens = calls * (6000 + Math.round(transcript / 4))
   const completion_tokens = pieces
+  record(req, { role: "assistant", content: spoken, finish_reason: "stop" })
   chunk({}, "stop", { usage: { prompt_tokens, completion_tokens, total_tokens: prompt_tokens + completion_tokens } })
   if (!closed) res.end("data: [DONE]\n\n")
 }
@@ -276,8 +302,10 @@ http
     if (sessionMessages) {
       const id = decodeURIComponent(sessionMessages[1])
       const tail = cronSessionTail(profile, id)
-      if (!tail) return json(res, 404, { error: { message: "Session not found" } })
-      return json(res, 200, { object: "list", session_id: id, data: [{ session_id: id, ...tail }] })
+      if (tail) return json(res, 200, { object: "list", session_id: id, data: [{ session_id: id, ...tail }] })
+      if (!transcripts.has(id)) return json(res, 404, { error: { message: "Session not found" } })
+      const data = pageRows(transcripts.get(id), url.searchParams)
+      return json(res, 200, { object: "list", session_id: id, data })
     }
     if (req.method === "POST" && url.pathname === "/v1/chat/completions") {
       return streamCompletion(req, res, await readBody(req))
