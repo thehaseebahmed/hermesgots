@@ -1,0 +1,83 @@
+name: Android
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Fork PRs get no secrets; they fall back to a debug build.
+      KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      # Name the build after the PR's head, not the merge commit Actions checks out.
+      COMMIT_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm lint
+
+      - name: Build web assets and sync them into the Android project
+        run: pnpm build:android
+        env:
+          VITE_SITE_URL: ${{ vars.MEMENTO_SITE_URL }}
+
+      - name: Version
+        id: version
+        run: |
+          sha="${COMMIT_REF::7}"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "ANDROID_VERSION_CODE=${{ github.run_number }}" >> "$GITHUB_ENV"
+          echo "ANDROID_VERSION_NAME=$(node -p 'require("./package.json").version')-$sha" >> "$GITHUB_ENV"
+
+      - name: Build signed release APK
+        if: env.KEYSTORE_BASE64 != ''
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/release.keystore"
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+          ./gradlew assembleRelease --no-daemon
+          rm -f "$ANDROID_KEYSTORE_PATH"
+
+      - name: Build debug APK
+        if: env.KEYSTORE_BASE64 == ''
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: memento-${{ steps.version.outputs.sha }}
+          path: android/app/build/outputs/apk/*/*.apk
+          if-no-files-found: error
