@@ -35,8 +35,7 @@ export function ChatHeader({
         </div>
         <div className="pointer-events-auto flex min-w-0 flex-1 flex-col items-center">
           <Bot id={botId} animate className="size-11" />
-          {/* A soft shadow, not a border, lifts it off messages scrolling underneath. */}
-          <div className="-mt-1 flex max-w-1/2 min-w-0 flex-col items-center rounded-full bg-background/85 px-3 py-0.5 shadow-[0_1px_2px_rgb(0_0_0/0.06),0_4px_14px_rgb(0_0_0/0.08)] backdrop-blur dark:bg-popover/90 dark:shadow-[0_1px_2px_rgb(0_0_0/0.5),0_6px_20px_rgb(0_0_0/0.6)]">
+          <div className="flex max-w-1/2 min-w-0 flex-col items-center">
             <span className="max-w-full truncate text-sm font-semibold">{title}</span>
             {subtitle && (
               <span className="max-w-full truncate text-[11px] leading-tight text-muted-foreground">
