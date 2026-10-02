@@ -55,7 +55,8 @@ PR titles follow the same format. Fill in `.github/pull_request_template.md` for
 | `src/lib/hermes.ts` | Hermes API client and SSE parser |
 | `src/lib/chat.ts` | Send/stop a turn and stream it into IndexedDB; approval answers |
 | `src/lib/db.ts` | Dexie schema, types, settings and profile (bot) helpers |
-| `src/routes/` | `chat.tsx`, `settings.tsx`, `bots.tsx` (gallery) |
+| `src/lib/cron.ts` | Syncs Hermes cron jobs and folds their runs into IndexedDB |
+| `src/routes/` | `chat.tsx`, `settings.tsx`, `routines.tsx` (cron jobs), `bots.tsx` (gallery) |
 | `src/components/chat/` | Message rendering, tool and approval cards, composer, header |
 | `src/components/bots.tsx` | Bot character definitions (SVG). `bot.tsx` renders them |
 | `src/components/bot-card.tsx`, `bot-settings.tsx` | Bot cards (sidebar strip, settings) and the bot editor |
@@ -77,6 +78,8 @@ These behaviours were verified against Hermes's `gateway/platforms/api_server*.p
 - The final stream chunk carries `usage`. Hermes sums it over **every** model call in the turn, so on a turn that ran tools `prompt_tokens` counts the prompt more than once. No endpoint reports the model's context window, so each bot stores its own.
 - `GET /api/model/options` (server root, not `/v1`) returns the configured `model` and `provider` behind a profile. Older versions don't have it, so treat a failure as unknown.
 - The context window is looked up in [models.dev](https://models.dev/api.json) (`limit.context`) by that `provider`/`model` (`src/lib/models.ts`). The bot remembers which model it was for and resets it when the model changes; if models.dev doesn't list the model, the user sets it by hand.
+- Cron jobs are called **Routines** in the UI (`/routines`) and `cron` in code. `GET /api/jobs?include_disabled=true` (server root) returns `{ jobs }`. Each job carries `last_run_at`, `last_status`, `failure_streak` and, on newer versions, `latest_execution`. `POST /api/jobs/{id}/pause | resume | run` control a job. A 501 means cron isn't available.
+- The API server has **no run-history endpoint** (the dashboard's `/api/cron/jobs/{id}/runs` is localhost-only). Memento keeps every run it sees in `cronRuns`, and backfills from `GET /api/sessions?source=cron`: each agent run leaves a session `cron_<jobId>_<YYYYmmdd_HHMMSS>` whose `end_reason` is `cron_complete` or `cron_incomplete_no_output`. Script-only runs and runs that fail before the agent starts leave no session, so the history is best effort.
 - If you change how the API is used, update `scripts/mock-hermes.mjs` to match.
 
 ## Conventions
