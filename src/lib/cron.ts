@@ -1,5 +1,11 @@
 import { cronRunsOf, db, type CronRun, type CronRunStatus, type Profile } from "@/lib/db"
-import { listCronJobs, listCronSessions, type CronJob, type CronSession } from "@/lib/hermes"
+import {
+  cronSessionFailed,
+  listCronJobs,
+  listCronSessions,
+  type CronJob,
+  type CronSession,
+} from "@/lib/hermes"
 
 /** Bars shown per job. */
 export const HISTORY_LENGTH = 24
@@ -74,22 +80,29 @@ function sessionStart(session: CronSession, jobId: string) {
   return new Date(y, mo - 1, d, h, mi, s).getTime()
 }
 
+/** Whether each `cron_complete` session ended on a failed turn, keyed by session id. */
+type Verdicts = Map<string, boolean>
+
 function sessionRun(
   session: CronSession,
   jobId: string,
+  verdicts: Verdicts,
 ): Omit<CronRun, "id" | "profileId"> | undefined {
   const startedAt = sessionStart(session, jobId)
   if (!startedAt) return undefined
   const finishedAt = toMillis(session.ended_at)
+  const failed = verdicts.get(session.id)
   const status: CronRunStatus =
     session.end_reason === "cron_complete"
-      ? "ok"
+      ? failed
+        ? "failed"
+        : "ok"
       : session.end_reason === "cron_incomplete_no_output"
         ? "failed"
         : !finishedAt && Date.now() - startedAt < STILL_RUNNING_MS
           ? "running"
           : "unknown"
-  return { jobId, startedAt, finishedAt, status, source: "session" }
+  return { jobId, startedAt, finishedAt, status, source: "session", checked: failed !== undefined }
 }
 
 function sameRun(run: CronRun, startedAt: number) {
@@ -97,13 +110,55 @@ function sameRun(run: CronRun, startedAt: number) {
   return startedAt >= run.startedAt - SAME_RUN_MS && startedAt <= end
 }
 
-async function mergeRuns(profileId: string, job: CronJob, sessions: CronSession[]) {
+const jobSessions = (job: CronJob, sessions: CronSession[]) =>
+  sessions.filter((session) => session.id.startsWith(`cron_${job.id}_`))
+
+/**
+ * Checks the transcripts of `cron_complete` sessions that haven't been checked yet. Only the newest
+ * `KEEP_RUNS` per job, since older runs are pruned and would be fetched again on every sync.
+ */
+async function checkSessions(profile: Profile, jobs: CronJob[], sessions: CronSession[]) {
+  const stored = await db.cronRuns.where("profileId").equals(profile.id).toArray()
+  const pending: string[] = []
+  for (const job of jobs) {
+    const settled = stored.filter(
+      (run) => run.jobId === job.id && (run.source === "observed" || run.checked),
+    )
+    const newest = jobSessions(job, sessions)
+      .map((session) => ({ session, startedAt: sessionStart(session, job.id) ?? 0 }))
+      .sort((a, b) => b.startedAt - a.startedAt)
+      .slice(0, KEEP_RUNS)
+    for (const { session, startedAt } of newest) {
+      if (session.end_reason !== "cron_complete" || !startedAt) continue
+      if (settled.some((run) => sameRun(run, startedAt))) continue
+      pending.push(session.id)
+    }
+  }
+  const verdicts: Verdicts = new Map()
+  await Promise.all(
+    pending.map(async (id) => {
+      const failed = await cronSessionFailed(profile, id)
+      if (failed !== undefined) verdicts.set(id, failed)
+    }),
+  )
+  return verdicts
+}
+
+async function mergeRuns(
+  profileId: string,
+  job: CronJob,
+  sessions: CronSession[],
+  verdicts: Verdicts,
+) {
   const runs = await cronRunsOf(profileId, job.id).toArray()
   const put = async (run: Omit<CronRun, "id" | "profileId">) => {
     const existing = runs.find((candidate) => sameRun(candidate, run.startedAt))
     if (existing) {
-      // What the job reports beats what a session implies.
-      if (existing.source === "session" || run.source === "observed") {
+      // What the job reports beats what a session implies; a checked session beats an unchecked one.
+      const replace =
+        run.source === "observed" ||
+        (existing.source === "session" && (run.checked || !existing.checked))
+      if (replace) {
         Object.assign(existing, { ...run, startedAt: existing.startedAt })
         await db.cronRuns.put(existing)
       }
@@ -116,9 +171,8 @@ async function mergeRuns(profileId: string, job: CronJob, sessions: CronSession[
 
   const observed = observedRun(job)
   if (observed) await put(observed)
-  for (const session of sessions) {
-    if (!session.id.startsWith(`cron_${job.id}_`)) continue
-    const run = sessionRun(session, job.id)
+  for (const session of jobSessions(job, sessions)) {
+    const run = sessionRun(session, job.id, verdicts)
     if (run) await put(run)
   }
 
@@ -134,8 +188,9 @@ async function mergeRuns(profileId: string, job: CronJob, sessions: CronSession[
 /** Fetches the profile's jobs and folds what they and the cron sessions say into `cronRuns`. */
 export async function syncCron(profile: Profile) {
   const [jobs, sessions] = await Promise.all([listCronJobs(profile), listCronSessions(profile)])
+  const verdicts = await checkSessions(profile, jobs, sessions)
   await db.transaction("rw", db.cronRuns, async () => {
-    for (const job of jobs) await mergeRuns(profile.id, job, sessions)
+    for (const job of jobs) await mergeRuns(profile.id, job, sessions, verdicts)
     const live = new Set(jobs.map((job) => job.id))
     await db.cronRuns
       .where("profileId")

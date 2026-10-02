@@ -353,6 +353,30 @@ export interface CronSession {
   end_reason?: string | null
 }
 
+const ERROR_FINISH_REASONS = new Set(["error", "agent_error", "content_filter"])
+
+/**
+ * Whether a session ended on a failed turn. Hermes closes a turn that died on provider errors with
+ * its own assistant row, so the run is booked `cron_complete` anyway. Undefined when unknown.
+ */
+export async function cronSessionFailed(
+  config: HermesConfig,
+  sessionId: string,
+): Promise<boolean | undefined> {
+  try {
+    const response = await request(
+      `${serverRoot(config.baseUrl)}/api/sessions/${encodeURIComponent(sessionId)}/messages?limit=1&order=latest`,
+      { headers: headers(config) },
+    )
+    const body = await response.json()
+    const last = Array.isArray(body?.data) ? body.data.at(-1) : undefined
+    if (!last) return undefined
+    return last.display_kind === "failed_turn" || ERROR_FINISH_REASONS.has(last.finish_reason)
+  } catch {
+    return undefined
+  }
+}
+
 /** Sessions cron runs left behind, the only run history the API server exposes. Best effort. */
 export async function listCronSessions(config: HermesConfig): Promise<CronSession[]> {
   try {

@@ -109,6 +109,8 @@ export interface CronRun {
   status: CronRunStatus
   error?: string
   source: "observed" | "session"
+  /** A session run whose transcript was checked for a failed turn. */
+  checked?: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
