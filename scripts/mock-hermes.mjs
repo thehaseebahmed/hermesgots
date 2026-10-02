@@ -231,7 +231,11 @@ async function streamCompletion(req, res, body) {
 
   // Like Hermes, usage sums every model call in the turn: a fixed system prompt plus the transcript,
   // counted once per call (this turn makes one call per tool, plus the reply).
-  const transcript = (body.messages ?? []).reduce((n, m) => n + String(m.content ?? "").length, 0)
+  // A keyed session's history comes from the session store, not the body, as on Hermes.
+  const sessionId = req.headers["x-hermes-session-id"]
+  const keyed = sessionId && req.headers.authorization && transcripts.get(sessionId)
+  const context = keyed ? keyed.filter((row) => row.role !== "tool") : (body.messages ?? [])
+  const transcript = context.reduce((n, m) => n + String(m.content ?? "").length, 0)
   const calls = /clean|delete/i.test(last) ? 3 : 2
   const prompt_tokens = calls * (6000 + Math.round(transcript / 4))
   const completion_tokens = pieces
