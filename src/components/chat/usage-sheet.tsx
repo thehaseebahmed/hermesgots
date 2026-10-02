@@ -24,7 +24,7 @@ function fraction({ tokens, window }: ContextUsage) {
 export function ContextRing({ usage, onClick }: { usage: ContextUsage; onClick: () => void }) {
   const filled = fraction(usage)
   const percent = Math.round(filled * 100)
-  const radius = 16
+  const radius = 20
   const circumference = 2 * Math.PI * radius
   const label = usage.window ? `Context ${percent}% used` : "Context usage and model"
 
@@ -33,19 +33,19 @@ export function ContextRing({ usage, onClick }: { usage: ContextUsage; onClick: 
       type="button"
       variant="ghost"
       size="icon-lg"
-      className="relative size-9 rounded-full text-muted-foreground"
+      className="relative size-11 rounded-full text-muted-foreground"
       onClick={onClick}
       aria-label={label}
     >
-      <svg viewBox="0 0 36 36" className="absolute inset-0 size-9 -rotate-90" aria-hidden>
-        <circle cx="18" cy="18" r={radius} fill="none" strokeWidth="2.5" className="stroke-muted" />
+      <svg viewBox="0 0 44 44" className="absolute inset-0 size-11 -rotate-90" aria-hidden>
+        <circle cx="22" cy="22" r={radius} fill="none" strokeWidth="3" className="stroke-muted" />
         {filled > 0 && (
           <circle
-            cx="18"
-            cy="18"
+            cx="22"
+            cy="22"
             r={radius}
             fill="none"
-            strokeWidth="2.5"
+            strokeWidth="3"
             strokeLinecap="round"
             strokeDasharray={circumference}
             strokeDashoffset={circumference * (1 - filled)}
@@ -54,7 +54,7 @@ export function ContextRing({ usage, onClick }: { usage: ContextUsage; onClick: 
         )}
       </svg>
       {usage.window && (
-        <span className="text-[9px] font-medium tabular-nums" aria-hidden>
+        <span className="text-[11px] font-medium tabular-nums" aria-hidden>
           {percent}%
         </span>
       )}
