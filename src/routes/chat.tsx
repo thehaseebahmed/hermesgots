@@ -110,6 +110,17 @@ function FollowAfterApproval({ pending }: { pending: boolean }) {
   return null
 }
 
+/** Sending jumps back to the end, even if you'd scrolled up to read. */
+function FollowOnSend({ lastUserId }: { lastUserId?: string }) {
+  const { scrollToEnd } = useMessageScroller()
+  const previous = useRef(lastUserId)
+  useEffect(() => {
+    if (lastUserId !== previous.current) scrollToEnd({ behavior: "smooth" })
+    previous.current = lastUserId
+  }, [lastUserId, scrollToEnd])
+  return null
+}
+
 export function ChatPage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -213,11 +224,7 @@ export function ChatPage() {
             <MessageScrollerViewport aria-label="Messages">
               <MessageScrollerContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-32 pb-6">
                 {messages!.map((message) => (
-                  <MessageScrollerItem
-                    key={message.id}
-                    messageId={message.id}
-                    scrollAnchor={message.role === "user"}
-                  >
+                  <MessageScrollerItem key={message.id} messageId={message.id}>
                     <MessageItem
                       message={message}
                       showStats={resolved.showStats}
@@ -229,6 +236,7 @@ export function ChatPage() {
             </MessageScrollerViewport>
             <MessageScrollerButton />
             <FollowAfterApproval pending={Boolean(awaitingApproval)} />
+            <FollowOnSend lastUserId={messages!.findLast((m) => m.role === "user")?.id} />
           </MessageScroller>
         </MessageScrollerProvider>
       ) : (
