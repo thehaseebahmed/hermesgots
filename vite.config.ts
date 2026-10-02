@@ -19,7 +19,7 @@ function commit() {
   }
 }
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   define: {
     __APP_VERSION__: JSON.stringify(`${pkg.version} · ${commit()}`),
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
@@ -28,6 +28,8 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
+      // The Android app ships its assets in the APK; a service worker would only serve stale ones.
+      disable: mode === "native",
       registerType: "autoUpdate",
       includeAssets: ["favicon.svg", "apple-touch-icon.png"],
       manifest: {
@@ -59,4 +61,4 @@ export default defineConfig({
   resolve: {
     alias: { "@": path.resolve(import.meta.dirname, "./src") },
   },
-})
+}))
