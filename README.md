@@ -12,7 +12,8 @@ A playful, minimal companion app for [Hermes Agent](https://github.com/NousResea
 - **Bots**: each bot is a Hermes profile with its own API URL, key and model. Bots sit in a horizontal strip at the top of the sidebar. Tap one to open its latest chat (or a new one if it has none), and new chats go to it. A new bot gets a random image from the 8 glassy SVG characters (soft shapes with an accessory each; see `/bots`), unique until all 8 are taken, and you can change it in Settings. The header bot is animated, and the bots next to messages stay still.
 - **Routines** (`/routines`): every Hermes cron job, grouped by bot, with its last 24 runs as status bars and Run now / Pause / Resume. Bots fold away, and the header flags failing and recently failed routines.
 - **Settings**: sync, bots (name, image, API URL and key, model picker), theme, reply stats, and clearing local data.
-- **Sync** (optional): sign in with GitHub to sync bots and the chat list (titles, Hermes session ids and context use) across devices. It's end-to-end encrypted, so Netlify only ever stores ciphertext. Messages come from Hermes: an open chat picks up turns sent from your other devices, and older messages load on request.
+- **Sync**: on a deploy with Netlify Identity, you sign in with GitHub and turn on (or unlock) sync before the app opens. It syncs bots and the chat list (titles, Hermes session ids and context use) across devices. It's end-to-end encrypted, so Netlify only ever stores ciphertext. Messages come from Hermes: an open chat picks up turns sent from your other devices, and older messages load on request.
+- **First-run setup** walks through signing in, turning on sync, enabling Hermes's API server (from its `.env` file or the Hermes Dashboard) and connecting the first bot. A device whose bots arrive through sync skips the Hermes steps.
 - Bots, chats and settings are stored on the device in **IndexedDB** (via Dexie). Theme preference lives in `localStorage` so the first paint doesn't flash.
 
 Built with Vite, React 19, Tailwind v4 and [shadcn/ui](https://ui.shadcn.com) on **Base UI** (the `base-maia` style, plus shadcn's `Message`, `Bubble` and `MessageScroller` chat components).
@@ -23,11 +24,13 @@ Add the following to `~/.hermes/.env` and restart the gateway:
 
 ```bash
 API_SERVER_ENABLED=true
-API_SERVER_KEY=$(openssl rand -hex 32)      # required for per-chat sessions
+API_SERVER_KEY=<a long random secret>     # required (e.g. `openssl rand -hex 32`)
 API_SERVER_CORS_ORIGINS=https://<your-site>.netlify.app
 ```
 
-Then open **Settings** in Memento, enter `http://localhost:8642/v1` (or your server's URL) and the key for your first bot, and tap **Test connection**.
+Or, in the Hermes Dashboard (`hermes dashboard`): **Channels → API server → Configure**, turn it on, set the auth key, and **Restart gateway**. The dashboard has no CORS field, so `API_SERVER_CORS_ORIGINS` still goes in `~/.hermes/.env`.
+
+Memento's first-run setup shows both routes, with a fresh key and this site's origin filled in, then connects your first bot (`http://localhost:8642/v1` or your server's URL) with **Test connection**. Add more bots later in **Settings**.
 
 **Profiles:** Hermes's API can't list its profiles, so add one bot per profile. Point it at the profile's own gateway, or at `/p/<profile>/v1` on a gateway running with `gateway.multiplex_profiles`. Each profile has its own `API_SERVER_KEY`. A named profile advertises its name on `/v1/models`, so **Test connection** fills in the bot's name.
 
@@ -53,7 +56,7 @@ pnpm dev
 
 `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm format`.
 
-Sync needs Netlify Identity and the `netlify/functions/sync.mts` function, which only run under the Netlify CLI. Use `pnpm dev:netlify` against a linked site to work on it. Under plain `pnpm dev`, the Sync card stays hidden.
+Sync needs Netlify Identity and the `netlify/functions/sync.mts` function, which only run under the Netlify CLI. Use `pnpm dev:netlify` against a linked site to work on it. Under plain `pnpm dev`, the Sync card stays hidden and sign-in isn't required.
 
 UI primitives in `src/components/ui` are shadcn `base-maia` components. Add more with `pnpm dlx shadcn@latest add <name>`.
 
