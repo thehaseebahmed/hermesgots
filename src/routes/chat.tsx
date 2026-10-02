@@ -48,6 +48,7 @@ import {
   getMessages,
   type Message,
 } from "@/lib/db"
+import { syncContextWindow } from "@/lib/models"
 
 const SUGGESTIONS = [
   "What can you do on my machine?",
@@ -153,6 +154,15 @@ export function ChatPage() {
     approximate: lastTurn?.toolsUsed,
     window: profile?.contextWindow,
   }
+
+  // Picks up a model changed on the server (only when the connection does, not on every write);
+  // the ring follows via the live query.
+  const profileId = profile?.id
+  const connection = profile && `${profile.baseUrl}\n${profile.apiKey}`
+  useEffect(() => {
+    if (!profileId) return
+    void db.profiles.get(profileId).then((current) => current && syncContextWindow(current))
+  }, [profileId, connection])
 
   // A deleted (or unknown) conversation id falls back to a fresh chat.
   useEffect(() => {

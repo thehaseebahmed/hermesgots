@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/select"
 import {
   addProfile,
+  db,
   deleteProfile,
   getActiveProfile,
   listProfiles,
@@ -44,6 +45,7 @@ import {
   type Profile,
 } from "@/lib/db"
 import { checkHealth, listModels } from "@/lib/hermes"
+import { syncContextWindow } from "@/lib/models"
 import { cn } from "@/lib/utils"
 
 type Connection =
@@ -144,6 +146,10 @@ function BotEditor({
         save({ name: advertised })
       }
       setConnection({ state: "ok" })
+      const saved = await db.profiles.get(profile.id)
+      if (saved) await syncContextWindow(saved)
+      const synced = await db.profiles.get(profile.id)
+      setContextWindow(synced?.contextWindow?.toString() ?? "")
     } catch (error) {
       setConnection({
         state: "error",
@@ -283,13 +289,13 @@ function BotEditor({
             onChange={(e) => {
               const digits = e.target.value.replace(/\D/g, "")
               setContextWindow(digits)
-              save({ contextWindow: Number(digits) || undefined })
+              save({ contextWindow: Number(digits) || undefined, contextSource: "manual" })
             }}
           />
           <InputGroupAddon align="inline-end">tokens</InputGroupAddon>
         </InputGroup>
         <FieldDescription>
-          The model's context size. Hermes doesn't report it, so set it to see how full a chat is.
+          <ContextWindowHint profile={profile} />
         </FieldDescription>
       </Field>
 
@@ -342,4 +348,25 @@ function BotEditor({
       )}
     </FieldGroup>
   )
+}
+
+function ContextWindowHint({ profile }: { profile: Profile }) {
+  const model = profile.contextModel && (
+    <code className="font-mono break-all">{profile.contextModel}</code>
+  )
+  if (!model) {
+    return (
+      <>
+        The model's context size, to see how full a chat is. Test the connection to look it up on
+        models.dev.
+      </>
+    )
+  }
+  if (profile.contextSource === "models.dev" && profile.contextWindow) {
+    return <>Found on models.dev for {model}. It resets when the bot's model changes.</>
+  }
+  if (profile.contextSource === "manual" && profile.contextWindow) {
+    return <>Set by hand for {model}. It resets when the bot's model changes.</>
+  }
+  return <>{model} isn't on models.dev, so set its context size by hand.</>
 }
