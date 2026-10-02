@@ -25,6 +25,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
 import { HISTORY_LENGTH, syncCron } from "@/lib/cron"
 import { cronRunsOf, db, listProfiles, type CronRun, type Profile } from "@/lib/db"
@@ -190,41 +191,51 @@ function BotRoutines({
   const resync = useCallback(() => setOwnTick((n) => n + 1), [])
 
   return (
-    <Collapsible open={open} onOpenChange={onOpenChange}>
-      <CollapsibleTrigger className="group/bot flex min-h-11 w-full items-center gap-3 rounded-2xl px-1 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
-        <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[panel-open]/bot:rotate-90" />
-        <Bot id={profile.botId} className="size-9" />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate font-semibold">{profile.name}</span>
-          {jobs && !error && (
-            <span className="block text-xs text-muted-foreground">
-              {jobs.length} {jobs.length === 1 ? "routine" : "routines"}
-            </span>
-          )}
-        </span>
-        <span className="flex shrink-0 flex-col items-end gap-1">
-          {error && (
-            <Badge variant="destructive">
-              <CircleAlertIcon /> Unreachable
-            </Badge>
-          )}
-          {failing > 0 && (
-            <Badge variant="destructive">
-              <CircleAlertIcon /> {failing} failing
-            </Badge>
-          )}
-          {recent > 0 && (
-            <Badge className="bg-warning/15 text-warning">
-              <TriangleAlertIcon /> {recent} recently failed
-            </Badge>
-          )}
-        </span>
-      </CollapsibleTrigger>
+    <Collapsible open={open && !error} onOpenChange={onOpenChange} disabled={!!error}>
+      <div className="flex items-center gap-2">
+        <CollapsibleTrigger className="group/bot flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-2xl px-1 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[disabled]/bot:opacity-40 group-data-[panel-open]/bot:rotate-90" />
+          <Bot id={profile.botId} className="size-9" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate font-semibold">{profile.name}</span>
+            {jobs && !error && (
+              <span className="block text-xs text-muted-foreground">
+                {jobs.length} {jobs.length === 1 ? "routine" : "routines"}
+              </span>
+            )}
+          </span>
+          <span className="flex shrink-0 flex-col items-end gap-1">
+            {failing > 0 && (
+              <Badge variant="destructive">
+                <CircleAlertIcon /> {failing} failing
+              </Badge>
+            )}
+            {recent > 0 && (
+              <Badge className="bg-warning/15 text-warning">
+                <TriangleAlertIcon /> {recent} recently failed
+              </Badge>
+            )}
+          </span>
+        </CollapsibleTrigger>
+        {error && (
+          <Popover>
+            <PopoverTrigger
+              openOnHover
+              className="flex min-h-11 shrink-0 items-center rounded-2xl px-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Badge variant="destructive">
+                <CircleAlertIcon /> Unreachable
+              </Badge>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="break-words text-destructive">
+              {error}
+            </PopoverContent>
+          </Popover>
+        )}
+      </div>
       <CollapsibleContent>
         <div className="flex flex-col gap-3 pt-2">
-          {error ? (
-            <p className="px-1 text-sm text-destructive">{error}</p>
-          ) : !jobs ? (
+          {!jobs ? (
             <p className="flex items-center gap-2 px-1 text-sm text-muted-foreground">
               <Spinner className="size-4" /> Loading routines…
             </p>
