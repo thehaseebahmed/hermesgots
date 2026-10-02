@@ -20,33 +20,32 @@ function fraction({ tokens, window }: ContextUsage) {
   return tokens && window ? Math.min(1, tokens / window) : 0
 }
 
-/** Small fill ring for the composer; opens the usage sheet. */
+/** Fill ring for the composer, the size of the send button; opens the usage sheet. */
 export function ContextRing({ usage, onClick }: { usage: ContextUsage; onClick: () => void }) {
   const filled = fraction(usage)
-  const radius = 8
+  const percent = Math.round(filled * 100)
+  const radius = 20
   const circumference = 2 * Math.PI * radius
-  const label = usage.window
-    ? `Context ${Math.round(filled * 100)}% used`
-    : "Context usage and model"
+  const label = usage.window ? `Context ${percent}% used` : "Context usage and model"
 
   return (
     <Button
       type="button"
       variant="ghost"
       size="icon-lg"
-      className="size-11 rounded-full text-muted-foreground"
+      className="relative size-11 rounded-full text-muted-foreground"
       onClick={onClick}
       aria-label={label}
     >
-      <svg viewBox="0 0 20 20" className="size-5 -rotate-90" aria-hidden>
-        <circle cx="10" cy="10" r={radius} fill="none" strokeWidth="2.5" className="stroke-muted" />
+      <svg viewBox="0 0 44 44" className="absolute inset-0 size-11 -rotate-90" aria-hidden>
+        <circle cx="22" cy="22" r={radius} fill="none" strokeWidth="3" className="stroke-muted" />
         {filled > 0 && (
           <circle
-            cx="10"
-            cy="10"
+            cx="22"
+            cy="22"
             r={radius}
             fill="none"
-            strokeWidth="2.5"
+            strokeWidth="3"
             strokeLinecap="round"
             strokeDasharray={circumference}
             strokeDashoffset={circumference * (1 - filled)}
@@ -54,6 +53,11 @@ export function ContextRing({ usage, onClick }: { usage: ContextUsage; onClick: 
           />
         )}
       </svg>
+      {usage.window && (
+        <span className="text-[11px] font-medium tabular-nums" aria-hidden>
+          {percent}%
+        </span>
+      )}
     </Button>
   )
 }

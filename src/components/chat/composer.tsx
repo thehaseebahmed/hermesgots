@@ -123,7 +123,7 @@ export function Composer({
       )}
       <InputGroup className="bg-background shadow-lg shadow-black/5 has-[textarea]:rounded-[1.75rem] dark:bg-input/30">
         {leading && (
-          <InputGroupAddon align="inline-start" className="self-end py-0.5 pl-0.5">
+          <InputGroupAddon align="inline-start" className="self-end pb-1.5 pl-1.5">
             {leading}
           </InputGroupAddon>
         )}
@@ -154,18 +154,18 @@ export function Composer({
           disabled={disabled}
           rows={1}
           className={cn(
-            "max-h-48 min-h-12 py-3.5 text-base md:text-[15px]",
-            leading ? "pr-5 pl-1" : "px-5",
+            "max-h-48 min-h-14 py-4 text-base md:text-[15px]",
+            leading ? "pr-5 pl-2" : "px-5",
           )}
           aria-label="Message"
         />
-        <InputGroupAddon align="inline-end" className="gap-1.5 self-end pb-2">
+        <InputGroupAddon align="inline-end" className="gap-1.5 self-end pr-1.5 pb-1.5">
           {busy && (
             <InputGroupButton
               type="button"
               variant="secondary"
               size="icon-sm"
-              className="size-9 rounded-full"
+              className="size-11 rounded-full"
               onClick={onStop}
               aria-label="Stop"
             >
@@ -177,7 +177,7 @@ export function Composer({
               type="submit"
               variant="default"
               size="icon-sm"
-              className="size-9 rounded-full"
+              className="size-11 rounded-full"
               disabled={!canSend}
               aria-label={busy ? "Queue message" : "Send"}
             >
