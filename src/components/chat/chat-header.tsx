@@ -14,7 +14,7 @@ export function ChatHeader({
 }: {
   title: string
   botId?: string
-  subtitle: string
+  subtitle?: string
   actions?: ReactNode
 }) {
   const openDrawer = useOpenDrawer()
@@ -35,9 +35,14 @@ export function ChatHeader({
         </div>
         <div className="pointer-events-auto flex min-w-0 flex-1 flex-col items-center">
           <Bot id={botId} animate className="size-11" />
-          <div className="-mt-1 flex max-w-full flex-col items-center rounded-full bg-background/80 px-3 py-0.5 backdrop-blur">
+          {/* Ringed and shadowed so it stays readable over messages scrolling underneath. */}
+          <div className="-mt-1 flex max-w-1/2 min-w-0 flex-col items-center rounded-full bg-background/80 px-3 py-0.5 shadow-sm ring-1 ring-foreground/10 backdrop-blur">
             <span className="max-w-full truncate text-sm font-semibold">{title}</span>
-            <span className="text-[11px] leading-tight text-muted-foreground">{subtitle}</span>
+            {subtitle && (
+              <span className="max-w-full truncate text-[11px] leading-tight text-muted-foreground">
+                {subtitle}
+              </span>
+            )}
           </div>
         </div>
         <div className="pointer-events-auto size-11 shrink-0">{actions}</div>
