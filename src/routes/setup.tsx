@@ -233,7 +233,7 @@ function ServerStep({ onNext }: { onNext: () => void }) {
           href="https://randomkeygen.com/api-key"
           target="_blank"
           rel="noreferrer"
-          className="text-primary underline-offset-4 hover:underline"
+          className="font-medium underline underline-offset-4"
         >
           randomkeygen.com/api-key
         </a>
