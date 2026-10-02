@@ -280,3 +280,92 @@ export async function checkHealth(config: HermesConfig) {
   })
   return response.json().catch(() => ({}))
 }
+
+/** Hermes's newest execution-ledger row for a job (newer versions only). */
+export interface CronExecution {
+  status: "claimed" | "running" | "completed" | "failed" | "unknown"
+  claimed_at?: string | null
+  started_at?: string | null
+  finished_at?: string | null
+  error?: string | null
+}
+
+export interface CronJob {
+  id: string
+  name: string
+  schedule: string
+  enabled: boolean
+  /** `scheduled`, `paused`, `running`, `completed` or `error`. */
+  state?: string
+  nextRunAt?: string | null
+  lastRunAt?: string | null
+  /** `ok`, `error` or `delivery_failed`. */
+  lastStatus?: string | null
+  lastError?: string | null
+  failureStreak: number
+  latestExecution?: CronExecution | null
+}
+
+function toCronJob(raw: any): CronJob | null {
+  if (typeof raw?.id !== "string") return null
+  const schedule = raw.schedule_display ?? raw.schedule?.display ?? raw.schedule?.expr
+  return {
+    id: raw.id,
+    name: typeof raw.name === "string" && raw.name ? raw.name : raw.id,
+    schedule: typeof schedule === "string" ? schedule : "",
+    enabled: raw.enabled !== false,
+    state: raw.state ?? undefined,
+    nextRunAt: raw.next_run_at,
+    lastRunAt: raw.last_run_at,
+    lastStatus: raw.last_status,
+    lastError: raw.last_error,
+    failureStreak: Number(raw.failure_streak) || 0,
+    latestExecution: raw.latest_execution,
+  }
+}
+
+/** Every cron job on the profile, paused ones included. */
+export async function listCronJobs(config: HermesConfig): Promise<CronJob[]> {
+  const response = await request(`${serverRoot(config.baseUrl)}/api/jobs?include_disabled=true`, {
+    headers: headers(config),
+  })
+  const body = await response.json()
+  const jobs: unknown[] = Array.isArray(body?.jobs) ? body.jobs : []
+  return jobs.map(toCronJob).filter((job): job is CronJob => job !== null)
+}
+
+export async function controlCronJob(
+  config: HermesConfig,
+  jobId: string,
+  action: "pause" | "resume" | "run",
+) {
+  await request(`${serverRoot(config.baseUrl)}/api/jobs/${encodeURIComponent(jobId)}/${action}`, {
+    method: "POST",
+    headers: headers(config),
+    body: "{}",
+  })
+}
+
+export interface CronSession {
+  id: string
+  started_at?: number | string | null
+  ended_at?: number | string | null
+  end_reason?: string | null
+}
+
+/** Sessions cron runs left behind, the only run history the API server exposes. Best effort. */
+export async function listCronSessions(config: HermesConfig): Promise<CronSession[]> {
+  try {
+    const response = await request(
+      `${serverRoot(config.baseUrl)}/api/sessions?source=cron&limit=200`,
+      {
+        headers: headers(config),
+      },
+    )
+    const body = await response.json()
+    const data: unknown = Array.isArray(body) ? body : body?.data
+    return Array.isArray(data) ? data.filter((s) => typeof s?.id === "string") : []
+  } catch {
+    return []
+  }
+}
