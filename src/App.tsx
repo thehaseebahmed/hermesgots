@@ -5,6 +5,7 @@ import { Route, Routes } from "react-router"
 import { AppShell } from "@/components/app-shell"
 import { BotsPage } from "@/routes/bots"
 import { ChatPage } from "@/routes/chat"
+import { RoutinesPage } from "@/routes/routines"
 import { SettingsPage } from "@/routes/settings"
 
 /** Computed colours come back as oklch(), which browser chrome may not parse; hex always works. */
@@ -37,6 +38,7 @@ export default function App() {
         <Route element={<AppShell />}>
           <Route index element={<ChatPage />} />
           <Route path="c/:id" element={<ChatPage />} />
+          <Route path="routines" element={<RoutinesPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="bots" element={<BotsPage />} />
           <Route path="*" element={<ChatPage />} />

@@ -2,6 +2,7 @@
 // as gateway/platforms/api_server*.py: chat.completion.chunk frames plus the named SSE events
 // `hermes.tool.progress`, `hermes.status` and `approval.request`, and answers approvals on
 // POST /v1/runs/{id}/approval. Mention "clean" or "delete" in a message to trigger an approval.
+// Cron jobs live on /api/jobs, and their past runs show up as /api/sessions?source=cron.
 //
 //   pnpm mock            # then point Settings at http://localhost:8642/v1
 
@@ -14,7 +15,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Authorization, Content-Type, Idempotency-Key, X-Hermes-Session-Id",
 }
 
@@ -27,6 +28,79 @@ async function readBody(req) {
   let raw = ""
   for await (const chunk of req) raw += chunk
   return raw ? JSON.parse(raw) : {}
+}
+
+// Cron: per profile, three jobs with a run history. Runs are { start, end, ok } in ms.
+const cronByProfile = new Map()
+const MINUTE = 60_000
+function cronJobs(profile = "default") {
+  if (cronByProfile.has(profile)) return cronByProfile.get(profile)
+  const seed = [...profile].reduce((n, c) => n + c.charCodeAt(0), 0)
+  const make = (n, name, display, every, { paused = false, streak = 0, history = 30 } = {}) => {
+    const now = Date.now()
+    const runs = Array.from({ length: history }, (_, i) => {
+      // The latest run was a third of a period ago, so the next one is still ahead.
+      const start = now - (history - i - 0.67) * every * MINUTE
+      const failed = i >= history - streak || (i * 7 + seed) % 11 === 0
+      return { start, end: start + 20_000 + ((i * 13) % 50) * 1000, ok: !failed }
+    })
+    return { id: `${seed.toString(16)}a${n}c0ffee`.slice(0, 12), name, display, every, paused, runs }
+  }
+  const jobs = [
+    make(1, "Inbox triage", "every 60m", 60),
+    make(2, "Uptime check", "every 15m", 15, { streak: 2 }),
+    make(3, "Morning digest", "0 8 * * *", 1440, { paused: true, history: 9 }),
+  ]
+  cronByProfile.set(profile, jobs)
+  return jobs
+}
+
+const iso = (ms) => (ms ? new Date(ms).toISOString() : null)
+const stamp = (ms) => new Date(ms).toISOString().slice(0, 19).replace(/-|:/g, "").replace("T", "_")
+
+function jobRecord(job) {
+  const last = job.runs.at(-1)
+  const lastDone = job.runs.findLast((run) => run.end)
+  let streak = 0
+  for (const run of [...job.runs].reverse()) {
+    if (!run.end) continue
+    if (run.ok) break
+    streak += 1
+  }
+  return {
+    id: job.id,
+    name: job.name,
+    schedule: { kind: "interval", display: job.display },
+    schedule_display: job.display,
+    enabled: !job.paused,
+    state: job.paused ? "paused" : last && !last.end ? "running" : "scheduled",
+    next_run_at: job.paused ? null : iso((last?.start ?? Date.now()) + job.every * MINUTE),
+    last_run_at: iso(lastDone?.end),
+    last_status: lastDone ? (lastDone.ok ? "ok" : "error") : null,
+    last_error: lastDone && !lastDone.ok ? "Timed out waiting for https://status.example.com" : null,
+    failure_streak: streak,
+    latest_execution: last && {
+      status: !last.end ? "running" : last.ok ? "completed" : "failed",
+      claimed_at: iso(last.start - 500),
+      started_at: iso(last.start),
+      finished_at: iso(last.end),
+      error: last.end && !last.ok ? "Timed out waiting for https://status.example.com" : null,
+    },
+  }
+}
+
+function cronSessions(profile) {
+  // Like Hermes, a session per agent run; ended_at stays null while it runs.
+  return cronJobs(profile).flatMap((job) =>
+    job.runs.map((run) => ({
+      id: `cron_${job.id}_${stamp(run.start)}`,
+      source: "cron",
+      title: job.name,
+      started_at: run.start / 1000,
+      ended_at: run.end ? run.end / 1000 : null,
+      end_reason: !run.end ? null : run.ok ? "cron_complete" : "cron_incomplete_no_output",
+    })),
+  ).sort((a, b) => b.started_at - a.started_at)
 }
 
 async function streamCompletion(req, res, body) {
@@ -135,6 +209,30 @@ http
           { name: "plan", description: "Write a step-by-step plan before touching anything.", category: null },
         ],
       })
+    }
+    if (url.pathname === "/api/jobs") {
+      const all = url.searchParams.get("include_disabled") === "true"
+      const jobs = cronJobs(profile).filter((job) => all || !job.paused)
+      return json(res, 200, { jobs: jobs.map(jobRecord) })
+    }
+    const jobAction = /^\/api\/jobs\/([^/]+)\/(pause|resume|run)$/.exec(url.pathname)
+    if (req.method === "POST" && jobAction) {
+      const job = cronJobs(profile).find((j) => j.id === jobAction[1])
+      if (!job) return json(res, 404, { error: "Job not found" })
+      if (jobAction[2] === "pause") job.paused = true
+      if (jobAction[2] === "resume") job.paused = false
+      if (jobAction[2] === "run") {
+        const run = { start: Date.now(), end: null, ok: true }
+        job.runs.push(run)
+        setTimeout(() => (run.end = Date.now()), 4000)
+      }
+      return json(res, 200, { job: jobRecord(job) })
+    }
+    if (url.pathname === "/api/sessions") {
+      const source = url.searchParams.get("source")
+      const limit = Number(url.searchParams.get("limit") ?? 50)
+      const data = source === "cron" ? cronSessions(profile).slice(0, limit) : []
+      return json(res, 200, { object: "list", data, limit, offset: 0, has_more: false })
     }
     if (req.method === "POST" && url.pathname === "/v1/chat/completions") {
       return streamCompletion(req, res, await readBody(req))

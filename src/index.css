@@ -35,8 +35,9 @@
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
 
-  /* App-specific: the approval accent. */
+  /* App-specific: the approval accent and the routine run bars. */
   --warning: oklch(0.7 0.17 55);
+  --success: oklch(0.65 0.17 152);
 }
 
 .dark {
@@ -68,6 +69,7 @@
   --sidebar-ring: oklch(0.556 0 0);
 
   --warning: oklch(0.76 0.16 60);
+  --success: oklch(0.72 0.17 152);
 }
 
 @theme inline {
@@ -100,6 +102,7 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-warning: var(--warning);
+  --color-success: var(--success);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);

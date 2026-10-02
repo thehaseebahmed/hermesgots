@@ -12,3 +12,19 @@ export function formatTokens(tokens: number) {
   if (tokens >= 1_000) return compact(tokens / 1_000, "k")
   return String(tokens)
 }
+
+const relative = new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "short" })
+
+/** "in 5 min", "3 hr. ago", "yesterday". */
+export function formatRelative(timestamp: number, now: number) {
+  const seconds = Math.round((timestamp - now) / 1000)
+  const units: [Intl.RelativeTimeFormatUnit, number][] = [
+    ["day", 86_400],
+    ["hour", 3_600],
+    ["minute", 60],
+  ]
+  for (const [unit, size] of units) {
+    if (Math.abs(seconds) >= size) return relative.format(Math.round(seconds / size), unit)
+  }
+  return relative.format(seconds, "second")
+}
