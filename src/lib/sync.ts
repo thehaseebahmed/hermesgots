@@ -15,6 +15,8 @@ import {
   db,
   deleteConversation,
   deleteProfile,
+  getSettings,
+  saveSettings,
   type Conversation,
   type Profile,
 } from "@/lib/db"
@@ -363,7 +365,9 @@ async function runSync() {
     await syncBots(key)
     for (const profile of await db.profiles.toArray()) await syncChats(key, profile.id)
     syncedFingerprint = await fingerprint()
-    setState({ syncing: false, error: undefined, syncedAt: Date.now() })
+    const syncedAt = Date.now()
+    await saveSettings({ syncedAt })
+    setState({ syncing: false, error: undefined, syncedAt })
   } catch (error) {
     setState({ syncing: false, error: error instanceof Error ? error.message : "Sync failed" })
   }
@@ -393,6 +397,7 @@ let started = false
 export async function startSync() {
   if (started) return
   started = true
+  setState({ syncedAt: (await getSettings()).syncedAt })
   const onAccount = async (account: Account) => {
     setState({ account })
     if (account.status !== "signed-in") return
