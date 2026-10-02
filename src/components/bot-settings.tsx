@@ -109,14 +109,19 @@ export function BotSettings() {
   )
 }
 
-function BotEditor({
+/** `setup` trims it to the connection fields for first-run setup. */
+export function BotEditor({
   profile,
-  canDelete,
+  canDelete = false,
   onDeleted,
+  setup = false,
+  onConnected,
 }: {
   profile: Profile
-  canDelete: boolean
-  onDeleted: () => void
+  canDelete?: boolean
+  onDeleted?: () => void
+  setup?: boolean
+  onConnected?: () => void
 }) {
   const [showKey, setShowKey] = useState(false)
   const [models, setModels] = useState<string[]>([])
@@ -146,6 +151,7 @@ function BotEditor({
         save({ name: advertised })
       }
       setConnection({ state: "ok" })
+      onConnected?.()
       const saved = await db.profiles.get(profile.id)
       if (saved) await syncContextWindow(saved)
       const synced = await db.profiles.get(profile.id)
@@ -175,34 +181,36 @@ function BotEditor({
         />
       </Field>
 
-      <Field>
-        <FieldLabel id="bot-image-label">Image</FieldLabel>
-        <div
-          role="radiogroup"
-          aria-labelledby="bot-image-label"
-          className="grid grid-cols-4 gap-2 sm:grid-cols-8"
-        >
-          {BOTS.map((bot) => {
-            const checked = bot.id === profile.botId
-            return (
-              <button
-                key={bot.id}
-                type="button"
-                role="radio"
-                aria-checked={checked}
-                aria-label={bot.name}
-                onClick={() => save({ botId: bot.id })}
-                className={cn(
-                  "flex aspect-square min-h-11 items-center justify-center rounded-2xl ring-1 ring-foreground/10 transition-colors outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50",
-                  checked && "bg-primary/10 ring-2 ring-primary hover:bg-primary/15",
-                )}
-              >
-                <Bot id={bot.id} className="size-3/5" />
-              </button>
-            )
-          })}
-        </div>
-      </Field>
+      {!setup && (
+        <Field>
+          <FieldLabel id="bot-image-label">Image</FieldLabel>
+          <div
+            role="radiogroup"
+            aria-labelledby="bot-image-label"
+            className="grid grid-cols-4 gap-2 sm:grid-cols-8"
+          >
+            {BOTS.map((bot) => {
+              const checked = bot.id === profile.botId
+              return (
+                <button
+                  key={bot.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={checked}
+                  aria-label={bot.name}
+                  onClick={() => save({ botId: bot.id })}
+                  className={cn(
+                    "flex aspect-square min-h-11 items-center justify-center rounded-2xl ring-1 ring-foreground/10 transition-colors outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50",
+                    checked && "bg-primary/10 ring-2 ring-primary hover:bg-primary/15",
+                  )}
+                >
+                  <Bot id={bot.id} className="size-3/5" />
+                </button>
+              )
+            })}
+          </div>
+        </Field>
+      )}
 
       <Field>
         <FieldLabel htmlFor="base-url">API base URL</FieldLabel>
@@ -276,27 +284,29 @@ function BotEditor({
         </Field>
       )}
 
-      <Field>
-        <FieldLabel htmlFor="context-window">Context window</FieldLabel>
-        <InputGroup>
-          <InputGroupInput
-            id="context-window"
-            inputMode="numeric"
-            autoComplete="off"
-            placeholder="200000"
-            value={contextWindow}
-            onChange={(e) => {
-              const digits = e.target.value.replace(/\D/g, "")
-              setContextWindow(digits)
-              save({ contextWindow: Number(digits) || undefined, contextSource: "manual" })
-            }}
-          />
-          <InputGroupAddon align="inline-end">tokens</InputGroupAddon>
-        </InputGroup>
-        <FieldDescription>
-          <ContextWindowHint profile={profile} />
-        </FieldDescription>
-      </Field>
+      {!setup && (
+        <Field>
+          <FieldLabel htmlFor="context-window">Context window</FieldLabel>
+          <InputGroup>
+            <InputGroupInput
+              id="context-window"
+              inputMode="numeric"
+              autoComplete="off"
+              placeholder="200000"
+              value={contextWindow}
+              onChange={(e) => {
+                const digits = e.target.value.replace(/\D/g, "")
+                setContextWindow(digits)
+                save({ contextWindow: Number(digits) || undefined, contextSource: "manual" })
+              }}
+            />
+            <InputGroupAddon align="inline-end">tokens</InputGroupAddon>
+          </InputGroup>
+          <FieldDescription>
+            <ContextWindowHint profile={profile} />
+          </FieldDescription>
+        </Field>
+      )}
 
       <div className="flex flex-wrap items-center gap-3">
         <Button onClick={test} disabled={connection.state === "testing"}>
@@ -308,37 +318,39 @@ function BotEditor({
             Connected
           </Badge>
         )}
-        <AlertDialog>
-          <AlertDialogTrigger
-            render={<Button variant="outline" className="ml-auto" disabled={!canDelete} />}
-          >
-            <Trash2Icon data-icon="inline-start" />
-            Delete bot
-          </AlertDialogTrigger>
-          <AlertDialogContent size="sm">
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete {profile.name}?</AlertDialogTitle>
-              <AlertDialogDescription>
-                Its chats are removed too. The profile and its sessions on your Hermes server are
-                untouched.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                variant="destructive"
-                onClick={async () => {
-                  await deleteProfile(profile.id)
-                  const next = await getActiveProfile()
-                  if (next) await setActiveProfile(next.id)
-                  onDeleted()
-                }}
-              >
-                Delete
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        {!setup && (
+          <AlertDialog>
+            <AlertDialogTrigger
+              render={<Button variant="outline" className="ml-auto" disabled={!canDelete} />}
+            >
+              <Trash2Icon data-icon="inline-start" />
+              Delete bot
+            </AlertDialogTrigger>
+            <AlertDialogContent size="sm">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete {profile.name}?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Its chats are removed too. The profile and its sessions on your Hermes server are
+                  untouched.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  variant="destructive"
+                  onClick={async () => {
+                    await deleteProfile(profile.id)
+                    const next = await getActiveProfile()
+                    if (next) await setActiveProfile(next.id)
+                    onDeleted?.()
+                  }}
+                >
+                  Delete
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
       </div>
       {connection.state === "error" && (
         <p className="text-sm text-destructive" role="alert">
