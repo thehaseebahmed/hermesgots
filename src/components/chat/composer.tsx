@@ -1,7 +1,8 @@
 import { useId, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react"
-import { ArrowUpIcon, SquareIcon } from "lucide-react"
+import { ArrowUpIcon, MicIcon, SquareIcon } from "lucide-react"
 
 import { SlashMenu } from "@/components/chat/slash-menu"
+import { VoiceBar } from "@/components/chat/voice-bar"
 import {
   InputGroup,
   InputGroupAddon,
@@ -9,6 +10,7 @@ import {
   InputGroupTextarea,
 } from "@/components/ui/input-group"
 import type { HermesConfig } from "@/lib/hermes"
+import { joinText, useDictation } from "@/lib/speech"
 import { cn } from "@/lib/utils"
 import {
   localCommand,
@@ -47,6 +49,7 @@ export function Composer({
   const [active, setActive] = useState(0)
   const textarea = useRef<HTMLTextAreaElement>(null)
   const listId = useId()
+  const dictation = useDictation()
   const canSend = value.trim().length > 0 && !disabled
 
   const query = /^\/(\S*)$/.exec(value)?.[1]
@@ -69,18 +72,51 @@ export function Composer({
     textarea.current?.focus()
   }
 
-  const submit = (event?: FormEvent) => {
-    event?.preventDefault()
-    const command = localCommand(value)
-    if (command && !disabled) return runCommand(command)
-    if (!canSend) return
-    const text = value
+  const submitText = (text: string) => {
     setValue("")
     // Hand the text back if it never made it into the chat, unless something new was typed.
     void Promise.resolve((busy ? onQueue : onSend)(text)).catch(() =>
       setValue((current) => current || text),
     )
+  }
+
+  const submit = (event?: FormEvent) => {
+    event?.preventDefault()
+    const command = localCommand(value)
+    if (command && !disabled) return runCommand(command)
+    if (!canSend) return
+    submitText(value)
     textarea.current?.focus()
+  }
+
+  const stopDictation = async () => {
+    const heard = await dictation.finish()
+    if (heard) setValue((current) => joinText(current, heard))
+    setTimeout(() => textarea.current?.focus())
+  }
+
+  const sendDictation = async () => {
+    const heard = await dictation.finish()
+    if (!heard) return
+    const text = joinText(value, heard)
+    if (disabled) setValue(text)
+    else submitText(text)
+  }
+
+  if (dictation.status !== "idle") {
+    return (
+      <div className="mx-auto w-full max-w-3xl">
+        <VoiceBar
+          final={dictation.final}
+          interim={dictation.interim}
+          levels={dictation.levels}
+          finishing={dictation.status === "finishing"}
+          onCancel={dictation.cancel}
+          onStop={() => void stopDictation()}
+          onSend={() => void sendDictation()}
+        />
+      </div>
+    )
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -160,6 +196,18 @@ export function Composer({
           aria-label="Message"
         />
         <InputGroupAddon align="inline-end" className="self-end py-1.5 pr-2.5">
+          {dictation.supported && !disabled && (
+            <InputGroupButton
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="size-11 rounded-full"
+              onClick={dictation.start}
+              aria-label="Voice"
+            >
+              <MicIcon />
+            </InputGroupButton>
+          )}
           {busy ? (
             <InputGroupButton
               type="button"
