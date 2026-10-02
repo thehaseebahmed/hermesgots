@@ -151,8 +151,6 @@ function BotEditor({
     }
   }
 
-  const modelOptions = Array.from(new Set([profile.model, ...models])).filter(Boolean)
-
   return (
     <FieldGroup>
       <Field>
@@ -254,24 +252,23 @@ function BotEditor({
         </FieldDescription>
       </Field>
 
-      <Field>
-        <FieldLabel htmlFor="model">Model</FieldLabel>
-        <Select value={profile.model} onValueChange={(value) => value && save({ model: value })}>
-          <SelectTrigger id="model" className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {modelOptions.map((id) => (
-              <SelectItem key={id} value={id}>
-                {id}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <FieldDescription>
-          Test the connection to load the models Hermes advertises.
-        </FieldDescription>
-      </Field>
+      {models.length > 1 && (
+        <Field>
+          <FieldLabel htmlFor="model">Model</FieldLabel>
+          <Select value={profile.model} onValueChange={(value) => value && save({ model: value })}>
+            <SelectTrigger id="model" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {models.map((id) => (
+                <SelectItem key={id} value={id}>
+                  {id}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      )}
 
       <div className="flex flex-wrap items-center gap-3">
         <Button onClick={test} disabled={connection.state === "testing"}>
