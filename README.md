@@ -24,13 +24,13 @@ Add the following to `~/.hermes/.env` and restart the gateway:
 
 ```bash
 API_SERVER_ENABLED=true
-API_SERVER_KEY=<a long random secret>     # required (e.g. `openssl rand -hex 32`)
+API_SERVER_KEY=<your 64-character key>    # required; generate one at https://randomkeygen.com/api-key
 API_SERVER_CORS_ORIGINS=https://<your-site>.netlify.app
 ```
 
 Or, in the Hermes Dashboard (`hermes dashboard`): **Channels → API server → Configure**, turn it on, set the auth key, and **Restart gateway**. The dashboard has no CORS field, so `API_SERVER_CORS_ORIGINS` still goes in `~/.hermes/.env`.
 
-Memento's first-run setup shows both routes, with a fresh key and this site's origin filled in, then connects your first bot (`http://localhost:8642/v1` or your server's URL) with **Test connection**. Add more bots later in **Settings**.
+Memento's first-run setup shows both routes, with this site's origin filled in, then connects your first bot (`http://localhost:8642/v1` or your server's URL) with **Test connection**. Add more bots later in **Settings**.
 
 **Profiles:** Hermes's API can't list its profiles, so add one bot per profile. Point it at the profile's own gateway, or at `/p/<profile>/v1` on a gateway running with `gateway.multiplex_profiles`. Each profile has its own `API_SERVER_KEY`. A named profile advertises its name on `/v1/models`, so **Test connection** fills in the bot's name.
 
