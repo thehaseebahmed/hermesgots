@@ -1,7 +1,6 @@
-import { useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTheme } from "next-themes"
-import { CheckIcon, CopyIcon, MenuIcon, MonitorIcon, MoonIcon, SunIcon } from "lucide-react"
+import { MenuIcon, MonitorIcon, MoonIcon, SunIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { BotSettings } from "@/components/bot-settings"
@@ -23,36 +22,6 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { DEFAULT_SETTINGS, clearAllData, db, saveSettings, type Settings } from "@/lib/db"
-
-function SetupSnippet() {
-  const [copied, setCopied] = useState(false)
-  const snippet = [
-    "API_SERVER_ENABLED=true",
-    "API_SERVER_KEY=<openssl rand -hex 32>",
-    `API_SERVER_CORS_ORIGINS=${window.location.origin}`,
-  ].join("\n")
-
-  return (
-    <div className="relative rounded-2xl bg-muted">
-      <pre className="overflow-x-auto px-4 py-3 pr-12 font-mono text-xs leading-relaxed">
-        {snippet}
-      </pre>
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        className="absolute top-1.5 right-1.5"
-        aria-label="Copy"
-        onClick={async () => {
-          await navigator.clipboard?.writeText(snippet).catch(() => {})
-          setCopied(true)
-          window.setTimeout(() => setCopied(false), 1500)
-        }}
-      >
-        {copied ? <CheckIcon /> : <CopyIcon />}
-      </Button>
-    </div>
-  )
-}
 
 export function SettingsPage() {
   const stored = useLiveQuery(async () => (await db.settings.get("settings")) ?? null, [])
@@ -84,19 +53,6 @@ function SettingsForm({ stored }: { stored: Settings | null }) {
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pb-[max(2rem,env(safe-area-inset-bottom))]">
         <BotSettings />
-
-        <Card className="rounded-3xl">
-          <CardHeader>
-            <CardTitle>Hermes setup</CardTitle>
-            <CardDescription>
-              Add these to <code className="font-mono">~/.hermes/.env</code> and restart the gateway
-              so this site is allowed to connect.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <SetupSnippet />
-          </CardContent>
-        </Card>
 
         <Card className="rounded-3xl">
           <CardHeader>
