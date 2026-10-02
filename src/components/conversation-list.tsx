@@ -1,11 +1,11 @@
 import { useLiveQuery } from "dexie-react-hooks"
-import { NavLink, useMatch, useNavigate } from "react-router"
+import { NavLink, useNavigate } from "react-router"
 import { PlusIcon, SettingsIcon, TimerIcon } from "lucide-react"
 
 import { Bot } from "@/components/bot"
 import { BotCard } from "@/components/bot-card"
 import { Button } from "@/components/ui/button"
-import { conversationsOf, db, getActiveProfile, listProfiles, setActiveProfile } from "@/lib/db"
+import { conversationsOf, getActiveProfile, listProfiles, setActiveProfile } from "@/lib/db"
 import { cn } from "@/lib/utils"
 
 function relativeDay(timestamp: number) {
@@ -20,15 +20,13 @@ function relativeDay(timestamp: number) {
 /** Every bot (Hermes profile) in a horizontal strip; picking one filters the chats below. */
 function BotStrip({ onNavigate }: { onNavigate?: () => void }) {
   const navigate = useNavigate()
-  const openChat = useMatch("/c/:id")?.params.id
   const profiles = useLiveQuery(listProfiles, [])
   const active = useLiveQuery(getActiveProfile, [])
 
   const select = async (profileId: string) => {
-    // The open chat belongs to its own bot, so switching bots leaves it for a fresh chat.
-    const chat = openChat ? await db.conversations.get(openChat) : undefined
     await setActiveProfile(profileId)
-    if (chat && chat.profileId !== profileId) navigate("/")
+    const last = await conversationsOf(profileId).last()
+    navigate(last ? `/c/${last.id}` : "/")
   }
 
   return (
