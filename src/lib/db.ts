@@ -93,6 +93,24 @@ export interface Message {
   createdAt: number
 }
 
+export type CronRunStatus = "ok" | "failed" | "running" | "unknown"
+
+/**
+ * One cron run as Memento saw it. Hermes's API server only reports each job's latest run, so the
+ * history is what this device observed plus what cron sessions on the server imply.
+ */
+export interface CronRun {
+  /** `${profileId}:${jobId}:${startedAt}` */
+  id: string
+  profileId: string
+  jobId: string
+  startedAt: number
+  finishedAt?: number
+  status: CronRunStatus
+  error?: string
+  source: "observed" | "session"
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   id: "settings",
   showStats: true,
@@ -110,6 +128,7 @@ export const db = new Dexie("memento") as Dexie & {
   profiles: EntityTable<Profile, "id">
   conversations: EntityTable<Conversation, "id">
   messages: EntityTable<Message, "id">
+  cronRuns: EntityTable<CronRun, "id">
 }
 
 db.version(1).stores({
@@ -179,6 +198,11 @@ db.version(3).upgrade((tx) =>
     }),
 )
 
+// v4: cron run history, grouped by profile and job.
+db.version(4).stores({
+  cronRuns: "id, profileId, [profileId+jobId+startedAt]",
+})
+
 db.on("populate", (tx) => seedProfile(tx))
 
 export async function getSettings(): Promise<Settings> {
@@ -218,10 +242,11 @@ export async function updateProfile(id: string, patch: Partial<Omit<Profile, "id
 
 /** Deletes a profile and its chats. The last profile can't be deleted. */
 export async function deleteProfile(id: string) {
-  await db.transaction("rw", db.profiles, db.conversations, db.messages, async () => {
+  await db.transaction("rw", db.profiles, db.conversations, db.messages, db.cronRuns, async () => {
     if ((await db.profiles.count()) <= 1) return
     const ids = await conversationsOf(id).primaryKeys()
     await db.messages.where("conversationId").anyOf(ids).delete()
+    await db.cronRuns.where("profileId").equals(id).delete()
     await db.conversations.bulkDelete(ids)
     await db.profiles.delete(id)
   })
@@ -263,9 +288,16 @@ export async function getMessages(conversationId: string) {
 }
 
 export async function clearAllData() {
-  const tables = [db.conversations, db.messages, db.settings, db.profiles]
+  const tables = [db.conversations, db.messages, db.settings, db.profiles, db.cronRuns]
   await db.transaction("rw", tables, async () => {
     await Promise.all(tables.map((table) => table.clear()))
     await db.profiles.add(newProfile({}, []))
   })
+}
+
+/** A job's runs, oldest first. */
+export function cronRunsOf(profileId: string, jobId: string) {
+  return db.cronRuns
+    .where("[profileId+jobId+startedAt]")
+    .between([profileId, jobId, Dexie.minKey], [profileId, jobId, Dexie.maxKey])
 }
