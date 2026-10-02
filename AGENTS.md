@@ -56,7 +56,7 @@ PR titles follow the same format. Fill in `.github/pull_request_template.md` for
 | Path | What lives there |
 | --- | --- |
 | `src/lib/hermes.ts` | Hermes API client and SSE parser |
-| `src/lib/chat.ts` | Send/stop a turn and stream it into IndexedDB; approval answers |
+| `src/lib/chat.ts` | Send/stop a turn, stream it into IndexedDB and resume it after a drop; approval answers |
 | `src/lib/db.ts` | Dexie schema, types, settings and profile (bot) helpers |
 | `src/lib/cron.ts` | Syncs Hermes cron jobs and folds their runs into IndexedDB |
 | `src/lib/speech.ts` | Voice dictation hook (browser Web Speech API) |
@@ -79,8 +79,13 @@ PR titles follow the same format. Fill in `.github/pull_request_template.md` for
 
 These behaviours were verified against Hermes's `gateway/platforms/api_server*.py`. Check the source again before relying on anything new.
 
-- The client uses `POST /v1/chat/completions` with `stream: true`.
-- The stream interleaves named SSE events with the normal chunks: `hermes.tool.progress`, `hermes.status` and `approval.request`.
+- Turns run on `POST /v1/runs` when `GET /v1/capabilities` reports `run_submission` and `run_events_sse`. A chat completion's agent is interrupted when its SSE client disconnects, which happens whenever a phone sleeps mid-reply. A run keeps going without a client.
+  - `GET /v1/runs/{id}/events?last_seq=N` replays the buffered events after `N` and then follows live ones. CORS doesn't allow `Last-Event-ID`, so the cursor goes in the query. Each event carries `seq`, which the reply stores (`runSeq`, along with `runId`) so it can resume after a dropped stream or a reload.
+  - Hermes keeps the buffer (1000 events) for 5 minutes while nobody is listening. After that the events endpoint returns 404, and `GET /v1/runs/{id}` (whose `output` and `usage` are kept for 24h when the run was started with an `Idempotency-Key`) is polled instead.
+  - Events: `message.delta`, `message.interim`, `tool.started` / `tool.completed` (no call id, so a completion matches the oldest running call of that tool), `reasoning.available` (a whole block, non-streaming providers only), `approval.request`, `replay.truncated` and the terminal `run.completed | failed | cancelled | interrupted`, which carries `output` and `usage` (`input_tokens`, `output_tokens`).
+  - A keyed profile sends `session_id` in the body and only the new message as `input`. A keyless one sends the whole transcript.
+  - `POST /v1/runs/{id}/stop` stops a run.
+- Older servers fall back to `POST /v1/chat/completions` with `stream: true`, whose stream interleaves named SSE events with the normal chunks: `hermes.tool.progress`, `hermes.status` and `approval.request`.
 - Approvals are answered with `POST /v1/runs/{completion_id}/approval` and a body of `{ choice }`.
 - `X-Hermes-Session-Id` continues a session. Hermes only accepts it when `API_SERVER_KEY` is set.
 - Hermes's CORS setup does not expose response headers, which is why the client mints its own session ids.

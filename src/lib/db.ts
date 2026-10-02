@@ -112,6 +112,9 @@ export interface Message {
   createdAt: number
   /** The Hermes transcript row a user message was matched to, once the device has seen it. */
   hermesRowId?: number
+  /** The run behind a reply and its last event seen, so a dropped stream can pick up again. */
+  runId?: string
+  runSeq?: number
 }
 
 export type CronRunStatus = "ok" | "failed" | "running" | "unknown"

@@ -9,12 +9,19 @@ import {
   updateConversation,
 } from "@/lib/db"
 import {
+  followRun,
+  getRun,
   getSessionTitle,
   HermesError,
   respondToApproval,
+  startRun,
+  stopRun,
   streamChat,
+  supportsRuns,
   type ChatMessage,
   type HermesConfig,
+  type RunOutcome,
+  type StreamHandlers,
   type TurnUsage,
 } from "@/lib/hermes"
 import { randomId } from "@/lib/utils"
@@ -56,6 +63,285 @@ async function syncTitle(conversationId: string, config: HermesConfig, sessionId
 /** A chat's profile, or the active one if its profile has gone. */
 async function profileFor(profileId?: string) {
   return (profileId && (await db.profiles.get(profileId))) || getActiveProfile()
+}
+
+type Draft = Message & { tools: ToolEvent[] }
+
+interface Turn {
+  conversationId: string
+  config: HermesConfig
+  draft: Draft
+  controller: AbortController
+  touch: () => void
+  firstTokenAt: number | null
+  /** Set when a reply is picked up after a reload, so its timings can't be trusted. */
+  resumed: boolean
+  /** Stops flushing and saves the draft one last time. */
+  close: () => Promise<void>
+}
+
+const turns = new Map<string, Turn>()
+
+/** Mutable working copy of a reply, flushed to Dexie on a timer so token deltas don't hammer IndexedDB. */
+function openTurn(
+  conversationId: string,
+  config: HermesConfig,
+  reply: Message,
+  resumed = false,
+): Turn {
+  const draft: Draft = { ...reply, tools: [...(reply.tools ?? [])] }
+  let dirty = false
+  const flush = async () => {
+    if (!dirty) return
+    dirty = false
+    const { id: _id, ...changes } = draft
+    await db.messages.update(reply.id, changes)
+  }
+  const timer = window.setInterval(flush, FLUSH_INTERVAL_MS)
+  const touch = () => {
+    dirty = true
+  }
+  const controller = new AbortController()
+  const close = async () => {
+    window.clearInterval(timer)
+    controllers.delete(conversationId)
+    turns.delete(conversationId)
+    activeDrafts.delete(reply.id)
+    dirty = true
+    await flush()
+  }
+  const turn: Turn = {
+    conversationId,
+    config,
+    draft,
+    controller,
+    touch,
+    firstTokenAt: null,
+    resumed,
+    close,
+  }
+  controllers.set(conversationId, controller)
+  turns.set(conversationId, turn)
+  activeDrafts.set(reply.id, { draft, touch })
+  return turn
+}
+
+function streamHandlers(turn: Turn): StreamHandlers {
+  const { draft, touch } = turn
+  const started = () => {
+    turn.firstTokenAt ??= Date.now()
+  }
+  return {
+    onContent(delta) {
+      started()
+      draft.content += delta
+      draft.statusText = undefined
+      touch()
+    },
+    onReasoning(delta) {
+      started()
+      draft.reasoning = (draft.reasoning ?? "") + delta
+      touch()
+    },
+    onReasoningBlock(text) {
+      started()
+      draft.reasoning = draft.reasoning ? `${draft.reasoning}\n\n${text}` : text
+      touch()
+    },
+    onStatus(text) {
+      draft.statusText = text
+      touch()
+    },
+    onTool(event) {
+      const existing = event.toolCallId
+        ? draft.tools.find((t) => t.toolCallId === event.toolCallId)
+        : draft.tools.find((t) => t.status === "running" && t.tool === event.tool)
+      if (existing) {
+        existing.status = event.status
+        if (event.status === "completed") existing.endedAt = Date.now()
+      } else if (event.toolCallId) {
+        draft.tools.push({
+          toolCallId: event.toolCallId,
+          tool: event.tool,
+          emoji: event.emoji,
+          label: event.label ?? event.tool,
+          status: event.status,
+          startedAt: Date.now(),
+          contentOffset: draft.content.length,
+        })
+      }
+      draft.tools = [...draft.tools]
+      touch()
+    },
+    onApproval(event) {
+      draft.approval = {
+        runId: event.run_id,
+        command: event.command,
+        description: event.description,
+        choices: event.choices?.length ? event.choices : ["once", "deny"],
+        contentOffset: draft.content.length,
+        requestedAt: Date.now(),
+      }
+      touch()
+    },
+  }
+}
+
+const RETRY_MS = [1000, 2000, 4000, 8000, 15000]
+/** Failed reconnects, counted only while the app is in view and online, before the reply is given up. */
+const MAX_VISIBLE_FAILURES = 8
+
+/** Waits out a backoff, cut short when the app comes back into view or back online. */
+function waitToRetry(attempt: number, signal: AbortSignal) {
+  return new Promise<void>((resolve) => {
+    const done = () => {
+      window.clearTimeout(timer)
+      document.removeEventListener("visibilitychange", onVisible)
+      window.removeEventListener("online", done)
+      signal.removeEventListener("abort", done)
+      resolve()
+    }
+    const onVisible = () => {
+      if (document.visibilityState === "visible") done()
+    }
+    const timer = window.setTimeout(done, RETRY_MS[Math.min(attempt, RETRY_MS.length - 1)])
+    document.addEventListener("visibilitychange", onVisible)
+    window.addEventListener("online", done)
+    signal.addEventListener("abort", done)
+  })
+}
+
+/**
+ * Network trouble is worth retrying, Hermes turning the request down is not. A stream cut mid-body
+ * rejects the read with a bare TypeError.
+ */
+const retryable = (error: unknown) =>
+  !(error instanceof HermesError) ||
+  error.status === undefined ||
+  error.status >= 500 ||
+  [408, 429].includes(error.status)
+
+/**
+ * Follows a run to its end through dropped connections: the screen going off, the app being
+ * backgrounded, a flaky network. Hermes keeps running it and replays what was missed.
+ */
+async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
+  const { config, draft, touch, controller } = turn
+  const { signal } = controller
+  // Events went missing, so what streamed has gaps; the run's final text replaces it.
+  let lost = false
+  const handlers = {
+    ...streamHandlers(turn),
+    onSeq(seq: number) {
+      draft.runSeq = seq
+      touch()
+    },
+    onTruncated() {
+      lost = true
+    },
+  }
+  // Once Hermes drops the event buffer, only the run's status is left to poll.
+  let polling = false
+  let failures = 0
+  for (let attempt = 0; ; attempt++) {
+    try {
+      if (!polling) {
+        const lastSeq = draft.runSeq ?? -1
+        const outcome = await followRun(config, runId, { lastSeq, signal }, handlers)
+        if (outcome) return { ...outcome, replaceContent: lost }
+      }
+      const { outcome } = await getRun(config, runId, signal)
+      if (outcome) return { ...outcome, replaceContent: lost }
+      failures = 0
+    } catch (error) {
+      if (signal.aborted) throw error
+      if (error instanceof HermesError && error.status === 404) {
+        if (polling) return { status: "interrupted", error: "Hermes no longer has this reply." }
+        polling = true
+        lost = true
+        continue
+      }
+      if (!retryable(error)) throw error
+      if (document.visibilityState === "visible" && navigator.onLine) {
+        if (++failures >= MAX_VISIBLE_FAILURES) throw error
+      }
+    }
+    await waitToRetry(attempt, signal)
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError")
+  }
+}
+
+/** Settles a finished, stopped or failed reply: closes running tools, adds stats, saves it. */
+async function finishTurn(turn: Turn, usage: TurnUsage | undefined) {
+  const { draft, conversationId } = turn
+  const endedAt = Date.now()
+  draft.tools = draft.tools.map((t) =>
+    t.status === "running" ? { ...t, status: "completed", endedAt } : t,
+  )
+  if (draft.approval && !draft.approval.resolved) {
+    draft.approval = { ...draft.approval, resolved: "expired" }
+  }
+  if (draft.status !== "error") draft.statusText = undefined
+  if (draft.content || usage) {
+    // Hermes's counts when it sent them; a stopped turn never gets them, so estimate.
+    const tokens = usage?.completionTokens || estimateTokens(draft.content)
+    const toolsUsed = draft.tools.length > 0
+    const writingMs = Math.max(1, endedAt - (turn.firstTokenAt ?? endedAt))
+    const stats: MessageStats = {
+      tokens,
+      estimated: !usage?.completionTokens,
+      tokensPerSecond:
+        toolsUsed || turn.resumed ? undefined : Math.round(tokens / (writingMs / 1000)),
+      durationMs: endedAt - draft.createdAt,
+      promptTokens: usage?.promptTokens || undefined,
+      toolsUsed,
+    }
+    draft.stats = stats
+  }
+  draft.runId = undefined
+  draft.runSeq = undefined
+  await turn.close()
+  await updateConversation(conversationId, {
+    updatedAt: endedAt,
+    ...(usage?.promptTokens
+      ? { contextTokens: usage.promptTokens, contextApproximate: draft.tools.length > 0 }
+      : {}),
+  })
+}
+
+/** Runs a turn on `/v1/runs` when Hermes has it, else streams a chat completion. */
+async function runTurn(turn: Turn, start: () => Promise<{ usage?: TurnUsage }>) {
+  const { draft, controller } = turn
+  let usage: TurnUsage | undefined
+  try {
+    usage = (await start()).usage
+    if (draft.status === "streaming") draft.status = "done"
+  } catch (error) {
+    if (controller.signal.aborted) {
+      draft.status = "stopped"
+    } else {
+      draft.status = "error"
+      draft.statusText =
+        error instanceof HermesError ? error.message : "Something went wrong talking to Hermes."
+    }
+  }
+  await finishTurn(turn, usage)
+  return draft.status
+}
+
+/** Folds a run's outcome into the reply; a run whose events were lost takes its final text. */
+function settleRun(draft: Draft, outcome: RunOutcome) {
+  if (outcome.output && (outcome.replaceContent || !draft.content)) draft.content = outcome.output
+  if (outcome.status === "cancelled") draft.status = "stopped"
+  else if (outcome.status !== "completed") {
+    draft.status = "error"
+    draft.statusText = outcome.error || "Hermes couldn't finish this reply."
+  }
+  return { usage: outcome.usage }
+}
+
+async function followTurnRun(turn: Turn, runId: string) {
+  return settleRun(turn.draft, await trackRun(turn, runId))
 }
 
 /** `queuedId` sends a queued message, keeping its id so the bubble doesn't remount. */
@@ -101,138 +387,55 @@ export async function sendMessage(conversationId: string, text: string, queuedId
     .filter((m) => m.status === "done" || (m.role === "assistant" && m.content))
     .map((m) => ({ role: m.role, content: m.content }))
 
-  const controller = new AbortController()
-  controllers.set(conversationId, controller)
-
-  // Mutable working copy; flushed to Dexie on a timer so token deltas don't hammer IndexedDB.
-  const draft = { ...reply, tools: [] as ToolEvent[] }
-  let dirty = false
-  let firstTokenAt: number | null = null
-  const flush = async () => {
-    if (!dirty) return
-    dirty = false
-    const { id: _id, ...changes } = draft
-    await db.messages.update(reply.id, changes)
-  }
-  const timer = window.setInterval(flush, FLUSH_INTERVAL_MS)
-  const touch = () => {
-    dirty = true
-  }
-  activeDrafts.set(reply.id, { draft, touch })
-
   const config = { baseUrl: profile.baseUrl, apiKey: profile.apiKey }
-  let usage: TurnUsage | undefined
-  try {
-    const result = await streamChat(
-      config,
-      {
-        model: profile.model,
-        messages: transcript,
-        sessionId: conversation.hermesSessionId,
-        signal: controller.signal,
-      },
-      {
-        onContent(delta) {
-          firstTokenAt ??= Date.now()
-          draft.content += delta
-          draft.statusText = undefined
-          touch()
-        },
-        onReasoning(delta) {
-          firstTokenAt ??= Date.now()
-          draft.reasoning = (draft.reasoning ?? "") + delta
-          touch()
-        },
-        onStatus(text) {
-          draft.statusText = text
-          touch()
-        },
-        onTool(event) {
-          const existing = draft.tools.find((t) => t.toolCallId === event.toolCallId)
-          if (existing) {
-            existing.status = event.status
-            if (event.status === "completed") existing.endedAt = Date.now()
-          } else {
-            draft.tools.push({
-              toolCallId: event.toolCallId,
-              tool: event.tool,
-              emoji: event.emoji,
-              label: event.label ?? event.tool,
-              status: event.status,
-              startedAt: Date.now(),
-              contentOffset: draft.content.length,
-            })
-          }
-          draft.tools = [...draft.tools]
-          touch()
-        },
-        onApproval(event) {
-          draft.approval = {
-            runId: event.run_id,
-            command: event.command,
-            description: event.description,
-            choices: event.choices?.length ? event.choices : ["once", "deny"],
-            contentOffset: draft.content.length,
-            requestedAt: Date.now(),
-          }
-          touch()
-        },
-      },
-    )
-    usage = result.usage
-    draft.status = "done"
-  } catch (error) {
-    if (controller.signal.aborted) {
-      draft.status = "stopped"
-    } else {
-      draft.status = "error"
-      draft.statusText =
-        error instanceof HermesError ? error.message : "Something went wrong talking to Hermes."
-    }
-  } finally {
-    window.clearInterval(timer)
-    controllers.delete(conversationId)
-    activeDrafts.delete(reply.id)
-    const endedAt = Date.now()
-    draft.tools = draft.tools.map((t) =>
-      t.status === "running" ? { ...t, status: "completed", endedAt } : t,
-    )
-    if (draft.approval && !draft.approval.resolved) {
-      draft.approval = { ...draft.approval, resolved: "expired" }
-    }
-    if (draft.status !== "error") draft.statusText = undefined
-    if (draft.content || usage) {
-      // Hermes's counts when it sent them; a stopped turn never gets them, so estimate.
-      const tokens = usage?.completionTokens || estimateTokens(draft.content)
-      const toolsUsed = draft.tools.length > 0
-      const writingMs = Math.max(1, endedAt - (firstTokenAt ?? endedAt))
-      const stats: MessageStats = {
-        tokens,
-        estimated: !usage?.completionTokens,
-        tokensPerSecond: toolsUsed ? undefined : Math.round(tokens / (writingMs / 1000)),
-        durationMs: endedAt - reply.createdAt,
-        promptTokens: usage?.promptTokens || undefined,
-        toolsUsed,
-      }
-      draft.stats = stats
-    }
-    dirty = true
-    await flush()
-    await updateConversation(conversationId, {
-      updatedAt: endedAt,
-      ...(usage?.promptTokens
-        ? { contextTokens: usage.promptTokens, contextApproximate: draft.tools.length > 0 }
-        : {}),
-    })
+  const turn = openTurn(conversationId, config, reply)
+  const options = {
+    model: profile.model,
+    messages: transcript,
+    sessionId: conversation.hermesSessionId,
   }
-  if (draft.status !== "done") return
+  const status = await runTurn(turn, async () => {
+    if (!(await supportsRuns(config))) {
+      return streamChat(
+        config,
+        { ...options, signal: turn.controller.signal },
+        streamHandlers(turn),
+      )
+    }
+    const runId = await startRun(config, { ...options, idempotencyKey: reply.id })
+    turn.draft.runId = runId
+    turn.touch()
+    if (turn.controller.signal.aborted) {
+      void stopRun(config, runId).catch(() => undefined)
+      throw new DOMException("Aborted", "AbortError")
+    }
+    return followTurnRun(turn, runId)
+  })
+
+  if (status !== "done") return
   // Hermes only keys the session by our id when the profile has an API key.
-  const turn = history.filter((m) => m.role === "user" && m.status === "done").length + 1
-  if (config.apiKey && turn <= TITLED_TURNS) {
+  const turnNumber = history.filter((m) => m.role === "user" && m.status === "done").length + 1
+  if (config.apiKey && turnNumber <= TITLED_TURNS) {
     void syncTitle(conversationId, config, conversation.hermesSessionId)
   }
   // A stop or an error pauses the queue: the user probably wants to look before it carries on.
   await sendNextQueued(conversationId)
+}
+
+/** Picks up a reply whose run was still going when the app was closed or reloaded. */
+async function resumeReply(reply: Message) {
+  const { conversationId, runId } = reply
+  if (!runId || controllers.has(conversationId)) return
+  const conversation = await db.conversations.get(conversationId)
+  const profile = await profileFor(conversation?.profileId)
+  if (!conversation || !profile) {
+    await db.messages.update(reply.id, { status: "stopped", statusText: undefined })
+    return
+  }
+  const config = { baseUrl: profile.baseUrl, apiKey: profile.apiKey }
+  const turn = openTurn(conversationId, config, reply, true)
+  const status = await runTurn(turn, () => followTurnRun(turn, runId))
+  if (status === "done") await sendNextQueued(conversationId)
 }
 
 /** Holds a message until the current reply finishes. */
@@ -259,6 +462,9 @@ export async function removeQueued(id: string) {
 }
 
 export function stopMessage(conversationId: string) {
+  const turn = turns.get(conversationId)
+  const runId = turn?.draft.runId
+  if (turn && runId) void stopRun(turn.config, runId).catch(() => undefined)
   controllers.get(conversationId)?.abort()
 }
 
@@ -281,9 +487,17 @@ export async function answerApproval(message: Message, choice: ApprovalChoice) {
   }
 }
 
-/** Replies left "streaming" by a closed tab can never finish; mark them stopped on startup. */
+/**
+ * Replies left "streaming" by a closed tab: one on a Hermes run picks up where it left off, since
+ * the run carried on without us. A streamed chat completion died with the tab, so it's stopped.
+ */
 export async function recoverInterruptedMessages() {
-  await db.messages
-    .filter((m) => m.status === "streaming")
-    .modify({ status: "stopped", statusText: undefined })
+  const interrupted = await db.messages.filter((m) => m.status === "streaming").toArray()
+  await Promise.all(
+    interrupted.map((reply) =>
+      reply.runId
+        ? resumeReply(reply)
+        : db.messages.update(reply.id, { status: "stopped", statusText: undefined }),
+    ),
+  )
 }
