@@ -1,8 +1,11 @@
 import { useState } from "react"
 import {
   CheckIcon,
+  CircleAlertIcon,
+  CircleCheckIcon,
   CopyIcon,
   FingerprintIcon,
+  LoaderCircleIcon,
   LogInIcon,
   LogOutIcon,
   RefreshCwIcon,
@@ -18,9 +21,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
@@ -67,7 +69,16 @@ export function AccountSettings() {
   return (
     <Card className="rounded-3xl">
       <CardHeader>
-        <CardTitle>Sync</CardTitle>
+        <CardTitle className="flex items-center gap-2">
+          {account.status === "signed-in" && sync.vault === "unlocked" && (
+            <SyncStatus syncing={sync.syncing || !sync.syncedAt} error={sync.error} />
+          )}
+          Sync
+        </CardTitle>
+        <CardDescription>
+          Bots, API keys and chat titles are encrypted on your device before they're stored on the
+          server.
+        </CardDescription>
       </CardHeader>
       <CardContent>
         {account.status === "signed-out" ? (
@@ -93,9 +104,16 @@ export function AccountSettings() {
                   <p className="truncate text-sm text-muted-foreground">{account.user.email}</p>
                 )}
               </div>
-              {sync.vault === "unlocked" && (
-                <SyncBadge syncing={sync.syncing || !sync.syncedAt} error={sync.error} />
-              )}
+              <Button
+                variant="ghost"
+                size="icon-lg"
+                className="size-11 shrink-0 rounded-full"
+                aria-label="Sign out"
+                title="Sign out"
+                onClick={() => run(signOut)}
+              >
+                <LogOutIcon />
+              </Button>
             </div>
 
             {sync.vault === "unknown" && !sync.error && <Spinner />}
@@ -170,33 +188,29 @@ export function AccountSettings() {
               </p>
             )}
 
-            <div className="flex flex-wrap gap-3">
-              {sync.vault === "unlocked" && (
+            {sync.vault === "unlocked" && (
+              <div className="flex flex-wrap gap-3">
                 <Button variant="outline" disabled={sync.syncing} onClick={() => void syncNow()}>
                   <RefreshCwIcon data-icon="inline-start" />
                   Sync now
                 </Button>
-              )}
-              {sync.vault === "unlocked" && supportsPasskeys() && canAddPasskey() && (
-                <Button
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() =>
-                    run(async () => {
-                      await addPasskey()
-                      toast.success("Passkey added")
-                    })
-                  }
-                >
-                  <FingerprintIcon data-icon="inline-start" />
-                  Add passkey
-                </Button>
-              )}
-              <Button variant="outline" className="ml-auto" onClick={() => run(signOut)}>
-                <LogOutIcon data-icon="inline-start" />
-                Sign out
-              </Button>
-            </div>
+                {supportsPasskeys() && canAddPasskey() && (
+                  <Button
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() =>
+                      run(async () => {
+                        await addPasskey()
+                        toast.success("Passkey added")
+                      })
+                    }
+                  >
+                    <FingerprintIcon data-icon="inline-start" />
+                    Add passkey
+                  </Button>
+                )}
+              </div>
+            )}
           </FieldGroup>
         )}
       </CardContent>
@@ -210,9 +224,7 @@ export function AccountSettings() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="flex items-center gap-2 rounded-2xl bg-muted p-3">
-            <code className="min-w-0 flex-1 font-mono text-sm select-all">
-              {recoveryCode}
-            </code>
+            <code className="min-w-0 flex-1 font-mono text-sm select-all">{recoveryCode}</code>
             <Button
               variant="ghost"
               size="icon-lg"
@@ -242,12 +254,20 @@ export function AccountSettings() {
   )
 }
 
-function SyncBadge({ syncing, error }: { syncing: boolean; error?: string }) {
-  if (syncing) return <Badge variant="secondary">Syncing…</Badge>
-  if (error) return <Badge variant="destructive">Not synced</Badge>
-  return (
-    <Badge className="bg-primary/15 text-primary dark:bg-primary/30 dark:text-sidebar-primary">
-      Synced
-    </Badge>
-  )
+function SyncStatus({ syncing, error }: { syncing: boolean; error?: string }) {
+  if (syncing) {
+    return (
+      <LoaderCircleIcon
+        role="img"
+        aria-label="Syncing"
+        className="size-5 text-muted-foreground motion-safe:animate-spin"
+      />
+    )
+  }
+  if (error) {
+    return (
+      <CircleAlertIcon role="img" aria-label="Not synced" className="size-5 text-destructive" />
+    )
+  }
+  return <CircleCheckIcon role="img" aria-label="Synced" className="size-5 text-primary" />
 }
