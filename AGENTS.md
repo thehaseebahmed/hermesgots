@@ -93,4 +93,5 @@ These behaviours were verified against Hermes's `gateway/platforms/api_server*.p
 - **Bots:** they are still by default. Only the header (and the empty-state hero) passes `animate`. Animations must respect `prefers-reduced-motion`.
 - **Assets must be original or properly licensed.** Never copy third-party characters, mascots or brand assets, even as "inspiration" copies.
 - **Never commit secrets.** API keys live only in the user's browser.
+- **No explanatory copy.** Don't add UI text that explains how the app works or where its data comes from (footnotes, "from X" captions) unless asked. If it seems needed, ask first.
 - Match the surrounding code: Prettier style (no semicolons, 100 columns) and few comments. Comments explain *why*.
