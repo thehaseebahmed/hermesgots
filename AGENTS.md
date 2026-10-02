@@ -97,7 +97,8 @@ These behaviours were verified against Hermes's `gateway/platforms/api_server*.p
 - Sign-in is Netlify Identity with the GitHub provider (`@netlify/identity`). It only identifies the owner. **Never send plaintext, a key or anything that derives one to the server.** Every document the function stores is sealed with `vault.ts` first, and the associated data names its owner and slot (`memento:<userId>:<doc>`).
 - Documents are `vault` (the wrapped data keys), `bots` and `chats/<botId>`. Writes carry the etag they read; a 412 means re-pull, merge and retry.
 - Records merge last-write-wins on a change clock: `Profile.updatedAt` and `Conversation.changedAt`. Change synced fields through `updateProfile` / `updateConversation` so the clock moves, and delete through `deleteProfile` / `deleteConversation` so a tombstone is left for sync.
-- Message bodies don't sync. They come from Hermes (`history.ts`).
+- Message bodies don't sync. They come from Hermes (`history.ts`): with `X-Hermes-Session-Id`, Hermes builds the turn's history from its own session store and ignores the body's, so its transcript holds every device's turns. An open chat catches up (`reconcileHistory`) on open, when its `updatedAt` changes, on focus, every 30s while visible, and before a send. `Conversation.hermesTip` (local only) lets that start with a one-row probe. Turns streamed on this device are kept (they carry stats and approvals) and matched to their rows by `hermesRowId`.
+- A chat's context use (`contextTokens`) syncs with the chat list, since Hermes has nothing to recompute it from: the session's `input_tokens` is summed over every call, and message rows' `token_count` is unset.
 
 ## Conventions
 

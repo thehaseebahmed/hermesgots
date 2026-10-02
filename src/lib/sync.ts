@@ -39,7 +39,7 @@ import {
 } from "@/lib/vault"
 
 /**
- * Syncs bots and the chat list (titles and Hermes session ids, not messages) through the Netlify
+ * Syncs bots and the chat list (titles, Hermes session ids and context use, not messages) through the Netlify
  * function. Everything is sealed with the account's data key before upload, and each document's
  * associated data names its owner and slot, so the server can't swap one document for another.
  */
@@ -47,7 +47,13 @@ import {
 type BotValue = Omit<Profile, "id" | "updatedAt">
 type ChatValue = Pick<
   Conversation,
-  "title" | "titleEdited" | "hermesSessionId" | "createdAt" | "updatedAt"
+  | "title"
+  | "titleEdited"
+  | "hermesSessionId"
+  | "createdAt"
+  | "updatedAt"
+  | "contextTokens"
+  | "contextApproximate"
 >
 
 export interface SyncState {
@@ -301,6 +307,8 @@ async function localChats(profileId: string): Promise<Doc<ChatValue>> {
         hermesSessionId: c.hermesSessionId,
         createdAt: c.createdAt,
         updatedAt: c.updatedAt,
+        contextTokens: c.contextTokens,
+        contextApproximate: c.contextApproximate,
       },
     }
   }

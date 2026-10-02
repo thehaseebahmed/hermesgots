@@ -49,6 +49,12 @@ export interface Conversation {
    * id, and roughly how many newer rows to skip to reach it.
    */
   olderThan?: { id: number; offset: number }
+  /** Prompt tokens of the latest turn, from whichever device ran it (Hermes doesn't report it). */
+  contextTokens?: number
+  /** That turn ran tools, so Hermes's sum counts the prompt more than once. */
+  contextApproximate?: boolean
+  /** Newest Hermes transcript row this device has caught up to. Local only; never synced. */
+  hermesTip?: number
 }
 
 export interface ToolEvent {
@@ -104,6 +110,8 @@ export interface Message {
   statusText?: string
   stats?: MessageStats
   createdAt: number
+  /** The Hermes transcript row a user message was matched to, once the device has seen it. */
+  hermesRowId?: number
 }
 
 export type CronRunStatus = "ok" | "failed" | "running" | "unknown"

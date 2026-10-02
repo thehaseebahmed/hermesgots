@@ -50,8 +50,13 @@ import {
   updateConversation,
   type Message,
 } from "@/lib/db"
-import { loadEarlierHistory, loadRecentHistory } from "@/lib/history"
+import { loadEarlierHistory, reconcileHistory } from "@/lib/history"
 import { syncContextWindow } from "@/lib/models"
+
+/** How often an open chat checks Hermes for turns sent from another device. */
+const CATCH_UP_MS = 30_000
+
+const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
 const SUGGESTIONS = [
   "What can you do on my machine?",
@@ -154,9 +159,12 @@ export function ChatPage() {
   const awaitingApproval = messages?.find((m) => m.approval && !m.approval.resolved)
   const activity = streaming && describeActivity(streaming)
   const lastTurn = messages?.findLast((m) => m.stats?.promptTokens)?.stats
+  // The chat's own figure follows turns run on other devices; older chats only have their stats.
   const usage: ContextUsage = {
-    tokens: lastTurn?.promptTokens,
-    approximate: lastTurn?.toolsUsed,
+    tokens: conversation?.contextTokens ?? lastTurn?.promptTokens,
+    approximate: conversation?.contextTokens
+      ? conversation.contextApproximate
+      : lastTurn?.toolsUsed,
     window: profile?.contextWindow,
   }
 
@@ -176,13 +184,33 @@ export function ChatPage() {
   const loadingHistory = needsHistory && historyMissing !== id
   useEffect(() => {
     if (!id || !needsHistory) return
-    loadRecentHistory(id)
+    reconcileHistory(id)
       .then((count) => count || setHistoryMissing(id))
       .catch((error) => {
         setHistoryMissing(id)
         toast.error(error instanceof Error ? error.message : "Couldn't load this chat.")
       })
   }, [id, needsHistory])
+
+  // Other devices add turns on Hermes. Catch up when the chat opens, when sync brings news of it,
+  // when this tab comes back, and now and then while it's on screen.
+  const updatedAt = conversation?.updatedAt
+  const hasMessages = (messages?.length ?? 0) > 0
+  useEffect(() => {
+    if (!id || !hasMessages) return
+    const catchUp = () => {
+      if (document.visibilityState === "visible") reconcileHistory(id).catch(() => undefined)
+    }
+    catchUp()
+    const timer = window.setInterval(catchUp, CATCH_UP_MS)
+    document.addEventListener("visibilitychange", catchUp)
+    window.addEventListener("online", catchUp)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener("visibilitychange", catchUp)
+      window.removeEventListener("online", catchUp)
+    }
+  }, [id, hasMessages, updatedAt])
 
   // A deleted (or unknown) conversation id falls back to a fresh chat.
   useEffect(() => {
@@ -192,7 +220,10 @@ export function ChatPage() {
   const send = async (text: string) => {
     try {
       let conversationId = id
-      if (!conversationId) {
+      if (conversationId) {
+        // So a reply that builds on another device's latest turn shows after it, not before.
+        await Promise.race([reconcileHistory(conversationId).catch(() => undefined), wait(1500)])
+      } else {
         if (!profile) return
         conversationId = (await createConversation(profile.id)).id
         navigate(`/c/${conversationId}`)
@@ -244,8 +275,6 @@ export function ChatPage() {
       </DropdownMenuContent>
     </DropdownMenu>
   )
-
-  const hasMessages = (messages?.length ?? 0) > 0
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
