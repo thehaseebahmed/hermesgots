@@ -154,7 +154,7 @@ export function Composer({
           disabled={disabled}
           rows={1}
           className={cn(
-            "max-h-48 min-h-14 py-4 text-base md:text-[15px]",
+            "max-h-48 min-h-12 py-3.5 text-base md:text-[15px]",
             leading ? "pr-5 pl-2" : "px-5",
           )}
           aria-label="Message"
@@ -165,7 +165,7 @@ export function Composer({
               type="button"
               variant="secondary"
               size="icon-sm"
-              className="size-11 rounded-full"
+              className="size-9 rounded-full"
               onClick={onStop}
               aria-label="Stop"
             >
@@ -177,7 +177,7 @@ export function Composer({
               type="submit"
               variant="default"
               size="icon-sm"
-              className="size-11 rounded-full"
+              className="size-9 rounded-full"
               disabled={!canSend}
               aria-label={busy ? "Queue message" : "Send"}
             >
