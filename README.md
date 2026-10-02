@@ -12,7 +12,7 @@ A playful, minimal companion app for [Hermes Agent](https://github.com/NousResea
 - **Bots**: each bot is a Hermes profile with its own API URL, key and model. Bots sit in a horizontal strip at the top of the sidebar. Tap one to open its latest chat (or a new one if it has none), and new chats go to it. A new bot gets a random image from the 8 glassy SVG characters (soft shapes with an accessory each; see `/bots`), unique until all 8 are taken, and you can change it in Settings. The header bot is animated, and the bots next to messages stay still.
 - **Routines** (`/routines`): every Hermes cron job, grouped by bot, with its last 24 runs as status bars and Run now / Pause / Resume. Bots fold away, and the header flags failing and recently failed routines.
 - **Settings**: sync, bots (name, image, API URL and key, model picker), theme, reply stats, and clearing local data.
-- **Sync** (optional): sign in with GitHub to sync bots and the chat list (titles and Hermes session ids) across devices. It's end-to-end encrypted, so Netlify only ever stores ciphertext. Opening a synced chat on a new device loads its recent messages from Hermes, and older ones load on request.
+- **Sync** (optional): sign in with GitHub to sync bots and the chat list (titles, Hermes session ids and context use) across devices. It's end-to-end encrypted, so Netlify only ever stores ciphertext. Messages come from Hermes: an open chat picks up turns sent from your other devices, and older messages load on request.
 - Bots, chats and settings are stored on the device in **IndexedDB** (via Dexie). Theme preference lives in `localStorage` so the first paint doesn't flash.
 
 Built with Vite, React 19, Tailwind v4 and [shadcn/ui](https://ui.shadcn.com) on **Base UI** (the `base-maia` style, plus shadcn's `Message`, `Bubble` and `MessageScroller` chat components).
@@ -40,7 +40,7 @@ Then open **Settings** in Memento, enter `http://localhost:8642/v1` (or your ser
 - Approvals are answered with `POST /v1/runs/{completion_id}/approval`.
 - Routines use `GET /api/jobs` and `POST /api/jobs/{id}/pause | resume | run`. The API server only reports each job's latest run, so the history is the runs Memento has seen, backfilled from cron sessions (`GET /api/sessions?source=cron`).
 - Hermes's tool events carry the tool name and a preview of its arguments, but not its output. Tool cards show what ran and for how long.
-- A chat synced from another device loads its transcript from `GET /api/sessions/{id}/messages?order=latest`, 50 rows at a time.
+- Chats load and catch up from `GET /api/sessions/{id}/messages?order=latest`, 50 rows at a time, so turns sent from another device appear on this one.
 - The reply stats line is an estimate (about 4 characters per token, measured over the visible reply).
 
 ## Develop
