@@ -16,6 +16,7 @@ interface Recognizer {
   abort(): void
   onresult: ((event: SpeechRecognitionEvent) => void) | null
   onerror: ((event: SpeechRecognitionErrorEvent) => void) | null
+  onaudiostart: (() => void) | null
   onend: (() => void) | null
 }
 
@@ -30,13 +31,27 @@ function recognizerClass(): RecognizerClass | undefined {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition
 }
 
-const ERRORS: Partial<Record<SpeechRecognitionErrorCode, string>> = {
+const ERRORS: Partial<Record<string, string>> = {
   "not-allowed": "Microphone access is blocked.",
   "service-not-allowed": "Microphone access is blocked.",
   "audio-capture": "No microphone found.",
   network: "Speech recognition needs a connection.",
   "language-not-supported": "Speech recognition doesn't support your language.",
+  "no-speech": "Didn't hear anything.",
 }
+
+/** Errors a restart can get past; the rest end dictation. */
+const PASSING_ERRORS = new Set<string>(["no-speech", "aborted"])
+
+/**
+ * Runs in a row that ended without a word before dictation gives up. Chrome ends a run after
+ * several seconds of silence, but a recognizer that can't hear ends at once, and restarting it
+ * forever looks like listening while nothing ever arrives.
+ */
+const MAX_EMPTY_RUNS = 3
+
+/** Android's recognizer and a second capture of the mic for the meter can't share it. */
+const SHARED_MIC = !/Android/i.test(navigator.userAgent)
 
 const BARS = 32
 const SAMPLE_MS = 50
@@ -54,6 +69,11 @@ interface Session {
   committed: string
   final: string
   interim: string
+  /** Runs since the last one that heard something, and the last error seen. */
+  emptyRuns: number
+  heard: boolean
+  error?: string
+  metered?: boolean
   stopping: boolean
   ended?: () => void
   stream?: MediaStream
@@ -126,7 +146,15 @@ export function useDictation() {
     recognizer.lang = navigator.language
     recognizer.continuous = true
     recognizer.interimResults = true
-    const current: Session = { recognizer, committed: "", final: "", interim: "", stopping: false }
+    const current: Session = {
+      recognizer,
+      committed: "",
+      final: "",
+      interim: "",
+      emptyRuns: 0,
+      heard: false,
+      stopping: false,
+    }
 
     recognizer.onresult = (event) => {
       let final = ""
@@ -138,19 +166,36 @@ export function useDictation() {
       }
       current.final = final
       current.interim = interim
+      current.heard = true
       setFinal(joinText(current.committed, final))
       setInterim(interim)
     }
     recognizer.onerror = (event) => {
-      const message = ERRORS[event.error]
-      if (!message) return
-      toast.error(message)
+      current.error = event.error
+      if (current.stopping || PASSING_ERRORS.has(event.error)) return
+      toast.error(ERRORS[event.error] ?? `Speech recognition failed (${event.error}).`)
       current.stopping = true
       teardown(current)
+    }
+    // Opening the meter's own stream only once the recognizer holds the mic keeps it from losing it.
+    recognizer.onaudiostart = () => {
+      if (!SHARED_MIC || current.metered) return
+      current.metered = true
+      void meter(current)
     }
     recognizer.onend = () => {
       if (current.stopping) {
         current.ended?.()
+        return
+      }
+      current.emptyRuns = current.heard ? 0 : current.emptyRuns + 1
+      const code = current.error ?? "no-speech"
+      current.heard = false
+      current.error = undefined
+      if (current.emptyRuns >= MAX_EMPTY_RUNS) {
+        toast.error(ERRORS[code] ?? `Speech recognition failed (${code}).`)
+        current.stopping = true
+        teardown(current)
         return
       }
       current.committed = joinText(current.committed, current.final, current.interim)
@@ -169,9 +214,7 @@ export function useDictation() {
       recognizer.start()
     } catch {
       teardown(current)
-      return
     }
-    void meter(current)
   }, [meter, teardown])
 
   /** Stops listening and resolves with everything heard, including words not yet finalized. */
