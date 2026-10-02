@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react"
+import { useId, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react"
 import { ArrowUpIcon, SquareIcon } from "lucide-react"
 
 import { SlashMenu } from "@/components/chat/slash-menu"
@@ -9,6 +9,7 @@ import {
   InputGroupTextarea,
 } from "@/components/ui/input-group"
 import type { HermesConfig } from "@/lib/hermes"
+import { cn } from "@/lib/utils"
 import {
   localCommand,
   optionId,
@@ -25,11 +26,14 @@ export function Composer({
   onCommand,
   connection,
   botName = "Hermes",
+  leading,
 }: {
   busy: boolean
   /** The chat's Hermes profile, for the skills in the `/` menu. */
   connection: HermesConfig
   botName?: string
+  /** Shown at the start of the input, e.g. the context ring. */
+  leading?: ReactNode
   disabled?: boolean
   onSend: (text: string) => Promise<void> | void
   onStop: () => void
@@ -113,6 +117,11 @@ export function Composer({
         />
       )}
       <InputGroup className="bg-background shadow-lg shadow-black/5 has-[textarea]:rounded-[1.75rem] dark:bg-input/30">
+        {leading && (
+          <InputGroupAddon align="inline-start" className="self-end py-0.5 pl-0.5">
+            {leading}
+          </InputGroupAddon>
+        )}
         <InputGroupTextarea
           ref={textarea}
           value={value}
@@ -133,7 +142,10 @@ export function Composer({
           placeholder={disabled ? "Connect to Hermes in Settings first" : `Message ${botName}…`}
           disabled={disabled}
           rows={1}
-          className="max-h-48 min-h-12 px-5 py-3.5 text-base md:text-[15px]"
+          className={cn(
+            "max-h-48 min-h-12 py-3.5 text-base md:text-[15px]",
+            leading ? "pr-5 pl-1" : "px-5",
+          )}
           aria-label="Message"
         />
         <InputGroupAddon align="inline-end" className="self-end pb-2">
