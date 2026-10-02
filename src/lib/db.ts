@@ -11,6 +11,8 @@ export interface Settings {
   activeProfileId?: string
   /** When sync last finished without an error. */
   syncedAt?: number
+  /** Finished the first-run setup. */
+  onboarded?: boolean
 }
 
 /** A Hermes profile Memento can talk to. Hermes can't list its profiles, so the user adds them. */
