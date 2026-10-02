@@ -180,7 +180,6 @@ export function UsageSheet({
           </Section>
 
           <Section title="Model">
-            <Row label="Bot model" value={profile?.model} />
             <Row label="Model" value={pending ? "…" : known?.model} />
             <Row label="Provider" value={pending ? "…" : known?.provider} />
           </Section>
