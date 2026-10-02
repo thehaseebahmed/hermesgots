@@ -123,7 +123,7 @@ export function Composer({
       )}
       <InputGroup className="bg-background shadow-lg shadow-black/5 has-[textarea]:rounded-[1.75rem] dark:bg-input/30">
         {leading && (
-          <InputGroupAddon align="inline-start" className="self-end pb-1.5 pl-2.5">
+          <InputGroupAddon align="inline-start" className="self-end py-1.5 pl-2.5">
             {leading}
           </InputGroupAddon>
         )}
@@ -159,7 +159,7 @@ export function Composer({
           )}
           aria-label="Message"
         />
-        <InputGroupAddon align="inline-end" className="self-end pr-2.5 pb-1.5">
+        <InputGroupAddon align="inline-end" className="self-end py-1.5 pr-2.5">
           {busy ? (
             <InputGroupButton
               type="button"
