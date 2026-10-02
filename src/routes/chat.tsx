@@ -45,6 +45,7 @@ import {
   deleteConversation,
   getActiveProfile,
   getMessages,
+  type Message,
 } from "@/lib/db"
 
 const SUGGESTIONS = [
@@ -129,8 +130,10 @@ export function ChatPage() {
 
   const resolved = { ...DEFAULT_SETTINGS, ...settings }
   const configured = Boolean(profile?.baseUrl.trim())
-  const busy = messages?.some((m) => m.status === "streaming") ?? false
+  const streaming = messages?.find((m) => m.status === "streaming")
+  const busy = Boolean(streaming)
   const awaitingApproval = messages?.find((m) => m.approval && !m.approval.resolved)
+  const activity = streaming && describeActivity(streaming)
 
   // A deleted (or unknown) conversation id falls back to a fresh chat.
   useEffect(() => {
@@ -151,14 +154,6 @@ export function ChatPage() {
       throw error
     }
   }
-
-  const host = (() => {
-    try {
-      return new URL(profile?.baseUrl ?? "").host
-    } catch {
-      return "not connected"
-    }
-  })()
 
   const actions = (
     <DropdownMenu>
@@ -207,7 +202,7 @@ export function ChatPage() {
     <div className="relative flex min-h-0 flex-1 flex-col">
       <ChatHeader
         title={conversation?.title ?? "New chat"}
-        subtitle={busy ? "Writing…" : profile ? `${profile.name} · ${host}` : host}
+        subtitle={activity}
         botId={profile?.botId}
         actions={actions}
       />
@@ -318,4 +313,14 @@ export function ChatPage() {
       </AlertDialog>
     </div>
   )
+}
+
+/** One line saying what the bot is doing right now. */
+function describeActivity(message: Message) {
+  if (message.approval && !message.approval.resolved) return "Waiting for approval"
+  const tool = message.tools?.findLast((t) => t.status === "running")
+  if (tool) return `${tool.emoji ? `${tool.emoji} ` : ""}${tool.label}…`
+  if (message.statusText) return message.statusText
+  if (message.reasoning && !message.content) return "Thinking…"
+  return "Writing…"
 }
