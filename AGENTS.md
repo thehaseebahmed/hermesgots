@@ -54,10 +54,11 @@ PR titles follow the same format. Fill in `.github/pull_request_template.md` for
 | --- | --- |
 | `src/lib/hermes.ts` | Hermes API client and SSE parser |
 | `src/lib/chat.ts` | Send/stop a turn and stream it into IndexedDB; approval answers |
-| `src/lib/db.ts` | Dexie schema, types, settings helpers |
+| `src/lib/db.ts` | Dexie schema, types, settings and profile (bot) helpers |
 | `src/routes/` | `chat.tsx`, `settings.tsx`, `bots.tsx` (gallery) |
 | `src/components/chat/` | Message rendering, tool and approval cards, composer, header |
 | `src/components/bots.tsx` | Bot character definitions (SVG). `bot.tsx` renders them |
+| `src/components/bot-card.tsx`, `bot-settings.tsx` | Bot cards (sidebar strip, settings) and the bot editor |
 | `src/index.css` | Theme tokens (light and dark) and bot/typing animations |
 | `scripts/mock-hermes.mjs` | Dev-only Hermes stand-in |
 
@@ -72,6 +73,7 @@ These behaviours were verified against Hermes's `gateway/platforms/api_server*.p
 - Hermes's CORS setup does not expose response headers, which is why the client mints its own session ids.
 - `GET /v1/skills` lists skills for the `/` menu. The code returns `{ object: "list", data }` (the docs show a bare array), and on some versions it returns a 500, so the menu must work without it.
 - The API server does **not** expand `/skill-name` messages (only the CLI and messaging gateway do). The composer sends them literally and the model decides what to do with them.
+- **Profiles are bots.** Hermes has no endpoint that lists profiles, so the user adds each one in Settings (a `profiles` row with its own URL, key and model). With `gateway.multiplex_profiles`, secondary profiles are served at `/p/<profile>/...`. Each profile has its own `API_SERVER_KEY`, and a named profile advertises its name as the `/v1/models` id. The mock serves the same `/p/<profile>/` prefix.
 - If you change how the API is used, update `scripts/mock-hermes.mjs` to match.
 
 ## Conventions
