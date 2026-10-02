@@ -55,8 +55,14 @@ const PASSING_ERRORS = new Set<string>(["no-speech", "aborted"])
  */
 const MAX_EMPTY_RUNS = 3
 
-/** Android's recognizer and a second capture of the mic for the meter can't share it. */
+/**
+ * Android's recognizer may lose the mic to the meter's own capture, so there the meter waits until
+ * the recognizer has heard something, and is dropped if the recognizer breaks once it's on.
+ */
 const SHARED_MIC = !/Android/i.test(navigator.userAgent)
+/** A run that ends this fast without a word didn't time out on silence; something cut it off. */
+const CUT_OFF_MS = 2000
+let meterBlocked = false
 
 const BARS = 32
 const SAMPLE_MS = 50
@@ -79,6 +85,9 @@ interface Session {
   heard: boolean
   error?: string
   metered?: boolean
+  /** On Android, when the meter came on; a run that breaks after it blames the meter. */
+  meterAt?: number
+  runStartedAt: number
   stopping: boolean
   ended?: () => void
   stream?: MediaStream
@@ -95,18 +104,28 @@ function useWebDictation() {
   const [levels, setLevels] = useState<number[] | null>(null)
   const session = useRef<Session | null>(null)
 
-  const teardown = useCallback((current: Session) => {
+  const stopMeter = useCallback((current: Session) => {
     if (current.frame !== undefined) cancelAnimationFrame(current.frame)
     current.stream?.getTracks().forEach((track) => track.stop())
     void current.audio?.close().catch(() => {})
-    if (session.current === current) {
-      session.current = null
-      setStatus("idle")
-      setFinal("")
-      setInterim("")
-      setLevels(null)
-    }
+    current.frame = undefined
+    current.stream = undefined
+    current.audio = undefined
   }, [])
+
+  const teardown = useCallback(
+    (current: Session) => {
+      stopMeter(current)
+      if (session.current === current) {
+        session.current = null
+        setStatus("idle")
+        setFinal("")
+        setInterim("")
+        setLevels(null)
+      }
+    },
+    [stopMeter],
+  )
 
   const meter = useCallback(async (current: Session) => {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
@@ -158,6 +177,7 @@ function useWebDictation() {
       interim: "",
       emptyRuns: 0,
       heard: false,
+      runStartedAt: Date.now(),
       stopping: false,
     }
 
@@ -174,10 +194,16 @@ function useWebDictation() {
       current.heard = true
       setFinal(joinText(current.committed, final))
       setInterim(interim)
+      if (!SHARED_MIC && !current.metered && !meterBlocked) {
+        current.metered = true
+        current.meterAt = Date.now()
+        void meter(current)
+      }
     }
     recognizer.onerror = (event) => {
       current.error = event.error
       if (current.stopping || PASSING_ERRORS.has(event.error)) return
+      if (current.meterAt !== undefined && event.error === "audio-capture") return
       toast.error(ERRORS[event.error] ?? `Speech recognition failed (${event.error}).`)
       current.stopping = true
       teardown(current)
@@ -193,8 +219,21 @@ function useWebDictation() {
         current.ended?.()
         return
       }
-      current.emptyRuns = current.heard ? 0 : current.emptyRuns + 1
       const code = current.error ?? "no-speech"
+      const cutOff =
+        current.meterAt !== undefined &&
+        !current.heard &&
+        (code === "aborted" ||
+          code === "audio-capture" ||
+          Date.now() - current.runStartedAt < CUT_OFF_MS)
+      if (cutOff) {
+        meterBlocked = true
+        current.meterAt = undefined
+        stopMeter(current)
+        setLevels(null)
+      } else {
+        current.emptyRuns = current.heard ? 0 : current.emptyRuns + 1
+      }
       current.heard = false
       current.error = undefined
       if (current.emptyRuns >= MAX_EMPTY_RUNS) {
@@ -206,6 +245,7 @@ function useWebDictation() {
       current.committed = joinText(current.committed, current.final, current.interim)
       current.final = ""
       current.interim = ""
+      current.runStartedAt = Date.now()
       try {
         recognizer.start()
       } catch {
@@ -220,7 +260,7 @@ function useWebDictation() {
     } catch {
       teardown(current)
     }
-  }, [meter, teardown])
+  }, [meter, stopMeter, teardown])
 
   /** Stops listening and resolves with everything heard, including words not yet finalized. */
   const finish = useCallback(async () => {
