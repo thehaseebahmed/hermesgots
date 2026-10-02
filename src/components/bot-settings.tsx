@@ -124,6 +124,7 @@ function BotEditor({
   const [name, setName] = useState(profile.name)
   const [baseUrl, setBaseUrl] = useState(profile.baseUrl)
   const [apiKey, setApiKey] = useState(profile.apiKey)
+  const [contextWindow, setContextWindow] = useState(profile.contextWindow?.toString() ?? "")
   const [nameTouched, setNameTouched] = useState(false)
 
   const save = (patch: Partial<Omit<Profile, "id">>) => void updateProfile(profile.id, patch)
@@ -269,6 +270,28 @@ function BotEditor({
           </Select>
         </Field>
       )}
+
+      <Field>
+        <FieldLabel htmlFor="context-window">Context window</FieldLabel>
+        <InputGroup>
+          <InputGroupInput
+            id="context-window"
+            inputMode="numeric"
+            autoComplete="off"
+            placeholder="200000"
+            value={contextWindow}
+            onChange={(e) => {
+              const digits = e.target.value.replace(/\D/g, "")
+              setContextWindow(digits)
+              save({ contextWindow: Number(digits) || undefined })
+            }}
+          />
+          <InputGroupAddon align="inline-end">tokens</InputGroupAddon>
+        </InputGroup>
+        <FieldDescription>
+          The model's context size. Hermes doesn't report it, so set it to see how full a chat is.
+        </FieldDescription>
+      </Field>
 
       <div className="flex flex-wrap items-center gap-3">
         <Button onClick={test} disabled={connection.state === "testing"}>
