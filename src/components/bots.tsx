@@ -1,416 +1,549 @@
 import type { ReactNode } from "react"
 
 /**
- * Memento's bot characters (rendered by <Bot> in bot.tsx): fluffy SVG buddies with a fur filter and soft 3D shading.
+ * Memento's bot characters (rendered by <Bot> in bot.tsx): calm, glassy little organisms built on
+ * basic shapes, each with one accessory. Bodies have no straight edges: every outline is a smooth
+ * curve with a slight wobble, like a cell under a microscope.
  * Each is still by default; pass `animate` (the header does) to bring it to life.
  * Animations live in index.css under `.bot-animate` and respect prefers-reduced-motion.
  */
 
 interface Palette {
-  light: string
+  /** Lit top of the glass. */
+  top: string
   base: string
-  dark: string
+  /** Shaded underside and rim. */
+  deep: string
 }
 
 interface BotDefinition {
   id: string
   name: string
   description: string
-  draw: (ids: { fur: string; fill: string }) => ReactNode
+  /** `uid` keeps gradient and clip ids unique when several bots share a page. */
+  draw: (uid: string) => ReactNode
 }
 
-const INK = "#16161a"
+type Point = [number, number]
 
-/** Gradient + fur filter shared by every character. */
-function furDefs(fur: string, fill: string, palette: Palette) {
+/** Eye colour: a deep blue-black that sits softer on pastels than pure black. */
+const INK = "#1f2233"
+const GRAPHITE: Palette = { top: "#6b7180", base: "#454a57", deep: "#2a2e38" }
+const FROST: Palette = { top: "#ffffff", base: "#eef0f6", deep: "#a9b0c2" }
+
+/** A closed Catmull-Rom spline through `points`, as cubic Béziers, so the outline has no corners. */
+function smoothPath(points: Point[]) {
+  const n = points.length
+  const at = (i: number) => points[(i + n) % n]
+  const f = ([x, y]: Point) => `${x.toFixed(1)} ${y.toFixed(1)}`
+  let d = `M${f(at(0))}`
+  for (let i = 0; i < n; i++) {
+    const [p0, p1, p2, p3] = [at(i - 1), at(i), at(i + 1), at(i + 2)]
+    const c1: Point = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6]
+    const c2: Point = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6]
+    d += `C${f(c1)} ${f(c2)} ${f(p2)}`
+  }
+  return `${d}Z`
+}
+
+/** A slow, uneven radial wobble so no two bodies look machine-made. */
+function wobble(theta: number, amount: number, seed: number) {
   return (
-    <defs>
-      <radialGradient id={fill} cx="34%" cy="28%" r="80%">
-        <stop offset="0" stopColor={palette.light} />
-        <stop offset="0.5" stopColor={palette.base} />
-        <stop offset="1" stopColor={palette.dark} />
-      </radialGradient>
-      <filter id={fur} x="-15%" y="-15%" width="130%" height="130%">
-        <feTurbulence
-          type="fractalNoise"
-          baseFrequency="0.9"
-          numOctaves="2"
-          seed="7"
-          result="noise"
-        />
-        <feDisplacementMap
-          in="SourceGraphic"
-          in2="noise"
-          scale="5"
-          xChannelSelector="R"
-          yChannelSelector="G"
-          result="fuzzy"
-        />
-        <feTurbulence
-          type="fractalNoise"
-          baseFrequency="2.2"
-          numOctaves="1"
-          seed="3"
-          result="grain"
-        />
-        <feColorMatrix
-          in="grain"
-          type="matrix"
-          values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.55 -0.25"
-          result="sheen"
-        />
-        <feComposite in="sheen" in2="fuzzy" operator="in" result="sheenOnBody" />
-        <feMerge>
-          <feMergeNode in="fuzzy" />
-          <feMergeNode in="sheenOnBody" />
-        </feMerge>
-      </filter>
-    </defs>
+    amount *
+    (0.6 * Math.sin(2 * theta + seed) +
+      0.8 * Math.sin(3 * theta + 2.1 * seed) +
+      0.4 * Math.sin(5 * theta + 3.7 * seed))
   )
 }
 
-function glint(cx: number, cy: number, r = 1.6) {
-  return <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={r} fill="#fff" />
+interface ShapeSpec {
+  cx: number
+  cy: number
+  /** Base radius. */
+  r: number
+  /** Number of lobes (3 = triangle, 4 = square…). 0 is a plain round blob. */
+  sides?: number
+  /** How far the corners push out: small values give soft polygons, large ones give a star. */
+  corners?: number
+  /** Sharpens the corners a little without ever making them pointed. */
+  sharpen?: number
+  /** Direction of the first corner, in degrees (-90 is straight up). */
+  rotate?: number
+  sx?: number
+  sy?: number
+  wobble?: number
+  seed?: number
 }
 
-const bolt: Palette = { light: "#e2dcff", base: "#9b8cff", dark: "#5a48d4" }
-const ember: Palette = { light: "#ffd6c2", base: "#ff7a59", dark: "#d93f26" }
-const custard: Palette = { light: "#fff4d6", base: "#ffd98f", dark: "#e0a64a" }
-const nimbus: Palette = { light: "#e6ebff", base: "#a9b8ff", dark: "#6a7fe0" }
-const sprout: Palette = { light: "#c9ffe6", base: "#5ee6a8", dark: "#1aa86c" }
-const twinkle: Palette = { light: "#ffe0b0", base: "#ffa43b", dark: "#dc6a00" }
-const bubbles: Palette = { light: "#c4f6ff", base: "#4fd1e8", dark: "#128fae" }
-const mochi: Palette = { light: "#fff0e2", base: "#ffbd8f", dark: "#e3834a" }
-
-/** Five-point star with rounded tips (round line joins on a same-colour stroke). */
-const STAR = (() => {
-  const points: string[] = []
-  for (let i = 0; i < 10; i++) {
-    const r = i % 2 === 0 ? 40 : 20
-    const a = (Math.PI / 5) * i - Math.PI / 2
-    points.push(`${(50 + r * Math.cos(a)).toFixed(1)},${(56 + r * Math.sin(a)).toFixed(1)}`)
+/**
+ * A rounded polygon in polar form: r(θ) = 1 + a·cos(nθ) + b·cos(2nθ). It's a sum of cosines, so
+ * the outline is smooth everywhere: corners become lobes and edges bow gently.
+ */
+function shape({
+  cx,
+  cy,
+  r,
+  sides = 0,
+  corners = 0,
+  sharpen = 0,
+  rotate = -90,
+  sx = 1,
+  sy = 1,
+  wobble: amount = 0.025,
+  seed = 1,
+}: ShapeSpec) {
+  const rot = (rotate * Math.PI) / 180
+  const points: Point[] = []
+  const steps = 72
+  for (let k = 0; k < steps; k++) {
+    const theta = (2 * Math.PI * k) / steps
+    const phi = theta - rot
+    const radius =
+      r *
+      (1 +
+        corners * Math.cos(sides * phi) +
+        sharpen * Math.cos(2 * sides * phi) +
+        wobble(theta, amount, seed))
+    points.push([cx + radius * sx * Math.cos(theta), cy + radius * sy * Math.sin(theta)])
   }
-  return `M${points.join(" L")}Z`
-})()
+  return smoothPath(points)
+}
+
+/**
+ * A plump heart from the classic parametric heart. Its x term is usually sin³t, which pinches the
+ * tip and the dip into cusps; blending in a linear sin t keeps both of them rounded.
+ */
+function heart(cx: number, cy: number, scale: number, seed: number) {
+  const points: Point[] = []
+  const steps = 72
+  for (let k = 0; k < steps; k++) {
+    const t = (2 * Math.PI * k) / steps
+    const sin = Math.sin(t)
+    const x = 16 * sin * (0.8 * sin * sin + 0.2)
+    const y = -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t))
+    const w = 1 + wobble(t, 0.02, seed)
+    points.push([cx + x * scale * w, cy + (y + 2) * scale * w])
+  }
+  return smoothPath(points)
+}
+
+/** Top-to-bottom glass gradient, used by bodies and accessories alike. */
+function gradient(id: string, palette: Palette) {
+  return (
+    <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stopColor={palette.top} />
+      <stop offset="0.55" stopColor={palette.base} />
+      <stop offset="1" stopColor={palette.deep} />
+    </linearGradient>
+  )
+}
+
+/**
+ * A glassy body: a soft vertical gradient, a lit inner rim along the top edge, a specular bloom
+ * and a faint rim line. Everything inside is clipped to the outline so the glass reads as solid.
+ */
+function body(uid: string, palette: Palette, d: string) {
+  return (
+    <>
+      <defs>
+        {gradient(`${uid}-fill`, palette)}
+        <radialGradient id={`${uid}-spec`} cx="0.38" cy="0.12" r="0.5">
+          <stop offset="0" stopColor="#fff" stopOpacity="0.75" />
+          <stop offset="1" stopColor="#fff" stopOpacity="0" />
+        </radialGradient>
+        <clipPath id={`${uid}-clip`}>
+          <path d={d} />
+        </clipPath>
+      </defs>
+      <path d={d} fill={`url(#${uid}-fill)`} />
+      <g clipPath={`url(#${uid}-clip)`}>
+        <path d={d} fill={`url(#${uid}-spec)`} />
+        <path
+          d={d}
+          fill="none"
+          stroke="#fff"
+          strokeOpacity="0.6"
+          strokeWidth="3"
+          transform="translate(0 1.6)"
+        />
+        <path
+          d={d}
+          fill="none"
+          stroke={palette.deep}
+          strokeOpacity="0.35"
+          strokeWidth="5"
+          transform="translate(0 -2.5)"
+        />
+      </g>
+      <path d={d} fill="none" stroke={palette.deep} strokeOpacity="0.45" strokeWidth="1" />
+    </>
+  )
+}
+
+/** Fill and edge props that give an accessory part the same glass finish as the bodies. */
+function glass(id: string, palette: Palette) {
+  return {
+    fill: `url(#${id})`,
+    stroke: palette.deep,
+    strokeOpacity: 0.5,
+    strokeWidth: 1,
+  }
+}
+
+/** A soft white sheen across the top of an accessory part. */
+function sheen(d: string) {
+  return (
+    <path
+      d={d}
+      stroke="#fff"
+      strokeOpacity="0.7"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      fill="none"
+    />
+  )
+}
+
+type EyeStyle = "pill" | "tall" | "dot" | "happy" | "sleepy" | "wink"
+
+/** Minimal eyes in the shared ink, with a faint light rim like the glass around them. */
+function eyes(style: EyeStyle, y: number, spread = 10) {
+  const left = 50 - spread
+  const right = 50 + spread
+  const rim = { stroke: "#fff", strokeOpacity: 0.3, strokeWidth: 1 }
+  const pill = (cx: number, w: number, h: number) => (
+    <rect
+      key={cx}
+      x={cx - w / 2}
+      y={y - h / 2}
+      width={w}
+      height={h}
+      rx={w / 2}
+      fill={INK}
+      {...rim}
+    />
+  )
+  const arc = (cx: number, up: boolean) => (
+    <path
+      key={cx}
+      d={`M${cx - 4.5} ${y}q4.5 ${up ? -5 : 4} 9 0`}
+      stroke={INK}
+      strokeWidth="2.6"
+      strokeLinecap="round"
+      fill="none"
+    />
+  )
+  switch (style) {
+    case "pill":
+      return <g className="bot-blink">{[pill(left, 5, 10), pill(right, 5, 10)]}</g>
+    case "tall":
+      return <g className="bot-blink">{[pill(left, 5.5, 13), pill(right, 5.5, 13)]}</g>
+    case "dot":
+      return (
+        <g className="bot-blink" fill={INK} {...rim}>
+          <circle cx={left} cy={y} r="3.2" />
+          <circle cx={right} cy={y} r="3.2" />
+        </g>
+      )
+    case "happy":
+      return <g>{[arc(left, true), arc(right, true)]}</g>
+    case "sleepy":
+      return <g>{[arc(left, false), arc(right, false)]}</g>
+    case "wink":
+      return (
+        <g>
+          {arc(left, true)}
+          <g className="bot-blink">{pill(right, 5, 10)}</g>
+        </g>
+      )
+  }
+}
+
+const tri: Palette = { top: "#e4faf0", base: "#a8e6cb", deep: "#5eb593" }
+const cubby: Palette = { top: "#eeeaff", base: "#c3b6ff", deep: "#8775dc" }
+const penny: Palette = { top: "#ffece3", base: "#ffc6ab", deep: "#de8c6c" }
+const hex: Palette = { top: "#e6f3ff", base: "#aed6ff", deep: "#6aa2dc" }
+const stella: Palette = { top: "#fff6d9", base: "#ffe196", deep: "#d6a647" }
+const orbi: Palette = { top: "#ffe9f0", base: "#ffbccd", deep: "#de7f9a" }
+const gem: Palette = { top: "#e0f8f5", base: "#a3e3db", deep: "#58b0a5" }
+const bloom: Palette = { top: "#f6e9ff", base: "#ddbdf5", deep: "#a57cc6" }
+
+/** Accessory accents, picked to sit next to each body without clashing. */
+const beanie: Palette = { top: "#e1ecff", base: "#a9c4f2", deep: "#6c8fcc" }
+const cap: Palette = { top: "#fff3d6", base: "#ffd98c", deep: "#d4a24a" }
+const crown: Palette = { top: "#f1ebff", base: "#cdbdff", deep: "#8f78dc" }
+const bow: Palette = { top: "#efe9ff", base: "#c4b3f7", deep: "#8a72d4" }
+const bulb: Palette = { top: "#fffbe6", base: "#ffe58a", deep: "#d9b23f" }
+const petals: Palette = { top: "#ffffff", base: "#fde6ef", deep: "#d6a0b6" }
+
+const TRI = shape({ cx: 50, cy: 61, r: 31, sides: 3, corners: 0.2, sharpen: 0.045, seed: 1.3 })
+const CUBBY = shape({
+  cx: 50,
+  cy: 60,
+  r: 33,
+  sides: 4,
+  corners: 0.07,
+  sharpen: 0.015,
+  rotate: -45,
+  seed: 2.2,
+})
+// Flat side up, so the beanie sits on it and both shoulders stay visible.
+const PENNY = shape({
+  cx: 50,
+  cy: 59,
+  r: 33,
+  sides: 5,
+  corners: 0.07,
+  sharpen: 0.012,
+  rotate: 90,
+  seed: 0.7,
+})
+const HEX = shape({
+  cx: 50,
+  cy: 61,
+  r: 32,
+  sides: 6,
+  corners: 0.05,
+  sharpen: 0.01,
+  rotate: 0,
+  seed: 3.1,
+})
+const STELLA = shape({ cx: 50, cy: 60, r: 29, sides: 5, corners: 0.27, sharpen: 0.05, seed: 1.9 })
+const ORBI = shape({ cx: 50, cy: 60, r: 31, wobble: 0.045, seed: 4.4 })
+const GEM = shape({
+  cx: 50,
+  cy: 61,
+  r: 28,
+  sides: 4,
+  corners: 0.12,
+  sharpen: 0.02,
+  sx: 0.95,
+  sy: 1.12,
+  seed: 2.7,
+})
+const BLOOM = heart(50, 60, 1.85, 5.3)
 
 export const BOTS: BotDefinition[] = [
   {
-    id: "bolt",
-    name: "Bolt",
-    description: "A tidy little bot whose visor eyes scan back and forth while it thinks.",
-    draw: ({ fur, fill }) => (
-      <>
-        {furDefs(fur, fill, bolt)}
-        <g className="bot-breathe">
-          <g filter={`url(#${fur})`} fill={`url(#${fill})`}>
-            <rect x="14" y="20" width="72" height="72" rx="26" />
-            <circle cx="12" cy="56" r="7" />
-            <circle cx="88" cy="56" r="7" />
-          </g>
-          {/* visor */}
-          <rect
-            x="22"
-            y="40"
-            width="56"
-            height="26"
-            rx="13"
-            fill={INK}
-            stroke="#fff"
-            strokeOpacity="0.25"
-            strokeWidth="1.5"
-          />
-          <g className="bot-scan">
-            <g className="bot-blink">
-              <rect x="33" y="46" width="8" height="14" rx="4" fill="#7df9ff" />
-              <rect x="59" y="46" width="8" height="14" rx="4" fill="#7df9ff" />
-            </g>
-          </g>
-          <path
-            d="M28 44q10-4 20-3"
-            stroke="#fff"
-            strokeOpacity="0.3"
-            strokeWidth="2"
-            fill="none"
-            strokeLinecap="round"
-          />
-          <path
-            d="M43 76q7 5 14 0"
-            stroke={INK}
-            strokeWidth="3"
-            strokeLinecap="round"
-            fill="none"
-          />
-        </g>
-      </>
-    ),
-  },
-  {
-    id: "ember",
-    name: "Ember",
-    description: "A warm little flame that flickers with excitement.",
-    draw: ({ fur, fill }) => (
-      <>
-        {furDefs(fur, fill, ember)}
-        <g className="bot-flicker">
-          <path
-            filter={`url(#${fur})`}
-            fill={`url(#${fill})`}
-            d="M50 6C58 22 78 32 81 54C84 78 68 94 50 94C32 94 16 80 19 58C21 46 29 41 33 30C37 39 41 42 44 45C44 31 46 19 50 6Z"
-          />
-          <path
-            d="M50 52C55 60 64 64 64 74C64 83 58 88 50 88C42 88 36 83 36 75C36 68 42 64 44 58C46 62 48 63 50 64Z"
-            fill="#ffd36b"
-            opacity="0.85"
-          />
-          <g className="bot-blink">
-            <ellipse cx="40" cy="60" rx="4.5" ry="6" fill={INK} />
-            <ellipse cx="60" cy="60" rx="4.5" ry="6" fill={INK} />
-            {glint(41.6, 57.6)}
-            {glint(61.6, 57.6)}
-          </g>
-          <path
-            d="M45 71q5 6 10 0Z"
-            fill={INK}
-            strokeLinejoin="round"
-            stroke={INK}
-            strokeWidth="2"
-          />
-        </g>
-      </>
-    ),
-  },
-  {
-    id: "custard",
-    name: "Custard",
-    description: "A wobbly caramel pudding, cherry on top, that jiggles when it's happy.",
-    draw: ({ fur, fill }) => (
-      <>
-        {furDefs(fur, fill, custard)}
-        <g className="bot-jiggle">
-          <path
-            filter={`url(#${fur})`}
-            fill={`url(#${fill})`}
-            d="M24 42Q24 30 50 30Q76 30 76 42L84 82Q84 92 50 92Q16 92 16 82Z"
-          />
-          <path
-            d="M24 44Q24 30 50 30Q76 30 76 44Q73 53 69 47Q64 57 58 47Q52 55 46 47Q40 57 34 47Q28 53 24 44Z"
-            fill="#9a5424"
-          />
-          <path
-            d="M32 38q8-4 16-4"
-            stroke="#fff"
-            strokeOpacity="0.35"
-            strokeWidth="2.5"
-            fill="none"
-            strokeLinecap="round"
-          />
-          <path
-            d="M50 22q3-9 10-12"
-            stroke="#4d7a2a"
-            strokeWidth="2.5"
-            fill="none"
-            strokeLinecap="round"
-          />
-          <circle cx="50" cy="25" r="7" fill="#e5243b" />
-          <circle cx="47.5" cy="22.5" r="2" fill="#fff" opacity="0.6" />
-          <g className="bot-blink">
-            <circle cx="39" cy="66" r="4.2" fill={INK} />
-            <circle cx="61" cy="66" r="4.2" fill={INK} />
-            {glint(40.4, 64.4, 1.3)}
-            {glint(62.4, 64.4, 1.3)}
-          </g>
-          <ellipse cx="32" cy="74" rx="4.5" ry="2.6" fill="#ff7a8a" opacity="0.45" />
-          <ellipse cx="68" cy="74" rx="4.5" ry="2.6" fill="#ff7a8a" opacity="0.45" />
-          <path
-            d="M46 73q4 4 8 0"
-            stroke={INK}
-            strokeWidth="2.6"
-            strokeLinecap="round"
-            fill="none"
-          />
-        </g>
-      </>
-    ),
-  },
-  {
-    id: "nimbus",
-    name: "Nimbus",
-    description: "A sleepy little cloud that breathes slow and dreams in Zs.",
-    draw: ({ fur, fill }) => (
-      <>
-        {furDefs(fur, fill, nimbus)}
-        <g className="bot-breathe">
-          <g filter={`url(#${fur})`} fill={`url(#${fill})`}>
-            <circle cx="30" cy="62" r="18" />
-            <circle cx="47" cy="44" r="22" />
-            <circle cx="68" cy="52" r="18" />
-            <circle cx="74" cy="68" r="15" />
-            <rect x="22" y="58" width="58" height="26" rx="13" />
-          </g>
-          <path
-            d="M36 64q5 4 10 0M56 64q5 4 10 0"
-            stroke={INK}
-            strokeWidth="3.2"
-            strokeLinecap="round"
-            fill="none"
-          />
-          <ellipse cx="51" cy="74" rx="2.6" ry="3" fill={INK} />
-        </g>
-        <g
-          className="bot-zzz"
-          fill="currentColor"
-          fontFamily="ui-rounded, system-ui, sans-serif"
-          fontWeight="800"
-        >
-          <text x="80" y="30" fontSize="12">
-            z
-          </text>
-          <text x="88" y="18" fontSize="9">
-            z
-          </text>
-        </g>
-      </>
-    ),
-  },
-  {
-    id: "sprout",
-    name: "Sprout",
-    description: "Eager helper with an antenna that wiggles when it has an idea.",
-    draw: ({ fur, fill }) => (
-      <>
-        {furDefs(fur, fill, sprout)}
-        <g className="bot-antenna">
-          <path d="M50 26V9" stroke={sprout.dark} strokeWidth="3" strokeLinecap="round" />
-          <circle className="bot-glow" cx="50" cy="8" r="5.5" fill="#ffe066" />
-        </g>
+    id: "tri",
+    name: "Tri",
+    description: "A soft triangle who keeps its headphones on while it works.",
+    draw: (uid) => (
+      <g className="bot-breathe">
+        {body(uid, tri, TRI)}
+        {eyes("pill", 60, 9)}
+        <defs>
+          {gradient(`${uid}-band`, GRAPHITE)}
+          {gradient(`${uid}-cup`, FROST)}
+        </defs>
         <path
-          filter={`url(#${fur})`}
-          fill={`url(#${fill})`}
-          d="M20 46C20 30 32 22 50 22C68 22 80 30 80 46L83 72C83 87 70 93 50 93C30 93 17 87 17 72Z"
-        />
-        <g className="bot-blink">
-          <ellipse cx="38" cy="55" rx="6.5" ry="8.5" fill={INK} />
-          <ellipse cx="62" cy="55" rx="6.5" ry="8.5" fill={INK} />
-          {glint(40, 51.5, 2.2)}
-          {glint(64, 51.5, 2.2)}
-        </g>
-        <path d="M44 71q6 5 12 0" stroke={INK} strokeWidth="3" strokeLinecap="round" fill="none" />
-      </>
-    ),
-  },
-  {
-    id: "twinkle",
-    name: "Twinkle",
-    description: "A cheeky star that winks and wiggles between sparkles.",
-    draw: ({ fur, fill }) => (
-      <>
-        {furDefs(fur, fill, twinkle)}
-        <g className="bot-wiggle">
-          <path
-            filter={`url(#${fur})`}
-            fill={`url(#${fill})`}
-            stroke={`url(#${fill})`}
-            strokeWidth="9"
-            strokeLinejoin="round"
-            d={STAR}
-          />
-          <path
-            d="M36 58q5-5 10 0"
-            stroke={INK}
-            strokeWidth="3.2"
-            strokeLinecap="round"
-            fill="none"
-          />
-          <ellipse cx="60" cy="57" rx="4.2" ry="5.8" fill={INK} />
-          {glint(61.4, 54.8, 1.4)}
-          <ellipse cx="36" cy="67" rx="4.5" ry="2.6" fill="#ff5f7a" opacity="0.5" />
-          <ellipse cx="64" cy="67" rx="4.5" ry="2.6" fill="#ff5f7a" opacity="0.5" />
-          <path
-            d="M47 67q3 3 6 0"
-            stroke={INK}
-            strokeWidth="2.6"
-            strokeLinecap="round"
-            fill="none"
-          />
-        </g>
-        <g className="bot-sparkle" fill="#ffd43b">
-          <path d="M88 14l2.5 6 6 2.5-6 2.5-2.5 6-2.5-6-6-2.5 6-2.5Z" />
-          <path d="M10 18l1.6 4 4 1.6-4 1.6-1.6 4-1.6-4-4-1.6 4-1.6Z" />
-        </g>
-      </>
-    ),
-  },
-  {
-    id: "bubbles",
-    name: "Bubbles",
-    description: "A floaty friend who drifts up and down, blinking big eyes.",
-    draw: ({ fur, fill }) => (
-      <>
-        {furDefs(fur, fill, bubbles)}
-        <g className="bot-float">
-          <path
-            filter={`url(#${fur})`}
-            fill={`url(#${fill})`}
-            d="M18 50C18 28 32 12 50 12C68 12 82 28 82 50V84Q74 92 66 84T50 84T34 84T18 84Z"
-          />
-          <g className="bot-blink">
-            <circle cx="38" cy="48" r="7" fill={INK} />
-            <circle cx="62" cy="48" r="7" fill={INK} />
-            {glint(40.4, 45.4, 2.4)}
-            {glint(64.4, 45.4, 2.4)}
-          </g>
-          <ellipse cx="50" cy="63" rx="4" ry="4.8" fill={INK} />
-        </g>
-      </>
-    ),
-  },
-  {
-    id: "mochi",
-    name: "Mochi",
-    description: "A soft kitten-ish puff whose ear twitches when it's listening.",
-    draw: ({ fur, fill }) => (
-      <>
-        {furDefs(fur, fill, mochi)}
-        <g filter={`url(#${fur})`} fill={`url(#${fill})`}>
-          <path
-            d="M20 46 24 12 46 30Z"
-            strokeLinejoin="round"
-            stroke={mochi.base}
-            strokeWidth="5"
-          />
-          <path
-            className="bot-ear"
-            d="M80 46 76 12 54 30Z"
-            strokeLinejoin="round"
-            stroke={mochi.base}
-            strokeWidth="5"
-          />
-          <circle cx="50" cy="60" r="34" />
-        </g>
-        <g className="bot-blink">
-          <ellipse cx="38" cy="58" rx="4.5" ry="6" fill={INK} />
-          <ellipse cx="62" cy="58" rx="4.5" ry="6" fill={INK} />
-          {glint(39.6, 55.6)}
-          {glint(63.6, 55.6)}
-        </g>
-        <path
-          d="M47 67h6l-3 3.5Z"
-          fill="#ff6f8f"
-          strokeLinejoin="round"
-          stroke="#ff6f8f"
-          strokeWidth="1.5"
-        />
-        <path
-          d="M14 64l14 2M14 72l14-2M86 64l-14 2M86 72l-14-2"
-          stroke={INK}
-          strokeWidth="1.6"
+          d="M27 60C21 8 79 8 73 60"
+          stroke={`url(#${uid}-band)`}
+          strokeWidth="4"
           strokeLinecap="round"
-          opacity="0.6"
+          fill="none"
         />
+        <rect x="19" y="52" width="12" height="18" rx="6" {...glass(`${uid}-cup`, FROST)} />
+        <rect x="69" y="52" width="12" height="18" rx="6" {...glass(`${uid}-cup`, FROST)} />
+        {sheen("M22 57q3-3 6 0")}
+        {sheen("M72 57q3-3 6 0")}
+      </g>
+    ),
+  },
+  {
+    id: "cubby",
+    name: "Cubby",
+    description: "A squishy square in round glasses who reads everything twice.",
+    draw: (uid) => (
+      <g className="bot-breathe">
+        {body(uid, cubby, CUBBY)}
+        {eyes("dot", 56, 12)}
+        <g stroke={GRAPHITE.base} strokeWidth="2.2" strokeLinecap="round">
+          <circle cx="38" cy="56" r="9" fill="#fff" fillOpacity="0.22" />
+          <circle cx="62" cy="56" r="9" fill="#fff" fillOpacity="0.22" />
+          <path d="M47 55q3-2.5 6 0" fill="none" />
+          <path d="M29 54q-5-2-9 0.5M71 54q5-2 9 0.5" fill="none" />
+        </g>
+        {sheen("M32.5 51.5q2.5-2.5 5.5-2.5")}
+        {sheen("M56.5 51.5q2.5-2.5 5.5-2.5")}
+      </g>
+    ),
+  },
+  {
+    id: "penny",
+    name: "Penny",
+    description: "A cosy pentagon in a knitted beanie, unbothered by the weather.",
+    draw: (uid) => (
+      <g className="bot-jiggle">
+        {body(uid, penny, PENNY)}
+        {eyes("happy", 60, 10)}
+        <defs>
+          {gradient(`${uid}-hat`, beanie)}
+          {gradient(`${uid}-pom`, FROST)}
+        </defs>
+        <path d="M28 40C27 14 73 14 72 40C60 36 40 36 28 40Z" {...glass(`${uid}-hat`, beanie)} />
+        <path
+          d="M25 40C38 34 62 34 75 40C76 46 72 48 68 46C57 42 43 42 32 46C28 48 24 46 25 40Z"
+          {...glass(`${uid}-hat`, beanie)}
+        />
+        <path
+          d="M40 22q-2 7-1 14M50 19v16M60 22q2 7 1 14"
+          stroke={beanie.deep}
+          strokeOpacity="0.35"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          fill="none"
+        />
+        {sheen("M35 31q6-9 15-10")}
+        <circle cx="50" cy="13" r="5.5" {...glass(`${uid}-pom`, FROST)} />
+      </g>
+    ),
+  },
+  {
+    id: "hex",
+    name: "Hex",
+    description: "A breezy hexagon whose propeller cap spins up when it's thinking hard.",
+    draw: (uid) => (
+      <g className="bot-float">
+        {body(uid, hex, HEX)}
+        {eyes("tall", 61, 10)}
+        <defs>
+          {gradient(`${uid}-cap`, cap)}
+          {gradient(`${uid}-blade`, FROST)}
+        </defs>
+        <path d="M31 38C31 19 69 19 69 38C57 34 43 34 31 38Z" {...glass(`${uid}-cap`, cap)} />
+        <path
+          d="M31 38C43 34 57 34 69 38Q76 41 71 42C59 38 41 38 29 42Q24 41 31 38Z"
+          {...glass(`${uid}-cap`, cap)}
+        />
+        {sheen("M37 33q5-7 12-8")}
+        <path d="M50 22v-6" stroke={GRAPHITE.base} strokeWidth="2" strokeLinecap="round" />
+        <g className="bot-propel">
+          <ellipse cx="41" cy="14" rx="8.5" ry="2.6" {...glass(`${uid}-blade`, FROST)} />
+          <ellipse cx="59" cy="14" rx="8.5" ry="2.6" {...glass(`${uid}-blade`, FROST)} />
+        </g>
+        <circle cx="50" cy="14.5" r="2" fill={GRAPHITE.base} />
+      </g>
+    ),
+  },
+  {
+    id: "stella",
+    name: "Stella",
+    description: "A soft star with a small glass crown and a knowing wink.",
+    draw: (uid) => (
+      <g className="bot-wiggle">
+        {body(uid, stella, STELLA)}
+        {eyes("wink", 61, 9)}
+        <defs>{gradient(`${uid}-crown`, crown)}</defs>
+        <path
+          d="M39 26C38 19 40 14 41 11C44 15 46 16 50 8C54 16 56 15 59 11C60 14 62 19 61 26C55 23.5 45 23.5 39 26Z"
+          {...glass(`${uid}-crown`, crown)}
+          strokeLinejoin="round"
+        />
+        {sheen("M42 21q8-3 16 0")}
+      </g>
+    ),
+  },
+  {
+    id: "orbi",
+    name: "Orbi",
+    description: "A round, wobbly blob with a glass bow who drifts like a jellyfish.",
+    draw: (uid) => (
+      <g className="bot-float">
+        {body(uid, orbi, ORBI)}
+        {eyes("pill", 60, 11)}
+        <defs>{gradient(`${uid}-bow`, bow)}</defs>
+        <g className="bot-bow">
+          <path d="M50 30C43 19 30 21 31 30C32 37 42 37 50 31Z" {...glass(`${uid}-bow`, bow)} />
+          <path d="M50 30C57 19 70 21 69 30C68 37 58 37 50 31Z" {...glass(`${uid}-bow`, bow)} />
+          {sheen("M35 26q4-3.5 8-1.5")}
+          {sheen("M65 26q-4-3.5-8-1.5")}
+          <ellipse cx="50" cy="30.5" rx="4" ry="3.8" {...glass(`${uid}-bow`, bow)} />
+        </g>
+      </g>
+    ),
+  },
+  {
+    id: "gem",
+    name: "Gem",
+    description: "A plump diamond with a glowing antenna that lights up when it has an idea.",
+    draw: (uid) => (
+      <>
+        <defs>{gradient(`${uid}-bulb`, bulb)}</defs>
+        <g className="bot-antenna">
+          <path
+            d="M50 27C48 21 53 17 51.5 11"
+            stroke={gem.deep}
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            fill="none"
+          />
+          <circle className="bot-glow" cx="51.5" cy="8.5" r="4.6" {...glass(`${uid}-bulb`, bulb)} />
+          <circle cx="50.2" cy="7" r="1.4" fill="#fff" opacity="0.85" />
+        </g>
+        <g className="bot-breathe">
+          {body(uid, gem, GEM)}
+          {eyes("dot", 61, 9)}
+        </g>
+      </>
+    ),
+  },
+  {
+    id: "bloom",
+    name: "Bloom",
+    description: "A gentle heart with a flower on top that sways in a breeze only it can feel.",
+    draw: (uid) => (
+      <>
+        <defs>
+          {gradient(`${uid}-petal`, petals)}
+          {gradient(`${uid}-leaf`, tri)}
+          {gradient(`${uid}-heart`, stella)}
+        </defs>
+        <g className="bot-antenna">
+          <path
+            d="M50 34C50 28 48 25 50 20"
+            stroke={tri.deep}
+            strokeWidth="2"
+            strokeLinecap="round"
+            fill="none"
+          />
+          <path
+            d="M50 29C53 25.5 58 26 59.5 27.5C57 30.5 53 30.5 50 29Z"
+            {...glass(`${uid}-leaf`, tri)}
+          />
+          {[0, 72, 144, 216, 288].map((angle) => (
+            <ellipse
+              key={angle}
+              cx="50"
+              cy="9.5"
+              rx="3.6"
+              ry="5"
+              transform={`rotate(${angle} 50 15)`}
+              {...glass(`${uid}-petal`, petals)}
+            />
+          ))}
+          <circle cx="50" cy="15" r="3.2" {...glass(`${uid}-heart`, stella)} />
+        </g>
+        <g className="bot-breathe">
+          {body(uid, bloom, BLOOM)}
+          {eyes("sleepy", 58, 10)}
+        </g>
       </>
     ),
   },
 ]
 
-/** The bot Memento uses everywhere. Hardcoded for now; the others are in /bots. */
-export const DEFAULT_BOT_ID = "bolt"
+/** Older builds stored these ids; v3 of the database maps them onto the current bots. */
+export const LEGACY_BOT_IDS: Record<string, string> = {
+  bolt: "cubby",
+  ember: "tri",
+  custard: "penny",
+  nimbus: "orbi",
+  sprout: "gem",
+  twinkle: "stella",
+  bubbles: "hex",
+  mochi: "bloom",
+}
+
+/** The bot Memento uses wherever no profile is in play. */
+export const DEFAULT_BOT_ID = "cubby"

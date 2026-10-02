@@ -1,6 +1,6 @@
 import Dexie, { type EntityTable, type Transaction } from "dexie"
 
-import { BOTS } from "@/components/bots"
+import { BOTS, LEGACY_BOT_IDS } from "@/components/bots"
 import { randomId } from "@/lib/utils"
 
 export type ThemePreference = "system" | "light" | "dark"
@@ -158,6 +158,16 @@ db.version(2)
         settings.activeProfileId = profile.id
       })
   })
+
+// v3: the bot characters were redrawn with new ids; map each old one onto a distinct new one.
+db.version(3).upgrade((tx) =>
+  tx
+    .table("profiles")
+    .toCollection()
+    .modify((profile: Profile) => {
+      profile.botId = LEGACY_BOT_IDS[profile.botId] ?? profile.botId
+    }),
+)
 
 db.on("populate", (tx) => seedProfile(tx))
 
