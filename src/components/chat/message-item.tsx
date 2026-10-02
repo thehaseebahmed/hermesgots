@@ -41,7 +41,9 @@ function Stats({ message }: { message: Message }) {
   return (
     <div className="px-1 text-xs text-muted-foreground/80 tabular-nums">
       {stats.estimated ? "~" : ""}
-      {stats.tokens} tokens · {stats.tokensPerSecond} tok/s · {formatDuration(stats.durationMs)}
+      {stats.tokens} tokens
+      {stats.tokensPerSecond !== undefined && ` · ${stats.tokensPerSecond} tok/s`} ·{" "}
+      {formatDuration(stats.durationMs)}
       {message.status === "stopped" && " · stopped"}
     </div>
   )

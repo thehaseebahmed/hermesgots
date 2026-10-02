@@ -62,8 +62,12 @@ export interface ApprovalRequest {
 export interface MessageStats {
   tokens: number
   estimated: boolean
-  tokensPerSecond: number
+  /** Left out when tools ran: the turn's time then includes tool execution. */
+  tokensPerSecond?: number
   durationMs: number
+  /** Hermes's prompt tokens for the turn, summed over every model call in it. */
+  promptTokens?: number
+  toolsUsed?: boolean
 }
 
 export type MessageStatus = "streaming" | "done" | "error" | "stopped"
