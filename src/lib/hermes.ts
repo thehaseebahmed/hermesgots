@@ -281,6 +281,24 @@ export async function checkHealth(config: HermesConfig) {
   return response.json().catch(() => ({}))
 }
 
+/** The title Hermes gave a session (it auto-titles chats in the background). Best effort. */
+export async function getSessionTitle(
+  config: HermesConfig,
+  sessionId: string,
+): Promise<string | undefined> {
+  try {
+    const response = await request(
+      `${serverRoot(config.baseUrl)}/api/sessions/${encodeURIComponent(sessionId)}`,
+      { headers: headers(config) },
+    )
+    const body = await response.json()
+    const title = body?.session?.title
+    return typeof title === "string" && title.trim() ? title.trim() : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** Hermes's newest execution-ledger row for a job (newer versions only). */
 export interface CronExecution {
   status: "claimed" | "running" | "completed" | "failed" | "unknown"

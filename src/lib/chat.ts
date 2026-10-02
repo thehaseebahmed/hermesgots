@@ -8,10 +8,12 @@ import {
   type ToolEvent,
 } from "@/lib/db"
 import {
+  getSessionTitle,
   HermesError,
   respondToApproval,
   streamChat,
   type ChatMessage,
+  type HermesConfig,
   type TurnUsage,
 } from "@/lib/hermes"
 import { randomId } from "@/lib/utils"
@@ -22,6 +24,10 @@ import { randomId } from "@/lib/utils"
  */
 
 const FLUSH_INTERVAL_MS = 50
+/** Hermes upgrades a placeholder title on later turns, up to the third. */
+const TITLED_TURNS = 3
+/** Hermes titles with a model call in the background, which can land after the reply ends. */
+const TITLE_CHECKS_MS = [0, 3000, 10000]
 const controllers = new Map<string, AbortController>()
 /** In-flight reply drafts by message id, so approval answers land in the draft being flushed. */
 const activeDrafts = new Map<string, { draft: Message; touch: () => void }>()
@@ -33,6 +39,18 @@ function estimateTokens(text: string) {
 function titleFrom(text: string) {
   const line = text.trim().split("\n")[0]
   return line.length > 48 ? `${line.slice(0, 47).trimEnd()}…` : line || "New chat"
+}
+
+/** Swaps the first-line title for the one Hermes generated, unless the user renamed the chat. */
+async function syncTitle(conversationId: string, config: HermesConfig, sessionId: string) {
+  for (const delay of TITLE_CHECKS_MS) {
+    if (delay) await new Promise((resolve) => window.setTimeout(resolve, delay))
+    const title = await getSessionTitle(config, sessionId)
+    const conversation = await db.conversations.get(conversationId)
+    if (!conversation || conversation.titleEdited) return
+    if (title && title !== conversation.title)
+      await db.conversations.update(conversationId, { title })
+  }
 }
 
 /** A chat's profile, or the active one if its profile has gone. */
@@ -75,7 +93,7 @@ export async function sendMessage(conversationId: string, text: string, queuedId
     await db.messages.bulkAdd([userMessage, reply])
     await db.conversations.update(conversationId, {
       updatedAt: now,
-      ...(history.length === 0 ? { title: titleFrom(content) } : {}),
+      ...(history.length === 0 && !conversation.titleEdited ? { title: titleFrom(content) } : {}),
     })
   })
 
@@ -202,8 +220,14 @@ export async function sendMessage(conversationId: string, text: string, queuedId
     await flush()
     await db.conversations.update(conversationId, { updatedAt: endedAt })
   }
+  if (draft.status !== "done") return
+  // Hermes only keys the session by our id when the profile has an API key.
+  const turn = history.filter((m) => m.role === "user" && m.status === "done").length + 1
+  if (config.apiKey && turn <= TITLED_TURNS) {
+    void syncTitle(conversationId, config, conversation.hermesSessionId)
+  }
   // A stop or an error pauses the queue: the user probably wants to look before it carries on.
-  if (draft.status === "done") await sendNextQueued(conversationId)
+  await sendNextQueued(conversationId)
 }
 
 /** Holds a message until the current reply finishes. */

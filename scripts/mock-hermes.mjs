@@ -4,6 +4,8 @@
 // POST /v1/runs/{id}/approval. Mention "clean" or "delete" in a message to trigger an approval.
 // Cron jobs live on /api/jobs, and their past runs show up as /api/sessions?source=cron. Like
 // Hermes, a run that died on provider errors still ends `cron_complete`, behind a `failed_turn` row.
+// Chats are titled like Hermes does: a slice of the opener at once, a "model" title a moment later,
+// readable on GET /api/sessions/{id}. Sessions are keyed by X-Hermes-Session-Id when a key is sent.
 //
 //   pnpm mock            # then point Settings at http://localhost:8642/v1
 
@@ -12,6 +14,7 @@ import { randomUUID } from "node:crypto"
 
 const PORT = Number(process.env.PORT ?? 8642)
 const pendingApprovals = new Map()
+const chatTitles = new Map()
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const cors = {
@@ -121,6 +124,16 @@ function cronSessionTail(profile, sessionId) {
   return { role: "tool", content: "{}" }
 }
 
+function titleChat(req, opener) {
+  const sessionId = req.headers["x-hermes-session-id"]
+  if (!sessionId || !req.headers.authorization || chatTitles.has(sessionId)) return
+  const line = opener.trim().split("\n")[0]
+  chatTitles.set(sessionId, line.length > 48 ? `${line.slice(0, 47).trimEnd()}…` : line)
+  const words = line.replace(/[^\p{L}\p{N}\s-]/gu, "").split(/\s+/).filter(Boolean).slice(0, 4)
+  const title = words.length > 1 ? words.join(" ").replace(/^./, (c) => c.toUpperCase()) : "Friendly greeting"
+  setTimeout(() => chatTitles.set(sessionId, title), 2000)
+}
+
 async function streamCompletion(req, res, body) {
   const id = `chatcmpl-${randomUUID().replace(/-/g, "").slice(0, 29)}`
   const created = Math.floor(Date.now() / 1000)
@@ -128,6 +141,7 @@ async function streamCompletion(req, res, body) {
   const last = [...(body.messages ?? [])].reverse().find((m) => m.role === "user")?.content ?? ""
   let closed = false
   let pieces = 0
+  titleChat(req, last)
   req.on("close", () => (closed = true))
 
   res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", ...cors })
@@ -251,6 +265,12 @@ http
       const limit = Number(url.searchParams.get("limit") ?? 50)
       const data = source === "cron" ? cronSessions(profile).slice(0, limit) : []
       return json(res, 200, { object: "list", data, limit, offset: 0, has_more: false })
+    }
+    const chatSession = /^\/api\/sessions\/([^/]+)$/.exec(url.pathname)
+    if (req.method === "GET" && chatSession) {
+      const id = decodeURIComponent(chatSession[1])
+      if (!chatTitles.has(id)) return json(res, 404, { error: { message: "Session not found" } })
+      return json(res, 200, { object: "hermes.session", session: { id, source: "api_server", title: chatTitles.get(id) } })
     }
     const sessionMessages = /^\/api\/sessions\/([^/]+)\/messages$/.exec(url.pathname)
     if (sessionMessages) {

@@ -299,7 +299,8 @@ export function ChatPage() {
             className="contents"
             onSubmit={async (event) => {
               event.preventDefault()
-              if (id && title.trim()) await db.conversations.update(id, { title: title.trim() })
+              if (id && title.trim())
+                await db.conversations.update(id, { title: title.trim(), titleEdited: true })
               setRenaming(false)
             }}
           >
