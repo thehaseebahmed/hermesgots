@@ -1,13 +1,15 @@
 import type { ReactNode } from "react"
-import { AlertCircleIcon } from "lucide-react"
+import { AlertCircleIcon, ClockIcon, SendHorizontalIcon, XIcon } from "lucide-react"
 
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { Markdown } from "@/components/chat/markdown"
 import { ToolCard } from "@/components/chat/tool-card"
 import { Bot } from "@/components/bot"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
+import { Button } from "@/components/ui/button"
 import { Message as MessageRow, MessageAvatar, MessageContent } from "@/components/ui/message"
 import { Spinner } from "@/components/ui/spinner"
+import { removeQueued, sendMessage } from "@/lib/chat"
 import type { Message, ToolEvent } from "@/lib/db"
 import { formatDuration } from "@/lib/format"
 
@@ -49,6 +51,35 @@ function Stats({ message }: { message: Message }) {
   )
 }
 
+function QueuedActions({ message, paused }: { message: Message; paused: boolean }) {
+  return (
+    <div className="-my-2 flex items-center gap-1 text-xs text-muted-foreground">
+      <ClockIcon className="size-3.5" />
+      <span className="pr-1">{paused ? "Queued, paused" : "Queued"}</span>
+      {paused && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="min-h-11 text-xs"
+          onClick={() => void sendMessage(message.conversationId, message.content, message.id)}
+        >
+          <SendHorizontalIcon data-icon="inline-start" />
+          Send now
+        </Button>
+      )}
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="size-11"
+        aria-label="Remove queued message"
+        onClick={() => void removeQueued(message.id)}
+      >
+        <XIcon />
+      </Button>
+    </div>
+  )
+}
+
 export function TypingBubble({ status }: { status?: string }) {
   return (
     <div className="flex flex-col gap-1.5">
@@ -81,20 +112,25 @@ export function MessageItem({
   message,
   showStats,
   botId,
+  busy,
 }: {
   message: Message
   showStats: boolean
   botId?: string
+  /** Whether a reply is streaming in this chat, so queued messages know they'll go on their own. */
+  busy?: boolean
 }) {
   if (message.role === "user") {
+    const queued = message.status === "queued"
     return (
       <MessageRow align="end">
-        <MessageContent className="items-end">
-          <Bubble variant="default" align="end">
+        <MessageContent className="items-end gap-1">
+          <Bubble variant="default" align="end" className={queued ? "opacity-60" : undefined}>
             <BubbleContent className="px-4 py-2.5 text-[15px] whitespace-pre-wrap">
               {message.content}
             </BubbleContent>
           </Bubble>
+          {queued && <QueuedActions message={message} paused={!busy} />}
         </MessageContent>
       </MessageRow>
     )

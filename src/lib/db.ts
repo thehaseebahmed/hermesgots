@@ -72,7 +72,8 @@ export interface MessageStats {
   toolsUsed?: boolean
 }
 
-export type MessageStatus = "streaming" | "done" | "error" | "stopped"
+/** `queued` is a user message waiting for the current reply to finish. */
+export type MessageStatus = "queued" | "streaming" | "done" | "error" | "stopped"
 
 export interface Message {
   id: string
