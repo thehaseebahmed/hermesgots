@@ -20,6 +20,8 @@ export interface Profile {
   model: string
   /** Which of the bot characters represents this profile. */
   botId: string
+  /** The model's context window in tokens. Hermes doesn't report it, so the user sets it. */
+  contextWindow?: number
   createdAt: number
 }
 
