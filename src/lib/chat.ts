@@ -7,7 +7,13 @@ import {
   type MessageStats,
   type ToolEvent,
 } from "@/lib/db"
-import { HermesError, respondToApproval, streamChat, type ChatMessage } from "@/lib/hermes"
+import {
+  HermesError,
+  respondToApproval,
+  streamChat,
+  type ChatMessage,
+  type TurnUsage,
+} from "@/lib/hermes"
 import { randomId } from "@/lib/utils"
 
 /**
@@ -95,8 +101,9 @@ export async function sendMessage(conversationId: string, text: string) {
   activeDrafts.set(reply.id, { draft, touch })
 
   const config = { baseUrl: profile.baseUrl, apiKey: profile.apiKey }
+  let usage: TurnUsage | undefined
   try {
-    await streamChat(
+    const result = await streamChat(
       config,
       {
         model: profile.model,
@@ -112,6 +119,7 @@ export async function sendMessage(conversationId: string, text: string) {
           touch()
         },
         onReasoning(delta) {
+          firstTokenAt ??= Date.now()
           draft.reasoning = (draft.reasoning ?? "") + delta
           touch()
         },
@@ -151,6 +159,7 @@ export async function sendMessage(conversationId: string, text: string) {
         },
       },
     )
+    usage = result.usage
     draft.status = "done"
   } catch (error) {
     if (controller.signal.aborted) {
@@ -172,14 +181,18 @@ export async function sendMessage(conversationId: string, text: string) {
       draft.approval = { ...draft.approval, resolved: "expired" }
     }
     if (draft.status !== "error") draft.statusText = undefined
-    if (draft.content) {
-      const tokens = estimateTokens(draft.content)
+    if (draft.content || usage) {
+      // Hermes's counts when it sent them; a stopped turn never gets them, so estimate.
+      const tokens = usage?.completionTokens || estimateTokens(draft.content)
+      const toolsUsed = draft.tools.length > 0
       const writingMs = Math.max(1, endedAt - (firstTokenAt ?? endedAt))
       const stats: MessageStats = {
         tokens,
-        estimated: true,
-        tokensPerSecond: Math.round(tokens / (writingMs / 1000)),
+        estimated: !usage?.completionTokens,
+        tokensPerSecond: toolsUsed ? undefined : Math.round(tokens / (writingMs / 1000)),
         durationMs: endedAt - reply.createdAt,
+        promptTokens: usage?.promptTokens || undefined,
+        toolsUsed,
       }
       draft.stats = stats
     }

@@ -42,8 +42,15 @@ export interface StreamHandlers {
   onApproval?: (event: ApprovalRequestEvent) => void
 }
 
+/** Hermes sums these over every model call in the turn, tool loops included. */
+export interface TurnUsage {
+  promptTokens: number
+  completionTokens: number
+}
+
 export interface StreamResult {
   finishReason: string | null
+  usage?: TurnUsage
 }
 
 export class HermesError extends Error {
@@ -161,6 +168,7 @@ export async function streamChat(
   if (!response.body) throw new HermesError("Hermes returned an empty response.")
 
   let finishReason: string | null = null
+  let usage: TurnUsage | undefined
   let runId: string | null = null
 
   for await (const { event, data } of readSse(response.body)) {
@@ -195,11 +203,17 @@ export async function streamChat(
         if (delta?.reasoning_content) handlers.onReasoning?.(delta.reasoning_content)
         if (delta?.content) handlers.onContent?.(delta.content)
         if (choice?.finish_reason) finishReason = choice.finish_reason
+        if (payload?.usage) {
+          usage = {
+            promptTokens: Number(payload.usage.prompt_tokens) || 0,
+            completionTokens: Number(payload.usage.completion_tokens) || 0,
+          }
+        }
       }
     }
   }
 
-  return { finishReason }
+  return { finishReason, usage }
 }
 
 /** Answer a dangerous-command prompt raised mid-stream. `runId` is the completion id. */
@@ -239,6 +253,25 @@ export async function listSkills(config: HermesConfig): Promise<Skill[]> {
   return Array.isArray(data)
     ? data.filter((s): s is Skill => typeof s?.name === "string" && s.name.length > 0)
     : []
+}
+
+export interface ModelInfo {
+  model?: string
+  provider?: string
+}
+
+/** The LLM and provider behind the profile. Newer Hermes only, so callers treat null as unknown. */
+export async function getModelInfo(config: HermesConfig): Promise<ModelInfo | null> {
+  try {
+    const response = await request(`${serverRoot(config.baseUrl)}/api/model/options`, {
+      headers: headers(config),
+    })
+    const body = await response.json()
+    const text = (value: unknown) => (typeof value === "string" && value ? value : undefined)
+    return { model: text(body?.model), provider: text(body?.provider) }
+  } catch {
+    return null
+  }
 }
 
 export async function checkHealth(config: HermesConfig) {
