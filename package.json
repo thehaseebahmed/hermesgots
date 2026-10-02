@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:netlify": "pnpm --package=netlify-cli dlx netlify dev",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "oxlint",
