@@ -7,6 +7,7 @@ Guidance for AI coding agents (and humans) working on Memento: a playful, minima
 ```bash
 pnpm install
 pnpm dev         # Vite dev server
+pnpm dev:netlify # Netlify CLI dev server (Identity + the sync function; needs a linked site)
 pnpm mock        # fake Hermes API on :8642 (say "clean up" to trigger an approval)
 pnpm lint        # oxlint
 pnpm typecheck   # tsc -b
@@ -57,6 +58,11 @@ PR titles follow the same format. Fill in `.github/pull_request_template.md` for
 | `src/lib/db.ts` | Dexie schema, types, settings and profile (bot) helpers |
 | `src/lib/cron.ts` | Syncs Hermes cron jobs and folds their runs into IndexedDB |
 | `src/lib/speech.ts` | Voice dictation hook (browser Web Speech API) |
+| `src/lib/vault.ts` | Sync encryption: data key, passkey (PRF) and recovery-code wrapping, seal/unseal |
+| `src/lib/account.ts` | Netlify Identity GitHub sign-in and the sync function's document API |
+| `src/lib/sync.ts`, `merge.ts` | Sync state, unlock flows, and merging bots and chat lists with the server |
+| `src/lib/history.ts` | Loads a synced chat's transcript from Hermes into IndexedDB |
+| `netlify/functions/sync.mts`, `netlify/lib/docs.ts` | The opaque per-user document store (Netlify Blobs) |
 | `src/routes/` | `chat.tsx`, `settings.tsx`, `routines.tsx` (cron jobs), `bots.tsx` (gallery) |
 | `src/components/chat/` | Message rendering, tool and approval cards, composer, header |
 | `src/components/bots.tsx` | Bot character definitions (SVG). `bot.tsx` renders them |
@@ -83,7 +89,15 @@ These behaviours were verified against Hermes's `gateway/platforms/api_server*.p
 - Cron jobs are called **Routines** in the UI (`/routines`) and `cron` in code. `GET /api/jobs?include_disabled=true` (server root) returns `{ jobs }`. Each job carries `last_run_at`, `last_status`, `failure_streak` and, on newer versions, `latest_execution`. `POST /api/jobs/{id}/pause | resume | run` control a job. A 501 means cron isn't available.
 - The API server has **no run-history endpoint** (the dashboard's `/api/cron/jobs/{id}/runs` is localhost-only). Memento keeps every run it sees in `cronRuns`, and backfills from `GET /api/sessions?source=cron`: each agent run leaves a session `cron_<jobId>_<YYYYmmdd_HHMMSS>` whose `end_reason` is `cron_complete` or `cron_incomplete_no_output`. A run that dies on provider errors still ends `cron_complete` (Hermes closes the turn with an assistant row whose `display_kind` is `failed_turn`), so Memento checks each `cron_complete` session's last row once via `GET /api/sessions/{id}/messages?limit=1&order=latest`. Script-only runs and runs that fail before the agent starts leave no session, so the history is best effort.
 - **Voice input uses the browser's Web Speech API, not Hermes STT.** Hermes exposes its STT provider config only on the dashboard server (`GET /api/audio/voice-config`), whose CORS allows only `localhost` origins and whose session token rotates each start; the API server reports `audio_api: false`. The wire shapes it hands out (OpenAI multipart, xAI, ElevenLabs) are upload-only, not streaming.
+- `GET /api/sessions/{id}/messages?order=latest&limit&offset` (server root) pages a session's transcript back from the newest row, but returns each page oldest first. Rows carry `id` (increasing), `role`, `content`, `tool_calls`, `tool_call_id`, `tool_name`, `timestamp` (Unix seconds), `reasoning` and `display_kind` (`hidden` rows are compaction scaffolding; skip them). Memento uses it to fill in chats synced from another device.
 - If you change how the API is used, update `scripts/mock-hermes.mjs` to match.
+
+## Sync
+
+- Sign-in is Netlify Identity with the GitHub provider (`@netlify/identity`). It only identifies the owner. **Never send plaintext, a key or anything that derives one to the server.** Every document the function stores is sealed with `vault.ts` first, and the associated data names its owner and slot (`memento:<userId>:<doc>`).
+- Documents are `vault` (the wrapped data keys), `bots` and `chats/<botId>`. Writes carry the etag they read; a 412 means re-pull, merge and retry.
+- Records merge last-write-wins on a change clock: `Profile.updatedAt` and `Conversation.changedAt`. Change synced fields through `updateProfile` / `updateConversation` so the clock moves, and delete through `deleteProfile` / `deleteConversation` so a tombstone is left for sync.
+- Message bodies don't sync. They come from Hermes (`history.ts`).
 
 ## Conventions
 
