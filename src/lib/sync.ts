@@ -263,6 +263,11 @@ async function pristineSeed() {
   return untouched ? profile : undefined
 }
 
+/** True while the only bot is the untouched seed, so first-run setup still has work to do. */
+export async function needsBotSetup() {
+  return Boolean(await pristineSeed())
+}
+
 async function syncBots(key: CryptoKey) {
   const seed = await pristineSeed()
   const hasBots = (doc: Doc<BotValue>) => Object.values(doc).some((entry) => !entry.deleted)
