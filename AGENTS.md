@@ -85,7 +85,7 @@ These behaviours were verified against Hermes's `gateway/platforms/api_server*.p
 - **Every screen must work at phone (390px) and tablet (≥768px) widths, in light and dark mode.**
   - Use the theme tokens. Don't hard-code colours, except for the fixed character palettes in the bots.
   - Respect safe-area insets.
-  - Keep touch targets at 44px or larger.
+  - Keep touch targets at 36px or larger (WCAG 2.2 AA asks for 24px).
 - **Bots:** they are still by default. Only the header (and the empty-state hero) passes `animate`. Animations must respect `prefers-reduced-motion`.
 - **Assets must be original or properly licensed.** Never copy third-party characters, mascots or brand assets, even as "inspiration" copies.
 - **Never commit secrets.** API keys live only in the user's browser.
