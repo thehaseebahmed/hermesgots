@@ -2,7 +2,8 @@
 // as gateway/platforms/api_server*.py: chat.completion.chunk frames plus the named SSE events
 // `hermes.tool.progress`, `hermes.status` and `approval.request`, and answers approvals on
 // POST /v1/runs/{id}/approval. Mention "clean" or "delete" in a message to trigger an approval.
-// Cron jobs live on /api/jobs, and their past runs show up as /api/sessions?source=cron.
+// Cron jobs live on /api/jobs, and their past runs show up as /api/sessions?source=cron. Like
+// Hermes, a run that died on provider errors still ends `cron_complete`, behind a `failed_turn` row.
 //
 //   pnpm mock            # then point Settings at http://localhost:8642/v1
 
@@ -30,7 +31,7 @@ async function readBody(req) {
   return raw ? JSON.parse(raw) : {}
 }
 
-// Cron: per profile, three jobs with a run history. Runs are { start, end, ok } in ms.
+// Cron: per profile, three jobs with a run history. Runs are { start, end, ok, provider } in ms.
 const cronByProfile = new Map()
 const MINUTE = 60_000
 function cronJobs(profile = "default") {
@@ -42,7 +43,8 @@ function cronJobs(profile = "default") {
       // The latest run was a third of a period ago, so the next one is still ahead.
       const start = now - (history - i - 0.67) * every * MINUTE
       const failed = i >= history - streak || (i * 7 + seed) % 11 === 0
-      return { start, end: start + 20_000 + ((i * 13) % 50) * 1000, ok: !failed }
+      const end = start + 20_000 + ((i * 13) % 50) * 1000
+      return { start, end, ok: !failed, provider: failed && i % 2 === 0 }
     })
     return { id: `${seed.toString(16)}a${n}c0ffee`.slice(0, 12), name, display, every, paused, runs }
   }
@@ -98,9 +100,25 @@ function cronSessions(profile) {
       title: job.name,
       started_at: run.start / 1000,
       ended_at: run.end ? run.end / 1000 : null,
-      end_reason: !run.end ? null : run.ok ? "cron_complete" : "cron_incomplete_no_output",
+      end_reason: !run.end
+        ? null
+        : run.ok || run.provider
+          ? "cron_complete"
+          : "cron_incomplete_no_output",
     })),
   ).sort((a, b) => b.started_at - a.started_at)
+}
+
+function cronSessionTail(profile, sessionId) {
+  const run = cronJobs(profile)
+    .flatMap((job) => job.runs.map((run) => ({ run, id: `cron_${job.id}_${stamp(run.start)}` })))
+    .find((entry) => entry.id === sessionId)?.run
+  if (!run) return undefined
+  if (run.ok) return { role: "assistant", content: "All good.", finish_reason: "stop" }
+  if (run.provider) {
+    return { role: "assistant", content: "The model provider didn't respond.", display_kind: "failed_turn" }
+  }
+  return { role: "tool", content: "{}" }
 }
 
 async function streamCompletion(req, res, body) {
@@ -233,6 +251,13 @@ http
       const limit = Number(url.searchParams.get("limit") ?? 50)
       const data = source === "cron" ? cronSessions(profile).slice(0, limit) : []
       return json(res, 200, { object: "list", data, limit, offset: 0, has_more: false })
+    }
+    const sessionMessages = /^\/api\/sessions\/([^/]+)\/messages$/.exec(url.pathname)
+    if (sessionMessages) {
+      const id = decodeURIComponent(sessionMessages[1])
+      const tail = cronSessionTail(profile, id)
+      if (!tail) return json(res, 404, { error: { message: "Session not found" } })
+      return json(res, 200, { object: "list", session_id: id, data: [{ session_id: id, ...tail }] })
     }
     if (req.method === "POST" && url.pathname === "/v1/chat/completions") {
       return streamCompletion(req, res, await readBody(req))
