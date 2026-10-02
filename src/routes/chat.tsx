@@ -38,6 +38,7 @@ import {
   MessageScrollerViewport,
   useMessageScroller,
 } from "@/components/ui/message-scroller"
+import { Spinner } from "@/components/ui/spinner"
 import { queueMessage, sendMessage, stopMessage } from "@/lib/chat"
 import {
   DEFAULT_SETTINGS,
@@ -49,6 +50,7 @@ import {
   updateConversation,
   type Message,
 } from "@/lib/db"
+import { loadEarlierHistory, loadRecentHistory } from "@/lib/history"
 import { syncContextWindow } from "@/lib/models"
 
 const SUGGESTIONS = [
@@ -142,6 +144,8 @@ export function ChatPage() {
   const [deleting, setDeleting] = useState(false)
   const [title, setTitle] = useState("")
   const [usageOpen, setUsageOpen] = useState(false)
+  const [loadingEarlier, setLoadingEarlier] = useState(false)
+  const [historyMissing, setHistoryMissing] = useState<string>()
 
   const resolved = { ...DEFAULT_SETTINGS, ...settings }
   const configured = Boolean(profile?.baseUrl.trim())
@@ -164,6 +168,21 @@ export function ChatPage() {
     if (!profileId) return
     void db.profiles.get(profileId).then((current) => current && syncContextWindow(current))
   }, [profileId, connection])
+
+  // A chat synced from another device arrives empty; its transcript is on Hermes.
+  const needsHistory =
+    Boolean(conversation && conversation.updatedAt > conversation.createdAt) &&
+    messages?.length === 0
+  const loadingHistory = needsHistory && historyMissing !== id
+  useEffect(() => {
+    if (!id || !needsHistory) return
+    loadRecentHistory(id)
+      .then((count) => count || setHistoryMissing(id))
+      .catch((error) => {
+        setHistoryMissing(id)
+        toast.error(error instanceof Error ? error.message : "Couldn't load this chat.")
+      })
+  }, [id, needsHistory])
 
   // A deleted (or unknown) conversation id falls back to a fresh chat.
   useEffect(() => {
@@ -242,6 +261,25 @@ export function ChatPage() {
           <MessageScroller className="flex-1">
             <MessageScrollerViewport aria-label="Messages">
               <MessageScrollerContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-32 pb-6">
+                {conversation?.olderThan && (
+                  <Button
+                    variant="outline"
+                    className="min-h-11 self-center rounded-full"
+                    disabled={loadingEarlier}
+                    onClick={() => {
+                      setLoadingEarlier(true)
+                      loadEarlierHistory(conversation.id)
+                        .catch((error) =>
+                          toast.error(
+                            error instanceof Error ? error.message : "Couldn't load more.",
+                          ),
+                        )
+                        .finally(() => setLoadingEarlier(false))
+                    }}
+                  >
+                    Load earlier messages
+                  </Button>
+                )}
                 {messages!.map((message) => (
                   <MessageScrollerItem key={message.id} messageId={message.id}>
                     <MessageItem
@@ -259,6 +297,10 @@ export function ChatPage() {
             <FollowOnSend lastUserId={messages!.findLast((m) => m.role === "user")?.id} />
           </MessageScroller>
         </MessageScrollerProvider>
+      ) : loadingHistory ? (
+        <div className="flex flex-1 items-center justify-center">
+          <Spinner className="size-6" />
+        </div>
       ) : (
         <EmptyState
           name={profile?.name ?? "Hermes"}
