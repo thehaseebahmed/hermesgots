@@ -9,6 +9,7 @@ A playful, minimal companion app for [Hermes Agent](https://github.com/NousResea
 
 - **Chat** streams replies from Hermes's OpenAI-compatible API, with live tool cards. When Hermes asks to run a dangerous command, an **approval** card (Once / Session / Always / Deny) takes the place of the message bar. Once you answer, the card moves into the thread at the point where Hermes asked.
 - **Bots**: each bot is a Hermes profile with its own API URL, key and model. Bots sit in a horizontal strip at the top of the sidebar. Tap one to see its chats, and new chats go to it. A new bot gets a random image from the 8 glassy SVG characters (soft shapes with an accessory each; see `/bots`), unique until all 8 are taken, and you can change it in Settings. The header bot is animated, and the bots next to messages stay still.
+- **Routines** (`/routines`): every Hermes cron job, grouped by bot, with its last 24 runs as status bars and Run now / Pause / Resume. Bots fold away, and the header flags failing and recently failed routines.
 - **Settings**: bots (name, image, API URL and key, model picker), theme, reply stats, and clearing local data.
 - Bots, chats and settings are stored on the device in **IndexedDB** (via Dexie). Theme preference lives in `localStorage` so the first paint doesn't flash.
 
@@ -35,6 +36,7 @@ Then open **Settings** in Memento, enter `http://localhost:8642/v1` (or your ser
 - `POST /v1/chat/completions` with `stream: true`. Memento parses Hermes's extra SSE events (`hermes.tool.progress`, `hermes.status`, `approval.request`) alongside the normal chunks.
 - Each chat mints its own `X-Hermes-Session-Id` (`memento-<uuid>`), so Hermes keeps one session per chat. Hermes only honours this header when `API_SERVER_KEY` is set. Without a key, Memento sends the full transcript on every turn.
 - Approvals are answered with `POST /v1/runs/{completion_id}/approval`.
+- Routines use `GET /api/jobs` and `POST /api/jobs/{id}/pause | resume | run`. The API server only reports each job's latest run, so the history is the runs Memento has seen, backfilled from cron sessions (`GET /api/sessions?source=cron`).
 - Hermes's tool events carry the tool name and a preview of its arguments, but not its output. Tool cards show what ran and for how long.
 - The reply stats line is an estimate (about 4 characters per token, measured over the visible reply).
 
