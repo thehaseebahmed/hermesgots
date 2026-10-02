@@ -35,6 +35,7 @@ async function streamCompletion(req, res, body) {
   const model = body.model ?? "hermes-agent"
   const last = [...(body.messages ?? [])].reverse().find((m) => m.role === "user")?.content ?? ""
   let closed = false
+  let pieces = 0
   req.on("close", () => (closed = true))
 
   res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", ...cors })
@@ -46,6 +47,7 @@ async function streamCompletion(req, res, body) {
   const say = async (text) => {
     for (const piece of text.match(/\S+\s*|\s+/g) ?? []) {
       if (closed) return
+      pieces += 1
       chunk({ content: piece })
       await sleep(25)
     }
@@ -96,7 +98,13 @@ async function streamCompletion(req, res, body) {
     await say("Want me to clean up the rotated files older than 90 days? Just say *clean them up*.")
   }
 
-  chunk({}, "stop", { usage: { prompt_tokens: 120, completion_tokens: 87, total_tokens: 207 } })
+  // Like Hermes, usage sums every model call in the turn: a fixed system prompt plus the transcript,
+  // counted once per call (this turn makes one call per tool, plus the reply).
+  const transcript = (body.messages ?? []).reduce((n, m) => n + String(m.content ?? "").length, 0)
+  const calls = /clean|delete/i.test(last) ? 3 : 2
+  const prompt_tokens = calls * (6000 + Math.round(transcript / 4))
+  const completion_tokens = pieces
+  chunk({}, "stop", { usage: { prompt_tokens, completion_tokens, total_tokens: prompt_tokens + completion_tokens } })
   if (!closed) res.end("data: [DONE]\n\n")
 }
 
@@ -112,6 +120,9 @@ http
       // Named profiles advertise their name as the model id.
       const id = profile ?? "hermes-agent"
       return json(res, 200, { object: "list", data: [{ id, object: "model", owned_by: "hermes" }] })
+    }
+    if (url.pathname === "/api/model/options") {
+      return json(res, 200, { model: "claude-sonnet-4.5", provider: "openrouter", providers: [] })
     }
     if (url.pathname === "/v1/skills") {
       return json(res, 200, {

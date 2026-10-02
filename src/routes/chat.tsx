@@ -8,6 +8,7 @@ import { ApprovalCard } from "@/components/chat/approval-card"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
+import { ContextRing, UsageSheet, type ContextUsage } from "@/components/chat/usage-sheet"
 import { Bot } from "@/components/bot"
 import {
   AlertDialog,
@@ -138,6 +139,7 @@ export function ChatPage() {
   const [renaming, setRenaming] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [title, setTitle] = useState("")
+  const [usageOpen, setUsageOpen] = useState(false)
 
   const resolved = { ...DEFAULT_SETTINGS, ...settings }
   const configured = Boolean(profile?.baseUrl.trim())
@@ -145,6 +147,12 @@ export function ChatPage() {
   const busy = Boolean(streaming)
   const awaitingApproval = messages?.find((m) => m.approval && !m.approval.resolved)
   const activity = streaming && describeActivity(streaming)
+  const lastTurn = messages?.findLast((m) => m.stats?.promptTokens)?.stats
+  const usage: ContextUsage = {
+    tokens: lastTurn?.promptTokens,
+    approximate: lastTurn?.toolsUsed,
+    window: profile?.contextWindow,
+  }
 
   // A deleted (or unknown) conversation id falls back to a fresh chat.
   useEffect(() => {
@@ -262,9 +270,16 @@ export function ChatPage() {
             onCommand={(command) => navigate(command === "new" ? "/" : "/settings")}
             connection={{ baseUrl: profile?.baseUrl ?? "", apiKey: profile?.apiKey ?? "" }}
             botName={profile?.name}
+            leading={
+              hasMessages && configured ? (
+                <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />
+              ) : undefined
+            }
           />
         )}
       </div>
+
+      <UsageSheet open={usageOpen} onOpenChange={setUsageOpen} usage={usage} profile={profile} />
 
       <AlertDialog open={renaming} onOpenChange={setRenaming}>
         <AlertDialogContent>
