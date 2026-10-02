@@ -11,16 +11,11 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { signIn } from "@/lib/account"
-import { getActiveProfile, getSettings, saveSettings, updateProfile } from "@/lib/db"
+import { getActiveProfile, getSettings, saveSettings } from "@/lib/db"
 import { needsBotSetup, setUpSync, syncNow, useSyncState, type SyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
 
 type Step = "sign-in" | "sync" | "checking" | "server" | "bot"
-
-function randomKey() {
-  const bytes = crypto.getRandomValues(new Uint8Array(32))
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
-}
 
 function isAuthed({ account, vault }: SyncState) {
   return (
@@ -229,15 +224,23 @@ function Code({ children }: { children: ReactNode }) {
 
 /** How to turn on Hermes's API server, from its `.env` file or the Hermes Dashboard. */
 function ServerStep({ onNext }: { onNext: () => void }) {
-  const profile = useLiveQuery(getActiveProfile, [])
   const [method, setMethod] = useState<"env" | "dashboard">("env")
-
-  // The key the instructions hand out is the one the bot will use.
-  useEffect(() => {
-    if (profile && !profile.apiKey) void updateProfile(profile.id, { apiKey: randomKey() })
-  }, [profile])
-
-  if (!profile?.apiKey) return <Spinner className="self-center" />
+  const generate = (
+    <li>
+      <p>
+        Generate a 64-character key at{" "}
+        <a
+          href="https://randomkeygen.com/api-key"
+          target="_blank"
+          rel="noreferrer"
+          className="text-primary underline-offset-4 hover:underline"
+        >
+          randomkeygen.com/api-key
+        </a>
+        .
+      </p>
+    </li>
+  )
   const origin = window.location.origin
   const cors = `API_SERVER_CORS_ORIGINS=${origin}`
 
@@ -259,13 +262,15 @@ function ServerStep({ onNext }: { onNext: () => void }) {
 
       {method === "env" ? (
         <ol className="flex list-decimal flex-col gap-3 pl-5 text-sm marker:text-muted-foreground">
+          {generate}
           <li className="space-y-2">
             <p>
-              Add these lines to <Code>~/.hermes/.env</Code>:
+              Add these lines to <Code>~/.hermes/.env</Code>, with your key in place of the
+              placeholder:
             </p>
             <CopyBlock
               label="Copy .env lines"
-              text={`API_SERVER_ENABLED=true\nAPI_SERVER_KEY=${profile.apiKey}\n${cors}`}
+              text={`API_SERVER_ENABLED=true\nAPI_SERVER_KEY=<your 64-character key>\n${cors}`}
             />
           </li>
           <li className="space-y-2">
@@ -275,18 +280,18 @@ function ServerStep({ onNext }: { onNext: () => void }) {
         </ol>
       ) : (
         <ol className="flex list-decimal flex-col gap-3 pl-5 text-sm marker:text-muted-foreground">
-          <li className="space-y-2">
+          {generate}
+          <li>
             <p>
               Run <Code>hermes dashboard</Code> and open <Code>http://127.0.0.1:9119</Code>.
             </p>
           </li>
-          <li className="space-y-2">
+          <li>
             <p>
               Go to <strong>Channels</strong>, find <strong>API server</strong> and choose{" "}
               <strong>Configure</strong>. Set <strong>Enable API server</strong> to{" "}
-              <Code>true</Code> and the auth key to:
+              <Code>true</Code> and paste your key as the auth key.
             </p>
-            <CopyBlock label="Copy API key" text={profile.apiKey} />
           </li>
           <li className="space-y-2">
             <p>
