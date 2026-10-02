@@ -90,10 +90,6 @@ export function RoutinesPage() {
             onOpenChange={(open) => setOpen(profile.id, open)}
           />
         ))}
-        <p className="text-center text-xs text-muted-foreground">
-          Hermes only reports each routine's latest run, so the history is what this device has seen
-          plus what Hermes's cron sessions show.
-        </p>
       </div>
     </div>
   )
@@ -416,9 +412,6 @@ function JobCard({
           </p>
           {selected.error && (
             <p className="mt-1 text-xs break-words text-destructive">{selected.error}</p>
-          )}
-          {selected.source === "session" && (
-            <p className="mt-1 text-xs text-muted-foreground">From Hermes's session history.</p>
           )}
         </div>
       )}
