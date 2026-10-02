@@ -418,7 +418,12 @@ export async function startSync() {
       await refreshVault()
       void syncNow()
     } catch (error) {
-      setState({ error: error instanceof Error ? error.message : "Sync failed" })
+      // A key already on this device keeps the app usable while the sync function is unreachable.
+      const unlocked = Boolean(await localKey())
+      setState({
+        vault: unlocked ? "unlocked" : state.vault,
+        error: error instanceof Error ? error.message : "Sync failed",
+      })
     }
   }
   await onAccount(await loadAccount())
