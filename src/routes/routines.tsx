@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
+  ChevronRightIcon,
+  CircleAlertIcon,
   EllipsisIcon,
   MenuIcon,
   PauseIcon,
   PlayIcon,
   RefreshCwIcon,
   RotateCwIcon,
+  TriangleAlertIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -14,7 +17,8 @@ import { Bot } from "@/components/bot"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card } from "@/components/ui/card"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,7 +27,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Spinner } from "@/components/ui/spinner"
 import { HISTORY_LENGTH, syncCron } from "@/lib/cron"
-import { cronRunsOf, listProfiles, type CronRun, type Profile } from "@/lib/db"
+import { cronRunsOf, db, listProfiles, type CronRun, type Profile } from "@/lib/db"
 import { formatDuration, formatRelative } from "@/lib/format"
 import { HermesError, controlCronJob, type CronJob } from "@/lib/hermes"
 import { cn } from "@/lib/utils"
@@ -35,6 +39,7 @@ export function RoutinesPage() {
   const openDrawer = useOpenDrawer()
   const profiles = useLiveQuery(listProfiles, [])
   const [tick, setTick] = useState(0)
+  const [collapsed, setOpen] = useCollapsedBots()
   const refresh = useCallback(() => setTick((n) => n + 1), [])
 
   useEffect(() => {
@@ -75,9 +80,15 @@ export function RoutinesPage() {
         </div>
       </header>
 
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pb-[max(2rem,env(safe-area-inset-bottom))]">
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pb-[max(2rem,env(safe-area-inset-bottom))]">
         {profiles?.map((profile) => (
-          <BotRoutines key={profile.id} profile={profile} tick={tick} />
+          <BotRoutines
+            key={profile.id}
+            profile={profile}
+            tick={tick}
+            open={!collapsed.has(profile.id)}
+            onOpenChange={(open) => setOpen(profile.id, open)}
+          />
         ))}
         <p className="text-center text-xs text-muted-foreground">
           Hermes only reports each routine's latest run, so the history is what this device has seen
@@ -97,11 +108,73 @@ function describeError(error: unknown) {
   return error instanceof Error ? error.message : "Couldn't load routines."
 }
 
-function BotRoutines({ profile, tick }: { profile: Profile; tick: number }) {
+const COLLAPSED_KEY = "memento:routines:collapsed"
+
+/** Bots whose routines are folded away; a per-device convenience, so localStorage is enough. */
+function useCollapsedBots() {
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      const stored: unknown = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]")
+      return new Set(Array.isArray(stored) ? stored.filter((id) => typeof id === "string") : [])
+    } catch {
+      return new Set<string>()
+    }
+  })
+  const setOpen = useCallback((profileId: string, open: boolean) => {
+    setCollapsed((current) => {
+      const next = new Set(current)
+      if (open) next.delete(profileId)
+      else next.add(profileId)
+      try {
+        localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]))
+      } catch {
+        // Private mode or blocked storage: it just won't be remembered.
+      }
+      return next
+    })
+  }, [])
+  return [collapsed, setOpen] as const
+}
+
+const isPaused = (job: CronJob) => !job.enabled || job.state === "paused"
+
+/** Routines failing now, and the others that failed at least once in their last runs. */
+function useFailureSummary(profileId: string, jobs?: CronJob[]) {
+  const runs = useLiveQuery(
+    () => db.cronRuns.where("profileId").equals(profileId).toArray(),
+    [profileId],
+  )
+  if (!jobs || !runs) return { failing: 0, recent: 0 }
+  let failing = 0
+  let recent = 0
+  for (const job of jobs) {
+    const history = runs
+      .filter((run) => run.jobId === job.id)
+      .sort((a, b) => a.startedAt - b.startedAt)
+      .slice(-HISTORY_LENGTH)
+    const latest = history.findLast((run) => run.status !== "running")
+    if (!isPaused(job) && (job.failureStreak > 0 || latest?.status === "failed")) failing += 1
+    else if (history.some((run) => run.status === "failed")) recent += 1
+  }
+  return { failing, recent }
+}
+
+function BotRoutines({
+  profile,
+  tick,
+  open,
+  onOpenChange,
+}: {
+  profile: Profile
+  tick: number
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
   const [jobs, setJobs] = useState<CronJob[]>()
   const [syncedAt, setSyncedAt] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [ownTick, setOwnTick] = useState(0)
+  const { failing, recent } = useFailureSummary(profile.id, error ? undefined : jobs)
 
   useEffect(() => {
     let cancelled = false
@@ -121,34 +194,54 @@ function BotRoutines({ profile, tick }: { profile: Profile; tick: number }) {
   const resync = useCallback(() => setOwnTick((n) => n + 1), [])
 
   return (
-    <Card className="rounded-3xl">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-3">
-          <Bot id={profile.botId} className="size-9" />
-          <span className="min-w-0 flex-1 truncate">{profile.name}</span>
+    <Collapsible open={open} onOpenChange={onOpenChange}>
+      <CollapsibleTrigger className="group/bot flex min-h-11 w-full items-center gap-3 rounded-2xl px-1 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[panel-open]/bot:rotate-90" />
+        <Bot id={profile.botId} className="size-9" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-semibold">{profile.name}</span>
           {jobs && !error && (
-            <span className="text-sm font-normal text-muted-foreground">
+            <span className="block text-xs text-muted-foreground">
               {jobs.length} {jobs.length === 1 ? "routine" : "routines"}
             </span>
           )}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-6">
-        {error ? (
-          <p className="text-sm text-destructive">{error}</p>
-        ) : !jobs ? (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Spinner className="size-4" /> Loading routines…
-          </p>
-        ) : jobs.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No routines yet.</p>
-        ) : (
-          jobs.map((job) => (
-            <JobRow key={job.id} profile={profile} job={job} now={syncedAt} onChanged={resync} />
-          ))
-        )}
-      </CardContent>
-    </Card>
+        </span>
+        <span className="flex shrink-0 flex-col items-end gap-1">
+          {error && (
+            <Badge variant="destructive">
+              <CircleAlertIcon /> Unreachable
+            </Badge>
+          )}
+          {failing > 0 && (
+            <Badge variant="destructive">
+              <CircleAlertIcon /> {failing} failing
+            </Badge>
+          )}
+          {recent > 0 && (
+            <Badge className="bg-warning/15 text-warning">
+              <TriangleAlertIcon /> {recent} recently failed
+            </Badge>
+          )}
+        </span>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="flex flex-col gap-3 pt-2">
+          {error ? (
+            <p className="px-1 text-sm text-destructive">{error}</p>
+          ) : !jobs ? (
+            <p className="flex items-center gap-2 px-1 text-sm text-muted-foreground">
+              <Spinner className="size-4" /> Loading routines…
+            </p>
+          ) : jobs.length === 0 ? (
+            <p className="px-1 text-sm text-muted-foreground">No routines yet.</p>
+          ) : (
+            jobs.map((job) => (
+              <JobCard key={job.id} profile={profile} job={job} now={syncedAt} onChanged={resync} />
+            ))
+          )}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 
@@ -167,8 +260,7 @@ const BAR_COLOR: Record<CronRun["status"], string> = {
 }
 
 function JobStatus({ job, latest }: { job: CronJob; latest?: CronRun }) {
-  const paused = !job.enabled || job.state === "paused"
-  if (paused) return <Badge variant="secondary">Paused</Badge>
+  if (isPaused(job)) return <Badge variant="secondary">Paused</Badge>
   if (job.state === "running" || latest?.status === "running") {
     return <Badge className="bg-warning/15 text-warning">Running</Badge>
   }
@@ -188,7 +280,7 @@ function formatWhen(timestamp: number) {
   })
 }
 
-function JobRow({
+function JobCard({
   profile,
   job,
   now,
@@ -208,7 +300,7 @@ function JobRow({
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const selected = runs?.find((run) => run.id === selectedId)
   const latest = runs?.at(-1)
-  const paused = !job.enabled || job.state === "paused"
+  const paused = isPaused(job)
   const nextRun = job.nextRunAt ? Date.parse(job.nextRunAt) : NaN
   const slots: (CronRun | null)[] = [
     ...Array<null>(Math.max(0, HISTORY_LENGTH - (runs?.length ?? 0))).fill(null),
@@ -229,7 +321,7 @@ function JobRow({
   }
 
   return (
-    <section className="flex flex-col gap-2" aria-label={job.name}>
+    <Card className="gap-2 rounded-3xl px-4 py-3" aria-label={job.name}>
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -330,6 +422,6 @@ function JobRow({
           )}
         </div>
       )}
-    </section>
+    </Card>
   )
 }
