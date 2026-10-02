@@ -109,23 +109,28 @@ export function BotSettings() {
   )
 }
 
-/** `setup` trims it to the connection fields for first-run setup. */
+/**
+ * `setup` trims it to the connection fields for first-run setup. `onConnectionChange` reports
+ * whether the current URL and key passed Test connection.
+ */
 export function BotEditor({
   profile,
   canDelete = false,
   onDeleted,
   setup = false,
-  onConnected,
+  onConnectionChange,
 }: {
   profile: Profile
   canDelete?: boolean
   onDeleted?: () => void
   setup?: boolean
-  onConnected?: () => void
+  onConnectionChange?: (ok: boolean) => void
 }) {
   const [showKey, setShowKey] = useState(false)
   const [models, setModels] = useState<string[]>([])
   const [connection, setConnection] = useState<Connection>({ state: "idle" })
+
+  useEffect(() => onConnectionChange?.(connection.state === "ok"), [connection, onConnectionChange])
 
   // Local drafts so typing isn't fighting the live query; persisted on every change.
   const [name, setName] = useState(profile.name)
@@ -151,7 +156,6 @@ export function BotEditor({
         save({ name: advertised })
       }
       setConnection({ state: "ok" })
-      onConnected?.()
       const saved = await db.profiles.get(profile.id)
       if (saved) await syncContextWindow(saved)
       const synced = await db.profiles.get(profile.id)

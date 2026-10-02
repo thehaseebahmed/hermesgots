@@ -325,19 +325,14 @@ function BotStep({ onBack, onDone }: { onBack: () => void; onDone: () => void })
 
   return (
     <Section title="Connect your bot" description="Point it at your Hermes API server.">
-      <BotEditor profile={profile} setup onConnected={() => setConnected(true)} />
+      <BotEditor profile={profile} setup onConnectionChange={setConnected} />
       <div className="flex flex-col gap-2">
         <Button size="lg" className="h-11" disabled={!connected} onClick={onDone}>
           Start chatting
         </Button>
-        <div className="flex justify-between">
-          <Button variant="ghost" className="h-11" onClick={onBack}>
-            Back
-          </Button>
-          <Button variant="ghost" className="h-11" onClick={onDone}>
-            Skip for now
-          </Button>
-        </div>
+        <Button variant="ghost" className="h-11 self-start" onClick={onBack}>
+          Back
+        </Button>
       </div>
     </Section>
   )
