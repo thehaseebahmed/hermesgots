@@ -76,6 +76,7 @@ These behaviours were verified against Hermes's `gateway/platforms/api_server*.p
 - **Profiles are bots.** Hermes has no endpoint that lists profiles, so the user adds each one in Settings (a `profiles` row with its own URL, key and model). With `gateway.multiplex_profiles`, secondary profiles are served at `/p/<profile>/...`. Each profile has its own `API_SERVER_KEY`, and a named profile advertises its name as the `/v1/models` id. The mock serves the same `/p/<profile>/` prefix.
 - The final stream chunk carries `usage`. Hermes sums it over **every** model call in the turn, so on a turn that ran tools `prompt_tokens` counts the prompt more than once. No endpoint reports the model's context window, so each bot stores its own.
 - `GET /api/model/options` (server root, not `/v1`) returns the configured `model` and `provider` behind a profile. Older versions don't have it, so treat a failure as unknown.
+- The context window is looked up in [models.dev](https://models.dev/api.json) (`limit.context`) by that `provider`/`model` (`src/lib/models.ts`). The bot remembers which model it was for and resets it when the model changes; if models.dev doesn't list the model, the user sets it by hand.
 - If you change how the API is used, update `scripts/mock-hermes.mjs` to match.
 
 ## Conventions

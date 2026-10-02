@@ -164,7 +164,7 @@ export function UsageSheet({
                   {usage.tokens
                     ? `The last turn used ${formatTokens(usage.tokens)} prompt tokens. `
                     : ""}
-                  Hermes doesn't report the model's context size. Set it on this bot to see how full
+                  This model's context size isn't on models.dev. Set it on this bot to see how full
                   the chat is.
                 </p>
                 <Button
