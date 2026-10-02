@@ -12,6 +12,7 @@ pnpm mock        # fake Hermes API on :8642 (say "clean up" to trigger an approv
 pnpm lint        # oxlint
 pnpm typecheck   # tsc -b
 pnpm build       # typecheck + production build (also generates the service worker)
+pnpm build:android # native-mode build (no service worker) synced into android/; set VITE_SITE_URL for sync
 pnpm format      # prettier (with the Tailwind class sorter) over src/
 ```
 
@@ -48,6 +49,7 @@ PR titles follow the same format. Fill in `.github/pull_request_template.md` for
   - Use shadcn components wherever one fits before writing your own.
   - Add new ones with `pnpm dlx shadcn@latest add <name>`. Leave the generated files alone unless there's a reason to change them.
 - Dexie (IndexedDB) for all app data. `vite-plugin-pwa` handles the manifest and service worker. Deployed on Netlify (`netlify.toml`).
+- Capacitor 8 wraps the same build as an Android app (`capacitor.config.ts`, `android/`). `.github/workflows/android.yml` builds the APK on pushes to `main` and to PRs into `main`.
 
 ## Layout
 
@@ -63,6 +65,9 @@ PR titles follow the same format. Fill in `.github/pull_request_template.md` for
 | `src/lib/sync.ts`, `merge.ts` | Sync state, unlock flows, and merging bots and chat lists with the server |
 | `src/lib/history.ts` | Loads a synced chat's transcript from Hermes into IndexedDB |
 | `netlify/functions/sync.mts`, `netlify/lib/docs.ts` | The opaque per-user document store (Netlify Blobs) |
+| `src/lib/native.ts`, `native-account.ts` | Android app: platform checks, back button, and GoTrue sign-in and sync calls over native HTTP |
+| `public/auth/native.html` | Sign-in bridge the app opens in a Custom Tab; hands the tokens back via `memento://auth` |
+| `android/`, `capacitor.config.ts`, `assets/icon.png` | Capacitor Android project (icons and splash generated from `assets/icon.png` with `@capacitor/assets`) |
 | `src/routes/` | `chat.tsx`, `settings.tsx`, `routines.tsx` (cron jobs), `bots.tsx` (gallery) |
 | `src/components/chat/` | Message rendering, tool and approval cards, composer, header |
 | `src/components/bots.tsx` | Bot character definitions (SVG). `bot.tsx` renders them |
@@ -95,6 +100,7 @@ These behaviours were verified against Hermes's `gateway/platforms/api_server*.p
 ## Sync
 
 - Sign-in is Netlify Identity with the GitHub provider (`@netlify/identity`). It only identifies the owner. **Never send plaintext, a key or anything that derives one to the server.** Every document the function stores is sealed with `vault.ts` first, and the associated data names its owner and slot (`memento:<userId>:<doc>`).
+- **In the Android app** the page is `https://localhost`, and `@netlify/identity` only talks to its own origin. So `account.ts` hands off to `native-account.ts`, which calls `${VITE_SITE_URL}/.netlify/identity` and the sync function through `CapacitorHttp.request` with a Bearer token. Don't turn on `CapacitorHttp`'s fetch patching: it would buffer Hermes's SSE streams. GoTrue ignores `redirect_to` and returns to the page that started sign-in (its `Referer`, when on the site's host), so sign-in starts from `/auth/native.html`. The function skips its origin check for Bearer requests. Passkeys are off in the app, so it unlocks with the recovery code.
 - Documents are `vault` (the wrapped data keys), `bots` and `chats/<botId>`. Writes carry the etag they read; a 412 means re-pull, merge and retry.
 - Records merge last-write-wins on a change clock: `Profile.updatedAt` and `Conversation.changedAt`. Change synced fields through `updateProfile` / `updateConversation` so the clock moves, and delete through `deleteProfile` / `deleteConversation` so a tombstone is left for sync.
 - Message bodies don't sync. They come from Hermes (`history.ts`): with `X-Hermes-Session-Id`, Hermes builds the turn's history from its own session store and ignores the body's, so its transcript holds every device's turns. An open chat catches up (`reconcileHistory`) on open, when its `updatedAt` changes, on focus, every 30s while visible, and before a send. `Conversation.hermesTip` (local only) lets that start with a one-row probe. Turns streamed on this device are kept (they carry stats and approvals) and matched to their rows by `hermesRowId`.
