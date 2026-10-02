@@ -104,9 +104,14 @@ http
   .createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`)
     if (req.method === "OPTIONS") return res.writeHead(200, cors).end()
+    // Like a gateway with multiplex_profiles: other profiles live under /p/<profile>/.
+    const profile = /^\/p\/([^/]+)(?=\/)/.exec(url.pathname)?.[1]
+    if (profile) url.pathname = url.pathname.slice(profile.length + 3)
     if (url.pathname === "/health") return json(res, 200, { status: "ok", platform: "mock-hermes" })
     if (url.pathname === "/v1/models") {
-      return json(res, 200, { object: "list", data: [{ id: "hermes-agent", object: "model", owned_by: "hermes" }] })
+      // Named profiles advertise their name as the model id.
+      const id = profile ?? "hermes-agent"
+      return json(res, 200, { object: "list", data: [{ id, object: "model", owned_by: "hermes" }] })
     }
     if (url.pathname === "/v1/skills") {
       return json(res, 200, {

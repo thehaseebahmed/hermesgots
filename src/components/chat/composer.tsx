@@ -8,6 +8,7 @@ import {
   InputGroupButton,
   InputGroupTextarea,
 } from "@/components/ui/input-group"
+import type { HermesConfig } from "@/lib/hermes"
 import {
   localCommand,
   optionId,
@@ -22,8 +23,13 @@ export function Composer({
   onSend,
   onStop,
   onCommand,
+  connection,
+  botName = "Hermes",
 }: {
   busy: boolean
+  /** The chat's Hermes profile, for the skills in the `/` menu. */
+  connection: HermesConfig
+  botName?: string
   disabled?: boolean
   onSend: (text: string) => Promise<void> | void
   onStop: () => void
@@ -37,7 +43,7 @@ export function Composer({
   const canSend = value.trim().length > 0 && !busy && !disabled
 
   const query = /^\/(\S*)$/.exec(value)?.[1]
-  const slash = useSlashItems(query !== undefined && !disabled, query ?? "")
+  const slash = useSlashItems(query !== undefined && !disabled, query ?? "", connection)
   const menuOpen =
     query !== undefined &&
     !dismissed &&
@@ -124,7 +130,7 @@ export function Composer({
           aria-activedescendant={
             menuOpen && slash.items.length ? optionId(listId, activeIndex) : undefined
           }
-          placeholder={disabled ? "Connect to Hermes in Settings first" : "Message Hermes…"}
+          placeholder={disabled ? "Connect to Hermes in Settings first" : `Message ${botName}…`}
           disabled={disabled}
           rows={1}
           className="max-h-48 min-h-12 px-5 py-3.5 text-base md:text-[15px]"

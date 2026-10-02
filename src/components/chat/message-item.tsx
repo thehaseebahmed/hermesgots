@@ -75,7 +75,15 @@ export function TypingBubble({ status }: { status?: string }) {
   )
 }
 
-export function MessageItem({ message, showStats }: { message: Message; showStats: boolean }) {
+export function MessageItem({
+  message,
+  showStats,
+  botId,
+}: {
+  message: Message
+  showStats: boolean
+  botId?: string
+}) {
   if (message.role === "user") {
     return (
       <MessageRow align="end">
@@ -130,19 +138,33 @@ export function MessageItem({ message, showStats }: { message: Message; showStat
 
   return (
     <div className="flex flex-col gap-3">
-      <AssistantRow parts={toParts(before, toolsBefore, 0)}>{!split && footer}</AssistantRow>
+      <AssistantRow botId={botId} parts={toParts(before, toolsBefore, 0)}>
+        {!split && footer}
+      </AssistantRow>
       {/* A pending approval lives in the composer slot; once answered it sits in the thread, unattributed. */}
       {approval?.resolved && <ApprovalCard message={message} />}
-      {split && <AssistantRow parts={toParts(after, toolsAfter, offset)}>{footer}</AssistantRow>}
+      {split && (
+        <AssistantRow botId={botId} parts={toParts(after, toolsAfter, offset)}>
+          {footer}
+        </AssistantRow>
+      )}
     </div>
   )
 }
 
-function AssistantRow({ parts, children }: { parts: Part[]; children?: ReactNode }) {
+function AssistantRow({
+  botId,
+  parts,
+  children,
+}: {
+  botId?: string
+  parts: Part[]
+  children?: ReactNode
+}) {
   return (
     <MessageRow align="start" className="gap-2">
       <MessageAvatar className="mb-6 size-8 bg-transparent">
-        <Bot className="size-8" />
+        <Bot id={botId} className="size-8" />
       </MessageAvatar>
       <MessageContent className="gap-2">
         {parts.map((part) =>

@@ -1,7 +1,7 @@
 import {
   db,
+  getActiveProfile,
   getMessages,
-  getSettings,
   type ApprovalChoice,
   type Message,
   type MessageStats,
@@ -29,13 +29,19 @@ function titleFrom(text: string) {
   return line.length > 48 ? `${line.slice(0, 47).trimEnd()}…` : line || "New chat"
 }
 
+/** A chat's profile, or the active one if its profile has gone. */
+async function profileFor(profileId?: string) {
+  return (profileId && (await db.profiles.get(profileId))) || getActiveProfile()
+}
+
 export async function sendMessage(conversationId: string, text: string) {
   const content = text.trim()
   if (!content || controllers.has(conversationId)) return
 
-  const settings = await getSettings()
   const conversation = await db.conversations.get(conversationId)
   if (!conversation) return
+  const profile = await profileFor(conversation.profileId)
+  if (!profile) return
 
   const history = await getMessages(conversationId)
   const now = Date.now()
@@ -88,12 +94,12 @@ export async function sendMessage(conversationId: string, text: string) {
   }
   activeDrafts.set(reply.id, { draft, touch })
 
-  const config = { baseUrl: settings.baseUrl, apiKey: settings.apiKey }
+  const config = { baseUrl: profile.baseUrl, apiKey: profile.apiKey }
   try {
     await streamChat(
       config,
       {
-        model: settings.model,
+        model: profile.model,
         messages: transcript,
         sessionId: conversation.hermesSessionId,
         signal: controller.signal,
@@ -189,9 +195,11 @@ export function stopMessage(conversationId: string) {
 
 export async function answerApproval(message: Message, choice: ApprovalChoice) {
   if (!message.approval) return
-  const settings = await getSettings()
+  const conversation = await db.conversations.get(message.conversationId)
+  const profile = await profileFor(conversation?.profileId)
+  if (!profile) return
   await respondToApproval(
-    { baseUrl: settings.baseUrl, apiKey: settings.apiKey },
+    { baseUrl: profile.baseUrl, apiKey: profile.apiKey },
     message.approval.runId,
     choice,
   )

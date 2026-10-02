@@ -9,9 +9,11 @@ import { Button } from "@/components/ui/button"
 export function ChatHeader({
   title,
   subtitle,
+  botId,
   actions,
 }: {
   title: string
+  botId?: string
   subtitle: string
   actions?: ReactNode
 }) {
@@ -32,7 +34,7 @@ export function ChatHeader({
           </Button>
         </div>
         <div className="pointer-events-auto flex min-w-0 flex-1 flex-col items-center">
-          <Bot animate className="size-11" />
+          <Bot id={botId} animate className="size-11" />
           <div className="-mt-1 flex max-w-full flex-col items-center rounded-full bg-background/80 px-3 py-0.5 backdrop-blur">
             <span className="max-w-full truncate text-sm font-semibold">{title}</span>
             <span className="text-[11px] leading-tight text-muted-foreground">{subtitle}</span>
