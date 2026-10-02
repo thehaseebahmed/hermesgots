@@ -9,6 +9,8 @@ export interface Settings {
   id: "settings"
   showStats: boolean
   activeProfileId?: string
+  /** When sync last finished without an error. */
+  syncedAt?: number
 }
 
 /** A Hermes profile Memento can talk to. Hermes can't list its profiles, so the user adds them. */

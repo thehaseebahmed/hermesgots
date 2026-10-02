@@ -1,11 +1,8 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
   CheckIcon,
-  CircleAlertIcon,
-  CircleCheckIcon,
   CopyIcon,
   FingerprintIcon,
-  LoaderCircleIcon,
   LogInIcon,
   LogOutIcon,
   RefreshCwIcon,
@@ -27,6 +24,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { signIn } from "@/lib/account"
+import { formatRelative } from "@/lib/format"
 import {
   addPasskey,
   canAddPasskey,
@@ -69,12 +67,7 @@ export function AccountSettings() {
   return (
     <Card className="rounded-3xl">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          {account.status === "signed-in" && sync.vault === "unlocked" && (
-            <SyncStatus syncing={sync.syncing || !sync.syncedAt} error={sync.error} />
-          )}
-          Sync
-        </CardTitle>
+        <CardTitle className="flex items-center gap-2">Sync</CardTitle>
         <CardDescription>
           Bots, API keys and chat titles are encrypted on your device before they're stored on the
           server.
@@ -189,26 +182,29 @@ export function AccountSettings() {
             )}
 
             {sync.vault === "unlocked" && (
-              <div className="flex flex-wrap gap-3">
-                <Button variant="outline" disabled={sync.syncing} onClick={() => void syncNow()}>
-                  <RefreshCwIcon data-icon="inline-start" />
-                  Sync now
-                </Button>
-                {supportsPasskeys() && canAddPasskey() && (
-                  <Button
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() =>
-                      run(async () => {
-                        await addPasskey()
-                        toast.success("Passkey added")
-                      })
-                    }
-                  >
-                    <FingerprintIcon data-icon="inline-start" />
-                    Add passkey
+              <div className="flex flex-col gap-3">
+                <LastSynced at={sync.syncedAt} />
+                <div className="flex flex-wrap gap-3">
+                  <Button variant="outline" disabled={sync.syncing} onClick={() => void syncNow()}>
+                    <RefreshCwIcon data-icon="inline-start" />
+                    Sync now
                   </Button>
-                )}
+                  {supportsPasskeys() && canAddPasskey() && (
+                    <Button
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() =>
+                        run(async () => {
+                          await addPasskey()
+                          toast.success("Passkey added")
+                        })
+                      }
+                    >
+                      <FingerprintIcon data-icon="inline-start" />
+                      Add passkey
+                    </Button>
+                  )}
+                </div>
               </div>
             )}
           </FieldGroup>
@@ -254,20 +250,21 @@ export function AccountSettings() {
   )
 }
 
-function SyncStatus({ syncing, error }: { syncing: boolean; error?: string }) {
-  if (syncing) {
-    return (
-      <LoaderCircleIcon
-        role="img"
-        aria-label="Syncing"
-        className="size-5 text-muted-foreground motion-safe:animate-spin"
-      />
-    )
-  }
-  if (error) {
-    return (
-      <CircleAlertIcon role="img" aria-label="Not synced" className="size-5 text-destructive" />
-    )
-  }
-  return <CircleCheckIcon role="img" aria-label="Synced" className="size-5 text-primary" />
+/** "Last synced 5 min. ago", kept fresh while the card is open. */
+function LastSynced({ at }: { at?: number }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000)
+    return () => window.clearInterval(timer)
+  }, [])
+  if (!at) return <p className="text-sm text-muted-foreground">Not synced yet</p>
+  const when = Math.max(now, at) - at < 60_000 ? "just now" : formatRelative(at, Math.max(now, at))
+  return (
+    <p className="text-sm text-muted-foreground">
+      Last synced{" "}
+      <time dateTime={new Date(at).toISOString()} title={new Date(at).toLocaleString()}>
+        {when}
+      </time>
+    </p>
+  )
 }
