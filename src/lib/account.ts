@@ -9,6 +9,15 @@ import {
   type User,
 } from "@netlify/identity"
 
+import { isNative, SITE_URL } from "@/lib/native"
+import {
+  loadNativeAccount,
+  nativeSignIn,
+  nativeSignOut,
+  nativeSyncCall,
+  watchNativeAccount,
+} from "@/lib/native-account"
+
 /**
  * GitHub sign-in through Netlify Identity, and the sync function's document API. Signing in only
  * proves who owns the documents; it never unlocks them (see `vault.ts`).
@@ -21,7 +30,7 @@ export type Account =
   | { status: "signed-out" }
   | { status: "signed-in"; user: User }
 
-const ENDPOINT = "/.netlify/functions/sync"
+const ENDPOINT = `${isNative ? SITE_URL : ""}/.netlify/functions/sync`
 
 export class SyncError extends Error {
   readonly status?: number
@@ -34,6 +43,7 @@ export class SyncError extends Error {
 }
 
 export async function loadAccount(): Promise<Account> {
+  if (isNative) return loadNativeAccount()
   try {
     const settings = await getSettings()
     if (!settings.providers.github) return { status: "unavailable" }
@@ -51,20 +61,24 @@ export async function loadAccount(): Promise<Account> {
 }
 
 export function watchAccount(callback: (account: Account) => void) {
+  if (isNative) return watchNativeAccount(callback)
   return onAuthChange((_event, user) =>
     callback(user ? { status: "signed-in", user } : { status: "signed-out" }),
   )
 }
 
 export function signIn() {
+  if (isNative) return nativeSignIn()
   oauthLogin("github")
 }
 
 export async function signOut() {
+  if (isNative) return nativeSignOut()
   await logout()
 }
 
 async function call(method: string, doc: string, body?: unknown) {
+  if (isNative) return nativeSyncCall(method, `${ENDPOINT}?doc=${encodeURIComponent(doc)}`, body)
   const send = () =>
     fetch(`${ENDPOINT}?doc=${encodeURIComponent(doc)}`, {
       method,

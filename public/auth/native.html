@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- GoTrue sends the tokens back to the referring page when it is on this site. -->
+    <meta name="referrer" content="same-origin" />
+    <title>Memento</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --background: #ffffff;
+        --foreground: #16161a;
+        --muted: #6b6b76;
+        --accent: #5a48d4;
+        --accent-foreground: #ffffff;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --background: #111111;
+          --foreground: #f4f4f5;
+          --muted: #a1a1aa;
+          --accent: #9b8cff;
+          --accent-foreground: #16161a;
+        }
+      }
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        display: grid;
+        place-items: center;
+        padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
+        box-sizing: border-box;
+        background: var(--background);
+        color: var(--foreground);
+        font-family: system-ui, sans-serif;
+        text-align: center;
+      }
+      img {
+        width: 96px;
+        height: 96px;
+      }
+      p {
+        color: var(--muted);
+      }
+      a {
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
+        padding: 0 24px;
+        border-radius: 999px;
+        background: var(--accent);
+        color: var(--accent-foreground);
+        font-weight: 600;
+        text-decoration: none;
+      }
+      [hidden] {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="/favicon.svg" alt="" />
+      <p id="error" hidden></p>
+      <p><a id="open" href="memento://auth" hidden>Open Memento</a></p>
+    </main>
+    <script>
+      const params = new URLSearchParams(location.hash.slice(1))
+      if (params.get("access_token")) {
+        const link = document.getElementById("open")
+        link.href = "memento://auth#" + location.hash.slice(1)
+        link.hidden = false
+        history.replaceState(null, "", location.pathname)
+        location.href = link.href
+      } else if (params.get("error")) {
+        const error = document.getElementById("error")
+        error.textContent = params.get("error_description") || params.get("error")
+        error.hidden = false
+      } else {
+        try {
+          localStorage.setItem("memento-native-auth", String(Date.now()))
+        } catch {}
+        location.replace("/.netlify/identity/authorize?provider=github")
+      }
+    </script>
+  </body>
+</html>

@@ -1,3 +1,5 @@
+import { isNative } from "@/lib/native"
+
 /**
  * End-to-end encryption for sync. One random data key encrypts everything Memento uploads; the
  * server only ever holds that key wrapped by secrets it never sees: a passkey's PRF output or a
@@ -207,7 +209,8 @@ export function newVault(): Vault {
 }
 
 export function supportsPasskeys() {
-  return typeof window !== "undefined" && "PublicKeyCredential" in window
+  // The app's WebView runs on `https://localhost`, which can't use the deploy's passkeys.
+  return !isNative && typeof window !== "undefined" && "PublicKeyCredential" in window
 }
 
 /** Registers a passkey and wraps the data key with its PRF secret. */
@@ -216,6 +219,7 @@ export async function passkeyWrapper(
   vault: Vault,
   user: { id: string; name: string; displayName: string },
 ): Promise<Wrapper> {
+  if (!supportsPasskeys()) throw new PrfUnsupportedError()
   const credential = (await navigator.credentials.create({
     publicKey: {
       rp: { name: "Memento" },

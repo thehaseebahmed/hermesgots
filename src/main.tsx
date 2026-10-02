@@ -6,11 +6,15 @@ import { BrowserRouter } from "react-router"
 import App from "@/App"
 import { Toaster } from "@/components/ui/sonner"
 import { recoverInterruptedMessages } from "@/lib/chat"
+import { handBackNativeSignIn, handleBackButton } from "@/lib/native"
 import { startSync } from "@/lib/sync"
 import "@/index.css"
 
-void recoverInterruptedMessages()
-void startSync()
+if (!handBackNativeSignIn()) {
+  handleBackButton()
+  void recoverInterruptedMessages()
+  void startSync()
+}
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
