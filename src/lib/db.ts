@@ -32,6 +32,8 @@ export interface Conversation {
   id: string
   profileId: string
   title: string
+  /** Renamed by the user, so Hermes's title never replaces it. */
+  titleEdited?: boolean
   /** Client-minted id sent as `X-Hermes-Session-Id` so Hermes keeps one session per chat. */
   hermesSessionId: string
   createdAt: number
