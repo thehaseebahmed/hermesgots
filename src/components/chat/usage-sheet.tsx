@@ -33,31 +33,40 @@ export function ContextRing({ usage, onClick }: { usage: ContextUsage; onClick: 
       type="button"
       variant="ghost"
       size="icon-lg"
-      className="relative size-11 rounded-full text-muted-foreground"
+      className="size-11 rounded-full text-muted-foreground"
       onClick={onClick}
       aria-label={label}
     >
-      <svg viewBox="0 0 44 44" className="absolute inset-0 size-11 -rotate-90" aria-hidden>
-        <circle cx="22" cy="22" r={radius} fill="none" strokeWidth="3" className="stroke-muted" />
-        {filled > 0 && (
-          <circle
-            cx="22"
-            cy="22"
-            r={radius}
-            fill="none"
-            strokeWidth="3"
-            strokeLinecap="round"
-            strokeDasharray={circumference}
-            strokeDashoffset={circumference * (1 - filled)}
-            className={filled >= 0.9 ? "stroke-destructive" : "stroke-primary"}
-          />
+      {/* Ring and label share one SVG so they share one centre. */}
+      <svg viewBox="0 0 44 44" className="size-11" aria-hidden>
+        <g transform="rotate(-90 22 22)">
+          <circle cx="22" cy="22" r={radius} fill="none" strokeWidth="3" className="stroke-muted" />
+          {filled > 0 && (
+            <circle
+              cx="22"
+              cy="22"
+              r={radius}
+              fill="none"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeDasharray={circumference}
+              strokeDashoffset={circumference * (1 - filled)}
+              className={filled >= 0.9 ? "stroke-destructive" : "stroke-primary"}
+            />
+          )}
+        </g>
+        {usage.window && (
+          <text
+            x="22"
+            y="22"
+            textAnchor="middle"
+            dominantBaseline="central"
+            className="fill-current text-[11px] font-medium tabular-nums"
+          >
+            {percent}%
+          </text>
         )}
       </svg>
-      {usage.window && (
-        <span className="text-[11px] font-medium tabular-nums" aria-hidden>
-          {percent}%
-        </span>
-      )}
     </Button>
   )
 }
