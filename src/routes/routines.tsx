@@ -9,7 +9,6 @@ import {
   PlayIcon,
   RefreshCwIcon,
   RotateCwIcon,
-  TriangleAlertIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -135,25 +134,20 @@ function useCollapsedBots() {
 
 const isPaused = (job: CronJob) => !job.enabled || job.state === "paused"
 
-/** Routines failing now, and the others that failed at least once in their last runs. */
-function useFailureSummary(profileId: string, jobs?: CronJob[]) {
+/** How many routines are failing now. */
+function useFailingCount(profileId: string, jobs?: CronJob[]) {
   const runs = useLiveQuery(
     () => db.cronRuns.where("profileId").equals(profileId).toArray(),
     [profileId],
   )
-  if (!jobs || !runs) return { failing: 0, recent: 0 }
-  let failing = 0
-  let recent = 0
-  for (const job of jobs) {
-    const history = runs
-      .filter((run) => run.jobId === job.id)
-      .sort((a, b) => a.startedAt - b.startedAt)
-      .slice(-HISTORY_LENGTH)
-    const latest = history.findLast((run) => run.status !== "running")
-    if (!isPaused(job) && (job.failureStreak > 0 || latest?.status === "failed")) failing += 1
-    else if (history.some((run) => run.status === "failed")) recent += 1
-  }
-  return { failing, recent }
+  if (!jobs || !runs) return 0
+  return jobs.filter((job) => {
+    if (isPaused(job)) return false
+    const latest = runs
+      .filter((run) => run.jobId === job.id && run.status !== "running")
+      .reduce<CronRun | undefined>((a, b) => (a && a.startedAt > b.startedAt ? a : b), undefined)
+    return job.failureStreak > 0 || latest?.status === "failed"
+  }).length
 }
 
 function BotRoutines({
@@ -171,7 +165,7 @@ function BotRoutines({
   const [syncedAt, setSyncedAt] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [ownTick, setOwnTick] = useState(0)
-  const { failing, recent } = useFailureSummary(profile.id, error ? undefined : jobs)
+  const failing = useFailingCount(profile.id, error ? undefined : jobs)
 
   useEffect(() => {
     let cancelled = false
@@ -208,11 +202,6 @@ function BotRoutines({
             {failing > 0 && (
               <Badge variant="destructive">
                 <CircleAlertIcon /> {failing} failing
-              </Badge>
-            )}
-            {recent > 0 && (
-              <Badge className="bg-warning/15 text-warning">
-                <TriangleAlertIcon /> {recent} recently failed
               </Badge>
             )}
           </span>
