@@ -3,6 +3,7 @@ import { useTheme } from "next-themes"
 import { MenuIcon, MonitorIcon, MoonIcon, SunIcon } from "lucide-react"
 import { toast } from "sonner"
 
+import { AccountSettings } from "@/components/account-settings"
 import { BotSettings } from "@/components/bot-settings"
 import { useOpenDrawer } from "@/components/drawer-context"
 import {
@@ -22,6 +23,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { Switch } from "@/components/ui/switch"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { DEFAULT_SETTINGS, clearAllData, db, saveSettings, type Settings } from "@/lib/db"
+import { forgetLocalKey } from "@/lib/sync"
 
 export function SettingsPage() {
   const stored = useLiveQuery(async () => (await db.settings.get("settings")) ?? null, [])
@@ -52,6 +54,7 @@ function SettingsForm({ stored }: { stored: Settings | null }) {
       </header>
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pb-[max(2rem,env(safe-area-inset-bottom))]">
+        <AccountSettings />
         <BotSettings />
 
         <Card className="rounded-3xl">
@@ -121,6 +124,7 @@ function SettingsForm({ stored }: { stored: Settings | null }) {
                     variant="destructive"
                     onClick={async () => {
                       await clearAllData()
+                      forgetLocalKey()
                       toast.success("Local data cleared")
                     }}
                   >

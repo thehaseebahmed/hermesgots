@@ -49,6 +49,8 @@ export default defineConfig({
       workbox: {
         globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
         navigateFallback: "/index.html",
+        // Netlify Identity and the sync function must always reach the network.
+        navigateFallbackDenylist: [/^\/\.netlify\//],
         // Never let the service worker touch calls to the Hermes server.
         runtimeCaching: [],
       },
