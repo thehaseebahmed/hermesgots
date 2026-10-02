@@ -11,7 +11,8 @@ A playful, minimal companion app for [Hermes Agent](https://github.com/NousResea
 - **Voice**: the mic button dictates with the browser's speech recognition and shows the words live. Cancel discards them, Stop drops them into the message bar to edit, and Send sends them straight away. The button only appears in browsers that support it (Chrome, Edge, Safari).
 - **Bots**: each bot is a Hermes profile with its own API URL, key and model. Bots sit in a horizontal strip at the top of the sidebar. Tap one to open its latest chat (or a new one if it has none), and new chats go to it. A new bot gets a random image from the 8 glassy SVG characters (soft shapes with an accessory each; see `/bots`), unique until all 8 are taken, and you can change it in Settings. The header bot is animated, and the bots next to messages stay still.
 - **Routines** (`/routines`): every Hermes cron job, grouped by bot, with its last 24 runs as status bars and Run now / Pause / Resume. Bots fold away, and the header flags failing and recently failed routines.
-- **Settings**: bots (name, image, API URL and key, model picker), theme, reply stats, and clearing local data.
+- **Settings**: sync, bots (name, image, API URL and key, model picker), theme, reply stats, and clearing local data.
+- **Sync** (optional): sign in with GitHub to sync bots and the chat list (titles and Hermes session ids) across devices. It's end-to-end encrypted, so Netlify only ever stores ciphertext. Opening a synced chat on a new device loads its recent messages from Hermes, and older ones load on request.
 - Bots, chats and settings are stored on the device in **IndexedDB** (via Dexie). Theme preference lives in `localStorage` so the first paint doesn't flash.
 
 Built with Vite, React 19, Tailwind v4 and [shadcn/ui](https://ui.shadcn.com) on **Base UI** (the `base-maia` style, plus shadcn's `Message`, `Bubble` and `MessageScroller` chat components).
@@ -39,6 +40,7 @@ Then open **Settings** in Memento, enter `http://localhost:8642/v1` (or your ser
 - Approvals are answered with `POST /v1/runs/{completion_id}/approval`.
 - Routines use `GET /api/jobs` and `POST /api/jobs/{id}/pause | resume | run`. The API server only reports each job's latest run, so the history is the runs Memento has seen, backfilled from cron sessions (`GET /api/sessions?source=cron`).
 - Hermes's tool events carry the tool name and a preview of its arguments, but not its output. Tool cards show what ran and for how long.
+- A chat synced from another device loads its transcript from `GET /api/sessions/{id}/messages?order=latest`, 50 rows at a time.
 - The reply stats line is an estimate (about 4 characters per token, measured over the visible reply).
 
 ## Develop
@@ -51,11 +53,35 @@ pnpm dev
 
 `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm format`.
 
+Sync needs Netlify Identity and the `netlify/functions/sync.mts` function, which only run under the Netlify CLI. Use `pnpm dev:netlify` against a linked site to work on it. Under plain `pnpm dev`, the Sync card stays hidden.
+
 UI primitives in `src/components/ui` are shadcn `base-maia` components. Add more with `pnpm dlx shadcn@latest add <name>`.
 
 ## Deploy to Netlify
 
 `netlify.toml` is included (build `pnpm build`, publish `dist`, SPA fallback, service-worker cache headers). In Netlify, choose **Add new site → Import an existing project**, pick this repo, and deploy. Then add the site's URL to `API_SERVER_CORS_ORIGINS`.
+
+To turn on sync:
+
+1. **Project configuration → Identity**: enable Identity.
+2. **Registration → External providers**: add GitHub.
+3. **Registration preferences**: set **Invite only**, then invite yourself, so nobody else can sign in to your deploy.
+
+The function stores data in Netlify Blobs (store `memento-sync`), which needs no setup.
+
+### How sync is encrypted
+
+- One random AES-256-GCM key per account encrypts everything sync uploads: bots (API keys included) and each bot's chat list. Messages stay on your Hermes server.
+- The server only keeps that key wrapped by secrets it never sees:
+  - a passkey's WebAuthn PRF output, through HKDF
+  - a 25-character recovery code, through PBKDF2
+- Signing in with GitHub proves who owns the documents but can't decrypt them, and neither can anyone with access to the Netlify project.
+- Each document is bound to its account and slot (AES-GCM associated data), so documents can't be swapped around.
+- A device keeps a non-extractable copy of the key in IndexedDB, until you sign out or clear local data.
+- Passkeys need a browser and authenticator with PRF support (Safari 18+, Chrome, Firefox 139+). Without it, sync uses the recovery code alone.
+- Limits:
+  - A compromised deploy could ship code that reads the key once you unlock, which is inherent to encryption in a web app.
+  - Lose every passkey and the recovery code, and the synced copy can't be recovered. Each device's local copy remains.
 
 ## Roadmap
 
