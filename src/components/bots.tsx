@@ -327,103 +327,110 @@ export const BOTS: BotDefinition[] = [
   {
     id: "tri",
     name: "Tri",
-    description: "A soft triangle who keeps its headphones on while it works.",
+    description: "A soft triangle in round glasses who reads everything twice.",
     draw: (uid) => (
       <g className="bot-breathe">
         {body(uid, tri, TRI)}
-        {eyes("pill", 60, 9)}
-        <defs>
-          {gradient(`${uid}-band`, GRAPHITE)}
-          {gradient(`${uid}-cup`, FROST)}
-        </defs>
-        <path
-          d="M27 60C21 8 79 8 73 60"
-          stroke={`url(#${uid}-band)`}
-          strokeWidth="4"
-          strokeLinecap="round"
-          fill="none"
-        />
-        <rect x="19" y="52" width="12" height="18" rx="6" {...glass(`${uid}-cup`, FROST)} />
-        <rect x="69" y="52" width="12" height="18" rx="6" {...glass(`${uid}-cup`, FROST)} />
-        {sheen("M22 57q3-3 6 0")}
-        {sheen("M72 57q3-3 6 0")}
+        {eyes("dot", 60, 9)}
+        <g stroke={GRAPHITE.base} strokeWidth="2" strokeLinecap="round">
+          <circle cx="41" cy="60" r="7.5" fill="#fff" fillOpacity="0.22" />
+          <circle cx="59" cy="60" r="7.5" fill="#fff" fillOpacity="0.22" />
+          <path d="M48.5 59q1.5-2 3 0" fill="none" />
+          <path d="M33.5 58q-2.5-1-4.5 0.5M66.5 58q2.5-1 4.5 0.5" fill="none" />
+        </g>
+        {sheen("M36.5 56q2-2 4.5-2")}
+        {sheen("M54.5 56q2-2 4.5-2")}
       </g>
     ),
   },
   {
     id: "cubby",
     name: "Cubby",
-    description: "A squishy square in round glasses who reads everything twice.",
+    description: "A squishy square in a knitted beanie, unbothered by the weather.",
     draw: (uid) => (
-      <g className="bot-breathe">
+      <g className="bot-jiggle">
         {body(uid, cubby, CUBBY)}
-        {eyes("dot", 56, 12)}
-        <g stroke={GRAPHITE.base} strokeWidth="2.2" strokeLinecap="round">
-          <circle cx="38" cy="56" r="9" fill="#fff" fillOpacity="0.22" />
-          <circle cx="62" cy="56" r="9" fill="#fff" fillOpacity="0.22" />
-          <path d="M47 55q3-2.5 6 0" fill="none" />
-          <path d="M29 54q-5-2-9 0.5M71 54q5-2 9 0.5" fill="none" />
+        {eyes("pill", 60, 11)}
+        <defs>
+          {gradient(`${uid}-hat`, beanie)}
+          {gradient(`${uid}-pom`, FROST)}
+        </defs>
+        {/* Widened to cover the square's shoulders. */}
+        <g transform="translate(50 0) scale(1.16 1) translate(-50 0)">
+          <path d="M27 40C26 13 74 13 73 40C61 36 39 36 27 40Z" {...glass(`${uid}-hat`, beanie)} />
+          <path
+            d="M23 40C37 34 63 34 77 40C78 46 74 48 70 46C58 42 42 42 30 46C26 48 22 46 23 40Z"
+            {...glass(`${uid}-hat`, beanie)}
+          />
+          <path
+            d="M39 21q-2 7-1 15M50 18v17M61 21q2 7 1 15"
+            stroke={beanie.deep}
+            strokeOpacity="0.35"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+            fill="none"
+          />
+          {sheen("M34 31q6-9 15-10")}
         </g>
-        {sheen("M32.5 51.5q2.5-2.5 5.5-2.5")}
-        {sheen("M56.5 51.5q2.5-2.5 5.5-2.5")}
+        <circle cx="50" cy="12" r="5.5" {...glass(`${uid}-pom`, FROST)} />
       </g>
     ),
   },
   {
     id: "penny",
     name: "Penny",
-    description: "A cosy pentagon in a knitted beanie, unbothered by the weather.",
+    description: "A cosy pentagon who keeps its headphones on while it works.",
     draw: (uid) => (
-      <g className="bot-jiggle">
+      <g className="bot-breathe">
         {body(uid, penny, PENNY)}
-        {eyes("happy", 60, 10)}
+        {eyes("happy", 58, 10)}
         <defs>
-          {gradient(`${uid}-hat`, beanie)}
-          {gradient(`${uid}-pom`, FROST)}
+          {gradient(`${uid}-band`, GRAPHITE)}
+          {gradient(`${uid}-cup`, FROST)}
         </defs>
-        <path d="M28 40C27 14 73 14 72 40C60 36 40 36 28 40Z" {...glass(`${uid}-hat`, beanie)} />
         <path
-          d="M25 40C38 34 62 34 75 40C76 46 72 48 68 46C57 42 43 42 32 46C28 48 24 46 25 40Z"
-          {...glass(`${uid}-hat`, beanie)}
-        />
-        <path
-          d="M40 22q-2 7-1 14M50 19v16M60 22q2 7 1 14"
-          stroke={beanie.deep}
-          strokeOpacity="0.35"
-          strokeWidth="1.4"
+          d="M19 52C14 6 86 6 81 52"
+          stroke={`url(#${uid}-band)`}
+          strokeWidth="4"
           strokeLinecap="round"
           fill="none"
         />
-        {sheen("M35 31q6-9 15-10")}
-        <circle cx="50" cy="13" r="5.5" {...glass(`${uid}-pom`, FROST)} />
+        <rect x="12" y="45" width="13" height="19" rx="6.5" {...glass(`${uid}-cup`, FROST)} />
+        <rect x="75" y="45" width="13" height="19" rx="6.5" {...glass(`${uid}-cup`, FROST)} />
+        {sheen("M15.5 50q3-3 6 0")}
+        {sheen("M78.5 50q3-3 6 0")}
       </g>
     ),
   },
   {
     id: "hex",
     name: "Hex",
-    description: "A breezy hexagon whose propeller cap spins up when it's thinking hard.",
+    description: "A calm hexagon with a glowing antenna that lights up when it has an idea.",
     draw: (uid) => (
-      <g className="bot-float">
-        {body(uid, hex, HEX)}
-        {eyes("tall", 61, 10)}
-        <defs>
-          {gradient(`${uid}-cap`, cap)}
-          {gradient(`${uid}-blade`, FROST)}
-        </defs>
-        <path d="M31 38C31 19 69 19 69 38C57 34 43 34 31 38Z" {...glass(`${uid}-cap`, cap)} />
-        <path
-          d="M31 38C43 34 57 34 69 38Q76 41 71 42C59 38 41 38 29 42Q24 41 31 38Z"
-          {...glass(`${uid}-cap`, cap)}
-        />
-        {sheen("M37 33q5-7 12-8")}
-        <path d="M50 22v-6" stroke={GRAPHITE.base} strokeWidth="2" strokeLinecap="round" />
-        <g className="bot-propel">
-          <ellipse cx="41" cy="14" rx="8.5" ry="2.6" {...glass(`${uid}-blade`, FROST)} />
-          <ellipse cx="59" cy="14" rx="8.5" ry="2.6" {...glass(`${uid}-blade`, FROST)} />
+      <>
+        <defs>{gradient(`${uid}-bulb`, bulb)}</defs>
+        <g className="bot-antenna">
+          <path
+            d="M50 32C48 26 53 22 51.5 16"
+            stroke={hex.deep}
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            fill="none"
+          />
+          <circle
+            className="bot-glow"
+            cx="51.5"
+            cy="13.5"
+            r="4.6"
+            {...glass(`${uid}-bulb`, bulb)}
+          />
+          <circle cx="50.2" cy="12" r="1.4" fill="#fff" opacity="0.85" />
         </g>
-        <circle cx="50" cy="14.5" r="2" fill={GRAPHITE.base} />
-      </g>
+        <g className="bot-breathe">
+          {body(uid, hex, HEX)}
+          {eyes("tall", 61, 10)}
+        </g>
+      </>
     ),
   },
   {
@@ -466,26 +473,31 @@ export const BOTS: BotDefinition[] = [
   {
     id: "gem",
     name: "Gem",
-    description: "A plump diamond with a glowing antenna that lights up when it has an idea.",
+    description: "A plump diamond whose propeller cap spins up when it's thinking hard.",
     draw: (uid) => (
-      <>
-        <defs>{gradient(`${uid}-bulb`, bulb)}</defs>
-        <g className="bot-antenna">
+      <g className="bot-float">
+        {body(uid, gem, GEM)}
+        {eyes("dot", 61, 9)}
+        <defs>
+          {gradient(`${uid}-cap`, cap)}
+          {gradient(`${uid}-blade`, FROST)}
+        </defs>
+        {/* Scaled down to perch on the diamond's tip. */}
+        <g transform="translate(50 37) scale(0.82) translate(-50 -40)">
+          <path d="M31 38C31 19 69 19 69 38C57 34 43 34 31 38Z" {...glass(`${uid}-cap`, cap)} />
           <path
-            d="M50 27C48 21 53 17 51.5 11"
-            stroke={gem.deep}
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            fill="none"
+            d="M31 38C43 34 57 34 69 38Q76 41 71 42C59 38 41 38 29 42Q24 41 31 38Z"
+            {...glass(`${uid}-cap`, cap)}
           />
-          <circle className="bot-glow" cx="51.5" cy="8.5" r="4.6" {...glass(`${uid}-bulb`, bulb)} />
-          <circle cx="50.2" cy="7" r="1.4" fill="#fff" opacity="0.85" />
+          {sheen("M37 33q5-7 12-8")}
+          <path d="M50 22v-6" stroke={GRAPHITE.base} strokeWidth="2" strokeLinecap="round" />
+          <g className="bot-propel">
+            <ellipse cx="41" cy="14" rx="8.5" ry="2.6" {...glass(`${uid}-blade`, FROST)} />
+            <ellipse cx="59" cy="14" rx="8.5" ry="2.6" {...glass(`${uid}-blade`, FROST)} />
+          </g>
+          <circle cx="50" cy="14.5" r="2" fill={GRAPHITE.base} />
         </g>
-        <g className="bot-breathe">
-          {body(uid, gem, GEM)}
-          {eyes("dot", 61, 9)}
-        </g>
-      </>
+      </g>
     ),
   },
   {
