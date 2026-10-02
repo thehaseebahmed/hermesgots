@@ -7,6 +7,7 @@ import { BotsPage } from "@/routes/bots"
 import { ChatPage } from "@/routes/chat"
 import { RoutinesPage } from "@/routes/routines"
 import { SettingsPage } from "@/routes/settings"
+import { SetupGate } from "@/routes/setup"
 
 /** Computed colours come back as oklch(), which browser chrome may not parse; hex always works. */
 function toHex(color: string) {
@@ -34,16 +35,18 @@ export default function App() {
   return (
     <>
       <ThemeColor />
-      <Routes>
-        <Route element={<AppShell />}>
-          <Route index element={<ChatPage />} />
-          <Route path="c/:id" element={<ChatPage />} />
-          <Route path="routines" element={<RoutinesPage />} />
-          <Route path="settings" element={<SettingsPage />} />
-          <Route path="bots" element={<BotsPage />} />
-          <Route path="*" element={<ChatPage />} />
-        </Route>
-      </Routes>
+      <SetupGate>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route index element={<ChatPage />} />
+            <Route path="c/:id" element={<ChatPage />} />
+            <Route path="routines" element={<RoutinesPage />} />
+            <Route path="settings" element={<SettingsPage />} />
+            <Route path="bots" element={<BotsPage />} />
+            <Route path="*" element={<ChatPage />} />
+          </Route>
+        </Routes>
+      </SetupGate>
     </>
   )
 }
