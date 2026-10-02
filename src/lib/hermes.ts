@@ -1,4 +1,5 @@
 import type { ApprovalChoice } from "@/lib/db"
+import { isNative } from "@/lib/native"
 
 /**
  * Client for the Hermes Agent API server (OpenAI-compatible, default port 8642).
@@ -95,7 +96,7 @@ async function request(url: string, init: RequestInit) {
 function networkHint(url: string) {
   const insecure = url.startsWith("http://")
   const local = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/)/.test(url)
-  if (insecure && !local && window.location.protocol === "https:") {
+  if (insecure && !local && !isNative && window.location.protocol === "https:") {
     return "Can't reach Hermes: this page is HTTPS, so the browser blocks plain-HTTP servers on other hosts. Put Hermes behind HTTPS (e.g. Tailscale Serve or a Cloudflare Tunnel)."
   }
   return `Can't reach Hermes. Check it's running and that API_SERVER_CORS_ORIGINS includes ${window.location.origin}.`
