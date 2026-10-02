@@ -23,7 +23,8 @@ export interface ToolProgressEvent {
   tool: string
   emoji?: string
   label?: string
-  toolCallId: string
+  /** Runs don't name tool calls; their completions match the oldest running call of the tool. */
+  toolCallId?: string
   status: "running" | "completed"
 }
 
@@ -38,6 +39,8 @@ export interface StreamHandlers {
   onRunId?: (runId: string) => void
   onContent?: (delta: string) => void
   onReasoning?: (delta: string) => void
+  /** A whole reasoning block; runs only report them once a non-streaming provider finishes. */
+  onReasoningBlock?: (text: string) => void
   onTool?: (event: ToolProgressEvent) => void
   onStatus?: (text: string) => void
   onApproval?: (event: ApprovalRequestEvent) => void
@@ -451,4 +454,168 @@ export async function listCronSessions(config: HermesConfig): Promise<CronSessio
   } catch {
     return []
   }
+}
+
+const runSupport = new Map<string, Promise<boolean>>()
+
+/** Whether the server takes `/v1/runs`, which keep going when the client drops off. */
+export function supportsRuns(config: HermesConfig) {
+  const key = `${config.baseUrl}\n${config.apiKey}`
+  let pending = runSupport.get(key)
+  if (!pending) {
+    pending = request(endpoint(config.baseUrl, "/capabilities"), { headers: headers(config) })
+      .then((response) => response.json())
+      .then((body) => Boolean(body?.features?.run_submission && body?.features?.run_events_sse))
+      .catch(() => false)
+    runSupport.set(key, pending)
+    // A failed probe (server down, older version) gets another chance on a later turn.
+    void pending.then((ok) => ok || runSupport.delete(key))
+  }
+  return pending
+}
+
+export type RunStatus = "completed" | "failed" | "cancelled" | "interrupted"
+
+export interface RunOutcome {
+  status: RunStatus
+  output?: string
+  error?: string
+  usage?: TurnUsage
+  /** Events were lost on the way, so `output` should replace what streamed. */
+  replaceContent?: boolean
+}
+
+const TERMINAL_RUN_STATUSES = new Set<string>(["completed", "failed", "cancelled", "interrupted"])
+
+function runOutcome(payload: any): RunOutcome {
+  const usage = payload?.usage
+  return {
+    status: payload.status,
+    output: typeof payload?.output === "string" ? payload.output : undefined,
+    error: payload?.error ? String(payload.error) : payload?.turn_exit_reason,
+    usage: usage
+      ? {
+          promptTokens: Number(usage.input_tokens) || 0,
+          completionTokens: Number(usage.output_tokens) || 0,
+        }
+      : undefined,
+  }
+}
+
+/**
+ * Starts a turn on `/v1/runs`. Unlike a chat completion, Hermes doesn't interrupt a run when its
+ * event stream drops, so a phone that sleeps mid-reply can pick it up again.
+ */
+export async function startRun(
+  config: HermesConfig,
+  options: {
+    model: string
+    messages: ChatMessage[]
+    sessionId?: string
+    /** Makes a retried POST return the run it already started. */
+    idempotencyKey: string
+  },
+) {
+  // Like X-Hermes-Session-Id, a keyed session holds the history, so only the new message goes.
+  const keyed = Boolean(options.sessionId && config.apiKey)
+  const input = keyed ? options.messages.slice(-1) : options.messages
+  const response = await request(endpoint(config.baseUrl, "/runs"), {
+    method: "POST",
+    headers: headers(config, { "Idempotency-Key": options.idempotencyKey }),
+    body: JSON.stringify({
+      model: options.model,
+      input,
+      ...(keyed ? { session_id: options.sessionId } : {}),
+    }),
+  })
+  const body = await response.json()
+  if (typeof body?.run_id !== "string") throw new HermesError("Hermes didn't start the run.")
+  return body.run_id as string
+}
+
+/**
+ * Follows a run's events from after `lastSeq` (Hermes replays what it buffered). Resolves with the
+ * outcome, or null when Hermes closes the stream before the run ends (a subscriber that fell behind).
+ */
+export async function followRun(
+  config: HermesConfig,
+  runId: string,
+  options: { lastSeq: number; signal?: AbortSignal },
+  handlers: StreamHandlers & {
+    onSeq?: (seq: number) => void
+    /** Hermes no longer had every event after `lastSeq`. */
+    onTruncated?: () => void
+  },
+): Promise<RunOutcome | null> {
+  // CORS doesn't allow Last-Event-ID, so the cursor goes in the query.
+  const query = options.lastSeq >= 0 ? `?last_seq=${options.lastSeq}` : ""
+  const response = await request(
+    endpoint(config.baseUrl, `/runs/${encodeURIComponent(runId)}/events${query}`),
+    { headers: headers(config), signal: options.signal },
+  )
+  if (!response.body) throw new HermesError("Hermes returned an empty response.")
+
+  for await (const { data } of readSse(response.body)) {
+    let payload: any
+    try {
+      payload = JSON.parse(data)
+    } catch {
+      continue
+    }
+    const name = String(payload?.event ?? "")
+    switch (name) {
+      case "message.delta":
+        if (payload.delta) handlers.onContent?.(String(payload.delta))
+        break
+      case "message.interim":
+        if (payload.text && !payload.already_streamed) handlers.onContent?.(`${payload.text}\n\n`)
+        break
+      case "reasoning.available":
+        if (payload.text) handlers.onReasoningBlock?.(String(payload.text))
+        break
+      case "tool.started":
+        handlers.onTool?.({
+          tool: String(payload.tool ?? "tool"),
+          label: payload.preview ? String(payload.preview) : undefined,
+          toolCallId: `${runId}:${payload.seq}`,
+          status: "running",
+        })
+        break
+      case "tool.completed":
+        handlers.onTool?.({ tool: String(payload.tool ?? "tool"), status: "completed" })
+        break
+      case "approval.request":
+        handlers.onApproval?.(payload as ApprovalRequestEvent)
+        break
+      case "replay.truncated":
+        handlers.onTruncated?.()
+        break
+      default:
+        if (name.startsWith("run.") && TERMINAL_RUN_STATUSES.has(name.slice(4))) {
+          return runOutcome({ ...payload, status: name.slice(4) })
+        }
+    }
+    if (typeof payload?.seq === "number") handlers.onSeq?.(payload.seq)
+  }
+  return null
+}
+
+/** The run's status; `outcome` is set once it has finished. */
+export async function getRun(config: HermesConfig, runId: string, signal?: AbortSignal) {
+  const response = await request(endpoint(config.baseUrl, `/runs/${encodeURIComponent(runId)}`), {
+    headers: headers(config),
+    signal,
+  })
+  const body = await response.json()
+  return {
+    status: String(body?.status ?? ""),
+    outcome: TERMINAL_RUN_STATUSES.has(body?.status) ? runOutcome(body) : undefined,
+  }
+}
+
+export async function stopRun(config: HermesConfig, runId: string) {
+  await request(endpoint(config.baseUrl, `/runs/${encodeURIComponent(runId)}/stop`), {
+    method: "POST",
+    headers: headers(config),
+  })
 }

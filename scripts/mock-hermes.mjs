@@ -7,6 +7,8 @@
 // Chats are titled like Hermes does: a slice of the opener at once, a "model" title a moment later,
 // readable on GET /api/sessions/{id}. Sessions are keyed by X-Hermes-Session-Id when a key is sent,
 // and their transcripts page back from GET /api/sessions/{id}/messages?order=latest&limit&offset.
+// Turns also run on POST /v1/runs, whose events replay from GET /v1/runs/{id}/events?last_seq=N and
+// which keep going when the client drops, unlike a chat completion. Say "long" for a slow reply.
 //
 //   pnpm mock            # then point Settings at http://localhost:8642/v1
 
@@ -128,7 +130,7 @@ function cronSessionTail(profile, sessionId) {
 }
 
 function titleChat(req, opener) {
-  const sessionId = req.headers["x-hermes-session-id"]
+  const sessionId = sessionOf(req)
   if (!sessionId || !req.headers.authorization || chatTitles.has(sessionId)) return
   const line = opener.trim().split("\n")[0]
   chatTitles.set(sessionId, line.length > 48 ? `${line.slice(0, 47).trimEnd()}…` : line)
@@ -139,7 +141,7 @@ function titleChat(req, opener) {
 
 /** Stores a transcript row the way Hermes's session DB does, for keyed sessions only. */
 function record(req, row) {
-  const sessionId = req.headers["x-hermes-session-id"]
+  const sessionId = sessionOf(req)
   if (!sessionId || !req.headers.authorization) return
   if (!transcripts.has(sessionId)) transcripts.set(sessionId, [])
   transcripts.get(sessionId).push({ id: ++lastRowId, session_id: sessionId, timestamp: Date.now() / 1000, ...row })
@@ -154,42 +156,32 @@ function pageRows(rows, params) {
     : rows.slice().reverse().slice(offset, offset + limit).reverse()
 }
 
-async function streamCompletion(req, res, body) {
-  const id = `chatcmpl-${randomUUID().replace(/-/g, "").slice(0, 29)}`
-  const created = Math.floor(Date.now() / 1000)
-  const model = body.model ?? "hermes-agent"
-  const last = [...(body.messages ?? [])].reverse().find((m) => m.role === "user")?.content ?? ""
-  let closed = false
+/**
+ * The scripted turn behind both endpoints. `out` sends it over the wire: `say` streams a piece of the
+ * reply, `status` a status line, `tool` a tool's progress, and `approve` asks and resolves to a choice.
+ */
+async function playTurn(req, body, last, out) {
   let pieces = 0
+  let spoken = ""
   titleChat(req, last)
   record(req, { role: "user", content: last })
-  let spoken = ""
-  req.on("close", () => (closed = true))
-
-  res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", ...cors })
-  const frame = (data, event) => {
-    if (!closed) res.write(`${event ? `event: ${event}\n` : ""}data: ${JSON.stringify(data)}\n\n`)
-  }
-  const chunk = (delta, finish_reason = null, extra = {}) =>
-    frame({ id, object: "chat.completion.chunk", created, model, choices: [{ index: 0, delta, finish_reason }], ...extra })
   const say = async (text) => {
     for (const piece of text.match(/\S+\s*|\s+/g) ?? []) {
-      if (closed) return
+      if (out.closed()) return
       pieces += 1
       spoken += piece
-      chunk({ content: piece })
+      out.say(piece)
       await sleep(25)
     }
   }
 
-  chunk({ role: "assistant" })
-  frame({ kind: "thinking", text: "Thinking…" }, "hermes.status")
+  out.status("Thinking…")
   await sleep(500)
 
   const toolCallId = `call_${randomUUID().slice(0, 8)}`
-  frame({ tool: "terminal", emoji: "💻", label: "du -sh /var/log/* | sort -rh | head", toolCallId, status: "running" }, "hermes.tool.progress")
+  out.tool({ tool: "terminal", emoji: "💻", label: "du -sh /var/log/* | sort -rh | head", toolCallId, status: "running" })
   await sleep(1400)
-  frame({ tool: "terminal", toolCallId, status: "completed" }, "hermes.tool.progress")
+  out.tool({ tool: "terminal", toolCallId, status: "completed" })
   record(req, { role: "assistant", content: null, tool_calls: [{ id: toolCallId, type: "function", function: { name: "terminal", arguments: "{}" } }] })
   record(req, { role: "tool", tool_call_id: toolCallId, tool_name: "terminal", content: "2.1G nginx\n1.4G postgres\n0.7G app" })
 
@@ -203,28 +195,24 @@ async function streamCompletion(req, res, body) {
   if (/clean|delete/i.test(last)) {
     await say("The live logs and anything written in the last 90 days stay untouched. Here is the command I want to run:\n\n```bash\nfind /var/log -name '*.log.*' -mtime +90 -delete\n```\n")
     const cleanupId = `call_${randomUUID().slice(0, 8)}`
-    frame({ tool: "terminal", emoji: "💻", label: "find /var/log -name '*.log.*' -mtime +90 -delete", toolCallId: cleanupId, status: "running" }, "hermes.tool.progress")
-    const decision = new Promise((resolve) => pendingApprovals.set(id, resolve))
-    frame(
-      {
-        command: "find /var/log -name '*.log.*' -mtime +90 -delete",
-        pattern_key: "recursive_delete",
-        description: "Delete 34 rotated log files older than 90 days (4.2 GB) under /var/log",
-        allow_permanent: true,
-        allow_session: true,
-        event: "approval.request",
-        run_id: id,
-        timestamp: Date.now() / 1000,
-        choices: ["once", "session", "always", "deny"],
-      },
-      "approval.request"
-    )
-    const choice = await Promise.race([decision, sleep(120_000).then(() => "timeout")])
-    pendingApprovals.delete(id)
-    frame({ tool: "terminal", toolCallId: cleanupId, status: "completed" }, "hermes.tool.progress")
+    out.tool({ tool: "terminal", emoji: "💻", label: "find /var/log -name '*.log.*' -mtime +90 -delete", toolCallId: cleanupId, status: "running" })
+    const choice = await out.approve({
+      command: "find /var/log -name '*.log.*' -mtime +90 -delete",
+      pattern_key: "recursive_delete",
+      description: "Delete 34 rotated log files older than 90 days (4.2 GB) under /var/log",
+      allow_permanent: true,
+      allow_session: true,
+    })
+    out.tool({ tool: "terminal", toolCallId: cleanupId, status: "completed" })
     await say(choice === "deny" || choice === "timeout"
       ? "\nOkay, I left everything as it is."
       : "\nDone — freed **4.2 GB**. The live logs are untouched.")
+  } else if (/long|slow/i.test(last)) {
+    // Long enough to turn the screen off (or cut the network) halfway through.
+    for (let i = 1; i <= 20 && !out.closed(); i++) {
+      await say(`Step ${i} of 20 is done.\n\n`)
+      await sleep(1000)
+    }
   } else {
     await say("Want me to clean up the rotated files older than 90 days? Just say *clean them up*.")
   }
@@ -232,17 +220,125 @@ async function streamCompletion(req, res, body) {
   // Like Hermes, usage sums every model call in the turn: a fixed system prompt plus the transcript,
   // counted once per call (this turn makes one call per tool, plus the reply).
   // A keyed session's history comes from the session store, not the body, as on Hermes.
-  const sessionId = req.headers["x-hermes-session-id"]
+  const sessionId = sessionOf(req, body)
   const keyed = sessionId && req.headers.authorization && transcripts.get(sessionId)
-  const context = keyed ? keyed.filter((row) => row.role !== "tool") : (body.messages ?? [])
+  const context = keyed ? keyed.filter((row) => row.role !== "tool") : (body.messages ?? body.input ?? [])
   const transcript = context.reduce((n, m) => n + String(m.content ?? "").length, 0)
   const calls = /clean|delete/i.test(last) ? 3 : 2
   const prompt_tokens = calls * (6000 + Math.round(transcript / 4))
-  const completion_tokens = pieces
   record(req, { role: "assistant", content: spoken, finish_reason: "stop" })
+  return { spoken, prompt_tokens, completion_tokens: pieces }
+}
+
+async function waitForApproval(id) {
+  const decision = new Promise((resolve) => pendingApprovals.set(id, resolve))
+  const choice = await Promise.race([decision, sleep(120_000).then(() => "timeout")])
+  pendingApprovals.delete(id)
+  return choice
+}
+
+/** Like Hermes, a dropped connection interrupts the turn: the agent stops where it was. */
+async function streamCompletion(req, res, body) {
+  const id = `chatcmpl-${randomUUID().replace(/-/g, "").slice(0, 29)}`
+  const created = Math.floor(Date.now() / 1000)
+  const model = body.model ?? "hermes-agent"
+  const last = [...(body.messages ?? [])].reverse().find((m) => m.role === "user")?.content ?? ""
+  let closed = false
+  res.on("close", () => (closed = true))
+
+  res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", ...cors })
+  const frame = (data, event) => {
+    if (!closed) res.write(`${event ? `event: ${event}\n` : ""}data: ${JSON.stringify(data)}\n\n`)
+  }
+  const chunk = (delta, finish_reason = null, extra = {}) =>
+    frame({ id, object: "chat.completion.chunk", created, model, choices: [{ index: 0, delta, finish_reason }], ...extra })
+
+  chunk({ role: "assistant" })
+  const { prompt_tokens, completion_tokens } = await playTurn(req, body, last, {
+    closed: () => closed,
+    say: (piece) => chunk({ content: piece }),
+    status: (text) => frame({ kind: "thinking", text }, "hermes.status"),
+    tool: (event) => frame(event, "hermes.tool.progress"),
+    approve(event) {
+      frame({ ...event, event: "approval.request", run_id: id, timestamp: Date.now() / 1000, choices: ["once", "session", "always", "deny"] }, "approval.request")
+      return waitForApproval(id)
+    },
+  })
   chunk({}, "stop", { usage: { prompt_tokens, completion_tokens, total_tokens: prompt_tokens + completion_tokens } })
   if (!closed) res.end("data: [DONE]\n\n")
 }
+
+// Runs carry on whether or not anyone is listening. Each keeps its events, numbered by `seq`, so a
+// client that reconnects with ?last_seq= gets what it missed; MOCK_RUN_BACKLOG shrinks the buffer
+// to exercise `replay.truncated`, and MOCK_DROP_EVENTS_MS cuts every event stream after that long,
+// like a phone whose screen went off. MOCK_NO_RUNS=1 turns runs off, like an older Hermes.
+const runs = new Map()
+const RUNS = process.env.MOCK_NO_RUNS !== "1"
+const RUN_BACKLOG = Number(process.env.MOCK_RUN_BACKLOG ?? 1000)
+const DROP_EVENTS_MS = Number(process.env.MOCK_DROP_EVENTS_MS ?? 0)
+
+const sessionOf = (req, body) => req.headers["x-hermes-session-id"] ?? body?.session_id
+
+function startRun(req, body) {
+  const key = req.headers["idempotency-key"]
+  const replay = key && [...runs.values()].find((run) => run.key === key)
+  if (replay) return replay
+  const id = `run_${randomUUID().replace(/-/g, "")}`
+  const run = { id, key, status: "running", events: [], seq: 0, listeners: new Set(), stopped: false }
+  runs.set(id, run)
+  const push = (name, fields = {}) => {
+    const event = { event: name, run_id: id, timestamp: Date.now() / 1000, ...fields, seq: run.seq++ }
+    run.events.push(event)
+    if (run.events.length > RUN_BACKLOG) run.events.shift()
+    for (const listener of run.listeners) listener(event)
+  }
+  const input = Array.isArray(body.input) ? body.input : [{ role: "user", content: String(body.input ?? "") }]
+  const last = input.at(-1)?.content ?? ""
+  // Rows go to the session named in the body, as on Hermes.
+  const sessionReq = { headers: { ...req.headers, "x-hermes-session-id": body.session_id } }
+  void playTurn(sessionReq, body, last, {
+    closed: () => run.stopped,
+    say: (delta) => push("message.delta", { delta }),
+    status: () => {},
+    tool: ({ tool, label, status }) =>
+      push(status === "running" ? "tool.started" : "tool.completed", status === "running" ? { tool, preview: label } : { tool, duration: 1.4, error: false }),
+    approve(event) {
+      run.status = "waiting_for_approval"
+      push("approval.request", { ...event, choices: ["once", "session", "always", "deny"] })
+      return waitForApproval(id).finally(() => (run.status = "running"))
+    },
+  }).then(({ spoken, prompt_tokens, completion_tokens }) => {
+    run.status = run.stopped ? "cancelled" : "completed"
+    run.output = spoken
+    run.usage = { input_tokens: prompt_tokens, output_tokens: completion_tokens, total_tokens: prompt_tokens + completion_tokens }
+    push(`run.${run.status}`, { completed: !run.stopped, interrupted: run.stopped, output: spoken, usage: run.usage })
+    for (const listener of run.listeners) listener(null)
+  })
+  return run
+}
+
+function streamRunEvents(req, res, run, lastSeq) {
+  res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", ...cors })
+  res.write(": open\n\n")
+  const send = (event) => res.write(`id: ${event.seq}\ndata: ${JSON.stringify(event)}\n\n`)
+  const replay = run.events.filter((event) => event.seq > lastSeq)
+  if (replay.length && replay[0].seq > lastSeq + 1) {
+    res.write(`data: ${JSON.stringify({ event: "replay.truncated", run_id: run.id, oldest_retained_seq: replay[0].seq })}\n\n`)
+  }
+  replay.forEach(send)
+  if (run.status === "completed" || run.status === "cancelled") return res.end(": stream closed\n\n")
+  const listener = (event) => (event ? send(event) : res.end(": stream closed\n\n"))
+  run.listeners.add(listener)
+  res.on("close", () => run.listeners.delete(listener))
+  if (DROP_EVENTS_MS) setTimeout(() => res.destroy(), DROP_EVENTS_MS)
+}
+
+const runStatus = (run) => ({
+  object: "hermes.run",
+  run_id: run.id,
+  status: run.status,
+  ...(run.output !== undefined ? { output: run.output, usage: run.usage } : {}),
+})
 
 http
   .createServer(async (req, res) => {
@@ -313,6 +409,28 @@ http
     }
     if (req.method === "POST" && url.pathname === "/v1/chat/completions") {
       return streamCompletion(req, res, await readBody(req))
+    }
+    if (url.pathname === "/v1/capabilities") {
+      return json(res, 200, {
+        object: "hermes.api_server.capabilities",
+        features: { chat_completions: true, chat_completions_streaming: true, run_submission: RUNS, run_events_sse: RUNS, run_stop: RUNS },
+      })
+    }
+    if (RUNS && req.method === "POST" && url.pathname === "/v1/runs") {
+      const run = startRun(req, await readBody(req))
+      return json(res, 202, { run_id: run.id, status: "started", replayed: false })
+    }
+    const runPath = /^\/v1\/runs\/([^/]+)(\/events|\/stop)?$/.exec(url.pathname)
+    if (RUNS && runPath) {
+      const run = runs.get(runPath[1])
+      if (!run) return json(res, 404, { error: { message: `Run not found: ${runPath[1]}`, code: "run_not_found" } })
+      if (runPath[2] === "/events") return streamRunEvents(req, res, run, Number(url.searchParams.get("last_seq") ?? -1))
+      if (runPath[2] === "/stop" && req.method === "POST") {
+        run.stopped = true
+        pendingApprovals.get(run.id)?.("deny")
+        return json(res, 200, { run_id: run.id, status: "stopping" })
+      }
+      if (!runPath[2]) return json(res, 200, runStatus(run))
     }
     const approval = /^\/v1\/runs\/([^/]+)\/approval$/.exec(url.pathname)
     if (req.method === "POST" && approval) {
