@@ -46,6 +46,7 @@ import {
   deleteConversation,
   getActiveProfile,
   getMessages,
+  updateConversation,
   type Message,
 } from "@/lib/db"
 import { syncContextWindow } from "@/lib/models"
@@ -300,7 +301,7 @@ export function ChatPage() {
             onSubmit={async (event) => {
               event.preventDefault()
               if (id && title.trim())
-                await db.conversations.update(id, { title: title.trim(), titleEdited: true })
+                await updateConversation(id, { title: title.trim(), titleEdited: true })
               setRenaming(false)
             }}
           >
