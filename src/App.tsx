@@ -7,11 +7,21 @@ import { BotsPage } from "@/routes/bots"
 import { ChatPage } from "@/routes/chat"
 import { SettingsPage } from "@/routes/settings"
 
+/** Computed colours come back as oklch(), which browser chrome may not parse; hex always works. */
+function toHex(color: string) {
+  const context = document.createElement("canvas").getContext("2d", { willReadFrequently: true })
+  if (!context) return color
+  context.fillStyle = color
+  context.fillRect(0, 0, 1, 1)
+  const [r, g, b] = context.getImageData(0, 0, 1, 1).data
+  return `#${[r, g, b].map((n) => n.toString(16).padStart(2, "0")).join("")}`
+}
+
 /** Keeps the browser/OS chrome colour in step with the active theme. */
 function ThemeColor() {
   const { resolvedTheme } = useTheme()
   useEffect(() => {
-    const color = getComputedStyle(document.body).backgroundColor
+    const color = toHex(getComputedStyle(document.body).backgroundColor)
     document
       .querySelectorAll('meta[name="theme-color"]')
       .forEach((meta) => meta.setAttribute("content", color))
