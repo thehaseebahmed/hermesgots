@@ -83,6 +83,40 @@ The function stores data in Netlify Blobs (store `memento-sync`), which needs no
   - A compromised deploy could ship code that reads the key once you unlock, which is inherent to encryption in a web app.
   - Lose every passkey and the recovery code, and the synced copy can't be recovered. Each device's local copy remains.
 
+## Android app
+
+`android/` wraps this same app with [Capacitor](https://capacitorjs.com). The **Android** workflow (`.github/workflows/android.yml`) builds a signed release APK on every push to `main` and every push to a pull request into `main`, and attaches it to the run as an artifact (`memento-<commit>`).
+
+One-time setup:
+
+1. Create a signing key and keep it safe. Updates only install over a build signed with the same key.
+
+   ```bash
+   keytool -genkeypair -v -keystore memento.keystore -alias memento -keyalg RSA -keysize 4096 -validity 10000
+   base64 -w0 memento.keystore   # macOS: base64 -i memento.keystore
+   ```
+
+2. In the repo's **Settings → Secrets and variables → Actions**, add:
+   - secrets: `ANDROID_KEYSTORE_BASE64` (the output above), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`.
+   - variable: `MEMENTO_SITE_URL`, your Netlify deploy (e.g. `https://<your-site>.netlify.app`). The app signs in and syncs through it. Leave it unset to build without sync.
+3. Add `https://localhost` (the app's origin) to `API_SERVER_CORS_ORIGINS` on each Hermes server.
+
+Without the keystore secret (e.g. pull requests from forks), the workflow uploads a debug APK instead.
+
+In the app:
+
+- Plain-HTTP Hermes servers on other hosts work, since the app isn't bound by the browser's mixed-content rule.
+- Sign-in opens GitHub in a browser tab and returns to the app.
+- Passkeys belong to the website's domain, so the app unlocks sync with the recovery code.
+- Voice input isn't available, because Android's WebView has no Web Speech API.
+
+To build locally (needs JDK 21 and the Android SDK):
+
+```bash
+VITE_SITE_URL=https://<your-site>.netlify.app pnpm build:android
+pnpm exec cap open android   # or: cd android && ./gradlew assembleDebug
+```
+
 ## Roadmap
 
-Native iOS/Android builds by wrapping this same app with Capacitor.
+A native iOS build from the same Capacitor project.
