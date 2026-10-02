@@ -254,8 +254,7 @@ function BotEditor({
           </InputGroupAddon>
         </InputGroup>
         <FieldDescription>
-          The profile's own key, stored only in this browser. Required for Hermes to keep one
-          session per chat.
+          The profile's own key. Required for Hermes to keep one session per chat.
         </FieldDescription>
       </Field>
 
@@ -320,8 +319,8 @@ function BotEditor({
             <AlertDialogHeader>
               <AlertDialogTitle>Delete {profile.name}?</AlertDialogTitle>
               <AlertDialogDescription>
-                Its chats are removed from this device too. The profile and its sessions on your
-                Hermes server are untouched.
+                Its chats are removed too. The profile and its sessions on your Hermes server are
+                untouched.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
