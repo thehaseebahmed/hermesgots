@@ -13,7 +13,7 @@ export function Bot({
   animate?: boolean
   className?: string
 }) {
-  const uid = useId().replace(/:/g, "")
+  const uid = `bot-${useId().replace(/[^\w-]/g, "")}`
   const bot = BOTS.find((b) => b.id === id) ?? BOTS[0]
 
   return (
@@ -23,7 +23,7 @@ export function Bot({
       aria-label={bot.name}
       className={cn("size-8 shrink-0 overflow-visible", animate && "bot-animate", className)}
     >
-      {bot.draw({ fur: `fur-${uid}`, fill: `fill-${uid}` })}
+      {bot.draw(uid)}
     </svg>
   )
 }
