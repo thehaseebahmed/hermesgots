@@ -4,7 +4,7 @@
 // POST /v1/runs/{id}/approval. Mention "clean" or "delete" in a message to trigger an approval.
 // Cron jobs live on /api/jobs, and their past runs on GET /api/plugins/memento/cron/runs, like a
 // Hermes with the Memento plugin (MOCK_NO_PLUGIN=1 leaves it out). As on Hermes, the plugin isn't
-// served under /p/<profile>/.
+// served under /p/<profile>/, and an unknown route's 404 carries no CORS headers.
 // Chats are titled like Hermes does: a slice of the opener at once, a "model" title a moment later,
 // readable on GET /api/sessions/{id}. Sessions are keyed by X-Hermes-Session-Id when a key is sent,
 // and their transcripts page back from GET /api/sessions/{id}/messages?order=latest&limit&offset.
@@ -430,6 +430,7 @@ http
       resolve(choice)
       return json(res, 200, { object: "hermes.run.approval_response", run_id: approval[1], choice, resolved: 1 })
     }
-    json(res, 404, { error: { message: "Not found" } })
+    // aiohttp raises its unmatched-route 404 past Hermes's CORS middleware, so browsers block it.
+    res.writeHead(404, { "Content-Type": "application/json" }).end(JSON.stringify({ error: { message: "Not found" } }))
   })
   .listen(PORT, () => console.log(`Mock Hermes on http://localhost:${PORT}/v1`))

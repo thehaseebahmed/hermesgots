@@ -76,12 +76,20 @@ export class PluginMissingError extends Error {
 
 /** The profile's jobs and their recent runs. */
 export async function syncCron(profile: Profile): Promise<CronState> {
-  const [jobs, ledger] = await Promise.all([
+  const [jobsResult, ledgerResult] = await Promise.allSettled([
     listCronJobs(profile),
-    listCronRuns(profile, HISTORY_LENGTH).catch((error) => {
-      throw error instanceof HermesError && error.status === 404 ? new PluginMissingError() : error
-    }),
+    listCronRuns(profile, HISTORY_LENGTH),
   ])
+  if (jobsResult.status === "rejected") throw jobsResult.reason
+  if (ledgerResult.status === "rejected") {
+    const error = ledgerResult.reason
+    // Hermes's 404 for an unknown route skips its CORS middleware, so the browser blocks it and
+    // fetch fails without a status. /api/jobs on the same server got through, so that's the plugin.
+    const missing = error instanceof HermesError && (error.status === 404 || !error.status)
+    throw missing ? new PluginMissingError() : error
+  }
+  const jobs = jobsResult.value
+  const ledger = ledgerResult.value
   const runs: Record<string, CronRun[]> = {}
   for (const job of jobs) {
     runs[job.id] = (ledger[job.id] ?? [])
