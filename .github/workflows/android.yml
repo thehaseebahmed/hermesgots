@@ -3,8 +3,14 @@ name: Android
 on:
   push:
     branches: [main]
+    paths:
+      - "app/**"
+      - ".github/workflows/android.yml"
   pull_request:
     branches: [main]
+    paths:
+      - "app/**"
+      - ".github/workflows/android.yml"
 
 concurrency:
   group: android-${{ github.ref }}
