@@ -4,7 +4,8 @@ Guidance for AI coding agents (and humans) working on Memento: a playful, minima
 
 ## Repository
 
-- `app/` is the web and Android app. Run every command below from `app/`; paths in the rest of this file are relative to it.
+- `app/` is the web and Android app. Run every command below from `app/`; paths in the rest of this file are relative to it unless they start with `plugin/`.
+- `plugin/` is the Memento Hermes plugin (Python, no build step). See **Plugin** below.
 - `netlify.toml` stays at the root and sets `base = "app"`.
 
 ## Commands
@@ -107,6 +108,15 @@ These behaviours were verified against Hermes's `gateway/platforms/api_server*.p
 - **Voice input uses the browser's Web Speech API (and, in the Android app, whose WebView has no recognizer, Android's `SpeechRecognizer` through `@capgo/capacitor-speech-recognition`), not Hermes STT.** Hermes exposes its STT provider config only on the dashboard server (`GET /api/audio/voice-config`), whose CORS allows only `localhost` origins and whose session token rotates each start; the API server reports `audio_api: false`. The wire shapes it hands out (OpenAI multipart, xAI, ElevenLabs) are upload-only, not streaming.
 - `GET /api/sessions/{id}/messages?order=latest&limit&offset` (server root) pages a session's transcript back from the newest row, but returns each page oldest first. Rows carry `id` (increasing), `role`, `content`, `tool_calls`, `tool_call_id`, `tool_name`, `timestamp` (Unix seconds), `reasoning` and `display_kind` (`hidden` rows are compaction scaffolding; skip them). Memento uses it to fill in chats synced from another device.
 - If you change how the API is used, update `scripts/mock-hermes.mjs` to match.
+
+## Plugin
+
+- `plugin/` installs with `hermes plugins install thehaseebahmed/memento/plugin --enable` (Hermes clones the subdirectory into `~/.hermes/plugins/memento`). `plugin.yaml` holds the version; `dashboard/manifest.json` repeats it, so bump both.
+- **The app can't reach dashboard plugin routes.** The dashboard (`hermes dashboard`, :9119) only allows `localhost` origins, and its session token changes on every start. So the routes the app needs go on the API server: `register(ctx)` calls `ctx.register_platform_handler("api_server", factory)`, and Hermes hands the factory the API server's aiohttp app before its router freezes. Those routes get the API server's CORS handling, and they check the key with the adapter's `_check_auth`.
+- Routes live under `/api/plugins/memento/`: `info` and `cron/runs?per_job=N[&job_id=]`. The latter reads `cron.executions.list_executions`, the ledger behind the API server's `latest_execution`.
+- `dashboard/` is a status tab. `dist/index.js` is hand-written against `window.__HERMES_PLUGIN_SDK__` (no React import, no bundler), and `plugin_api.py` serves `/api/plugins/memento/status` on the dashboard.
+- Python changes need `hermes gateway restart` (API routes) and a dashboard restart (the tab's backend).
+- If you change the plugin's routes, update `app/scripts/mock-hermes.mjs` to match.
 
 ## Sync
 
