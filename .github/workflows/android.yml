@@ -22,6 +22,9 @@ jobs:
       KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       # Name the build after the PR's head, not the merge commit Actions checks out.
       COMMIT_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+    defaults:
+      run:
+        working-directory: app
     steps:
       - uses: actions/checkout@v7
 
@@ -33,6 +36,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
 
       - uses: actions/setup-java@v6
         with:
@@ -60,7 +64,7 @@ jobs:
 
       - name: Build signed release APK
         if: env.KEYSTORE_BASE64 != ''
-        working-directory: android
+        working-directory: app/android
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -73,11 +77,11 @@ jobs:
 
       - name: Build debug APK
         if: env.KEYSTORE_BASE64 == ''
-        working-directory: android
+        working-directory: app/android
         run: ./gradlew assembleDebug --no-daemon
 
       - uses: actions/upload-artifact@v7
         with:
           name: memento-${{ steps.version.outputs.sha }}
-          path: android/app/build/outputs/apk/*/*.apk
+          path: app/android/app/build/outputs/apk/*/*.apk
           if-no-files-found: error

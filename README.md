@@ -48,7 +48,10 @@ Memento's first-run setup shows both routes, with this site's origin filled in, 
 
 ## Develop
 
+The app lives in `app/`.
+
 ```bash
+cd app
 pnpm install
 pnpm mock      # fake Hermes on :8642 (say "clean up" to trigger an approval)
 pnpm dev
@@ -62,7 +65,7 @@ UI primitives in `src/components/ui` are shadcn `base-maia` components. Add more
 
 ## Deploy to Netlify
 
-`netlify.toml` is included (build `pnpm build`, publish `dist`, SPA fallback, service-worker cache headers). In Netlify, choose **Add new site → Import an existing project**, pick this repo, and deploy. Then add the site's URL to `API_SERVER_CORS_ORIGINS`.
+`netlify.toml` is included (base `app`, build `pnpm build`, publish `dist`, SPA fallback, service-worker cache headers). In Netlify, choose **Add new site → Import an existing project**, pick this repo, and deploy. Then add the site's URL to `API_SERVER_CORS_ORIGINS`.
 
 To turn on sync:
 
@@ -116,6 +119,7 @@ In the app:
 To build locally (needs JDK 21 and the Android SDK):
 
 ```bash
+cd app
 VITE_SITE_URL=https://<your-site>.netlify.app pnpm build:android
 pnpm exec cap open android   # or: cd android && ./gradlew assembleDebug
 ```

@@ -2,9 +2,15 @@
 
 Guidance for AI coding agents (and humans) working on Memento: a playful, minimal PWA companion for [Hermes Agent](https://github.com/NousResearch/hermes-agent).
 
+## Repository
+
+- `app/` is the web and Android app. Run every command below from `app/`; paths in the rest of this file are relative to it.
+- `netlify.toml` stays at the root and sets `base = "app"`.
+
 ## Commands
 
 ```bash
+cd app
 pnpm install
 pnpm dev         # Vite dev server
 pnpm dev:netlify # Netlify CLI dev server (Identity + the sync function; needs a linked site)
