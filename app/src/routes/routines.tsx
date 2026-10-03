@@ -326,6 +326,7 @@ function JobCard({
   onChanged: () => void
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [pending, setPending] = useState<"pause" | "resume" | "run" | null>(null)
   const selected = runs.find((run) => run.id === selectedId)
   const latest = runs.at(-1)
   const paused = isPaused(job)
@@ -336,6 +337,7 @@ function JobCard({
   ]
 
   const act = async (action: "pause" | "resume" | "run") => {
+    setPending(action)
     try {
       await controlCronJob(profile, job.id, action)
       const done = { pause: "Paused", resume: "Resumed", run: "Started" }[action]
@@ -345,6 +347,8 @@ function JobCard({
       if (action === "run") setTimeout(onChanged, 5_000)
     } catch (error) {
       toast.error(describeError(error))
+    } finally {
+      setPending(null)
     }
   }
 
@@ -366,10 +370,11 @@ function JobCard({
                 size="icon-lg"
                 className="-mt-1.5 -mr-2 size-11 shrink-0 rounded-full"
                 aria-label={`${job.name} options`}
+                disabled={pending !== null}
               />
             }
           >
-            <EllipsisIcon />
+            {pending !== null ? <Spinner className="size-4" /> : <EllipsisIcon />}
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-40">
             <DropdownMenuItem onClick={() => act("run")}>
