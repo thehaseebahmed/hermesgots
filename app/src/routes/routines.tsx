@@ -13,6 +13,7 @@ import {
 import { toast } from "sonner"
 
 import { Bot } from "@/components/bot"
+import { CopyBlock } from "@/components/copy-block"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -26,8 +27,14 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
-import { HISTORY_LENGTH, syncCron } from "@/lib/cron"
-import { cronRunsOf, db, listProfiles, type CronRun, type Profile } from "@/lib/db"
+import {
+  HISTORY_LENGTH,
+  PluginMissingError,
+  syncCron,
+  type CronRun,
+  type CronState,
+} from "@/lib/cron"
+import { listProfiles, type Profile } from "@/lib/db"
 import { formatDuration, formatRelative } from "@/lib/format"
 import { HermesError, controlCronJob, type CronJob } from "@/lib/hermes"
 import { cn } from "@/lib/utils"
@@ -135,19 +142,26 @@ function useCollapsedBots() {
 const isPaused = (job: CronJob) => !job.enabled || job.state === "paused"
 
 /** How many routines are failing now. */
-function useFailingCount(profileId: string, jobs?: CronJob[]) {
-  const runs = useLiveQuery(
-    () => db.cronRuns.where("profileId").equals(profileId).toArray(),
-    [profileId],
-  )
-  if (!jobs || !runs) return 0
+function failingCount({ jobs, runs }: CronState) {
   return jobs.filter((job) => {
     if (isPaused(job)) return false
-    const latest = runs
-      .filter((run) => run.jobId === job.id && run.status !== "running")
-      .reduce<CronRun | undefined>((a, b) => (a && a.startedAt > b.startedAt ? a : b), undefined)
+    const latest = runs[job.id]?.findLast((run) => run.status !== "running")
     return job.failureStreak > 0 || latest?.status === "failed"
   }).length
+}
+
+const INSTALL_PLUGIN = `hermes plugins install thehaseebahmed/memento/plugin --enable
+hermes gateway restart`
+
+function PluginMissing() {
+  return (
+    <Card className="gap-3 rounded-3xl px-4 py-4">
+      <p className="text-sm">
+        Routines need the Memento plugin on this Hermes server. Install it from the Hermes CLI:
+      </p>
+      <CopyBlock label="Copy install commands" text={INSTALL_PLUGIN} />
+    </Card>
+  )
 }
 
 function BotRoutines({
@@ -161,22 +175,29 @@ function BotRoutines({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
-  const [jobs, setJobs] = useState<CronJob[]>()
+  const [cron, setCron] = useState<CronState>()
   const [syncedAt, setSyncedAt] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [pluginMissing, setPluginMissing] = useState(false)
   const [ownTick, setOwnTick] = useState(0)
-  const failing = useFailingCount(profile.id, error ? undefined : jobs)
+  const jobs = cron?.jobs
+  const failing = cron && !error ? failingCount(cron) : 0
 
   useEffect(() => {
     let cancelled = false
     syncCron(profile)
       .then((result) => {
         if (cancelled) return
-        setJobs(result)
+        setCron(result)
         setSyncedAt(Date.now())
         setError(null)
+        setPluginMissing(false)
       })
-      .catch((reason) => !cancelled && setError(describeError(reason)))
+      .catch((reason) => {
+        if (cancelled) return
+        setPluginMissing(reason instanceof PluginMissingError)
+        setError(describeError(reason))
+      })
     return () => {
       cancelled = true
     }
@@ -185,7 +206,11 @@ function BotRoutines({
   const resync = useCallback(() => setOwnTick((n) => n + 1), [])
 
   return (
-    <Collapsible open={open && !error} onOpenChange={onOpenChange} disabled={!!error}>
+    <Collapsible
+      open={open && (!error || pluginMissing)}
+      onOpenChange={onOpenChange}
+      disabled={!!error && !pluginMissing}
+    >
       <div className="flex items-center gap-2">
         <CollapsibleTrigger className="group/bot flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-2xl px-1 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[disabled]/bot:opacity-40 group-data-[panel-open]/bot:rotate-90" />
@@ -206,7 +231,7 @@ function BotRoutines({
             )}
           </span>
         </CollapsibleTrigger>
-        {error && (
+        {error && !pluginMissing && (
           <Popover>
             <PopoverTrigger
               openOnHover
@@ -224,7 +249,9 @@ function BotRoutines({
       </div>
       <CollapsibleContent>
         <div className="flex flex-col gap-3 pt-2">
-          {!jobs ? (
+          {pluginMissing ? (
+            <PluginMissing />
+          ) : !jobs ? (
             <p className="flex items-center gap-2 px-1 text-sm text-muted-foreground">
               <Spinner className="size-4" /> Loading routines…
             </p>
@@ -232,7 +259,14 @@ function BotRoutines({
             <p className="px-1 text-sm text-muted-foreground">No routines yet.</p>
           ) : (
             jobs.map((job) => (
-              <JobCard key={job.id} profile={profile} job={job} now={syncedAt} onChanged={resync} />
+              <JobCard
+                key={job.id}
+                profile={profile}
+                job={job}
+                runs={cron?.runs[job.id] ?? []}
+                now={syncedAt}
+                onChanged={resync}
+              />
             ))
           )}
         </div>
@@ -279,28 +313,26 @@ function formatWhen(timestamp: number) {
 function JobCard({
   profile,
   job,
+  runs,
   now,
   onChanged,
 }: {
   profile: Profile
   job: CronJob
+  /** Oldest first. */
+  runs: CronRun[]
   /** When the job was fetched; relative times count from it. */
   now: number
   onChanged: () => void
 }) {
-  const runs = useLiveQuery(
-    async () =>
-      (await cronRunsOf(profile.id, job.id).reverse().limit(HISTORY_LENGTH).toArray()).reverse(),
-    [profile.id, job.id],
-  )
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const selected = runs?.find((run) => run.id === selectedId)
-  const latest = runs?.at(-1)
+  const selected = runs.find((run) => run.id === selectedId)
+  const latest = runs.at(-1)
   const paused = isPaused(job)
   const nextRun = job.nextRunAt ? Date.parse(job.nextRunAt) : NaN
   const slots: (CronRun | null)[] = [
-    ...Array<null>(Math.max(0, HISTORY_LENGTH - (runs?.length ?? 0))).fill(null),
-    ...(runs ?? []),
+    ...Array<null>(Math.max(0, HISTORY_LENGTH - runs.length)).fill(null),
+    ...runs.slice(-HISTORY_LENGTH),
   ]
 
   const act = async (action: "pause" | "resume" | "run") => {
@@ -385,7 +417,7 @@ function JobCard({
       </div>
 
       <div className="flex justify-between gap-2 text-xs text-muted-foreground">
-        <span>{runs?.[0] ? formatRelative(runs[0].startedAt, now) : "No history yet"}</span>
+        <span>{runs[0] ? formatRelative(runs[0].startedAt, now) : "No history yet"}</span>
         <span>
           {paused
             ? "Paused"
