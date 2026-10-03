@@ -1,4 +1,6 @@
 [build]
+  # The app lives in app/; publish and functions are relative to it.
+  base = "app"
   command = "pnpm build"
   publish = "dist"
 
