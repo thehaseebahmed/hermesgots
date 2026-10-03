@@ -1,0 +1,4 @@
+name: memento
+version: "0.1.0"
+description: Serves Hermes's cron run history to the Memento app over the API server.
+author: Memento
