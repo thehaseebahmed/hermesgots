@@ -2,8 +2,9 @@
 // as gateway/platforms/api_server*.py: chat.completion.chunk frames plus the named SSE events
 // `hermes.tool.progress`, `hermes.status` and `approval.request`, and answers approvals on
 // POST /v1/runs/{id}/approval. Mention "clean" or "delete" in a message to trigger an approval.
-// Cron jobs live on /api/jobs, and their past runs show up as /api/sessions?source=cron. Like
-// Hermes, a run that died on provider errors still ends `cron_complete`, behind a `failed_turn` row.
+// Cron jobs live on /api/jobs, and their past runs on GET /api/plugins/memento/cron/runs, like a
+// Hermes with the Memento plugin (MOCK_NO_PLUGIN=1 leaves it out). As on Hermes, the plugin isn't
+// served under /p/<profile>/.
 // Chats are titled like Hermes does: a slice of the opener at once, a "model" title a moment later,
 // readable on GET /api/sessions/{id}. Sessions are keyed by X-Hermes-Session-Id when a key is sent,
 // and their transcripts page back from GET /api/sessions/{id}/messages?order=latest&limit&offset.
@@ -66,7 +67,6 @@ function cronJobs(profile = "default") {
 }
 
 const iso = (ms) => (ms ? new Date(ms).toISOString() : null)
-const stamp = (ms) => new Date(ms).toISOString().slice(0, 19).replace(/-|:/g, "").replace("T", "_")
 
 function jobRecord(job) {
   const last = job.runs.at(-1)
@@ -87,46 +87,34 @@ function jobRecord(job) {
     next_run_at: job.paused ? null : iso((last?.start ?? Date.now()) + job.every * MINUTE),
     last_run_at: iso(lastDone?.end),
     last_status: lastDone ? (lastDone.ok ? "ok" : "error") : null,
-    last_error: lastDone && !lastDone.ok ? "Timed out waiting for https://status.example.com" : null,
+    last_error: lastDone && !lastDone.ok ? RUN_ERROR : null,
     failure_streak: streak,
     latest_execution: last && {
       status: !last.end ? "running" : last.ok ? "completed" : "failed",
       claimed_at: iso(last.start - 500),
       started_at: iso(last.start),
       finished_at: iso(last.end),
-      error: last.end && !last.ok ? "Timed out waiting for https://status.example.com" : null,
+      error: last.end && !last.ok ? RUN_ERROR : null,
     },
   }
 }
 
-function cronSessions(profile) {
-  // Like Hermes, a session per agent run; ended_at stays null while it runs.
-  return cronJobs(profile).flatMap((job) =>
-    job.runs.map((run) => ({
-      id: `cron_${job.id}_${stamp(run.start)}`,
-      source: "cron",
-      title: job.name,
-      started_at: run.start / 1000,
-      ended_at: run.end ? run.end / 1000 : null,
-      end_reason: !run.end
-        ? null
-        : run.ok || run.provider
-          ? "cron_complete"
-          : "cron_incomplete_no_output",
-    })),
-  ).sort((a, b) => b.started_at - a.started_at)
-}
+const PLUGIN = process.env.MOCK_NO_PLUGIN !== "1"
+const RUN_ERROR = "Timed out waiting for https://status.example.com"
 
-function cronSessionTail(profile, sessionId) {
-  const run = cronJobs(profile)
-    .flatMap((job) => job.runs.map((run) => ({ run, id: `cron_${job.id}_${stamp(run.start)}` })))
-    .find((entry) => entry.id === sessionId)?.run
-  if (!run) return undefined
-  if (run.ok) return { role: "assistant", content: "All good.", finish_reason: "stop" }
-  if (run.provider) {
-    return { role: "assistant", content: "The model provider didn't respond.", display_kind: "failed_turn" }
+/** A run as a row of Hermes's cron execution ledger. */
+function ledgerRow(job, run) {
+  return {
+    id: `${job.id}-${run.start}`,
+    job_id: job.id,
+    source: "schedule",
+    status: !run.end ? "running" : run.ok ? "completed" : "failed",
+    claimed_at: iso(run.start - 500),
+    started_at: iso(run.start),
+    finished_at: iso(run.end),
+    error: run.end && !run.ok ? (run.provider ? "The model provider didn't respond." : RUN_ERROR) : null,
+    delivery_outcome: run.ok ? "delivered" : null,
   }
-  return { role: "tool", content: "{}" }
 }
 
 function titleChat(req, opener) {
@@ -386,11 +374,15 @@ http
       }
       return json(res, 200, { job: jobRecord(job) })
     }
-    if (url.pathname === "/api/sessions") {
-      const source = url.searchParams.get("source")
-      const limit = Number(url.searchParams.get("limit") ?? 50)
-      const data = source === "cron" ? cronSessions(profile).slice(0, limit) : []
-      return json(res, 200, { object: "list", data, limit, offset: 0, has_more: false })
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/info") {
+      return json(res, 200, { name: "memento", version: "0.1.0", features: ["cron_runs"] })
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/cron/runs") {
+      const perJob = Math.max(1, Math.min(Number(url.searchParams.get("per_job") ?? 24) || 24, 200))
+      const jobs = Object.fromEntries(
+        cronJobs().map((job) => [job.id, job.runs.slice(-perJob).reverse().map((run) => ledgerRow(job, run))]),
+      )
+      return json(res, 200, { object: "cron_runs", jobs })
     }
     const chatSession = /^\/api\/sessions\/([^/]+)$/.exec(url.pathname)
     if (req.method === "GET" && chatSession) {
@@ -401,8 +393,6 @@ http
     const sessionMessages = /^\/api\/sessions\/([^/]+)\/messages$/.exec(url.pathname)
     if (sessionMessages) {
       const id = decodeURIComponent(sessionMessages[1])
-      const tail = cronSessionTail(profile, id)
-      if (tail) return json(res, 200, { object: "list", session_id: id, data: [{ session_id: id, ...tail }] })
       if (!transcripts.has(id)) return json(res, 404, { error: { message: "Session not found" } })
       const data = pageRows(transcripts.get(id), url.searchParams)
       return json(res, 200, { object: "list", session_id: id, data })

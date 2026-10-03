@@ -343,7 +343,7 @@ export async function listSessionMessages(
   }
 }
 
-/** Hermes's newest execution-ledger row for a job (newer versions only). */
+/** A row of Hermes's cron execution ledger. */
 export interface CronExecution {
   status: "claimed" | "running" | "completed" | "failed" | "unknown"
   claimed_at?: string | null
@@ -365,7 +365,6 @@ export interface CronJob {
   lastStatus?: string | null
   lastError?: string | null
   failureStreak: number
-  latestExecution?: CronExecution | null
 }
 
 function toCronJob(raw: any): CronJob | null {
@@ -382,7 +381,6 @@ function toCronJob(raw: any): CronJob | null {
     lastStatus: raw.last_status,
     lastError: raw.last_error,
     failureStreak: Number(raw.failure_streak) || 0,
-    latestExecution: raw.latest_execution,
   }
 }
 
@@ -408,52 +406,35 @@ export async function controlCronJob(
   })
 }
 
-export interface CronSession {
+/** One run from Hermes's cron execution ledger, as the Memento plugin serves it. */
+export interface CronExecutionRun extends CronExecution {
   id: string
-  started_at?: number | string | null
-  ended_at?: number | string | null
-  end_reason?: string | null
+  job_id: string
+  /** `delivered`, `failed`, `queued`, `suppressed`, `not_configured`, ... */
+  delivery_outcome?: string | null
 }
 
-const ERROR_FINISH_REASONS = new Set(["error", "agent_error", "content_filter"])
+/** Where the Memento Hermes plugin serves its routes on the API server. */
+const PLUGIN_ROOT = "/api/plugins/memento"
 
-/**
- * Whether a session ended on a failed turn. Hermes closes a turn that died on provider errors with
- * its own assistant row, so the run is booked `cron_complete` anyway. Undefined when unknown.
- */
-export async function cronSessionFailed(
+/** Each job's newest runs, newest first. A 404 means the Memento plugin isn't installed. */
+export async function listCronRuns(
   config: HermesConfig,
-  sessionId: string,
-): Promise<boolean | undefined> {
-  try {
-    const response = await request(
-      `${serverRoot(config.baseUrl)}/api/sessions/${encodeURIComponent(sessionId)}/messages?limit=1&order=latest`,
-      { headers: headers(config) },
-    )
-    const body = await response.json()
-    const last = Array.isArray(body?.data) ? body.data.at(-1) : undefined
-    if (!last) return undefined
-    return last.display_kind === "failed_turn" || ERROR_FINISH_REASONS.has(last.finish_reason)
-  } catch {
-    return undefined
-  }
-}
-
-/** Sessions cron runs left behind, the only run history the API server exposes. Best effort. */
-export async function listCronSessions(config: HermesConfig): Promise<CronSession[]> {
-  try {
-    const response = await request(
-      `${serverRoot(config.baseUrl)}/api/sessions?source=cron&limit=200`,
-      {
-        headers: headers(config),
-      },
-    )
-    const body = await response.json()
-    const data: unknown = Array.isArray(body) ? body : body?.data
-    return Array.isArray(data) ? data.filter((s) => typeof s?.id === "string") : []
-  } catch {
-    return []
-  }
+  perJob: number,
+): Promise<Record<string, CronExecutionRun[]>> {
+  const response = await request(
+    `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/cron/runs?per_job=${perJob}`,
+    { headers: headers(config) },
+  )
+  const body = await response.json()
+  const jobs: unknown = body?.jobs
+  if (!jobs || typeof jobs !== "object") return {}
+  return Object.fromEntries(
+    Object.entries(jobs).map(([jobId, runs]) => [
+      jobId,
+      Array.isArray(runs) ? runs.filter((run) => typeof run?.id === "string") : [],
+    ]),
+  )
 }
 
 const runSupport = new Map<string, Promise<boolean>>()

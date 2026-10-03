@@ -119,26 +119,6 @@ export interface Message {
   runSeq?: number
 }
 
-export type CronRunStatus = "ok" | "failed" | "running" | "unknown"
-
-/**
- * One cron run as Memento saw it. Hermes's API server only reports each job's latest run, so the
- * history is what this device observed plus what cron sessions on the server imply.
- */
-export interface CronRun {
-  /** `${profileId}:${jobId}:${startedAt}` */
-  id: string
-  profileId: string
-  jobId: string
-  startedAt: number
-  finishedAt?: number
-  status: CronRunStatus
-  error?: string
-  source: "observed" | "session"
-  /** A session run whose transcript was checked for a failed turn. */
-  checked?: boolean
-}
-
 /** A local deletion sync hasn't pushed yet: `bot:<profileId>` or `chat:<conversationId>`. */
 export interface Tombstone {
   id: string
@@ -170,7 +150,6 @@ export const db = new Dexie("memento") as Dexie & {
   profiles: EntityTable<Profile, "id">
   conversations: EntityTable<Conversation, "id">
   messages: EntityTable<Message, "id">
-  cronRuns: EntityTable<CronRun, "id">
   tombstones: EntityTable<Tombstone, "id">
   vault: EntityTable<VaultKey, "id">
 }
@@ -270,6 +249,9 @@ db.version(5)
       })
   })
 
+// v6: run history comes from the Memento plugin on the Hermes server, not from each device.
+db.version(6).stores({ cronRuns: null })
+
 db.on("populate", (tx) => seedProfile(tx))
 
 export async function getSettings(): Promise<Settings> {
@@ -314,12 +296,11 @@ export async function updateProfile(id: string, patch: Partial<Omit<Profile, "id
  * pulled from another device, which needs no tombstone of its own.
  */
 export async function deleteProfile(id: string, { remote = false } = {}) {
-  const tables = [db.profiles, db.conversations, db.messages, db.cronRuns, db.tombstones]
+  const tables = [db.profiles, db.conversations, db.messages, db.tombstones]
   return db.transaction("rw", tables, async () => {
     if ((await db.profiles.count()) <= 1) return false
     const ids = await conversationsOf(id).primaryKeys()
     await db.messages.where("conversationId").anyOf(ids).delete()
-    await db.cronRuns.where("profileId").equals(id).delete()
     await db.conversations.bulkDelete(ids)
     await db.profiles.delete(id)
     if (!remote) await db.tombstones.put({ id: `bot:${id}`, deletedAt: Date.now(), profileId: id })
@@ -380,24 +361,9 @@ export async function getMessages(conversationId: string) {
 }
 
 export async function clearAllData() {
-  const tables = [
-    db.conversations,
-    db.messages,
-    db.settings,
-    db.profiles,
-    db.cronRuns,
-    db.tombstones,
-    db.vault,
-  ]
+  const tables = [db.conversations, db.messages, db.settings, db.profiles, db.tombstones, db.vault]
   await db.transaction("rw", tables, async () => {
     await Promise.all(tables.map((table) => table.clear()))
     await db.profiles.add(newProfile({}, []))
   })
-}
-
-/** A job's runs, oldest first. */
-export function cronRunsOf(profileId: string, jobId: string) {
-  return db.cronRuns
-    .where("[profileId+jobId+startedAt]")
-    .between([profileId, jobId, Dexie.minKey], [profileId, jobId, Dexie.maxKey])
 }

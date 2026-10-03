@@ -1,11 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useNavigate } from "react-router"
-import { CheckIcon, CopyIcon, FingerprintIcon, LogInIcon } from "lucide-react"
+import { FingerprintIcon, LogInIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { RecoveryCodeDialog, UnlockSync } from "@/components/account-settings"
 import { Bot } from "@/components/bot"
+import { CopyBlock } from "@/components/copy-block"
 import { BotEditor } from "@/components/bot-settings"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -191,30 +192,6 @@ function Section({
       </div>
       {children}
     </section>
-  )
-}
-
-function CopyBlock({ text, label }: { text: string; label: string }) {
-  const [copied, setCopied] = useState(false)
-  return (
-    <div className="flex items-start gap-2 rounded-2xl bg-muted p-3">
-      <pre className="min-w-0 flex-1 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap select-all">
-        {text}
-      </pre>
-      <Button
-        variant="ghost"
-        size="icon-lg"
-        className="-my-1.5 size-11 shrink-0"
-        aria-label={label}
-        onClick={async () => {
-          await navigator.clipboard.writeText(text)
-          setCopied(true)
-          window.setTimeout(() => setCopied(false), 1500)
-        }}
-      >
-        {copied ? <CheckIcon /> : <CopyIcon />}
-      </Button>
-    </div>
   )
 }
 
