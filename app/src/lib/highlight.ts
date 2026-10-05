@@ -80,3 +80,27 @@ export async function formatTool(text: string, hint?: string): Promise<Block[]> 
   }
   return [json(hljs, parsed)]
 }
+
+const TOKEN = /<span[^>]*>|<\/span>|\n/g
+
+/** Splits highlighted HTML into lines, closing and reopening spans that cross a line break. */
+export function splitHtml(html: string) {
+  const lines: string[] = []
+  const open: string[] = []
+  let line = ""
+  let last = 0
+  for (const match of html.matchAll(TOKEN)) {
+    line += html.slice(last, match.index)
+    last = match.index + match[0].length
+    if (match[0] === "\n") {
+      lines.push(line + "</span>".repeat(open.length))
+      line = open.join("")
+    } else {
+      if (match[0] === "</span>") open.pop()
+      else open.push(match[0])
+      line += match[0]
+    }
+  }
+  lines.push(line + html.slice(last))
+  return lines
+}

@@ -195,8 +195,19 @@ async function playTurn(req, body, last, out) {
     "        shutil.copyfileobj(src, dst)",
     "    for old in sorted(path.parent.glob(f\"{path.name}.*.gz\"))[keep:]:",
     "        old.unlink()",
+    "",
+    ...Array.from({ length: 6 }, (_, n) => [
+      `def prune_${n}(root: Path, days: int = ${(n + 1) * 30}) -> list[Path]:`,
+      `    """Remove logs older than ${(n + 1) * 30} days under root, returning what was deleted so the caller can report it."""`,
+      "    cutoff = time.time() - days * 86400",
+      "    removed = [p for p in root.rglob('*.gz') if p.stat().st_mtime < cutoff]",
+      "    for p in removed:",
+      "        p.unlink()",
+      "    return removed",
+      "",
+    ]).flat(),
   ].map((line, i) => `${i + 1}|${line}`).join("\n")
-  const readOutput = JSON.stringify({ content: source, total_lines: 9, file_size: 312, truncated: false })
+  const readOutput = JSON.stringify({ content: source, total_lines: source.split("\n").length, file_size: 312, truncated: false })
   out.tool({ tool: "read_file", toolCallId: readId, status: "completed", result: readOutput })
   record(req, { role: "assistant", content: null, tool_calls: [{ id: readId, type: "function", function: { name: "read_file", arguments: JSON.stringify({ path: readPath }) } }] })
   record(req, { role: "tool", tool_call_id: readId, tool_name: "read_file", content: readOutput })

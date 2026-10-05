@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from "react"
+import { Fragment, useEffect, useState, useSyncExternalStore } from "react"
 import { Drawer } from "@base-ui/react/drawer"
 import { CheckIcon, ChevronRightIcon, XIcon } from "lucide-react"
 
@@ -7,7 +7,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Spinner } from "@/components/ui/spinner"
 import type { ToolEvent } from "@/lib/db"
 import { formatDuration } from "@/lib/format"
-import { formatTool, type Block } from "@/lib/highlight"
+import { formatTool, splitHtml, type Block } from "@/lib/highlight"
 
 const INPUT_TITLES: Record<string, string> = {
   terminal: "Command",
@@ -22,8 +22,8 @@ const INPUT_LANGUAGES: Record<string, string> = {
 /** Tools whose label is a file path, so the output is highlighted as that file. */
 const FILE_TOOLS = new Set(["read_file", "write_file", "patch"])
 
-/** Opens at a quarter of the screen; dragging or scrolling it up takes the full height. */
-const SNAP_POINTS = [0.25, 1]
+/** Opens at about a third of the screen; dragging or scrolling it up takes the full height. */
+const SNAP_POINTS = [0.35, 1]
 
 // Tablet width and up (Tailwind's `md`) shows details inline; phones get a drawer.
 const wide = window.matchMedia("(min-width: 768px)")
@@ -57,32 +57,37 @@ function useFormatted(text: string, hint?: string) {
   return formatted?.text === text ? formatted.blocks : [{ code: text }]
 }
 
-const blockClass = "rounded-2xl bg-muted/60 font-mono text-[13px] leading-relaxed"
+const blockClass =
+  "rounded-2xl bg-muted/60 p-4 font-mono text-[13px] leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]"
 
+/** Long lines wrap; numbered rows keep their number beside the first line of each wrap. */
 function CodeBlock({ block }: { block: Block }) {
-  const code = block.html ? (
-    <code dangerouslySetInnerHTML={{ __html: block.html }} />
-  ) : (
-    <code>{block.code}</code>
-  )
-  if (block.lines)
+  if (block.lines) {
+    const rows = block.html ? splitHtml(block.html) : block.code.split("\n")
     return (
-      <div className={`${blockClass} flex`}>
-        <pre
-          aria-hidden
-          className="shrink-0 py-4 pr-3 pl-4 text-right text-muted-foreground select-none"
-        >
-          {block.lines.join("\n")}
-        </pre>
-        <pre className="min-w-0 flex-1 overflow-x-auto py-4 pr-4 whitespace-pre">{code}</pre>
+      <div className={`${blockClass} grid grid-cols-[auto_minmax(0,1fr)] gap-x-3`}>
+        {block.lines.map((line, i) => (
+          <Fragment key={i}>
+            <span className="text-right text-muted-foreground select-none" aria-hidden>
+              {line}
+            </span>
+            {block.html ? (
+              <code dangerouslySetInnerHTML={{ __html: rows[i] ?? "" }} />
+            ) : (
+              <code>{rows[i]}</code>
+            )}
+          </Fragment>
+        ))}
       </div>
     )
-  // Code keeps its lines; plain text wraps.
-  return (
-    <pre
-      className={`${blockClass} overflow-x-auto p-4 ${block.html ? "whitespace-pre" : "break-words whitespace-pre-wrap"}`}
-    >
-      {code}
+  }
+  return block.html ? (
+    <pre className={blockClass}>
+      <code dangerouslySetInnerHTML={{ __html: block.html }} />
+    </pre>
+  ) : (
+    <pre className={blockClass}>
+      <code>{block.code}</code>
     </pre>
   )
 }
@@ -207,11 +212,11 @@ export function ToolCard({ tool }: { tool: ToolEvent }) {
                   {running ? "Running" : "Completed"} · {formatDuration(elapsed)}
                 </Drawer.Description>
               </div>
-              {/* Nothing scrolls until it's expanded, so dragging the content raises the drawer. */}
+              {/* Scrolling the content natively (no drag handling of our own) also expands it. */}
               <Drawer.Content
-                className="flex min-h-0 flex-1 flex-col gap-6 overflow-hidden overscroll-contain px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] group-data-expanded/drawer:touch-auto group-data-expanded/drawer:overflow-y-auto"
-                onWheel={(event) => {
-                  if (event.deltaY > 0 && snapPoint !== 1) setSnapPoint(1)
+                className="flex min-h-0 flex-1 touch-auto flex-col gap-6 overflow-y-auto overscroll-contain px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
+                onScroll={(event) => {
+                  if (snapPoint !== 1 && event.currentTarget.scrollTop > 0) setSnapPoint(1)
                 }}
               >
                 <Details tool={tool} />
