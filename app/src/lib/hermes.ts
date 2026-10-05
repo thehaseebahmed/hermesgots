@@ -460,6 +460,32 @@ export async function mergeChatList<T>(config: HermesConfig, chats: Doc<T>): Pro
   return body.chats
 }
 
+export interface SessionContext {
+  /** Prompt tokens of the session's latest model call. */
+  tokens: number
+  /** The context window Hermes runs that model with. */
+  window?: number
+}
+
+/**
+ * A session's context use as the Memento plugin recorded it, following compression to the live
+ * session. Null when it has nothing for the session yet.
+ */
+export async function getSessionContext(
+  config: HermesConfig,
+  sessionId: string,
+): Promise<SessionContext | null> {
+  const response = await request(
+    `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/sessions/${encodeURIComponent(sessionId)}/context`,
+    { headers: headers(config) },
+  )
+  const body = await response.json()
+  const count = (value: unknown) =>
+    typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined
+  const tokens = count(body?.prompt_tokens)
+  return tokens ? { tokens, window: count(body?.context_length) } : null
+}
+
 /** Marks a session as Memento's, so the Hermes dashboard labels it. Needs the Memento plugin. */
 export async function labelSession(config: HermesConfig, sessionId: string) {
   try {

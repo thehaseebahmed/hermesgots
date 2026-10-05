@@ -6,7 +6,8 @@
 // Hermes with the Memento plugin (MOCK_NO_PLUGIN=1 leaves it out). As on Hermes, the plugin isn't
 // served under /p/<profile>/, and an unknown route's 404 carries no CORS headers.
 // The plugin also keeps the chat list (GET and POST /api/plugins/memento/chats, newer record wins) and
-// labels a chat as Memento's on POST /api/plugins/memento/sessions/{id}/label.
+// labels a chat as Memento's on POST /api/plugins/memento/sessions/{id}/label. Its
+// GET /api/plugins/memento/sessions/{id}/context reports a keyed session's latest model call.
 // Chats are titled like Hermes does: a slice of the opener at once, a "model" title a moment later,
 // readable on GET /api/sessions/{id}. Sessions are keyed by X-Hermes-Session-Id when a key is sent,
 // and their transcripts page back from GET /api/sessions/{id}/messages?order=latest&limit&offset.
@@ -25,6 +26,8 @@ const chatTitles = new Map()
 const labelledSessions = new Set()
 /** The plugin's chat list: id -> { at, deleted?, value? }. */
 const pluginChats = new Map()
+/** What the plugin's hook saw last per session: one call's prompt, not the turn's sum. */
+const lastCalls = new Map()
 const transcripts = new Map()
 let lastRowId = 0
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -253,6 +256,13 @@ async function playTurn(req, body, last, out) {
   const transcript = context.reduce((n, m) => n + String(m.content ?? "").length, 0)
   const calls = /clean|delete/i.test(last) ? 3 : 2
   const prompt_tokens = calls * (6000 + Math.round(transcript / 4))
+  if (keyed) {
+    lastCalls.set(sessionId, {
+      prompt_tokens: 6000 + Math.round(transcript / 4),
+      output_tokens: pieces,
+      context_length: 200000,
+    })
+  }
   record(req, { role: "assistant", content: spoken, finish_reason: "stop" })
   return { spoken, prompt_tokens, completion_tokens: pieces }
 }
@@ -422,8 +432,8 @@ http
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/info") {
       return json(res, 200, {
         name: "memento",
-        version: "0.2.0",
-        features: ["cron_runs", "session_label", "chats"],
+        version: "0.3.0",
+        features: ["cron_runs", "session_label", "chats", "context"],
       })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/cron/runs") {
@@ -451,6 +461,21 @@ http
       if (!chatTitles.has(id)) return json(res, 404, { error: { message: "Session not found" } })
       labelledSessions.add(id)
       return json(res, 200, { id, source: "memento" })
+    }
+    const sessionContext = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/context$/.exec(url.pathname)
+    if (PLUGIN && !profile && req.method === "GET" && sessionContext) {
+      const id = decodeURIComponent(sessionContext[1])
+      const call = lastCalls.get(id)
+      return json(res, 200, {
+        object: "memento.context",
+        session_id: id,
+        prompt_tokens: call?.prompt_tokens ?? null,
+        output_tokens: call?.output_tokens ?? null,
+        context_length: call?.context_length ?? null,
+        model: call ? "anthropic/claude-sonnet-4.5" : null,
+        provider: call ? "openrouter" : null,
+        at: call ? Date.now() : null,
+      })
     }
     const chatSession = /^\/api\/sessions\/([^/]+)$/.exec(url.pathname)
     if (req.method === "GET" && chatSession) {

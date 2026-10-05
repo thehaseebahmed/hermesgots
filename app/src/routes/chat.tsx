@@ -159,13 +159,20 @@ export function ChatPage() {
   const awaitingApproval = messages?.find((m) => m.approval && !m.approval.resolved)
   const activity = streaming && describeActivity(streaming)
   const lastTurn = messages?.findLast((m) => m.stats?.promptTokens)?.stats
-  // The chat's own figure follows turns run on other devices; older chats only have their stats.
+  // The plugin's figure is exact and the same on every device. Without it, the chat's own figure
+  // follows turns run on other devices; older chats only have their stats.
+  const live = conversation?.liveContext
   const usage: ContextUsage = {
-    tokens: conversation?.contextTokens ?? lastTurn?.promptTokens,
-    approximate: conversation?.contextTokens
-      ? conversation.contextApproximate
-      : lastTurn?.toolsUsed,
-    window: profile?.contextWindow,
+    tokens: live?.tokens ?? conversation?.contextTokens ?? lastTurn?.promptTokens,
+    approximate: live
+      ? false
+      : conversation?.contextTokens
+        ? conversation.contextApproximate
+        : lastTurn?.toolsUsed,
+    window:
+      profile?.contextSource === "manual"
+        ? profile.contextWindow
+        : (live?.window ?? profile?.contextWindow),
   }
 
   // Picks up a model changed on the server (only when the connection does, not on every write);

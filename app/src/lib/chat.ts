@@ -25,6 +25,7 @@ import {
   type StreamHandlers,
   type TurnUsage,
 } from "@/lib/hermes"
+import { refreshContext } from "@/lib/context"
 import { randomId } from "@/lib/utils"
 
 /**
@@ -313,6 +314,7 @@ async function finishTurn(turn: Turn, usage: TurnUsage | undefined) {
       ? { contextTokens: usage.promptTokens, contextApproximate: draft.tools.length > 0 }
       : {}),
   })
+  void refreshContext(conversationId)
 }
 
 /** Runs a turn on `/v1/runs` when Hermes has it, else streams a chat completion. */
