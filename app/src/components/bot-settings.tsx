@@ -5,15 +5,14 @@ import {
   EyeOffIcon,
   PlugZapIcon,
   PlusIcon,
-  RefreshCwIcon,
   Trash2Icon,
   TriangleAlertIcon,
 } from "lucide-react"
+import { toast } from "sonner"
 
 import { Bot } from "@/components/bot"
 import { BotCard } from "@/components/bot-card"
 import { BOTS } from "@/components/bots"
-import { CopyBlock } from "@/components/copy-block"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,12 +24,12 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Switch } from "@/components/ui/switch"
 import {
   InputGroup,
@@ -55,7 +54,7 @@ import {
   updateProfile,
   type Profile,
 } from "@/lib/db"
-import { checkHealth, INSTALL_PLUGIN, listModels } from "@/lib/hermes"
+import { checkHealth, listModels, PLUGIN_DOCS } from "@/lib/hermes"
 import { syncContextWindow } from "@/lib/models"
 import { recheckChatStores, stopUsingPlugin, useSyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
@@ -116,7 +115,6 @@ export function BotSettings() {
             }}
           />
         </div>
-        {editing && <ChatStoreSettings profile={editing} />}
         {editing && (
           <BotEditor
             key={editing.id}
@@ -130,68 +128,65 @@ export function BotSettings() {
   )
 }
 
-/** Whether the bot's chats are on its server's Memento plugin, and a warning when they aren't. */
-function ChatStoreSettings({ profile }: { profile: Profile }) {
+/** The Memento plugin switch: on once the bot's server has the plugin, which then keeps its chats. */
+function PluginSetting({ profile }: { profile: Profile }) {
   const sync = useSyncState()
   const [checking, setChecking] = useState(false)
-  const store = sync.chatStores[profile.id]
-  if (profile.pluginChats) {
-    return (
-      <FieldGroup>
-        {store === "unreachable" && (
-          <Alert>
-            <TriangleAlertIcon />
-            <AlertTitle>Can't reach the Memento plugin</AlertTitle>
-            <AlertDescription>
-              This bot's chats sync again once its server answers. If you removed the plugin, turn
-              it off below.
-            </AlertDescription>
-          </Alert>
-        )}
-        <Field orientation="horizontal">
-          <div className="flex-1 space-y-1">
-            <FieldLabel htmlFor="plugin-chats">Memento plugin</FieldLabel>
-            <FieldDescription>This bot's chats are saved on its Hermes server.</FieldDescription>
-          </div>
-          <Switch
-            id="plugin-chats"
-            checked
-            onCheckedChange={(checked) => {
-              if (!checked) void stopUsingPlugin(profile.id)
-            }}
-          />
-        </Field>
-      </FieldGroup>
-    )
-  }
-  if (store !== "fallback") return null
+  const on = Boolean(profile.pluginChats)
+  const install = (
+    <a href={PLUGIN_DOCS} target="_blank" rel="noreferrer">
+      Install the plugin
+    </a>
+  )
+
   return (
-    <Alert>
-      <TriangleAlertIcon />
-      <AlertTitle>Chats aren't saved on this Hermes server</AlertTitle>
-      <AlertDescription className="flex flex-col gap-3 [&_p:not(:last-child)]:mb-0">
-        <p>
-          Install the Memento plugin to keep this bot's chats there. Until then,{" "}
-          {sync.vault === "unlocked"
-            ? "they sync through your Memento account."
-            : "they're only on this device."}
-        </p>
-        <CopyBlock label="Copy install commands" text={INSTALL_PLUGIN} />
-        <Button
-          variant="outline"
-          size="lg"
-          className="h-11 w-fit"
-          disabled={checking}
-          onClick={async () => {
-            setChecking(true)
-            await recheckChatStores().finally(() => setChecking(false))
-          }}
-        >
-          <RefreshCwIcon data-icon="inline-start" />
-          {checking ? "Checking…" : "Check again"}
-        </Button>
-      </AlertDescription>
-    </Alert>
+    <Field orientation="horizontal">
+      <div className="flex-1 space-y-1">
+        <div className="flex items-center gap-1">
+          <FieldLabel htmlFor="plugin">Plugin</FieldLabel>
+          {on && sync.chatStores[profile.id] === "unreachable" && (
+            <Popover>
+              <PopoverTrigger
+                openOnHover
+                aria-label="Plugin is unreachable"
+                className="-my-3 flex size-11 items-center justify-center rounded-full text-warning outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+              >
+                <TriangleAlertIcon className="size-4" />
+              </PopoverTrigger>
+              <PopoverContent side="top" className="w-64">
+                Plugin is unreachable. If you removed the plugin, turn it off below.
+              </PopoverContent>
+            </Popover>
+          )}
+        </div>
+        <FieldDescription>
+          {on ? (
+            "All of this bot's chat data is now stored on your Hermes server."
+          ) : sync.vault === "unlocked" ? (
+            <>Some chat data is stored on our servers. {install} to store it on yours.</>
+          ) : (
+            <>This bot's chat data is only on this device. {install} to store it on your server.</>
+          )}
+        </FieldDescription>
+      </div>
+      <Switch
+        id="plugin"
+        checked={on}
+        disabled={checking}
+        onCheckedChange={async (checked) => {
+          if (!checked) return void stopUsingPlugin(profile.id)
+          setChecking(true)
+          try {
+            await recheckChatStores()
+            if (!(await db.profiles.get(profile.id))?.pluginChats) {
+              toast.error("Couldn't find the plugin on this bot's server.")
+            }
+          } finally {
+            setChecking(false)
+          }
+        }}
+      />
+    </Field>
   )
 }
 
@@ -397,6 +392,8 @@ export function BotEditor({
           </FieldDescription>
         </Field>
       )}
+
+      {!setup && <PluginSetting profile={profile} />}
 
       <div className="flex flex-wrap items-center gap-3">
         <Button onClick={test} disabled={connection.state === "testing"}>
