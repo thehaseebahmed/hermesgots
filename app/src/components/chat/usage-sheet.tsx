@@ -27,8 +27,7 @@ export function ContextRing({ usage, onClick }: { usage: ContextUsage; onClick: 
   const percent = Math.round(filled * 100)
   const radius = 20
   const circumference = 2 * Math.PI * radius
-  const shown = usage.tracked && usage.window
-  const label = shown ? `Context ${percent}% used` : "Context usage and model"
+  const label = usage.window ? `Context ${percent}% used` : "Context usage and model"
 
   return (
     <Button
@@ -57,7 +56,7 @@ export function ContextRing({ usage, onClick }: { usage: ContextUsage; onClick: 
             />
           )}
         </g>
-        {shown && (
+        {usage.window && (
           <text
             x="22"
             y="22"
@@ -140,11 +139,9 @@ export function UsageSheet({
                 <div className="flex items-baseline justify-between gap-4">
                   <Meter.Label className="font-medium">Context window</Meter.Label>
                   <span className="text-muted-foreground tabular-nums">
-                    {!usage.tracked
-                      ? "—"
-                      : usage.tokens
-                        ? `${Math.round(filled * 100)}% used`
-                        : "Not used yet"}
+                    {usage.tokens || !usage.tracked
+                      ? `${Math.round(filled * 100)}% used`
+                      : "Not used yet"}
                   </span>
                 </div>
                 <Meter.Track className="h-2 overflow-hidden rounded-full bg-background">
@@ -155,7 +152,7 @@ export function UsageSheet({
                   />
                 </Meter.Track>
                 <span className="text-sm text-muted-foreground tabular-nums">
-                  {usage.tracked ? formatTokens(usage.tokens ?? 0) : "—"} of{" "}
+                  {formatTokens(usage.tokens ?? 0)} of{" "}
                   {usage.window ? formatTokens(usage.window) : "—"} tokens
                 </span>
               </Meter.Root>
