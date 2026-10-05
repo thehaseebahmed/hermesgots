@@ -26,6 +26,8 @@ export interface ToolProgressEvent {
   /** Runs don't name tool calls; their completions match the oldest running call of the tool. */
   toolCallId?: string
   status: "running" | "completed"
+  /** A completed call's output, as Hermes previews it. */
+  result?: string
 }
 
 export interface ApprovalRequestEvent {
@@ -309,7 +311,7 @@ export interface SessionMessage {
   role: "system" | "user" | "assistant" | "tool"
   content?: string | null
   tool_call_id?: string | null
-  tool_calls?: { id?: string; function?: { name?: string } }[] | string | null
+  tool_calls?: { id?: string; function?: { name?: string; arguments?: unknown } }[] | string | null
   tool_name?: string | null
   /** Unix seconds. */
   timestamp?: number | null
@@ -563,7 +565,11 @@ export async function followRun(
         })
         break
       case "tool.completed":
-        handlers.onTool?.({ tool: String(payload.tool ?? "tool"), status: "completed" })
+        handlers.onTool?.({
+          tool: String(payload.tool ?? "tool"),
+          status: "completed",
+          result: payload.preview ? String(payload.preview) : undefined,
+        })
         break
       case "approval.request":
         handlers.onApproval?.(payload as ApprovalRequestEvent)

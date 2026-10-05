@@ -10,7 +10,77 @@ const PAGE = 50
 /** Pages to skip past rows sent since the last load, before giving up on finding older ones. */
 const MAX_SKIPS = 10
 
-function toolNames(row: SessionMessage) {
+/** Hermes's main argument per tool (`_PRIMARY_ARGS` in agent/display.py), shown beside its name. */
+const PRIMARY_ARGS: Record<string, string> = {
+  terminal: "command",
+  execute_code: "code",
+  browser_exec: "code",
+  web_search: "query",
+  web_extract: "urls",
+  read_file: "path",
+  write_file: "path",
+  patch: "path",
+  search_files: "pattern",
+  browser_navigate: "url",
+  browser_click: "ref",
+  browser_type: "text",
+  image_generate: "prompt",
+  text_to_speech: "text",
+  vision_analyze: "question",
+  skill_view: "name",
+  skill_manage: "name",
+  skills_list: "category",
+  cronjob_manage: "action",
+  delegate_task: "goal",
+}
+const FALLBACK_ARGS = ["query", "text", "command", "path", "name", "prompt", "code", "goal"]
+const MAX_DETAIL = 4000
+
+const clip = (text: string) => (text.length > MAX_DETAIL ? `${text.slice(0, MAX_DETAIL)}…` : text)
+
+function parseArgs(value: unknown): unknown {
+  if (typeof value !== "string") return value
+  try {
+    return JSON.parse(value)
+  } catch {
+    return value
+  }
+}
+
+function argsLabel(name: string, args: unknown) {
+  if (typeof args === "string") return args.trim()
+  if (!args || typeof args !== "object" || Array.isArray(args)) return ""
+  const record = args as Record<string, unknown>
+  if (!Object.keys(record).length) return ""
+  const key = PRIMARY_ARGS[name] ?? FALLBACK_ARGS.find((k) => k in record)
+  let value = key ? record[key] : undefined
+  if (Array.isArray(value)) value = value[0]
+  if (value !== undefined && value !== null && value !== "") return String(value).trim()
+  return JSON.stringify(record)
+}
+
+/** A call's name and label; `tool_call` is Hermes's bridge to deferred tools, named in its args. */
+function describeCall(name: string, args: unknown) {
+  if (name === "tool_call" && args && typeof args === "object") {
+    const record = args as Record<string, unknown>
+    const entries = (Array.isArray(record.calls) ? record.calls : [record]).filter(
+      (entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object",
+    )
+    const inner = entries.map((entry) => {
+      const innerName = typeof entry.name === "string" && entry.name ? entry.name : "tool"
+      return { name: innerName, label: argsLabel(innerName, parseArgs(entry.arguments)) }
+    })
+    if (inner.length === 1) return inner[0]
+    if (inner.length > 1)
+      return {
+        name,
+        label: inner.map((c) => (c.label ? `${c.name}: ${c.label}` : c.name)).join("\n"),
+      }
+  }
+  return { name, label: argsLabel(name, args) }
+}
+
+function toolCalls(row: SessionMessage) {
   let calls = row.tool_calls
   if (typeof calls === "string") {
     try {
@@ -20,10 +90,13 @@ function toolNames(row: SessionMessage) {
     }
   }
   return Array.isArray(calls)
-    ? calls.map((call, i) => ({
-        id: call?.id ?? `${row.id}-${i}`,
-        name: call?.function?.name ?? "tool",
-      }))
+    ? calls.map((call, i) => {
+        const { name, label } = describeCall(
+          call?.function?.name ?? "tool",
+          parseArgs(call?.function?.arguments),
+        )
+        return { id: call?.id ?? `${row.id}-${i}`, name, label: clip(label) || name }
+      })
     : []
 }
 
@@ -62,7 +135,10 @@ export function toMessages(conversationId: string, sessionId: string, rows: Sess
     }
     if (row.role === "tool") {
       const tool = reply.tools?.find((t) => t.toolCallId === row.tool_call_id)
-      if (tool) tool.endedAt = createdAt
+      if (tool) {
+        tool.endedAt = createdAt
+        if (row.content) tool.result = clip(row.content)
+      }
       continue
     }
     const reasoning = row.reasoning ?? row.reasoning_content
@@ -74,11 +150,11 @@ export function toMessages(conversationId: string, sessionId: string, rows: Sess
     } else if (row.content) {
       reply.content = reply.content ? `${reply.content}\n\n${row.content}` : row.content
     }
-    for (const call of toolNames(row)) {
+    for (const call of toolCalls(row)) {
       const event: ToolEvent = {
         toolCallId: call.id,
         tool: call.name,
-        label: call.name,
+        label: call.label,
         status: "completed",
         startedAt: createdAt,
         endedAt: createdAt,
