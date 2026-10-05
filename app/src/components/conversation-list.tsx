@@ -1,6 +1,6 @@
 import { useLiveQuery } from "dexie-react-hooks"
 import { NavLink, useNavigate } from "react-router"
-import { PlusIcon, SettingsIcon, TimerIcon } from "lucide-react"
+import { CodeXmlIcon, PlusIcon, SettingsIcon, TimerIcon } from "lucide-react"
 
 import { Bot } from "@/components/bot"
 import { BotCard } from "@/components/bot-card"
@@ -115,6 +115,19 @@ export function ConversationList({ onNavigate }: { onNavigate?: () => void }) {
       </nav>
 
       <div className="flex flex-col gap-0.5 border-t p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+        <NavLink
+          to="/code"
+          onClick={onNavigate}
+          className={({ isActive }) =>
+            cn(
+              "flex min-h-11 items-center gap-3 rounded-2xl px-3 text-sm transition-colors hover:bg-muted",
+              isActive && "bg-muted font-medium",
+            )
+          }
+        >
+          <CodeXmlIcon className="size-4 text-muted-foreground" />
+          Code
+        </NavLink>
         <NavLink
           to="/routines"
           onClick={onNavigate}
