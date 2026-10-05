@@ -437,6 +437,18 @@ export async function listCronRuns(
   )
 }
 
+/** Marks a session as Memento's, so the Hermes dashboard labels it. Needs the Memento plugin. */
+export async function labelSession(config: HermesConfig, sessionId: string) {
+  try {
+    await request(
+      `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/sessions/${encodeURIComponent(sessionId)}/label`,
+      { method: "POST", headers: headers(config) },
+    )
+  } catch {
+    // Without the plugin the chat just keeps the API server's label.
+  }
+}
+
 const runSupport = new Map<string, Promise<boolean>>()
 
 /** Whether the server takes `/v1/runs`, which keep going when the client drops off. */
