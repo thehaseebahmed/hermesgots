@@ -80,6 +80,7 @@ PR titles follow the same format. Fill in `.github/pull_request_template.md` for
 | `src/routes/` | `chat.tsx`, `settings.tsx`, `routines.tsx` (cron jobs), `bots.tsx` (gallery), `setup.tsx` (sign-in gate and first-run wizard) |
 | `src/components/chat/` | Message rendering, tool and approval cards, composer, header |
 | `src/components/bots.tsx` | Bot character definitions (SVG). `bot.tsx` renders them |
+| `src/components/banner.tsx` | `Banner`: a one-line info, warning or error notice (on shadcn's `Alert`) for the top of a screen or sheet |
 | `src/components/bot-card.tsx`, `bot-settings.tsx` | Bot cards (sidebar strip, settings) and the bot editor |
 | `src/index.css` | Theme tokens (light and dark) and bot/typing animations |
 | `scripts/mock-hermes.mjs` | Dev-only Hermes stand-in |
@@ -135,7 +136,7 @@ These behaviours were verified against Hermes's `gateway/platforms/api_server*.p
 - Documents are `vault` (the wrapped data keys), `bots` and `chats/<botId>` (only for bots without the plugin). Writes carry the etag they read; a 412 means re-pull, merge and retry.
 - Records merge last-write-wins on a change clock: `Profile.updatedAt` and `Conversation.changedAt`. Change synced fields through `updateProfile` / `updateConversation` so the clock moves, and delete through `deleteProfile` / `deleteConversation` so a tombstone is left for sync.
 - Message bodies don't sync. They come from Hermes (`history.ts`): with `X-Hermes-Session-Id`, Hermes builds the turn's history from its own session store and ignores the body's, so its transcript holds every device's turns. An open chat catches up (`reconcileHistory`) on open, when its `updatedAt` changes, on focus, every 30s while visible, and before a send. `Conversation.hermesTip` (local only) lets that start with a one-row probe. Turns streamed on this device are kept (they carry stats and approvals) and matched to their rows by `hermesRowId`.
-- **A chat's context use needs the Memento plugin** (`Conversation.liveContext`, local only, read on every catch-up and after each turn): the latest model call's prompt and Hermes's own window, the same on every device. Hermes's API has nothing exact to work it out from (a turn's `prompt_tokens` and the session's `input_tokens` are summed over every call, and message rows' `token_count` is unset), so bots without the plugin aren't tracked and the usage sheet says the plugin is needed. A hand-set window beats Hermes's, which beats models.dev's.
+- **A chat's context use needs the Memento plugin** (`Conversation.liveContext`, local only, read on every catch-up and after each turn): the latest model call's prompt and Hermes's own window, the same on every device. Hermes's API has nothing exact to work it out from (a turn's `prompt_tokens` and the session's `input_tokens` are summed over every call, and message rows' `token_count` is unset), so bots without the plugin aren't tracked: the usage sheet keeps an empty bar under a `Banner` saying the plugin is needed. A hand-set window beats Hermes's, which beats models.dev's.
 
 ## Conventions
 
