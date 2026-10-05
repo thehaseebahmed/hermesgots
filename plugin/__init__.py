@@ -2,8 +2,8 @@
 
 Adds routes to the API server, so the Memento app (which only talks to the API server, with its key)
 can read cron run history from Hermes's execution ledger instead of piecing it together on each
-device, keep its chat list on the server (``chats.py``), and label its chats as Memento's. The
-dashboard half lives in ``dashboard/``.
+device, keep its chat list on the server (``chats.py``), report each chat's context use
+(``context.py``), and label its chats as Memento's. The dashboard half lives in ``dashboard/``.
 """
 
 from __future__ import annotations
@@ -14,7 +14,8 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-from . import chats
+from . import chats, context
+from .store import db_path
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +111,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             {
                 "name": "memento",
                 "version": VERSION,
-                "features": ["cron_runs", "session_label", "chats"],
+                "features": ["cron_runs", "session_label", "chats", "context"],
             }
         )
 
@@ -144,18 +145,18 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "Session not found", 404)
         return web.json_response({"id": session_id, "source": SESSION_SOURCE})
 
-    def chats_path() -> Path:
+    def store_path() -> Path:
         # On the loop thread: the API server scopes get_hermes_home() to the request's profile, and
         # that scope isn't visible inside to_thread.
         from hermes_constants import get_hermes_home
 
-        return chats.db_path(Path(get_hermes_home()))
+        return db_path(Path(get_hermes_home()))
 
     async def list_chats(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
             return denied
-        records = await asyncio.to_thread(chats.read, chats_path())
+        records = await asyncio.to_thread(chats.read, store_path())
         return web.json_response({"object": "memento.chats", "chats": records})
 
     async def merge_chats(request: "web.Request") -> "web.Response":
@@ -168,21 +169,50 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "Body must be JSON", 400)
         try:
             records = await asyncio.to_thread(
-                chats.merge, chats_path(), (body or {}).get("chats") if isinstance(body, dict) else None
+                chats.merge, store_path(), (body or {}).get("chats") if isinstance(body, dict) else None
             )
         except chats.InvalidChats as error:
             return _error(web, str(error), 400)
         return web.json_response({"object": "memento.chats", "chats": records})
+
+    async def session_context(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        session_id = request.match_info["session_id"]
+        path = store_path()
+        open_db = getattr(adapter, "_ensure_session_db_async", None)
+        db = await open_db() if callable(open_db) else None
+        resolve = getattr(db, "resolve_resume_session_id", None)
+        if callable(resolve):
+            # Compression moves a chat to a child session; its newest calls are recorded there.
+            try:
+                session_id = await asyncio.to_thread(resolve, session_id) or session_id
+            except Exception:
+                logger.debug("memento: couldn't resolve session %s", session_id, exc_info=True)
+        found = await asyncio.to_thread(context.read, path, session_id) or {}
+        # Never a 404 for an unknown session: the app reads a 404 as a missing plugin.
+        return web.json_response(
+            {
+                "object": "memento.context",
+                "session_id": session_id,
+                **{field: found.get(field) for field in context.FIELDS},
+            }
+        )
 
     app.router.add_get(f"{PREFIX}/info", info)
     app.router.add_get(f"{PREFIX}/chats", list_chats)
     app.router.add_post(f"{PREFIX}/chats", merge_chats)
     app.router.add_get(f"{PREFIX}/cron/runs", cron_runs)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/label", label_session)
+    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/context", session_context)
     logger.info("memento: serving %s on the API server", PREFIX)
 
 
 def register(ctx) -> None:
+    register_hook = getattr(ctx, "register_hook", None)
+    if register_hook is not None:
+        register_hook("post_api_request", context.record)
     register_handler = getattr(ctx, "register_platform_handler", None)
     if register_handler is None:
         logger.warning("memento: this Hermes version can't add API server routes; update Hermes")
