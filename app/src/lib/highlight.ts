@@ -14,6 +14,20 @@ export interface Block {
   code: string
   /** Highlighted HTML (escaped by highlight.js), when the text looked like code. */
   html?: string
+  /** Line numbers taken off read_file's `N|line` rows, shown in a gutter. */
+  lines?: string[]
+}
+
+const NUMBERED = /^\s*(\d+)\|(.*)$/
+
+/** Splits read_file's `LINE_NUM|CONTENT` rows so the numbers don't throw off highlighting. */
+function unnumber(text: string) {
+  const rows = text.split("\n").map((row) => NUMBERED.exec(row))
+  if (rows.length < 2 || rows.some((row) => !row)) return undefined
+  return {
+    lines: rows.map((row) => row![1]),
+    code: rows.map((row) => row![2]).join("\n"),
+  }
 }
 
 function parseJson(text: string): unknown {
@@ -33,7 +47,10 @@ function languageOf(hljs: Hljs, hint?: string) {
   return extension && hljs.getLanguage(extension) ? extension : undefined
 }
 
-function highlightWith(hljs: Hljs, code: string, language?: string): Block {
+function highlightWith(hljs: Hljs, text: string, language?: string): Block {
+  const numbered = unnumber(text)
+  if (numbered) return { ...highlightWith(hljs, numbered.code, language), lines: numbered.lines }
+  const code = text
   if (language)
     return { code, html: hljs.highlight(code, { language, ignoreIllegals: true }).value }
   const auto = hljs.highlightAuto(code)

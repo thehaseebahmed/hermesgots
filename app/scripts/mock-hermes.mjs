@@ -195,7 +195,7 @@ async function playTurn(req, body, last, out) {
     "        shutil.copyfileobj(src, dst)",
     "    for old in sorted(path.parent.glob(f\"{path.name}.*.gz\"))[keep:]:",
     "        old.unlink()",
-  ].map((line, i) => `${String(i + 1).padStart(6)}|${line}`).join("\n")
+  ].map((line, i) => `${i + 1}|${line}`).join("\n")
   const readOutput = JSON.stringify({ content: source, total_lines: 9, file_size: 312, truncated: false })
   out.tool({ tool: "read_file", toolCallId: readId, status: "completed", result: readOutput })
   record(req, { role: "assistant", content: null, tool_calls: [{ id: readId, type: "function", function: { name: "read_file", arguments: JSON.stringify({ path: readPath }) } }] })

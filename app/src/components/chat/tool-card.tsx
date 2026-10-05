@@ -57,28 +57,44 @@ function useFormatted(text: string, hint?: string) {
   return formatted?.text === text ? formatted.blocks : [{ code: text }]
 }
 
-const blockClass =
-  "overflow-x-auto rounded-2xl bg-muted/60 p-4 font-mono text-[13px] leading-relaxed"
+const blockClass = "rounded-2xl bg-muted/60 font-mono text-[13px] leading-relaxed"
+
+function CodeBlock({ block }: { block: Block }) {
+  const code = block.html ? (
+    <code dangerouslySetInnerHTML={{ __html: block.html }} />
+  ) : (
+    <code>{block.code}</code>
+  )
+  if (block.lines)
+    return (
+      <div className={`${blockClass} flex`}>
+        <pre
+          aria-hidden
+          className="shrink-0 py-4 pr-3 pl-4 text-right text-muted-foreground select-none"
+        >
+          {block.lines.join("\n")}
+        </pre>
+        <pre className="min-w-0 flex-1 overflow-x-auto py-4 pr-4 whitespace-pre">{code}</pre>
+      </div>
+    )
+  // Code keeps its lines; plain text wraps.
+  return (
+    <pre
+      className={`${blockClass} overflow-x-auto p-4 ${block.html ? "whitespace-pre" : "break-words whitespace-pre-wrap"}`}
+    >
+      {code}
+    </pre>
+  )
+}
 
 function Section({ title, text, hint }: { title: string; text: string; hint?: string }) {
   const blocks = useFormatted(text, hint)
   return (
     <section className="flex flex-col gap-2">
       <h3 className="px-1 text-sm text-muted-foreground">{title}</h3>
-      {blocks.map((block, i) =>
-        block.html ? (
-          <pre
-            key={i}
-            // Code keeps its lines; plain text wraps.
-            className={`${blockClass} whitespace-pre`}
-            dangerouslySetInnerHTML={{ __html: block.html }}
-          />
-        ) : (
-          <pre key={i} className={`${blockClass} break-words whitespace-pre-wrap`}>
-            {block.code}
-          </pre>
-        ),
-      )}
+      {blocks.map((block, i) => (
+        <CodeBlock key={i} block={block} />
+      ))}
     </section>
   )
 }
