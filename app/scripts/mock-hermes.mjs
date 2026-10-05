@@ -8,6 +8,9 @@
 // The plugin also keeps the chat list (GET and POST /api/plugins/memento/chats, newer record wins) and
 // labels a chat as Memento's on POST /api/plugins/memento/sessions/{id}/label. Its
 // GET /api/plugins/memento/sessions/{id}/context reports a keyed session's latest model call.
+// It lists Hermes Projects on GET /api/plugins/memento/projects. GET /api/plugins/memento/github and
+// github/repos stand in for the host's GitHub account (MOCK_NO_GITHUB=1 leaves it signed out), and
+// POST /api/plugins/memento/projects pretends to create a project with its repos cloned into it.
 // Chats are titled like Hermes does: a slice of the opener at once, a "model" title a moment later,
 // readable on GET /api/sessions/{id}. Sessions are keyed by X-Hermes-Session-Id when a key is sent,
 // and their transcripts page back from GET /api/sessions/{id}/messages?order=latest&limit&offset.
@@ -36,6 +39,69 @@ const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Authorization, Content-Type, Idempotency-Key, X-Hermes-Session-Id",
+}
+
+const GITHUB = !process.env.MOCK_NO_GITHUB
+const githubRepos = [
+  { full_name: "mock-user/memento", description: "A PWA companion for Hermes", private: false },
+  { full_name: "mock-user/theseus", description: "A tiny maze game", private: true },
+  { full_name: "mock-user/dotfiles", description: null, private: false },
+  { full_name: "mock-org/zigbee-bridge", description: "Zigbee to MQTT glue", private: true },
+  { full_name: "mock-user/ha-automations", description: "Home Assistant automations", private: false },
+]
+
+/** Hermes Projects as projects.db holds them, with activity from the sessions in their folders. */
+let projects
+function mockProjects() {
+  projects ??= seedProjects()
+  return projects
+}
+
+function seedProjects() {
+  const now = Date.now() / 1000
+  const folder = (path, git = true, label = null) => ({ path, label, is_primary: false, git })
+  return [
+    {
+      id: "p_1a2b3c4d",
+      slug: "memento",
+      name: "Memento",
+      description: null,
+      created_at: now - 40 * 86_400,
+      last_active: now - 15 * 60,
+      folders: [{ ...folder("/home/hermes/code/memento"), is_primary: true }],
+    },
+    {
+      id: "p_5e6f7a8b",
+      slug: "theseus",
+      name: "theseus",
+      description: "A tiny maze game for the phone, written over lunch breaks",
+      created_at: now - 20 * 86_400,
+      last_active: now - 3 * 3_600,
+      folders: [{ ...folder("/home/hermes/code/theseus"), is_primary: true }],
+    },
+    {
+      id: "p_9c0d1e2f",
+      slug: "smart-home",
+      name: "Smart Home",
+      description: null,
+      created_at: now - 300 * 86_400,
+      last_active: now - 120 * 86_400,
+      folders: [
+        { ...folder("/home/hermes/code/ha-config"), is_primary: true },
+        folder("/home/hermes/code/zigbee-bridge", true, "bridge"),
+        folder("/home/hermes/notes/home", false),
+      ],
+    },
+    {
+      id: "p_3a4b5c6d",
+      slug: "french",
+      name: "French",
+      description: null,
+      created_at: now - 80 * 86_400,
+      last_active: null,
+      folders: [{ ...folder("/home/hermes/notes/french", false), is_primary: true }],
+    },
+  ]
 }
 
 function json(res, status, body) {
@@ -432,8 +498,8 @@ http
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/info") {
       return json(res, 200, {
         name: "memento",
-        version: "0.3.0",
-        features: ["cron_runs", "session_label", "chats", "context"],
+        version: "0.4.0",
+        features: ["cron_runs", "session_label", "chats", "context", "projects", "github"],
       })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/cron/runs") {
@@ -442,6 +508,46 @@ http
         cronJobs().map((job) => [job.id, job.runs.slice(-perJob).reverse().map((run) => ledgerRow(job, run))]),
       )
       return json(res, 200, { object: "cron_runs", jobs })
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/github") {
+      return json(res, 200, GITHUB ? { connected: true, source: "gh", login: "mock-user" } : { connected: false })
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/github/repos") {
+      if (!GITHUB) return json(res, 409, { error: { message: "No GitHub account on the server." } })
+      return json(res, 200, { object: "memento.github.repos", repos: githubRepos })
+    }
+    if (PLUGIN && !profile && req.method === "POST" && url.pathname === "/api/plugins/memento/projects") {
+      const { name, description, repos = [] } = await readBody(req)
+      if (!String(name ?? "").trim()) return json(res, 400, { error: { message: "Name the project." } })
+      const bad = repos.find((repo) => !/^[\w-]+\/[\w.-]+$/.test(repo))
+      if (bad !== undefined) return json(res, 400, { error: { message: `${bad} isn't owner/name.` } })
+      const all = mockProjects()
+      const base = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "project"
+      let slug = base
+      for (let n = 2; all.some((p) => p.slug === slug); n++) slug = `${base}-${n}`
+      await sleep(1500 * Math.max(1, repos.length))
+      const root = `/home/hermes/.hermes/projects/${slug}`
+      const names = repos.map((repo) => repo.split("/")[1])
+      const folders = repos.map((repo, i) => ({
+        path: `${root}/${names.filter((n) => n === names[i]).length > 1 ? repo.replace("/", "-") : names[i]}`,
+        label: null,
+        is_primary: false,
+        git: true,
+      }))
+      const project = {
+        id: `p_${randomUUID().slice(0, 8)}`,
+        slug,
+        name: name.trim(),
+        description: String(description ?? "").trim() || null,
+        created_at: Date.now() / 1000,
+        last_active: null,
+        folders: [{ path: root, label: null, is_primary: true, git: false }, ...folders],
+      }
+      all.push(project)
+      return json(res, 200, { object: "memento.project", id: project.id, slug, path: root, folders: folders.map((f) => f.path) })
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/projects") {
+      return json(res, 200, { object: "memento.projects", projects: mockProjects() })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/chats") {
       if (req.method === "POST") {

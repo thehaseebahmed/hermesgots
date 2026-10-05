@@ -3,7 +3,8 @@
 Adds routes to the API server, so the Memento app (which only talks to the API server, with its key)
 can read cron run history from Hermes's execution ledger instead of piecing it together on each
 device, keep its chat list on the server (``chats.py``), report each chat's context use
-(``context.py``), and label its chats as Memento's. The dashboard half lives in ``dashboard/``.
+(``context.py``), list and create Hermes Projects (``projects.py``) with GitHub repos cloned into
+them (``github.py``) and label its chats as Memento's. The dashboard half lives in ``dashboard/``.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-from . import chats, context
+from . import chats, context, github, projects
 from .store import db_path
 
 logger = logging.getLogger(__name__)
@@ -111,7 +112,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             {
                 "name": "memento",
                 "version": VERSION,
-                "features": ["cron_runs", "session_label", "chats", "context"],
+                "features": ["cron_runs", "session_label", "chats", "context", "projects", "github"],
             }
         )
 
@@ -200,10 +201,78 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             }
         )
 
+    async def list_projects(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        from hermes_constants import get_hermes_home
+
+        # Resolved here for the same reason as store_path().
+        projects_db = Path(get_hermes_home()) / "projects.db"
+        open_db = getattr(adapter, "_ensure_session_db_async", None)
+        session_db = await open_db() if callable(open_db) else None
+        try:
+            rows = await asyncio.to_thread(projects.read, projects_db, session_db)
+        except ImportError:
+            return _error(web, "This Hermes version has no Projects.", 501)
+        return web.json_response({"object": "memento.projects", "projects": rows})
+
+    def hermes_home() -> Path:
+        from hermes_constants import get_hermes_home
+
+        return Path(get_hermes_home())
+
+    async def github_status(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        result = await asyncio.to_thread(github.status, hermes_home())
+        return web.json_response({"object": "memento.github", **result})
+
+    async def github_repos(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            rows = await asyncio.to_thread(github.repos, hermes_home())
+        except github.GitHubError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "memento.github.repos", "repos": rows})
+
+    async def create_project(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            body = await request.json()
+        except ValueError:
+            return _error(web, "Body must be JSON", 400)
+        if not isinstance(body, dict):
+            return _error(web, "Body must be an object", 400)
+        try:
+            created = await asyncio.to_thread(
+                projects.create,
+                hermes_home(),
+                body.get("name"),
+                body.get("description"),
+                body.get("repos", []),
+            )
+        except ImportError:
+            return _error(web, "This Hermes version has no Projects.", 501)
+        except github.GitHubError as error:
+            return _error(web, str(error), error.status)
+        except ValueError as error:
+            return _error(web, str(error), 400)
+        return web.json_response({"object": "memento.project", **created})
+
     app.router.add_get(f"{PREFIX}/info", info)
     app.router.add_get(f"{PREFIX}/chats", list_chats)
     app.router.add_post(f"{PREFIX}/chats", merge_chats)
     app.router.add_get(f"{PREFIX}/cron/runs", cron_runs)
+    app.router.add_get(f"{PREFIX}/projects", list_projects)
+    app.router.add_post(f"{PREFIX}/projects", create_project)
+    app.router.add_get(f"{PREFIX}/github", github_status)
+    app.router.add_get(f"{PREFIX}/github/repos", github_repos)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/label", label_session)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/context", session_context)
     logger.info("memento: serving %s on the API server", PREFIX)
