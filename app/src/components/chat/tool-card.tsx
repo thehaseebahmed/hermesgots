@@ -1,11 +1,12 @@
 import { Fragment, useEffect, useState, useSyncExternalStore } from "react"
 import { Drawer } from "@base-ui/react/drawer"
+import { useLiveQuery } from "dexie-react-hooks"
 import { CheckIcon, ChevronRightIcon, WrapTextIcon, XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Spinner } from "@/components/ui/spinner"
-import type { ToolEvent } from "@/lib/db"
+import { getSettings, saveSettings, type ToolEvent } from "@/lib/db"
 import { formatDuration } from "@/lib/format"
 import { formatTool, splitHtml, type Block } from "@/lib/highlight"
 
@@ -59,7 +60,7 @@ function useFormatted(text: string, hint?: string) {
 
 /** Long lines wrap unless turned off; numbered rows keep their number beside each wrapped row. */
 function CodeBlock({ block, toggle }: { block: Block; toggle?: boolean }) {
-  const [wrap, setWrap] = useState(true)
+  const wrap = useLiveQuery(async () => (await getSettings()).wrapToolOutput, []) ?? true
   const text = wrap ? "whitespace-pre-wrap [overflow-wrap:anywhere]" : "whitespace-pre"
   let body
   if (block.lines) {
@@ -107,7 +108,7 @@ function CodeBlock({ block, toggle }: { block: Block; toggle?: boolean }) {
           className="absolute top-0 right-0 size-11 rounded-2xl bg-muted text-muted-foreground aria-pressed:text-foreground"
           aria-label="Wrap lines"
           aria-pressed={wrap}
-          onClick={() => setWrap(!wrap)}
+          onClick={() => void saveSettings({ wrapToolOutput: !wrap })}
         >
           <WrapTextIcon />
         </Button>

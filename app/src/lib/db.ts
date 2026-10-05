@@ -13,6 +13,8 @@ export interface Settings {
   syncedAt?: number
   /** Finished the first-run setup. */
   onboarded?: boolean
+  /** Soft-wrap in tool output; unset until the user flips it (wrapped by default). */
+  wrapToolOutput?: boolean
 }
 
 /** A Hermes profile Memento can talk to. Hermes can't list its profiles, so the user adds them. */
