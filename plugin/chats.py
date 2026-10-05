@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 from .store import connect
 
@@ -64,12 +64,14 @@ def read(path: Path) -> Dict[str, Dict[str, Any]]:
         conn.close()
 
 
-def merge(path: Path, chats: Any) -> Dict[str, Dict[str, Any]]:
-    """Keeps whichever record is newer, then returns every record so the app can take the rest."""
+def merge(path: Path, chats: Any) -> Tuple[Dict[str, Dict[str, Any]], bool]:
+    """Keeps whichever record is newer, then returns every record so the app can take the rest, and
+    whether anything changed."""
     rows = _validate(chats)
     conn = connect(path)
     try:
         conn.execute("BEGIN IMMEDIATE")
+        before = conn.total_changes
         conn.executemany(
             """INSERT INTO chats (id, at, deleted, value) VALUES (?, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET
@@ -77,9 +79,10 @@ def merge(path: Path, chats: Any) -> Dict[str, Dict[str, Any]]:
                WHERE excluded.at > chats.at""",
             rows,
         )
+        changed = conn.total_changes > before
         records = _records(conn)
         conn.execute("COMMIT")
-        return records
+        return records, changed
     except BaseException:
         if conn.in_transaction:
             conn.execute("ROLLBACK")

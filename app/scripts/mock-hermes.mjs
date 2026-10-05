@@ -7,7 +7,9 @@
 // served under /p/<profile>/, and an unknown route's 404 carries no CORS headers.
 // The plugin also keeps the chat list (GET and POST /api/plugins/memento/chats, newer record wins) and
 // labels a chat as Memento's on POST /api/plugins/memento/sessions/{id}/label. Its
-// GET /api/plugins/memento/sessions/{id}/context reports a keyed session's latest model call.
+// GET /api/plugins/memento/sessions/{id}/context reports a keyed session's latest model call, and
+// GET /api/plugins/memento/events?since=N streams what changed (`session`, `title`, `chats`, `cron`)
+// after a `hello` carrying the cursor, as the plugin's hooks note it.
 // Chats are titled like Hermes does: a slice of the opener at once, a "model" title a moment later,
 // readable on GET /api/sessions/{id}. Sessions are keyed by X-Hermes-Session-Id when a key is sent,
 // and their transcripts page back from GET /api/sessions/{id}/messages?order=latest&limit&offset.
@@ -31,6 +33,36 @@ const lastCalls = new Map()
 const transcripts = new Map()
 let lastRowId = 0
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+/** The plugin's change log and the streams following it. */
+const changes = []
+let lastChange = 0
+const changeStreams = new Set()
+
+function noteChange(kind, sessionId) {
+  const change = { id: ++lastChange, kind, ...(sessionId ? { session_id: sessionId } : {}) }
+  changes.push(change)
+  if (changes.length > 200) changes.shift()
+  for (const send of changeStreams) send(change)
+}
+
+function streamChanges(req, res, since) {
+  res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", ...cors })
+  const write = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+  const send = ({ id, kind, session_id }) => write(kind, { cursor: id, ...(session_id ? { session_id } : {}) })
+  let cursor = Number.isInteger(since) ? since : lastChange
+  write("hello", { cursor, version: "0.4.0" })
+  if (cursor > lastChange || (cursor < lastChange && (changes[0]?.id ?? Infinity) > cursor + 1)) {
+    cursor = lastChange
+    write("reset", { cursor })
+  }
+  for (const change of changes) if (change.id > cursor) send(change)
+  changeStreams.add(send)
+  const ping = setInterval(() => res.write(": ping\n\n"), 20_000)
+  req.on("close", () => {
+    clearInterval(ping)
+    changeStreams.delete(send)
+  })
+}
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -133,7 +165,10 @@ function titleChat(req, opener) {
   chatTitles.set(sessionId, line.length > 48 ? `${line.slice(0, 47).trimEnd()}…` : line)
   const words = line.replace(/[^\p{L}\p{N}\s-]/gu, "").split(/\s+/).filter(Boolean).slice(0, 4)
   const title = words.length > 1 ? words.join(" ").replace(/^./, (c) => c.toUpperCase()) : "Friendly greeting"
-  setTimeout(() => chatTitles.set(sessionId, title), 2000)
+  setTimeout(() => {
+    chatTitles.set(sessionId, title)
+    noteChange("title", sessionId)
+  }, 2000)
 }
 
 /** Stores a transcript row the way Hermes's session DB does, for keyed sessions only. */
@@ -142,6 +177,7 @@ function record(req, row) {
   if (!sessionId || !req.headers.authorization) return
   if (!transcripts.has(sessionId)) transcripts.set(sessionId, [])
   transcripts.get(sessionId).push({ id: ++lastRowId, session_id: sessionId, timestamp: Date.now() / 1000, ...row })
+  noteChange("session", sessionId)
 }
 
 /** Hermes pages `latest` back from the newest row but returns each page oldest first. */
@@ -425,16 +461,24 @@ http
       if (jobAction[2] === "run") {
         const run = { start: Date.now(), end: null, ok: true }
         job.runs.push(run)
-        setTimeout(() => (run.end = Date.now()), 4000)
+        setTimeout(() => {
+          run.end = Date.now()
+          if (!profile) noteChange("cron")
+        }, 4000)
       }
+      if (!profile) noteChange("cron")
       return json(res, 200, { job: jobRecord(job) })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/info") {
       return json(res, 200, {
         name: "memento",
-        version: "0.3.0",
-        features: ["cron_runs", "session_label", "chats", "context"],
+        version: "0.4.0",
+        features: ["cron_runs", "session_label", "chats", "context", "events"],
       })
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/events") {
+      const since = url.searchParams.get("since")
+      return streamChanges(req, res, since === null ? undefined : Number(since))
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/cron/runs") {
       const perJob = Math.max(1, Math.min(Number(url.searchParams.get("per_job") ?? 24) || 24, 200))
@@ -449,9 +493,14 @@ http
         if (!chats || typeof chats !== "object") {
           return json(res, 400, { error: { message: "chats must be an object" } })
         }
+        let changed = false
         for (const [id, entry] of Object.entries(chats)) {
-          if (entry.at > (pluginChats.get(id)?.at ?? -1)) pluginChats.set(id, entry)
+          if (entry.at > (pluginChats.get(id)?.at ?? -1)) {
+            pluginChats.set(id, entry)
+            changed = true
+          }
         }
+        if (changed) noteChange("chats")
       }
       return json(res, 200, { object: "memento.chats", chats: Object.fromEntries(pluginChats) })
     }
