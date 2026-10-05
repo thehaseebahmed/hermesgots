@@ -120,8 +120,8 @@ async function errorMessage(response: Response) {
   return `Hermes returned ${response.status} ${response.statusText}`.trim()
 }
 
-/** Yields `{event, data}` for each SSE frame in the body. */
-async function* readSse(body: ReadableStream<Uint8Array>) {
+/** Yields `{event, data}` for each SSE frame in the body. `onRead` hears every chunk, pings included. */
+async function* readSse(body: ReadableStream<Uint8Array>, onRead?: () => void) {
   const reader = body.getReader()
   const decoder = new TextDecoder()
   let buffer = ""
@@ -129,6 +129,7 @@ async function* readSse(body: ReadableStream<Uint8Array>) {
     while (true) {
       const { value, done } = await reader.read()
       if (done) break
+      onRead?.()
       buffer += decoder.decode(value, { stream: true })
       let boundary: number
       while ((boundary = buffer.search(/\r?\n\r?\n/)) !== -1) {
@@ -458,6 +459,46 @@ export async function mergeChatList<T>(config: HermesConfig, chats: Doc<T>): Pro
   const body = await response.json()
   if (!body?.chats || typeof body.chats !== "object") throw new Error("Unexpected chat list")
   return body.chats
+}
+
+/** The Memento plugin's version and what it serves. */
+export async function getPluginInfo(config: HermesConfig): Promise<{ features: string[] }> {
+  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/info`, {
+    headers: headers(config),
+  })
+  const body = await response.json()
+  const features: unknown[] = Array.isArray(body?.features) ? body.features : []
+  return { features: features.filter((f): f is string => typeof f === "string") }
+}
+
+/**
+ * Follows the Memento plugin's change stream until it ends: `hello` and `reset` carry the cursor to
+ * resume from, and `session`, `title`, `chats` and `cron` say what changed (never the content).
+ */
+export async function followEvents(
+  config: HermesConfig,
+  options: { since?: number; signal?: AbortSignal; onRead?: () => void },
+  onEvent: (event: string, data: Record<string, unknown>) => void,
+) {
+  const query = options.since !== undefined ? `?since=${options.since}` : ""
+  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/events${query}`, {
+    headers: headers(config),
+    signal: options.signal,
+  })
+  if (!response.body) throw new HermesError("Hermes returned an empty response.")
+  options.onRead?.()
+  for await (const { event, data } of readSse(response.body, options.onRead)) {
+    let payload: unknown
+    try {
+      payload = JSON.parse(data)
+    } catch {
+      continue
+    }
+    onEvent(
+      event,
+      payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {},
+    )
+  }
 }
 
 export interface SessionContext {

@@ -26,6 +26,7 @@ import {
   type TurnUsage,
 } from "@/lib/hermes"
 import { refreshContext } from "@/lib/context"
+import { isLive } from "@/lib/live"
 import { randomId } from "@/lib/utils"
 
 /**
@@ -51,10 +52,14 @@ function titleFrom(text: string) {
   return line.length > 48 ? `${line.slice(0, 47).trimEnd()}…` : line || "New chat"
 }
 
-/** Swaps the first-line title for the one Hermes generated, unless the user renamed the chat. */
+/**
+ * Swaps the first-line title for the one Hermes generated, unless the user renamed the chat. A bot
+ * whose plugin stream is open hears of a later title as it lands, so only the first check runs.
+ */
 async function syncTitle(conversationId: string, config: HermesConfig, sessionId: string) {
   for (const delay of TITLE_CHECKS_MS) {
     if (delay) await new Promise((resolve) => window.setTimeout(resolve, delay))
+    if (delay && isLive((await db.conversations.get(conversationId))?.profileId)) return
     const title = await getSessionTitle(config, sessionId)
     const conversation = await db.conversations.get(conversationId)
     if (!conversation || conversation.titleEdited) return

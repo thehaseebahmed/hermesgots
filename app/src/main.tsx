@@ -6,6 +6,7 @@ import { BrowserRouter } from "react-router"
 import App from "@/App"
 import { Toaster } from "@/components/ui/sonner"
 import { recoverInterruptedMessages } from "@/lib/chat"
+import { startLive } from "@/lib/live"
 import { handBackNativeSignIn, handleBackButton } from "@/lib/native"
 import { startSync } from "@/lib/sync"
 import "@/index.css"
@@ -14,6 +15,7 @@ if (!handBackNativeSignIn()) {
   handleBackButton()
   void recoverInterruptedMessages()
   void startSync()
+  startLive()
 }
 
 createRoot(document.getElementById("root")!).render(

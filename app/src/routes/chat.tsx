@@ -51,10 +51,13 @@ import {
   type Message,
 } from "@/lib/db"
 import { loadEarlierHistory, reconcileHistory } from "@/lib/history"
+import { useLive, watchChat } from "@/lib/live"
 import { syncContextWindow } from "@/lib/models"
 
 /** How often an open chat checks Hermes for turns sent from another device. */
 const CATCH_UP_MS = 30_000
+/** With the plugin's stream, catch-ups come as turns happen; this is only a safety net. */
+const LIVE_CATCH_UP_MS = 5 * 60_000
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
@@ -195,16 +198,19 @@ export function ChatPage() {
   }, [id, needsHistory])
 
   // Other devices add turns on Hermes. Catch up when the chat opens, when sync brings news of it,
-  // when this tab comes back, and now and then while it's on screen.
+  // when this tab comes back, as the plugin's stream says the session moved, and now and then
+  // while it's on screen (rarely, when the stream is open).
   const updatedAt = conversation?.updatedAt
   const hasMessages = (messages?.length ?? 0) > 0
+  const streamOpen = useLive(conversation?.profileId)
+  useEffect(() => (id ? watchChat(id) : undefined), [id])
   useEffect(() => {
     if (!id || !hasMessages) return
     const catchUp = () => {
       if (document.visibilityState === "visible") reconcileHistory(id).catch(() => undefined)
     }
     catchUp()
-    const timer = window.setInterval(catchUp, CATCH_UP_MS)
+    const timer = window.setInterval(catchUp, streamOpen ? LIVE_CATCH_UP_MS : CATCH_UP_MS)
     document.addEventListener("visibilitychange", catchUp)
     window.addEventListener("online", catchUp)
     return () => {
@@ -212,7 +218,7 @@ export function ChatPage() {
       document.removeEventListener("visibilitychange", catchUp)
       window.removeEventListener("online", catchUp)
     }
-  }, [id, hasMessages, updatedAt])
+  }, [id, hasMessages, updatedAt, streamOpen])
 
   // A deleted (or unknown) conversation id falls back to a fresh chat.
   useEffect(() => {
