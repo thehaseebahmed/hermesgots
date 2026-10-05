@@ -1,6 +1,6 @@
 # Memento plugin for Hermes
 
-The [Memento](../README.md) app uses this plugin to keep each bot's chat list on its Hermes server, to show routine (cron) history, and to label its chats in the Hermes dashboard. It reads Hermes's cron execution ledger (`cron/executions.db`), so every device sees the same runs, including the ones that happened while no device was looking.
+The [Memento](../README.md) app uses this plugin to keep each bot's chat list on its Hermes server, to show how full each chat's context is, to show routine (cron) history, and to label its chats in the Hermes dashboard. It reads Hermes's cron execution ledger (`cron/executions.db`), so every device sees the same runs, including the ones that happened while no device was looking.
 
 It has two parts:
 
@@ -8,6 +8,7 @@ It has two parts:
   - `GET /api/plugins/memento/info` returns the plugin's name, version and features.
   - `GET /api/plugins/memento/cron/runs?per_job=24[&job_id=…]` returns each job's newest runs from the ledger, newest first.
   - `GET /api/plugins/memento/chats` returns the chat list Memento keeps here: titles, Hermes session ids, context use and deletions, keyed by chat id. `POST` it `{ "chats": { … } }` to merge a device's list in (the newer record wins) and get the merged list back. It's stored in `$HERMES_HOME/memento/memento.db`, outside the plugin's folder, so updates leave it alone.
+  - `GET /api/plugins/memento/sessions/{id}/context` returns the prompt tokens of the session's latest model call and the context window Hermes runs it with, recorded by a `post_api_request` hook. It follows compression to the session that continues the chat.
   - `POST /api/plugins/memento/sessions/{id}/label` marks a Memento chat's session with the `memento` source, so the dashboard's Sessions page labels it **Memento**. It only relabels sessions the API server created.
 - **A dashboard tab** (`dashboard/`). **Memento** in `hermes dashboard` shows the plugin's version, whether it's enabled, how many runs the ledger holds and how many chats it stores.
 
