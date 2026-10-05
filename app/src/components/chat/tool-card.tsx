@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState, useSyncExternalStore } from "react"
 import { Drawer } from "@base-ui/react/drawer"
-import { CheckIcon, ChevronRightIcon, XIcon } from "lucide-react"
+import { CheckIcon, ChevronRightIcon, WrapTextIcon, XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
@@ -57,48 +57,82 @@ function useFormatted(text: string, hint?: string) {
   return formatted?.text === text ? formatted.blocks : [{ code: text }]
 }
 
-const blockClass =
-  "rounded-2xl bg-muted/60 p-4 font-mono text-[13px] leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]"
-
-/** Long lines wrap; numbered rows keep their number beside the first line of each wrap. */
-function CodeBlock({ block }: { block: Block }) {
+/** Long lines wrap unless turned off; numbered rows keep their number beside each wrapped row. */
+function CodeBlock({ block, toggle }: { block: Block; toggle?: boolean }) {
+  const [wrap, setWrap] = useState(true)
+  const text = wrap ? "whitespace-pre-wrap [overflow-wrap:anywhere]" : "whitespace-pre"
+  let body
   if (block.lines) {
     const rows = block.html ? splitHtml(block.html) : block.code.split("\n")
-    return (
-      <div className={`${blockClass} grid grid-cols-[auto_minmax(0,1fr)] gap-x-3`}>
+    body = (
+      <div
+        className={`grid ${wrap ? "grid-cols-[auto_minmax(0,1fr)]" : "w-max min-w-full grid-cols-[auto_max-content]"}`}
+      >
         {block.lines.map((line, i) => (
           <Fragment key={i}>
-            <span className="text-right text-muted-foreground select-none" aria-hidden>
+            {/* Sticky, so the numbers stay put while unwrapped lines scroll sideways. */}
+            <span
+              className="sticky left-0 bg-muted pr-3 pl-4 text-right text-muted-foreground select-none"
+              aria-hidden
+            >
               {line}
             </span>
             {block.html ? (
-              <code dangerouslySetInnerHTML={{ __html: rows[i] ?? "" }} />
+              <code className={text} dangerouslySetInnerHTML={{ __html: rows[i] ?? "" }} />
             ) : (
-              <code>{rows[i]}</code>
+              <code className={text}>{rows[i]}</code>
             )}
           </Fragment>
         ))}
       </div>
     )
+  } else {
+    body = block.html ? (
+      <code className={`block ${text}`} dangerouslySetInnerHTML={{ __html: block.html }} />
+    ) : (
+      <code className={`block ${text}`}>{block.code}</code>
+    )
   }
-  return block.html ? (
-    <pre className={blockClass}>
-      <code dangerouslySetInnerHTML={{ __html: block.html }} />
-    </pre>
-  ) : (
-    <pre className={blockClass}>
-      <code>{block.code}</code>
-    </pre>
+  return (
+    <div className="relative">
+      <pre
+        className={`overflow-x-auto rounded-2xl bg-muted py-4 font-mono text-[13px] leading-relaxed ${block.lines ? "" : "pl-4"} ${toggle ? "pr-12" : "pr-4"}`}
+      >
+        {body}
+      </pre>
+      {toggle && (
+        <Button
+          variant="ghost"
+          size="icon-lg"
+          className="absolute top-0 right-0 size-11 rounded-2xl bg-muted text-muted-foreground aria-pressed:text-foreground"
+          aria-label="Wrap lines"
+          aria-pressed={wrap}
+          onClick={() => setWrap(!wrap)}
+        >
+          <WrapTextIcon />
+        </Button>
+      )}
+    </div>
   )
 }
 
-function Section({ title, text, hint }: { title: string; text: string; hint?: string }) {
+function Section({
+  title,
+  text,
+  hint,
+  wrapToggle,
+}: {
+  title: string
+  text: string
+  hint?: string
+  wrapToggle?: boolean
+}) {
   const blocks = useFormatted(text, hint)
   return (
     <section className="flex flex-col gap-2">
       <h3 className="px-1 text-sm text-muted-foreground">{title}</h3>
       {blocks.map((block, i) => (
-        <CodeBlock key={i} block={block} />
+        <CodeBlock key={i} block={block} toggle={wrapToggle} />
       ))}
     </section>
   )
@@ -118,6 +152,7 @@ function Details({ tool }: { tool: ToolEvent }) {
       {tool.result && (
         <Section
           title="Output"
+          wrapToggle
           text={tool.result}
           hint={FILE_TOOLS.has(tool.tool) && hasLabel ? tool.label : undefined}
         />
