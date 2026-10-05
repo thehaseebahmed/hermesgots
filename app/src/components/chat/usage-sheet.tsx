@@ -3,8 +3,8 @@ import { Meter } from "@base-ui/react/meter"
 import { Link } from "react-router"
 
 import { Banner } from "@/components/banner"
+import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import type { Profile } from "@/lib/db"
 import { formatTokens } from "@/lib/format"
 import { getModelInfo, type ModelInfo } from "@/lib/hermes"
@@ -123,14 +123,11 @@ export function UsageSheet({
   const known = pending ? undefined : info?.value
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="bottom"
-        className="mx-auto max-h-[85dvh] w-full max-w-xl overflow-y-auto rounded-t-3xl pb-[max(1.5rem,env(safe-area-inset-bottom))] data-[side=bottom]:border-t-0"
-      >
-        <SheetHeader className="items-center pb-2">
-          <SheetTitle>Usage</SheetTitle>
-        </SheetHeader>
+    <Popup open={open} onOpenChange={onOpenChange}>
+      <PopupContent>
+        <PopupHeader className="items-center pb-2">
+          <PopupTitle>Usage</PopupTitle>
+        </PopupHeader>
         <div className="flex flex-col gap-6 px-6 text-[15px]">
           {!usage.tracked && <Banner>Context tracking needs the Memento plugin.</Banner>}
           <Section title="Context">
@@ -182,7 +179,7 @@ export function UsageSheet({
             <Row label="Provider" value={pending ? "…" : known?.provider} />
           </Section>
         </div>
-      </SheetContent>
-    </Sheet>
+      </PopupContent>
+    </Popup>
   )
 }

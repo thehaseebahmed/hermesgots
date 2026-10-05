@@ -72,6 +72,7 @@ PR titles follow the same format. Fill in `.github/pull_request_template.md` for
 | `src/lib/sync.ts`, `merge.ts` | Sync state, unlock flows, and merging bots and chat lists with the server (chat lists with the Memento plugin when a bot's server has it) |
 | `src/lib/history.ts` | Loads a synced chat's transcript from Hermes into IndexedDB |
 | `src/lib/context.ts` | Reads a chat's context use from the Memento plugin |
+| `src/lib/media.ts` | `useWide`: whether the screen is tablet-sized (768px) or wider |
 | `src/lib/highlight.ts` | Formats and highlights tool input and output (highlight.js, loaded on first use) |
 | `netlify/functions/sync.mts`, `netlify/lib/docs.ts` | The opaque per-user document store (Netlify Blobs) |
 | `src/lib/native.ts`, `native-account.ts` | Android app: platform checks, back button, and GoTrue sign-in and sync calls over native HTTP |
@@ -80,6 +81,7 @@ PR titles follow the same format. Fill in `.github/pull_request_template.md` for
 | `src/routes/` | `chat.tsx`, `settings.tsx`, `routines.tsx` (cron jobs), `bots.tsx` (gallery), `setup.tsx` (sign-in gate and first-run wizard) |
 | `src/components/chat/` | Message rendering, tool and approval cards, composer, header |
 | `src/components/bots.tsx` | Bot character definitions (SVG). `bot.tsx` renders them |
+| `src/components/popup.tsx` | `Popup`: the app's pop-up, a bottom sheet on phones and a centred dialog from tablet width up |
 | `src/components/banner.tsx` | `Banner`: a one-line info, warning or error notice (on shadcn's `Alert`) for the top of a screen or sheet |
 | `src/components/bot-card.tsx`, `bot-settings.tsx` | Bot cards (sidebar strip, settings) and the bot editor |
 | `src/index.css` | Theme tokens (light and dark) and bot/typing animations |
@@ -143,6 +145,7 @@ These behaviours were verified against Hermes's `gateway/platforms/api_server*.p
 - **The UI renders from Dexie live queries.** Streaming writes into IndexedDB (throttled), and components never hold stream state.
 - **If you change the schema, bump the Dexie version** in `src/lib/db.ts` and keep existing data loading.
 - **Every screen must work at phone (390px) and tablet (≥768px) widths, in light and dark mode.**
+- **Pop-ups are sheets on phones and dialogs on bigger screens.** Build them with `Popup` / `PopupContent` (`src/components/popup.tsx`), which picks with `useWide`, rather than a bare `Sheet` or dialog. Side drawers (the sidebar) and the tool-details drawer are not pop-ups.
   - Use the theme tokens. Don't hard-code colours, except for the fixed character palettes in the bots.
   - Respect safe-area insets.
   - Keep touch targets at 44px or larger.

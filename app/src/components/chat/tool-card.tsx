@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState, useSyncExternalStore } from "react"
+import { Fragment, useEffect, useState } from "react"
 import { Drawer } from "@base-ui/react/drawer"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CheckIcon, ChevronRightIcon, WrapTextIcon, XIcon } from "lucide-react"
@@ -9,6 +9,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { getSettings, saveSettings, type ToolEvent } from "@/lib/db"
 import { formatDuration } from "@/lib/format"
 import { formatTool, splitHtml, type Block } from "@/lib/highlight"
+import { useWide } from "@/lib/media"
 
 const INPUT_TITLES: Record<string, string> = {
   terminal: "Command",
@@ -25,14 +26,6 @@ const FILE_TOOLS = new Set(["read_file", "write_file", "patch"])
 
 /** Opens at about a third of the screen; dragging or scrolling it up takes the full height. */
 const SNAP_POINTS = [0.35, 1]
-
-// Tablet width and up (Tailwind's `md`) shows details inline; phones get a drawer.
-const wide = window.matchMedia("(min-width: 768px)")
-const subscribeWide = (onChange: () => void) => {
-  wide.addEventListener("change", onChange)
-  return () => wide.removeEventListener("change", onChange)
-}
-const useWide = () => useSyncExternalStore(subscribeWide, () => wide.matches)
 
 function useElapsed(tool: ToolEvent) {
   const [now, setNow] = useState(() => Date.now())
@@ -166,6 +159,7 @@ export function ToolCard({ tool }: { tool: ToolEvent }) {
   const running = tool.status === "running"
   const elapsed = useElapsed(tool)
   const hasLabel = Boolean(tool.label) && tool.label !== tool.tool
+  // Tablet width and up shows details inline; phones get a drawer.
   const wide = useWide()
   const [open, setOpen] = useState(false)
   const [snapPoint, setSnapPoint] = useState<Drawer.Root.SnapPoint | null>(SNAP_POINTS[0])
