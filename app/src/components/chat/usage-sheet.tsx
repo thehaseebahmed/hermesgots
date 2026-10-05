@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { Meter } from "@base-ui/react/meter"
 import { Link } from "react-router"
 
+import { Banner } from "@/components/banner"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import type { Profile } from "@/lib/db"
@@ -26,7 +27,8 @@ export function ContextRing({ usage, onClick }: { usage: ContextUsage; onClick: 
   const percent = Math.round(filled * 100)
   const radius = 20
   const circumference = 2 * Math.PI * radius
-  const label = usage.window ? `Context ${percent}% used` : "Context usage and model"
+  const shown = usage.tracked && usage.window
+  const label = shown ? `Context ${percent}% used` : "Context usage and model"
 
   return (
     <Button
@@ -55,7 +57,7 @@ export function ContextRing({ usage, onClick }: { usage: ContextUsage; onClick: 
             />
           )}
         </g>
-        {usage.window && (
+        {shown && (
           <text
             x="22"
             y="22"
@@ -131,17 +133,18 @@ export function UsageSheet({
           <SheetTitle>Usage</SheetTitle>
         </SheetHeader>
         <div className="flex flex-col gap-6 px-6 text-[15px]">
+          {!usage.tracked && <Banner>Context tracking needs the Memento plugin.</Banner>}
           <Section title="Context">
-            {!usage.tracked ? (
-              <p className="text-sm text-muted-foreground">
-                Context tracking needs the Memento plugin.
-              </p>
-            ) : usage.window ? (
+            {!usage.tracked || usage.window ? (
               <Meter.Root value={filled * 100} className="flex flex-col gap-2.5">
                 <div className="flex items-baseline justify-between gap-4">
                   <Meter.Label className="font-medium">Context window</Meter.Label>
                   <span className="text-muted-foreground tabular-nums">
-                    {usage.tokens ? `${Math.round(filled * 100)}% used` : "Not used yet"}
+                    {!usage.tracked
+                      ? "—"
+                      : usage.tokens
+                        ? `${Math.round(filled * 100)}% used`
+                        : "Not used yet"}
                   </span>
                 </div>
                 <Meter.Track className="h-2 overflow-hidden rounded-full bg-background">
@@ -152,7 +155,8 @@ export function UsageSheet({
                   />
                 </Meter.Track>
                 <span className="text-sm text-muted-foreground tabular-nums">
-                  {formatTokens(usage.tokens ?? 0)} of {formatTokens(usage.window)} tokens
+                  {usage.tracked ? formatTokens(usage.tokens ?? 0) : "—"} of{" "}
+                  {usage.window ? formatTokens(usage.window) : "—"} tokens
                 </span>
               </Meter.Root>
             ) : (
