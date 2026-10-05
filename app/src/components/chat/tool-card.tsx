@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, useSyncExternalStore } from "react"
 import { CheckIcon, ChevronRightIcon, XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   Sheet,
   SheetClose,
@@ -19,6 +20,14 @@ const INPUT_TITLES: Record<string, string> = {
   execute_code: "Code",
   browser_exec: "Code",
 }
+
+// Tablet width and up (Tailwind's `md`) shows details inline; phones get a sheet.
+const wide = window.matchMedia("(min-width: 768px)")
+const subscribeWide = (onChange: () => void) => {
+  wide.addEventListener("change", onChange)
+  return () => wide.removeEventListener("change", onChange)
+}
+const useWide = () => useSyncExternalStore(subscribeWide, () => wide.matches)
 
 function useElapsed(tool: ToolEvent) {
   const [now, setNow] = useState(() => Date.now())
@@ -41,35 +50,60 @@ function Section({ title, children }: { title: string; children: string }) {
   )
 }
 
+function Details({ tool }: { tool: ToolEvent }) {
+  const hasLabel = Boolean(tool.label) && tool.label !== tool.tool
+  return (
+    <>
+      {hasLabel && <Section title={INPUT_TITLES[tool.tool] ?? "Input"}>{tool.label}</Section>}
+      {tool.result && <Section title="Output">{tool.result}</Section>}
+    </>
+  )
+}
+
 export function ToolCard({ tool }: { tool: ToolEvent }) {
   const running = tool.status === "running"
   const elapsed = useElapsed(tool)
   const hasLabel = Boolean(tool.label) && tool.label !== tool.tool
+  const wide = useWide()
   const [open, setOpen] = useState(false)
+
+  const row = (
+    <>
+      {running ? (
+        <Spinner className="size-4 shrink-0 text-muted-foreground" />
+      ) : (
+        <CheckIcon className="size-4 shrink-0 text-primary" strokeWidth={3} />
+      )}
+      <span className="min-w-0 flex-1 truncate">
+        <span className="font-medium">
+          {tool.emoji ? `${tool.emoji} ` : ""}
+          {tool.tool}
+        </span>
+        {hasLabel && <span className="text-muted-foreground"> {tool.label}</span>}
+      </span>
+      <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+        {formatDuration(elapsed)}
+      </span>
+      <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[panel-open]/tool:rotate-90" />
+    </>
+  )
+  const rowClass =
+    "group/tool flex min-h-11 w-full items-center gap-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+
+  if (wide)
+    return (
+      <Collapsible className="w-full" open={open} onOpenChange={setOpen}>
+        <CollapsibleTrigger className={rowClass}>{row}</CollapsibleTrigger>
+        <CollapsibleContent className="flex flex-col gap-4 pt-1 pb-3 pl-6">
+          <Details tool={tool} />
+        </CollapsibleContent>
+      </Collapsible>
+    )
 
   return (
     <>
-      <button
-        type="button"
-        className="flex min-h-11 w-full items-center gap-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-        onClick={() => setOpen(true)}
-      >
-        {running ? (
-          <Spinner className="size-4 shrink-0 text-muted-foreground" />
-        ) : (
-          <CheckIcon className="size-4 shrink-0 text-primary" strokeWidth={3} />
-        )}
-        <span className="min-w-0 flex-1 truncate">
-          <span className="font-medium">
-            {tool.emoji ? `${tool.emoji} ` : ""}
-            {tool.tool}
-          </span>
-          {hasLabel && <span className="text-muted-foreground"> {tool.label}</span>}
-        </span>
-        <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-          {formatDuration(elapsed)}
-        </span>
-        <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
+      <button type="button" className={rowClass} onClick={() => setOpen(true)}>
+        {row}
       </button>
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent
@@ -95,8 +129,7 @@ export function ToolCard({ tool }: { tool: ToolEvent }) {
             </SheetDescription>
           </SheetHeader>
           <div className="flex flex-col gap-6 px-6">
-            {hasLabel && <Section title={INPUT_TITLES[tool.tool] ?? "Input"}>{tool.label}</Section>}
-            {tool.result && <Section title="Output">{tool.result}</Section>}
+            <Details tool={tool} />
           </div>
         </SheetContent>
       </Sheet>
