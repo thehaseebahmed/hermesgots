@@ -1,12 +1,13 @@
 # Memento plugin for Hermes
 
-The [Memento](../README.md) app needs this plugin to show routine (cron) history. It reads Hermes's cron execution ledger (`cron/executions.db`), so every device sees the same runs, including the ones that happened while no device was looking.
+The [Memento](../README.md) app needs this plugin to show routine (cron) history and to label its chats in the Hermes dashboard. It reads Hermes's cron execution ledger (`cron/executions.db`), so every device sees the same runs, including the ones that happened while no device was looking.
 
 It has two parts:
 
 - **API server routes** (`__init__.py`). Memento calls these with the bot's API key, and they follow the API server's `API_SERVER_CORS_ORIGINS`.
   - `GET /api/plugins/memento/info` returns the plugin's name, version and features.
   - `GET /api/plugins/memento/cron/runs?per_job=24[&job_id=…]` returns each job's newest runs from the ledger, newest first.
+  - `POST /api/plugins/memento/sessions/{id}/label` marks a Memento chat's session with the `memento` source, so the dashboard's Sessions page labels it **Memento**. It only relabels sessions the API server created.
 - **A dashboard tab** (`dashboard/`). **Memento** in `hermes dashboard` shows the plugin's version, whether it's enabled, and how many runs the ledger holds.
 
 ## Install

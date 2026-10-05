@@ -32,7 +32,7 @@ Or, in the Hermes Dashboard (`hermes dashboard`): **Channels → API server → 
 
 Memento's first-run setup shows both routes, with this site's origin filled in, then connects your first bot (`http://localhost:8642/v1` or your server's URL) with **Test connection**. Add more bots later in **Settings**.
 
-For **Routines**, also install the [Memento plugin](plugin/README.md):
+For **Routines**, and to have your chats labelled **Memento** in the Hermes dashboard, also install the [Memento plugin](plugin/README.md):
 
 ```bash
 hermes plugins install thehaseebahmed/memento/plugin --enable
@@ -49,6 +49,7 @@ hermes gateway restart
 - Each chat mints its own `X-Hermes-Session-Id` (`memento-<uuid>`), so Hermes keeps one session per chat. Hermes only honours this header when `API_SERVER_KEY` is set. Without a key, Memento sends the full transcript on every turn.
 - Approvals are answered with `POST /v1/runs/{completion_id}/approval`.
 - Routines use `GET /api/jobs` and `POST /api/jobs/{id}/pause | resume | run`. The API server only reports each job's latest run, so the run history comes from the Memento plugin's `GET /api/plugins/memento/cron/runs`, which reads Hermes's cron execution ledger.
+- With the plugin, Memento marks each chat's session as `memento` (`POST /api/plugins/memento/sessions/{id}/label`) after its first turns, so the Hermes dashboard labels it **Memento** instead of **API server**.
 - Hermes's tool events carry the tool name and a preview of its arguments, but not its output. Tool cards show what ran and for how long.
 - Chats load and catch up from `GET /api/sessions/{id}/messages?order=latest`, 50 rows at a time, so turns sent from another device appear on this one.
 - The reply stats line is an estimate (about 4 characters per token, measured over the visible reply).

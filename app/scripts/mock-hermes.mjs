@@ -5,6 +5,7 @@
 // Cron jobs live on /api/jobs, and their past runs on GET /api/plugins/memento/cron/runs, like a
 // Hermes with the Memento plugin (MOCK_NO_PLUGIN=1 leaves it out). As on Hermes, the plugin isn't
 // served under /p/<profile>/, and an unknown route's 404 carries no CORS headers.
+// The plugin also labels a chat as Memento's on POST /api/plugins/memento/sessions/{id}/label.
 // Chats are titled like Hermes does: a slice of the opener at once, a "model" title a moment later,
 // readable on GET /api/sessions/{id}. Sessions are keyed by X-Hermes-Session-Id when a key is sent,
 // and their transcripts page back from GET /api/sessions/{id}/messages?order=latest&limit&offset.
@@ -19,6 +20,8 @@ import { randomUUID } from "node:crypto"
 const PORT = Number(process.env.PORT ?? 8642)
 const pendingApprovals = new Map()
 const chatTitles = new Map()
+/** Sessions the Memento plugin has labelled, which then report `source: "memento"`. */
+const labelledSessions = new Set()
 const transcripts = new Map()
 let lastRowId = 0
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -375,7 +378,11 @@ http
       return json(res, 200, { job: jobRecord(job) })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/info") {
-      return json(res, 200, { name: "memento", version: "0.1.0", features: ["cron_runs"] })
+      return json(res, 200, {
+        name: "memento",
+        version: "0.2.0",
+        features: ["cron_runs", "session_label"],
+      })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/cron/runs") {
       const perJob = Math.max(1, Math.min(Number(url.searchParams.get("per_job") ?? 24) || 24, 200))
@@ -384,11 +391,23 @@ http
       )
       return json(res, 200, { object: "cron_runs", jobs })
     }
+    const sessionLabel = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/label$/.exec(url.pathname)
+    if (PLUGIN && !profile && req.method === "POST" && sessionLabel) {
+      const id = decodeURIComponent(sessionLabel[1])
+      if (!chatTitles.has(id)) return json(res, 404, { error: { message: "Session not found" } })
+      labelledSessions.add(id)
+      return json(res, 200, { id, source: "memento" })
+    }
     const chatSession = /^\/api\/sessions\/([^/]+)$/.exec(url.pathname)
     if (req.method === "GET" && chatSession) {
       const id = decodeURIComponent(chatSession[1])
       if (!chatTitles.has(id)) return json(res, 404, { error: { message: "Session not found" } })
-      return json(res, 200, { object: "hermes.session", session: { id, source: "api_server", title: chatTitles.get(id) } })
+      return json(res, 200, { object: "hermes.session", session: {
+          id,
+          source: labelledSessions.has(id) ? "memento" : "api_server",
+          title: chatTitles.get(id),
+        },
+      })
     }
     const sessionMessages = /^\/api\/sessions\/([^/]+)\/messages$/.exec(url.pathname)
     if (sessionMessages) {

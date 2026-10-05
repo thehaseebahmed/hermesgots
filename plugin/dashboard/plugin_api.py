@@ -54,5 +54,9 @@ def status() -> Dict[str, Any]:
         "version": _version(),
         "enabled": _enabled(),
         "ledger": ledger,
-        "routes": ["/api/plugins/memento/info", "/api/plugins/memento/cron/runs"],
+        "routes": [
+            "/api/plugins/memento/info",
+            "/api/plugins/memento/cron/runs",
+            "/api/plugins/memento/sessions/{session_id}/label",
+        ],
     }
