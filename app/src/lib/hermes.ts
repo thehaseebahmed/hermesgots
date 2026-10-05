@@ -418,6 +418,8 @@ export interface CronExecutionRun extends CronExecution {
 /** Where the Memento Hermes plugin serves its routes on the API server. */
 const PLUGIN_ROOT = "/api/plugins/memento"
 
+export const PLUGIN_DOCS = "https://github.com/thehaseebahmed/memento/tree/main/plugin#install"
+
 export const INSTALL_PLUGIN = `hermes plugins install thehaseebahmed/memento/plugin --enable
 hermes gateway restart`
 
