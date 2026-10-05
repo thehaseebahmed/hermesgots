@@ -50,13 +50,7 @@ import {
 type BotValue = Omit<Profile, "id" | "updatedAt" | "pluginChats">
 type ChatValue = Pick<
   Conversation,
-  | "title"
-  | "titleEdited"
-  | "hermesSessionId"
-  | "createdAt"
-  | "updatedAt"
-  | "contextTokens"
-  | "contextApproximate"
+  "title" | "titleEdited" | "hermesSessionId" | "createdAt" | "updatedAt"
 >
 
 /**
@@ -330,8 +324,6 @@ async function localChats(profileId: string): Promise<Doc<ChatValue>> {
         hermesSessionId: c.hermesSessionId,
         createdAt: c.createdAt,
         updatedAt: c.updatedAt,
-        contextTokens: c.contextTokens,
-        contextApproximate: c.contextApproximate,
       },
     }
   }

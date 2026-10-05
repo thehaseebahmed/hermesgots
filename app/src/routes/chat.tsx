@@ -158,22 +158,19 @@ export function ChatPage() {
   const busy = Boolean(streaming)
   const awaitingApproval = messages?.find((m) => m.approval && !m.approval.resolved)
   const activity = streaming && describeActivity(streaming)
-  const lastTurn = messages?.findLast((m) => m.stats?.promptTokens)?.stats
-  // The plugin's figure is exact and the same on every device. Without it, the chat's own figure
-  // follows turns run on other devices; older chats only have their stats.
+  // Only the plugin sees each model call; Hermes's API sums a turn's calls, so nothing else is exact.
+  const tracked = Boolean(profile?.apiKey && profile.pluginChats)
   const live = conversation?.liveContext
-  const usage: ContextUsage = {
-    tokens: live?.tokens ?? conversation?.contextTokens ?? lastTurn?.promptTokens,
-    approximate: live
-      ? false
-      : conversation?.contextTokens
-        ? conversation.contextApproximate
-        : lastTurn?.toolsUsed,
-    window:
-      profile?.contextSource === "manual"
-        ? profile.contextWindow
-        : (live?.window ?? profile?.contextWindow),
-  }
+  const usage: ContextUsage = tracked
+    ? {
+        tracked,
+        tokens: live?.tokens,
+        window:
+          profile?.contextSource === "manual"
+            ? profile.contextWindow
+            : (live?.window ?? profile?.contextWindow),
+      }
+    : { tracked }
 
   // Picks up a model changed on the server (only when the connection does, not on every write);
   // the ring follows via the live query.

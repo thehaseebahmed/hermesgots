@@ -2,7 +2,7 @@
 
 Each record is ``{at, deleted?, value?}`` keyed by chat id, the same shape the app merges with:
 ``at`` is the chat's change clock, and the newer record wins, deletions included. Hermes keeps the
-transcripts; this keeps what it has no place for (titles the user typed, context use, ...).
+transcripts; this keeps what it has no place for (titles the user typed, ...).
 """
 
 from __future__ import annotations

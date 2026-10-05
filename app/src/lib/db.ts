@@ -58,13 +58,9 @@ export interface Conversation {
    * id, and roughly how many newer rows to skip to reach it.
    */
   olderThan?: { id: number; offset: number }
-  /** Prompt tokens of the latest turn, from whichever device ran it (Hermes doesn't report it). */
-  contextTokens?: number
-  /** That turn ran tools, so Hermes's sum counts the prompt more than once. */
-  contextApproximate?: boolean
   /**
-   * The session's latest model call, as the Memento plugin recorded it: exact where `contextTokens`
-   * is a turn's sum, and the window Hermes compresses against. Local only; every device reads it.
+   * The session's latest model call, as the Memento plugin recorded it, and the window Hermes
+   * compresses against. Local only; every device reads it from the plugin.
    */
   liveContext?: { tokens: number; window?: number }
   /** Newest Hermes transcript row this device has caught up to. Local only; never synced. */
