@@ -161,16 +161,14 @@ export function ChatPage() {
   // Only the plugin sees each model call; Hermes's API sums a turn's calls, so nothing else is exact.
   const tracked = Boolean(profile?.apiKey && profile.pluginChats)
   const live = conversation?.liveContext
-  const usage: ContextUsage = tracked
-    ? {
-        tracked,
-        tokens: live?.tokens,
-        window:
-          profile?.contextSource === "manual"
-            ? profile.contextWindow
-            : (live?.window ?? profile?.contextWindow),
-      }
-    : { tracked }
+  const usage: ContextUsage = {
+    tracked,
+    tokens: tracked ? live?.tokens : undefined,
+    window:
+      profile?.contextSource === "manual"
+        ? profile.contextWindow
+        : (live?.window ?? profile?.contextWindow),
+  }
 
   // Picks up a model changed on the server (only when the connection does, not on every write);
   // the ring follows via the live query.
