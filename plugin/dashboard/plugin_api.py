@@ -35,6 +35,16 @@ def _ledger() -> Dict[str, Any]:
     return {"exists": True, "runs": runs, "jobs": jobs}
 
 
+def _chats() -> Dict[str, Any]:
+    # Same file as ../chats.py; this module loads on its own, so it can't import that one.
+    path = Path(get_hermes_home()) / "memento" / "memento.db"
+    if not path.exists():
+        return {"exists": False, "chats": 0}
+    with sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=2) as conn:
+        (chats,) = conn.execute("SELECT COUNT(*) FROM chats WHERE deleted = 0").fetchone()
+    return {"exists": True, "chats": chats}
+
+
 def _enabled() -> bool | None:
     try:
         from hermes_cli.plugins_cmd import _get_disabled_set, _get_enabled_set
@@ -49,10 +59,20 @@ def status() -> Dict[str, Any]:
         ledger = _ledger()
     except sqlite3.Error as error:
         ledger = {"exists": True, "runs": None, "jobs": None, "error": str(error)}
+    try:
+        chats = _chats()
+    except sqlite3.Error as error:
+        chats = {"exists": True, "chats": None, "error": str(error)}
     return {
         "name": "memento",
         "version": _version(),
         "enabled": _enabled(),
         "ledger": ledger,
-        "routes": ["/api/plugins/memento/info", "/api/plugins/memento/cron/runs"],
+        "chats": chats,
+        "routes": [
+            "/api/plugins/memento/info",
+            "/api/plugins/memento/cron/runs",
+            "/api/plugins/memento/chats",
+            "/api/plugins/memento/sessions/{session_id}/label",
+        ],
     }

@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { EyeIcon, EyeOffIcon, PlugZapIcon, PlusIcon, Trash2Icon } from "lucide-react"
+import {
+  EyeIcon,
+  EyeOffIcon,
+  PlugZapIcon,
+  PlusIcon,
+  Trash2Icon,
+  TriangleAlertIcon,
+} from "lucide-react"
+import { toast } from "sonner"
 
 import { Bot } from "@/components/bot"
 import { BotCard } from "@/components/bot-card"
@@ -21,6 +29,8 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Switch } from "@/components/ui/switch"
 import {
   InputGroup,
   InputGroupAddon,
@@ -44,8 +54,9 @@ import {
   updateProfile,
   type Profile,
 } from "@/lib/db"
-import { checkHealth, listModels } from "@/lib/hermes"
+import { checkHealth, listModels, PLUGIN_DOCS } from "@/lib/hermes"
 import { syncContextWindow } from "@/lib/models"
+import { recheckChatStores, stopUsingPlugin, useSyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
 
 type Connection =
@@ -60,6 +71,7 @@ export function BotSettings() {
   const active = useLiveQuery(getActiveProfile, [])
   const [editingId, setEditingId] = useState<string>()
   const editing = profiles?.find((p) => p.id === editingId) ?? active
+  const { chatStores } = useSyncState()
   const section = useRef<HTMLDivElement>(null)
 
   // The sidebar's "Add bot" card links to #bots.
@@ -83,6 +95,13 @@ export function BotSettings() {
               botId={profile.botId}
               name={profile.name}
               selected={profile.id === editing?.id}
+              warning={
+                chatStores[profile.id] === "fallback"
+                  ? "Chats aren't saved on its Hermes server"
+                  : chatStores[profile.id] === "unreachable"
+                    ? "Can't reach its Memento plugin"
+                    : undefined
+              }
               onClick={() => setEditingId(profile.id)}
             />
           ))}
@@ -106,6 +125,68 @@ export function BotSettings() {
         )}
       </CardContent>
     </Card>
+  )
+}
+
+/** The Memento plugin switch: on once the bot's server has the plugin, which then keeps its chats. */
+function PluginSetting({ profile }: { profile: Profile }) {
+  const sync = useSyncState()
+  const [checking, setChecking] = useState(false)
+  const on = Boolean(profile.pluginChats)
+  const install = (
+    <a href={PLUGIN_DOCS} target="_blank" rel="noreferrer">
+      Install the plugin
+    </a>
+  )
+
+  return (
+    <Field orientation="horizontal">
+      <div className="flex-1 space-y-1">
+        <div className="flex items-center gap-1">
+          <FieldLabel htmlFor="plugin">Plugin</FieldLabel>
+          {on && sync.chatStores[profile.id] === "unreachable" && (
+            <Popover>
+              <PopoverTrigger
+                openOnHover
+                aria-label="Plugin is unreachable"
+                className="-my-3 flex size-11 items-center justify-center rounded-full text-warning outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+              >
+                <TriangleAlertIcon className="size-4" />
+              </PopoverTrigger>
+              <PopoverContent side="top" className="w-64">
+                Plugin is unreachable. If you removed the plugin, turn it off below.
+              </PopoverContent>
+            </Popover>
+          )}
+        </div>
+        <FieldDescription>
+          {on ? (
+            "All of this bot's chat data is now stored on your Hermes server."
+          ) : sync.vault === "unlocked" ? (
+            <>Some chat data is stored on our servers. {install} to store it on yours.</>
+          ) : (
+            <>This bot's chat data is only on this device. {install} to store it on your server.</>
+          )}
+        </FieldDescription>
+      </div>
+      <Switch
+        id="plugin"
+        checked={on}
+        disabled={checking}
+        onCheckedChange={async (checked) => {
+          if (!checked) return void stopUsingPlugin(profile.id)
+          setChecking(true)
+          try {
+            await recheckChatStores()
+            if (!(await db.profiles.get(profile.id))?.pluginChats) {
+              toast.error("Couldn't find the plugin on this bot's server.")
+            }
+          } finally {
+            setChecking(false)
+          }
+        }}
+      />
+    </Field>
   )
 }
 
@@ -311,6 +392,8 @@ export function BotEditor({
           </FieldDescription>
         </Field>
       )}
+
+      {!setup && <PluginSetting profile={profile} />}
 
       <div className="flex flex-wrap items-center gap-3">
         <Button onClick={test} disabled={connection.state === "testing"}>

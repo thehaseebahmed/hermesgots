@@ -1,9 +1,9 @@
 {
   "name": "memento",
   "label": "Memento",
-  "description": "Status of the Memento plugin, which serves cron run history to the Memento app.",
+  "description": "Status of the Memento plugin, which serves cron run history to the Memento app and labels its chats.",
   "icon": "Smartphone",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "tab": { "path": "/memento", "position": "end" },
   "entry": "dist/index.js",
   "api": "plugin_api.py"

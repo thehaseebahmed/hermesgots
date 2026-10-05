@@ -1,4 +1,5 @@
 import type { ApprovalChoice } from "@/lib/db"
+import type { Doc } from "@/lib/merge"
 import { isNative } from "@/lib/native"
 
 /**
@@ -419,6 +420,11 @@ export interface CronExecutionRun extends CronExecution {
 /** Where the Memento Hermes plugin serves its routes on the API server. */
 const PLUGIN_ROOT = "/api/plugins/memento"
 
+export const PLUGIN_DOCS = "https://github.com/thehaseebahmed/memento/tree/main/plugin#install"
+
+export const INSTALL_PLUGIN = `hermes plugins install thehaseebahmed/memento/plugin --enable
+hermes gateway restart`
+
 /** Each job's newest runs, newest first. A 404 means the Memento plugin isn't installed. */
 export async function listCronRuns(
   config: HermesConfig,
@@ -437,6 +443,33 @@ export async function listCronRuns(
       Array.isArray(runs) ? runs.filter((run) => typeof run?.id === "string") : [],
     ]),
   )
+}
+
+/**
+ * Merges this device's chat list into the one the Memento plugin keeps, newer record winning, and
+ * returns the merged list. A 404 (or a CORS-blocked one, with no status) means no plugin, or an older one.
+ */
+export async function mergeChatList<T>(config: HermesConfig, chats: Doc<T>): Promise<Doc<T>> {
+  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/chats`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ chats }),
+  })
+  const body = await response.json()
+  if (!body?.chats || typeof body.chats !== "object") throw new Error("Unexpected chat list")
+  return body.chats
+}
+
+/** Marks a session as Memento's, so the Hermes dashboard labels it. Needs the Memento plugin. */
+export async function labelSession(config: HermesConfig, sessionId: string) {
+  try {
+    await request(
+      `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/sessions/${encodeURIComponent(sessionId)}/label`,
+      { method: "POST", headers: headers(config) },
+    )
+  } catch {
+    // Without the plugin the chat just keeps the API server's label.
+  }
 }
 
 const runSupport = new Map<string, Promise<boolean>>()

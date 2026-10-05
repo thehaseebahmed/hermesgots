@@ -1,4 +1,4 @@
 name: memento
-version: "0.1.0"
-description: Serves Hermes's cron run history to the Memento app over the API server.
+version: "0.2.0"
+description: Keeps the Memento app's chat list, serves it cron run history and labels its chats in Hermes.
 author: Memento
