@@ -52,6 +52,7 @@
       body = h("p", { className: "text-sm text-muted-foreground" }, "Loading…")
     } else {
       var ledger = status.ledger || {}
+      var chats = status.chats || {}
       body = h(
         "div",
         { className: "flex flex-col" },
@@ -66,6 +67,8 @@
             ? plural(ledger.runs, "run") + " across " + plural(ledger.jobs, "routine")
             : "No runs recorded yet",
         ),
+        h(C.Separator, null),
+        h(Row, { label: "Chats" }, chats.exists ? plural(chats.chats, "chat") : "No chats stored yet"),
         h(C.Separator, null),
         h(
           Row,

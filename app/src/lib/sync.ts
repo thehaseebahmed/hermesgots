@@ -10,6 +10,7 @@ import {
   watchAccount,
   type Account,
 } from "@/lib/account"
+import { checkHealth, HermesError, mergeChatList } from "@/lib/hermes"
 import {
   DEFAULT_PROFILE,
   db,
@@ -39,12 +40,14 @@ import {
 } from "@/lib/vault"
 
 /**
- * Syncs bots and the chat list (titles, Hermes session ids and context use, not messages) through the Netlify
- * function. Everything is sealed with the account's data key before upload, and each document's
- * associated data names its owner and slot, so the server can't swap one document for another.
+ * Syncs bots and the chat list (titles, Hermes session ids and context use, not messages). Each
+ * bot's chat list lives with the Memento plugin on its own Hermes server; without the plugin it falls
+ * back to the Netlify function, like bots. Everything sent there is sealed with the account's data
+ * key, and each document's associated data names its owner and slot, so the server can't swap one
+ * document for another.
  */
 
-type BotValue = Omit<Profile, "id" | "updatedAt">
+type BotValue = Omit<Profile, "id" | "updatedAt" | "pluginChats">
 type ChatValue = Pick<
   Conversation,
   | "title"
@@ -56,6 +59,12 @@ type ChatValue = Pick<
   | "contextApproximate"
 >
 
+/**
+ * Where a bot's chat list lives: its Hermes server's Memento plugin, or the fallback.
+ * `unreachable`: the bot has the plugin, but its server didn't answer the last sync.
+ */
+export type ChatStore = "plugin" | "fallback" | "unreachable"
+
 export interface SyncState {
   account: Account
   vault: "unknown" | "missing" | "locked" | "unlocked"
@@ -63,6 +72,8 @@ export interface SyncState {
   syncing: boolean
   error?: string
   syncedAt?: number
+  /** By profile id; missing until the bot's server has answered. */
+  chatStores: Record<string, ChatStore>
 }
 
 let state: SyncState = {
@@ -70,6 +81,7 @@ let state: SyncState = {
   vault: "unknown",
   passkeys: false,
   syncing: false,
+  chatStores: {},
 }
 const listeners = new Set<() => void>()
 
@@ -233,7 +245,12 @@ async function syncDoc<T>(
   throw new Error("Another device kept changing the same data. Try again.")
 }
 
-function botValue({ id: _id, updatedAt: _updatedAt, ...value }: Profile): BotValue {
+function botValue({
+  id: _id,
+  updatedAt: _updatedAt,
+  pluginChats: _pluginChats,
+  ...value
+}: Profile): BotValue {
   return value
 }
 
@@ -285,7 +302,8 @@ async function syncBots(key: CryptoKey) {
           if (await db.profiles.get(id)) await deleteProfile(id, { remote: true })
         } else if (entry.value) {
           await db.transaction("rw", db.profiles, db.tombstones, async () => {
-            await db.profiles.put({ ...entry.value!, id, updatedAt: entry.at })
+            const { pluginChats } = (await db.profiles.get(id)) ?? {}
+            await db.profiles.put({ ...entry.value!, id, updatedAt: entry.at, pluginChats })
             await db.tombstones.delete(`bot:${id}`)
           })
         }
@@ -324,31 +342,30 @@ async function localChats(profileId: string): Promise<Doc<ChatValue>> {
   return doc
 }
 
-async function syncChats(key: CryptoKey, profileId: string) {
-  const merged = await syncDoc<ChatValue>(
-    key,
-    `chats/${profileId}`,
-    () => localChats(profileId),
-    async (pull) => {
-      for (const [id, entry] of pull) {
-        if (entry.deleted) {
-          if (await db.conversations.get(id)) await deleteConversation(id, { remote: true })
-        } else if (entry.value) {
-          await db.transaction("rw", db.conversations, db.tombstones, async () => {
-            const existing = await db.conversations.get(id)
-            await db.conversations.put({
-              ...existing,
-              ...entry.value!,
-              id,
-              profileId,
-              changedAt: entry.at,
-            })
-            await db.tombstones.delete(`chat:${id}`)
-          })
-        }
-      }
-    },
-  )
+async function applyChats(profileId: string, pull: [string, Entry<ChatValue>][]) {
+  for (const [id, entry] of pull) {
+    const existing = await db.conversations.get(id)
+    // Two bots on one server share its chat list; each chat stays with the bot that has it.
+    if (existing && existing.profileId !== profileId) continue
+    if (entry.deleted) {
+      if (existing) await deleteConversation(id, { remote: true })
+    } else if (entry.value) {
+      await db.transaction("rw", db.conversations, db.tombstones, async () => {
+        await db.conversations.put({
+          ...(await db.conversations.get(id)),
+          ...entry.value!,
+          id,
+          profileId,
+          changedAt: entry.at,
+        })
+        await db.tombstones.delete(`chat:${id}`)
+      })
+    }
+  }
+}
+
+/** Drops tombstones the merged list now carries. */
+async function settleChatTombstones(profileId: string, merged: Doc<ChatValue>) {
   const tombstones = await db.tombstones.where("id").startsWith("chat:").toArray()
   for (const tombstone of tombstones.filter((t) => t.profileId === profileId)) {
     const id = tombstone.id.slice("chat:".length)
@@ -356,28 +373,95 @@ async function syncChats(key: CryptoKey, profileId: string) {
   }
 }
 
+async function syncChats(key: CryptoKey, profileId: string) {
+  const merged = await syncDoc<ChatValue>(
+    key,
+    `chats/${profileId}`,
+    () => localChats(profileId),
+    (pull) => applyChats(profileId, pull),
+  )
+  await settleChatTombstones(profileId, merged)
+}
+
+/** Syncs a bot's chats with its server's Memento plugin; undefined when the server didn't answer. */
+async function syncPluginChats(profile: Profile): Promise<ChatStore | undefined> {
+  const local = await localChats(profile.id)
+  let merged: Doc<ChatValue>
+  try {
+    merged = await mergeChatList(profile, local)
+  } catch (error) {
+    if (!(error instanceof HermesError) || (error.status && error.status !== 404)) return undefined
+    // Hermes's 404 for an unknown route skips its CORS middleware, so fetch fails without a
+    // status. If the server itself answers, it's the plugin that's missing (or too old).
+    try {
+      await checkHealth(profile)
+    } catch {
+      return undefined
+    }
+    return "fallback"
+  }
+  await applyChats(profile.id, mergeDocs(merged, local).pull)
+  await settleChatTombstones(profile.id, merged)
+  return "plugin"
+}
+
 async function fingerprint() {
-  const [profiles, conversations, tombstones] = await Promise.all([
+  const [profiles, conversations, tombstones, settings] = await Promise.all([
     db.profiles.toArray(),
     db.conversations.orderBy("id").toArray(),
     db.tombstones.count(),
+    getSettings(),
   ])
   const bots = profiles.map((p) => `${p.id}@${p.updatedAt}`).join(",")
   const chats = conversations.reduce((n, c) => Math.max(n, c.changedAt), 0)
-  return `${bots}|${conversations.length}@${chats}|${tombstones}`
+  return `${bots}|${conversations.length}@${chats}|${tombstones}|${settings.onboarded}`
 }
+
+/** How often a bot without the plugin is asked again, in case it was installed since. */
+const PROBE_INTERVAL_MS = 5 * 60_000
+const probedAt = new Map<string, number>()
 
 let running: Promise<void> | undefined
 let again = false
 let syncedFingerprint = ""
 
 async function runSync() {
-  const key = await localKey()
-  if (!key) return setState({ syncing: false })
+  const key = state.vault === "unlocked" ? await localKey() : undefined
   try {
-    await syncBots(key)
-    for (const profile of await db.profiles.toArray()) await syncChats(key, profile.id)
+    if (key) await syncBots(key)
+    const chatStores = { ...state.chatStores }
+    // A new device's seed bot may point at a server it's about to be swapped out for.
+    const { onboarded } = await getSettings()
+    for (const profile of await db.profiles.toArray()) {
+      if (!onboarded) {
+        if (key) await syncChats(key, profile.id)
+        continue
+      }
+      // Once found, a bot keeps to the plugin until the user says it's gone, so an unreachable
+      // server never sends its chats back to the fallback.
+      if (profile.pluginChats) {
+        chatStores[profile.id] =
+          (await syncPluginChats(profile)) === "plugin" ? "plugin" : "unreachable"
+        continue
+      }
+      const known = chatStores[profile.id]
+      // Until the plugin has answered, the fallback goes first, so what only it holds moves over.
+      if (key) await syncChats(key, profile.id)
+      if (
+        known === "fallback" &&
+        Date.now() - (probedAt.get(profile.id) ?? 0) < PROBE_INTERVAL_MS
+      ) {
+        continue
+      }
+      probedAt.set(profile.id, Date.now())
+      const store = (await syncPluginChats(profile)) ?? known
+      // Not a synced change (no clock bump): each device finds the plugin itself.
+      if (store === "plugin") await db.profiles.update(profile.id, { pluginChats: true })
+      if (store) chatStores[profile.id] = store
+    }
+    setState({ chatStores })
     syncedFingerprint = await fingerprint()
+    if (!key) return setState({ syncing: false })
     const syncedAt = Date.now()
     await saveSettings({ syncedAt })
     setState({ syncing: false, error: undefined, syncedAt })
@@ -388,7 +472,6 @@ async function runSync() {
 
 /** Syncs now, or once more after the sync already running. */
 export function syncNow(): Promise<void> {
-  if (state.vault !== "unlocked") return Promise.resolve()
   if (running) {
     again = true
     return running
@@ -402,6 +485,21 @@ export function syncNow(): Promise<void> {
     }
   })
   return running
+}
+
+/** Asks every bot's server for the plugin again, without waiting for the next probe. */
+export function recheckChatStores() {
+  probedAt.clear()
+  return syncNow()
+}
+
+/** For a bot whose server no longer has the plugin: back to looking for it, and the fallback. */
+export async function stopUsingPlugin(profileId: string) {
+  await db.profiles.update(profileId, { pluginChats: false })
+  const { [profileId]: _forgotten, ...chatStores } = state.chatStores
+  setState({ chatStores })
+  probedAt.delete(profileId)
+  return syncNow()
 }
 
 let started = false
@@ -427,17 +525,20 @@ export async function startSync() {
     }
   }
   await onAccount(await loadAccount())
-  if (state.account.status === "unavailable") return
-  watchAccount((account) => {
-    const before = userId()
-    const after = account.status === "signed-in" ? account.user.id : undefined
-    // Token refreshes re-announce the same user; only a change of user matters here.
-    if (before !== after) void onAccount(account)
-  })
+  if (state.account.status !== "unavailable") {
+    watchAccount((account) => {
+      const before = userId()
+      const after = account.status === "signed-in" ? account.user.id : undefined
+      // Token refreshes re-announce the same user; only a change of user matters here.
+      if (before !== after) void onAccount(account)
+    })
+  }
+  // Chat lists on the plugin need no account.
+  void syncNow()
 
   let timer: number | undefined
   liveQuery(fingerprint).subscribe((value) => {
-    if (value === syncedFingerprint || state.vault !== "unlocked") return
+    if (value === syncedFingerprint) return
     window.clearTimeout(timer)
     timer = window.setTimeout(() => void syncNow(), 1500)
   })

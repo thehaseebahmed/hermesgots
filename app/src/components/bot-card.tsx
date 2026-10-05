@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ComponentProps, type ReactNode } from "react"
+import { TriangleAlertIcon } from "lucide-react"
 
 import { Bot } from "@/components/bot"
 import { cn } from "@/lib/utils"
@@ -9,6 +10,7 @@ export function BotCard({
   name,
   selected = false,
   icon,
+  warning,
   className,
   ...props
 }: ComponentProps<"button"> & {
@@ -17,6 +19,8 @@ export function BotCard({
   selected?: boolean
   /** Shown instead of the bot, e.g. for an "add" card. */
   icon?: ReactNode
+  /** Flags the card, with this as its accessible description. */
+  warning?: string
 }) {
   const ref = useRef<HTMLButtonElement>(null)
 
@@ -31,12 +35,18 @@ export function BotCard({
       type="button"
       aria-pressed={icon ? undefined : selected}
       className={cn(
-        "flex w-19 shrink-0 flex-col items-center gap-1 rounded-2xl bg-card px-1.5 pt-2 pb-1.5 text-card-foreground ring-1 ring-foreground/10 transition-colors outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50",
+        "relative flex w-19 shrink-0 flex-col items-center gap-1 rounded-2xl bg-card px-1.5 pt-2 pb-1.5 text-card-foreground ring-1 ring-foreground/10 transition-colors outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50",
         selected && "bg-primary/10 ring-2 ring-primary hover:bg-primary/15",
         className,
       )}
       {...props}
     >
+      {warning && (
+        <span className="absolute top-1 right-1 text-warning">
+          <TriangleAlertIcon aria-hidden className="size-3.5" />
+          <span className="sr-only">{warning}</span>
+        </span>
+      )}
       <span aria-hidden className="flex size-10 items-center justify-center text-muted-foreground">
         {icon ?? <Bot id={botId} className="size-10" />}
       </span>
