@@ -28,23 +28,26 @@ frontend." Phases are ordered by that cost, cheapest first.
 
 No new Hermes-side work. Pure Memento frontend.
 
-- [ ] Add pause / resume / run-now buttons to `/routines`, calling the
-      already-documented `POST /api/jobs/{id}/pause|resume|run`.
+- [x] Add pause / resume / run-now buttons to `/routines`, calling the
+      already-documented `POST /api/jobs/{id}/pause|resume|run`. Already
+      shipped: each job's menu in `app/src/routes/routines.tsx`.
 
 ## Phase 2 — Read-only Project and Kanban visibility
 
 New Memento plugin routes, read-only, mirroring the existing
 `cron/runs` route shape.
 
-- [ ] `GET /api/plugins/memento/projects` — list the user's configured
-      Hermes Projects (name, folders, bound board). Thin wrapper around
-      `hermes project list --json`-equivalent data.
-- [ ] `GET /api/plugins/memento/kanban/tasks` — list tasks across boards
-      (status, assignee, board) by importing `kanban_db` directly when the
-      kanban plugin is installed. No mutation, so no concurrency concerns.
-- [ ] Memento UI: a "Code" nav item showing a repo/Project picker (from the
-      first route) and a flat, read-only task list (from the second) —
-      explicitly not the drag-drop board.
+- [x] `GET /api/plugins/memento/projects` — list the user's configured
+      Hermes Projects (name, description, folders and which are git repos,
+      last session time), read from `projects.db`.
+- [x] Memento UI: a "Code" nav item listing every bot's Projects in one
+      list, most recently worked on first (title, then description or git
+      repos, with the bot as the icon).
+- [x] Create a project with its GitHub repos, cloned on the Hermes host into
+      `$HERMES_HOME/projects/<project>/` with the host's GitHub account.
+- Deferred: `GET /api/plugins/memento/kanban/tasks` and a read-only task
+      list on the Code screen (tasks across boards by importing `kanban_db`
+      when the kanban plugin is installed).
 
 ## Phase 3 — Checkpoints/rollback viewer
 
