@@ -29,6 +29,11 @@ export interface Profile {
   /** `provider/model` Hermes reported when the window was set; a different one resets it. */
   contextModel?: string
   contextSource?: "models.dev" | "manual"
+  /**
+   * Its server's Memento plugin keeps its chat list. Set once the plugin answers, and kept until the
+   * user turns it off, so an unreachable server doesn't flip chats to the fallback. Local only.
+   */
+  pluginChats?: boolean
   createdAt: number
   /** Last change to the config, the clock sync merges on. */
   updatedAt: number

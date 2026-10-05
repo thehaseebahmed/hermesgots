@@ -2,7 +2,8 @@
 
 Adds routes to the API server, so the Memento app (which only talks to the API server, with its key)
 can read cron run history from Hermes's execution ledger instead of piecing it together on each
-device, and label its chats as Memento's. The dashboard half lives in ``dashboard/``.
+device, keep its chat list on the server (``chats.py``), and label its chats as Memento's. The
+dashboard half lives in ``dashboard/``.
 """
 
 from __future__ import annotations
@@ -12,6 +13,8 @@ import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, List
+
+from . import chats
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +107,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if denied is not None:
             return denied
         return web.json_response(
-            {"name": "memento", "version": VERSION, "features": ["cron_runs", "session_label"]}
+            {
+                "name": "memento",
+                "version": VERSION,
+                "features": ["cron_runs", "session_label", "chats"],
+            }
         )
 
     async def cron_runs(request: "web.Request") -> "web.Response":
@@ -137,7 +144,39 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "Session not found", 404)
         return web.json_response({"id": session_id, "source": SESSION_SOURCE})
 
+    def chats_path() -> Path:
+        # On the loop thread: the API server scopes get_hermes_home() to the request's profile, and
+        # that scope isn't visible inside to_thread.
+        from hermes_constants import get_hermes_home
+
+        return chats.db_path(Path(get_hermes_home()))
+
+    async def list_chats(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        records = await asyncio.to_thread(chats.read, chats_path())
+        return web.json_response({"object": "memento.chats", "chats": records})
+
+    async def merge_chats(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            body = await request.json()
+        except ValueError:
+            return _error(web, "Body must be JSON", 400)
+        try:
+            records = await asyncio.to_thread(
+                chats.merge, chats_path(), (body or {}).get("chats") if isinstance(body, dict) else None
+            )
+        except chats.InvalidChats as error:
+            return _error(web, str(error), 400)
+        return web.json_response({"object": "memento.chats", "chats": records})
+
     app.router.add_get(f"{PREFIX}/info", info)
+    app.router.add_get(f"{PREFIX}/chats", list_chats)
+    app.router.add_post(f"{PREFIX}/chats", merge_chats)
     app.router.add_get(f"{PREFIX}/cron/runs", cron_runs)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/label", label_session)
     logger.info("memento: serving %s on the API server", PREFIX)

@@ -36,7 +36,7 @@ import {
 } from "@/lib/cron"
 import { listProfiles, type Profile } from "@/lib/db"
 import { formatDuration, formatRelative } from "@/lib/format"
-import { HermesError, controlCronJob, type CronJob } from "@/lib/hermes"
+import { HermesError, INSTALL_PLUGIN, controlCronJob, type CronJob } from "@/lib/hermes"
 import { cn } from "@/lib/utils"
 
 const REFRESH_MS = 60_000
@@ -149,9 +149,6 @@ function failingCount({ jobs, runs }: CronState) {
     return job.failureStreak > 0 || latest?.status === "failed"
   }).length
 }
-
-const INSTALL_PLUGIN = `hermes plugins install thehaseebahmed/memento/plugin --enable
-hermes gateway restart`
 
 function PluginMissing() {
   return (

@@ -1,14 +1,15 @@
 # Memento plugin for Hermes
 
-The [Memento](../README.md) app needs this plugin to show routine (cron) history and to label its chats in the Hermes dashboard. It reads Hermes's cron execution ledger (`cron/executions.db`), so every device sees the same runs, including the ones that happened while no device was looking.
+The [Memento](../README.md) app uses this plugin to keep each bot's chat list on its Hermes server, to show routine (cron) history, and to label its chats in the Hermes dashboard. It reads Hermes's cron execution ledger (`cron/executions.db`), so every device sees the same runs, including the ones that happened while no device was looking.
 
 It has two parts:
 
 - **API server routes** (`__init__.py`). Memento calls these with the bot's API key, and they follow the API server's `API_SERVER_CORS_ORIGINS`.
   - `GET /api/plugins/memento/info` returns the plugin's name, version and features.
   - `GET /api/plugins/memento/cron/runs?per_job=24[&job_id=…]` returns each job's newest runs from the ledger, newest first.
+  - `GET /api/plugins/memento/chats` returns the chat list Memento keeps here: titles, Hermes session ids, context use and deletions, keyed by chat id. `POST` it `{ "chats": { … } }` to merge a device's list in (the newer record wins) and get the merged list back. It's stored in `$HERMES_HOME/memento/memento.db`, outside the plugin's folder, so updates leave it alone.
   - `POST /api/plugins/memento/sessions/{id}/label` marks a Memento chat's session with the `memento` source, so the dashboard's Sessions page labels it **Memento**. It only relabels sessions the API server created.
-- **A dashboard tab** (`dashboard/`). **Memento** in `hermes dashboard` shows the plugin's version, whether it's enabled, and how many runs the ledger holds.
+- **A dashboard tab** (`dashboard/`). **Memento** in `hermes dashboard` shows the plugin's version, whether it's enabled, how many runs the ledger holds and how many chats it stores.
 
 ## Install
 
@@ -28,5 +29,5 @@ To update, run `hermes plugins update memento`, then restart the gateway.
 
 ## Limitations
 
-- Routes are served on the API server's own listener, not under `/p/<profile>/` on a multiplexed gateway. Give each profile its own API server port to use routines with Memento.
+- Routes are served on the API server's own listener, not under `/p/<profile>/` on a multiplexed gateway. Give each profile its own API server port to use routines, and keep its chats here, with Memento.
 - The ledger keeps the newest 1,000 finished runs across all jobs.
