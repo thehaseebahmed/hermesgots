@@ -445,6 +445,121 @@ export async function listCronRuns(
   )
 }
 
+export interface HermesProjectFolder {
+  path: string
+  label: string | null
+  git: boolean
+}
+
+/** A Hermes Project (`hermes project create`), through the Memento plugin. */
+export interface HermesProject {
+  id: string
+  name: string
+  description: string | null
+  createdAt: number
+  /** The newest session in one of its folders; unset when none has run there. */
+  lastActiveAt?: number
+  /** Primary folder first. */
+  folders: HermesProjectFolder[]
+}
+
+function toProject(raw: unknown): HermesProject | null {
+  if (!raw || typeof raw !== "object") return null
+  const p = raw as Record<string, unknown>
+  if (typeof p.id !== "string" || typeof p.name !== "string") return null
+  const seconds = (value: unknown) =>
+    typeof value === "number" && value > 0 ? value * 1000 : undefined
+  const folders = Array.isArray(p.folders) ? p.folders : []
+  return {
+    id: p.id,
+    name: p.name,
+    description: typeof p.description === "string" && p.description.trim() ? p.description : null,
+    createdAt: seconds(p.created_at) ?? 0,
+    lastActiveAt: seconds(p.last_active),
+    folders: folders
+      .filter((f): f is Record<string, unknown> => typeof f?.path === "string")
+      .map((f) => ({
+        path: f.path as string,
+        label: typeof f.label === "string" && f.label ? f.label : null,
+        git: f.git === true,
+      })),
+  }
+}
+
+/** The profile's Hermes Projects. A 404 (or a CORS-blocked one) means no plugin, or an older one. */
+export async function listProjects(config: HermesConfig): Promise<HermesProject[]> {
+  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects`, {
+    headers: headers(config),
+  })
+  const body = await response.json()
+  const projects: unknown[] = Array.isArray(body?.projects) ? body.projects : []
+  return projects.map(toProject).filter((project): project is HermesProject => project !== null)
+}
+
+export interface GitHubStatus {
+  connected: boolean
+  login?: string
+  /** Why a token the server has didn't work. */
+  error?: string
+}
+
+/** The GitHub account on the bot's Hermes host, which the plugin uses to list and clone repos. */
+export async function getGitHubStatus(config: HermesConfig): Promise<GitHubStatus> {
+  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/github`, {
+    headers: headers(config),
+  })
+  const body = await response.json()
+  return {
+    connected: body?.connected === true,
+    login: typeof body?.login === "string" ? body.login : undefined,
+    error: typeof body?.error === "string" ? body.error : undefined,
+  }
+}
+
+export interface GitHubRepo {
+  fullName: string
+  description: string | null
+  private: boolean
+}
+
+/** The host account's repos, most recently pushed first. */
+export async function listGitHubRepos(config: HermesConfig): Promise<GitHubRepo[]> {
+  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/github/repos`, {
+    headers: headers(config),
+  })
+  const body = await response.json()
+  const repos: unknown[] = Array.isArray(body?.repos) ? body.repos : []
+  return repos.flatMap((raw) => {
+    const repo = raw as Record<string, unknown> | null
+    if (typeof repo?.full_name !== "string") return []
+    return [
+      {
+        fullName: repo.full_name,
+        description: typeof repo.description === "string" ? repo.description : null,
+        private: repo.private === true,
+      },
+    ]
+  })
+}
+
+/**
+ * Clones a GitHub repo onto the Hermes host and adds it to a project, or to a new one named
+ * `projectName`. Can take minutes for a big repo.
+ */
+/** Creates a project in the profile's `projects/` folder on the server, with each repo cloned into it. */
+export async function createProject(
+  config: HermesConfig,
+  project: { name: string; description?: string; repos: string[] },
+): Promise<{ id: string; path: string }> {
+  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify(project),
+  })
+  const body = await response.json()
+  return { id: String(body?.id ?? ""), path: String(body?.path ?? "") }
+}
+
 /**
  * Merges this device's chat list into the one the Memento plugin keeps, newer record winning, and
  * returns the merged list. A 404 (or a CORS-blocked one, with no status) means no plugin, or an older one.
