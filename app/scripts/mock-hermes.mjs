@@ -175,9 +175,10 @@ async function playTurn(req, body, last, out) {
   const toolCallId = `call_${randomUUID().slice(0, 8)}`
   out.tool({ tool: "terminal", emoji: "💻", label: "du -sh /var/log/* | sort -rh | head", toolCallId, status: "running" })
   await sleep(1400)
-  out.tool({ tool: "terminal", toolCallId, status: "completed" })
-  record(req, { role: "assistant", content: null, tool_calls: [{ id: toolCallId, type: "function", function: { name: "terminal", arguments: "{}" } }] })
-  record(req, { role: "tool", tool_call_id: toolCallId, tool_name: "terminal", content: "2.1G nginx\n1.4G postgres\n0.7G app" })
+  const duOutput = "2.1G nginx\n1.4G postgres\n0.7G app"
+  out.tool({ tool: "terminal", toolCallId, status: "completed", result: duOutput })
+  record(req, { role: "assistant", content: null, tool_calls: [{ id: toolCallId, type: "function", function: { name: "terminal", arguments: JSON.stringify({ command: "du -sh /var/log/* | sort -rh | head" }) } }] })
+  record(req, { role: "tool", tool_call_id: toolCallId, tool_name: "terminal", content: duOutput })
 
   await say(
     "Here's where the space is going under `/var/log`:\n\n" +
@@ -252,7 +253,8 @@ async function streamCompletion(req, res, body) {
     closed: () => closed,
     say: (piece) => chunk({ content: piece }),
     status: (text) => frame({ kind: "thinking", text }, "hermes.status"),
-    tool: (event) => frame(event, "hermes.tool.progress"),
+    // Completions carry no result on this stream.
+    tool: ({ result: _result, ...event }) => frame(event, "hermes.tool.progress"),
     approve(event) {
       frame({ ...event, event: "approval.request", run_id: id, timestamp: Date.now() / 1000, choices: ["once", "session", "always", "deny"] }, "approval.request")
       return waitForApproval(id)
@@ -294,8 +296,8 @@ function startRun(req, body) {
     closed: () => run.stopped,
     say: (delta) => push("message.delta", { delta }),
     status: () => {},
-    tool: ({ tool, label, status }) =>
-      push(status === "running" ? "tool.started" : "tool.completed", status === "running" ? { tool, preview: label } : { tool, duration: 1.4, error: false }),
+    tool: ({ tool, label, status, result }) =>
+      push(status === "running" ? "tool.started" : "tool.completed", status === "running" ? { tool, preview: label } : { tool, duration: 1.4, error: false, preview: result ?? "" }),
     approve(event) {
       run.status = "waiting_for_approval"
       push("approval.request", { ...event, choices: ["once", "session", "always", "deny"] })

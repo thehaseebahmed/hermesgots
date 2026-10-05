@@ -74,6 +74,8 @@ export interface ToolEvent {
   endedAt?: number
   /** Length of the reply text when the tool started, so it renders where it happened. */
   contentOffset?: number
+  /** What the call returned (a preview while streaming). */
+  result?: string
 }
 
 export type ApprovalChoice = "once" | "session" | "always" | "deny"

@@ -19,7 +19,7 @@ function useElapsed(tool: ToolEvent) {
 export function ToolCard({ tool }: { tool: ToolEvent }) {
   const running = tool.status === "running"
   const elapsed = useElapsed(tool)
-  const hasDetail = tool.label && tool.label !== tool.tool
+  const hasLabel = Boolean(tool.label) && tool.label !== tool.tool
   const [open, setOpen] = useState(false)
   const [overflowing, setOverflowing] = useState(false)
   const textRef = useRef<HTMLSpanElement>(null)
@@ -35,7 +35,7 @@ export function ToolCard({ tool }: { tool: ToolEvent }) {
     return () => observer.disconnect()
   }, [open, tool.label])
 
-  const expandable = Boolean(hasDetail) && (overflowing || open)
+  const expandable = Boolean(tool.result) || (hasLabel && (overflowing || open))
 
   return (
     <Collapsible className="w-full" open={open} onOpenChange={setOpen}>
@@ -53,7 +53,7 @@ export function ToolCard({ tool }: { tool: ToolEvent }) {
             {tool.emoji ? `${tool.emoji} ` : ""}
             {tool.tool}
           </span>
-          {hasDetail && (
+          {hasLabel && (
             <span className="text-muted-foreground group-data-[panel-open]/tool:hidden">
               : {tool.label}
             </span>
@@ -66,11 +66,18 @@ export function ToolCard({ tool }: { tool: ToolEvent }) {
           <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[panel-open]/tool:rotate-180" />
         )}
       </CollapsibleTrigger>
-      {hasDetail && (
-        <CollapsibleContent>
-          <p className="pb-2 pl-6 text-sm break-words whitespace-pre-wrap text-muted-foreground">
-            {tool.label}
-          </p>
+      {(hasLabel || tool.result) && (
+        <CollapsibleContent className="space-y-2 pb-2 pl-6">
+          {hasLabel && (
+            <p className="text-sm break-words whitespace-pre-wrap text-muted-foreground">
+              {tool.label}
+            </p>
+          )}
+          {tool.result && (
+            <pre className="max-h-64 overflow-auto rounded-lg bg-muted px-3 py-2 font-mono text-xs break-words whitespace-pre-wrap text-muted-foreground">
+              {tool.result}
+            </pre>
+          )}
         </CollapsibleContent>
       )}
     </Collapsible>

@@ -160,6 +160,7 @@ function streamHandlers(turn: Turn): StreamHandlers {
       if (existing) {
         existing.status = event.status
         if (event.status === "completed") existing.endedAt = Date.now()
+        if (event.result) existing.result = event.result
       } else if (event.toolCallId) {
         draft.tools.push({
           toolCallId: event.toolCallId,
