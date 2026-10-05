@@ -1,27 +1,31 @@
 import { useEffect, useState, useSyncExternalStore } from "react"
+import { Drawer } from "@base-ui/react/drawer"
 import { CheckIcon, ChevronRightIcon, XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
 import { Spinner } from "@/components/ui/spinner"
 import type { ToolEvent } from "@/lib/db"
 import { formatDuration } from "@/lib/format"
+import { formatTool, type Block } from "@/lib/highlight"
 
 const INPUT_TITLES: Record<string, string> = {
   terminal: "Command",
   execute_code: "Code",
   browser_exec: "Code",
 }
+const INPUT_LANGUAGES: Record<string, string> = {
+  terminal: "bash",
+  execute_code: "python",
+  browser_exec: "javascript",
+}
+/** Tools whose label is a file path, so the output is highlighted as that file. */
+const FILE_TOOLS = new Set(["read_file", "write_file", "patch"])
 
-// Tablet width and up (Tailwind's `md`) shows details inline; phones get a sheet.
+/** Opens at a quarter of the screen; dragging or scrolling it up takes the full height. */
+const SNAP_POINTS = [0.25, 1]
+
+// Tablet width and up (Tailwind's `md`) shows details inline; phones get a drawer.
 const wide = window.matchMedia("(min-width: 768px)")
 const subscribeWide = (onChange: () => void) => {
   wide.addEventListener("change", onChange)
@@ -39,13 +43,42 @@ function useElapsed(tool: ToolEvent) {
   return (tool.endedAt ?? now) - tool.startedAt
 }
 
-function Section({ title, children }: { title: string; children: string }) {
+function useFormatted(text: string, hint?: string) {
+  const [formatted, setFormatted] = useState<{ text: string; blocks: Block[] }>()
+  useEffect(() => {
+    let cancelled = false
+    void formatTool(text, hint).then((blocks) => {
+      if (!cancelled) setFormatted({ text, blocks })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [text, hint])
+  return formatted?.text === text ? formatted.blocks : [{ code: text }]
+}
+
+const blockClass =
+  "overflow-x-auto rounded-2xl bg-muted/60 p-4 font-mono text-[13px] leading-relaxed"
+
+function Section({ title, text, hint }: { title: string; text: string; hint?: string }) {
+  const blocks = useFormatted(text, hint)
   return (
     <section className="flex flex-col gap-2">
       <h3 className="px-1 text-sm text-muted-foreground">{title}</h3>
-      <pre className="overflow-x-auto rounded-2xl bg-muted/60 p-4 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">
-        {children}
-      </pre>
+      {blocks.map((block, i) =>
+        block.html ? (
+          <pre
+            key={i}
+            // Code keeps its lines; plain text wraps.
+            className={`${blockClass} whitespace-pre`}
+            dangerouslySetInnerHTML={{ __html: block.html }}
+          />
+        ) : (
+          <pre key={i} className={`${blockClass} break-words whitespace-pre-wrap`}>
+            {block.code}
+          </pre>
+        ),
+      )}
     </section>
   )
 }
@@ -54,8 +87,20 @@ function Details({ tool }: { tool: ToolEvent }) {
   const hasLabel = Boolean(tool.label) && tool.label !== tool.tool
   return (
     <>
-      {hasLabel && <Section title={INPUT_TITLES[tool.tool] ?? "Input"}>{tool.label}</Section>}
-      {tool.result && <Section title="Output">{tool.result}</Section>}
+      {hasLabel && (
+        <Section
+          title={INPUT_TITLES[tool.tool] ?? "Input"}
+          text={tool.label}
+          hint={INPUT_LANGUAGES[tool.tool] ?? "plaintext"}
+        />
+      )}
+      {tool.result && (
+        <Section
+          title="Output"
+          text={tool.result}
+          hint={FILE_TOOLS.has(tool.tool) && hasLabel ? tool.label : undefined}
+        />
+      )}
     </>
   )
 }
@@ -66,6 +111,7 @@ export function ToolCard({ tool }: { tool: ToolEvent }) {
   const hasLabel = Boolean(tool.label) && tool.label !== tool.tool
   const wide = useWide()
   const [open, setOpen] = useState(false)
+  const [snapPoint, setSnapPoint] = useState<Drawer.Root.SnapPoint | null>(SNAP_POINTS[0])
 
   const row = (
     <>
@@ -102,37 +148,62 @@ export function ToolCard({ tool }: { tool: ToolEvent }) {
 
   return (
     <>
-      <button type="button" className={rowClass} onClick={() => setOpen(true)}>
+      <button
+        type="button"
+        className={rowClass}
+        onClick={() => {
+          setSnapPoint(SNAP_POINTS[0])
+          setOpen(true)
+        }}
+      >
         {row}
       </button>
-      <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent
-          side="bottom"
-          showCloseButton={false}
-          className="mx-auto max-h-[85dvh] w-full max-w-xl overflow-y-auto rounded-t-3xl pb-[max(1.5rem,env(safe-area-inset-bottom))] data-[side=bottom]:border-t-0"
-        >
-          <SheetHeader className="relative items-center px-16 pb-2 text-center">
-            <SheetClose
-              render={
-                <Button variant="ghost" size="icon-lg" className="absolute top-4 left-3 size-11" />
-              }
-            >
-              <XIcon />
-              <span className="sr-only">Close</span>
-            </SheetClose>
-            <SheetTitle className="max-w-full truncate">
-              {tool.emoji ? `${tool.emoji} ` : ""}
-              {tool.tool}
-            </SheetTitle>
-            <SheetDescription>
-              {running ? "Running" : "Completed"} · {formatDuration(elapsed)}
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex flex-col gap-6 px-6">
-            <Details tool={tool} />
-          </div>
-        </SheetContent>
-      </Sheet>
+      <Drawer.Root
+        open={open}
+        onOpenChange={setOpen}
+        snapPoints={SNAP_POINTS}
+        snapPoint={snapPoint}
+        onSnapPointChange={setSnapPoint}
+      >
+        <Drawer.Portal>
+          <Drawer.Backdrop className="fixed inset-0 z-50 bg-black/40 opacity-[calc(1-var(--drawer-swipe-progress))] transition-opacity duration-[450ms] ease-[cubic-bezier(0.32,0.72,0,1)] data-ending-style:opacity-0 data-starting-style:opacity-0 data-swiping:duration-0" />
+          <Drawer.Viewport className="fixed inset-0 z-50 flex touch-none items-end justify-center">
+            <Drawer.Popup className="group/drawer relative flex max-h-[calc(100dvh-env(safe-area-inset-top))] min-h-0 w-full max-w-xl [transform:translateY(calc(var(--drawer-snap-point-offset)+var(--drawer-swipe-movement-y)))] touch-none flex-col rounded-t-3xl bg-popover text-sm text-popover-foreground shadow-lg transition-transform duration-[450ms] ease-[cubic-bezier(0.32,0.72,0,1)] outline-none after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-12 after:bg-inherit data-ending-style:[transform:translateY(calc(100%+2px))] data-starting-style:[transform:translateY(calc(100%+2px))] data-swiping:duration-0">
+              <div className="relative shrink-0 px-16 pt-2 pb-3 text-center select-none">
+                <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-muted-foreground/30" />
+                <Drawer.Close
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-lg"
+                      className="absolute top-4 left-3 size-11"
+                    />
+                  }
+                >
+                  <XIcon />
+                  <span className="sr-only">Close</span>
+                </Drawer.Close>
+                <Drawer.Title className="truncate text-base font-medium">
+                  {tool.emoji ? `${tool.emoji} ` : ""}
+                  {tool.tool}
+                </Drawer.Title>
+                <Drawer.Description className="text-muted-foreground">
+                  {running ? "Running" : "Completed"} · {formatDuration(elapsed)}
+                </Drawer.Description>
+              </div>
+              {/* Nothing scrolls until it's expanded, so dragging the content raises the drawer. */}
+              <Drawer.Content
+                className="flex min-h-0 flex-1 flex-col gap-6 overflow-hidden overscroll-contain px-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] group-data-expanded/drawer:touch-auto group-data-expanded/drawer:overflow-y-auto"
+                onWheel={(event) => {
+                  if (event.deltaY > 0 && snapPoint !== 1) setSnapPoint(1)
+                }}
+              >
+                <Details tool={tool} />
+              </Drawer.Content>
+            </Drawer.Popup>
+          </Drawer.Viewport>
+        </Drawer.Portal>
+      </Drawer.Root>
     </>
   )
 }

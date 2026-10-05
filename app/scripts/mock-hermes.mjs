@@ -169,10 +169,31 @@ async function playTurn(req, body, last, out) {
   const toolCallId = `call_${randomUUID().slice(0, 8)}`
   out.tool({ tool: "terminal", emoji: "💻", label: "du -sh /var/log/* | sort -rh | head", toolCallId, status: "running" })
   await sleep(1400)
-  const duOutput = "2.1G nginx\n1.4G postgres\n0.7G app"
+  // Hermes's terminal tool returns a JSON envelope.
+  const duOutput = JSON.stringify({ output: "2.1G nginx\n1.4G postgres\n0.7G app", exit_code: 0, error: null })
   out.tool({ tool: "terminal", toolCallId, status: "completed", result: duOutput })
   record(req, { role: "assistant", content: null, tool_calls: [{ id: toolCallId, type: "function", function: { name: "terminal", arguments: JSON.stringify({ command: "du -sh /var/log/* | sort -rh | head" }) } }] })
   record(req, { role: "tool", tool_call_id: toolCallId, tool_name: "terminal", content: duOutput })
+
+  const readId = `call_${randomUUID().slice(0, 8)}`
+  const readPath = "/etc/logrotate.d/rotate.py"
+  out.tool({ tool: "read_file", emoji: "📖", label: readPath, toolCallId: readId, status: "running" })
+  await sleep(400)
+  const source = [
+    "import gzip, shutil",
+    "from pathlib import Path",
+    "",
+    "def rotate(path: Path, keep: int = 7) -> None:",
+    "    # Compress yesterday's log and drop the oldest.",
+    '    with path.open("rb") as src, gzip.open(f"{path}.1.gz", "wb") as dst:',
+    "        shutil.copyfileobj(src, dst)",
+    "    for old in sorted(path.parent.glob(f\"{path.name}.*.gz\"))[keep:]:",
+    "        old.unlink()",
+  ].map((line, i) => `${String(i + 1).padStart(6)}|${line}`).join("\n")
+  const readOutput = JSON.stringify({ content: source, total_lines: 9, file_size: 312, truncated: false })
+  out.tool({ tool: "read_file", toolCallId: readId, status: "completed", result: readOutput })
+  record(req, { role: "assistant", content: null, tool_calls: [{ id: readId, type: "function", function: { name: "read_file", arguments: JSON.stringify({ path: readPath }) } }] })
+  record(req, { role: "tool", tool_call_id: readId, tool_name: "read_file", content: readOutput })
 
   await say(
     "Here's where the space is going under `/var/log`:\n\n" +
