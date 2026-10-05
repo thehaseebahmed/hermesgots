@@ -1,10 +1,24 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
-import { CheckIcon, ChevronDownIcon } from "lucide-react"
+import { useEffect, useState } from "react"
+import { CheckIcon, ChevronRightIcon, XIcon } from "lucide-react"
 
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Button } from "@/components/ui/button"
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
 import { Spinner } from "@/components/ui/spinner"
 import type { ToolEvent } from "@/lib/db"
 import { formatDuration } from "@/lib/format"
+
+const INPUT_TITLES: Record<string, string> = {
+  terminal: "Command",
+  execute_code: "Code",
+  browser_exec: "Code",
+}
 
 function useElapsed(tool: ToolEvent) {
   const [now, setNow] = useState(() => Date.now())
@@ -16,70 +30,76 @@ function useElapsed(tool: ToolEvent) {
   return (tool.endedAt ?? now) - tool.startedAt
 }
 
+function Section({ title, children }: { title: string; children: string }) {
+  return (
+    <section className="flex flex-col gap-2">
+      <h3 className="px-1 text-sm text-muted-foreground">{title}</h3>
+      <pre className="overflow-x-auto rounded-2xl bg-muted/60 p-4 font-mono text-[13px] leading-relaxed break-words whitespace-pre-wrap">
+        {children}
+      </pre>
+    </section>
+  )
+}
+
 export function ToolCard({ tool }: { tool: ToolEvent }) {
   const running = tool.status === "running"
   const elapsed = useElapsed(tool)
   const hasLabel = Boolean(tool.label) && tool.label !== tool.tool
   const [open, setOpen] = useState(false)
-  const [overflowing, setOverflowing] = useState(false)
-  const textRef = useRef<HTMLSpanElement>(null)
-
-  // Only measure while collapsed: opening hides the inline label, which would end the overflow.
-  useLayoutEffect(() => {
-    const el = textRef.current
-    if (!el || open) return
-    const measure = () => setOverflowing(el.scrollWidth > el.clientWidth)
-    measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [open, tool.label])
-
-  const expandable = Boolean(tool.result) || (hasLabel && (overflowing || open))
 
   return (
-    <Collapsible className="w-full" open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger
-        className="group/tool flex min-h-11 w-full items-center gap-2 text-left text-sm outline-none"
-        disabled={!expandable}
+    <>
+      <button
+        type="button"
+        className="flex min-h-11 w-full items-center gap-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        onClick={() => setOpen(true)}
       >
         {running ? (
           <Spinner className="size-4 shrink-0 text-muted-foreground" />
         ) : (
           <CheckIcon className="size-4 shrink-0 text-primary" strokeWidth={3} />
         )}
-        <span ref={textRef} className="min-w-0 flex-1 truncate">
+        <span className="min-w-0 flex-1 truncate">
           <span className="font-medium">
             {tool.emoji ? `${tool.emoji} ` : ""}
             {tool.tool}
           </span>
-          {hasLabel && (
-            <span className="text-muted-foreground group-data-[panel-open]/tool:hidden">
-              : {tool.label}
-            </span>
-          )}
+          {hasLabel && <span className="text-muted-foreground"> {tool.label}</span>}
         </span>
         <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
           {formatDuration(elapsed)}
         </span>
-        {expandable && (
-          <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[panel-open]/tool:rotate-180" />
-        )}
-      </CollapsibleTrigger>
-      {(hasLabel || tool.result) && (
-        <CollapsibleContent className="space-y-2 pb-2 pl-6">
-          {hasLabel && (
-            <p className="text-sm break-words whitespace-pre-wrap text-muted-foreground">
-              {tool.label}
-            </p>
-          )}
-          {tool.result && (
-            <pre className="max-h-64 overflow-auto rounded-lg bg-muted px-3 py-2 font-mono text-xs break-words whitespace-pre-wrap text-muted-foreground">
-              {tool.result}
-            </pre>
-          )}
-        </CollapsibleContent>
-      )}
-    </Collapsible>
+        <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
+      </button>
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetContent
+          side="bottom"
+          showCloseButton={false}
+          className="mx-auto max-h-[85dvh] w-full max-w-xl overflow-y-auto rounded-t-3xl pb-[max(1.5rem,env(safe-area-inset-bottom))] data-[side=bottom]:border-t-0"
+        >
+          <SheetHeader className="relative items-center px-16 pb-2 text-center">
+            <SheetClose
+              render={
+                <Button variant="ghost" size="icon-lg" className="absolute top-4 left-3 size-11" />
+              }
+            >
+              <XIcon />
+              <span className="sr-only">Close</span>
+            </SheetClose>
+            <SheetTitle className="max-w-full truncate">
+              {tool.emoji ? `${tool.emoji} ` : ""}
+              {tool.tool}
+            </SheetTitle>
+            <SheetDescription>
+              {running ? "Running" : "Completed"} · {formatDuration(elapsed)}
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex flex-col gap-6 px-6">
+            {hasLabel && <Section title={INPUT_TITLES[tool.tool] ?? "Input"}>{tool.label}</Section>}
+            {tool.result && <Section title="Output">{tool.result}</Section>}
+          </div>
+        </SheetContent>
+      </Sheet>
+    </>
   )
 }
