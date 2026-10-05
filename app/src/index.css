@@ -38,6 +38,14 @@
   /* App-specific: the approval accent and the routine run bars. */
   --warning: oklch(0.7 0.17 55);
   --success: oklch(0.65 0.17 152);
+
+  /* Syntax highlighting in tool cards. */
+  --syntax-keyword: oklch(0.55 0.2 15);
+  --syntax-string: oklch(0.5 0.13 150);
+  --syntax-number: oklch(0.5 0.15 250);
+  --syntax-title: oklch(0.5 0.17 300);
+  --syntax-attr: oklch(0.55 0.13 60);
+  --syntax-comment: oklch(0.556 0 0);
 }
 
 .dark {
@@ -70,6 +78,13 @@
 
   --warning: oklch(0.76 0.16 60);
   --success: oklch(0.72 0.17 152);
+
+  --syntax-keyword: oklch(0.72 0.16 15);
+  --syntax-string: oklch(0.78 0.13 150);
+  --syntax-number: oklch(0.75 0.12 250);
+  --syntax-title: oklch(0.75 0.13 300);
+  --syntax-attr: oklch(0.8 0.12 70);
+  --syntax-comment: oklch(0.6 0 0);
 }
 
 @theme inline {
@@ -285,4 +300,52 @@
   .animate-typing-dot {
     animation: none !important;
   }
+}
+
+/* highlight.js classes, mapped onto the theme's syntax tokens. */
+.hljs-keyword,
+.hljs-built_in,
+.hljs-selector-tag,
+.hljs-meta .hljs-keyword,
+.hljs-deletion {
+  color: var(--syntax-keyword);
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-meta .hljs-string {
+  color: var(--syntax-string);
+}
+.hljs-number,
+.hljs-literal,
+.hljs-symbol,
+.hljs-variable,
+.hljs-template-variable {
+  color: var(--syntax-number);
+}
+.hljs-title,
+.hljs-section,
+.hljs-name,
+.hljs-type {
+  color: var(--syntax-title);
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-property,
+.hljs-params,
+.hljs-selector-class,
+.hljs-selector-id {
+  color: var(--syntax-attr);
+}
+.hljs-comment,
+.hljs-quote,
+.hljs-meta {
+  color: var(--syntax-comment);
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong,
+.hljs-section {
+  font-weight: 600;
 }

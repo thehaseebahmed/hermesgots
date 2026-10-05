@@ -71,6 +71,7 @@ PR titles follow the same format. Fill in `.github/pull_request_template.md` for
 | `src/lib/account.ts` | Netlify Identity GitHub sign-in and the sync function's document API |
 | `src/lib/sync.ts`, `merge.ts` | Sync state, unlock flows, and merging bots and chat lists with the server (chat lists with the Memento plugin when a bot's server has it) |
 | `src/lib/history.ts` | Loads a synced chat's transcript from Hermes into IndexedDB |
+| `src/lib/highlight.ts` | Formats and highlights tool input and output (highlight.js, loaded on first use) |
 | `netlify/functions/sync.mts`, `netlify/lib/docs.ts` | The opaque per-user document store (Netlify Blobs) |
 | `src/lib/native.ts`, `native-account.ts` | Android app: platform checks, back button, and GoTrue sign-in and sync calls over native HTTP |
 | `public/auth/native.html` | Sign-in bridge the app opens in a Custom Tab; hands the tokens back via `memento://auth` |
