@@ -288,12 +288,16 @@ async function finishTurn(turn: Turn, usage: TurnUsage | undefined) {
     // Hermes's counts when it sent them; a stopped turn never gets them, so estimate.
     const tokens = usage?.completionTokens || estimateTokens(draft.content)
     const toolsUsed = draft.tools.length > 0
+    // Nothing streamed when the run's events never arrived and only its final output did.
+    const streamed = turn.firstTokenAt !== null
     const writingMs = Math.max(1, endedAt - (turn.firstTokenAt ?? endedAt))
     const stats: MessageStats = {
       tokens,
       estimated: !usage?.completionTokens,
       tokensPerSecond:
-        toolsUsed || turn.resumed ? undefined : Math.round(tokens / (writingMs / 1000)),
+        toolsUsed || turn.resumed || !streamed
+          ? undefined
+          : Math.round(tokens / (writingMs / 1000)),
       durationMs: endedAt - draft.createdAt,
       promptTokens: usage?.promptTokens || undefined,
       toolsUsed,

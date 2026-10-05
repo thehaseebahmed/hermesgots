@@ -300,10 +300,13 @@ async function streamCompletion(req, res, body) {
 // client that reconnects with ?last_seq= gets what it missed; MOCK_RUN_BACKLOG shrinks the buffer
 // to exercise `replay.truncated`, and MOCK_DROP_EVENTS_MS cuts every event stream after that long,
 // like a phone whose screen went off. MOCK_NO_RUNS=1 turns runs off, like an older Hermes.
+// MOCK_BLOCK_RUN_EVENTS=1 is Hermes v2026.9.24: the event stream has no CORS headers, and the run
+// forgets its events once that (blocked) subscriber leaves, so only GET /v1/runs/{id} is left.
 const runs = new Map()
 const RUNS = process.env.MOCK_NO_RUNS !== "1"
 const RUN_BACKLOG = Number(process.env.MOCK_RUN_BACKLOG ?? 1000)
 const DROP_EVENTS_MS = Number(process.env.MOCK_DROP_EVENTS_MS ?? 0)
+const BLOCK_RUN_EVENTS = process.env.MOCK_BLOCK_RUN_EVENTS === "1"
 
 const sessionOf = (req, body) => req.headers["x-hermes-session-id"] ?? body?.session_id
 
@@ -346,7 +349,9 @@ function startRun(req, body) {
 }
 
 function streamRunEvents(req, res, run, lastSeq) {
-  res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", ...cors })
+  if (run.eventsDropped) return json(res, 404, { error: { message: `Run not found: ${run.id}`, code: "run_not_found" } })
+  if (BLOCK_RUN_EVENTS) res.on("close", () => (run.eventsDropped = true))
+  res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", ...(BLOCK_RUN_EVENTS ? {} : cors) })
   res.write(": open\n\n")
   const send = (event) => res.write(`id: ${event.seq}\ndata: ${JSON.stringify(event)}\n\n`)
   const replay = run.events.filter((event) => event.seq > lastSeq)
