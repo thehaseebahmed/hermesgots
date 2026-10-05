@@ -1,4 +1,5 @@
 import { db, getMessages, type Conversation, type Message, type ToolEvent } from "@/lib/db"
+import { refreshContext } from "@/lib/context"
 import { listSessionMessages, type HermesConfig, type SessionMessage } from "@/lib/hermes"
 
 /**
@@ -187,7 +188,12 @@ const reconciling = new Map<string, Promise<number>>()
 export function reconcileHistory(conversationId: string) {
   let pending = reconciling.get(conversationId)
   if (!pending) {
-    pending = reconcile(conversationId).finally(() => reconciling.delete(conversationId))
+    pending = reconcile(conversationId)
+      .then(async (added) => {
+        await refreshContext(conversationId)
+        return added
+      })
+      .finally(() => reconciling.delete(conversationId))
     reconciling.set(conversationId, pending)
   }
   return pending

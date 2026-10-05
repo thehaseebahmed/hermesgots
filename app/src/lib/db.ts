@@ -62,6 +62,11 @@ export interface Conversation {
   contextTokens?: number
   /** That turn ran tools, so Hermes's sum counts the prompt more than once. */
   contextApproximate?: boolean
+  /**
+   * The session's latest model call, as the Memento plugin recorded it: exact where `contextTokens`
+   * is a turn's sum, and the window Hermes compresses against. Local only; every device reads it.
+   */
+  liveContext?: { tokens: number; window?: number }
   /** Newest Hermes transcript row this device has caught up to. Local only; never synced. */
   hermesTip?: number
 }
