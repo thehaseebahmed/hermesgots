@@ -9,10 +9,10 @@ import { formatTokens } from "@/lib/format"
 import { getModelInfo, type ModelInfo } from "@/lib/hermes"
 
 export interface ContextUsage {
-  /** Prompt tokens of the latest turn. */
+  /** The bot's server has the Memento plugin, which is what records context use. */
+  tracked: boolean
+  /** Prompt tokens of the session's latest model call. */
   tokens?: number
-  /** True when that turn ran tools, so Hermes's sum counts the prompt more than once. */
-  approximate?: boolean
   window?: number
 }
 
@@ -132,7 +132,11 @@ export function UsageSheet({
         </SheetHeader>
         <div className="flex flex-col gap-6 px-6 text-[15px]">
           <Section title="Context">
-            {usage.window ? (
+            {!usage.tracked ? (
+              <p className="text-sm text-muted-foreground">
+                Context tracking needs the Memento plugin.
+              </p>
+            ) : usage.window ? (
               <Meter.Root value={filled * 100} className="flex flex-col gap-2.5">
                 <div className="flex items-baseline justify-between gap-4">
                   <Meter.Label className="font-medium">Context window</Meter.Label>
@@ -148,21 +152,14 @@ export function UsageSheet({
                   />
                 </Meter.Track>
                 <span className="text-sm text-muted-foreground tabular-nums">
-                  {usage.approximate ? "~" : ""}
                   {formatTokens(usage.tokens ?? 0)} of {formatTokens(usage.window)} tokens
                 </span>
-                {usage.approximate && (
-                  <p className="text-xs text-muted-foreground">
-                    The last turn ran tools, and Hermes counts the prompt once per model call, so
-                    this reads high.
-                  </p>
-                )}
               </Meter.Root>
             ) : (
               <div className="flex flex-col items-start gap-3">
                 <p className="text-sm text-muted-foreground">
                   {usage.tokens
-                    ? `The last turn used ${formatTokens(usage.tokens)} prompt tokens. `
+                    ? `The last model call used ${formatTokens(usage.tokens)} prompt tokens. `
                     : ""}
                   This model's context size isn't on models.dev. Set it on this bot to see how full
                   the chat is.

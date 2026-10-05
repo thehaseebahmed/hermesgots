@@ -308,12 +308,7 @@ async function finishTurn(turn: Turn, usage: TurnUsage | undefined) {
   draft.runId = undefined
   draft.runSeq = undefined
   await turn.close()
-  await updateConversation(conversationId, {
-    updatedAt: endedAt,
-    ...(usage?.promptTokens
-      ? { contextTokens: usage.promptTokens, contextApproximate: draft.tools.length > 0 }
-      : {}),
-  })
+  await updateConversation(conversationId, { updatedAt: endedAt })
   void refreshContext(conversationId)
 }
 
