@@ -966,6 +966,8 @@ export async function followRun(
   )
   if (!response.body) throw new HermesError("Hermes returned an empty response.")
 
+  // Hermes v2026.9.24 sends no seq: number the calls here, so each gets its own card.
+  let calls = 0
   for await (const { data } of readSse(response.body)) {
     let payload: any
     try {
@@ -988,7 +990,7 @@ export async function followRun(
         handlers.onTool?.({
           tool: String(payload.tool ?? "tool"),
           label: payload.preview ? String(payload.preview) : undefined,
-          toolCallId: `${runId}:${payload.seq}`,
+          toolCallId: `${runId}:${typeof payload.seq === "number" ? payload.seq : `t${calls++}`}`,
           status: "running",
         })
         break
