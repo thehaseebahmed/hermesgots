@@ -18,11 +18,13 @@
 // GET /api/plugins/memento/sessions/{id}/todos reads back from a keyed session's transcript.
 // Turns also run on POST /v1/runs, whose events replay from GET /v1/runs/{id}/events?last_seq=N and
 // which keep going when the client drops, unlike a chat completion. Say "long" for a slow reply.
-// Project sessions get a worktree on POST /api/plugins/memento/sessions/{id}/workspace (GET reads
-// it back, POST …/mode changes the permission mode, POST …/workspace/remove removes a tree unless a
-// turn mentioned "commit"). In plan mode the agent only writes a plan and leaves it pending. The
-// branch's PR (GET …/sessions/{id}/pr) appears after two turns, merged once a turn says "merge",
-// and GET /api/plugins/memento/runs/live lists the sessions with a run in flight.
+// Project sessions get a worktree in each of the project's repos on
+// POST /api/plugins/memento/sessions/{id}/workspace (GET reads it back, POST …/mode changes the
+// permission mode, POST …/workspace/remove removes the trees unless a turn mentioned "commit"). In
+// plan mode the agent only writes a plan and leaves it pending. The branch's PRs
+// (GET …/sessions/{id}/prs) appear after two turns: "merge", "close" or "draft" in a turn sets their
+// state and "break" fails their checks. GET /api/plugins/memento/runs/live lists the sessions with
+// a run in flight.
 //
 //   pnpm mock            # then point Settings at http://localhost:8642/v1
 
@@ -66,7 +68,14 @@ function mockProjects() {
 
 function seedProjects() {
   const now = Date.now() / 1000
-  const folder = (path, git = true, label = null) => ({ path, label, is_primary: false, git })
+  const folder = (path, git = true, label = null) => ({
+    path,
+    label,
+    is_primary: false,
+    git,
+    // As the plugin reads it from the clone's GitHub origin.
+    repo: git ? `${path.includes("zigbee") ? "mock-org" : "mock-user"}/${path.split("/").at(-1)}` : null,
+  })
   return [
     {
       id: "p_1a2b3c4d",
@@ -653,52 +662,70 @@ http
       }
       return json(res, 200, { object: "memento.runs", sessions })
     }
-    const sessionRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/(workspace|workspace\/remove|mode|pr)$/.exec(url.pathname)
+    const sessionRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/(workspace|workspace\/remove|mode|prs)$/.exec(url.pathname)
     if (PLUGIN && !profile && sessionRoute) {
       const id = decodeURIComponent(sessionRoute[1])
       const route = sessionRoute[2]
       const workspace = projectSessions.get(id)
+      // What the plugin tells the agent about its worktrees, with every run.
+      const instructions = (record) =>
+        record.repos.length === 1
+          ? `You are working in a git worktree of ${record.repos[0].name} at ${record.repos[0].path} (branch ${record.branch}). Keep all work inside it.`
+          : `You are working in git worktrees of this project's repos, all on branch ${record.branch}:\n${record.repos.map((r, i) => `- ${r.name} at ${r.path}${i === 0 ? " (your current directory)" : ""}`).join("\n")}\nKeep all work inside them.`
+      const answer = (record) => json(res, 200, { object: "memento.workspace", workspace: record, instructions: record ? instructions(record) : null })
       if (route === "workspace" && req.method === "POST") {
-        const { project_id, repo_root, task, mode } = await readBody(req)
+        const { project_id, task, mode } = await readBody(req)
         const project = mockProjects().find((p) => p.id === String(project_id ?? ""))
         if (!project) return json(res, 400, { error: { message: "No such project." } })
-        if (!project.folders.some((f) => f.git && f.path === repo_root))
-          return json(res, 400, { error: { message: "repo_root isn't a folder of this project." } })
+        const gitFolders = project.folders.filter((f) => f.git)
+        if (!gitFolders.length) return json(res, 400, { error: { message: "This project has no git repository." } })
         if (mode !== undefined && !["accept_edits", "auto", "plan"].includes(mode))
           return json(res, 400, { error: { message: "mode must be accept_edits, auto or plan." } })
         let record = workspace
         if (!record) {
-          await sleep(800)
+          await sleep(800 * gitFolders.length)
           const slug = `${String(task ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/, "") || "session"}-${randomUUID().slice(0, 6)}`
-          record = { session_id: id, project_id: project.id, repo_root, path: `${repo_root}/.worktrees/${slug}`, branch: `hermes/${slug}`, mode: mode ?? "accept_edits", plan_pending: 0, created_at: Date.now() }
+          const repos = gitFolders.map((f) => ({ name: f.repo, repo_root: f.path, path: `${f.path}/.worktrees/${slug}`, branch: `hermes/${slug}` }))
+          record = { session_id: id, project_id: project.id, repo_root: repos[0].repo_root, path: repos[0].path, branch: repos[0].branch, mode: mode ?? "accept_edits", plan_pending: 0, created_at: Date.now(), repos }
           projectSessions.set(id, record)
         } else if (mode && mode !== record.mode) {
           record.mode = mode
           record.plan_pending = 0
         }
-        return json(res, 200, { object: "memento.workspace", workspace: record })
+        return answer(record)
       }
-      if (route === "workspace") return json(res, 200, { object: "memento.workspace", workspace: workspace ?? null })
+      if (route === "workspace") return answer(workspace ?? null)
       if (route === "mode" && req.method === "POST") {
         const { mode } = await readBody(req)
         if (!["accept_edits", "auto", "plan"].includes(mode)) return json(res, 400, { error: { message: "mode must be accept_edits, auto or plan." } })
         if (!workspace) return json(res, 404, { error: { message: "This session has no workspace yet" } })
         workspace.mode = mode
         workspace.plan_pending = 0
-        return json(res, 200, { object: "memento.workspace", workspace })
+        return answer(workspace)
       }
       if (route === "workspace/remove" && req.method === "POST") {
-        if (!workspace) return json(res, 200, { object: "memento.workspace.removed", removed: false, reason: "missing" })
-        if (userTurns(id).some((r) => /commit/i.test(r.content))) return json(res, 200, { object: "memento.workspace.removed", removed: false, reason: "unpushed" })
+        if (!workspace) return json(res, 200, { object: "memento.workspace.removed", removed: false, kept: [] })
+        // The first repo keeps its tree after a turn that said "commit" (unpushed work).
+        if (userTurns(id).some((r) => /commit/i.test(r.content)))
+          return json(res, 200, { object: "memento.workspace.removed", removed: false, kept: [{ name: workspace.repos[0].name, reason: "unpushed" }] })
         projectSessions.delete(id)
-        return json(res, 200, { object: "memento.workspace.removed", removed: true })
+        return json(res, 200, { object: "memento.workspace.removed", removed: true, kept: [] })
       }
-      if (route === "pr" && req.method === "GET") {
+      if (route === "prs" && req.method === "GET") {
+        // A PR per repo after two turns; "merge" merges them, "break" fails their checks, "draft" drafts them.
         const turns = userTurns(id)
-        const pr = workspace && turns.length >= 2
-          ? { number: 27, title: "Add a dry-run flag to log rotation", url: "https://github.com/mock-user/memento/pull/27", state: turns.some((r) => /merge/i.test(r.content)) ? "merged" : "open" }
-          : null
-        return json(res, 200, { object: "memento.pr", pr })
+        const said = (word) => turns.some((r) => new RegExp(word, "i").test(r.content))
+        const prs = workspace && turns.length >= 2
+          ? workspace.repos.map((repo, i) => ({
+              repo: repo.name,
+              number: 27 + i,
+              title: "Add a dry-run flag to log rotation",
+              url: `https://github.com/${repo.name}/pull/${27 + i}`,
+              state: said("merge") ? "merged" : said("close") ? "closed" : said("draft") ? "draft" : "open",
+              checks: said("break") ? "failure" : said("pending") ? "pending" : "success",
+            }))
+          : []
+        return json(res, 200, { object: "memento.prs", prs })
       }
     }
     const chatSession = /^\/api\/sessions\/([^/]+)$/.exec(url.pathname)
