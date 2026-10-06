@@ -42,6 +42,12 @@ import { ensureSessionWorkspace, refreshPrs, refreshWorkspace } from "@/lib/work
  */
 
 const FLUSH_INTERVAL_MS = 50
+/**
+ * How long one status or transcript read of a running turn may take. A connection can die without
+ * the request ever failing (a phone that slept, a tunnel that dropped it), which would hold the
+ * reply on its last tool call for good.
+ */
+const POLL_TIMEOUT_MS = 15_000
 /** How often a run whose events can't be read is polled, with the transcript. */
 const POLL_MS = 3000
 /** How long after a turn ends before the plugin is asked about it. */
@@ -317,8 +323,8 @@ async function transcriptReader(turn: Turn) {
   const index = messages.findIndex((m) => m.id === draft.id)
   const user = messages.slice(0, index < 0 ? undefined : index).findLast((m) => m.role === "user")
   if (!conversation || !user) return undefined
-  return async () => {
-    const reply = await liveTurn(config, conversation.hermesSessionId, user.content).catch(
+  return async (signal: AbortSignal) => {
+    const reply = await liveTurn(config, conversation.hermesSessionId, user.content, signal).catch(
       () => undefined,
     )
     if (!reply) return
@@ -357,7 +363,8 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
   // Once Hermes drops the event buffer, only the run's status is left to poll, and the transcript.
   let polling = false
   let raisedFor: string | undefined
-  let readTranscript: (() => Promise<void>) | undefined
+  let readTranscript: ((signal: AbortSignal) => Promise<void>) | undefined
+  const timed = () => AbortSignal.any([signal, AbortSignal.timeout(POLL_TIMEOUT_MS)])
   let failures = 0
   let errored = false
   for (let attempt = 0; ; attempt++) {
@@ -368,9 +375,9 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
         if (outcome) return { ...outcome, replaceContent: lost }
       } else {
         readTranscript ??= await transcriptReader(turn)
-        await readTranscript?.()
+        await readTranscript?.(timed())
       }
-      const { outcome, approval, clarify } = await getRun(config, runId, signal)
+      const { outcome, approval, clarify } = await getRun(config, runId, timed())
       if (outcome) return { ...outcome, replaceContent: lost }
       // The events stream carries approval requests; when it can't be read, the run's status holds
       // the one it waits on.
@@ -406,7 +413,7 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
       // No response to the events request while the run itself answers: the browser blocks the
       // stream (Hermes v2026.9.24 sends it without CORS headers), so retrying it never helps.
       if (!polling && error instanceof HermesError && error.status === undefined) {
-        const probe = await getRun(config, runId, signal).catch(() => undefined)
+        const probe = await getRun(config, runId, timed()).catch(() => undefined)
         if (probe?.outcome) return { ...probe.outcome, replaceContent: lost }
         if (probe) {
           polling = true

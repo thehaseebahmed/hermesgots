@@ -198,8 +198,13 @@ export function toMessages(
  * The reply so far of the running turn that `userContent` started, from the transcript Hermes
  * writes after every tool round. For a client that can't read the run's events.
  */
-export async function liveTurn(config: HermesConfig, sessionId: string, userContent: string) {
-  const rows = await listSessionMessages(config, sessionId, { limit: PAGE, offset: 0 })
+export async function liveTurn(
+  config: HermesConfig,
+  sessionId: string,
+  userContent: string,
+  signal?: AbortSignal,
+) {
+  const rows = await listSessionMessages(config, sessionId, { limit: PAGE, offset: 0, signal })
   const start = rows.findLastIndex((row) => isTurnStart(row) && row.content === userContent)
   if (start < 0) return undefined
   return toMessages("", sessionId, rows.slice(start), { live: true }).find(

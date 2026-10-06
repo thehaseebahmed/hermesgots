@@ -670,7 +670,12 @@ function streamRunEvents(req, res, run, lastSeq) {
   if (run.status === "completed" || run.status === "cancelled") return res.end(": stream closed\n\n")
   const listener = (event) => (event ? send(event) : res.end(": stream closed\n\n"))
   run.listeners.add(listener)
-  res.on("close", () => run.listeners.delete(listener))
+  // Like Hermes, a comment every 10s while nothing else is sent, so the app can tell a live stream from a dead one.
+  const keepalive = setInterval(() => res.write(": keepalive\n\n"), 10_000)
+  res.on("close", () => {
+    clearInterval(keepalive)
+    run.listeners.delete(listener)
+  })
   if (DROP_EVENTS_MS) setTimeout(() => res.destroy(), DROP_EVENTS_MS)
 }
 

@@ -130,7 +130,8 @@ async function request(url: string, init: RequestInit) {
   try {
     response = await fetch(url, init)
   } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") throw error
+    if (error instanceof DOMException && ["AbortError", "TimeoutError"].includes(error.name))
+      throw error
     throw new HermesError(networkHint(url))
   }
   if (!response.ok) {
@@ -160,14 +161,29 @@ async function errorMessage(response: Response) {
   return `Hermes returned ${response.status} ${response.statusText}`.trim()
 }
 
-/** Yields `{event, data}` for each SSE frame in the body. */
-async function* readSse(body: ReadableStream<Uint8Array>) {
+/** A read that doesn't settle within `ms` rejects with a `TimeoutError`. */
+function readWithin(reader: ReadableStreamDefaultReader<Uint8Array>, ms: number) {
+  let timer = 0
+  const quiet = new Promise<never>((_, reject) => {
+    timer = window.setTimeout(
+      () => reject(new DOMException("Hermes stopped sending.", "TimeoutError")),
+      ms,
+    )
+  })
+  return Promise.race([reader.read(), quiet]).finally(() => window.clearTimeout(timer))
+}
+
+/**
+ * Yields `{event, data}` for each SSE frame in the body. With `idleMs`, a body that sends nothing
+ * for that long (comments included) is cancelled and the read rejects with a `TimeoutError`.
+ */
+async function* readSse(body: ReadableStream<Uint8Array>, idleMs?: number) {
   const reader = body.getReader()
   const decoder = new TextDecoder()
   let buffer = ""
   try {
     while (true) {
-      const { value, done } = await reader.read()
+      const { value, done } = await (idleMs ? readWithin(reader, idleMs) : reader.read())
       if (done) break
       buffer += decoder.decode(value, { stream: true })
       let boundary: number
@@ -187,6 +203,11 @@ async function* readSse(body: ReadableStream<Uint8Array>) {
         if (data.length) yield { event, data: data.join("\n") }
       }
     }
+  } catch (error) {
+    // Lets go of the connection, which may be dead without anything having noticed.
+    if (error instanceof DOMException && error.name === "TimeoutError")
+      void reader.cancel().catch(() => undefined)
+    throw error
   } finally {
     reader.releaseLock()
   }
@@ -369,13 +390,13 @@ export interface SessionMessage {
 export async function listSessionMessages(
   config: HermesConfig,
   sessionId: string,
-  { limit, offset }: { limit: number; offset: number },
+  { limit, offset, signal }: { limit: number; offset: number; signal?: AbortSignal },
 ): Promise<SessionMessage[]> {
   const query = new URLSearchParams({ order: "latest", limit: `${limit}`, offset: `${offset}` })
   try {
     const response = await request(
       `${serverRoot(config.baseUrl)}/api/sessions/${encodeURIComponent(sessionId)}/messages?${query}`,
-      { headers: headers(config) },
+      { headers: headers(config), signal },
     )
     const body = await response.json()
     const data: unknown = body?.data
@@ -1045,6 +1066,13 @@ export async function startRun(
  * Follows a run's events from after `lastSeq` (Hermes replays what it buffered). Resolves with the
  * outcome, or null when Hermes closes the stream before the run ends (a subscriber that fell behind).
  */
+/**
+ * Hermes writes a keepalive comment every 10s while a run is quiet, so a stream silent for longer
+ * than this is dead: a phone that slept, or a proxy or tunnel that dropped the connection without
+ * closing it. Nothing else ends such a read.
+ */
+const RUN_STREAM_IDLE_MS = 30_000
+
 export async function followRun(
   config: HermesConfig,
   runId: string,
@@ -1065,7 +1093,7 @@ export async function followRun(
 
   // Hermes v2026.9.24 sends no seq: number the calls here, so each gets its own card.
   let calls = 0
-  for await (const { data } of readSse(response.body)) {
+  for await (const { data } of readSse(response.body, RUN_STREAM_IDLE_MS)) {
     let payload: any
     try {
       payload = JSON.parse(data)
