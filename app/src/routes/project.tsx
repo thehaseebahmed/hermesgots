@@ -61,7 +61,6 @@ const GROUPS: { state: SessionState; label: string }[] = [
   { state: "working", label: "Working" },
   { state: "waiting", label: "Waiting on you" },
   { state: "idle", label: "Idle" },
-  { state: "draft", label: "Drafts" },
   { state: "resolved", label: "Resolved" },
 ]
 
