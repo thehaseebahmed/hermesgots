@@ -80,10 +80,11 @@ that works in its own git worktree of a project's repo.
       gateway restart.
 - [x] Run events come through Memento's existing SSE/resume machinery in
       `chat.ts`; nothing new there.
-- [x] UI: "New session" on a project (pick the repo when it has several)
-      opens a chat with a two-line composer: the text, then `+`, the
-      permission mode, the context ring, voice and send. The header shows
-      the branch.
+- [x] UI: "New session" on a project opens a chat with a two-line composer:
+      the text, then `+`, the permission mode, the context ring, voice and
+      send. The header shows the branch. A session spans every repo of its
+      project (a worktree in each); repos are named `user/repo`, never by
+      their path.
 - [x] Permission modes per session, held by the plugin: Accept edits
       (Hermes's native behaviour), Auto (the app answers approvals) and Plan
       (the plugin's `pre_tool_call` hook blocks anything that changes a
@@ -92,9 +93,10 @@ that works in its own git worktree of a project's repo.
       and Resolved, from the plugin's live-run list and this device's own
       turns. Resolve, Edit and Delete in the chat menu; a resolved session
       shows a notice in place of the composer until it's reopened.
-- [x] The worktree branch's pull request as a pill next to the todos pill
-      (looked up on GitHub by the plugin), and worktree removal on delete
-      when the tree is clean and pushed.
+- [x] The branch's pull request in each repo as a pill next to the todos
+      pill (looked up on GitHub by the plugin), coloured by state and
+      orange when its checks fail, and worktree removal on delete when a
+      tree is clean and pushed.
 - [ ] The Library and PRs tabs of a project.
 
 ## Phase 6 — Arbitrary GitHub repo picker
