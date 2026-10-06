@@ -14,6 +14,9 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+TOOL = "todo_list"
+_definition: Any = None  # the tool's definition, looked up once; False when Hermes has none
+
 STATUSES = ("pending", "in_progress", "completed", "cancelled")
 MAX_ITEMS = 256
 MAX_CONTENT_CHARS = 4000
@@ -106,3 +109,51 @@ def read(db: Any, session_id: str) -> Optional[Dict[str, Any]]:
             "todos": _items(data["todos"]),
         }
     return None
+
+
+def wire(adapter: Any) -> bool:
+    """Makes every agent the adapter builds carry ``todo_list`` as a direct tool. Hermes defers it
+    behind ``tool_search`` by default, and a saved ``platform_toolsets.api_server`` without ``todo``
+    leaves it out of reach even there, so the agent reports it unavailable. False when this Hermes
+    has no ``_create_agent`` seam."""
+    original = getattr(adapter, "_create_agent", None)
+    if not callable(original):
+        logger.warning("memento: this Hermes has no _create_agent; the todo_list tool may be missing")
+        return False
+
+    def create_agent(*args: Any, **kwargs: Any) -> Any:
+        agent = original(*args, **kwargs)
+        try:
+            equip(agent)
+        except Exception:
+            logger.debug("memento: couldn't add the todo_list tool to an agent", exc_info=True)
+        return agent
+
+    adapter._create_agent = create_agent
+    return True
+
+
+def equip(agent: Any) -> None:
+    """Adds the tool's definition and name to one agent that doesn't have it."""
+    names = getattr(agent, "valid_tool_names", None)
+    tools = getattr(agent, "tools", None)
+    if not isinstance(tools, list) or not isinstance(names, set) or TOOL in names:
+        return
+    definition = tool_definition()
+    if definition:
+        tools.append(definition)
+        names.add(TOOL)
+
+
+def tool_definition() -> Optional[Dict[str, Any]]:
+    """The tool's definition as Hermes sends it."""
+    global _definition
+    if _definition is None:
+        try:
+            from tools.todo_tool import TODO_SCHEMA
+
+            _definition = {"type": "function", "function": TODO_SCHEMA}
+        except Exception:
+            logger.debug("memento: no todo_list tool definition", exc_info=True)
+            _definition = False
+    return _definition or None
