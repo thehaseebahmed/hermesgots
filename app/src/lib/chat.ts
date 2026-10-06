@@ -323,7 +323,12 @@ async function transcriptReader(turn: Turn) {
     )
     if (!reply) return
     // Not through onTool: these carry Hermes's own call ids, which history matches later.
-    draft.tools = reply.tools ?? []
+    draft.tools = (reply.tools ?? []).map((tool) => {
+      if (tool.tool !== "clarify" || tool.result) return tool
+      const settled = draft.tools.find((t) => t.toolCallId === tool.toolCallId)
+      // The answer can arrive here before Hermes persists the tool's result row.
+      return settled?.result ? { ...tool, result: settled.result } : tool
+    })
     if (reply.reasoning) draft.reasoning = reply.reasoning
     if (reply.content) draft.content = reply.content
     touch()
