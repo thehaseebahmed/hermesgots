@@ -4,7 +4,7 @@ Adds routes to the API server, so the Memento app (which only talks to the API s
 can read cron run history from Hermes's execution ledger instead of piecing it together on each
 device, keep its chat list on the server (``chats.py``), report each chat's context use
 (``context.py``) and the agent's todo list (``todos.py``), list and create Hermes Projects (``projects.py``) with GitHub repos cloned into
-them (``github.py``), run project sessions in their own worktrees with a permission mode
+them (``github.py``), run project sessions in their own worktrees with a permission mode and save their plans
 (``sessions.py``) and label its chats as Memento's. The dashboard half lives in ``dashboard/``.
 """
 
@@ -119,6 +119,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "sessions",
                     "runs",
                     "prs",
+                    "plans",
                 ],
             }
         )
@@ -485,6 +486,7 @@ def register(ctx) -> None:
         register_hook("pre_tool_call", sessions.before_tool)
         register_hook("pre_llm_call", sessions.before_llm)
         register_hook("on_session_start", sessions.started)
+        register_hook("post_llm_call", sessions.after_llm)
         register_hook("on_session_end", sessions.after_run)
     register_handler = getattr(ctx, "register_platform_handler", None)
     if register_handler is None:
