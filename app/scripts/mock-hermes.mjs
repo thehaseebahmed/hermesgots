@@ -525,8 +525,12 @@ function startRun(req, body) {
       push(status === "running" ? "tool.started" : "tool.completed", status === "running" ? { tool, preview: label } : { tool, duration: 1.4, error: false, preview: result ?? "" }),
     approve(event) {
       run.status = "waiting_for_approval"
-      push("approval.request", { ...event, choices: ["once", "session", "always", "deny"] })
-      return waitForApproval(id).finally(() => (run.status = "running"))
+      run.approval = { ...event, run_id: id, choices: ["once", "session", "always", "deny"] }
+      push("approval.request", run.approval)
+      return waitForApproval(id).finally(() => {
+        run.status = "running"
+        run.approval = undefined
+      })
     },
   }).then(({ spoken, prompt_tokens, completion_tokens }) => {
     run.status = run.stopped ? "cancelled" : "completed"
@@ -560,6 +564,7 @@ const runStatus = (run) => ({
   object: "hermes.run",
   run_id: run.id,
   status: run.status,
+  ...(run.status === "waiting_for_approval" && run.approval ? { approval: run.approval } : {}),
   ...(run.output !== undefined ? { output: run.output, usage: run.usage } : {}),
 })
 

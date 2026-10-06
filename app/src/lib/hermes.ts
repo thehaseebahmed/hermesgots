@@ -1024,8 +1024,13 @@ export async function getRun(config: HermesConfig, runId: string, signal?: Abort
     signal,
   })
   const body = await response.json()
+  const pending = body?.status === "waiting_for_approval" ? body.approval : undefined
   return {
     status: String(body?.status ?? ""),
+    /** The approval the run is waiting on; Hermes keeps it on the status for clients that can't read the events. */
+    approval: pending
+      ? ({ ...pending, run_id: String(pending.run_id ?? runId) } as ApprovalRequestEvent)
+      : undefined,
     outcome: TERMINAL_RUN_STATUSES.has(body?.status) ? runOutcome(body) : undefined,
   }
 }

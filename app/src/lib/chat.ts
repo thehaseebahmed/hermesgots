@@ -14,7 +14,6 @@ import {
   getSessionTitle,
   HermesError,
   labelSession,
-  listLiveRuns,
   respondToApproval,
   startRun,
   stopRun,
@@ -254,7 +253,7 @@ const retryable = (error: unknown) =>
  * Hermes whose events stream the browser's CORS check blocks). Keyed sessions only: Hermes holds
  * the transcript under our session id only when a key is sent.
  */
-async function transcriptReader(turn: Turn, runId: string) {
+async function transcriptReader(turn: Turn) {
   const { config, draft, touch, conversationId } = turn
   if (!config.apiKey) return undefined
   const conversation = await db.conversations.get(conversationId)
@@ -262,32 +261,16 @@ async function transcriptReader(turn: Turn, runId: string) {
   const index = messages.findIndex((m) => m.id === draft.id)
   const user = messages.slice(0, index < 0 ? undefined : index).findLast((m) => m.role === "user")
   if (!conversation || !user) return undefined
-  let raisedFor: string | undefined
   return async () => {
-    const [reply, live] = await Promise.all([
-      liveTurn(config, conversation.hermesSessionId, user.content).catch(() => undefined),
-      listLiveRuns(config).catch(() => undefined),
-    ])
-    if (reply) {
-      // Not through onTool: these carry Hermes's own call ids, which history matches later.
-      draft.tools = reply.tools ?? []
-      if (reply.reasoning) draft.reasoning = reply.reasoning
-      if (reply.content) draft.content = reply.content
-      touch()
-    }
-    // The events stream carries approval requests, and it is the one this fallback can't read; the
-    // plugin knows the run is waiting, and the call it waits on is the one without a result.
-    if (live?.[conversation.hermesSessionId] === "waiting_for_approval") {
-      const call = draft.tools.findLast((t) => t.status === "running")
-      const key = call?.toolCallId ?? ""
-      if (raisedFor !== key) {
-        raisedFor = key
-        raiseApproval(turn, { run_id: runId, command: call?.label })
-      }
-    } else if (live && draft.approval && !draft.approval.resolved) {
-      draft.approval = { ...draft.approval, resolved: "expired" }
-      touch()
-    }
+    const reply = await liveTurn(config, conversation.hermesSessionId, user.content).catch(
+      () => undefined,
+    )
+    if (!reply) return
+    // Not through onTool: these carry Hermes's own call ids, which history matches later.
+    draft.tools = reply.tools ?? []
+    if (reply.reasoning) draft.reasoning = reply.reasoning
+    if (reply.content) draft.content = reply.content
+    touch()
   }
 }
 
@@ -312,6 +295,7 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
   }
   // Once Hermes drops the event buffer, only the run's status is left to poll, and the transcript.
   let polling = false
+  let raisedFor: string | undefined
   let readTranscript: (() => Promise<void>) | undefined
   let failures = 0
   let errored = false
@@ -322,11 +306,26 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
         const outcome = await followRun(config, runId, { lastSeq, signal }, handlers)
         if (outcome) return { ...outcome, replaceContent: lost }
       } else {
-        readTranscript ??= await transcriptReader(turn, runId)
+        readTranscript ??= await transcriptReader(turn)
         await readTranscript?.()
       }
-      const { outcome } = await getRun(config, runId, signal)
+      const { outcome, approval } = await getRun(config, runId, signal)
       if (outcome) return { ...outcome, replaceContent: lost }
+      // The events stream carries approval requests; when it can't be read, the run's status holds
+      // the one it waits on.
+      if (approval) {
+        const key = JSON.stringify([approval.command, approval.description])
+        if (key !== raisedFor) {
+          raisedFor = key
+          raiseApproval(turn, approval)
+        }
+      } else {
+        raisedFor = undefined
+        if (polling && draft.approval && !draft.approval.resolved) {
+          draft.approval = { ...draft.approval, resolved: "expired" }
+          touch()
+        }
+      }
       failures = 0
       errored = false
     } catch (error) {
