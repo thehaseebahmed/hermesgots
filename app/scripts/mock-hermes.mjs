@@ -732,7 +732,7 @@ http
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/info") {
       return json(res, 200, {
         name: "memento",
-        version: "0.11.1",
+        version: "0.12.0",
         features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "github", "sessions", "runs", "prs", "plans", "clarify"],
         clarify: true,
       })
@@ -867,11 +867,15 @@ http
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/runs/live") {
       const sessions = {}
-      for (const run of runs.values()) {
+      const run_ids = {}
+      for (const [runId, run] of runs.entries()) {
         if (!run.sessionId || !["running", "waiting_for_approval"].includes(run.status)) continue
-        if (sessions[run.sessionId] !== "waiting_for_approval") sessions[run.sessionId] = run.status
+        if (sessions[run.sessionId] !== "waiting_for_approval") {
+          sessions[run.sessionId] = run.status
+          run_ids[run.sessionId] = runId
+        }
       }
-      return json(res, 200, { object: "memento.runs", sessions })
+      return json(res, 200, { object: "memento.runs", sessions, run_ids })
     }
     const sessionRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/(workspace|workspace\/remove|mode|prs)$/.exec(url.pathname)
     if (PLUGIN && !profile && sessionRoute) {

@@ -52,7 +52,7 @@ import {
   useMessageScroller,
 } from "@/components/ui/message-scroller"
 import { Spinner } from "@/components/ui/spinner"
-import { queueMessage, sendMessage, stopMessage } from "@/lib/chat"
+import { queueMessage, reattachRun, sendMessage, stopMessage } from "@/lib/chat"
 import {
   DEFAULT_SETTINGS,
   createConversation,
@@ -232,7 +232,9 @@ export function ChatPage() {
   useEffect(() => {
     if (!id || !hasMessages) return
     const catchUp = () => {
-      if (document.visibilityState === "visible") reconcileHistory(id).catch(() => undefined)
+      if (document.visibilityState !== "visible") return
+      reattachRun(id).catch(() => undefined)
+      reconcileHistory(id).catch(() => undefined)
     }
     catchUp()
     const timer = window.setInterval(catchUp, CATCH_UP_MS)

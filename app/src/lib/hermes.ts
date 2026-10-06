@@ -907,6 +907,18 @@ export async function listLiveRuns(config: HermesConfig): Promise<Record<string,
   )
 }
 
+/** The run in flight for a session, if the plugin reports one (it adds `run_ids` from 0.12). */
+export async function liveRunOf(config: HermesConfig, sessionId: string) {
+  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/runs/live`, {
+    headers: headers(config),
+  })
+  const body = await response.json()
+  const status = body?.sessions?.[sessionId]
+  if (status !== "running" && status !== "waiting_for_approval") return undefined
+  const runId: unknown = body?.run_ids?.[sessionId]
+  return { status: status as LiveRunStatus, runId: typeof runId === "string" ? runId : undefined }
+}
+
 /** Answers the agent's questions. Needs the Memento plugin, which serves the clarify tool on runs. */
 export async function respondToClarify(
   config: HermesConfig,

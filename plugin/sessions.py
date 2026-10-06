@@ -27,7 +27,7 @@ import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from .store import connect
 
@@ -594,13 +594,18 @@ def is_code_session(session_id: str) -> bool:
     return bool(path.exists() and read(path, session_id))
 
 
-def live_runs(adapter: Any) -> Dict[str, str]:
-    """Each session with a run in flight: ``running`` or ``waiting_for_approval``."""
+def live_runs(adapter: Any) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """Each session with a run in flight: ``running`` or ``waiting_for_approval``, and its run id.
+
+    The run id is what lets a client that lost track of a reply (a reload, a dropped stream) follow
+    the run again.
+    """
     statuses = getattr(adapter, "_run_statuses", None)
     if not isinstance(statuses, dict):
-        return {}
+        return {}, {}
     live: Dict[str, str] = {}
-    for status in list(statuses.values()):
+    run_ids: Dict[str, str] = {}
+    for run_id, status in list(statuses.items()):
         if not isinstance(status, dict):
             continue
         state = LIVE_STATUSES.get(status.get("status"))
@@ -609,7 +614,9 @@ def live_runs(adapter: Any) -> Dict[str, str]:
             continue
         if live.get(session_id) != "waiting_for_approval":
             live[session_id] = state
-    return live
+            if isinstance(run_id, str):
+                run_ids[session_id] = run_id
+    return live, run_ids
 
 
 def read_only(command: Any) -> bool:

@@ -17,6 +17,7 @@ import {
   getSessionTitle,
   HermesError,
   labelSession,
+  liveRunOf,
   respondToApproval,
   respondToClarify,
   startRun,
@@ -482,6 +483,11 @@ async function runTurn(turn: Turn, start: () => Promise<{ usage?: TurnUsage }>) 
   } catch (error) {
     if (controller.signal.aborted) {
       draft.status = "stopped"
+    } else if (draft.runId && retryable(error)) {
+      // Hermes may still be running it: leave the reply streaming for `reattachRun` to pick up.
+      draft.statusText = undefined
+      await turn.close()
+      return draft.status
     } else {
       draft.status = "error"
       draft.statusText =
@@ -614,6 +620,29 @@ export async function sendMessage(conversationId: string, text: string, queuedId
   }
   // A stop or an error pauses the queue: the user probably wants to look before it carries on.
   await sendNextQueued(conversationId)
+}
+
+/**
+ * Follows the run Hermes is still working on for a chat that was reopened. A reply left streaming
+ * by a connection that gave up, or by a reload before its run id was saved, is the one to pick up.
+ */
+export async function reattachRun(conversationId: string) {
+  if (controllers.has(conversationId)) return
+  const conversation = await db.conversations.get(conversationId)
+  const profile = await profileFor(conversation?.profileId)
+  if (!conversation || !profile?.apiKey) return
+  const stale = (await getMessages(conversationId)).findLast(
+    (m) => m.role === "assistant" && m.status === "streaming",
+  )
+  if (!stale) return
+  const live = await liveRunOf(
+    { baseUrl: profile.baseUrl, apiKey: profile.apiKey },
+    conversation.hermesSessionId,
+  ).catch(() => undefined)
+  const runId = stale.runId ?? live?.runId
+  if (!runId) return
+  if (!stale.runId) await db.messages.update(stale.id, { runId })
+  await resumeReply({ ...stale, runId })
 }
 
 /** Picks up a reply whose run was still going when the app was closed or reloaded. */
