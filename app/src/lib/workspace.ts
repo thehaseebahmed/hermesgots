@@ -1,5 +1,4 @@
-import { answerApproval } from "@/lib/chat"
-import { db, getMessages, type Conversation, type SessionMode } from "@/lib/db"
+import { db, type Conversation, type SessionMode } from "@/lib/db"
 import {
   ensureWorkspace,
   getSessionPrs,
@@ -127,7 +126,7 @@ export async function refreshPrs(conversationId: string, { force = false } = {})
 
 /**
  * Changes the session's permission mode here and on the plugin, which also dismisses a pending
- * plan. Switching to auto answers an approval that's already waiting.
+ * plan and, switching to Auto, answers an approval that's already waiting.
  */
 export async function setSessionMode(conversationId: string, mode: SessionMode) {
   const conversation = await db.conversations.get(conversationId)
@@ -144,10 +143,6 @@ export async function setSessionMode(conversationId: string, mode: SessionMode) 
       // Before the first turn there's nothing on the plugin yet; the first turn carries the mode.
       if (!(error instanceof HermesError && error.status === 404)) throw error
     }
-  }
-  if (mode === "auto") {
-    const open = (await getMessages(conversationId)).find((m) => m.approval && !m.approval.resolved)
-    if (open) await answerApproval(open, "once")
   }
 }
 
