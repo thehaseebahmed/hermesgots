@@ -28,6 +28,7 @@ import {
 import { refreshContext } from "@/lib/context"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { randomId } from "@/lib/utils"
+import { ensureSessionWorkspace, refreshPr, refreshWorkspace } from "@/lib/workspace"
 
 /**
  * Sends a turn to Hermes and persists the streamed reply into IndexedDB as it arrives.
@@ -35,6 +36,8 @@ import { randomId } from "@/lib/utils"
  */
 
 const FLUSH_INTERVAL_MS = 50
+/** How long after a turn ends before the plugin is asked about it. */
+const PLUGIN_SETTLE_MS = 1500
 /** Hermes upgrades a placeholder title on later turns, up to the third. */
 const TITLED_TURNS = 3
 /** Hermes titles with a model call in the background, which can land after the reply ends. */
@@ -190,6 +193,10 @@ function streamHandlers(turn: Turn): StreamHandlers {
         requestedAt: Date.now(),
       }
       touch()
+      // A session in auto mode answers for the user, replayed requests included.
+      void db.conversations.get(turn.conversationId).then((conversation) => {
+        if (conversation?.mode === "auto") void answerApproval(draft, "once").catch(() => undefined)
+      })
     },
   }
 }
@@ -315,6 +322,16 @@ async function finishTurn(turn: Turn, usage: TurnUsage | undefined) {
   await updateConversation(conversationId, { updatedAt: endedAt })
   void refreshContext(conversationId)
   void refreshTodos(conversationId)
+  const conversation = await db.conversations.get(conversationId)
+  if (conversation?.projectId) {
+    if (draft.status === "done" && conversation.mode === "plan")
+      await db.conversations.update(conversationId, { planPending: true })
+    // A moment later: the plugin's own hook records the finished plan-mode turn.
+    setTimeout(() => {
+      void refreshWorkspace(conversationId)
+      void refreshPr(conversationId, { force: true })
+    }, PLUGIN_SETTLE_MS)
+  }
 }
 
 /** Runs a turn on `/v1/runs` when Hermes has it, else streams a chat completion. */
@@ -403,6 +420,8 @@ export async function sendMessage(conversationId: string, text: string, queuedId
     sessionId: conversation.hermesSessionId,
   }
   const status = await runTurn(turn, async () => {
+    // A project session works in its worktree; the plugin can't be told about it any other way.
+    const workspace = await ensureSessionWorkspace(conversationId, content)
     if (!(await supportsRuns(config))) {
       return streamChat(
         config,
@@ -410,7 +429,11 @@ export async function sendMessage(conversationId: string, text: string, queuedId
         streamHandlers(turn),
       )
     }
-    const runId = await startRun(config, { ...options, idempotencyKey: reply.id })
+    const runId = await startRun(config, {
+      ...options,
+      idempotencyKey: reply.id,
+      mode: workspace?.mode,
+    })
     turn.draft.runId = runId
     turn.touch()
     if (turn.controller.signal.aborted) {
