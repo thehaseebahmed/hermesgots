@@ -5,7 +5,8 @@ can read cron run history from Hermes's execution ledger instead of piecing it t
 device, keep its chat list on the server (``chats.py``), report each chat's context use
 (``context.py``) and the agent's todo list (``todos.py``), list and create Hermes Projects (``projects.py``) with GitHub repos cloned into
 them (``github.py``), run project sessions in their own worktrees with a permission mode and save their plans
-(``sessions.py``) and label its chats as Memento's. The dashboard half lives in ``dashboard/``.
+(``sessions.py``), let the agent ask the user questions with Hermes's ``clarify`` tool (``clarify.py``) and
+label its chats as Memento's. The dashboard half lives in ``dashboard/``.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-from . import chats, cleanup, context, github, projects, sessions, todos
+from . import chats, clarify, cleanup, context, github, projects, sessions, todos
 from .store import db_path
 
 logger = logging.getLogger(__name__)
@@ -79,6 +80,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
     # The hooks have no other way to the session store.
     sessions.adapter = adapter
+    # The API server's agents can't ask questions on their own; see clarify.py.
+    asks = clarify.wire(adapter)
 
     async def daily_cleanup(_app: Any):
         from hermes_constants import get_hermes_home
@@ -120,7 +123,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "runs",
                     "prs",
                     "plans",
+                    "clarify",
                 ],
+                "clarify": asks,
             }
         )
 
@@ -481,7 +486,23 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/workspace/remove", remove_workspace)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/mode", post_mode)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/prs", session_pr)
+    async def answer_clarify(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        run_id = request.match_info["run_id"]
+        clarify_id = clarify.resolve(run_id, body.get("clarify_id"), body.get("answers"), body.get("outcome"))
+        if clarify_id is None:
+            return _error(web, f"Run has no pending question: {run_id}", 409)
+        return web.json_response(
+            {"object": "memento.clarify_response", "run_id": run_id, "clarify_id": clarify_id, "resolved": True}
+        )
+
     app.router.add_get(f"{PREFIX}/runs/live", live_runs)
+    app.router.add_post(f"{PREFIX}/runs/{{run_id}}/clarify", answer_clarify)
     logger.info("memento: serving %s on the API server", PREFIX)
 
 
