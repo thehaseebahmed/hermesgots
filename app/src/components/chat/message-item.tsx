@@ -157,6 +157,11 @@ export function MessageItem({
   const approval = message.approval
   const awaitingApproval = Boolean(approval && !approval.resolved)
   const awaitingClarify = Boolean(message.clarify && !message.clarify.resolved)
+  // While this device shows the question as a form, the call's own "waiting" card would repeat it.
+  const asking = awaitingClarify
+    ? message.tools?.findLast((t) => t.tool === "clarify" && t.status === "running")
+    : undefined
+  const tools = (message.tools ?? []).filter((t) => t !== asking)
 
   // An answered approval splits the reply in two so the card sits where it happened:
   // everything Hermes said and ran before asking, the card, then everything after.

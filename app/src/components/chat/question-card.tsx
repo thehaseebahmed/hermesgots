@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { CheckIcon, MessageCircleQuestionIcon } from "lucide-react"
 import { toast } from "sonner"
 
@@ -169,6 +169,9 @@ export function QuestionCard({ message }: { message: Message }) {
   const [pending, setPending] = useState(false)
   const [page, setPage] = useState(0)
   const row = useRef<HTMLDivElement>(null)
+  const pages = useRef<(HTMLDivElement | null)[]>([])
+  // The row is as tall as the page showing, so a short question leaves no gap above the buttons.
+  const [height, setHeight] = useState<number>()
   const [picked, setPicked] = useState<Record<string, Picked>>(() =>
     Object.fromEntries(questions.map((q) => [q.id, { choices: [], other: "", usingOther: false }])),
   )
@@ -196,6 +199,16 @@ export function QuestionCard({ message }: { message: Message }) {
       cancelAnimationFrame(frame)
     }
   }, [paged])
+
+  useLayoutEffect(() => {
+    const el = pages.current[page]
+    if (!paged || !el) return
+    const measure = () => setHeight(el.offsetHeight)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [page, paged])
 
   const goTo = (index: number) => {
     const el = row.current
@@ -244,14 +257,17 @@ export function QuestionCard({ message }: { message: Message }) {
       </CardHeader>
       {paged ? (
         <CardContent>
-          {/* The row is as tall as its tallest page, so the card holds one height while paging. */}
           <div
             ref={row}
-            className="-m-1 flex snap-x snap-mandatory [scrollbar-width:none] overflow-x-auto overscroll-x-contain [&::-webkit-scrollbar]:hidden"
+            style={{ height }}
+            className="-m-1 flex snap-x snap-mandatory [scrollbar-width:none] items-start overflow-x-auto overscroll-x-contain transition-[height] motion-reduce:transition-none [&::-webkit-scrollbar]:hidden"
           >
             {questions.map((question, i) => (
               <div
                 key={question.id}
+                ref={(el) => {
+                  pages.current[i] = el
+                }}
                 role="group"
                 aria-roledescription="slide"
                 aria-label={`Question ${i + 1} of ${questions.length}`}
