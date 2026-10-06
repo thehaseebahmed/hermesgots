@@ -335,6 +335,17 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
         lost = true
         continue
       }
+      // No response to the events request while the run itself answers: the browser blocks the
+      // stream (Hermes v2026.9.24 sends it without CORS headers), so retrying it never helps.
+      if (!polling && error instanceof HermesError && error.status === undefined) {
+        const probe = await getRun(config, runId, signal).catch(() => undefined)
+        if (probe?.outcome) return { ...probe.outcome, replaceContent: lost }
+        if (probe) {
+          polling = true
+          lost = true
+          continue
+        }
+      }
       if (!retryable(error)) throw error
       errored = true
       if (document.visibilityState === "visible" && navigator.onLine) {
