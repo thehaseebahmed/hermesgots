@@ -127,7 +127,7 @@ export interface ToolEvent {
   tool: string
   emoji?: string
   label: string
-  status: "running" | "completed"
+  status: "running" | "completed" | "failed"
   startedAt: number
   endedAt?: number
   /** Length of the reply text when the tool started, so it renders where it happened. */

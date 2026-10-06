@@ -157,6 +157,7 @@ function Details({ tool }: { tool: ToolEvent }) {
 
 export function ToolCard({ tool }: { tool: ToolEvent }) {
   const running = tool.status === "running"
+  const failed = tool.status === "failed"
   const elapsed = useElapsed(tool)
   const hasLabel = Boolean(tool.label) && tool.label !== tool.tool
   // Tablet width and up shows details inline; phones get a drawer.
@@ -168,6 +169,8 @@ export function ToolCard({ tool }: { tool: ToolEvent }) {
     <>
       {running ? (
         <Spinner className="size-4 shrink-0 text-muted-foreground" />
+      ) : failed ? (
+        <XIcon className="size-4 shrink-0 text-destructive" strokeWidth={3} aria-label="Failed" />
       ) : (
         <CheckIcon className="size-4 shrink-0 text-primary" strokeWidth={3} />
       )}
@@ -239,7 +242,8 @@ export function ToolCard({ tool }: { tool: ToolEvent }) {
                   {tool.tool}
                 </Drawer.Title>
                 <Drawer.Description className="text-muted-foreground">
-                  {running ? "Running" : "Completed"} · {formatDuration(elapsed)}
+                  {running ? "Running" : failed ? "Failed" : "Completed"} ·{" "}
+                  {formatDuration(elapsed)}
                 </Drawer.Description>
               </div>
               {/* Scrolling the content natively (no drag handling of our own) also expands it. */}

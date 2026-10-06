@@ -187,10 +187,9 @@ function streamHandlers(turn: Turn): StreamHandlers {
         : draft.tools.find((t) => t.status === "running" && t.tool === event.tool)
       if (existing) {
         existing.status = event.status
-        if (event.status === "completed") {
-          existing.endedAt = Date.now()
+        if (event.status !== "running") existing.endedAt = Date.now()
+        if (event.status === "completed")
           void onTodoTool(turn.conversationId, existing.tool, event.result)
-        }
         if (event.result) existing.result = event.result
       } else {
         // A completion with no start to match still happened; it gets its own card.
@@ -201,7 +200,7 @@ function streamHandlers(turn: Turn): StreamHandlers {
           label: event.label ?? event.tool,
           status: event.status,
           startedAt: Date.now(),
-          ...(event.status === "completed" ? { endedAt: Date.now(), result: event.result } : {}),
+          ...(event.status !== "running" ? { endedAt: Date.now(), result: event.result } : {}),
           contentOffset: draft.content.length,
         })
       }
