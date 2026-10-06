@@ -1,4 +1,4 @@
-import type { ApprovalChoice, Todo } from "@/lib/db"
+import type { ApprovalChoice, PrState, SessionMode, Todo } from "@/lib/db"
 import type { Doc } from "@/lib/merge"
 import { isNative } from "@/lib/native"
 
@@ -647,6 +647,152 @@ export async function getSessionTodos(
   return parseTodos(await response.json())
 }
 
+/** A project session's worktree and permission mode, as the Memento plugin keeps them. */
+export interface SessionWorkspace {
+  projectId: string
+  repoRoot: string
+  path: string
+  branch: string
+  mode: SessionMode
+  planPending: boolean
+}
+
+const MODES = new Set<string>(["accept_edits", "auto", "plan"])
+
+function parseWorkspace(raw: unknown): SessionWorkspace | null {
+  const body = raw as Record<string, unknown> | null
+  if (
+    !body ||
+    typeof body.path !== "string" ||
+    typeof body.branch !== "string" ||
+    typeof body.repo_root !== "string"
+  )
+    return null
+  const mode = typeof body.mode === "string" && MODES.has(body.mode) ? body.mode : "accept_edits"
+  return {
+    projectId: String(body.project_id ?? ""),
+    repoRoot: body.repo_root,
+    path: body.path,
+    branch: body.branch,
+    mode: mode as SessionMode,
+    planPending: Boolean(body.plan_pending),
+  }
+}
+
+function pluginSession(config: HermesConfig, sessionId: string, path: string) {
+  return `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/sessions/${encodeURIComponent(sessionId)}${path}`
+}
+
+/**
+ * Gives a project session its worktree (made on the first call) and points its tools into it. The
+ * pointer only lives in the gateway's memory, so this runs before every turn.
+ */
+export async function ensureWorkspace(
+  config: HermesConfig,
+  sessionId: string,
+  options: { projectId: string; repoRoot: string; task?: string; mode?: SessionMode },
+): Promise<SessionWorkspace> {
+  const response = await request(pluginSession(config, sessionId, "/workspace"), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({
+      project_id: options.projectId,
+      repo_root: options.repoRoot,
+      task: options.task,
+      mode: options.mode,
+    }),
+  })
+  const workspace = parseWorkspace((await response.json())?.workspace)
+  if (!workspace) throw new HermesError("The plugin didn't return a workspace.")
+  return workspace
+}
+
+/** The session's workspace, or null when it has none (or the plugin predates them). */
+export async function getWorkspace(
+  config: HermesConfig,
+  sessionId: string,
+): Promise<SessionWorkspace | null> {
+  const response = await request(pluginSession(config, sessionId, "/workspace"), {
+    headers: headers(config),
+  })
+  return parseWorkspace((await response.json())?.workspace)
+}
+
+/** Changes a session's permission mode; also clears a pending plan. 404 before the first turn. */
+export async function setWorkspaceMode(
+  config: HermesConfig,
+  sessionId: string,
+  mode: SessionMode,
+): Promise<SessionWorkspace | null> {
+  const response = await request(pluginSession(config, sessionId, "/mode"), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ mode }),
+  })
+  return parseWorkspace((await response.json())?.workspace)
+}
+
+/** Asks the plugin to remove the worktree; it keeps one with uncommitted or unpushed work. */
+export async function removeWorkspace(
+  config: HermesConfig,
+  sessionId: string,
+): Promise<{ removed: boolean; reason?: "dirty" | "unpushed" | "missing" }> {
+  const response = await request(pluginSession(config, sessionId, "/workspace/remove"), {
+    method: "POST",
+    headers: headers(config),
+  })
+  const body = await response.json()
+  const reason = body?.reason
+  return {
+    removed: Boolean(body?.removed),
+    ...(reason === "dirty" || reason === "unpushed" || reason === "missing" ? { reason } : {}),
+  }
+}
+
+export interface PullRequest {
+  number: number
+  title: string
+  state: PrState
+  url: string | null
+}
+
+const PR_STATES = new Set<string>(["open", "draft", "merged", "closed"])
+
+/** The pull request from the session's worktree branch, or null. Needs the Memento plugin. */
+export async function getSessionPr(
+  config: HermesConfig,
+  sessionId: string,
+): Promise<PullRequest | null> {
+  const response = await request(pluginSession(config, sessionId, "/pr"), {
+    headers: headers(config),
+  })
+  const pr = (await response.json())?.pr
+  if (!pr || typeof pr.number !== "number" || !PR_STATES.has(pr.state)) return null
+  return {
+    number: pr.number,
+    title: typeof pr.title === "string" ? pr.title : "",
+    state: pr.state,
+    url: typeof pr.url === "string" ? pr.url : null,
+  }
+}
+
+export type LiveRunStatus = "running" | "waiting_for_approval"
+
+/** Sessions with a run in flight on the server, by Hermes session id. Needs the Memento plugin. */
+export async function listLiveRuns(config: HermesConfig): Promise<Record<string, LiveRunStatus>> {
+  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/runs/live`, {
+    headers: headers(config),
+  })
+  const sessions: unknown = (await response.json())?.sessions
+  if (!sessions || typeof sessions !== "object") return {}
+  return Object.fromEntries(
+    Object.entries(sessions).filter(
+      (entry): entry is [string, LiveRunStatus] =>
+        entry[1] === "running" || entry[1] === "waiting_for_approval",
+    ),
+  )
+}
+
 /** Marks a session as Memento's, so the Hermes dashboard labels it. Needs the Memento plugin. */
 export async function labelSession(config: HermesConfig, sessionId: string) {
   try {
@@ -706,19 +852,23 @@ function runOutcome(payload: any): RunOutcome {
 }
 
 /**
- * Starts a turn on `/v1/runs`. Unlike a chat completion, Hermes doesn't interrupt a run when its
- * event stream drops, so a phone that sleeps mid-reply can pick it up again.
- */
-/**
  * Sent as a run's `instructions`, which Hermes adds to the system prompt. `todo_list` is a deferred
- * tool by default, so without it the agent rarely keeps the list the chat shows. It never changes,
- * so the prompt cache still holds.
+ * tool by default, so without it the agent rarely keeps the list the chat shows. Fixed per mode, so
+ * the prompt cache holds across the turns of one mode.
  */
 const PLAN_HINT =
   "When a task takes three or more steps, plan it first with the todo_list tool (load it through " +
   "tool search if it isn't loaded yet), keep exactly one item in progress, and update the list as " +
   "each step is done."
+/** Plan mode: the Memento plugin blocks tools that change anything; this tells the agent why. */
+const PLAN_MODE_HINT =
+  "You are in plan mode: change nothing. Read what you need, then present a numbered plan of the " +
+  "changes you would make in your reply and stop; the user approves it before you act."
 
+/**
+ * Starts a turn on `/v1/runs`. Unlike a chat completion, Hermes doesn't interrupt a run when its
+ * event stream drops, so a phone that sleeps mid-reply can pick it up again.
+ */
 export async function startRun(
   config: HermesConfig,
   options: {
@@ -727,6 +877,8 @@ export async function startRun(
     sessionId?: string
     /** Makes a retried POST return the run it already started. */
     idempotencyKey: string
+    /** A project session's permission mode. */
+    mode?: SessionMode
   },
 ) {
   // Like X-Hermes-Session-Id, a keyed session holds the history, so only the new message goes.
@@ -738,7 +890,7 @@ export async function startRun(
     body: JSON.stringify({
       model: options.model,
       input,
-      instructions: PLAN_HINT,
+      instructions: options.mode === "plan" ? `${PLAN_HINT}\n${PLAN_MODE_HINT}` : PLAN_HINT,
       ...(keyed ? { session_id: options.sessionId } : {}),
     }),
   })
