@@ -3,7 +3,12 @@ import { getModelInfo, type ModelInfo } from "@/lib/hermes"
 
 const CATALOG_URL = "https://models.dev/api.json"
 
-type Catalog = Record<string, { models?: Record<string, { limit?: { context?: unknown } }> }>
+interface CatalogModel {
+  limit?: { context?: unknown }
+  modalities?: { input?: unknown }
+}
+
+type Catalog = Record<string, { models?: Record<string, CatalogModel> }>
 
 let catalog: Promise<Catalog> | undefined
 
@@ -25,47 +30,62 @@ function loadCatalog() {
 const normalise = (id: string) => id.toLowerCase().replace(/\./g, "-")
 const lastSegment = (id: string) => id.slice(id.lastIndexOf("/") + 1)
 
-function contextOf(entry: { limit?: { context?: unknown } } | undefined) {
+function contextOf(entry: CatalogModel | undefined) {
   const context = entry?.limit?.context
   return typeof context === "number" && context > 0 ? context : undefined
 }
 
-function matchIn(
-  models: Record<string, { limit?: { context?: unknown } }> | undefined,
+function imageInputOf(entry: CatalogModel | undefined) {
+  const input = entry?.modalities?.input
+  return Array.isArray(input) ? input.includes("image") : undefined
+}
+
+function matchIn<T>(
+  models: Record<string, CatalogModel> | undefined,
   model: string,
+  pick: (entry: CatalogModel | undefined) => T | undefined,
 ) {
   if (!models) return undefined
-  const exact = contextOf(models[model])
-  if (exact) return exact
+  const exact = pick(models[model])
+  if (exact !== undefined) return exact
   const full = normalise(model)
   const short = lastSegment(full)
   for (const [id, entry] of Object.entries(models)) {
     const candidate = normalise(id)
     if (candidate === full || lastSegment(candidate) === short) {
-      const context = contextOf(entry)
-      if (context) return context
+      const value = pick(entry)
+      if (value !== undefined) return value
     }
   }
   return undefined
 }
 
-/** The model's context window per models.dev, or undefined if it isn't listed (or unreachable). */
-export async function findContextWindow({ provider, model }: ModelInfo) {
+/** What models.dev says about the model, or undefined if it isn't listed (or unreachable). */
+async function lookUp<T>(
+  { provider, model }: ModelInfo,
+  pick: (entry: CatalogModel | undefined) => T | undefined,
+) {
   if (!model) return undefined
   try {
     const data = await loadCatalog()
     // Hermes's provider ids don't always match models.dev's, so fall back to any provider.
-    const own = provider ? matchIn(data[provider]?.models, model) : undefined
-    if (own) return own
+    const own = provider ? matchIn(data[provider]?.models, model, pick) : undefined
+    if (own !== undefined) return own
     for (const entry of Object.values(data)) {
-      const context = matchIn(entry?.models, model)
-      if (context) return context
+      const value = matchIn(entry?.models, model, pick)
+      if (value !== undefined) return value
     }
   } catch {
     // Offline, blocked or malformed: the user can still set it by hand.
   }
   return undefined
 }
+
+/** The model's context window per models.dev. */
+export const findContextWindow = (info: ModelInfo) => lookUp(info, contextOf)
+
+/** Whether the model takes images (`modalities.input`), unknown when models.dev doesn't say. */
+export const findImageInput = (info: ModelInfo) => lookUp(info, imageInputOf)
 
 /**
  * Fills in the profile's context window from models.dev whenever the model behind it changes,
@@ -76,13 +96,21 @@ export async function syncContextWindow(profile: Profile) {
   const info = await getModelInfo(profile)
   if (!info?.model) return
   const key = info.provider ? `${info.provider}/${info.model}` : info.model
-  if (key === profile.contextModel) return
-  const found = await findContextWindow(info)
+  if (key === profile.contextModel) {
+    // Bots from before image detection learn it once.
+    if (profile.imageInput === undefined) {
+      const imageInput = await findImageInput(info)
+      if (imageInput !== undefined) await updateProfile(profile.id, { imageInput })
+    }
+    return
+  }
+  const [found, imageInput] = await Promise.all([findContextWindow(info), findImageInput(info)])
   // Bots from before detection keep a hand-set window rather than losing it on the first sync.
   const keep = !profile.contextModel && !found && profile.contextWindow
   await updateProfile(profile.id, {
     contextModel: key,
     contextWindow: keep ? profile.contextWindow : found,
     contextSource: keep ? "manual" : found ? "models.dev" : undefined,
+    imageInput,
   })
 }

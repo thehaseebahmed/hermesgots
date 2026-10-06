@@ -488,6 +488,7 @@ export function ChatPage() {
               id ? queueMessage(id, text, attachments) : send(text, attachments)
             }
             filesAvailable={Boolean(profile?.pluginChats)}
+            imagesAvailable={profile?.imageInput !== false}
             onStop={() => id && stopMessage(id)}
             onCommand={(command) => navigate(command === "new" ? "/" : "/settings")}
             connection={{ baseUrl: profile?.baseUrl ?? "", apiKey: profile?.apiKey ?? "" }}

@@ -16,11 +16,14 @@ const SOURCES: { id: Source; label: string; icon: LucideIcon }[] = [
 export function AttachMenu({
   disabled,
   filesAvailable,
+  imagesAvailable,
   onAdd,
 }: {
   disabled?: boolean
   /** Files only reach Hermes through the Memento plugin; photos also go inline. */
   filesAvailable: boolean
+  /** Camera and Photos send images the model has to read itself. */
+  imagesAvailable: boolean
   onAdd: (files: File[]) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -90,7 +93,7 @@ export function AttachMenu({
                 type="button"
                 variant="outline"
                 className="h-auto min-h-24 flex-col gap-2 rounded-2xl py-5 text-[15px] font-normal"
-                disabled={id === "files" && !filesAvailable}
+                disabled={id === "files" ? !filesAvailable : !imagesAvailable}
                 onClick={() => pick(id)}
               >
                 <Icon className="size-6!" />
