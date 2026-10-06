@@ -18,7 +18,8 @@
 // Say "plan" and the agent keeps a todo list with its todo_list tool as it works, which the plugin's
 // GET /api/plugins/memento/sessions/{id}/todos reads back from a keyed session's transcript.
 // Turns also run on POST /v1/runs, whose events replay from GET /v1/runs/{id}/events?last_seq=N and
-// which keep going when the client drops, unlike a chat completion. Say "long" for a slow reply.
+// which keep going when the client drops, unlike a chat completion. Say "long" for a slow reply, and
+// "fail" for a tool call that fails.
 // Project sessions get a worktree in each of the project's repos on
 // POST /api/plugins/memento/sessions/{id}/workspace (GET reads it back, POST …/mode changes the
 // permission mode, POST …/workspace/remove removes the trees unless a turn mentioned "commit"). In
@@ -400,7 +401,17 @@ async function playTurn(req, body, last, out) {
       "- `app/debug.log.*` — 0.7 GB, left over from the verbose-logging experiment\n\n"
   )
 
-  if (/clean|delete/i.test(last)) {
+  if (/fail/i.test(last)) {
+    const failId = `call_${randomUUID().slice(0, 8)}`
+    const command = "journalctl --vacuum-size=500M"
+    out.tool({ tool: "terminal", emoji: "💻", label: command, toolCallId: failId, status: "running" })
+    await sleep(900)
+    const failOutput = JSON.stringify({ output: "Failed to vacuum: Permission denied", exit_code: 1, error: "Permission denied" })
+    out.tool({ tool: "terminal", toolCallId: failId, status: "failed", result: failOutput })
+    record(req, { role: "assistant", content: null, tool_calls: [{ id: failId, type: "function", function: { name: "terminal", arguments: JSON.stringify({ command }) } }] })
+    record(req, { role: "tool", tool_call_id: failId, tool_name: "terminal", content: failOutput })
+    await say("I tried to trim the journal too, but I don't have permission to.")
+  } else if (/clean|delete/i.test(last)) {
     await say("The live logs and anything written in the last 90 days stay untouched. Here is the command I want to run:\n\n```bash\nfind /var/log -name '*.log.*' -mtime +90 -delete\n```\n")
     const cleanupId = `call_${randomUUID().slice(0, 8)}`
     out.tool({ tool: "terminal", emoji: "💻", label: "find /var/log -name '*.log.*' -mtime +90 -delete", toolCallId: cleanupId, status: "running" })
@@ -476,7 +487,9 @@ async function streamCompletion(req, res, body) {
     say: (piece) => chunk({ content: piece }),
     status: (text) => frame({ kind: "thinking", text }, "hermes.status"),
     // Completions carry no result on this stream.
-    tool: ({ result: _result, ...event }) => frame(event, "hermes.tool.progress"),
+    // Only the run stream says whether a call failed.
+    tool: ({ result: _result, ...event }) =>
+      frame({ ...event, status: event.status === "failed" ? "completed" : event.status }, "hermes.tool.progress"),
     approve(event) {
       frame({ ...event, event: "approval.request", run_id: id, timestamp: Date.now() / 1000, choices: ["once", "session", "always", "deny"] }, "approval.request")
       return waitForApproval(id)
@@ -522,7 +535,7 @@ function startRun(req, body) {
     say: (delta) => push("message.delta", { delta }),
     status: () => {},
     tool: ({ tool, label, status, result }) =>
-      push(status === "running" ? "tool.started" : "tool.completed", status === "running" ? { tool, preview: label } : { tool, duration: 1.4, error: false, preview: result ?? "" }),
+      push(status === "running" ? "tool.started" : "tool.completed", status === "running" ? { tool, preview: label } : { tool, duration: 1.4, error: status === "failed", preview: result ?? "" }),
     approve(event) {
       run.status = "waiting_for_approval"
       run.approval = { ...event, run_id: id, choices: ["once", "session", "always", "deny"] }

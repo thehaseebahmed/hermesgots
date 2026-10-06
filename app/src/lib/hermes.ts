@@ -26,8 +26,8 @@ export interface ToolProgressEvent {
   label?: string
   /** Runs don't name tool calls; their completions match the oldest running call of the tool. */
   toolCallId?: string
-  status: "running" | "completed"
-  /** A completed call's output, as Hermes previews it. */
+  status: "running" | "completed" | "failed"
+  /** A finished call's output, as Hermes previews it. */
   result?: string
 }
 
@@ -997,7 +997,7 @@ export async function followRun(
       case "tool.completed":
         handlers.onTool?.({
           tool: String(payload.tool ?? "tool"),
-          status: "completed",
+          status: payload.error ? "failed" : "completed",
           result: payload.preview ? String(payload.preview) : undefined,
         })
         break
