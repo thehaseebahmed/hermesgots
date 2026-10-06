@@ -56,6 +56,9 @@ def _empty_chats(records: Dict[str, Dict[str, Any]], hermes_home: Path, now: int
             continue
         if isinstance(updated, (int, float)) and updated > created:
             continue
+        if value.get("draftAt"):
+            # Saved on purpose.
+            continue
         if now - created < GRACE_MS:
             continue
         if _has_messages(hermes_home, session_id) is False:

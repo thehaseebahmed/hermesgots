@@ -74,6 +74,8 @@ export interface Conversation {
   projectId?: string
   /** Unsent composer text a session was left with, kept on this device only. */
   draft?: string
+  /** When the user saved the session as a draft. Synced, so the plugin's cleanup spares it. */
+  draftAt?: number
   /** Marked done by the user; the composer gives way until it's reopened. */
   resolvedAt?: number
   /** Permission mode, as the plugin last reported it. Local only; the plugin holds it. */
