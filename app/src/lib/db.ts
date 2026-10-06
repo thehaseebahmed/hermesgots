@@ -70,6 +70,33 @@ export interface Conversation {
    * every device reads it from the Memento plugin.
    */
   todos?: { revision: number; items: Todo[]; at: number }
+  /** The Hermes Project this chat is a session of (works in its own worktree). */
+  projectId?: string
+  /** The project folder (a git repo) the session's worktree is made from. */
+  repoRoot?: string
+  /** Marked done by the user; the composer gives way until it's reopened. */
+  resolvedAt?: number
+  /** Permission mode, as the plugin last reported it. Local only; the plugin holds it. */
+  mode?: SessionMode
+  /** The session's worktree, from the plugin. Local only. */
+  worktree?: { path: string; branch: string }
+  /** A plan-mode turn finished and the plan awaits the user. Local only; the plugin holds it. */
+  planPending?: boolean
+  /** The worktree branch's pull request and when it was last read. Local only; null when none. */
+  pr?: PullRequestRef | null
+}
+
+/** How much a project session may do without asking. */
+export type SessionMode = "accept_edits" | "auto" | "plan"
+
+export type PrState = "open" | "draft" | "merged" | "closed"
+
+export interface PullRequestRef {
+  number: number
+  title: string
+  state: PrState
+  url: string | null
+  at: number
 }
 
 export type TodoStatus = "pending" | "in_progress" | "completed" | "cancelled"
@@ -277,6 +304,9 @@ db.version(5)
 // v6: run history comes from the Memento plugin on the Hermes server, not from each device.
 db.version(6).stores({ cronRuns: null })
 
+// v7: project sessions, listed per project.
+db.version(7).stores({ conversations: "id, updatedAt, [profileId+updatedAt], projectId" })
+
 db.on("populate", (tx) => seedProfile(tx))
 
 export async function getSettings(): Promise<Settings> {
@@ -340,7 +370,10 @@ export function conversationsOf(profileId: string) {
     .between([profileId, Dexie.minKey], [profileId, Dexie.maxKey])
 }
 
-export async function createConversation(profileId: string): Promise<Conversation> {
+export async function createConversation(
+  profileId: string,
+  fields: Partial<Pick<Conversation, "title" | "projectId" | "repoRoot" | "mode">> = {},
+): Promise<Conversation> {
   const now = Date.now()
   const conversation: Conversation = {
     id: randomId(),
@@ -350,6 +383,7 @@ export async function createConversation(profileId: string): Promise<Conversatio
     createdAt: now,
     updatedAt: now,
     changedAt: now,
+    ...fields,
   }
   await db.conversations.add(conversation)
   return conversation
