@@ -67,23 +67,35 @@ tool, not Kanban: the agent writes and updates it, the user only watches.
       work.
 - [x] UI: a "2/5 todos" pill above the composer that opens the list.
 
-## Phase 5 — "Start a coding session in a worktree" chore
+## Phase 5 — Project sessions
 
-The first genuinely new capability, not just a read/write proxy.
+The first genuinely new capability, not just a read/write proxy: a chat
+that works in its own git worktree of a project's repo.
 
-- [ ] `POST /api/plugins/memento/worktree-sessions` — given a Project and a
-      natural-language task, call into `hermes_cli/worktree_ops.py`'s
-      existing functions to create the worktree (don't reimplement worktree
-      logic), then start a run scoped to that directory
-      (`hermes -w -z "<task>"` or a directory-scoped `/v1/runs` call).
-- [ ] Relay run events back through Memento's existing SSE/resume machinery
-      in `chat.ts` — this part is close to free, it's the same resume model
-      already built for chat turns.
-- [ ] UI: "New chore" sheet (pick Project, type task, start) rendering as a
-      pinned chat-style thread with a header showing branch + worktree path.
-- [ ] On completion: surface commit count / branch name, with a keep/discard
-      action that calls back into `git worktree remove` via the plugin
-      (mirrors what a worktree-aware client does on exit).
+- [x] `POST /api/plugins/memento/sessions/{id}/workspace` — makes the
+      session's worktree with `hermes_cli/worktree_ops.py`'s own function
+      and points the session's tools into it (`/v1/runs` has no cwd, but
+      Hermes's terminal tool has a per-task cwd override keyed by the
+      session id). Posted before every turn, restored by a hook after a
+      gateway restart.
+- [x] Run events come through Memento's existing SSE/resume machinery in
+      `chat.ts`; nothing new there.
+- [x] UI: "New session" on a project (pick the repo when it has several)
+      opens a chat with a two-line composer: the text, then `+`, the
+      permission mode, the context ring, voice and send. The header shows
+      the branch.
+- [x] Permission modes per session, held by the plugin: Accept edits
+      (Hermes's native behaviour), Auto (the app answers approvals) and Plan
+      (the plugin's `pre_tool_call` hook blocks anything that changes a
+      file; the finished plan waits for approval in place of the composer).
+- [x] Session states on the project screen: Working, Waiting on you, Idle
+      and Resolved, from the plugin's live-run list and this device's own
+      turns. Resolve, Edit and Delete in the chat menu; a resolved session
+      shows a notice in place of the composer until it's reopened.
+- [x] The worktree branch's pull request as a pill next to the todos pill
+      (looked up on GitHub by the plugin), and worktree removal on delete
+      when the tree is clean and pushed.
+- [ ] The Library and PRs tabs of a project.
 
 ## Phase 6 — Arbitrary GitHub repo picker
 
@@ -96,6 +108,18 @@ needs new ground on both sides:
       account owner today).
 - [ ] A plugin route that clones a chosen repo onto the Hermes host before
       Phase 5's worktree-session flow can target it.
+
+## Phase 7 — Composer context
+
+What the `+` button on a project session's composer should add to a message.
+The menu is there with its entries disabled.
+
+- [ ] Mention files from the project folder (a plugin route lists the
+      worktree's files; picked paths go into the message as references the
+      agent can read).
+- [ ] A photo from the camera.
+- [ ] Images from the gallery.
+- [ ] Documents from the device.
 
 ## Deferred / needs a decision before scheduling
 
