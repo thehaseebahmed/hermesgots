@@ -19,7 +19,7 @@
 // GET /api/plugins/memento/sessions/{id}/todos reads back from a keyed session's transcript.
 // Turns also run on POST /v1/runs, whose events replay from GET /v1/runs/{id}/events?last_seq=N and
 // which keep going when the client drops, unlike a chat completion. Say "long" for a slow reply, and
-// "fail" for a tool call that fails, and "ask" for a clarify question.
+// "fail" for a tool call that fails.
 // Project sessions get a worktree in each of the project's repos on
 // POST /api/plugins/memento/sessions/{id}/workspace (GET reads it back, POST …/mode changes the
 // permission mode, POST …/workspace/remove removes the trees unless a turn mentioned "commit"). In
@@ -27,7 +27,9 @@
 // names the file the plugin would have saved it to (plan_file). The branch's PRs
 // (GET …/sessions/{id}/prs) appear after two turns: "merge", "close" or "draft" in a turn sets their
 // state and "break" fails their checks. GET /api/plugins/memento/runs/live lists the sessions with
-// a run in flight.
+// a run in flight. The agent asks the user questions with Hermes's clarify tool, which the plugin
+// serves on runs: say "ask" for one (plan mode asks before planning), the run carries
+// `clarify.request` and waits, and POST /api/plugins/memento/runs/{id}/clarify answers it.
 //
 //   pnpm mock            # then point Settings at http://localhost:8642/v1
 
@@ -36,6 +38,7 @@ import { randomUUID } from "node:crypto"
 
 const PORT = Number(process.env.PORT ?? 8642)
 const pendingApprovals = new Map()
+const pendingClarifies = new Map()
 const chatTitles = new Map()
 /** Sessions the Memento plugin has labelled, which then report `source: "memento"`. */
 const labelledSessions = new Set()
@@ -292,6 +295,26 @@ async function playTurn(req, body, last, out) {
   out.status("Thinking…")
   await sleep(500)
 
+  // Hermes's clarify tool: a tool call whose result is the user's answers, which the plugin shows
+  // on runs; a chat completion can't show it and the result says so.
+  const ask = async (questions) => {
+    const id = `call_${randomUUID().slice(0, 8)}`
+    out.tool({ tool: "clarify", emoji: "❓", label: questions[0].question, toolCallId: id, status: "running" })
+    record(req, { role: "assistant", content: null, tool_calls: [{ id, type: "function", function: { name: "clarify", arguments: JSON.stringify({ questions }) } }] })
+    const { answers, outcome } = await out.ask(questions.map((q, i) => ({ id: `q${i}`, ...q })))
+    const result = JSON.stringify({
+      responses: questions.map((q, i) => {
+        const answer = answers[`q${i}`]
+        return { question: q.question, choices_offered: q.choices ?? null, status: answer ? "answered" : outcome === "submitted" ? "skipped" : "unanswered", user_response: answer ?? null }
+      }),
+      outcome,
+      ...(outcome === "undelivered" ? { notice: "This client can't show questions on this turn; ask in your reply instead." } : {}),
+    })
+    out.tool({ tool: "clarify", toolCallId: id, status: "completed", result })
+    record(req, { role: "tool", tool_call_id: id, tool_name: "clarify", content: result })
+    return { answers, outcome }
+  }
+
   // In plan mode the plugin blocks every tool that changes anything, so the agent reads and plans.
   const workspace = projectSessions.get(sessionOf(req, body))
   if (workspace) workspace.plan_pending = 0
@@ -310,15 +333,25 @@ async function playTurn(req, body, last, out) {
       out.tool({ tool, toolCallId: id, status: "completed", result })
       record(req, { role: "tool", tool_call_id: id, tool_name: tool, content: result })
     }
+    // The instructions ask the agent to settle every open choice before it writes the plan.
+    const { answers, outcome } = await ask([
+      { question: "What should `--dry-run` print?", choices: ["Each file it would delete", "Only a count and the total size"] },
+      { question: "Anything the rotation must keep, whatever its age?" },
+    ])
+    const counts = answers.q0 === "Only a count and the total size"
+    const keep = answers.q1 ? `You asked to keep ${answers.q1}, so the dry run flags any such file it finds.` : ""
+    const assumption = outcome === "submitted"
+      ? `You chose ${counts ? "a count and the total size" : "a list of each file"} for the dry run's output. ${keep}`.trim()
+      : "No answer came for what the dry run should print, so it lists each file: that is what a cron log needs to be checked against."
     await say(
       "# Plan: Add a dry run to log rotation\n\n" +
         "## Overview\nRotation deletes old logs with no way to preview what goes. A `--dry-run` flag lists the files it would remove, so the cron job can be checked before it runs for real.\n\n" +
         "## Approach\nAdd the flag to the existing script rather than a second script, so both paths share one `find` expression. A separate preview script was rejected: the two would drift.\n\n" +
         "## Changes\n- `scripts/rotate-logs.sh`: parse `--dry-run`; print instead of `-delete` when set.\n- `tests/rotate-logs.bats`: a case for each path.\n- `README.md`: document the flag.\n\n" +
-        "## Checkpoints\n### Checkpoint 1: The flag\n- Commit: `feat(rotate): add a --dry-run flag that lists what would go`\n- Steps: parse the flag; switch `-delete` for `-print` when set.\n- Done when: `./rotate-logs.sh --dry-run` lists files and deletes nothing.\n\n" +
+        "## Checkpoints\n### Checkpoint 1: The flag\n- Commit: `feat(rotate): add a --dry-run flag that lists what would go`\n- Steps: parse the flag; switch `-delete` for " + (counts ? "a count and `du -ch`" : "`-print`") + " when set.\n- Done when: `./rotate-logs.sh --dry-run` lists files and deletes nothing.\n\n" +
         "### Checkpoint 2: Tests and docs\n- Commit: `test(rotate): cover --dry-run and document it`\n- Steps: add the bats cases; a README paragraph.\n- Done when: `bats tests/` passes.\n\n" +
         "## Verification\nRun `bats tests/`, then `./rotate-logs.sh --dry-run` against a folder with an old `.gz`: it's listed and still there.\n\n" +
-        "## Risks and assumptions\nNone of the callers pass flags today, so nothing else changes.",
+        `## Risks and assumptions\n${assumption} None of the callers pass flags today, so nothing else changes.`,
     )
     if (!out.closed()) {
       workspace.plan_pending = 1
@@ -404,16 +437,12 @@ async function playTurn(req, body, last, out) {
   )
 
   if (/\bask\b/i.test(last)) {
-    const askId = `call_${randomUUID().slice(0, 8)}`
-    const question = "Which logs should I count as old?"
-    out.tool({ tool: "clarify", emoji: "❓", label: question, toolCallId: askId, status: "running" })
-    await sleep(1500)
-    // Not checked against Hermes's clarify tool; the app takes plain text or a JSON answer field.
-    const answer = JSON.stringify({ question, user_response: "Anything older than 90 days" })
-    out.tool({ tool: "clarify", toolCallId: askId, status: "completed", result: answer })
-    record(req, { role: "assistant", content: null, tool_calls: [{ id: askId, type: "function", function: { name: "clarify", arguments: JSON.stringify({ question, choices: ["Older than 30 days", "Older than 90 days"] }) } }] })
-    record(req, { role: "tool", tool_call_id: askId, tool_name: "clarify", content: answer })
-    await say("Got it, I'll count anything older than 90 days.")
+    const { answers, outcome } = await ask([
+      { question: "Which logs should I count as old?", choices: ["Older than 90 days", "Older than 30 days"] },
+    ])
+    await say(outcome === "submitted" && answers.q0
+      ? `Got it, I'll count anything in the "${answers.q0}" group.`
+      : "No answer came, so I'll count anything older than 90 days.")
   } else if (/fail/i.test(last)) {
     const failId = `call_${randomUUID().slice(0, 8)}`
     const command = "journalctl --vacuum-size=500M"
@@ -459,7 +488,7 @@ async function playTurn(req, body, last, out) {
   const keyed = sessionId && req.headers.authorization && transcripts.get(sessionId)
   const context = keyed ? keyed.filter((row) => row.role !== "tool") : (body.messages ?? body.input ?? [])
   const transcript = context.reduce((n, m) => n + String(m.content ?? "").length, 0)
-  const calls = /clean|delete/i.test(last) ? 3 : 2
+  const calls = /clean|delete|\bask\b/i.test(last) ? 3 : 2
   const prompt_tokens = calls * (6000 + Math.round(transcript / 4))
   if (keyed) {
     lastCalls.set(sessionId, {
@@ -508,6 +537,7 @@ async function streamCompletion(req, res, body) {
       frame({ ...event, event: "approval.request", run_id: id, timestamp: Date.now() / 1000, choices: ["once", "session", "always", "deny"] }, "approval.request")
       return waitForApproval(id)
     },
+    ask: () => Promise.resolve({ answers: {}, outcome: "undelivered" }),
   })
   chunk({}, "stop", { usage: { prompt_tokens, completion_tokens, total_tokens: prompt_tokens + completion_tokens } })
   if (!closed) res.end("data: [DONE]\n\n")
@@ -559,6 +589,19 @@ function startRun(req, body) {
         run.approval = undefined
       })
     },
+    async ask(questions) {
+      const clarify_id = randomUUID().replace(/-/g, "").slice(0, 12)
+      run.status = "waiting_for_approval"
+      run.clarify = { event: "clarify.request", run_id: id, timestamp: Date.now() / 1000, clarify_id, questions }
+      push("clarify.request", { clarify_id, questions })
+      const reply = new Promise((resolve) => pendingClarifies.set(id, { clarify_id, resolve }))
+      const { answers, outcome } = await Promise.race([reply, sleep(120_000).then(() => ({ answers: {}, outcome: "timed_out" }))])
+      pendingClarifies.delete(id)
+      run.status = "running"
+      run.clarify = undefined
+      push("clarify.responded", { clarify_id, outcome, answers })
+      return { answers, outcome }
+    },
   }).then(({ spoken, prompt_tokens, completion_tokens }) => {
     run.status = run.stopped ? "cancelled" : "completed"
     run.output = spoken
@@ -592,6 +635,7 @@ const runStatus = (run) => ({
   run_id: run.id,
   status: run.status,
   ...(run.status === "waiting_for_approval" && run.approval ? { approval: run.approval } : {}),
+  ...(run.clarify ? { clarify: run.clarify } : {}),
   ...(run.output !== undefined ? { output: run.output, usage: run.usage } : {}),
 })
 
@@ -644,8 +688,9 @@ http
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/info") {
       return json(res, 200, {
         name: "memento",
-        version: "0.6.0",
-        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "github", "sessions", "runs", "prs", "plans"],
+        version: "0.9.0",
+        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "github", "sessions", "runs", "prs", "plans", "clarify"],
+        clarify: true,
       })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/cron/runs") {
@@ -750,6 +795,16 @@ http
       const row = (transcripts.get(id) ?? []).findLast((r) => r.role === "tool" && r.tool_name === "todo_list")
       const found = row ? JSON.parse(row.content) : null
       return json(res, 200, { object: "memento.todos", session_id: id, revision: found?.revision ?? null, todos: found?.todos ?? null })
+    }
+    const clarifyRoute = /^\/api\/plugins\/memento\/runs\/([^/]+)\/clarify$/.exec(url.pathname)
+    if (PLUGIN && !profile && req.method === "POST" && clarifyRoute) {
+      const pending = pendingClarifies.get(clarifyRoute[1])
+      const { clarify_id, answers, outcome } = await readBody(req)
+      if (!pending || (clarify_id && clarify_id !== pending.clarify_id)) return json(res, 409, { error: { message: `Run has no pending question: ${clarifyRoute[1]}` } })
+      // A missing or blank answer is a skipped question.
+      const given = Object.fromEntries(Object.entries(answers ?? {}).map(([k, v]) => [k, Array.isArray(v) ? (v.filter(Boolean).length ? v.filter(Boolean) : null) : (String(v ?? "").trim() || null)]))
+      pending.resolve({ answers: given, outcome: outcome === "cancelled" ? "cancelled" : "submitted" })
+      return json(res, 200, { object: "memento.clarify_response", run_id: clarifyRoute[1], clarify_id: pending.clarify_id, resolved: true })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/runs/live") {
       const sessions = {}
