@@ -11,6 +11,8 @@
 // It lists Hermes Projects on GET /api/plugins/memento/projects. GET /api/plugins/memento/github and
 // github/repos stand in for the host's GitHub account (MOCK_NO_GITHUB=1 leaves it signed out), and
 // POST /api/plugins/memento/projects pretends to create a project with its repos cloned into it.
+// GET /api/plugins/memento/projects/{id}/checkpoints lists a project's checkpoints (MOCK_NO_CHECKPOINTS=1
+// turns them off in the config), and .../checkpoints/{hash}/diff what changed after one.
 // Chats are titled like Hermes does: a slice of the opener at once, a "model" title a moment later,
 // readable on GET /api/sessions/{id}. Sessions are keyed by X-Hermes-Session-Id when a key is sent,
 // and their transcripts page back from GET /api/sessions/{id}/messages?order=latest&limit&offset.
@@ -102,6 +104,87 @@ function seedProjects() {
       folders: [{ ...folder("/home/hermes/notes/french", false), is_primary: true }],
     },
   ]
+}
+
+const CHECKPOINTS = process.env.MOCK_NO_CHECKPOINTS !== "1"
+const sha = (n) => n.toString(16).padStart(8, "0").repeat(5)
+const patchFile = (path, patch, extra = {}) => {
+  const lines = patch ? patch.split("\n") : []
+  return {
+    path,
+    old_path: null,
+    status: "modified",
+    binary: false,
+    insertions: lines.filter((line) => line.startsWith("+")).length,
+    deletions: lines.filter((line) => line.startsWith("-")).length,
+    patch: patch ? `${patch}\n` : null,
+    truncated: false,
+    ...extra,
+  }
+}
+const WIDE_LINE = `      title: "${"A very long line that only fits on a wide screen, ".repeat(3)}",`
+
+/** Checkpoints by project, newest first, each with what changed after it. */
+let checkpoints
+function mockCheckpoints() {
+  if (checkpoints) return checkpoints
+  const now = Date.now() / 1000
+  const app = "/home/hermes/code/memento"
+  const row = (n, ago, reason, files, folder = app) => ({
+    id: sha(n),
+    folder,
+    created_at: Math.round(now - ago),
+    reason,
+    files,
+  })
+  const memento = [
+    row(4, 9 * 60, "before patch", [
+      patchFile(
+        "app/src/lib/checkpoints.ts",
+        "@@ -8,7 +8,8 @@ export function folderName(path: string) {\n export function formatCheckpointTime(at: number, now: number) {\n-  if (now - at < DAY_MS) return formatRelative(at, now)\n+  // Recent ones read better as \"5 min ago\".\n+  if (now - at < DAY_MS) return formatRelative(at, now)\n   return new Date(at).toLocaleString([], {\n     day: \"numeric\",\n     month: \"short\",",
+      ),
+    ]),
+    row(3, 40 * 60, "before terminal: pnpm format", [
+      patchFile(
+        "app/src/routes/project.tsx",
+        `@@ -40,6 +40,7 @@ export function ProjectPage() {\n   return (\n     <div className="flex min-h-0 flex-1 flex-col">\n+${WIDE_LINE}\n       <ChatHeader\n-        className="relative pb-2"\n+        className="relative pb-3"\n         title={project?.name ?? ""}`,
+      ),
+      patchFile("app/public/icon.png", null, { binary: true, insertions: 0, deletions: 0 }),
+    ]),
+    row(2, 3 * 3_600, "before write_file", [
+      patchFile(
+        "app/src/components/diff.tsx",
+        "@@ -0,0 +1,6 @@\n+import { cn } from \"@/lib/utils\"\n+\n+/** One file's change. */\n+export function FileDiff() {\n+  return null\n+}",
+        { status: "added" },
+      ),
+      patchFile("app/src/components/old-diff.tsx", "@@ -1,2 +0,0 @@\n-export const OldDiff = () => null\n-// unused", {
+        status: "deleted",
+      }),
+      patchFile("notes/plan.md", null, { status: "renamed", old_path: "plan.md" }),
+    ]),
+    row(1, 2 * 86_400, "before patch [nested git repos not captured: vendor/lib]", []),
+  ]
+  const theseus = [
+    row(
+      5,
+      3 * 3_600 + 120,
+      "before patch",
+      [patchFile("src/maze.ts", "@@ -12,3 +12,3 @@ export function walls(seed: number) {\n-  return grid(seed, 8)\n+  return grid(seed, 12)\n }")],
+      "/home/hermes/code/theseus",
+    ),
+  ]
+  checkpoints = { p_1a2b3c4d: memento, p_5e6f7a8b: theseus }
+  return checkpoints
+}
+
+function checkpointRow({ files, ...row }, next) {
+  return {
+    ...row,
+    next: next?.id ?? null,
+    files_changed: files.length,
+    insertions: files.reduce((sum, file) => sum + file.insertions, 0),
+    deletions: files.reduce((sum, file) => sum + file.deletions, 0),
+  }
 }
 
 function json(res, status, body) {
@@ -499,7 +582,7 @@ http
       return json(res, 200, {
         name: "memento",
         version: "0.4.0",
-        features: ["cron_runs", "session_label", "chats", "context", "projects", "github"],
+        features: ["cron_runs", "session_label", "chats", "context", "projects", "github", "checkpoints"],
       })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/cron/runs") {
@@ -548,6 +631,34 @@ http
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/projects") {
       return json(res, 200, { object: "memento.projects", projects: mockProjects() })
+    }
+    const projectCheckpoints = /^\/api\/plugins\/memento\/projects\/([^/]+)\/checkpoints(?:\/([^/]+)\/diff)?$/.exec(
+      url.pathname,
+    )
+    if (PLUGIN && !profile && req.method === "GET" && projectCheckpoints) {
+      const [, projectId, checkpointId] = projectCheckpoints
+      if (!mockProjects().some((p) => p.id === projectId)) {
+        return json(res, 404, { error: { message: "Project not found." } })
+      }
+      const rows = CHECKPOINTS ? (mockCheckpoints()[projectId] ?? []) : []
+      if (!checkpointId) {
+        return json(res, 200, {
+          object: "memento.checkpoints",
+          enabled: CHECKPOINTS,
+          checkpoints: rows.map((row, i) => checkpointRow(row, rows.slice(0, i).findLast((r) => r.folder === row.folder))),
+        })
+      }
+      const i = rows.findIndex((row) => row.id === checkpointId)
+      if (i < 0) return json(res, 404, { error: { message: "Checkpoint not found." } })
+      await sleep(300)
+      const next = rows.slice(0, i).findLast((r) => r.folder === rows[i].folder)
+      return json(res, 200, {
+        object: "memento.checkpoint.diff",
+        id: checkpointId,
+        folder: rows[i].folder,
+        next: next?.id ?? null,
+        files: rows[i].files,
+      })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/chats") {
       if (req.method === "POST") {
