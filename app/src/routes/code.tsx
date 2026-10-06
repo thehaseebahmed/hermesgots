@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { MenuIcon, PlusIcon, RefreshCwIcon, XIcon } from "lucide-react"
+import { MenuIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, Trash2Icon, XIcon } from "lucide-react"
 import { Link } from "react-router"
 import { toast } from "sonner"
 
@@ -16,13 +16,17 @@ import { formatRelative } from "@/lib/format"
 import { useWide } from "@/lib/media"
 import {
   HermesError,
+  deleteProject,
   listProjects,
+  retryProject,
   type HermesConfig,
   type HermesProject,
   type HermesProjectFolder,
 } from "@/lib/hermes"
 
 const REFRESH_MS = 60_000
+// While a project is being cloned: the plugin does the work, this just watches for it to finish.
+const CLONING_REFRESH_MS = 3_000
 const TOASTER = "code"
 // Above the floating New project button: its bottom padding, its height and a gap.
 const ABOVE_BUTTON = { bottom: "calc(max(1rem, env(safe-area-inset-bottom)) + 3.75rem)" }
@@ -109,6 +113,17 @@ export function CodePage() {
       document.removeEventListener("visibilitychange", onVisible)
     }
   }, [refresh])
+
+  const cloning = results?.some(
+    (result) => "projects" in result && result.projects.some((p) => p.status === "cloning"),
+  )
+  useEffect(() => {
+    if (!cloning) return
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") setTick((n) => n + 1)
+    }, CLONING_REFRESH_MS)
+    return () => clearInterval(timer)
+  }, [cloning])
 
   // Sync rewrites profile rows often; only a change to what's fetched should fetch again.
   const targetsKey = JSON.stringify(
@@ -199,7 +214,7 @@ export function CodePage() {
           <ul className="flex flex-col">
             {rows.map((row) => (
               <li key={row.key}>
-                <ProjectItem row={row} now={now} />
+                <ProjectItem row={row} now={now} onChanged={refresh} />
               </li>
             ))}
           </ul>
@@ -237,7 +252,7 @@ export function CodePage() {
         onOpenChange={setCreating}
         profiles={withPlugin}
         onCreated={(profile, name) => {
-          toast.success(`Created ${name} on ${profile.name}`, { toasterId: TOASTER })
+          toast.success(`Creating ${name} on ${profile.name}`, { toasterId: TOASTER })
           refresh()
         }}
       />
@@ -317,8 +332,89 @@ function formatWhen(at: number, now: number) {
   return new Date(at).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })
 }
 
-function ProjectItem({ row, now }: { row: ProjectRow; now: number }) {
+function ProjectAvatar({ profile }: { profile: Profile }) {
+  return (
+    <span
+      className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-muted"
+      title={profile.name}
+    >
+      <Bot id={profile.botId} className="size-8" />
+    </span>
+  )
+}
+
+/** A project the plugin is still cloning, or one whose clone failed. It has no page until it's ready. */
+function PendingItem({ row, onChanged }: { row: ProjectRow; onChanged: () => void }) {
+  const { profile, project } = row
+  const [busy, setBusy] = useState(false)
+  const failed = project.status === "failed"
+  const total = project.folders.length
+  const done = project.folders.filter((folder) => folder.status === "done").length
+  const act = async (action: typeof retryProject) => {
+    setBusy(true)
+    try {
+      await action(profile, project.id)
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : "Couldn't update the project.", {
+        toasterId: TOASTER,
+      })
+    }
+    setBusy(false)
+    onChanged()
+  }
+  return (
+    <div className="-mx-2 flex min-h-16 items-center gap-4 rounded-2xl px-2 py-3">
+      <ProjectAvatar profile={profile} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium">{project.name}</span>
+        {failed ? (
+          <span className="block truncate text-sm text-destructive">
+            {project.error ?? "Couldn't clone."}
+          </span>
+        ) : (
+          <span className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Spinner className="size-3.5" />
+            {total > 0 ? `Cloning ${Math.min(done + 1, total)} of ${total}` : "Creating…"}
+          </span>
+        )}
+      </span>
+      {failed && (
+        <Button
+          variant="ghost"
+          size="icon-lg"
+          className="size-11 rounded-full"
+          disabled={busy}
+          onClick={() => void act(retryProject)}
+          aria-label={`Retry ${project.name}`}
+        >
+          <RotateCcwIcon />
+        </Button>
+      )}
+      <Button
+        variant="ghost"
+        size="icon-lg"
+        className="size-11 rounded-full"
+        disabled={busy}
+        onClick={() => void act(deleteProject)}
+        aria-label={failed ? `Remove ${project.name}` : `Cancel ${project.name}`}
+      >
+        {failed ? <Trash2Icon /> : <XIcon />}
+      </Button>
+    </div>
+  )
+}
+
+function ProjectItem({
+  row,
+  now,
+  onChanged,
+}: {
+  row: ProjectRow
+  now: number
+  onChanged: () => void
+}) {
   const { profile, project, at } = row
+  if (project.status !== "ready") return <PendingItem row={row} onChanged={onChanged} />
   const line2 = subtitle(project)
   return (
     <Link
@@ -326,12 +422,7 @@ function ProjectItem({ row, now }: { row: ProjectRow; now: number }) {
       state={{ project }}
       className="-mx-2 flex min-h-16 items-center gap-4 rounded-2xl px-2 py-3 outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
     >
-      <span
-        className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-muted"
-        title={profile.name}
-      >
-        <Bot id={profile.botId} className="size-8" />
-      </span>
+      <ProjectAvatar profile={profile} />
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-3">
           <span className="min-w-0 flex-1 truncate font-medium">{project.name}</span>

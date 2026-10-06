@@ -7,7 +7,6 @@ project whose folder holds their cwd, so this does the same over the session sto
 from __future__ import annotations
 
 import os
-import shutil
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -36,47 +35,54 @@ def _last_active(projects: List[Any], cwds: Iterable[Dict[str, Any]]) -> Dict[st
     return latest
 
 
-def read(projects_db: Path, session_db: Optional[Any]) -> List[Dict[str, Any]]:
+def read(
+    projects_db: Path, session_db: Optional[Any], pending: Iterable[Dict[str, Any]] = ()
+) -> List[Dict[str, Any]]:
+    """Every project, newest first as Hermes lists them, then the ones still cloning (``clones.py``)."""
     from hermes_cli import projects_db as pdb
 
     from . import github
 
-    if not projects_db.exists():
-        return []
-    with pdb.connect_closing(db_path=projects_db) as conn:
-        projects = pdb.list_projects(conn)
-    cwds = getattr(session_db, "distinct_session_cwds", None)
-    latest = _last_active(projects, cwds() if callable(cwds) else [])
-    return [
-        {
-            "id": project.id,
-            "slug": project.slug,
-            "name": project.name,
-            "description": project.description or None,
-            "created_at": project.created_at,
-            "last_active": latest.get(project.id) or None,
-            "folders": [
-                {
-                    "path": folder.path,
-                    "label": folder.label,
-                    "is_primary": bool(folder.is_primary),
-                    "git": _is_git_repo(folder.path),
-                    # The app names repos `user/repo`, never by their path.
-                    "repo": github.origin_repo(folder.path) if _is_git_repo(folder.path) else None,
-                }
-                for folder in project.folders
-            ],
-        }
-        for project in projects
-    ]
+    rows: List[Dict[str, Any]] = []
+    if projects_db.exists():
+        with pdb.connect_closing(db_path=projects_db) as conn:
+            projects = pdb.list_projects(conn)
+        cwds = getattr(session_db, "distinct_session_cwds", None)
+        latest = _last_active(projects, cwds() if callable(cwds) else [])
+        rows = [
+            {
+                "id": project.id,
+                "slug": project.slug,
+                "name": project.name,
+                "description": project.description or None,
+                "created_at": project.created_at,
+                "last_active": latest.get(project.id) or None,
+                "status": "ready",
+                "folders": [
+                    {
+                        "path": folder.path,
+                        "label": folder.label,
+                        "is_primary": bool(folder.is_primary),
+                        "git": _is_git_repo(folder.path),
+                        # The app names repos `user/repo`, never by their path.
+                        "repo": github.origin_repo(folder.path) if _is_git_repo(folder.path) else None,
+                    }
+                    for folder in project.folders
+                ],
+            }
+            for project in projects
+        ]
+    # The instant between a finished clone's project row and its pending row going away.
+    slugs = {row["slug"] for row in rows}
+    return rows + [row for row in pending if row["slug"] not in slugs]
 
 
-def _folder_slug(projects_db: Path, root: Path, name: str) -> str:
-    """The project's slug, free both in ``projects.db`` and as a folder under ``root``."""
+def _folder_slug(projects_db: Path, root: Path, name: str, reserved: Iterable[str] = ()) -> str:
+    """The project's slug, free in ``projects.db`` and among ``reserved`` and as a folder under ``root``."""
     from hermes_cli import projects_db as pdb
 
     base = pdb._slugify(name)
-    taken = set()
+    taken = set(reserved)
     if projects_db.exists():
         with pdb.connect_closing(db_path=projects_db) as conn:
             taken = {project.slug for project in pdb.list_projects(conn, include_archived=True)}
@@ -95,13 +101,8 @@ def _clone_dirs(repos: List[str]) -> List[str]:
     ]
 
 
-def create(hermes_home: Path, name: Any, description: Any, repos: Any) -> Dict[str, Any]:
-    """Creates a project in ``$HERMES_HOME/projects/<slug>`` with each repo cloned inside it.
-
-    A repo in two projects gets two clones, so their branches and changes stay apart.
-    """
-    from hermes_cli import projects_db as pdb
-
+def validate(name: Any, description: Any, repos: Any) -> List[str]:
+    """Checks a new project's fields and returns its repos, de-duplicated."""
     from . import github
 
     if not isinstance(name, str) or not name.strip():
@@ -114,30 +115,7 @@ def create(hermes_home: Path, name: Any, description: Any, repos: Any) -> Dict[s
     bad = next((repo for repo in repos if not github.REPO_RE.match(repo)), None)
     if bad is not None:
         raise ValueError(f"{bad} isn't owner/name.")
-
-    projects_db = hermes_home / "projects.db"
-    root = hermes_home / "projects"
-    slug = _folder_slug(projects_db, root, name.strip())
-    folder = root / slug
-    folder.mkdir(parents=True)
-    try:
-        clones = [
-            github.clone(hermes_home, repo, str(folder / dirname))
-            for repo, dirname in zip(repos, _clone_dirs(repos))
-        ]
-        with pdb.connect_closing(db_path=projects_db) as conn:
-            pid = pdb.create_project(
-                conn,
-                name=name.strip(),
-                slug=slug,
-                description=(description or "").strip() or None,
-                primary_path=str(folder),
-                folders=clones,
-            )
-    except BaseException:
-        shutil.rmtree(folder, ignore_errors=True)
-        raise
-    return {"id": pid, "slug": slug, "path": str(folder), "folders": clones}
+    return repos
 
 
 def update(hermes_home: Path, project_id: str, name: Any, description: Any) -> bool:

@@ -4,7 +4,7 @@ Adds routes to the API server, so the Memento app (which only talks to the API s
 can read cron run history from Hermes's execution ledger instead of piecing it together on each
 device, keep its chat list on the server (``chats.py``), report each chat's context use
 (``context.py``) and the agent's todo list (``todos.py``), list and create Hermes Projects (``projects.py``) with GitHub repos cloned into
-them (``github.py``), run project sessions in their own worktrees with a permission mode and save their plans
+them in the background (``clones.py``, ``github.py``), run project sessions in their own worktrees with a permission mode and save their plans
 (``sessions.py``), let the agent ask the user questions with Hermes's ``clarify`` tool (``clarify.py``) and
 label its chats as Memento's. The dashboard half lives in ``dashboard/``.
 """
@@ -17,7 +17,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-from . import chats, clarify, cleanup, context, github, projects, sessions, todos
+from . import chats, clarify, cleanup, clones, context, github, projects, sessions, todos
 from .store import db_path
 
 logger = logging.getLogger(__name__)
@@ -82,11 +82,19 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     sessions.adapter = adapter
     # The API server's agents can't ask questions on their own; see clarify.py.
     asks = clarify.wire(adapter)
+    # Hermes defers todo_list behind tool_search, where the agent can't always find it; see todos.py.
+    todo_tool = todos.wire(adapter)
 
     async def daily_cleanup(_app: Any):
         from hermes_constants import get_hermes_home
 
-        task = asyncio.ensure_future(cleanup.run_daily(adapter, Path(get_hermes_home())))
+        home = Path(get_hermes_home())
+        try:
+            # A restart can leave projects mid-clone.
+            await asyncio.to_thread(clones.resume, home)
+        except Exception:
+            logger.debug("memento: couldn't resume project clones", exc_info=True)
+        task = asyncio.ensure_future(cleanup.run_daily(adapter, home))
         yield
         task.cancel()
 
@@ -118,14 +126,17 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "context",
                     "todos",
                     "projects",
+                    "projects_async",
                     "github",
                     "sessions",
                     "runs",
                     "prs",
                     "plans",
                     "clarify",
+                    "todo_tool",
                 ],
                 "clarify": asks,
+                "todo_tool": todo_tool,
             }
         )
 
@@ -154,10 +165,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         db = await open_db() if callable(open_db) else None
         if db is None or not callable(getattr(db, "_execute_write", None)):
             return _error(web, "Session database unavailable", 503)
-        labelled = await asyncio.to_thread(sessions.label, db, session_id)
-        if not labelled:
+        # On the loop thread, like store_path: the profile scope isn't visible inside to_thread.
+        code = sessions.is_code_session(session_id)
+        source = await asyncio.to_thread(sessions.label, db, session_id, code)
+        if not source:
             return _error(web, "Session not found", 404)
-        return web.json_response({"id": session_id, "source": sessions.SESSION_SOURCE})
+        return web.json_response({"id": session_id, "source": source})
 
     def store_path() -> Path:
         # On the loop thread: the API server scopes get_hermes_home() to the request's profile, and
@@ -240,6 +253,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             }
         )
 
+    def list_with_clones(home: Path, projects_db: Path, session_db: Any) -> List[Dict[str, Any]]:
+        # Profiles served at /p/<profile> have their own homes, which the startup resume can't see.
+        clones.resume(home)
+        return projects.read(projects_db, session_db, clones.pending(home))
+
     async def list_projects(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -247,11 +265,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         from hermes_constants import get_hermes_home
 
         # Resolved here for the same reason as store_path().
-        projects_db = Path(get_hermes_home()) / "projects.db"
+        home = Path(get_hermes_home())
+        projects_db = home / "projects.db"
         open_db = getattr(adapter, "_ensure_session_db_async", None)
         session_db = await open_db() if callable(open_db) else None
         try:
-            rows = await asyncio.to_thread(projects.read, projects_db, session_db)
+            rows = await asyncio.to_thread(list_with_clones, home, projects_db, session_db)
         except ImportError:
             return _error(web, "This Hermes version has no Projects.", 501)
         return web.json_response({"object": "memento.projects", "projects": rows})
@@ -289,20 +308,14 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if not isinstance(body, dict):
             return _error(web, "Body must be an object", 400)
         try:
+            home = hermes_home()
             created = await asyncio.to_thread(
-                projects.create,
-                hermes_home(),
-                body.get("name"),
-                body.get("description"),
-                body.get("repos", []),
+                clones.start, home, body.get("name"), body.get("description"), body.get("repos", [])
             )
-        except ImportError:
-            return _error(web, "This Hermes version has no Projects.", 501)
-        except github.GitHubError as error:
-            return _error(web, str(error), error.status)
         except ValueError as error:
             return _error(web, str(error), 400)
-        return web.json_response({"object": "memento.project", **created})
+        clones.spawn(home, created["slug"])
+        return web.json_response({"object": "memento.project", **created}, status=202)
 
     async def edit_project(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -314,6 +327,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "Body must be JSON", 400)
         if not isinstance(body, dict):
             return _error(web, "Body must be an object", 400)
+        if clones.is_pending_id(request.match_info["project_id"]):
+            return _error(web, "The project is still being created.", 409)
         try:
             found = await asyncio.to_thread(
                 projects.update,
@@ -334,15 +349,33 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         denied = unauthorized(request)
         if denied is not None:
             return denied
+        project_id = request.match_info["project_id"]
         try:
-            found = await asyncio.to_thread(
-                projects.remove, hermes_home(), request.match_info["project_id"]
-            )
+            if clones.is_pending_id(project_id):
+                found = await asyncio.to_thread(
+                    clones.dismiss, hermes_home(), project_id[len(clones.ID_PREFIX) :]
+                )
+            else:
+                found = await asyncio.to_thread(projects.remove, hermes_home(), project_id)
         except ImportError:
             return _error(web, "This Hermes version has no Projects.", 501)
         if not found:
             return _error(web, "No such project.", 404)
         return web.json_response({"object": "memento.project", "removed": True})
+
+    async def retry_project(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        project_id = request.match_info["project_id"]
+        if not clones.is_pending_id(project_id):
+            return _error(web, "No such project.", 404)
+        retried = await asyncio.to_thread(
+            clones.retry, hermes_home(), project_id[len(clones.ID_PREFIX) :]
+        )
+        if retried is None:
+            return _error(web, "No failed project to retry.", 404)
+        return web.json_response({"object": "memento.project", **retried}, status=202)
 
     async def session_db():
         open_db = getattr(adapter, "_ensure_session_db_async", None)
@@ -466,7 +499,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         denied = unauthorized(request)
         if denied is not None:
             return denied
-        return web.json_response({"object": "memento.runs", "sessions": sessions.live_runs(adapter)})
+        live, run_ids = sessions.live_runs(adapter)
+        return web.json_response({"object": "memento.runs", "sessions": live, "run_ids": run_ids})
 
     app.router.add_get(f"{PREFIX}/info", info)
     app.router.add_get(f"{PREFIX}/chats", list_chats)
@@ -476,6 +510,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/projects", create_project)
     app.router.add_post(f"{PREFIX}/projects/{{project_id}}", edit_project)
     app.router.add_post(f"{PREFIX}/projects/{{project_id}}/remove", delete_project)
+    app.router.add_post(f"{PREFIX}/projects/{{project_id}}/retry", retry_project)
     app.router.add_get(f"{PREFIX}/github", github_status)
     app.router.add_get(f"{PREFIX}/github/repos", github_repos)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/label", label_session)

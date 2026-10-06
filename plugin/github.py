@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -137,7 +138,36 @@ def _destination(raw: Any) -> str:
     return dest
 
 
-def clone(hermes_home: Path, repo: Any, dest_raw: Any) -> str:
+class Cancelled(Exception):
+    """A clone was stopped because its project was removed."""
+
+
+def _run_git(command: List[str], env: Dict[str, str], cancel: Optional[threading.Event]):
+    """``git`` that a ``cancel`` event can stop, in 1s slices, within ``CLONE_TIMEOUT_S``."""
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        stdin=subprocess.DEVNULL,
+    )
+    deadline = time.monotonic() + CLONE_TIMEOUT_S
+    while True:
+        try:
+            stdout, stderr = process.communicate(timeout=1)
+            return process.returncode, stdout, stderr
+        except subprocess.TimeoutExpired:
+            stopped = cancel is not None and cancel.is_set()
+            if stopped or time.monotonic() >= deadline:
+                process.kill()
+                process.communicate()
+                if stopped:
+                    raise Cancelled() from None
+                raise
+
+
+def clone(hermes_home: Path, repo: Any, dest_raw: Any, cancel: Optional[threading.Event] = None) -> str:
     """Clones ``owner/name`` from GitHub into ``dest`` and returns its absolute path."""
     if not isinstance(repo, str) or not REPO_RE.match(repo):
         raise GitHubError("repo must be owner/name.", 400)
@@ -153,17 +183,18 @@ def clone(hermes_home: Path, repo: Any, dest_raw: Any) -> str:
     command += ["clone", "--", f"https://github.com/{repo}.git", dest]
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     try:
-        result = subprocess.run(
-            command, capture_output=True, text=True, timeout=CLONE_TIMEOUT_S, env=env, stdin=subprocess.DEVNULL
-        )
+        returncode, _, stderr = _run_git(command, env, cancel)
     except FileNotFoundError:
         raise GitHubError("git isn't installed on the server.", 501) from None
     except subprocess.TimeoutExpired:
         shutil.rmtree(dest, ignore_errors=True)
         raise GitHubError("The clone took too long.", 504) from None
-    if result.returncode != 0:
+    except Cancelled:
         shutil.rmtree(dest, ignore_errors=True)
-        stderr = result.stderr.strip()
+        raise
+    if returncode != 0:
+        shutil.rmtree(dest, ignore_errors=True)
+        stderr = stderr.strip()
         if "could not read Username" in stderr or "Authentication failed" in stderr:
             raise GitHubError(f"GitHub refused access to {repo}.", 403)
         lines = [line for line in stderr.splitlines() if line.strip()]

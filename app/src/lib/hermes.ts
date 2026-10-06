@@ -130,7 +130,8 @@ async function request(url: string, init: RequestInit) {
   try {
     response = await fetch(url, init)
   } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") throw error
+    if (error instanceof DOMException && ["AbortError", "TimeoutError"].includes(error.name))
+      throw error
     throw new HermesError(networkHint(url))
   }
   if (!response.ok) {
@@ -160,14 +161,29 @@ async function errorMessage(response: Response) {
   return `Hermes returned ${response.status} ${response.statusText}`.trim()
 }
 
-/** Yields `{event, data}` for each SSE frame in the body. */
-async function* readSse(body: ReadableStream<Uint8Array>) {
+/** A read that doesn't settle within `ms` rejects with a `TimeoutError`. */
+function readWithin(reader: ReadableStreamDefaultReader<Uint8Array>, ms: number) {
+  let timer = 0
+  const quiet = new Promise<never>((_, reject) => {
+    timer = window.setTimeout(
+      () => reject(new DOMException("Hermes stopped sending.", "TimeoutError")),
+      ms,
+    )
+  })
+  return Promise.race([reader.read(), quiet]).finally(() => window.clearTimeout(timer))
+}
+
+/**
+ * Yields `{event, data}` for each SSE frame in the body. With `idleMs`, a body that sends nothing
+ * for that long (comments included) is cancelled and the read rejects with a `TimeoutError`.
+ */
+async function* readSse(body: ReadableStream<Uint8Array>, idleMs?: number) {
   const reader = body.getReader()
   const decoder = new TextDecoder()
   let buffer = ""
   try {
     while (true) {
-      const { value, done } = await reader.read()
+      const { value, done } = await (idleMs ? readWithin(reader, idleMs) : reader.read())
       if (done) break
       buffer += decoder.decode(value, { stream: true })
       let boundary: number
@@ -187,6 +203,11 @@ async function* readSse(body: ReadableStream<Uint8Array>) {
         if (data.length) yield { event, data: data.join("\n") }
       }
     }
+  } catch (error) {
+    // Lets go of the connection, which may be dead without anything having noticed.
+    if (error instanceof DOMException && error.name === "TimeoutError")
+      void reader.cancel().catch(() => undefined)
+    throw error
   } finally {
     reader.releaseLock()
   }
@@ -369,13 +390,13 @@ export interface SessionMessage {
 export async function listSessionMessages(
   config: HermesConfig,
   sessionId: string,
-  { limit, offset }: { limit: number; offset: number },
+  { limit, offset, signal }: { limit: number; offset: number; signal?: AbortSignal },
 ): Promise<SessionMessage[]> {
   const query = new URLSearchParams({ order: "latest", limit: `${limit}`, offset: `${offset}` })
   try {
     const response = await request(
       `${serverRoot(config.baseUrl)}/api/sessions/${encodeURIComponent(sessionId)}/messages?${query}`,
-      { headers: headers(config) },
+      { headers: headers(config), signal },
     )
     const body = await response.json()
     const data: unknown = body?.data
@@ -491,7 +512,11 @@ export interface HermesProjectFolder {
   git: boolean
   /** `user/repo` from the clone's GitHub origin; what the UI calls the folder. */
   repo: string | null
+  /** Only while the project is being created: this repo's clone. */
+  status?: "queued" | "cloning" | "done" | "failed"
 }
+
+export type ProjectStatus = "ready" | "cloning" | "failed"
 
 /** A Hermes Project (`hermes project create`), through the Memento plugin. */
 export interface HermesProject {
@@ -501,6 +526,10 @@ export interface HermesProject {
   createdAt: number
   /** The newest session in one of its folders; unset when none has run there. */
   lastActiveAt?: number
+  /** `cloning` and `failed` are a project the plugin is still creating, which has no sessions yet. */
+  status: ProjectStatus
+  /** Why a `failed` project failed. */
+  error?: string
   /** Primary folder first. */
   folders: HermesProjectFolder[]
 }
@@ -518,6 +547,8 @@ function toProject(raw: unknown): HermesProject | null {
     description: typeof p.description === "string" && p.description.trim() ? p.description : null,
     createdAt: seconds(p.created_at) ?? 0,
     lastActiveAt: seconds(p.last_active),
+    status: p.status === "cloning" || p.status === "failed" ? p.status : "ready",
+    error: typeof p.error === "string" && p.error ? p.error : undefined,
     folders: folders
       .filter((f): f is Record<string, unknown> => typeof f?.path === "string")
       .map((f) => ({
@@ -525,6 +556,13 @@ function toProject(raw: unknown): HermesProject | null {
         label: typeof f.label === "string" && f.label ? f.label : null,
         git: f.git === true,
         repo: typeof f.repo === "string" && f.repo ? f.repo : null,
+        status:
+          f.status === "queued" ||
+          f.status === "cloning" ||
+          f.status === "done" ||
+          f.status === "failed"
+            ? f.status
+            : undefined,
       })),
   }
 }
@@ -586,21 +624,26 @@ export async function listGitHubRepos(config: HermesConfig): Promise<GitHubRepo[
 }
 
 /**
- * Clones a GitHub repo onto the Hermes host and adds it to a project, or to a new one named
- * `projectName`. Can take minutes for a big repo.
+ * Starts a project in the profile's `projects/` folder on the server. The plugin clones each repo in
+ * the background, so this answers at once with a project that is `cloning` until they are all in.
  */
-/** Creates a project in the profile's `projects/` folder on the server, with each repo cloned into it. */
 export async function createProject(
   config: HermesConfig,
   project: { name: string; description?: string; repos: string[] },
-): Promise<{ id: string; path: string }> {
-  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects`, {
+): Promise<void> {
+  await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects`, {
     method: "POST",
     headers: headers(config),
     body: JSON.stringify(project),
   })
-  const body = await response.json()
-  return { id: String(body?.id ?? ""), path: String(body?.path ?? "") }
+}
+
+/** Starts a `failed` project's clones over. */
+export async function retryProject(config: HermesConfig, id: string): Promise<void> {
+  await request(
+    `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects/${encodeURIComponent(id)}/retry`,
+    { method: "POST", headers: headers(config), body: "{}" },
+  )
 }
 
 /** Renames a project or changes its description. */
@@ -616,7 +659,10 @@ export async function updateProject(
   })
 }
 
-/** Deletes a project's record on the server. Its folders and clones stay on the host. */
+/**
+ * Deletes a project's record on the server. Its folders and clones stay on the host, except for a
+ * project still being created, which is stopped and wiped.
+ */
 export async function deleteProject(config: HermesConfig, id: string): Promise<void> {
   await request(
     `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects/${encodeURIComponent(id)}/remove`,
@@ -882,6 +928,18 @@ export async function listLiveRuns(config: HermesConfig): Promise<Record<string,
   )
 }
 
+/** The run in flight for a session, if the plugin reports one (it adds `run_ids` from 0.12). */
+export async function liveRunOf(config: HermesConfig, sessionId: string) {
+  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/runs/live`, {
+    headers: headers(config),
+  })
+  const body = await response.json()
+  const status = body?.sessions?.[sessionId]
+  if (status !== "running" && status !== "waiting_for_approval") return undefined
+  const runId: unknown = body?.run_ids?.[sessionId]
+  return { status: status as LiveRunStatus, runId: typeof runId === "string" ? runId : undefined }
+}
+
 /** Answers the agent's questions. Needs the Memento plugin, which serves the clarify tool on runs. */
 export async function respondToClarify(
   config: HermesConfig,
@@ -1008,6 +1066,13 @@ export async function startRun(
  * Follows a run's events from after `lastSeq` (Hermes replays what it buffered). Resolves with the
  * outcome, or null when Hermes closes the stream before the run ends (a subscriber that fell behind).
  */
+/**
+ * Hermes writes a keepalive comment every 10s while a run is quiet, so a stream silent for longer
+ * than this is dead: a phone that slept, or a proxy or tunnel that dropped the connection without
+ * closing it. Nothing else ends such a read.
+ */
+const RUN_STREAM_IDLE_MS = 30_000
+
 export async function followRun(
   config: HermesConfig,
   runId: string,
@@ -1028,7 +1093,7 @@ export async function followRun(
 
   // Hermes v2026.9.24 sends no seq: number the calls here, so each gets its own card.
   let calls = 0
-  for await (const { data } of readSse(response.body)) {
+  for await (const { data } of readSse(response.body, RUN_STREAM_IDLE_MS)) {
     let payload: any
     try {
       payload = JSON.parse(data)

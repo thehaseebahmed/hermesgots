@@ -17,6 +17,7 @@ import {
   getSessionTitle,
   HermesError,
   labelSession,
+  liveRunOf,
   respondToApproval,
   respondToClarify,
   startRun,
@@ -41,6 +42,12 @@ import { ensureSessionWorkspace, refreshPrs, refreshWorkspace } from "@/lib/work
  */
 
 const FLUSH_INTERVAL_MS = 50
+/**
+ * How long one status or transcript read of a running turn may take. A connection can die without
+ * the request ever failing (a phone that slept, a tunnel that dropped it), which would hold the
+ * reply on its last tool call for good.
+ */
+const POLL_TIMEOUT_MS = 15_000
 /** How often a run whose events can't be read is polled, with the transcript. */
 const POLL_MS = 3000
 /** How long after a turn ends before the plugin is asked about it. */
@@ -316,13 +323,18 @@ async function transcriptReader(turn: Turn) {
   const index = messages.findIndex((m) => m.id === draft.id)
   const user = messages.slice(0, index < 0 ? undefined : index).findLast((m) => m.role === "user")
   if (!conversation || !user) return undefined
-  return async () => {
-    const reply = await liveTurn(config, conversation.hermesSessionId, user.content).catch(
+  return async (signal: AbortSignal) => {
+    const reply = await liveTurn(config, conversation.hermesSessionId, user.content, signal).catch(
       () => undefined,
     )
     if (!reply) return
     // Not through onTool: these carry Hermes's own call ids, which history matches later.
-    draft.tools = reply.tools ?? []
+    draft.tools = (reply.tools ?? []).map((tool) => {
+      if (tool.tool !== "clarify" || tool.result) return tool
+      const settled = draft.tools.find((t) => t.toolCallId === tool.toolCallId)
+      // The answer can arrive here before Hermes persists the tool's result row.
+      return settled?.result ? { ...tool, result: settled.result } : tool
+    })
     if (reply.reasoning) draft.reasoning = reply.reasoning
     if (reply.content) draft.content = reply.content
     touch()
@@ -351,7 +363,8 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
   // Once Hermes drops the event buffer, only the run's status is left to poll, and the transcript.
   let polling = false
   let raisedFor: string | undefined
-  let readTranscript: (() => Promise<void>) | undefined
+  let readTranscript: ((signal: AbortSignal) => Promise<void>) | undefined
+  const timed = () => AbortSignal.any([signal, AbortSignal.timeout(POLL_TIMEOUT_MS)])
   let failures = 0
   let errored = false
   for (let attempt = 0; ; attempt++) {
@@ -362,9 +375,9 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
         if (outcome) return { ...outcome, replaceContent: lost }
       } else {
         readTranscript ??= await transcriptReader(turn)
-        await readTranscript?.()
+        await readTranscript?.(timed())
       }
-      const { outcome, approval, clarify } = await getRun(config, runId, signal)
+      const { outcome, approval, clarify } = await getRun(config, runId, timed())
       if (outcome) return { ...outcome, replaceContent: lost }
       // The events stream carries approval requests; when it can't be read, the run's status holds
       // the one it waits on.
@@ -400,7 +413,7 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
       // No response to the events request while the run itself answers: the browser blocks the
       // stream (Hermes v2026.9.24 sends it without CORS headers), so retrying it never helps.
       if (!polling && error instanceof HermesError && error.status === undefined) {
-        const probe = await getRun(config, runId, signal).catch(() => undefined)
+        const probe = await getRun(config, runId, timed()).catch(() => undefined)
         if (probe?.outcome) return { ...probe.outcome, replaceContent: lost }
         if (probe) {
           polling = true
@@ -482,6 +495,11 @@ async function runTurn(turn: Turn, start: () => Promise<{ usage?: TurnUsage }>) 
   } catch (error) {
     if (controller.signal.aborted) {
       draft.status = "stopped"
+    } else if (draft.runId && retryable(error)) {
+      // Hermes may still be running it: leave the reply streaming for `reattachRun` to pick up.
+      draft.statusText = undefined
+      await turn.close()
+      return draft.status
     } else {
       draft.status = "error"
       draft.statusText =
@@ -616,6 +634,37 @@ export async function sendMessage(conversationId: string, text: string, queuedId
   await sendNextQueued(conversationId)
 }
 
+/**
+ * Follows the run Hermes is still working on for a chat that was reopened. A reply left streaming
+ * by a connection that gave up, or by a reload before its run id was saved, is the one to pick up.
+ */
+export async function reattachRun(conversationId: string) {
+  if (controllers.has(conversationId)) return
+  const conversation = await db.conversations.get(conversationId)
+  const profile = await profileFor(conversation?.profileId)
+  if (!conversation || !profile) return
+  const stale = (await getMessages(conversationId)).findLast(
+    (m) => m.role === "assistant" && m.status === "streaming",
+  )
+  if (!stale) return
+  // Hermes only keys the session by our id with an API key, so only then can the run be looked up.
+  const live = profile.apiKey
+    ? await liveRunOf(
+        { baseUrl: profile.baseUrl, apiKey: profile.apiKey },
+        conversation.hermesSessionId,
+      ).catch(() => undefined)
+    : undefined
+  const runId = stale.runId ?? live?.runId
+  if (!runId) {
+    // Nothing is running for it: a streamed chat completion died with the tab, or the run never
+    // started.
+    await db.messages.update(stale.id, { status: "stopped", statusText: undefined })
+    return
+  }
+  if (!stale.runId) await db.messages.update(stale.id, { runId })
+  await resumeReply({ ...stale, runId })
+}
+
 /** Picks up a reply whose run was still going when the app was closed or reloaded. */
 async function resumeReply(reply: Message) {
   const { conversationId, runId } = reply
@@ -714,9 +763,7 @@ export async function recoverInterruptedMessages() {
   const interrupted = await db.messages.filter((m) => m.status === "streaming").toArray()
   await Promise.all(
     interrupted.map((reply) =>
-      reply.runId
-        ? resumeReply(reply)
-        : db.messages.update(reply.id, { status: "stopped", statusText: undefined }),
+      reply.runId ? resumeReply(reply) : reattachRun(reply.conversationId),
     ),
   )
 }

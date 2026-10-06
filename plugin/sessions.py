@@ -27,7 +27,7 @@ import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from .store import connect
 
@@ -108,8 +108,11 @@ LIVE_STATUSES = {
 
 # The dashboard shows a session's source as its label. /api/sessions only accepts a fixed set of
 # sources, so Memento's sessions start as the API server's and the plugin relabels them.
-SESSION_SOURCE = "memento"
+SESSION_SOURCE = "Memento"
+CODE_SESSION_SOURCE = "Memento Code"
 RELABELLED_SOURCES = ("api_server", "unknown")
+# What earlier plugin versions wrote; both are still ours to upgrade.
+LEGACY_SOURCES = ("memento", "memento-code")
 # How the app starts the session ids of its chats (`createConversation`).
 MEMENTO_ID_PREFIX = "memento-"
 
@@ -559,31 +562,50 @@ def remove(path: Path, session_id: str) -> Dict[str, Any]:
     return {"removed": True, "kept": []}
 
 
-def label(db: Any, session_id: str) -> bool:
-    """Marks a session as Memento's, so the Hermes dashboard labels it."""
+def label(db: Any, session_id: str, code: bool = False) -> Optional[str]:
+    """Marks a session as Memento's, so the Hermes dashboard labels it: ``Memento`` for a chat,
+    ``Memento Code`` for a project session. Answers the session's source, or None when it isn't
+    one the plugin may label."""
+    source = CODE_SESSION_SOURCE if code else SESSION_SOURCE
+    # A project session was a chat's source until its workspace existed; never the other way.
+    from_sources = RELABELLED_SOURCES + LEGACY_SOURCES[:1]
+    if code:
+        from_sources += (SESSION_SOURCE, LEGACY_SOURCES[1])
 
     def write(conn):
-        placeholders = ", ".join("?" for _ in RELABELLED_SOURCES)
+        placeholders = ", ".join("?" for _ in from_sources)
         # Never takes a session from another surface (Telegram, the CLI, ...).
         cursor = conn.execute(
             f"UPDATE sessions SET source = ? WHERE id = ? AND source IN ({placeholders})",
-            (SESSION_SOURCE, session_id, *RELABELLED_SOURCES),
+            (source, session_id, *from_sources),
         )
         if cursor.rowcount:
-            return True
+            return source
         row = conn.execute("SELECT source FROM sessions WHERE id = ?", (session_id,)).fetchone()
-        return bool(row) and row[0] == SESSION_SOURCE
+        current = row[0] if row else None
+        return current if current in (source, CODE_SESSION_SOURCE if code else None) else None
 
     return db._execute_write(write)
 
 
-def live_runs(adapter: Any) -> Dict[str, str]:
-    """Each session with a run in flight: ``running`` or ``waiting_for_approval``."""
+def is_code_session(session_id: str) -> bool:
+    """Whether the session has a project workspace record."""
+    path, _ = _paths()
+    return bool(path.exists() and read(path, session_id))
+
+
+def live_runs(adapter: Any) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """Each session with a run in flight: ``running`` or ``waiting_for_approval``, and its run id.
+
+    The run id is what lets a client that lost track of a reply (a reload, a dropped stream) follow
+    the run again.
+    """
     statuses = getattr(adapter, "_run_statuses", None)
     if not isinstance(statuses, dict):
-        return {}
+        return {}, {}
     live: Dict[str, str] = {}
-    for status in list(statuses.values()):
+    run_ids: Dict[str, str] = {}
+    for run_id, status in list(statuses.items()):
         if not isinstance(status, dict):
             continue
         state = LIVE_STATUSES.get(status.get("status"))
@@ -592,7 +614,9 @@ def live_runs(adapter: Any) -> Dict[str, str]:
             continue
         if live.get(session_id) != "waiting_for_approval":
             live[session_id] = state
-    return live
+            if isinstance(run_id, str):
+                run_ids[session_id] = run_id
+    return live, run_ids
 
 
 def read_only(command: Any) -> bool:
@@ -717,19 +741,18 @@ def before_llm(**kwargs: Any) -> None:
 
 
 def started(**kwargs: Any) -> None:
-    """The ``on_session_start`` hook: labels a brand-new session as Memento's when it is one. Memento
-    mints its chats' session ids (``memento-…``), and a project session has its workspace before
-    its first turn."""
+    """The ``on_session_start`` hook: labels a brand-new session as Memento's when it is one
+    (``Memento Code`` for a project session). Memento mints its chats' session ids (``memento-…``),
+    and a project session has its workspace before its first turn."""
     try:
         session_id = kwargs.get("session_id") or ""
         db = getattr(adapter, "_session_db", None)
         if not session_id or db is None:
             return
-        if not session_id.startswith(MEMENTO_ID_PREFIX):
-            path, _ = _paths()
-            if not (path.exists() and read(path, session_id)):
-                return
-        label(db, session_id)
+        code = is_code_session(session_id)
+        if not code and not session_id.startswith(MEMENTO_ID_PREFIX):
+            return
+        label(db, session_id, code)
     except Exception:
         logger.debug("memento: on_session_start failed", exc_info=True)
 
