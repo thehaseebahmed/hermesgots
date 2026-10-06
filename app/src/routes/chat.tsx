@@ -65,7 +65,12 @@ import { describeActivity } from "@/lib/format"
 import { loadEarlierHistory, reconcileHistory } from "@/lib/history"
 import { setBackGuard } from "@/lib/native"
 import { syncContextWindow } from "@/lib/models"
-import { refreshWorkspace, removeSessionWorkspace, setSessionMode } from "@/lib/workspace"
+import {
+  planApprovalMessage,
+  refreshWorkspace,
+  removeSessionWorkspace,
+  setSessionMode,
+} from "@/lib/workspace"
 
 /** How often an open chat checks Hermes for turns sent from another device. */
 const CATCH_UP_MS = 30_000
@@ -458,7 +463,7 @@ export function ChatPage() {
             <PlanReadyCard
               onApprove={async () => {
                 await setSessionMode(session.id, "accept_edits")
-                await send(approvalMessage(session.planFile))
+                await send(planApprovalMessage(session.planFile))
               }}
               onKeepPlanning={() => setSessionMode(session.id, "plan")}
             />
@@ -603,14 +608,5 @@ export function ChatPage() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  )
-}
-
-/** What approving a plan sends: the saved plan's checkpoints, each committed, or just a go-ahead. */
-function approvalMessage(planFile: string | undefined) {
-  if (!planFile) return "Go ahead with the plan."
-  return (
-    `Go ahead with the plan in \`${planFile}\`. Work through its checkpoints in order and commit ` +
-    "each one on this branch with the commit message it names. Don't push."
   )
 }

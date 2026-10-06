@@ -1,9 +1,11 @@
-import { useState } from "react"
-import { CheckCircle2Icon, MapIcon } from "lucide-react"
+import { useState, type ReactNode } from "react"
+import { CheckCircle2Icon, MapIcon, MessageCircleQuestionIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Spinner } from "@/components/ui/spinner"
+import type { ToolEvent } from "@/lib/db"
 
 const CARD = "w-full rounded-3xl border shadow-xl ring-0 shadow-black/10 dark:shadow-black/40"
 
@@ -77,5 +79,74 @@ export function ResolvedCard({ onReopen }: { onReopen: () => void }) {
         </Button>
       </CardContent>
     </Card>
+  )
+}
+
+/** In a session's thread, an exchange that is neither the agent's nor the user's. */
+function CentredCard({
+  icon,
+  title,
+  children,
+}: {
+  icon: ReactNode
+  title: string
+  children?: ReactNode
+}) {
+  return (
+    <Card size="sm" className="mx-auto w-full max-w-md rounded-3xl border bg-muted/40 ring-0">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+          {icon}
+          {title}
+        </CardTitle>
+      </CardHeader>
+      {children && <CardContent className="space-y-2 text-[15px]">{children}</CardContent>}
+    </Card>
+  )
+}
+
+/** The answer in a clarify result, which may be JSON or plain text. */
+function clarifyAnswer(result: string | undefined) {
+  if (!result) return undefined
+  try {
+    const parsed = JSON.parse(result)
+    if (typeof parsed === "string") return parsed
+    for (const key of ["user_response", "response", "answer", "choice"])
+      if (typeof parsed?.[key] === "string" && parsed[key]) return parsed[key] as string
+  } catch {
+    // Plain text.
+  }
+  return result
+}
+
+export function ClarifyCard({ tool }: { tool: ToolEvent }) {
+  const question = tool.label && tool.label !== tool.tool ? tool.label : undefined
+  const answer = tool.status === "running" ? undefined : clarifyAnswer(tool.result)
+  return (
+    <CentredCard
+      icon={<MessageCircleQuestionIcon className="size-4" />}
+      title={tool.status === "running" ? "Question" : "Answered"}
+    >
+      {question && <p>{question}</p>}
+      {tool.status === "running" ? (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Spinner className="size-3.5" />
+          Waiting for an answer…
+        </p>
+      ) : (
+        answer && (
+          <p className="rounded-2xl bg-background px-3 py-2 whitespace-pre-wrap">{answer}</p>
+        )
+      )}
+    </CentredCard>
+  )
+}
+
+export function PlanApprovedCard() {
+  return (
+    <CentredCard
+      icon={<CheckCircle2Icon className="size-4 text-success" />}
+      title="Plan approved"
+    />
   )
 }

@@ -3,6 +3,7 @@ import { AlertCircleIcon, ClockIcon, SendHorizontalIcon, XIcon } from "lucide-re
 
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { Markdown } from "@/components/chat/markdown"
+import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
 import { ToolCard } from "@/components/chat/tool-card"
 import { Bot } from "@/components/bot"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
@@ -12,11 +13,18 @@ import { Spinner } from "@/components/ui/spinner"
 import { removeQueued, sendMessage } from "@/lib/chat"
 import type { Message, ToolEvent } from "@/lib/db"
 import { describeActivity, formatDuration } from "@/lib/format"
+import { isPlanApproval } from "@/lib/workspace"
 
-type Part = { kind: "text"; at: number; text: string } | { kind: "tools"; tools: ToolEvent[] }
+type Part =
+  | { kind: "text"; at: number; text: string }
+  | { kind: "tools"; tools: ToolEvent[] }
+  | { kind: "clarify"; tool: ToolEvent }
 
-/** Interleaves a slice of the reply (starting at `start`) with the tools run during it. */
-function toParts(content: string, tools: ToolEvent[], start: number): Part[] {
+/**
+ * Interleaves a slice of the reply (starting at `start`) with the tools run during it. With
+ * `cards`, a clarify call is a card of its own rather than a tool row.
+ */
+function toParts(content: string, tools: ToolEvent[], start: number, cards?: boolean): Part[] {
   const end = start + content.length
   const parts: Part[] = []
   let cursor = start
@@ -30,7 +38,8 @@ function toParts(content: string, tools: ToolEvent[], start: number): Part[] {
     const at = Math.min(Math.max(tool.contentOffset ?? 0, cursor), end)
     if (at > cursor) pushText(at)
     const last = parts.at(-1)
-    if (last?.kind === "tools") last.tools.push(tool)
+    if (cards && tool.tool === "clarify") parts.push({ kind: "clarify", tool })
+    else if (last?.kind === "tools") last.tools.push(tool)
     else parts.push({ kind: "tools", tools: [tool] })
   }
   if (cursor < end) pushText(end)
@@ -134,6 +143,7 @@ export function MessageItem({
   plain?: boolean
 }) {
   if (message.role === "user") {
+    if (plain && isPlanApproval(message.content)) return <PlanApprovedCard />
     const queued = message.status === "queued"
     return (
       <MessageRow align="end">
@@ -205,13 +215,13 @@ export function MessageItem({
 
   return (
     <div className="flex flex-col gap-3">
-      <AssistantRow botId={botId} plain={plain} parts={toParts(before, toolsBefore, 0)}>
+      <AssistantRow botId={botId} plain={plain} parts={toParts(before, toolsBefore, 0, plain)}>
         {!split && footer}
       </AssistantRow>
       {/* A pending approval lives in the composer slot; once answered it sits in the thread, unattributed. */}
       {approval?.resolved && <ApprovalCard message={message} />}
       {split && (
-        <AssistantRow botId={botId} plain={plain} parts={toParts(after, toolsAfter, offset)}>
+        <AssistantRow botId={botId} plain={plain} parts={toParts(after, toolsAfter, offset, plain)}>
           {footer}
         </AssistantRow>
       )}
@@ -239,7 +249,9 @@ function AssistantRow({
       )}
       <MessageContent className={plain ? "gap-3" : "gap-2"}>
         {parts.map((part) =>
-          part.kind === "tools" ? (
+          part.kind === "clarify" ? (
+            <ClarifyCard key={part.tool.toolCallId} tool={part.tool} />
+          ) : part.kind === "tools" ? (
             <div key={part.tools[0].toolCallId} className="flex w-full max-w-xl flex-col">
               {part.tools.map((tool) => (
                 <ToolCard key={tool.toolCallId} tool={tool} />
