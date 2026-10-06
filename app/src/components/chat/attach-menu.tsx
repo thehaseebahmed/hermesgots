@@ -83,7 +83,7 @@ export function AttachMenu({
           <PopupHeader className="items-center pb-2">
             <PopupTitle>Add context</PopupTitle>
           </PopupHeader>
-          <div className="grid grid-cols-3 gap-3 px-4 pb-2 sm:px-6">
+          <div className="grid grid-cols-3 gap-4 px-4 pb-24 sm:gap-5 sm:px-6 md:pb-2">
             {SOURCES.map(({ id, label, icon: Icon }) => (
               <Button
                 key={id}
