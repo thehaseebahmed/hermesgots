@@ -51,11 +51,15 @@ New Memento plugin routes, read-only, mirroring the existing
 
 ## Phase 3 — Checkpoints/rollback viewer
 
-- [ ] `GET /api/plugins/memento/checkpoints?project=<slug>` — list
+- [x] `GET /api/plugins/memento/projects/:id/checkpoints` — list
       checkpoints with change stats, and a diff endpoint
-      (`GET /api/plugins/memento/checkpoints/:id/diff`).
-- [ ] New Memento frontend surface: a diff viewer (file list + unified
-      diff), read-only to start.
+      (`GET /api/plugins/memento/projects/:id/checkpoints/:hash/diff`).
+      Keyed by project id, as the app already has it; each checkpoint's
+      changes run to the next one, or to now for the newest.
+- [x] New Memento frontend surface: a diff viewer (file list + unified
+      diff), read-only to start. A Checkpoints tab on the project screen.
+- Deferred: rolling back from Memento (Hermes's `restore()` has a safe
+      mode that keeps hand-edited files; it needs the store lock).
 
 ## Phase 4 — Mutating Kanban from Memento
 
