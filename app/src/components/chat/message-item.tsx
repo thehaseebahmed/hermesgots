@@ -13,6 +13,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { removeQueued, sendMessage } from "@/lib/chat"
 import type { Message, ToolEvent } from "@/lib/db"
 import { describeActivity, formatDuration } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import { useReveal } from "@/lib/reveal"
 import { isPlanApproval } from "@/lib/workspace"
 
@@ -153,7 +154,6 @@ export function MessageItem({
   }
 
   const streaming = message.status === "streaming"
-  const tools = message.tools ?? []
   const approval = message.approval
   const awaitingApproval = Boolean(approval && !approval.resolved)
   const awaitingClarify = Boolean(message.clarify && !message.clarify.resolved)
@@ -180,6 +180,8 @@ export function MessageItem({
       <span>{message.statusText ?? "Something went wrong."}</span>
     </>
   )
+  // The avatar lines up with the bubble, which has the stats line under it only once the reply is done.
+  const statsShown = showStats && !streaming && !revealing && Boolean(message.stats)
   const footer = (
     <>
       {plain ? (
@@ -207,19 +209,29 @@ export function MessageItem({
       {message.status === "stopped" && !message.content && (
         <div className="px-1 text-xs text-muted-foreground">Stopped</div>
       )}
-      {showStats && !streaming && !revealing && <Stats message={message} />}
+      {statsShown && <Stats message={message} />}
     </>
   )
 
   return (
     <div className="flex flex-col gap-3">
-      <AssistantRow botId={botId} plain={plain} parts={toParts(before, toolsBefore, 0)}>
+      <AssistantRow
+        botId={botId}
+        plain={plain}
+        lift={!split && statsShown}
+        parts={toParts(before, toolsBefore, 0)}
+      >
         {!split && footer}
       </AssistantRow>
       {/* A pending approval lives in the composer slot; once answered it sits in the thread, unattributed. */}
       {approval?.resolved && <ApprovalCard message={message} />}
       {split && (
-        <AssistantRow botId={botId} plain={plain} parts={toParts(after, toolsAfter, offset)}>
+        <AssistantRow
+          botId={botId}
+          plain={plain}
+          lift={statsShown}
+          parts={toParts(after, toolsAfter, offset)}
+        >
           {footer}
         </AssistantRow>
       )}
@@ -230,18 +242,21 @@ export function MessageItem({
 function AssistantRow({
   botId,
   plain,
+  lift,
   parts,
   children,
 }: {
   botId?: string
   plain?: boolean
+  /** A line sits under the last bubble, so the avatar rises to stay level with it. */
+  lift?: boolean
   parts: Part[]
   children?: ReactNode
 }) {
   return (
     <MessageRow align="start" className="gap-2">
       {!plain && (
-        <MessageAvatar className="mb-6 size-8 bg-transparent">
+        <MessageAvatar className={cn("size-8 bg-transparent", lift && "mb-6")}>
           <Bot id={botId} className="size-8" />
         </MessageAvatar>
       )}
