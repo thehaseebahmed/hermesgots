@@ -4,7 +4,8 @@ Adds routes to the API server, so the Memento app (which only talks to the API s
 can read cron run history from Hermes's execution ledger instead of piecing it together on each
 device, keep its chat list on the server (``chats.py``), report each chat's context use
 (``context.py``) and the agent's todo list (``todos.py``), list and create Hermes Projects (``projects.py``) with GitHub repos cloned into
-them (``github.py``) and label its chats as Memento's. The dashboard half lives in ``dashboard/``.
+them (``github.py``), run project sessions in their own worktrees with a permission mode
+(``sessions.py``) and label its chats as Memento's. The dashboard half lives in ``dashboard/``.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-from . import chats, context, github, projects, todos
+from . import chats, context, github, projects, sessions, todos
 from .store import db_path
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,9 @@ def _error(web: Any, message: str, status: int):
 def _wire_api_server(app: Any, adapter: Any) -> None:
     from aiohttp import web
 
+    # The hooks have no other way to the session store.
+    sessions.adapter = adapter
+
     def unauthorized(request: "web.Request"):
         # The API server's own Bearer check, so the routes take the same key as /v1. Fail closed if
         # a Hermes update renames it.
@@ -112,7 +116,18 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             {
                 "name": "memento",
                 "version": VERSION,
-                "features": ["cron_runs", "session_label", "chats", "context", "todos", "projects", "github"],
+                "features": [
+                    "cron_runs",
+                    "session_label",
+                    "chats",
+                    "context",
+                    "todos",
+                    "projects",
+                    "github",
+                    "sessions",
+                    "runs",
+                    "pr",
+                ],
             }
         )
 
@@ -291,6 +306,110 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), 400)
         return web.json_response({"object": "memento.project", **created})
 
+    async def session_db():
+        open_db = getattr(adapter, "_ensure_session_db_async", None)
+        return await open_db() if callable(open_db) else None
+
+    async def json_body(request: "web.Request"):
+        try:
+            body = await request.json()
+        except ValueError:
+            return None
+        return body if isinstance(body, dict) else None
+
+    def workspace_response(record: Dict[str, Any] | None):
+        return web.json_response({"object": "memento.workspace", "workspace": record})
+
+    async def post_workspace(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        session_id = request.match_info["session_id"]
+        path, home = store_path(), hermes_home()
+        try:
+            record = await asyncio.to_thread(
+                sessions.ensure,
+                path,
+                home,
+                session_id,
+                body.get("project_id"),
+                body.get("repo_root"),
+                body.get("task"),
+                body.get("mode"),
+            )
+        except ImportError:
+            return _error(web, "This Hermes version has no projects or worktrees.", 501)
+        except ValueError as error:
+            return _error(web, str(error), 400)
+        except sessions.WorkspaceError as error:
+            return _error(web, str(error), error.status)
+        # On the loop thread: the override is keyed by the request's profile scope.
+        sessions.apply_cwd(session_id, record["path"])
+        db = await session_db()
+        if db is not None:
+            await asyncio.to_thread(sessions.stamp, db, record)
+        return workspace_response(record)
+
+    async def get_workspace(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        record = await asyncio.to_thread(
+            sessions.record_for, store_path(), hermes_home(), request.match_info["session_id"]
+        )
+        # Never a 404 for an unknown session: the app reads a 404 as a missing plugin.
+        return workspace_response(record)
+
+    async def post_mode(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        try:
+            record = await asyncio.to_thread(
+                sessions.set_mode, store_path(), request.match_info["session_id"], body.get("mode")
+            )
+        except ValueError as error:
+            return _error(web, str(error), 400)
+        if record is None:
+            return _error(web, "This session has no workspace yet", 404)
+        return workspace_response(record)
+
+    async def remove_workspace(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        session_id = request.match_info["session_id"]
+        try:
+            result = await asyncio.to_thread(sessions.remove, store_path(), session_id)
+        except sessions.WorkspaceError as error:
+            return _error(web, str(error), error.status)
+        if result.get("removed"):
+            sessions._clear_cwd(session_id)
+        return web.json_response({"object": "memento.workspace.removed", **result})
+
+    async def session_pr(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        path, home = store_path(), hermes_home()
+        record = await asyncio.to_thread(sessions.record_for, path, home, request.match_info["session_id"])
+        pr = None
+        if record and record.get("path") and record.get("branch"):
+            pr = await asyncio.to_thread(github.pull_request, home, record["repo_root"], record["branch"])
+        return web.json_response({"object": "memento.pr", "pr": pr})
+
+    async def live_runs(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        return web.json_response({"object": "memento.runs", "sessions": sessions.live_runs(adapter)})
+
     app.router.add_get(f"{PREFIX}/info", info)
     app.router.add_get(f"{PREFIX}/chats", list_chats)
     app.router.add_post(f"{PREFIX}/chats", merge_chats)
@@ -302,6 +421,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/label", label_session)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/context", session_context)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/todos", session_todos)
+    app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/workspace", post_workspace)
+    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/workspace", get_workspace)
+    app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/workspace/remove", remove_workspace)
+    app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/mode", post_mode)
+    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/pr", session_pr)
+    app.router.add_get(f"{PREFIX}/runs/live", live_runs)
     logger.info("memento: serving %s on the API server", PREFIX)
 
 
@@ -309,6 +434,9 @@ def register(ctx) -> None:
     register_hook = getattr(ctx, "register_hook", None)
     if register_hook is not None:
         register_hook("post_api_request", context.record)
+        register_hook("pre_tool_call", sessions.before_tool)
+        register_hook("pre_llm_call", sessions.before_llm)
+        register_hook("on_session_end", sessions.after_run)
     register_handler = getattr(ctx, "register_platform_handler", None)
     if register_handler is None:
         logger.warning("memento: this Hermes version can't add API server routes; update Hermes")
