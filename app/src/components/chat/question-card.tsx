@@ -158,41 +158,10 @@ function Question({
 const motion = () =>
   window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"
 
-/** One step marker: filled once its question has an answer, long while it's the one showing. */
-function Dot({
-  index,
-  current,
-  answered,
-  onClick,
-}: {
-  index: number
-  current: boolean
-  answered: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={`Question ${index + 1}${answered ? ", answered" : ""}`}
-      aria-current={current ? "step" : undefined}
-      onClick={onClick}
-      className="flex size-11 items-center justify-center rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-    >
-      <span
-        className={cn(
-          "h-2.5 rounded-full border border-primary transition-[width,background-color] motion-reduce:transition-none",
-          current ? "w-6" : "w-2.5",
-          answered ? "bg-primary" : "bg-transparent",
-        )}
-      />
-    </button>
-  )
-}
-
 /**
  * The agent's questions, in place of the composer until answered; the answers then show as a card
  * in the thread (`ClarifyCard`). One question is a plain form. Two or more are pages of one card
- * (swipe, tap a dot, or Back and Next), so five questions never outgrow the screen.
+ * (swipe, or Skip and Next), so five questions never outgrow the screen.
  */
 export function QuestionCard({ message }: { message: Message }) {
   const { questions } = message.clarify!
@@ -233,10 +202,18 @@ export function QuestionCard({ message }: { message: Message }) {
     if (el) el.scrollTo({ left: index * el.clientWidth, behavior: motion() })
   }
 
-  const send = async () => {
+  // Leaves this question unanswered (a skipped question is null to Hermes) and moves on.
+  const current = questions[page]
+  const skip = () => {
+    setPicked((all) => ({ ...all, [current.id]: { choices: [], other: "", usingOther: false } }))
+    if (last) void send({ ...answers, [current.id]: null })
+    else goTo(page + 1)
+  }
+
+  const send = async (given: ClarifyAnswers = answers) => {
     setPending(true)
     try {
-      await answerClarify(message, answers)
+      await answerClarify(message, given)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't send your answer.")
     } finally {
@@ -266,18 +243,7 @@ export function QuestionCard({ message }: { message: Message }) {
         </CardTitle>
       </CardHeader>
       {paged ? (
-        <CardContent className="space-y-1">
-          <div className="-mt-2 flex justify-center">
-            {questions.map((question, i) => (
-              <Dot
-                key={question.id}
-                index={i}
-                current={i === page}
-                answered={Boolean(answers[question.id])}
-                onClick={() => goTo(i)}
-              />
-            ))}
-          </div>
+        <CardContent>
           {/* The row is as tall as its tallest page, so the card holds one height while paging. */}
           <div
             ref={row}
@@ -313,16 +279,16 @@ export function QuestionCard({ message }: { message: Message }) {
         </CardContent>
       )}
       <CardFooter className="gap-2">
-        {paged && page > 0 && (
+        {paged && (
           <Button
             type="button"
             variant="outline"
             size="lg"
             className="h-11 flex-1 sm:min-w-28 sm:flex-none"
             disabled={pending}
-            onClick={() => goTo(page - 1)}
+            onClick={skip}
           >
-            Back
+            Skip
           </Button>
         )}
         {paged && !last ? (
@@ -330,6 +296,7 @@ export function QuestionCard({ message }: { message: Message }) {
             type="button"
             size="lg"
             className="h-11 flex-1 sm:min-w-40 sm:flex-none"
+            disabled={!answers[current.id]}
             onClick={() => goTo(page + 1)}
           >
             Next
@@ -338,8 +305,8 @@ export function QuestionCard({ message }: { message: Message }) {
           <Button
             size="lg"
             className="h-11 flex-1 sm:min-w-40 sm:flex-none"
-            disabled={pending || !anything}
-            onClick={send}
+            disabled={pending || (paged ? !answers[current.id] : !anything)}
+            onClick={() => void send()}
           >
             Send
           </Button>
