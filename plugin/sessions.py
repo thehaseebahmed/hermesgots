@@ -73,6 +73,11 @@ LIVE_STATUSES = {
     "waiting_for_approval": "waiting_for_approval",
 }
 
+# The dashboard shows a session's source as its label. /api/sessions only accepts a fixed set of
+# sources, so Memento's sessions start as the API server's and the plugin relabels them.
+SESSION_SOURCE = "memento"
+RELABELLED_SOURCES = ("api_server", "unknown")
+
 # The API server adapter, kept by _wire_api_server so the hooks can reach its session store.
 adapter: Any = None
 
@@ -433,6 +438,24 @@ def remove(path: Path, session_id: str) -> Dict[str, Any]:
     return {"removed": True, "kept": []}
 
 
+def label(db: Any, session_id: str) -> bool:
+    """Marks a session as Memento's, so the Hermes dashboard labels it."""
+
+    def write(conn):
+        placeholders = ", ".join("?" for _ in RELABELLED_SOURCES)
+        # Never takes a session from another surface (Telegram, the CLI, ...).
+        cursor = conn.execute(
+            f"UPDATE sessions SET source = ? WHERE id = ? AND source IN ({placeholders})",
+            (SESSION_SOURCE, session_id, *RELABELLED_SOURCES),
+        )
+        if cursor.rowcount:
+            return True
+        row = conn.execute("SELECT source FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        return bool(row) and row[0] == SESSION_SOURCE
+
+    return db._execute_write(write)
+
+
 def live_runs(adapter: Any) -> Dict[str, str]:
     """Each session with a run in flight: ``running`` or ``waiting_for_approval``."""
     statuses = getattr(adapter, "_run_statuses", None)
@@ -539,5 +562,8 @@ def after_run(**kwargs: Any) -> None:
         db = getattr(adapter, "_session_db", None)
         if db is not None:
             stamp(db, record)
+            # The app labels after a turn too, but a project session is Memento's from its first one.
+            for session_id in {record["session_id"], kwargs.get("session_id") or ""} - {""}:
+                label(db, session_id)
     except Exception:
         logger.debug("memento: on_session_end failed", exc_info=True)

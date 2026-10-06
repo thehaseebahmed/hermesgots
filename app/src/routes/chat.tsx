@@ -548,7 +548,11 @@ export function ChatPage() {
             <AlertDialogAction
               onClick={async () => {
                 if (!session || !projectPath) return
-                await db.conversations.update(session.id, { draft: draftRef.current.trim() })
+                // Counts as activity, so neither the list nor the plugin's daily cleanup treats it as empty.
+                await updateConversation(session.id, {
+                  draft: draftRef.current.trim(),
+                  updatedAt: Date.now(),
+                })
                 navigate(projectPath)
               }}
             >
