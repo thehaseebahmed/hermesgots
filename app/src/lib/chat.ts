@@ -149,10 +149,6 @@ function raiseApproval(
     requestedAt: Date.now(),
   }
   touch()
-  // A session in auto mode answers for the user, replayed requests included.
-  void db.conversations.get(turn.conversationId).then((conversation) => {
-    if (conversation?.mode === "auto") void answerApproval(draft, "once").catch(() => undefined)
-  })
 }
 
 function streamHandlers(turn: Turn): StreamHandlers {
