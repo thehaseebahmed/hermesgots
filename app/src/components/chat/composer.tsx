@@ -56,7 +56,7 @@ export function Composer({
   /** Shown at the start of the input (in a session, on its bottom row), e.g. the context ring. */
   leading?: ReactNode
   /** A project session: two lines, with the `+` menu and its permission mode under the text. */
-  session?: { mode: SessionMode; onMode: (mode: SessionMode) => void }
+  session?: { mode: SessionMode; onMode: (mode: SessionMode) => void; autoAvailable: boolean }
   disabled?: boolean
   onSend: (text: string) => Promise<void> | void
   /** Called instead of `onSend` while a reply is streaming: Enter queues the message. */
@@ -275,7 +275,12 @@ export function Composer({
             onClick={() => textarea.current?.focus()}
           >
             <AttachMenu disabled={disabled} />
-            <ModeMenu mode={session.mode} onChange={session.onMode} disabled={disabled} />
+            <ModeMenu
+              mode={session.mode}
+              onChange={session.onMode}
+              disabled={disabled}
+              autoAvailable={session.autoAvailable}
+            />
             <span className="flex-1" />
             {leading}
             {controls}
