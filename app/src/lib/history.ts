@@ -1,7 +1,7 @@
 import { db, getMessages, type Conversation, type Message, type ToolEvent } from "@/lib/db"
 import { refreshContext } from "@/lib/context"
 import { refreshTodos } from "@/lib/todos"
-import { refreshPr, refreshWorkspace } from "@/lib/workspace"
+import { refreshPrs, refreshWorkspace } from "@/lib/workspace"
 import { listSessionMessages, type HermesConfig, type SessionMessage } from "@/lib/hermes"
 
 /**
@@ -196,7 +196,7 @@ export function reconcileHistory(conversationId: string) {
           refreshContext(conversationId),
           refreshTodos(conversationId),
           refreshWorkspace(conversationId),
-          refreshPr(conversationId),
+          refreshPrs(conversationId),
         ])
         return added
       })

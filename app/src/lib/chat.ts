@@ -28,7 +28,7 @@ import {
 import { refreshContext } from "@/lib/context"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { randomId } from "@/lib/utils"
-import { ensureSessionWorkspace, refreshPr, refreshWorkspace } from "@/lib/workspace"
+import { ensureSessionWorkspace, refreshPrs, refreshWorkspace } from "@/lib/workspace"
 
 /**
  * Sends a turn to Hermes and persists the streamed reply into IndexedDB as it arrives.
@@ -329,7 +329,7 @@ async function finishTurn(turn: Turn, usage: TurnUsage | undefined) {
     // A moment later: the plugin's own hook records the finished plan-mode turn.
     setTimeout(() => {
       void refreshWorkspace(conversationId)
-      void refreshPr(conversationId, { force: true })
+      void refreshPrs(conversationId, { force: true })
     }, PLUGIN_SETTLE_MS)
   }
 }
@@ -433,6 +433,7 @@ export async function sendMessage(conversationId: string, text: string, queuedId
       ...options,
       idempotencyKey: reply.id,
       mode: workspace?.mode,
+      workspaceInstructions: workspace?.instructions,
     })
     turn.draft.runId = runId
     turn.touch()

@@ -1,4 +1,4 @@
-import type { ApprovalChoice, PrState, SessionMode, Todo } from "@/lib/db"
+import type { ApprovalChoice, PrChecks, PrState, SessionMode, Todo } from "@/lib/db"
 import type { Doc } from "@/lib/merge"
 import { isNative } from "@/lib/native"
 
@@ -449,6 +449,8 @@ export interface HermesProjectFolder {
   path: string
   label: string | null
   git: boolean
+  /** `user/repo` from the clone's GitHub origin; what the UI calls the folder. */
+  repo: string | null
 }
 
 /** A Hermes Project (`hermes project create`), through the Memento plugin. */
@@ -482,6 +484,7 @@ function toProject(raw: unknown): HermesProject | null {
         path: f.path as string,
         label: typeof f.label === "string" && f.label ? f.label : null,
         git: f.git === true,
+        repo: typeof f.repo === "string" && f.repo ? f.repo : null,
       })),
   }
 }
@@ -647,35 +650,39 @@ export async function getSessionTodos(
   return parseTodos(await response.json())
 }
 
-/** A project session's worktree and permission mode, as the Memento plugin keeps them. */
+/** A project session's worktrees and permission mode, as the Memento plugin keeps them. */
 export interface SessionWorkspace {
   projectId: string
-  repoRoot: string
-  path: string
   branch: string
+  /** One worktree per repo of the project, primary first; `name` is `user/repo`. */
+  repos: { name: string; branch: string }[]
   mode: SessionMode
   planPending: boolean
+  /** Tells the agent where its worktrees are; goes into every run's `instructions`. */
+  instructions: string
 }
 
 const MODES = new Set<string>(["accept_edits", "auto", "plan"])
 
 function parseWorkspace(raw: unknown): SessionWorkspace | null {
-  const body = raw as Record<string, unknown> | null
-  if (
-    !body ||
-    typeof body.path !== "string" ||
-    typeof body.branch !== "string" ||
-    typeof body.repo_root !== "string"
-  )
-    return null
-  const mode = typeof body.mode === "string" && MODES.has(body.mode) ? body.mode : "accept_edits"
+  const body = raw as { workspace?: Record<string, unknown>; instructions?: unknown } | null
+  const record = body?.workspace
+  if (!record || typeof record.branch !== "string") return null
+  const mode =
+    typeof record.mode === "string" && MODES.has(record.mode) ? record.mode : "accept_edits"
+  const repos = Array.isArray(record.repos) ? record.repos : []
   return {
-    projectId: String(body.project_id ?? ""),
-    repoRoot: body.repo_root,
-    path: body.path,
-    branch: body.branch,
+    projectId: String(record.project_id ?? ""),
+    branch: record.branch,
+    repos: repos
+      .filter((r): r is Record<string, unknown> => typeof r?.name === "string")
+      .map((r) => ({
+        name: r.name as string,
+        branch: typeof r.branch === "string" ? r.branch : (record.branch as string),
+      })),
     mode: mode as SessionMode,
-    planPending: Boolean(body.plan_pending),
+    planPending: Boolean(record.plan_pending),
+    instructions: typeof body?.instructions === "string" ? body.instructions : "",
   }
 }
 
@@ -684,25 +691,25 @@ function pluginSession(config: HermesConfig, sessionId: string, path: string) {
 }
 
 /**
- * Gives a project session its worktree (made on the first call) and points its tools into it. The
- * pointer only lives in the gateway's memory, so this runs before every turn.
+ * Gives a project session its worktrees (made on the first call, one per repo of the project) and
+ * points its tools into the primary one. The pointer only lives in the gateway's memory, so this
+ * runs before every turn.
  */
 export async function ensureWorkspace(
   config: HermesConfig,
   sessionId: string,
-  options: { projectId: string; repoRoot: string; task?: string; mode?: SessionMode },
+  options: { projectId: string; task?: string; mode?: SessionMode },
 ): Promise<SessionWorkspace> {
   const response = await request(pluginSession(config, sessionId, "/workspace"), {
     method: "POST",
     headers: headers(config),
     body: JSON.stringify({
       project_id: options.projectId,
-      repo_root: options.repoRoot,
       task: options.task,
       mode: options.mode,
     }),
   })
-  const workspace = parseWorkspace((await response.json())?.workspace)
+  const workspace = parseWorkspace(await response.json())
   if (!workspace) throw new HermesError("The plugin didn't return a workspace.")
   return workspace
 }
@@ -715,7 +722,7 @@ export async function getWorkspace(
   const response = await request(pluginSession(config, sessionId, "/workspace"), {
     headers: headers(config),
   })
-  return parseWorkspace((await response.json())?.workspace)
+  return parseWorkspace(await response.json())
 }
 
 /** Changes a session's permission mode; also clears a pending plan. 404 before the first turn. */
@@ -729,51 +736,69 @@ export async function setWorkspaceMode(
     headers: headers(config),
     body: JSON.stringify({ mode }),
   })
-  return parseWorkspace((await response.json())?.workspace)
+  return parseWorkspace(await response.json())
 }
 
-/** Asks the plugin to remove the worktree; it keeps one with uncommitted or unpushed work. */
+export interface KeptWorktree {
+  /** `user/repo`. */
+  name: string
+  reason: "dirty" | "unpushed"
+}
+
+/** Asks the plugin to remove the session's worktrees; it keeps those with uncommitted or unpushed work. */
 export async function removeWorkspace(
   config: HermesConfig,
   sessionId: string,
-): Promise<{ removed: boolean; reason?: "dirty" | "unpushed" | "missing" }> {
+): Promise<{ removed: boolean; kept: KeptWorktree[] }> {
   const response = await request(pluginSession(config, sessionId, "/workspace/remove"), {
     method: "POST",
     headers: headers(config),
   })
   const body = await response.json()
-  const reason = body?.reason
+  const kept: unknown = body?.kept
   return {
     removed: Boolean(body?.removed),
-    ...(reason === "dirty" || reason === "unpushed" || reason === "missing" ? { reason } : {}),
+    kept: Array.isArray(kept)
+      ? kept.filter(
+          (k): k is KeptWorktree =>
+            typeof k?.name === "string" && (k.reason === "dirty" || k.reason === "unpushed"),
+        )
+      : [],
   }
 }
 
 export interface PullRequest {
+  repo: string
   number: number
   title: string
   state: PrState
+  checks: PrChecks | null
   url: string | null
 }
 
 const PR_STATES = new Set<string>(["open", "draft", "merged", "closed"])
+const PR_CHECKS = new Set<string>(["success", "failure", "pending"])
 
-/** The pull request from the session's worktree branch, or null. Needs the Memento plugin. */
-export async function getSessionPr(
+/** The pull request from the session's branch in each of its repos. Needs the Memento plugin. */
+export async function getSessionPrs(
   config: HermesConfig,
   sessionId: string,
-): Promise<PullRequest | null> {
-  const response = await request(pluginSession(config, sessionId, "/pr"), {
+): Promise<PullRequest[]> {
+  const response = await request(pluginSession(config, sessionId, "/prs"), {
     headers: headers(config),
   })
-  const pr = (await response.json())?.pr
-  if (!pr || typeof pr.number !== "number" || !PR_STATES.has(pr.state)) return null
-  return {
-    number: pr.number,
-    title: typeof pr.title === "string" ? pr.title : "",
-    state: pr.state,
-    url: typeof pr.url === "string" ? pr.url : null,
-  }
+  const prs: unknown = (await response.json())?.prs
+  if (!Array.isArray(prs)) return []
+  return prs
+    .filter((pr) => typeof pr?.number === "number" && PR_STATES.has(pr.state))
+    .map((pr) => ({
+      repo: typeof pr.repo === "string" ? pr.repo : "",
+      number: pr.number,
+      title: typeof pr.title === "string" ? pr.title : "",
+      state: pr.state,
+      checks: PR_CHECKS.has(pr.checks) ? pr.checks : null,
+      url: typeof pr.url === "string" ? pr.url : null,
+    }))
 }
 
 export type LiveRunStatus = "running" | "waiting_for_approval"
@@ -879,6 +904,8 @@ export async function startRun(
     idempotencyKey: string
     /** A project session's permission mode. */
     mode?: SessionMode
+    /** A project session's worktree line from the plugin. Fixed per session. */
+    workspaceInstructions?: string
   },
 ) {
   // Like X-Hermes-Session-Id, a keyed session holds the history, so only the new message goes.
@@ -890,7 +917,13 @@ export async function startRun(
     body: JSON.stringify({
       model: options.model,
       input,
-      instructions: options.mode === "plan" ? `${PLAN_HINT}\n${PLAN_MODE_HINT}` : PLAN_HINT,
+      instructions: [
+        PLAN_HINT,
+        options.workspaceInstructions,
+        options.mode === "plan" ? PLAN_MODE_HINT : undefined,
+      ]
+        .filter(Boolean)
+        .join("\n"),
       ...(keyed ? { session_id: options.sessionId } : {}),
     }),
   })

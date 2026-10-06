@@ -72,18 +72,19 @@ export interface Conversation {
   todos?: { revision: number; items: Todo[]; at: number }
   /** The Hermes Project this chat is a session of (works in its own worktree). */
   projectId?: string
-  /** The project folder (a git repo) the session's worktree is made from. */
-  repoRoot?: string
   /** Marked done by the user; the composer gives way until it's reopened. */
   resolvedAt?: number
   /** Permission mode, as the plugin last reported it. Local only; the plugin holds it. */
   mode?: SessionMode
-  /** The session's worktree, from the plugin. Local only. */
-  worktree?: { path: string; branch: string }
+  /**
+   * The session's worktrees (one per repo of the project, all on `branch`), from the plugin, and
+   * the line that tells the agent where they are. Local only; no path reaches the UI.
+   */
+  worktree?: { branch: string; repos: { name: string; branch: string }[]; instructions: string }
   /** A plan-mode turn finished and the plan awaits the user. Local only; the plugin holds it. */
   planPending?: boolean
-  /** The worktree branch's pull request and when it was last read. Local only; null when none. */
-  pr?: PullRequestRef | null
+  /** The branch's pull request in each repo, and when they were last read. Local only. */
+  prs?: PullRequestRef[]
 }
 
 /** How much a project session may do without asking. */
@@ -91,10 +92,16 @@ export type SessionMode = "accept_edits" | "auto" | "plan"
 
 export type PrState = "open" | "draft" | "merged" | "closed"
 
+export type PrChecks = "success" | "failure" | "pending"
+
 export interface PullRequestRef {
+  /** `user/repo`. */
+  repo: string
   number: number
   title: string
   state: PrState
+  /** The head commit's check runs and statuses; null when it has none. */
+  checks: PrChecks | null
   url: string | null
   at: number
 }
@@ -372,7 +379,7 @@ export function conversationsOf(profileId: string) {
 
 export async function createConversation(
   profileId: string,
-  fields: Partial<Pick<Conversation, "title" | "projectId" | "repoRoot" | "mode">> = {},
+  fields: Partial<Pick<Conversation, "title" | "projectId" | "mode">> = {},
 ): Promise<Conversation> {
   const now = Date.now()
   const conversation: Conversation = {

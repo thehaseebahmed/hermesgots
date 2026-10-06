@@ -2,18 +2,20 @@ import { answerApproval } from "@/lib/chat"
 import { db, getMessages, type Conversation, type SessionMode } from "@/lib/db"
 import {
   ensureWorkspace,
-  getSessionPr,
+  getSessionPrs,
   getWorkspace,
   HermesError,
   removeWorkspace,
   setWorkspaceMode,
+  type KeptWorktree,
   type LiveRunStatus,
   type SessionWorkspace,
 } from "@/lib/hermes"
 
 /**
- * A project session's workspace: the worktree the Memento plugin made for it on the Hermes host,
- * its permission mode and its pull request. The plugin holds all of it; this keeps a local copy.
+ * A project session's workspace: the worktrees the Memento plugin made for it on the Hermes host
+ * (one per repo of the project), its permission mode and its pull requests. The plugin holds all
+ * of it; this keeps a local copy.
  */
 
 /** Bots whose plugin has no workspace routes (an older plugin), and when they were last asked. */
@@ -46,28 +48,31 @@ async function store(conversationId: string, workspace: SessionWorkspace | null)
   // Not through updateConversation: this is local, so it mustn't move the sync clock.
   await db.conversations.update(conversationId, {
     mode: workspace.mode,
-    worktree: { path: workspace.path, branch: workspace.branch },
+    worktree: {
+      branch: workspace.branch,
+      repos: workspace.repos,
+      instructions: workspace.instructions,
+    },
     planPending: workspace.planPending,
   })
 }
 
 /**
- * Gets the session its worktree (made on the first turn, named after `task`) and points the
- * agent's tools into it, which has to happen before every turn. Throws only while the session has
- * no worktree yet: afterwards the plugin's own hook restores the pointer on the next tool call.
+ * Gets the session its worktrees (made on the first turn, named after `task`) and points the
+ * agent's tools into the primary one, which has to happen before every turn. Throws only while the
+ * session has no worktree yet: afterwards the plugin's own hook restores the pointer on the next
+ * tool call.
  */
 export async function ensureSessionWorkspace(
   conversationId: string,
   task: string,
 ): Promise<SessionWorkspace | undefined> {
   const found = await tracked(conversationId)
-  const repoRoot = found?.conversation.repoRoot
-  if (!found || !repoRoot) return
+  if (!found) return
   const { conversation, profile } = found
   try {
     const workspace = await ensureWorkspace(profile, conversation.hermesSessionId, {
       projectId: conversation.projectId!,
-      repoRoot,
       task,
       mode: conversation.mode,
     })
@@ -78,7 +83,6 @@ export async function ensureSessionWorkspace(
     return {
       ...conversation.worktree,
       projectId: conversation.projectId!,
-      repoRoot,
       mode: conversation.mode ?? "accept_edits",
       planPending: Boolean(conversation.planPending),
     }
@@ -100,21 +104,23 @@ export async function refreshWorkspace(conversationId: string) {
   await store(conversationId, workspace)
 }
 
-/** Reads the worktree branch's pull request from the plugin. */
-export async function refreshPr(conversationId: string, { force = false } = {}) {
+/** Reads the branch's pull request in each of the session's repos from the plugin. */
+export async function refreshPrs(conversationId: string, { force = false } = {}) {
   const found = await tracked(conversationId)
   if (!found?.conversation.worktree || cooling(found.key)) return
   const { conversation, profile } = found
-  if (!force && conversation.pr && Date.now() - conversation.pr.at < PR_MS) return
-  let pr
+  const newest = Math.min(...(conversation.prs ?? []).map((pr) => pr.at))
+  if (!force && conversation.prs?.length && Date.now() - newest < PR_MS) return
+  let prs
   try {
-    pr = await getSessionPr(profile, conversation.hermesSessionId)
+    prs = await getSessionPrs(profile, conversation.hermesSessionId)
   } catch {
     unsupported.set(found.key, Date.now())
     return
   }
   unsupported.delete(found.key)
-  await db.conversations.update(conversationId, { pr: pr ? { ...pr, at: Date.now() } : null })
+  const at = Date.now()
+  await db.conversations.update(conversationId, { prs: prs.map((pr) => ({ ...pr, at })) })
 }
 
 /**
@@ -143,17 +149,18 @@ export async function setSessionMode(conversationId: string, mode: SessionMode) 
   }
 }
 
-/** Asks the plugin to remove the worktree; it keeps one that has uncommitted or unpushed work. */
+/** Asks the plugin to remove the worktrees; it keeps those with uncommitted or unpushed work. */
 export async function removeSessionWorkspace(
   conversationId: string,
-): Promise<{ removed: boolean; reason?: "dirty" | "unpushed" | "missing"; error?: string }> {
+): Promise<{ removed: boolean; kept: KeptWorktree[]; error?: string }> {
   const found = await tracked(conversationId)
-  if (!found?.conversation.worktree) return { removed: false, reason: "missing" }
+  if (!found?.conversation.worktree) return { removed: false, kept: [] }
   try {
     return await removeWorkspace(found.profile, found.conversation.hermesSessionId)
   } catch (error) {
     return {
       removed: false,
+      kept: [],
       error: error instanceof Error ? error.message : "Couldn't reach the plugin.",
     }
   }

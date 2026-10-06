@@ -397,10 +397,12 @@ export function ChatPage() {
       )}
 
       <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
-        {(todos.length > 0 || session?.pr) && (
+        {(todos.length > 0 || session?.prs?.length) && (
           <div className="mx-auto flex w-full max-w-3xl flex-wrap justify-center gap-2 pb-2">
             {todos.length > 0 && <TodosPill items={todos} onClick={() => setTodosOpen(true)} />}
-            {session?.pr && <PrPill pr={session.pr} />}
+            {session?.prs?.map((pr) => (
+              <PrPill key={pr.repo} pr={pr} named={(session.worktree?.repos.length ?? 0) > 1} />
+            ))}
           </div>
         )}
         {session?.resolvedAt ? (
@@ -492,7 +494,7 @@ export function ChatPage() {
             </AlertDialogTitle>
             <AlertDialogDescription>
               {session
-                ? "It's removed from this device, and its worktree from the server unless it has uncommitted or unpushed work. Hermes keeps its own copy of the session."
+                ? "It's removed from this device, and its worktrees from the server unless they have uncommitted or unpushed work. Hermes keeps its own copy of the session."
                 : "It's removed from this device. Hermes keeps its own copy of the session."}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -505,11 +507,11 @@ export function ChatPage() {
                   stopMessage(id)
                   if (session) {
                     const result = await removeSessionWorkspace(id)
-                    if (result.reason === "dirty" || result.reason === "unpushed")
+                    for (const kept of result.kept)
                       toast.info(
-                        `Kept the worktree: it has ${result.reason === "dirty" ? "uncommitted" : "unpushed"} changes.`,
+                        `Kept ${kept.name}: it has ${kept.reason === "dirty" ? "uncommitted" : "unpushed"} changes.`,
                       )
-                    else if (result.error) toast.error(result.error)
+                    if (result.error) toast.error(result.error)
                   }
                   await deleteConversation(id)
                 }
