@@ -113,15 +113,15 @@ needs new ground on both sides:
 
 ## Phase 7 — Composer context
 
-What the `+` button on a project session's composer should add to a message.
-The menu is there with its entries disabled.
+What the `+` button on the composer (bot chats and project sessions) adds to a
+message. It opens an **Add context** sheet with Camera, Photos and Files.
 
 - [ ] Mention files from the project folder (a plugin route lists the
       worktree's files; picked paths go into the message as references the
       agent can read).
-- [ ] A photo from the camera.
-- [ ] Images from the gallery.
-- [ ] Documents from the device.
+- [x] A photo from the camera.
+- [x] Images from the gallery.
+- [x] Documents from the device.
 
 ## Deferred / needs a decision before scheduling
 
