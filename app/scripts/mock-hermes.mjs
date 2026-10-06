@@ -28,7 +28,7 @@
 // (GET …/sessions/{id}/prs) appear after two turns: "merge", "close" or "draft" in a turn sets their
 // state and "break" fails their checks. GET /api/plugins/memento/runs/live lists the sessions with
 // a run in flight. The agent asks the user questions with Hermes's clarify tool, which the plugin
-// serves on runs: say "ask" for one (plan mode asks before planning), the run carries
+// serves on runs: say "ask" for one, or "ask five" for five (plan mode asks before planning), the run carries
 // `clarify.request` and waits, and POST /api/plugins/memento/runs/{id}/clarify answers it.
 //
 //   pnpm mock            # then point Settings at http://localhost:8642/v1
@@ -436,7 +436,17 @@ async function playTurn(req, body, last, out) {
       "- `app/debug.log.*` — 0.7 GB, left over from the verbose-logging experiment\n\n"
   )
 
-  if (/\bask\b/i.test(last)) {
+  if (/ask five/i.test(last)) {
+    const { answers, outcome } = await ask([
+      { question: "Which environment should this run against?", choices: ["staging", "production"] },
+      { question: "Which services are in scope?", choices: ["api", "worker", "web", "cron"], multi_select: true },
+      { question: "What should the change be called?" },
+      { question: "How should existing data be handled?", choices: ["Migrate it in place", "Leave it and write new rows only", "Back it up first, then migrate"] },
+      { question: "Who should review it?", choices: ["Platform", "Product"], multi_select: true },
+    ])
+    const given = Object.values(answers).filter(Boolean).length
+    await say(outcome === "submitted" ? `\nGot ${given} of 5 answers.\n` : "\nNo answers came, so I'll use the defaults.\n")
+  } else if (/\bask\b/i.test(last)) {
     const { answers, outcome } = await ask([
       { question: "Which logs should I count as old?", choices: ["Older than 90 days", "Older than 30 days"] },
     ])

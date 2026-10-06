@@ -462,7 +462,7 @@ export function ChatPage() {
           </div>
         ) : awaitingClarify ? (
           <div className="mx-auto w-full max-w-3xl">
-            <QuestionCard message={awaitingClarify} />
+            <QuestionCard key={awaitingClarify.clarify!.clarifyId} message={awaitingClarify} />
           </div>
         ) : session?.planPending && session.mode === "plan" && !busy ? (
           <div className="mx-auto w-full max-w-3xl">

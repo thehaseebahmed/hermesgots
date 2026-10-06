@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { CheckIcon, MessageCircleQuestionIcon } from "lucide-react"
 import { toast } from "sonner"
 
@@ -155,10 +155,51 @@ function Question({
   )
 }
 
-/** The agent's questions, in place of the composer until answered. The answers then show as a card in the thread (`ClarifyCard`). */
+const motion = () =>
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"
+
+/** One step marker: filled once its question has an answer, long while it's the one showing. */
+function Dot({
+  index,
+  current,
+  answered,
+  onClick,
+}: {
+  index: number
+  current: boolean
+  answered: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={`Question ${index + 1}${answered ? ", answered" : ""}`}
+      aria-current={current ? "step" : undefined}
+      onClick={onClick}
+      className="flex size-11 items-center justify-center rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+    >
+      <span
+        className={cn(
+          "h-2.5 rounded-full border border-primary transition-[width,background-color] motion-reduce:transition-none",
+          current ? "w-6" : "w-2.5",
+          answered ? "bg-primary" : "bg-transparent",
+        )}
+      />
+    </button>
+  )
+}
+
+/**
+ * The agent's questions, in place of the composer until answered; the answers then show as a card
+ * in the thread (`ClarifyCard`). One question is a plain form. Two or more are pages of one card
+ * (swipe, tap a dot, or Back and Next), so five questions never outgrow the screen.
+ */
 export function QuestionCard({ message }: { message: Message }) {
   const { questions } = message.clarify!
+  const paged = questions.length > 1
   const [pending, setPending] = useState(false)
+  const [page, setPage] = useState(0)
+  const row = useRef<HTMLDivElement>(null)
   const [picked, setPicked] = useState<Record<string, Picked>>(() =>
     Object.fromEntries(questions.map((q) => [q.id, { choices: [], other: "", usingOther: false }])),
   )
@@ -166,6 +207,31 @@ export function QuestionCard({ message }: { message: Message }) {
     questions.map((q) => [q.id, answerOf(q, picked[q.id])]),
   )
   const anything = Object.values(answers).some(Boolean)
+  const last = page === questions.length - 1
+
+  // The row scrolls (a swipe, or the buttons below), so the page is read back from where it rests.
+  useEffect(() => {
+    const el = row.current
+    if (!el) return
+    let frame = 0
+    const read = () => {
+      frame = 0
+      if (el.clientWidth) setPage(Math.round(el.scrollLeft / el.clientWidth))
+    }
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(read)
+    }
+    el.addEventListener("scroll", onScroll, { passive: true })
+    return () => {
+      el.removeEventListener("scroll", onScroll)
+      cancelAnimationFrame(frame)
+    }
+  }, [paged])
+
+  const goTo = (index: number) => {
+    const el = row.current
+    if (el) el.scrollTo({ left: index * el.clientWidth, behavior: motion() })
+  }
 
   const send = async () => {
     setPending(true)
@@ -178,6 +244,8 @@ export function QuestionCard({ message }: { message: Message }) {
     }
   }
 
+  const onChange = (id: string) => (next: Picked) => setPicked((all) => ({ ...all, [id]: next }))
+
   return (
     <Card
       size="sm"
@@ -186,29 +254,96 @@ export function QuestionCard({ message }: { message: Message }) {
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base text-primary">
           <MessageCircleQuestionIcon className="size-5" />
-          {questions.length > 1 ? "Questions" : "Question"}
+          {paged ? "Questions" : "Question"}
+          {paged && (
+            <span
+              aria-live="polite"
+              className="ml-auto text-sm font-normal text-muted-foreground tabular-nums"
+            >
+              {page + 1} of {questions.length}
+            </span>
+          )}
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
-        {questions.map((question) => (
+      {paged ? (
+        <CardContent className="space-y-1">
+          <div className="-mt-2 flex justify-center">
+            {questions.map((question, i) => (
+              <Dot
+                key={question.id}
+                index={i}
+                current={i === page}
+                answered={Boolean(answers[question.id])}
+                onClick={() => goTo(i)}
+              />
+            ))}
+          </div>
+          {/* The row is as tall as its tallest page, so the card holds one height while paging. */}
+          <div
+            ref={row}
+            className="-m-1 flex snap-x snap-mandatory [scrollbar-width:none] overflow-x-auto overscroll-x-contain [&::-webkit-scrollbar]:hidden"
+          >
+            {questions.map((question, i) => (
+              <div
+                key={question.id}
+                role="group"
+                aria-roledescription="slide"
+                aria-label={`Question ${i + 1} of ${questions.length}`}
+                inert={i !== page}
+                className="max-h-[60dvh] w-full shrink-0 snap-center snap-always overflow-y-auto p-1"
+              >
+                <Question
+                  question={question}
+                  picked={picked[question.id]}
+                  disabled={pending}
+                  onChange={onChange(question.id)}
+                />
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      ) : (
+        <CardContent>
           <Question
-            key={question.id}
-            question={question}
-            picked={picked[question.id]}
+            question={questions[0]}
+            picked={picked[questions[0].id]}
             disabled={pending}
-            onChange={(next) => setPicked((all) => ({ ...all, [question.id]: next }))}
+            onChange={onChange(questions[0].id)}
           />
-        ))}
-      </CardContent>
-      <CardFooter>
-        <Button
-          size="lg"
-          className="h-11 w-full sm:w-auto sm:min-w-40"
-          disabled={pending || !anything}
-          onClick={send}
-        >
-          Send
-        </Button>
+        </CardContent>
+      )}
+      <CardFooter className="gap-2">
+        {paged && page > 0 && (
+          <Button
+            type="button"
+            variant="outline"
+            size="lg"
+            className="h-11 flex-1 sm:min-w-28 sm:flex-none"
+            disabled={pending}
+            onClick={() => goTo(page - 1)}
+          >
+            Back
+          </Button>
+        )}
+        {paged && !last ? (
+          <Button
+            type="button"
+            size="lg"
+            className="h-11 flex-1 sm:min-w-40 sm:flex-none"
+            onClick={() => goTo(page + 1)}
+          >
+            Next
+          </Button>
+        ) : (
+          <Button
+            size="lg"
+            className="h-11 flex-1 sm:min-w-40 sm:flex-none"
+            disabled={pending || !anything}
+            onClick={send}
+          >
+            Send
+          </Button>
+        )}
       </CardFooter>
     </Card>
   )
