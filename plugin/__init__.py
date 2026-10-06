@@ -4,7 +4,8 @@ Adds routes to the API server, so the Memento app (which only talks to the API s
 can read cron run history from Hermes's execution ledger instead of piecing it together on each
 device, keep its chat list on the server (``chats.py``), report each chat's context use
 (``context.py``), list and create Hermes Projects (``projects.py``) with GitHub repos cloned into
-them (``github.py``) and label its chats as Memento's. The dashboard half lives in ``dashboard/``.
+them (``github.py``), show a project's checkpoints (``checkpoints.py``) and label its chats as
+Memento's. The dashboard half lives in ``dashboard/``.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-from . import chats, context, github, projects
+from . import chats, checkpoints, context, github, projects
 from .store import db_path
 
 logger = logging.getLogger(__name__)
@@ -112,7 +113,15 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             {
                 "name": "memento",
                 "version": VERSION,
-                "features": ["cron_runs", "session_label", "chats", "context", "projects", "github"],
+                "features": [
+                    "cron_runs",
+                    "session_label",
+                    "chats",
+                    "context",
+                    "projects",
+                    "github",
+                    "checkpoints",
+                ],
             }
         )
 
@@ -265,12 +274,47 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), 400)
         return web.json_response({"object": "memento.project", **created})
 
+    async def list_checkpoints(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            result = await asyncio.to_thread(
+                checkpoints.list_for_project, hermes_home(), request.match_info["project_id"]
+            )
+        except ImportError:
+            return _error(web, "This Hermes version has no Projects.", 501)
+        except checkpoints.CheckpointError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "memento.checkpoints", **result})
+
+    async def checkpoint_diff(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            result = await asyncio.to_thread(
+                checkpoints.diff,
+                hermes_home(),
+                request.match_info["project_id"],
+                request.match_info["checkpoint_id"],
+            )
+        except ImportError:
+            return _error(web, "This Hermes version has no Projects.", 501)
+        except checkpoints.CheckpointError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "memento.checkpoint.diff", **result})
+
     app.router.add_get(f"{PREFIX}/info", info)
     app.router.add_get(f"{PREFIX}/chats", list_chats)
     app.router.add_post(f"{PREFIX}/chats", merge_chats)
     app.router.add_get(f"{PREFIX}/cron/runs", cron_runs)
     app.router.add_get(f"{PREFIX}/projects", list_projects)
     app.router.add_post(f"{PREFIX}/projects", create_project)
+    app.router.add_get(f"{PREFIX}/projects/{{project_id}}/checkpoints", list_checkpoints)
+    app.router.add_get(
+        f"{PREFIX}/projects/{{project_id}}/checkpoints/{{checkpoint_id}}/diff", checkpoint_diff
+    )
     app.router.add_get(f"{PREFIX}/github", github_status)
     app.router.add_get(f"{PREFIX}/github/repos", github_repos)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/label", label_session)

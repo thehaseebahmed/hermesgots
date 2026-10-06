@@ -1,6 +1,6 @@
 # Memento plugin for Hermes
 
-The [Memento](../README.md) app uses this plugin to keep each bot's chat list on its Hermes server, to show how full each chat's context is, to show routine (cron) history, to list Hermes Projects and create them with their GitHub repos cloned in, and to label its chats in the Hermes dashboard. It reads Hermes's cron execution ledger (`cron/executions.db`), so every device sees the same runs, including the ones that happened while no device was looking.
+The [Memento](../README.md) app uses this plugin to keep each bot's chat list on its Hermes server, to show how full each chat's context is, to show routine (cron) history, to list Hermes Projects and create them with their GitHub repos cloned in, to show what changed after each of a project's checkpoints, and to label its chats in the Hermes dashboard. It reads Hermes's cron execution ledger (`cron/executions.db`), so every device sees the same runs, including the ones that happened while no device was looking.
 
 It has two parts:
 
@@ -12,6 +12,7 @@ It has two parts:
   - `GET /api/plugins/memento/projects` returns the profile's Hermes Projects (`hermes project create`) with their folders, whether each folder is a git repo, and when a session last ran in one of them. Memento's Code screen lists them.
   - `GET /api/plugins/memento/github` says whether the server has a GitHub account (`GITHUB_TOKEN` or `GH_TOKEN` in the environment or `$HERMES_HOME/.env`, else the gh CLI's login), and `GET /api/plugins/memento/github/repos` lists its repos. The token stays on the server.
   - `POST /api/plugins/memento/projects` with `{ "name": …, "description": …, "repos": ["owner/name", …] }` creates a project in `$HERMES_HOME/projects/<slug>/` and clones each repo from GitHub into it, so a repo used by two projects has a clone in each. It needs `git` on the server.
+  - `GET /api/plugins/memento/projects/{id}/checkpoints` lists the checkpoints Hermes took in the project's folders (with `checkpoints.enabled` in its config), newest first, with how many files and lines changed after each. `GET /api/plugins/memento/projects/{id}/checkpoints/{hash}/diff` returns those changes file by file as unified diffs: up to the next checkpoint, or to the files as they are now. Both read Hermes's checkpoint store without changing it, and need `git` on the server.
   - `POST /api/plugins/memento/sessions/{id}/label` marks a Memento chat's session with the `memento` source, so the dashboard's Sessions page labels it **Memento**. It only relabels sessions the API server created.
 - **A dashboard tab** (`dashboard/`). **Memento** in `hermes dashboard` shows the plugin's version, whether it's enabled, how many runs the ledger holds and how many chats it stores.
 
