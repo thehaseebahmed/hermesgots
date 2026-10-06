@@ -4,7 +4,6 @@ import { ArrowLeftIcon, CheckIcon, CircleAlertIcon, PlusIcon } from "lucide-reac
 import { Link, useLocation, useNavigate, useParams } from "react-router"
 
 import { ChatHeader } from "@/components/chat/chat-header"
-import { NewSessionPopup } from "@/components/new-session"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -60,7 +59,6 @@ export function ProjectPage() {
   const passed = (useLocation().state as { project?: HermesProject } | null)?.project
   const profile = useLiveQuery(() => db.profiles.get(profileId), [profileId])
   const [fetched, setFetched] = useState<HermesProject>()
-  const [picking, setPicking] = useState(false)
   const project = passed?.id === projectId ? passed : fetched
   const live = useLiveRuns(profile)
 
@@ -106,16 +104,12 @@ export function ProjectPage() {
     return signals
   }, [ids.join("\n")])
 
-  const repos = project?.folders.filter((folder) => folder.git) ?? []
-  const canStart = Boolean(profile?.apiKey && project && repos.length > 0)
+  // A session spans every repo of the project; without one there's nowhere for it to work.
+  const canStart = Boolean(profile?.apiKey && project?.folders.some((folder) => folder.git))
 
-  const start = async (repoRoot: string) => {
+  const start = async () => {
     if (!profile) return
-    const conversation = await createConversation(profile.id, {
-      title: "New session",
-      projectId,
-      repoRoot,
-    })
+    const conversation = await createConversation(profile.id, { title: "New session", projectId })
     navigate(`/c/${conversation.id}`)
   }
 
@@ -186,9 +180,7 @@ export function ProjectPage() {
                 <Button
                   size="lg"
                   className="h-12 rounded-full px-5 shadow-lg"
-                  onClick={() =>
-                    repos.length === 1 ? void start(repos[0].path) : setPicking(true)
-                  }
+                  onClick={() => void start()}
                 >
                   <PlusIcon /> New session
                 </Button>
@@ -199,17 +191,6 @@ export function ProjectPage() {
         <TabsContent value="library" />
         <TabsContent value="prs" />
       </Tabs>
-      {project && (
-        <NewSessionPopup
-          open={picking}
-          onOpenChange={setPicking}
-          project={project}
-          onPick={(repoRoot) => {
-            setPicking(false)
-            void start(repoRoot)
-          }}
-        />
-      )}
     </div>
   )
 }
@@ -220,6 +201,20 @@ function formatWhen(at: number, now: number) {
 }
 
 const PR_LABELS = { open: "Open", draft: "Draft", merged: "Merged", closed: "Closed" }
+
+/** `user/repo #27 · Open`, naming the repo when the session spans more than one. */
+function prLine(session: Conversation) {
+  const prs = session.prs ?? []
+  if (!prs.length) return undefined
+  const named = (session.worktree?.repos.length ?? 0) > 1
+  return prs
+    .map((pr) => {
+      const state =
+        pr.checks === "failure" && pr.state !== "merged" ? "Checks failing" : PR_LABELS[pr.state]
+      return `${named ? `${pr.repo} ` : "PR "}#${pr.number} · ${state}`
+    })
+    .join(", ")
+}
 
 function StateIcon({ state }: { state: SessionState }) {
   if (state === "working") return <Spinner className="size-4" />
@@ -237,9 +232,7 @@ function SessionItem({
   state: SessionState
   now: number
 }) {
-  const line2 = session.pr
-    ? `PR #${session.pr.number} · ${PR_LABELS[session.pr.state]}`
-    : session.worktree?.branch
+  const line2 = prLine(session) ?? session.worktree?.branch
   return (
     <Link
       to={`/c/${session.id}`}

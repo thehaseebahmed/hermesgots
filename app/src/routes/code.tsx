@@ -298,8 +298,11 @@ function PluginNotice({ names: bots, onDismiss }: { names: string[]; onDismiss: 
   )
 }
 
+/** A repo as `user/repo`; any other folder by its label or name, never its path. */
 function folderName(folder: HermesProjectFolder) {
-  return folder.label ?? folder.path.split(/[\\/]/).filter(Boolean).at(-1) ?? folder.path
+  return (
+    folder.repo ?? folder.label ?? folder.path.split(/[\\/]/).filter(Boolean).at(-1) ?? folder.path
+  )
 }
 
 /** The description, or else the project's git repos (its folders when none is a repo). */
