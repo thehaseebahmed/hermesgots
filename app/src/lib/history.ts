@@ -30,6 +30,7 @@ const PRIMARY_ARGS: Record<string, string> = {
   image_generate: "prompt",
   text_to_speech: "text",
   vision_analyze: "question",
+  clarify: "question",
   skill_view: "name",
   skill_manage: "name",
   skills_list: "category",

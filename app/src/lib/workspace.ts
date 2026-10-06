@@ -183,3 +183,17 @@ export function sessionState(
   if (local?.streaming || live === "running") return "working"
   return "idle"
 }
+
+const PLAN_GO_AHEAD = "Go ahead with the plan"
+
+/** What approving a plan sends: the saved plan's checkpoints, each committed, or just a go-ahead. */
+export function planApprovalMessage(planFile: string | undefined) {
+  if (!planFile) return `${PLAN_GO_AHEAD}.`
+  return (
+    `${PLAN_GO_AHEAD} in \`${planFile}\`. Work through its checkpoints in order and commit ` +
+    "each one on this branch with the commit message it names. Don't push."
+  )
+}
+
+/** Matched on its text so a copy loaded from the transcript, on any device, reads the same. */
+export const isPlanApproval = (text: string) => text.startsWith(PLAN_GO_AHEAD)

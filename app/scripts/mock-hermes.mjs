@@ -19,7 +19,7 @@
 // GET /api/plugins/memento/sessions/{id}/todos reads back from a keyed session's transcript.
 // Turns also run on POST /v1/runs, whose events replay from GET /v1/runs/{id}/events?last_seq=N and
 // which keep going when the client drops, unlike a chat completion. Say "long" for a slow reply, and
-// "fail" for a tool call that fails.
+// "fail" for a tool call that fails, and "ask" for a clarify question.
 // Project sessions get a worktree in each of the project's repos on
 // POST /api/plugins/memento/sessions/{id}/workspace (GET reads it back, POST …/mode changes the
 // permission mode, POST …/workspace/remove removes the trees unless a turn mentioned "commit"). In
@@ -401,7 +401,18 @@ async function playTurn(req, body, last, out) {
       "- `app/debug.log.*` — 0.7 GB, left over from the verbose-logging experiment\n\n"
   )
 
-  if (/fail/i.test(last)) {
+  if (/\bask\b/i.test(last)) {
+    const askId = `call_${randomUUID().slice(0, 8)}`
+    const question = "Which logs should I count as old?"
+    out.tool({ tool: "clarify", emoji: "❓", label: question, toolCallId: askId, status: "running" })
+    await sleep(1500)
+    // Not checked against Hermes's clarify tool; the app takes plain text or a JSON answer field.
+    const answer = JSON.stringify({ question, user_response: "Anything older than 90 days" })
+    out.tool({ tool: "clarify", toolCallId: askId, status: "completed", result: answer })
+    record(req, { role: "assistant", content: null, tool_calls: [{ id: askId, type: "function", function: { name: "clarify", arguments: JSON.stringify({ question, choices: ["Older than 30 days", "Older than 90 days"] }) } }] })
+    record(req, { role: "tool", tool_call_id: askId, tool_name: "clarify", content: answer })
+    await say("Got it, I'll count anything older than 90 days.")
+  } else if (/fail/i.test(last)) {
     const failId = `call_${randomUUID().slice(0, 8)}`
     const command = "journalctl --vacuum-size=500M"
     out.tool({ tool: "terminal", emoji: "💻", label: command, toolCallId: failId, status: "running" })
