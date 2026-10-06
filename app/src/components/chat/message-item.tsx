@@ -5,7 +5,7 @@ import { ApprovalCard } from "@/components/chat/approval-card"
 import { AttachmentTile } from "@/components/chat/attachments"
 import { Markdown } from "@/components/chat/markdown"
 import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
-import { ToolCard } from "@/components/chat/tool-card"
+import { ToolGroup } from "@/components/chat/tool-group"
 import { Bot } from "@/components/bot"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Button } from "@/components/ui/button"
@@ -282,10 +282,8 @@ function AssistantRow({
           part.kind === "clarify" ? (
             <ClarifyCard key={part.tool.toolCallId} tool={part.tool} />
           ) : part.kind === "tools" ? (
-            <div key={part.tools[0].toolCallId} className="flex w-full max-w-xl flex-col">
-              {part.tools.map((tool) => (
-                <ToolCard key={tool.toolCallId} tool={tool} />
-              ))}
+            <div key={part.tools[0].toolCallId} className="w-full max-w-xl">
+              <ToolGroup tools={part.tools} />
             </div>
           ) : plain ? (
             <Markdown key={part.at} plain className="px-1 text-[15px] leading-relaxed">
