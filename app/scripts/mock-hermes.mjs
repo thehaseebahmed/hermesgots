@@ -41,8 +41,8 @@ const PORT = Number(process.env.PORT ?? 8642)
 const pendingApprovals = new Map()
 const pendingClarifies = new Map()
 const chatTitles = new Map()
-/** Sessions the Memento plugin has labelled, which then report `source: "memento"`. */
-const labelledSessions = new Set()
+/** Sessions the Memento plugin has labelled, which then report `source: "memento"` (`"memento-code"` for a project session). */
+const labelledSessions = new Map()
 /** The plugin's chat list: id -> { at, deleted?, value? }. */
 const pluginChats = new Map()
 /** What the plugin's hook saw last per session: one call's prompt, not the turn's sum. */
@@ -732,7 +732,7 @@ http
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/info") {
       return json(res, 200, {
         name: "memento",
-        version: "0.11.0",
+        version: "0.11.1",
         features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "github", "sessions", "runs", "prs", "plans", "clarify"],
         clarify: true,
       })
@@ -829,8 +829,9 @@ http
     if (PLUGIN && !profile && req.method === "POST" && sessionLabel) {
       const id = decodeURIComponent(sessionLabel[1])
       if (!chatTitles.has(id)) return json(res, 404, { error: { message: "Session not found" } })
-      labelledSessions.add(id)
-      return json(res, 200, { id, source: "memento" })
+      const source = projectSessions.has(id) ? "memento-code" : "memento"
+      labelledSessions.set(id, source)
+      return json(res, 200, { id, source })
     }
     const sessionContext = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/context$/.exec(url.pathname)
     if (PLUGIN && !profile && req.method === "GET" && sessionContext) {
@@ -952,7 +953,7 @@ http
       if (!chatTitles.has(id)) return json(res, 404, { error: { message: "Session not found" } })
       return json(res, 200, { object: "hermes.session", session: {
           id,
-          source: labelledSessions.has(id) ? "memento" : "api_server",
+          source: labelledSessions.get(id) ?? "api_server",
           title: chatTitles.get(id),
         },
       })

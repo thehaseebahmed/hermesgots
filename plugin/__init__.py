@@ -161,10 +161,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         db = await open_db() if callable(open_db) else None
         if db is None or not callable(getattr(db, "_execute_write", None)):
             return _error(web, "Session database unavailable", 503)
-        labelled = await asyncio.to_thread(sessions.label, db, session_id)
-        if not labelled:
+        # On the loop thread, like store_path: the profile scope isn't visible inside to_thread.
+        code = sessions.is_code_session(session_id)
+        source = await asyncio.to_thread(sessions.label, db, session_id, code)
+        if not source:
             return _error(web, "Session not found", 404)
-        return web.json_response({"id": session_id, "source": sessions.SESSION_SOURCE})
+        return web.json_response({"id": session_id, "source": source})
 
     def store_path() -> Path:
         # On the loop thread: the API server scopes get_hermes_home() to the request's profile, and
