@@ -5,7 +5,8 @@ can read cron run history from Hermes's execution ledger instead of piecing it t
 device, keep its chat list on the server (``chats.py``), report each chat's context use
 (``context.py``) and the agent's todo list (``todos.py``), list and create Hermes Projects (``projects.py``) with GitHub repos cloned into
 them (``github.py``), run project sessions in their own worktrees with a permission mode and save their plans
-(``sessions.py``) and label its chats as Memento's. The dashboard half lives in ``dashboard/``.
+(``sessions.py``), show those sessions' checkpoints (``checkpoints.py``) and label its chats as
+Memento's. The dashboard half lives in ``dashboard/``.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-from . import chats, cleanup, context, github, projects, sessions, todos
+from . import checkpoints, chats, cleanup, context, github, projects, sessions, todos
 from .store import db_path
 
 logger = logging.getLogger(__name__)
@@ -120,6 +121,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "runs",
                     "prs",
                     "plans",
+                    "checkpoints",
                 ],
             }
         )
@@ -451,6 +453,37 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         prs = await asyncio.to_thread(lookup) if record else []
         return web.json_response({"object": "memento.prs", "prs": prs})
 
+    async def session_checkpoints(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        path, home = store_path(), hermes_home()
+        record = await asyncio.to_thread(sessions.record_for, path, home, request.match_info["session_id"])
+        try:
+            result = await asyncio.to_thread(checkpoints.read, home, record)
+        except ImportError:
+            return _error(web, "This Hermes version has no checkpoints.", 501)
+        # Never a 404 for an unknown session: the app reads a 404 as a missing plugin.
+        return web.json_response({"object": "memento.checkpoints", **result})
+
+    async def checkpoint_diff(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        path, home = store_path(), hermes_home()
+        record = await asyncio.to_thread(sessions.record_for, path, home, request.match_info["session_id"])
+        try:
+            result = await asyncio.to_thread(
+                checkpoints.diff, home, record, request.query.get("repo"), request.match_info["commit"]
+            )
+        except ImportError:
+            return _error(web, "This Hermes version has no checkpoints.", 501)
+        except RuntimeError as error:
+            return _error(web, str(error), 502)
+        if result is None:
+            return _error(web, "This session has no such checkpoint.", 400)
+        return web.json_response({"object": "memento.checkpoint.diff", **result})
+
     async def live_runs(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -475,6 +508,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/workspace/remove", remove_workspace)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/mode", post_mode)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/prs", session_pr)
+    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/checkpoints", session_checkpoints)
+    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/checkpoints/{{commit}}/diff", checkpoint_diff)
     app.router.add_get(f"{PREFIX}/runs/live", live_runs)
     logger.info("memento: serving %s on the API server", PREFIX)
 
