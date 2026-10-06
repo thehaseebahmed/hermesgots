@@ -93,16 +93,47 @@ function describeCall(name: string, args: unknown) {
     )
     const inner = entries.map((entry) => {
       const innerName = typeof entry.name === "string" && entry.name ? entry.name : "tool"
-      return { name: innerName, label: argsLabel(innerName, parseArgs(entry.arguments)) }
+      const innerArgs = parseArgs(entry.arguments)
+      return { name: innerName, label: argsLabel(innerName, innerArgs), args: innerArgs }
     })
     if (inner.length === 1) return inner[0]
     if (inner.length > 1)
       return {
         name,
         label: inner.map((c) => (c.label ? `${c.name}: ${c.label}` : c.name)).join("\n"),
+        args: undefined,
       }
   }
-  return { name, label: argsLabel(name, args) }
+  return { name, label: argsLabel(name, args), args }
+}
+
+const countLines = (text: string) =>
+  text ? text.split("\n").length - (text.endsWith("\n") ? 1 : 0) : 0
+
+/** A new file's size, from the call's own content: the result only says how many bytes. */
+function writeStats(name: string, args: unknown) {
+  if (name !== "write_file" || !args || typeof args !== "object") return undefined
+  const content = (args as { content?: unknown }).content
+  return typeof content === "string" ? { added: countLines(content), removed: 0 } : undefined
+}
+
+/** A patch's size and whether it made a file, from the result's unified diff (before it is clipped). */
+export function patchStats(result: string) {
+  let parsed: { diff?: unknown; files_created?: unknown } | undefined
+  try {
+    parsed = JSON.parse(result)
+  } catch {
+    return undefined
+  }
+  if (!parsed || typeof parsed.diff !== "string") return undefined
+  let added = 0
+  let removed = 0
+  for (const line of parsed.diff.split("\n")) {
+    if (line.startsWith("+") && !line.startsWith("+++")) added++
+    else if (line.startsWith("-") && !line.startsWith("---")) removed++
+  }
+  const created = Array.isArray(parsed.files_created) && parsed.files_created.length > 0
+  return { added, removed, ...(created ? { created } : {}) }
 }
 
 function toolCalls(row: SessionMessage) {
@@ -116,11 +147,16 @@ function toolCalls(row: SessionMessage) {
   }
   return Array.isArray(calls)
     ? calls.map((call, i) => {
-        const { name, label } = describeCall(
+        const { name, label, args } = describeCall(
           call?.function?.name ?? "tool",
           parseArgs(call?.function?.arguments),
         )
-        return { id: call?.id ?? `${row.id}-${i}`, name, label: clip(label) || name }
+        return {
+          id: call?.id ?? `${row.id}-${i}`,
+          name,
+          label: clip(label) || name,
+          stats: writeStats(name, args),
+        }
       })
     : []
 }
@@ -173,7 +209,10 @@ export function toMessages(
       if (tool) {
         tool.status = "completed"
         tool.endedAt = createdAt
-        if (row.content) tool.result = clip(row.content)
+        if (row.content) {
+          tool.result = clip(row.content)
+          if (tool.tool === "patch") Object.assign(tool, patchStats(row.content))
+        }
       }
       continue
     }
@@ -194,6 +233,8 @@ export function toMessages(
         status: "running",
         startedAt: createdAt,
         contentOffset: reply.content.length,
+        ...call.stats,
+        ...(call.stats ? { created: true } : {}),
       }
       reply.tools = [...(reply.tools ?? []), event]
     }
@@ -207,6 +248,21 @@ export function toMessages(
   return messages.filter(
     (m) => m.role === "user" || m.content || m.tools?.length || m.status === "error",
   )
+}
+
+/** Streamed calls know their edits' size only from the transcript; matched by tool and path, in order. */
+function withEditStats(local: ToolEvent[], fromHermes: ToolEvent[]) {
+  const spare = fromHermes.filter((t) => t.added !== undefined)
+  let changed = false
+  const tools = local.map((tool) => {
+    if (tool.added !== undefined) return tool
+    const i = spare.findIndex((t) => t.tool === tool.tool && t.label === tool.label)
+    if (i < 0) return tool
+    const [{ added, removed, created }] = spare.splice(i, 1)
+    changed = true
+    return { ...tool, added, removed, created }
+  })
+  return changed ? tools : undefined
 }
 
 /**
@@ -387,6 +443,10 @@ async function reconcile(conversationId: string) {
               tools: reply.tools,
               reasoning: local.reasoning ?? reply.reasoning,
             })
+          else if (local?.role === "assistant" && local.tools?.length && reply?.tools?.length) {
+            const tools = withEditStats(local.tools, reply.tools)
+            if (tools) writes.push({ ...local, tools })
+          }
           continue
         }
         user.createdAt = Math.max(user.createdAt, floor)

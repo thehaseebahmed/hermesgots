@@ -34,7 +34,7 @@ import {
 } from "@/lib/hermes"
 import { attachmentsText, wireContent } from "@/lib/attachments"
 import { refreshContext } from "@/lib/context"
-import { liveTurn } from "@/lib/history"
+import { liveTurn, patchStats } from "@/lib/history"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { randomId } from "@/lib/utils"
 import { ensureSessionWorkspace, refreshPrs, refreshWorkspace } from "@/lib/workspace"
@@ -235,6 +235,9 @@ function streamHandlers(turn: Turn): StreamHandlers {
         // A question's full result is written when it's answered; the stream's preview is cut short.
         if (event.result && !(existing.tool === "clarify" && existing.result))
           existing.result = event.result
+        // Only a patch whose whole result fit in the preview can be counted here.
+        if (existing.tool === "patch" && event.status === "completed" && event.result)
+          Object.assign(existing, patchStats(event.result))
       } else {
         // A completion with no start to match still happened; it gets its own card.
         draft.tools.push({

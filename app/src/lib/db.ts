@@ -136,6 +136,11 @@ export interface ToolEvent {
   contentOffset?: number
   /** What the call returned (a preview while streaming). */
   result?: string
+  /** Lines a file edit added and removed, counted from the transcript (the stream's preview is cut short). */
+  added?: number
+  removed?: number
+  /** The call made a new file. */
+  created?: boolean
 }
 
 export type ApprovalChoice = "once" | "session" | "always" | "deny"

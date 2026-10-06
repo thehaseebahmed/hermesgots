@@ -483,6 +483,37 @@ async function playTurn(req, body, last, out) {
   record(req, { role: "tool", tool_call_id: readId, tool_name: "read_file", content: readOutput })
   await writeTodos(2)
 
+  // A search, a patch and a new file, so the group's mixed title and diff badges show up.
+  const searchId = `call_${randomUUID().slice(0, 8)}`
+  out.tool({ tool: "search_files", emoji: "🔎", label: "def rotate", toolCallId: searchId, status: "running" })
+  await sleep(300)
+  const searchOutput = JSON.stringify({ matches: [{ path: "/etc/logrotate.d/rotate.py", line: 4 }] })
+  out.tool({ tool: "search_files", toolCallId: searchId, status: "completed", result: searchOutput })
+  record(req, { role: "assistant", content: null, tool_calls: [{ id: searchId, type: "function", function: { name: "search_files", arguments: JSON.stringify({ pattern: "def rotate" }) } }] })
+  record(req, { role: "tool", tool_call_id: searchId, tool_name: "search_files", content: searchOutput })
+
+  const patchId = `call_${randomUUID().slice(0, 8)}`
+  out.tool({ tool: "patch", emoji: "🔧", label: readPath, toolCallId: patchId, status: "running" })
+  await sleep(300)
+  const patchOutput = JSON.stringify({
+    success: true,
+    diff: `--- a${readPath}\n+++ b${readPath}\n@@ -4,2 +4,3 @@\n-def rotate(path: Path, keep: int = 7) -> None:\n-    # Compress yesterday's log and drop the oldest.\n+def rotate(path: Path, keep: int = 14) -> None:\n+    # Compress yesterday's log and keep two weeks.\n+    keep = max(keep, 1)\n`,
+    files_modified: [readPath],
+  })
+  out.tool({ tool: "patch", toolCallId: patchId, status: "completed", result: patchOutput })
+  record(req, { role: "assistant", content: null, tool_calls: [{ id: patchId, type: "function", function: { name: "patch", arguments: JSON.stringify({ mode: "replace", path: readPath, old_string: "keep: int = 7", new_string: "keep: int = 14" }) } }] })
+  record(req, { role: "tool", tool_call_id: patchId, tool_name: "patch", content: patchOutput })
+
+  const writeId = `call_${randomUUID().slice(0, 8)}`
+  const notesPath = "/etc/logrotate.d/NOTES-on-rotating-and-pruning-logs.md"
+  const notes = Array.from({ length: 38 }, (_, n) => `- note ${n + 1}`).join("\n") + "\n"
+  out.tool({ tool: "write_file", emoji: "✍️", label: notesPath, toolCallId: writeId, status: "running" })
+  await sleep(300)
+  const writeOutput = JSON.stringify({ bytes_written: notes.length, dirs_created: false })
+  out.tool({ tool: "write_file", toolCallId: writeId, status: "completed", result: writeOutput })
+  record(req, { role: "assistant", content: null, tool_calls: [{ id: writeId, type: "function", function: { name: "write_file", arguments: JSON.stringify({ path: notesPath, content: notes }) } }] })
+  record(req, { role: "tool", tool_call_id: writeId, tool_name: "write_file", content: writeOutput })
+
   await say(
     "Here's where the space is going under `/var/log`:\n\n" +
       "- `nginx/access.log.*` — **2.1 GB** across 34 files\n" +
