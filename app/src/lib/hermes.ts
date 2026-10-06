@@ -563,6 +563,27 @@ export async function createProject(
   return { id: String(body?.id ?? ""), path: String(body?.path ?? "") }
 }
 
+/** Renames a project or changes its description. */
+export async function updateProject(
+  config: HermesConfig,
+  id: string,
+  fields: { name?: string; description?: string },
+): Promise<void> {
+  await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects/${encodeURIComponent(id)}`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify(fields),
+  })
+}
+
+/** Deletes a project's record on the server. Its folders and clones stay on the host. */
+export async function deleteProject(config: HermesConfig, id: string): Promise<void> {
+  await request(
+    `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects/${encodeURIComponent(id)}/remove`,
+    { method: "POST", headers: headers(config), body: "{}" },
+  )
+}
+
 /**
  * Merges this device's chat list into the one the Memento plugin keeps, newer record winning, and
  * returns the merged list. A 404 (or a CORS-blocked one, with no status) means no plugin, or an older one.

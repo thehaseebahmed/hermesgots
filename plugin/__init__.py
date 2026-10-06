@@ -306,6 +306,46 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), 400)
         return web.json_response({"object": "memento.project", **created})
 
+    async def edit_project(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            body = await request.json()
+        except ValueError:
+            return _error(web, "Body must be JSON", 400)
+        if not isinstance(body, dict):
+            return _error(web, "Body must be an object", 400)
+        try:
+            found = await asyncio.to_thread(
+                projects.update,
+                hermes_home(),
+                request.match_info["project_id"],
+                body.get("name"),
+                body.get("description"),
+            )
+        except ImportError:
+            return _error(web, "This Hermes version has no Projects.", 501)
+        except ValueError as error:
+            return _error(web, str(error), 400)
+        if not found:
+            return _error(web, "No such project.", 404)
+        return web.json_response({"object": "memento.project", "id": request.match_info["project_id"]})
+
+    async def delete_project(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            found = await asyncio.to_thread(
+                projects.remove, hermes_home(), request.match_info["project_id"]
+            )
+        except ImportError:
+            return _error(web, "This Hermes version has no Projects.", 501)
+        if not found:
+            return _error(web, "No such project.", 404)
+        return web.json_response({"object": "memento.project", "removed": True})
+
     async def session_db():
         open_db = getattr(adapter, "_ensure_session_db_async", None)
         return await open_db() if callable(open_db) else None
@@ -430,6 +470,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/cron/runs", cron_runs)
     app.router.add_get(f"{PREFIX}/projects", list_projects)
     app.router.add_post(f"{PREFIX}/projects", create_project)
+    app.router.add_post(f"{PREFIX}/projects/{{project_id}}", edit_project)
+    app.router.add_post(f"{PREFIX}/projects/{{project_id}}/remove", delete_project)
     app.router.add_get(f"{PREFIX}/github", github_status)
     app.router.add_get(f"{PREFIX}/github/repos", github_repos)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/label", label_session)

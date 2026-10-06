@@ -138,3 +138,33 @@ def create(hermes_home: Path, name: Any, description: Any, repos: Any) -> Dict[s
         shutil.rmtree(folder, ignore_errors=True)
         raise
     return {"id": pid, "slug": slug, "path": str(folder), "folders": clones}
+
+
+def update(hermes_home: Path, project_id: str, name: Any, description: Any) -> bool:
+    """Renames a project or changes its description. False when there's no such project."""
+    from hermes_cli import projects_db as pdb
+
+    if name is not None and (not isinstance(name, str) or not name.strip()):
+        raise ValueError("Name the project.")
+    if description is not None and not isinstance(description, str):
+        raise ValueError("description must be a string.")
+    with pdb.connect_closing(db_path=hermes_home / "projects.db") as conn:
+        return bool(
+            pdb.update_project(
+                conn,
+                project_id,
+                name=name.strip() if name is not None else None,
+                description=description.strip() if description is not None else None,
+            )
+        )
+
+
+def remove(hermes_home: Path, project_id: str) -> bool:
+    """Deletes the project's record. Its folders and clones stay on disk."""
+    from hermes_cli import projects_db as pdb
+
+    projects_db = hermes_home / "projects.db"
+    if not projects_db.exists():
+        return False
+    with pdb.connect_closing(db_path=projects_db) as conn:
+        return bool(pdb.delete_project(conn, project_id))
