@@ -191,8 +191,42 @@ def origin_repo(repo_root: str) -> Optional[str]:
 _pr_cache: Dict[Tuple[str, str], Tuple[float, Optional[Dict[str, Any]]]] = {}
 
 
+FAILED_CONCLUSIONS = {"failure", "timed_out", "cancelled", "action_required", "startup_failure"}
+
+
+def _checks(repo: str, sha: str, auth: Optional[str]) -> Optional[str]:
+    """``success``, ``failure`` or ``pending`` over the commit's check runs and statuses, else None."""
+    outcomes = []
+    try:
+        runs = _get(f"/repos/{repo}/commits/{sha}/check-runs?per_page=100", auth).get("check_runs")
+        for run in runs if isinstance(runs, list) else []:
+            if not isinstance(run, dict):
+                continue
+            if run.get("status") != "completed":
+                outcomes.append("pending")
+            elif run.get("conclusion") in FAILED_CONCLUSIONS:
+                outcomes.append("failure")
+            else:
+                outcomes.append("success")
+    except GitHubError:
+        pass
+    try:
+        # Legacy commit statuses (older CI integrations); "pending" there also means none yet.
+        combined = _get(f"/repos/{repo}/commits/{sha}/status", auth)
+        if combined.get("total_count"):
+            state = combined.get("state")
+            outcomes.append("failure" if state in ("failure", "error") else "pending" if state == "pending" else "success")
+    except GitHubError:
+        pass
+    if not outcomes:
+        return None
+    if "failure" in outcomes:
+        return "failure"
+    return "pending" if "pending" in outcomes else "success"
+
+
 def pull_request(hermes_home: Path, repo_root: str, branch: str) -> Optional[Dict[str, Any]]:
-    """The newest pull request from ``branch`` of the checkout's GitHub repo, or None.
+    """The newest pull request from ``branch`` of the checkout's GitHub repo, with its checks, or None.
 
     Cached for a short while per branch: the app asks after every turn and on every catch-up.
     """
@@ -211,7 +245,9 @@ def pull_request(hermes_home: Path, repo_root: str, branch: str) -> Optional[Dic
             rows = []
         row = rows[0] if isinstance(rows, list) and rows and isinstance(rows[0], dict) else None
         if row and isinstance(row.get("number"), int):
+            sha = (row.get("head") or {}).get("sha") if isinstance(row.get("head"), dict) else None
             value = {
+                "repo": repo,
                 "number": row["number"],
                 "title": row.get("title") if isinstance(row.get("title"), str) else "",
                 "url": row.get("html_url") if isinstance(row.get("html_url"), str) else None,
@@ -220,6 +256,7 @@ def pull_request(hermes_home: Path, repo_root: str, branch: str) -> Optional[Dic
                 else "draft"
                 if row.get("draft")
                 else ("closed" if row.get("state") == "closed" else "open"),
+                "checks": _checks(repo, sha, auth) if isinstance(sha, str) and sha else None,
             }
     _pr_cache[key] = (time.time(), value)
     return value
