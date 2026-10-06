@@ -484,6 +484,7 @@ def register(ctx) -> None:
         register_hook("post_api_request", context.record)
         register_hook("pre_tool_call", sessions.before_tool)
         register_hook("pre_llm_call", sessions.before_llm)
+        register_hook("on_session_start", sessions.started)
         register_hook("on_session_end", sessions.after_run)
     register_handler = getattr(ctx, "register_platform_handler", None)
     if register_handler is None:

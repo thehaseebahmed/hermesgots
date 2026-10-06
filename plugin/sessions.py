@@ -77,6 +77,8 @@ LIVE_STATUSES = {
 # sources, so Memento's sessions start as the API server's and the plugin relabels them.
 SESSION_SOURCE = "memento"
 RELABELLED_SOURCES = ("api_server", "unknown")
+# How the app starts the session ids of its chats (`createConversation`).
+MEMENTO_ID_PREFIX = "memento-"
 
 # The API server adapter, kept by _wire_api_server so the hooks can reach its session store.
 adapter: Any = None
@@ -550,6 +552,24 @@ def before_llm(**kwargs: Any) -> None:
         logger.debug("memento: pre_llm_call failed", exc_info=True)
 
 
+def started(**kwargs: Any) -> None:
+    """The ``on_session_start`` hook: labels a brand-new session as Memento's when it is one. Memento
+    mints its chats' session ids (``memento-…``), and a project session has its workspace before
+    its first turn."""
+    try:
+        session_id = kwargs.get("session_id") or ""
+        db = getattr(adapter, "_session_db", None)
+        if not session_id or db is None:
+            return
+        if not session_id.startswith(MEMENTO_ID_PREFIX):
+            path, _ = _paths()
+            if not (path.exists() and read(path, session_id)):
+                return
+        label(db, session_id)
+    except Exception:
+        logger.debug("memento: on_session_start failed", exc_info=True)
+
+
 def after_run(**kwargs: Any) -> None:
     """The ``on_session_end`` hook: a finished plan-mode turn leaves a plan waiting for the user."""
     try:
@@ -562,8 +582,5 @@ def after_run(**kwargs: Any) -> None:
         db = getattr(adapter, "_session_db", None)
         if db is not None:
             stamp(db, record)
-            # The app labels after a turn too, but a project session is Memento's from its first one.
-            for session_id in {record["session_id"], kwargs.get("session_id") or ""} - {""}:
-                label(db, session_id)
     except Exception:
         logger.debug("memento: on_session_end failed", exc_info=True)

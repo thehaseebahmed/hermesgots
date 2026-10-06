@@ -1,4 +1,4 @@
-"""Once a day, drops Memento sessions nothing was ever sent in, and labels the rest as Memento's.
+"""Once a day, drops Memento sessions nothing was ever sent in.
 
 A session counts as empty when its chat record shows no activity (``updatedAt`` never moved past
 ``createdAt``, the app's own test), it is a day old, and Hermes holds no message for it. Anything
@@ -72,10 +72,10 @@ def _project_session_ids(path: Path) -> Dict[str, int]:
 
 
 def sweep(hermes_home: Path, db: Any = None, now: Optional[int] = None) -> Dict[str, int]:
-    """One pass: deletes empty sessions and relabels Memento's. Returns what it did."""
+    """One pass: deletes empty sessions. Returns what it did."""
     now = int(time.time() * 1000) if now is None else now
     path = db_path(hermes_home)
-    result = {"deleted": 0, "kept": 0, "labelled": 0}
+    result = {"deleted": 0, "kept": 0}
     if not path.exists():
         return result
 
@@ -117,14 +117,6 @@ def sweep(hermes_home: Path, db: Any = None, now: Optional[int] = None) -> Dict[
     if tombstones:
         chats.merge(path, tombstones)
 
-    if db is not None:
-        for record in chats.read(path).values():
-            sid = (record.get("value") or {}).get("hermesSessionId")
-            if isinstance(sid, str) and sid not in gone:
-                try:
-                    result["labelled"] += bool(sessions.label(db, sid))
-                except Exception:
-                    logger.debug("memento: couldn't label %s", sid, exc_info=True)
     return result
 
 
