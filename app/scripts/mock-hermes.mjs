@@ -31,11 +31,16 @@
 // a run in flight. The agent asks the user questions with Hermes's clarify tool, which the plugin
 // serves on runs: say "ask" for one, or "ask five" for five (plan mode asks before planning), the run carries
 // `clarify.request` and waits, and POST /api/plugins/memento/runs/{id}/clarify answers it.
+// POST /api/plugins/memento/sessions/{id}/attachments saves an attached file under the temp dir, and a
+// message that carries attachments (inline images, `<attachment>` lines) gets a reply naming them.
 //
 //   pnpm mock            # then point Settings at http://localhost:8642/v1
 
 import http from "node:http"
 import { randomUUID } from "node:crypto"
+import { mkdirSync, writeFileSync, existsSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { basename, join } from "node:path"
 
 const PORT = Number(process.env.PORT ?? 8642)
 const pendingApprovals = new Map()
@@ -163,6 +168,21 @@ function seedProjects() {
 function json(res, status, body) {
   res.writeHead(status, { "Content-Type": "application/json", ...cors })
   res.end(JSON.stringify(body))
+}
+
+/** Like Hermes's transcript: a message's text parts, with each inline image as `[screenshot]`. */
+function durable(content) {
+  if (!Array.isArray(content)) return String(content ?? "")
+  return content
+    .map((part) => (part?.type === "text" ? part.text : part?.type === "image_url" ? "[screenshot]" : null))
+    .filter((part) => part != null)
+    .join("\n")
+}
+
+async function readRaw(req) {
+  const chunks = []
+  for await (const chunk of req) chunks.push(chunk)
+  return Buffer.concat(chunks)
 }
 
 async function readBody(req) {
@@ -470,7 +490,15 @@ async function playTurn(req, body, last, out) {
       "- `app/debug.log.*` — 0.7 GB, left over from the verbose-logging experiment\n\n"
   )
 
-  if (/ask five/i.test(last)) {
+  const attached = [...last.matchAll(/^<attachment name="([^"]*)"/gm)].map((m) => m[1])
+  if (attached.length) {
+    const images = (last.match(/^\[screenshot\]$/gm) ?? []).length
+    await say(
+      `Got ${attached.length === 1 ? attached[0] : `${attached.length} attachments: ${attached.join(", ")}`}` +
+        (images ? `, ${images === 1 ? "an image" : `${images} images`} I can see` : "") +
+        ".",
+    )
+  } else if (/ask five/i.test(last)) {
     const { answers, outcome } = await ask([
       { question: "Which environment should this run against?", choices: ["staging", "production"] },
       { question: "Which services are in scope?", choices: ["api", "worker", "web", "cron"], multi_select: true },
@@ -557,7 +585,7 @@ async function streamCompletion(req, res, body) {
   const id = `chatcmpl-${randomUUID().replace(/-/g, "").slice(0, 29)}`
   const created = Math.floor(Date.now() / 1000)
   const model = body.model ?? "hermes-agent"
-  const last = [...(body.messages ?? [])].reverse().find((m) => m.role === "user")?.content ?? ""
+  const last = durable([...(body.messages ?? [])].reverse().find((m) => m.role === "user")?.content)
   let closed = false
   res.on("close", () => (closed = true))
 
@@ -615,7 +643,7 @@ function startRun(req, body) {
     for (const listener of run.listeners) listener(event)
   }
   const input = Array.isArray(body.input) ? body.input : [{ role: "user", content: String(body.input ?? "") }]
-  const last = input.at(-1)?.content ?? ""
+  const last = durable(input.at(-1)?.content)
   // Rows go to the session named in the body, as on Hermes.
   const sessionReq = { headers: { ...req.headers, "x-hermes-session-id": body.session_id } }
   void playTurn(sessionReq, body, last, {
@@ -738,7 +766,7 @@ http
       return json(res, 200, {
         name: "memento",
         version: "0.12.0",
-        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "github", "sessions", "runs", "prs", "plans", "clarify"],
+        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments"],
         clarify: true,
       })
     }
@@ -869,6 +897,18 @@ http
       const given = Object.fromEntries(Object.entries(answers ?? {}).map(([k, v]) => [k, Array.isArray(v) ? (v.filter(Boolean).length ? v.filter(Boolean) : null) : (String(v ?? "").trim() || null)]))
       pending.resolve({ answers: given, outcome: outcome === "cancelled" ? "cancelled" : "submitted" })
       return json(res, 200, { object: "memento.clarify_response", run_id: clarifyRoute[1], clarify_id: pending.clarify_id, resolved: true })
+    }
+    const attachmentRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/attachments$/.exec(url.pathname)
+    if (PLUGIN && !profile && req.method === "POST" && attachmentRoute) {
+      const data = await readRaw(req)
+      if (!data.length) return json(res, 400, { error: { message: "The file is empty." } })
+      const dir = join(tmpdir(), "mock-hermes-attachments", basename(attachmentRoute[1]))
+      mkdirSync(dir, { recursive: true })
+      const name = basename(url.searchParams.get("name") || "file")
+      let path = join(dir, name)
+      for (let n = 2; existsSync(path); n++) path = join(dir, name.replace(/(\.[^.]*)?$/, `-${n}$1`))
+      writeFileSync(path, data)
+      return json(res, 200, { object: "memento.attachment", name: basename(path), path, size: data.length })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/runs/live") {
       const sessions = {}

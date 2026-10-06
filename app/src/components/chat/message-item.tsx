@@ -2,6 +2,7 @@ import type { ReactNode } from "react"
 import { AlertCircleIcon, ClockIcon, SendHorizontalIcon, XIcon } from "lucide-react"
 
 import { ApprovalCard } from "@/components/chat/approval-card"
+import { AttachmentTile } from "@/components/chat/attachments"
 import { Markdown } from "@/components/chat/markdown"
 import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
 import { ToolCard } from "@/components/chat/tool-card"
@@ -72,7 +73,12 @@ function QueuedActions({ message, paused }: { message: Message; paused: boolean 
           variant="ghost"
           size="sm"
           className="min-h-11 text-xs"
-          onClick={() => void sendMessage(message.conversationId, message.content, message.id)}
+          onClick={() =>
+            void sendMessage(message.conversationId, message.content, {
+              queuedId: message.id,
+              attachments: message.attachments,
+            })
+          }
         >
           <SendHorizontalIcon data-icon="inline-start" />
           Send now
@@ -142,11 +148,22 @@ export function MessageItem({
     return (
       <MessageRow align="end">
         <MessageContent className="items-end gap-1">
-          <Bubble variant="default" align="end" className={queued ? "opacity-60" : undefined}>
-            <BubbleContent className="px-4 py-2.5 text-[15px] whitespace-pre-wrap">
-              {message.content}
-            </BubbleContent>
-          </Bubble>
+          {message.attachments?.length ? (
+            <div
+              className={cn("flex max-w-full flex-wrap justify-end gap-2", queued && "opacity-60")}
+            >
+              {message.attachments.map((attachment) => (
+                <AttachmentTile key={attachment.id} attachment={attachment} />
+              ))}
+            </div>
+          ) : null}
+          {message.content && (
+            <Bubble variant="default" align="end" className={queued ? "opacity-60" : undefined}>
+              <BubbleContent className="px-4 py-2.5 text-[15px] whitespace-pre-wrap">
+                {message.content}
+              </BubbleContent>
+            </Bubble>
+          )}
           {queued && <QueuedActions message={message} paused={!busy} />}
         </MessageContent>
       </MessageRow>

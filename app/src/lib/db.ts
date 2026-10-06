@@ -181,6 +181,21 @@ export interface MessageStats {
   toolsUsed?: boolean
 }
 
+/** A photo or file the user added to a message. */
+export interface Attachment {
+  id: string
+  name: string
+  /** MIME type. */
+  type: string
+  size: number
+  /** Goes to the model inline as well. */
+  image: boolean
+  /** The file (an image downscaled), on this device only: Hermes's transcript doesn't keep it. */
+  blob?: Blob
+  /** Where the Memento plugin saved it on the Hermes host. */
+  path?: string
+}
+
 /** `queued` is a user message waiting for the current reply to finish. */
 export type MessageStatus = "queued" | "streaming" | "done" | "error" | "stopped"
 
@@ -189,6 +204,7 @@ export interface Message {
   conversationId: string
   role: "user" | "assistant"
   content: string
+  attachments?: Attachment[]
   reasoning?: string
   tools?: ToolEvent[]
   approval?: ApprovalRequest
