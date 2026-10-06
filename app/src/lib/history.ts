@@ -1,8 +1,8 @@
-import { db, getMessages, type Conversation, type Message, type ToolEvent } from "@/lib/db"
+import { db, getMessages, updateConversation, type Conversation, type Message, type ToolEvent } from "@/lib/db"
 import { refreshContext } from "@/lib/context"
 import { refreshTodos } from "@/lib/todos"
 import { refreshPrs, refreshWorkspace } from "@/lib/workspace"
-import { listSessionMessages, type HermesConfig, type SessionMessage } from "@/lib/hermes"
+import { getSessionTitle, listSessionMessages, type HermesConfig, type SessionMessage } from "@/lib/hermes"
 
 /**
  * Message bodies don't sync; every device's turns live in the chat's Hermes session. Opening a chat
@@ -223,6 +223,21 @@ const loading = new Set<string>()
 const reconciling = new Map<string, Promise<number>>()
 
 /**
+ * Pulls Hermes's auto-generated session title into the chat, the same way `syncTitle` in
+ * `chat.ts` does after a local turn. A long-running turn (a code session) may finish on
+ * Hermes after the app closed; without this, the first-line slice stays forever.
+ */
+async function refreshTitle(conversationId: string) {
+  const conversation = await db.conversations.get(conversationId)
+  if (!conversation || conversation.titleEdited) return
+  const config = await connection(conversation)
+  if (!config) return
+  const title = await getSessionTitle(config, conversation.hermesSessionId)
+  if (title && title !== conversation.title)
+    await updateConversation(conversationId, { title })
+}
+
+/**
  * Catches a chat up with its transcript on Hermes, which holds every device's turns. An empty chat
  * gets the newest page; otherwise only turns newer than the last one seen arrive. Turns streamed on
  * this device are kept as they are (they carry stats and approvals Hermes doesn't store) and only
@@ -234,6 +249,7 @@ export function reconcileHistory(conversationId: string) {
     pending = reconcile(conversationId)
       .then(async (added) => {
         await Promise.all([
+          refreshTitle(conversationId),
           refreshContext(conversationId),
           refreshTodos(conversationId),
           refreshWorkspace(conversationId),
