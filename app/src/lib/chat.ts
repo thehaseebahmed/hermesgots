@@ -26,6 +26,7 @@ import {
   type TurnUsage,
 } from "@/lib/hermes"
 import { refreshContext } from "@/lib/context"
+import { liveTurn } from "@/lib/history"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { randomId } from "@/lib/utils"
 import { ensureSessionWorkspace, refreshPrs, refreshWorkspace } from "@/lib/workspace"
@@ -36,6 +37,8 @@ import { ensureSessionWorkspace, refreshPrs, refreshWorkspace } from "@/lib/work
  */
 
 const FLUSH_INTERVAL_MS = 50
+/** How often a run whose events can't be read is polled, with the transcript. */
+const POLL_MS = 3000
 /** How long after a turn ends before the plugin is asked about it. */
 const PLUGIN_SETTLE_MS = 1500
 /** Hermes upgrades a placeholder title on later turns, up to the third. */
@@ -169,14 +172,16 @@ function streamHandlers(turn: Turn): StreamHandlers {
           void onTodoTool(turn.conversationId, existing.tool, event.result)
         }
         if (event.result) existing.result = event.result
-      } else if (event.toolCallId) {
+      } else {
+        // A completion with no start to match still happened; it gets its own card.
         draft.tools.push({
-          toolCallId: event.toolCallId,
+          toolCallId: event.toolCallId ?? `${event.tool}:${Date.now()}`,
           tool: event.tool,
           emoji: event.emoji,
           label: event.label ?? event.tool,
           status: event.status,
           startedAt: Date.now(),
+          ...(event.status === "completed" ? { endedAt: Date.now(), result: event.result } : {}),
           contentOffset: draft.content.length,
         })
       }
@@ -205,8 +210,8 @@ const RETRY_MS = [1000, 2000, 4000, 8000, 15000]
 /** Failed reconnects, counted only while the app is in view and online, before the reply is given up. */
 const MAX_VISIBLE_FAILURES = 8
 
-/** Waits out a backoff, cut short when the app comes back into view or back online. */
-function waitToRetry(attempt: number, signal: AbortSignal) {
+/** Waits `ms`, cut short when the app comes back into view or back online. */
+function waitToRetry(ms: number, signal: AbortSignal) {
   return new Promise<void>((resolve) => {
     const done = () => {
       window.clearTimeout(timer)
@@ -218,7 +223,7 @@ function waitToRetry(attempt: number, signal: AbortSignal) {
     const onVisible = () => {
       if (document.visibilityState === "visible") done()
     }
-    const timer = window.setTimeout(done, RETRY_MS[Math.min(attempt, RETRY_MS.length - 1)])
+    const timer = window.setTimeout(done, ms)
     document.addEventListener("visibilitychange", onVisible)
     window.addEventListener("online", done)
     signal.addEventListener("abort", done)
@@ -234,6 +239,32 @@ const retryable = (error: unknown) =>
   error.status === undefined ||
   error.status >= 500 ||
   [408, 429].includes(error.status)
+
+/**
+ * Reads the turn's progress from the session transcript, for a run whose events can't be read (a
+ * Hermes whose events stream the browser's CORS check blocks). Keyed sessions only: Hermes holds
+ * the transcript under our session id only when a key is sent.
+ */
+async function transcriptReader(turn: Turn) {
+  const { config, draft, touch, conversationId } = turn
+  if (!config.apiKey) return undefined
+  const conversation = await db.conversations.get(conversationId)
+  const messages = await getMessages(conversationId)
+  const index = messages.findIndex((m) => m.id === draft.id)
+  const user = messages.slice(0, index < 0 ? undefined : index).findLast((m) => m.role === "user")
+  if (!conversation || !user) return undefined
+  return async () => {
+    const reply = await liveTurn(config, conversation.hermesSessionId, user.content).catch(
+      () => undefined,
+    )
+    if (!reply) return
+    // Not through onTool: these carry Hermes's own call ids, which history matches later.
+    draft.tools = reply.tools ?? []
+    if (reply.reasoning) draft.reasoning = reply.reasoning
+    if (reply.content) draft.content = reply.content
+    touch()
+  }
+}
 
 /**
  * Follows a run to its end through dropped connections: the screen going off, the app being
@@ -254,19 +285,25 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
       lost = true
     },
   }
-  // Once Hermes drops the event buffer, only the run's status is left to poll.
+  // Once Hermes drops the event buffer, only the run's status is left to poll, and the transcript.
   let polling = false
+  let readTranscript: (() => Promise<void>) | undefined
   let failures = 0
+  let errored = false
   for (let attempt = 0; ; attempt++) {
     try {
       if (!polling) {
         const lastSeq = draft.runSeq ?? -1
         const outcome = await followRun(config, runId, { lastSeq, signal }, handlers)
         if (outcome) return { ...outcome, replaceContent: lost }
+      } else {
+        readTranscript ??= await transcriptReader(turn)
+        await readTranscript?.()
       }
       const { outcome } = await getRun(config, runId, signal)
       if (outcome) return { ...outcome, replaceContent: lost }
       failures = 0
+      errored = false
     } catch (error) {
       if (signal.aborted) throw error
       if (error instanceof HermesError && error.status === 404) {
@@ -276,11 +313,13 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
         continue
       }
       if (!retryable(error)) throw error
+      errored = true
       if (document.visibilityState === "visible" && navigator.onLine) {
         if (++failures >= MAX_VISIBLE_FAILURES) throw error
       }
     }
-    await waitToRetry(attempt, signal)
+    const backoff = RETRY_MS[Math.min(attempt, RETRY_MS.length - 1)]
+    await waitToRetry(polling && !errored ? POLL_MS : backoff, signal)
     if (signal.aborted) throw new DOMException("Aborted", "AbortError")
   }
 }
