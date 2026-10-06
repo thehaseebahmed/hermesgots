@@ -60,8 +60,8 @@ import {
   getActiveProfile,
   getMessages,
   updateConversation,
-  type Message,
 } from "@/lib/db"
+import { describeActivity } from "@/lib/format"
 import { loadEarlierHistory, reconcileHistory } from "@/lib/history"
 import { setBackGuard } from "@/lib/native"
 import { syncContextWindow } from "@/lib/models"
@@ -402,6 +402,7 @@ export function ChatPage() {
                       showStats={resolved.showStats}
                       botId={profile?.botId}
                       busy={busy}
+                      plain={Boolean(session)}
                     />
                   </MessageScrollerItem>
                 ))}
@@ -612,14 +613,4 @@ function approvalMessage(planFile: string | undefined) {
     `Go ahead with the plan in \`${planFile}\`. Work through its checkpoints in order and commit ` +
     "each one on this branch with the commit message it names. Don't push."
   )
-}
-
-/** One line saying what the bot is doing right now. */
-function describeActivity(message: Message) {
-  if (message.approval && !message.approval.resolved) return "Waiting for approval"
-  const tool = message.tools?.findLast((t) => t.status === "running")
-  if (tool) return `${tool.emoji ? `${tool.emoji} ` : ""}${tool.label}…`
-  if (message.statusText) return message.statusText
-  if (message.reasoning && !message.content) return "Thinking…"
-  return "Writing…"
 }

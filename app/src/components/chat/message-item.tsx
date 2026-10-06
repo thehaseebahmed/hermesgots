@@ -11,7 +11,7 @@ import { Message as MessageRow, MessageAvatar, MessageContent } from "@/componen
 import { Spinner } from "@/components/ui/spinner"
 import { removeQueued, sendMessage } from "@/lib/chat"
 import type { Message, ToolEvent } from "@/lib/db"
-import { formatDuration } from "@/lib/format"
+import { describeActivity, formatDuration } from "@/lib/format"
 
 type Part = { kind: "text"; at: number; text: string } | { kind: "tools"; tools: ToolEvent[] }
 
@@ -108,17 +108,30 @@ export function TypingBubble({ status }: { status?: string }) {
   )
 }
 
+/** A project session's working line: no bubble, just what the agent is doing. */
+function StatusLine({ text }: { text: string }) {
+  return (
+    <div className="flex items-center gap-2 px-1 text-sm text-muted-foreground" aria-live="polite">
+      <Spinner className="size-4" />
+      <span className="truncate">{text}</span>
+    </div>
+  )
+}
+
 export function MessageItem({
   message,
   showStats,
   botId,
   busy,
+  plain,
 }: {
   message: Message
   showStats: boolean
   botId?: string
   /** Whether a reply is streaming in this chat, so queued messages know they'll go on their own. */
   busy?: boolean
+  /** A project session's thread: no avatars, and the agent's replies sit on the page, not in bubbles. */
+  plain?: boolean
 }) {
   if (message.role === "user") {
     const queued = message.status === "queued"
@@ -153,20 +166,36 @@ export function MessageItem({
 
   const showTyping = streaming && (!message.content || awaitingApproval)
   const typingStatus = awaitingApproval ? "Waiting for your approval…" : message.statusText
+  const error = (
+    <>
+      <AlertCircleIcon className="mt-0.5 size-4 shrink-0" />
+      <span>{message.statusText ?? "Something went wrong."}</span>
+    </>
+  )
   const footer = (
     <>
-      {showTyping && <TypingBubble status={typingStatus} />}
-      {streaming && message.content && message.statusText && !awaitingApproval && (
-        <div className="px-1 text-xs text-muted-foreground">{message.statusText}</div>
+      {plain ? (
+        streaming && (
+          <StatusLine
+            text={awaitingApproval ? "Waiting for your approval…" : describeActivity(message)}
+          />
+        )
+      ) : (
+        <>
+          {showTyping && <TypingBubble status={typingStatus} />}
+          {streaming && message.content && message.statusText && !awaitingApproval && (
+            <div className="px-1 text-xs text-muted-foreground">{message.statusText}</div>
+          )}
+        </>
       )}
-      {message.status === "error" && (
-        <Bubble variant="destructive">
-          <BubbleContent className="flex items-start gap-2 px-4 py-3">
-            <AlertCircleIcon className="mt-0.5 size-4 shrink-0" />
-            <span>{message.statusText ?? "Something went wrong."}</span>
-          </BubbleContent>
-        </Bubble>
-      )}
+      {message.status === "error" &&
+        (plain ? (
+          <div className="flex items-start gap-2 px-1 text-[15px] text-destructive">{error}</div>
+        ) : (
+          <Bubble variant="destructive">
+            <BubbleContent className="flex items-start gap-2 px-4 py-3">{error}</BubbleContent>
+          </Bubble>
+        ))}
       {message.status === "stopped" && !message.content && (
         <div className="px-1 text-xs text-muted-foreground">Stopped</div>
       )}
@@ -176,13 +205,13 @@ export function MessageItem({
 
   return (
     <div className="flex flex-col gap-3">
-      <AssistantRow botId={botId} parts={toParts(before, toolsBefore, 0)}>
+      <AssistantRow botId={botId} plain={plain} parts={toParts(before, toolsBefore, 0)}>
         {!split && footer}
       </AssistantRow>
       {/* A pending approval lives in the composer slot; once answered it sits in the thread, unattributed. */}
       {approval?.resolved && <ApprovalCard message={message} />}
       {split && (
-        <AssistantRow botId={botId} parts={toParts(after, toolsAfter, offset)}>
+        <AssistantRow botId={botId} plain={plain} parts={toParts(after, toolsAfter, offset)}>
           {footer}
         </AssistantRow>
       )}
@@ -192,19 +221,23 @@ export function MessageItem({
 
 function AssistantRow({
   botId,
+  plain,
   parts,
   children,
 }: {
   botId?: string
+  plain?: boolean
   parts: Part[]
   children?: ReactNode
 }) {
   return (
     <MessageRow align="start" className="gap-2">
-      <MessageAvatar className="mb-6 size-8 bg-transparent">
-        <Bot id={botId} className="size-8" />
-      </MessageAvatar>
-      <MessageContent className="gap-2">
+      {!plain && (
+        <MessageAvatar className="mb-6 size-8 bg-transparent">
+          <Bot id={botId} className="size-8" />
+        </MessageAvatar>
+      )}
+      <MessageContent className={plain ? "gap-3" : "gap-2"}>
         {parts.map((part) =>
           part.kind === "tools" ? (
             <div key={part.tools[0].toolCallId} className="flex w-full max-w-xl flex-col">
@@ -212,6 +245,10 @@ function AssistantRow({
                 <ToolCard key={tool.toolCallId} tool={tool} />
               ))}
             </div>
+          ) : plain ? (
+            <Markdown key={part.at} plain className="px-1 text-[15px] leading-relaxed">
+              {part.text}
+            </Markdown>
           ) : (
             <Bubble key={part.at} variant="muted" className="max-w-[min(100%,42rem)]">
               <BubbleContent className="px-4 py-3 text-[15px]">
