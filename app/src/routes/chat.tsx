@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Link, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
@@ -63,6 +63,7 @@ import {
   type Message,
 } from "@/lib/db"
 import { loadEarlierHistory, reconcileHistory } from "@/lib/history"
+import { setBackGuard } from "@/lib/native"
 import { syncContextWindow } from "@/lib/models"
 import { refreshWorkspace, removeSessionWorkspace, setSessionMode } from "@/lib/workspace"
 
@@ -242,6 +243,33 @@ export function ChatPage() {
     if (id && conversation === null) navigate("/", { replace: true })
   }, [id, conversation, navigate])
 
+  // A session that was never sent anything isn't kept; typed text is the user's to keep or drop.
+  const draftRef = useRef("")
+  const onDraft = useCallback((text: string) => {
+    draftRef.current = text
+  }, [])
+  const [leavingWithDraft, setLeavingWithDraft] = useState(false)
+  const unsent =
+    session !== undefined && messages?.length === 0 && !(session.updatedAt > session.createdAt)
+  const projectPath = session && `/code/${session.profileId}/${session.projectId}`
+  const leave = () => {
+    if (!session || !projectPath) return
+    if (!unsent) return navigate(projectPath)
+    if (draftRef.current.trim()) return setLeavingWithDraft(true)
+    void deleteConversation(session.id)
+    navigate(projectPath, { replace: true })
+  }
+  useEffect(() => {
+    if (!unsent) return
+    setBackGuard(() => {
+      leave()
+      return true
+    })
+    return () => setBackGuard(undefined)
+    // `leave` only reads what `unsent` already covers, plus the ref and the router.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [unsent])
+
   const send = async (text: string) => {
     try {
       let conversationId = id
@@ -253,6 +281,7 @@ export function ChatPage() {
         conversationId = (await createConversation(profile.id)).id
         navigate(`/c/${conversationId}`)
       }
+      if (session?.draft) void db.conversations.update(conversationId, { draft: undefined })
       await sendMessage(conversationId, text)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't send your message.")
@@ -332,8 +361,7 @@ export function ChatPage() {
               variant="outline"
               size="icon-lg"
               className="size-11 rounded-full bg-background/80 backdrop-blur"
-              render={<Link to={`/code/${session.profileId}/${session.projectId}`} />}
-              nativeButton={false}
+              onClick={leave}
               aria-label="Back to project"
             >
               <ArrowLeftIcon />
@@ -437,6 +465,8 @@ export function ChatPage() {
           <Composer
             busy={busy}
             disabled={!configured}
+            draft={session?.draft}
+            onDraft={onDraft}
             onSend={send}
             onQueue={(text) => (id ? queueMessage(id, text) : send(text))}
             onStop={() => id && stopMessage(id)}
@@ -491,6 +521,40 @@ export function ChatPage() {
               <AlertDialogAction type="submit">Save</AlertDialogAction>
             </AlertDialogFooter>
           </form>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={leavingWithDraft} onOpenChange={setLeavingWithDraft}>
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Save your draft?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This session hasn't started. Save the draft to pick it up later, or discard the
+              session.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep writing</AlertDialogCancel>
+            <AlertDialogAction
+              variant="outline"
+              onClick={async () => {
+                if (!session || !projectPath) return
+                await deleteConversation(session.id)
+                navigate(projectPath, { replace: true })
+              }}
+            >
+              Discard
+            </AlertDialogAction>
+            <AlertDialogAction
+              onClick={async () => {
+                if (!session || !projectPath) return
+                await db.conversations.update(session.id, { draft: draftRef.current.trim() })
+                navigate(projectPath)
+              }}
+            >
+              Save draft
+            </AlertDialogAction>
+          </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
