@@ -45,7 +45,14 @@ FIELDS = (
 )
 REPO_FIELDS = ("name", "repo_root", "path", "branch")
 MAX_PARENT_HOPS = 5
-SLUG_CHARS = 40
+ADJECTIVES = (
+    "breezy", "cosmic", "dapper", "fuzzy", "gleaming", "jazzy", "lucky", "mellow", "nimble",
+    "peppy", "quirky", "snazzy", "spry", "sunny", "swift", "wobbly", "zesty", "plucky",
+)
+NOUNS = (
+    "badger", "biscuit", "comet", "dumpling", "falcon", "hopper", "lantern", "marmot", "noodle",
+    "otter", "pickle", "puffin", "quokka", "sprocket", "thimble", "walrus", "waffle", "yeti",
+)
 GIT_TIMEOUT_S = 60
 MUTATING_TOOLS = frozenset({"write_file", "patch", "execute_code", "delegate_task"})
 READ_ONLY_COMMANDS = frozenset(
@@ -149,11 +156,9 @@ def record_for(path: Path, hermes_home: Path, session_id: str) -> Optional[Dict[
     return None
 
 
-def slug(task: Any) -> str:
-    """A worktree name from the task's first words, plus a few hex digits so two never clash."""
-    text = task if isinstance(task, str) else ""
-    base = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:SLUG_CHARS].rstrip("-")
-    return f"{base or 'session'}-{secrets.token_hex(3)}"
+def slug(task: Any = None) -> str:
+    """A worktree name of two random words and a few hex digits, so two never clash."""
+    return f"{secrets.choice(ADJECTIVES)}-{secrets.choice(NOUNS)}-{secrets.token_hex(2)}"
 
 
 def _project_repos(projects_db: Path, project_id: str) -> list[str]:
