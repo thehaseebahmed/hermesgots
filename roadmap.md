@@ -45,11 +45,8 @@ New Memento plugin routes, read-only, mirroring the existing
       repos, with the bot as the icon).
 - [x] Create a project with its GitHub repos, cloned on the Hermes host into
       `$HERMES_HOME/projects/<project>/` with the host's GitHub account.
-- Deferred: `GET /api/plugins/memento/kanban/tasks` and a read-only task
-      list on the Code screen (tasks across boards by importing `kanban_db`
-      when the kanban plugin is installed).
 
-## Phase 3 — Checkpoints/rollback viewer
+## Phase 3 (optional) — Checkpoints/rollback viewer
 
 - [ ] `GET /api/plugins/memento/checkpoints?project=<slug>` — list
       checkpoints with change stats, and a diff endpoint
@@ -57,14 +54,18 @@ New Memento plugin routes, read-only, mirroring the existing
 - [ ] New Memento frontend surface: a diff viewer (file list + unified
       diff), read-only to start.
 
-## Phase 4 — Mutating Kanban from Memento
+## Phase 4 — The agent's todos in chat
 
-- [ ] `PATCH /api/plugins/memento/kanban/tasks/:id` — status transitions
-      and task creation, routed through the same `kanban_db` layer the CLI
-      and dashboard use, with the same concurrency care the existing kanban
-      dashboard plugin takes.
-- [ ] UI: status-change actions and a create-task sheet on top of Phase 2's
-      list view.
+The agent's own plan for a turn, shown read-only above the composer the way
+Claude Code shows its task list. This is Hermes's per-session `todo_list`
+tool, not Kanban: the agent writes and updates it, the user only watches.
+
+- [ ] `GET /api/plugins/memento/sessions/{id}/todos` — the session's latest
+      `todo_list` result, read from its transcript (following compression).
+- [ ] Nudge the agent to plan: `todo_list` is a deferred tool by default, so
+      each run sends a short `instructions` line asking for it on multi-step
+      work.
+- [ ] UI: a "2/5 todos" pill above the composer that opens the list.
 
 ## Phase 5 — "Start a coding session in a worktree" chore
 
@@ -108,6 +109,10 @@ already exists elsewhere — worth tracking, not worth building yet.
   Hermes's own gateway event schema — which, per Hermes's own contribution
   rubric ("the core is a narrow waist"), is the hardest kind of change to
   get accepted upstream, independent of Memento-side effort.
+- **Kanban from Memento** (a read-only task list, then status changes and a
+  create-task sheet through `kanban_db`). Kanban cards are shared, dispatched
+  work on a board every profile sees, not a session's plan, so Phase 4 shows
+  the agent's `todo_list` instead.
 - **Full remote Kanban board parity** (drag-drop, auto-decompose, PR
   acceptance gating) rebuilt natively in Memento at phone width. Kanban
   already has a complete dashboard SPA for this; duplicating it in a PWA is
