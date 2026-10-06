@@ -3,7 +3,7 @@
 Adds routes to the API server, so the Memento app (which only talks to the API server, with its key)
 can read cron run history from Hermes's execution ledger instead of piecing it together on each
 device, keep its chat list on the server (``chats.py``), report each chat's context use
-(``context.py``), list and create Hermes Projects (``projects.py``) with GitHub repos cloned into
+(``context.py``) and the agent's todo list (``todos.py``), list and create Hermes Projects (``projects.py``) with GitHub repos cloned into
 them (``github.py``) and label its chats as Memento's. The dashboard half lives in ``dashboard/``.
 """
 
@@ -15,7 +15,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-from . import chats, context, github, projects
+from . import chats, context, github, projects, todos
 from .store import db_path
 
 logger = logging.getLogger(__name__)
@@ -112,7 +112,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             {
                 "name": "memento",
                 "version": VERSION,
-                "features": ["cron_runs", "session_label", "chats", "context", "projects", "github"],
+                "features": ["cron_runs", "session_label", "chats", "context", "todos", "projects", "github"],
             }
         )
 
@@ -201,6 +201,32 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             }
         )
 
+    async def session_todos(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        session_id = request.match_info["session_id"]
+        open_db = getattr(adapter, "_ensure_session_db_async", None)
+        db = await open_db() if callable(open_db) else None
+        found = None
+        if db is not None:
+            resolve = getattr(db, "resolve_resume_session_id", None)
+            if callable(resolve):
+                try:
+                    session_id = await asyncio.to_thread(resolve, session_id) or session_id
+                except Exception:
+                    logger.debug("memento: couldn't resolve session %s", session_id, exc_info=True)
+            found = await asyncio.to_thread(todos.read, db, session_id)
+        # Never a 404 for an unknown session: the app reads a 404 as a missing plugin.
+        return web.json_response(
+            {
+                "object": "memento.todos",
+                "session_id": session_id,
+                "revision": found["revision"] if found else None,
+                "todos": found["todos"] if found else None,
+            }
+        )
+
     async def list_projects(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -275,6 +301,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/github/repos", github_repos)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/label", label_session)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/context", session_context)
+    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/todos", session_todos)
     logger.info("memento: serving %s on the API server", PREFIX)
 
 

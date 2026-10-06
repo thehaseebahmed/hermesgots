@@ -14,6 +14,8 @@
 // Chats are titled like Hermes does: a slice of the opener at once, a "model" title a moment later,
 // readable on GET /api/sessions/{id}. Sessions are keyed by X-Hermes-Session-Id when a key is sent,
 // and their transcripts page back from GET /api/sessions/{id}/messages?order=latest&limit&offset.
+// Say "plan" and the agent keeps a todo list with its todo_list tool as it works, which the plugin's
+// GET /api/plugins/memento/sessions/{id}/todos reads back from a keyed session's transcript.
 // Turns also run on POST /v1/runs, whose events replay from GET /v1/runs/{id}/events?last_seq=N and
 // which keep going when the client drops, unlike a chat completion. Say "long" for a slow reply.
 //
@@ -241,6 +243,30 @@ async function playTurn(req, body, last, out) {
   out.status("Thinking…")
   await sleep(500)
 
+  // Like Hermes's todo_list: every call returns the whole list, and the result is a transcript row.
+  const planned = /plan/i.test(last)
+  // Hermes restores the list's revision from the transcript, so it keeps counting across turns.
+  const lastTodos = (transcripts.get(sessionOf(req)) ?? []).findLast((r) => r.tool_name === "todo_list")
+  let todoRevision = lastTodos ? JSON.parse(lastTodos.content).revision : 0
+  const steps = ["Check disk use under /var/log", "Read the log rotation script", "Summarise where the space goes"]
+  const writeTodos = async (done) => {
+    if (!planned || out.closed()) return
+    const todos = steps.map((content, i) => ({
+      id: String(i + 1),
+      content,
+      status: i < done ? "completed" : i === done ? "in_progress" : "pending",
+    }))
+    const id = `call_${randomUUID().slice(0, 8)}`
+    const result = JSON.stringify({ todos, revision: ++todoRevision, summary: { total: todos.length } })
+    out.tool({ tool: "todo_list", emoji: "📋", label: "todo_list", toolCallId: id, status: "running" })
+    await sleep(300)
+    // The run stream's preview is cut at 500 characters, as on Hermes.
+    out.tool({ tool: "todo_list", toolCallId: id, status: "completed", result: result.length > 500 ? `${result.slice(0, 497)}...` : result })
+    record(req, { role: "assistant", content: null, tool_calls: [{ id, type: "function", function: { name: "todo_list", arguments: JSON.stringify({ todos }) } }] })
+    record(req, { role: "tool", tool_call_id: id, tool_name: "todo_list", content: result })
+  }
+  await writeTodos(0)
+
   const toolCallId = `call_${randomUUID().slice(0, 8)}`
   out.tool({ tool: "terminal", emoji: "💻", label: "du -sh /var/log/* | sort -rh | head", toolCallId, status: "running" })
   await sleep(1400)
@@ -249,6 +275,7 @@ async function playTurn(req, body, last, out) {
   out.tool({ tool: "terminal", toolCallId, status: "completed", result: duOutput })
   record(req, { role: "assistant", content: null, tool_calls: [{ id: toolCallId, type: "function", function: { name: "terminal", arguments: JSON.stringify({ command: "du -sh /var/log/* | sort -rh | head" }) } }] })
   record(req, { role: "tool", tool_call_id: toolCallId, tool_name: "terminal", content: duOutput })
+  await writeTodos(1)
 
   const readId = `call_${randomUUID().slice(0, 8)}`
   const readPath = "/etc/logrotate.d/rotate.py"
@@ -280,6 +307,7 @@ async function playTurn(req, body, last, out) {
   out.tool({ tool: "read_file", toolCallId: readId, status: "completed", result: readOutput })
   record(req, { role: "assistant", content: null, tool_calls: [{ id: readId, type: "function", function: { name: "read_file", arguments: JSON.stringify({ path: readPath }) } }] })
   record(req, { role: "tool", tool_call_id: readId, tool_name: "read_file", content: readOutput })
+  await writeTodos(2)
 
   await say(
     "Here's where the space is going under `/var/log`:\n\n" +
@@ -312,6 +340,8 @@ async function playTurn(req, body, last, out) {
   } else {
     await say("Want me to clean up the rotated files older than 90 days? Just say *clean them up*.")
   }
+
+  await writeTodos(steps.length)
 
   // Like Hermes, usage sums every model call in the turn: a fixed system prompt plus the transcript,
   // counted once per call (this turn makes one call per tool, plus the reply).
@@ -582,6 +612,13 @@ http
         provider: call ? "openrouter" : null,
         at: call ? Date.now() : null,
       })
+    }
+    const sessionTodos = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/todos$/.exec(url.pathname)
+    if (PLUGIN && !profile && req.method === "GET" && sessionTodos) {
+      const id = decodeURIComponent(sessionTodos[1])
+      const row = (transcripts.get(id) ?? []).findLast((r) => r.role === "tool" && r.tool_name === "todo_list")
+      const found = row ? JSON.parse(row.content) : null
+      return json(res, 200, { object: "memento.todos", session_id: id, revision: found?.revision ?? null, todos: found?.todos ?? null })
     }
     const chatSession = /^\/api\/sessions\/([^/]+)$/.exec(url.pathname)
     if (req.method === "GET" && chatSession) {
