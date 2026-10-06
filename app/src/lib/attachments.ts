@@ -39,10 +39,13 @@ function jpegName(name: string) {
   return /\.jpe?g$/i.test(name) ? name : `${name.replace(/\.[^./]+$/, "") || "photo"}.jpg`
 }
 
-/** Reads a picked file into an attachment. Images the browser can decode are scaled down. */
-export async function prepareAttachment(file: File): Promise<Attachment> {
+/**
+ * Reads a picked file into an attachment. Images the browser can decode are scaled down, unless
+ * the model can't take images (`inline: false`), when they go as files.
+ */
+export async function prepareAttachment(file: File, inline = true): Promise<Attachment> {
   const name = file.name || "file"
-  if (IMAGE_TYPES.test(file.type)) {
+  if (inline && IMAGE_TYPES.test(file.type)) {
     const blob = await scaled(file)
     if (blob) {
       const reencoded = blob !== file

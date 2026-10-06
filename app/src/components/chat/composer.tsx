@@ -46,6 +46,7 @@ export function Composer({
   leading,
   session,
   filesAvailable,
+  imagesAvailable,
   draft,
   onDraft,
 }: {
@@ -63,6 +64,8 @@ export function Composer({
   session?: { mode: SessionMode; onMode: (mode: SessionMode) => void; autoAvailable: boolean }
   /** Whether files can be attached (they need the Memento plugin); photos always can. */
   filesAvailable: boolean
+  /** False when the model doesn't take images. */
+  imagesAvailable: boolean
   disabled?: boolean
   onSend: (text: string, attachments: Attachment[]) => Promise<void> | void
   /** Called instead of `onSend` while a reply is streaming: Enter queues the message. */
@@ -123,7 +126,7 @@ export function Composer({
     const added: Attachment[] = []
     for (const file of files.slice(0, Math.max(room, 0))) {
       try {
-        added.push(await prepareAttachment(file))
+        added.push(await prepareAttachment(file, imagesAvailable))
       } catch (error) {
         toast.error(error instanceof Error ? error.message : `Couldn't attach ${file.name}.`)
       }
@@ -136,6 +139,7 @@ export function Composer({
     <AttachMenu
       disabled={disabled}
       filesAvailable={filesAvailable}
+      imagesAvailable={imagesAvailable}
       onAdd={(files) => void addFiles(files)}
     />
   )
