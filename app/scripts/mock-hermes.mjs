@@ -10,7 +10,8 @@
 // GET /api/plugins/memento/sessions/{id}/context reports a keyed session's latest model call.
 // It lists Hermes Projects on GET /api/plugins/memento/projects. GET /api/plugins/memento/github and
 // github/repos stand in for the host's GitHub account (MOCK_NO_GITHUB=1 leaves it signed out), and
-// POST /api/plugins/memento/projects pretends to create a project with its repos cloned into it.
+// POST /api/plugins/memento/projects pretends to create a project with its repos cloned into it, and
+// POST projects/{id} and projects/{id}/remove edit and delete one.
 // Chats are titled like Hermes does: a slice of the opener at once, a "model" title a moment later,
 // readable on GET /api/sessions/{id}. Sessions are keyed by X-Hermes-Session-Id when a key is sent,
 // and their transcripts page back from GET /api/sessions/{id}/messages?order=latest&limit&offset.
@@ -610,6 +611,21 @@ http
       all.push(project)
       return json(res, 200, { object: "memento.project", id: project.id, slug, path: root, folders: folders.map((f) => f.path) })
     }
+    const projectRoute = /^\/api\/plugins\/memento\/projects\/([^/]+)(\/remove)?$/.exec(url.pathname)
+    if (PLUGIN && !profile && req.method === "POST" && projectRoute) {
+      const all = mockProjects()
+      const found = all.find((p) => p.id === decodeURIComponent(projectRoute[1]))
+      if (!found) return json(res, 404, { error: { message: "No such project." } })
+      if (projectRoute[2]) {
+        all.splice(all.indexOf(found), 1)
+        return json(res, 200, { object: "memento.project", removed: true })
+      }
+      const { name, description } = await readBody(req)
+      if (name !== undefined && !String(name).trim()) return json(res, 400, { error: { message: "Name the project." } })
+      if (name !== undefined) found.name = String(name).trim()
+      if (description !== undefined) found.description = String(description).trim() || null
+      return json(res, 200, { object: "memento.project", id: found.id })
+    }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/projects") {
       return json(res, 200, { object: "memento.projects", projects: mockProjects() })
     }
@@ -674,7 +690,7 @@ http
           : `You are working in git worktrees of this project's repos, all on branch ${record.branch}:\n${record.repos.map((r, i) => `- ${r.name} at ${r.path}${i === 0 ? " (your current directory)" : ""}`).join("\n")}\nKeep all work inside them.`
       const answer = (record) => json(res, 200, { object: "memento.workspace", workspace: record, instructions: record ? instructions(record) : null })
       if (route === "workspace" && req.method === "POST") {
-        const { project_id, task, mode } = await readBody(req)
+        const { project_id, mode } = await readBody(req)
         const project = mockProjects().find((p) => p.id === String(project_id ?? ""))
         if (!project) return json(res, 400, { error: { message: "No such project." } })
         const gitFolders = project.folders.filter((f) => f.git)

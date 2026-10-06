@@ -1,15 +1,57 @@
 import { useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { ArrowLeftIcon, CheckIcon, CircleAlertIcon, PlusIcon } from "lucide-react"
+import {
+  ArrowLeftIcon,
+  CheckIcon,
+  CircleAlertIcon,
+  EllipsisIcon,
+  PencilIcon,
+  PlusIcon,
+  Trash2Icon,
+} from "lucide-react"
 import { Link, useLocation, useNavigate, useParams } from "react-router"
+import { toast } from "sonner"
 
 import { ChatHeader } from "@/components/chat/chat-header"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
+import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { createConversation, db, type Conversation, type Profile } from "@/lib/db"
+import { stopMessage } from "@/lib/chat"
+import {
+  createConversation,
+  db,
+  deleteConversation,
+  type Conversation,
+  type Profile,
+} from "@/lib/db"
 import { formatRelative } from "@/lib/format"
-import { listLiveRuns, listProjects, type HermesProject, type LiveRunStatus } from "@/lib/hermes"
+import {
+  deleteProject,
+  listLiveRuns,
+  listProjects,
+  updateProject,
+  type HermesProject,
+  type LiveRunStatus,
+} from "@/lib/hermes"
 import { sessionState, type SessionState } from "@/lib/workspace"
 
 /** How often the plugin is asked which sessions have a run in flight, while the screen is on. */
@@ -59,7 +101,14 @@ export function ProjectPage() {
   const passed = (useLocation().state as { project?: HermesProject } | null)?.project
   const profile = useLiveQuery(() => db.profiles.get(profileId), [profileId])
   const [fetched, setFetched] = useState<HermesProject>()
-  const project = passed?.id === projectId ? passed : fetched
+  const [edits, setEdits] = useState<Pick<HermesProject, "name" | "description">>()
+  const base = passed?.id === projectId ? passed : fetched
+  const project = base && { ...base, ...edits }
+  const [editing, setEditing] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [name, setName] = useState("")
+  const [description, setDescription] = useState("")
+  const [busy, setBusy] = useState(false)
   const live = useLiveRuns(profile)
 
   // Opened from a link or a reload, with no project handed over by the Code screen.
@@ -113,6 +162,40 @@ export function ProjectPage() {
     navigate(`/c/${conversation.id}`)
   }
 
+  const save = async () => {
+    if (!profile || !name.trim()) return
+    setBusy(true)
+    try {
+      await updateProject(profile, projectId, {
+        name: name.trim(),
+        description: description.trim(),
+      })
+      setEdits({ name: name.trim(), description: description.trim() || null })
+      setEditing(false)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't save the project.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async () => {
+    if (!profile) return
+    setBusy(true)
+    try {
+      await deleteProject(profile, projectId)
+      for (const c of sessions ?? []) {
+        stopMessage(c.id)
+        await deleteConversation(c.id)
+      }
+      navigate("/code", { replace: true })
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't delete the project.")
+      setBusy(false)
+      setDeleting(false)
+    }
+  }
+
   const grouped = GROUPS.map((group) => ({
     ...group,
     sessions: (sessions ?? []).filter(
@@ -138,6 +221,41 @@ export function ProjectPage() {
           >
             <ArrowLeftIcon />
           </Button>
+        }
+        actions={
+          project && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    size="icon-lg"
+                    className="size-11 rounded-full bg-background/80 backdrop-blur"
+                    aria-label="Project options"
+                  />
+                }
+              >
+                <EllipsisIcon />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-44">
+                <DropdownMenuItem
+                  onClick={() => {
+                    setName(project.name)
+                    setDescription(project.description ?? "")
+                    setEditing(true)
+                  }}
+                >
+                  <PencilIcon />
+                  Edit
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onClick={() => setDeleting(true)}>
+                  <Trash2Icon />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )
         }
       />
       <Tabs defaultValue="sessions" className="flex-1">
@@ -191,6 +309,59 @@ export function ProjectPage() {
         <TabsContent value="library" />
         <TabsContent value="prs" />
       </Tabs>
+
+      <AlertDialog open={editing} onOpenChange={setEditing}>
+        <AlertDialogContent>
+          <form
+            className="contents"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void save()
+            }}
+          >
+            <AlertDialogHeader>
+              <AlertDialogTitle>Edit project</AlertDialogTitle>
+            </AlertDialogHeader>
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoFocus
+              aria-label="Project name"
+            />
+            <Textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+              placeholder="Description (optional)"
+              aria-label="Project description"
+            />
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction type="submit" disabled={busy || !name.trim()}>
+                Save
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </form>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={deleting} onOpenChange={setDeleting}>
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this project?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The project and its sessions are removed from this device. Its folders on the server
+              stay where they are, and Hermes keeps its own copy of the sessions.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" disabled={busy} onClick={() => void remove()}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
