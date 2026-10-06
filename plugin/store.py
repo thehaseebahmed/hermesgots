@@ -1,11 +1,12 @@
-"""``$HERMES_HOME/memento/memento.db``: the chat list (``chats.py``) and context use (``context.py``)."""
+"""``$HERMES_HOME/memento/memento.db``: the chat list (``chats.py``), context use (``context.py``) and
+project sessions (``sessions.py``)."""
 
 from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -34,6 +35,18 @@ def connect(path: Path) -> sqlite3.Connection:
                    model TEXT,
                    provider TEXT,
                    at INTEGER NOT NULL
+               )"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS project_sessions (
+                   session_id TEXT PRIMARY KEY,
+                   project_id TEXT NOT NULL,
+                   repo_root TEXT NOT NULL,
+                   path TEXT,
+                   branch TEXT,
+                   mode TEXT NOT NULL DEFAULT 'accept_edits',
+                   plan_pending INTEGER NOT NULL DEFAULT 0,
+                   created_at INTEGER NOT NULL
                )"""
         )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

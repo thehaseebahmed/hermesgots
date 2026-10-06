@@ -14,10 +14,12 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 API = "https://api.github.com"
 TOKEN_ENV_VARS = ("GITHUB_TOKEN", "GH_TOKEN")
@@ -25,6 +27,8 @@ TOKEN_ENV_VARS = ("GITHUB_TOKEN", "GH_TOKEN")
 REPO_RE = re.compile(r"^[A-Za-z0-9-]{1,39}/(?!\.+$)[A-Za-z0-9._-]{1,100}$")
 CLONE_TIMEOUT_S = 600
 MAX_REPOS = 100
+ORIGIN_RE = re.compile(r"github\.com[:/]([A-Za-z0-9-]+/[A-Za-z0-9._-]+?)(?:\.git)?/?$")
+PR_CACHE_S = 30
 
 
 class GitHubError(Exception):
@@ -71,12 +75,13 @@ def token(hermes_home: Path) -> tuple[Optional[str], Optional[str]]:
     return (value, "gh") if value else (None, None)
 
 
-def _get(path: str, auth: str) -> Any:
+def _get(path: str, auth: Optional[str]) -> Any:
+    # Without a token, public repos still answer (rate-limited).
     request = urllib.request.Request(
         f"{API}{path}",
         headers={
             "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {auth}",
+            **({"Authorization": f"Bearer {auth}"} if auth else {}),
             "User-Agent": "memento-hermes-plugin",
             "X-GitHub-Api-Version": "2022-11-28",
         },
@@ -165,3 +170,56 @@ def clone(hermes_home: Path, repo: Any, dest_raw: Any) -> str:
         message = lines[-1] if lines else "git clone failed."
         raise GitHubError(message.replace(auth, "***") if auth else message, 502)
     return dest
+
+
+def origin_repo(repo_root: str) -> Optional[str]:
+    """``owner/name`` of the checkout's ``origin`` when it's on GitHub."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", repo_root, "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    match = result.returncode == 0 and ORIGIN_RE.search(result.stdout.strip())
+    return match.group(1) if match else None
+
+
+_pr_cache: Dict[Tuple[str, str], Tuple[float, Optional[Dict[str, Any]]]] = {}
+
+
+def pull_request(hermes_home: Path, repo_root: str, branch: str) -> Optional[Dict[str, Any]]:
+    """The newest pull request from ``branch`` of the checkout's GitHub repo, or None.
+
+    Cached for a short while per branch: the app asks after every turn and on every catch-up.
+    """
+    key = (repo_root, branch)
+    cached = _pr_cache.get(key)
+    if cached and time.time() - cached[0] < PR_CACHE_S:
+        return cached[1]
+    value = None
+    repo = origin_repo(repo_root)
+    if repo:
+        head = urllib.parse.quote(f"{repo.split('/')[0]}:{branch}", safe=":")
+        auth, _ = token(hermes_home)
+        try:
+            rows = _get(f"/repos/{repo}/pulls?head={head}&state=all&per_page=1", auth)
+        except GitHubError:
+            rows = []
+        row = rows[0] if isinstance(rows, list) and rows and isinstance(rows[0], dict) else None
+        if row and isinstance(row.get("number"), int):
+            value = {
+                "number": row["number"],
+                "title": row.get("title") if isinstance(row.get("title"), str) else "",
+                "url": row.get("html_url") if isinstance(row.get("html_url"), str) else None,
+                "state": "merged"
+                if row.get("merged_at")
+                else "draft"
+                if row.get("draft")
+                else ("closed" if row.get("state") == "closed" else "open"),
+            }
+    _pr_cache[key] = (time.time(), value)
+    return value
