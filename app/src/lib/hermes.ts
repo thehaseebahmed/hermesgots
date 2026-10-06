@@ -496,6 +496,120 @@ export async function listProjects(config: HermesConfig): Promise<HermesProject[
   return projects.map(toProject).filter((project): project is HermesProject => project !== null)
 }
 
+/** A Hermes checkpoint in one of a project's folders, with what changed after it. */
+export interface Checkpoint {
+  id: string
+  /** The directory Hermes snapshots (a repo in the project, usually). */
+  folder: string
+  createdAt: number
+  /** Why Hermes took it, e.g. `before write_file`. */
+  reason: string
+  /** The checkpoint after it in the same folder; unset for the newest, whose changes run to now. */
+  next?: string
+  filesChanged: number
+  insertions: number
+  deletions: number
+}
+
+export interface Checkpoints {
+  /** `checkpoints.enabled` in the profile's config. */
+  enabled: boolean
+  /** Newest first. */
+  checkpoints: Checkpoint[]
+}
+
+const count = (value: unknown) => (typeof value === "number" && value > 0 ? value : 0)
+
+/** A project's checkpoints, through the Memento plugin (0.5 and up). */
+export async function listCheckpoints(
+  config: HermesConfig,
+  projectId: string,
+): Promise<Checkpoints> {
+  const response = await request(
+    `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects/${encodeURIComponent(projectId)}/checkpoints`,
+    { headers: headers(config) },
+  )
+  const body = await response.json()
+  const rows: unknown[] = Array.isArray(body?.checkpoints) ? body.checkpoints : []
+  return {
+    enabled: body?.enabled === true,
+    checkpoints: rows.flatMap((raw) => {
+      const row = raw as Record<string, unknown> | null
+      if (typeof row?.id !== "string" || typeof row.folder !== "string") return []
+      return [
+        {
+          id: row.id,
+          folder: row.folder,
+          createdAt: count(row.created_at) * 1000,
+          reason: typeof row.reason === "string" ? row.reason : "",
+          next: typeof row.next === "string" ? row.next : undefined,
+          filesChanged: count(row.files_changed),
+          insertions: count(row.insertions),
+          deletions: count(row.deletions),
+        },
+      ]
+    }),
+  }
+}
+
+export interface FileChange {
+  path: string
+  /** The path before a rename. */
+  oldPath?: string
+  status: "added" | "deleted" | "modified" | "renamed"
+  binary: boolean
+  insertions: number
+  deletions: number
+  /** Unified diff hunks; unset for a binary file, a rename with no edits, or one too big to show. */
+  patch?: string
+  /** The patch was left out for its size. */
+  truncated: boolean
+}
+
+export interface CheckpointDiff {
+  folder: string
+  next?: string
+  files: FileChange[]
+}
+
+const STATUSES = new Set(["added", "deleted", "modified", "renamed"])
+
+/** What changed after a checkpoint: up to the next one, or to the files as they are now. */
+export async function getCheckpointDiff(
+  config: HermesConfig,
+  projectId: string,
+  checkpointId: string,
+): Promise<CheckpointDiff> {
+  const response = await request(
+    `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects/${encodeURIComponent(projectId)}/checkpoints/${encodeURIComponent(checkpointId)}/diff`,
+    { headers: headers(config) },
+  )
+  const body = await response.json()
+  const files: unknown[] = Array.isArray(body?.files) ? body.files : []
+  return {
+    folder: typeof body?.folder === "string" ? body.folder : "",
+    next: typeof body?.next === "string" ? body.next : undefined,
+    files: files.flatMap((raw) => {
+      const file = raw as Record<string, unknown> | null
+      if (typeof file?.path !== "string") return []
+      return [
+        {
+          path: file.path,
+          oldPath: typeof file.old_path === "string" ? file.old_path : undefined,
+          status: STATUSES.has(file.status as string)
+            ? (file.status as FileChange["status"])
+            : "modified",
+          binary: file.binary === true,
+          insertions: count(file.insertions),
+          deletions: count(file.deletions),
+          patch: typeof file.patch === "string" && file.patch ? file.patch : undefined,
+          truncated: file.truncated === true,
+        },
+      ]
+    }),
+  }
+}
+
 export interface GitHubStatus {
   connected: boolean
   login?: string
