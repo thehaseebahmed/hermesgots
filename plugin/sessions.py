@@ -11,7 +11,8 @@ task id, which is the session id Memento sends. The plugin makes the worktree wi
 the workspace before every run and the ``pre_tool_call`` hook puts it back after a gateway restart.
 
 The session's permission mode is kept here too, so the hook can enforce plan mode (no tool may
-change anything) and every device sees the same mode.
+change anything) and every device sees the same mode. A finished plan-mode reply is saved as a
+Markdown file under the project's ``plans/`` folder, named after the session branch and the time.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ import secrets
 import sqlite3
 import subprocess
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -42,6 +44,7 @@ FIELDS = (
     "plan_pending",
     "created_at",
     "repos",
+    "plan_file",
 )
 REPO_FIELDS = ("name", "repo_root", "path", "branch")
 MAX_PARENT_HOPS = 5
@@ -66,6 +69,36 @@ PLAN_BLOCK = (
     "Plan mode: only read for now. Describe the change you would make in your reply; the user "
     "approves the plan before you act."
 )
+PLANS_DIR = "plans"
+# A plan-mode reply is saved only when it is a plan: the heading the instructions ask for.
+PLAN_HEADING = "# Plan:"
+# Added to the run's instructions in plan mode. Fixed per mode, so the prompt cache holds across
+# the turns of one mode. The app's mock repeats it; keep them the same.
+PLAN_INSTRUCTIONS = """You are in plan mode: change nothing. Read what you need, then make your whole final reply the plan below and stop; the user approves it before you act. It is saved to a file as written, so write it for someone who hasn't read this chat. Use this Markdown shape exactly:
+
+# Plan: <short title>
+
+## Overview
+What was asked, the problem it solves and the outcome, in two to five sentences.
+
+## Approach
+The design you chose and why. One line each for the alternatives you rejected.
+
+## Changes
+One entry per file or area: its path, what changes and why, and the existing functions you'd reuse.
+
+## Checkpoints
+Split the work into checkpoints that each leave the code building and worth committing, in order. For each:
+### Checkpoint N: <name>
+- Commit: `type(scope): summary` in Conventional Commits form, unless the user asked for another style
+- Steps: the concrete edits
+- Done when: how you'd know it works
+
+## Verification
+How to test the whole change end to end: commands, what to look at, expected results.
+
+## Risks and open questions
+What could go wrong, what you're assuming, and anything the user must decide."""
 LIVE_STATUSES = {
     "queued": "running",
     "running": "running",
@@ -168,8 +201,7 @@ def slug(task: Any = None) -> str:
     return f"{secrets.choice(ADJECTIVES)}-{secrets.choice(NOUNS)}-{secrets.token_hex(2)}"
 
 
-def _project_repos(projects_db: Path, project_id: str) -> list[str]:
-    """The project's git folders, primary first."""
+def _project(projects_db: Path, project_id: str) -> Any:
     from hermes_cli import projects_db as pdb
 
     if not projects_db.exists():
@@ -179,10 +211,19 @@ def _project_repos(projects_db: Path, project_id: str) -> list[str]:
     project = next((p for p in projects if str(p.id) == project_id), None)
     if project is None:
         raise ValueError("No such project.")
+    return project
+
+
+def _project_folders(project: Any) -> list[str]:
+    """The project's folders as absolute paths, primary first."""
     folders = sorted(project.folders, key=lambda folder: not folder.is_primary)
+    return [os.path.abspath(os.path.expanduser(folder.path)) for folder in folders]
+
+
+def _project_repos(projects_db: Path, project_id: str) -> list[str]:
+    """The project's git folders, primary first."""
     repos = []
-    for folder in folders:
-        root = os.path.abspath(os.path.expanduser(folder.path))
+    for root in _project_folders(_project(projects_db, project_id)):
         if os.path.exists(os.path.join(root, ".git")) and root not in repos:
             repos.append(root)
     if not repos:
@@ -277,7 +318,15 @@ def ensure(
 
 
 def instructions(record: Dict[str, Any]) -> str:
-    """What the run's system prompt tells the agent about its worktrees. Fixed per session."""
+    """What the run's system prompt tells the agent: its worktrees (fixed per session) and, in plan
+    mode, the shape of the plan."""
+    lines = [_worktree_line(record)]
+    if record.get("mode") == "plan":
+        lines.append(PLAN_INSTRUCTIONS)
+    return "\n".join(line for line in lines if line)
+
+
+def _worktree_line(record: Dict[str, Any]) -> str:
     repos = record.get("repos") or []
     if not repos:
         return ""
@@ -295,6 +344,67 @@ def instructions(record: Dict[str, Any]) -> str:
         + "\n".join(lines)
         + "\nKeep all work inside them."
     )
+
+
+def plan_filename(record: Dict[str, Any], now: datetime) -> str:
+    """``<branch slug>-<date>-<time>.md``: every plan of a session together, oldest first."""
+    branch = record.get("branch") or ""
+    name = branch.split("/", 1)[1] if "/" in branch else branch
+    return f"{name or 'session'}-{now:%Y%m%d-%H%M%S}.md"
+
+
+def _exclude_from_git(root: str) -> None:
+    """Keeps ``plans/`` out of ``git status`` when the project's folder is itself a repo."""
+    if not os.path.isdir(os.path.join(root, ".git")):
+        return
+    exclude = Path(root) / ".git" / "info" / "exclude"
+    line = f"{PLANS_DIR}/"
+    try:
+        current = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
+        if line in current.splitlines():
+            return
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        with exclude.open("a", encoding="utf-8") as handle:
+            handle.write(("" if not current or current.endswith("\n") else "\n") + line + "\n")
+    except OSError:
+        logger.debug("memento: couldn't exclude %s from git in %s", PLANS_DIR, root, exc_info=True)
+
+
+def save_plan(path: Path, hermes_home: Path, record: Dict[str, Any], text: Any) -> Optional[str]:
+    """Writes a plan-mode reply to ``<project folder>/plans/`` and remembers it on the session.
+    Returns the file's path under the project folder, or None when the reply isn't a plan."""
+    if not isinstance(text, str) or not any(
+        line.startswith(PLAN_HEADING) for line in text.splitlines()
+    ):
+        return None
+    project = _project(hermes_home / "projects.db", record["project_id"])
+    root = _project_folders(project)[0]
+    now = datetime.now().astimezone()
+    name = plan_filename(record, now)
+    folder = Path(root) / PLANS_DIR
+    folder.mkdir(parents=True, exist_ok=True)
+    _exclude_from_git(root)
+    front_matter = "\n".join(
+        [
+            "---",
+            f"session: {record['session_id']}",
+            f"branch: {record.get('branch') or ''}",
+            f"project: {json.dumps(getattr(project, 'name', '') or '')}",
+            f"created: {now.isoformat(timespec='seconds')}",
+            "---",
+        ]
+    )
+    (folder / name).write_text(f"{front_matter}\n\n{text.strip()}\n", encoding="utf-8")
+    plan_file = f"{PLANS_DIR}/{name}"
+    conn = connect(path)
+    try:
+        conn.execute(
+            "UPDATE project_sessions SET plan_file = ? WHERE session_id = ?",
+            (plan_file, record["session_id"]),
+        )
+    finally:
+        conn.close()
+    return plan_file
 
 
 def apply_cwd(session_id: str, cwd: str) -> None:
@@ -568,6 +678,24 @@ def started(**kwargs: Any) -> None:
         label(db, session_id)
     except Exception:
         logger.debug("memento: on_session_start failed", exc_info=True)
+
+
+def after_llm(**kwargs: Any) -> None:
+    """The ``post_llm_call`` hook: a plan-mode reply that is a plan goes into the project's plans
+    folder. Hermes doesn't fire it for interrupted turns, so no half-written plan is saved."""
+    try:
+        path, home = _paths()
+        if not path.exists():
+            return
+        task_id = kwargs.get("task_id") or ""
+        session_id = kwargs.get("session_id") or ""
+        record = record_for(path, home, session_id)
+        if not record and task_id and task_id != session_id:
+            record = record_for(path, home, task_id)
+        if record and record["mode"] == "plan":
+            save_plan(path, home, record, kwargs.get("assistant_response"))
+    except Exception:
+        logger.debug("memento: post_llm_call failed", exc_info=True)
 
 
 def after_run(**kwargs: Any) -> None:
