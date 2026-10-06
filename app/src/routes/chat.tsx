@@ -8,6 +8,7 @@ import { ApprovalCard } from "@/components/chat/approval-card"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
+import { TodosPill, TodosSheet } from "@/components/chat/todos"
 import { ContextRing, UsageSheet, type ContextUsage } from "@/components/chat/usage-sheet"
 import { Bot } from "@/components/bot"
 import {
@@ -149,6 +150,7 @@ export function ChatPage() {
   const [deleting, setDeleting] = useState(false)
   const [title, setTitle] = useState("")
   const [usageOpen, setUsageOpen] = useState(false)
+  const [todosOpen, setTodosOpen] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const [historyMissing, setHistoryMissing] = useState<string>()
 
@@ -161,6 +163,7 @@ export function ChatPage() {
   // Only the plugin sees each model call; Hermes's API sums a turn's calls, so nothing else is exact.
   const tracked = Boolean(profile?.apiKey && profile.pluginChats)
   const live = conversation?.liveContext
+  const todos = (tracked && conversation?.todos?.items) || []
   const usage: ContextUsage = {
     tracked,
     tokens: tracked ? live?.tokens : undefined,
@@ -342,6 +345,7 @@ export function ChatPage() {
       )}
 
       <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
+        {todos.length > 0 && <TodosPill items={todos} onClick={() => setTodosOpen(true)} />}
         {awaitingApproval ? (
           <div className="mx-auto w-full max-w-3xl">
             <ApprovalCard message={awaitingApproval} />
@@ -366,6 +370,7 @@ export function ChatPage() {
       </div>
 
       <UsageSheet open={usageOpen} onOpenChange={setUsageOpen} usage={usage} profile={profile} />
+      <TodosSheet open={todosOpen} onOpenChange={setTodosOpen} items={todos} />
 
       <AlertDialog open={renaming} onOpenChange={setRenaming}>
         <AlertDialogContent>

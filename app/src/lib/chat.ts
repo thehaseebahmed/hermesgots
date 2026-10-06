@@ -163,7 +163,7 @@ function streamHandlers(turn: Turn): StreamHandlers {
         existing.status = event.status
         if (event.status === "completed") {
           existing.endedAt = Date.now()
-          onTodoTool(turn.conversationId, existing.tool, event.result)
+          void onTodoTool(turn.conversationId, existing.tool, event.result)
         }
         if (event.result) existing.result = event.result
       } else if (event.toolCallId) {
