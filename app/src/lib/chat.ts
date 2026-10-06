@@ -26,6 +26,7 @@ import {
   type TurnUsage,
 } from "@/lib/hermes"
 import { refreshContext } from "@/lib/context"
+import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { randomId } from "@/lib/utils"
 
 /**
@@ -160,7 +161,10 @@ function streamHandlers(turn: Turn): StreamHandlers {
         : draft.tools.find((t) => t.status === "running" && t.tool === event.tool)
       if (existing) {
         existing.status = event.status
-        if (event.status === "completed") existing.endedAt = Date.now()
+        if (event.status === "completed") {
+          existing.endedAt = Date.now()
+          onTodoTool(turn.conversationId, existing.tool, event.result)
+        }
         if (event.result) existing.result = event.result
       } else if (event.toolCallId) {
         draft.tools.push({
@@ -310,6 +314,7 @@ async function finishTurn(turn: Turn, usage: TurnUsage | undefined) {
   await turn.close()
   await updateConversation(conversationId, { updatedAt: endedAt })
   void refreshContext(conversationId)
+  void refreshTodos(conversationId)
 }
 
 /** Runs a turn on `/v1/runs` when Hermes has it, else streams a chat completion. */
