@@ -125,9 +125,15 @@ function readClarify(tool: ToolEvent): { asked: Asked[]; outcome?: string } {
   if (!raw) return { asked: first ? [{ question: first, answers: [] }] : [] }
   try {
     const parsed = JSON.parse(raw)
+    const outcome =
+      typeof parsed?.outcome === "string"
+        ? parsed.outcome
+        : parsed?.timed_out === true
+          ? "timed_out"
+          : undefined
     if (Array.isArray(parsed?.responses)) {
       return {
-        outcome: typeof parsed.outcome === "string" ? parsed.outcome : undefined,
+        outcome,
         asked: parsed.responses.map((r: Record<string, unknown>) => ({
           question: typeof r?.question === "string" ? r.question : undefined,
           answers: listOf(r?.user_response),
@@ -138,7 +144,7 @@ function readClarify(tool: ToolEvent): { asked: Asked[]; outcome?: string } {
     const keyed = ["user_response", "response", "answer", "choice"].flatMap((key) =>
       listOf(parsed?.[key]),
     )
-    return { asked: [{ question: first, answers: [...direct, ...keyed] }] }
+    return { outcome, asked: [{ question: first, answers: [...direct, ...keyed] }] }
   } catch {
     return { asked: [{ question: first, answers: [raw] }] }
   }
@@ -155,7 +161,7 @@ export function ClarifyCard({ tool }: { tool: ToolEvent }) {
       ? "Answered"
       : outcome === "submitted"
         ? "Skipped"
-        : outcome === "cancelled"
+        : outcome === "cancelled" || outcome === "undelivered"
           ? "Not answered"
           : "No answer"
   return (
