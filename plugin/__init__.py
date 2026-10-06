@@ -82,6 +82,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     sessions.adapter = adapter
     # The API server's agents can't ask questions on their own; see clarify.py.
     asks = clarify.wire(adapter)
+    # Hermes defers todo_list behind tool_search, where the agent can't always find it; see todos.py.
+    todo_tool = todos.wire(adapter)
 
     async def daily_cleanup(_app: Any):
         from hermes_constants import get_hermes_home
@@ -131,8 +133,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "prs",
                     "plans",
                     "clarify",
+                    "todo_tool",
                 ],
                 "clarify": asks,
+                "todo_tool": todo_tool,
             }
         )
 
