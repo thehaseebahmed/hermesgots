@@ -56,7 +56,15 @@ function open(url: string) {
  * A session's pull request as a pill above the composer, coloured by state (orange when its
  * checks fail); opens it on GitHub. `named` adds the repo, for a session that spans several.
  */
-export function PrPill({ pr, named }: { pr: PullRequestRef; named?: boolean }) {
+export function PrPill({
+  pr,
+  named,
+  className,
+}: {
+  pr: PullRequestRef
+  named?: boolean
+  className?: string
+}) {
   const state = STATES[pr.state]
   const look = pr.checks === "failure" && pr.state !== "merged" ? FAILING : state
   const Icon = look.icon
@@ -64,7 +72,7 @@ export function PrPill({ pr, named }: { pr: PullRequestRef; named?: boolean }) {
     <Button
       type="button"
       variant="secondary"
-      className={cn("h-11 gap-2 rounded-full px-4 tabular-nums", look.className)}
+      className={cn("h-11 gap-2 rounded-full px-4 tabular-nums", look.className, className)}
       disabled={!pr.url}
       onClick={() => pr.url && open(pr.url)}
       aria-label={`Pull request ${pr.number} in ${pr.repo}, ${state.label}${
