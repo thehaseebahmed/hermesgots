@@ -343,7 +343,7 @@ function ProjectForm({
         <Button type="submit" size="lg" className="h-11 rounded-full" disabled={!valid || creating}>
           {creating ? (
             <>
-              <Spinner /> {picked.length ? "Cloning…" : "Creating…"}
+              <Spinner /> Creating…
             </>
           ) : (
             "Create project"

@@ -10,8 +10,9 @@
 // GET /api/plugins/memento/sessions/{id}/context reports a keyed session's latest model call.
 // It lists Hermes Projects on GET /api/plugins/memento/projects. GET /api/plugins/memento/github and
 // github/repos stand in for the host's GitHub account (MOCK_NO_GITHUB=1 leaves it signed out), and
-// POST /api/plugins/memento/projects pretends to create a project with its repos cloned into it, and
-// POST projects/{id} and projects/{id}/remove edit and delete one.
+// POST /api/plugins/memento/projects answers at once with a project that clones its repos in the
+// background (1.5s each; a repo named like `fail` fails it, as does MOCK_FAIL_CLONE=1), and
+// POST projects/{id}, projects/{id}/retry and projects/{id}/remove edit, retry and delete one.
 // Chats are titled like Hermes does: a slice of the opener at once, a "model" title a moment later,
 // readable on GET /api/sessions/{id}. Sessions are keyed by X-Hermes-Session-Id when a key is sent,
 // and their transcripts page back from GET /api/sessions/{id}/messages?order=latest&limit&offset.
@@ -64,6 +65,39 @@ const githubRepos = [
   { full_name: "mock-org/zigbee-bridge", description: "Zigbee to MQTT glue", private: true },
   { full_name: "mock-user/ha-automations", description: "Home Assistant automations", private: false },
 ]
+
+/** Pending projects' running clone timers, by project id. */
+const cloning = new Map()
+/** Clones a pending project's repos one by one (1.5s each); a repo named like `*fail*` fails it. */
+function cloneProject(project, root) {
+  const step = (i) => {
+    if (i >= project.folders.length) {
+      cloning.delete(project.id)
+      project.id = `p_${randomUUID().slice(0, 8)}`
+      project.status = "ready"
+      project.folders = [
+        { path: root, label: null, is_primary: true, git: false, repo: null },
+        ...project.folders.map((f) => ({ ...f, git: true, status: undefined })),
+      ]
+      return
+    }
+    const folder = project.folders[i]
+    folder.status = "cloning"
+    cloning.set(project.id, setTimeout(() => {
+      if (process.env.MOCK_FAIL_CLONE === "1" || /fail/i.test(folder.repo)) {
+        cloning.delete(project.id)
+        folder.status = "failed"
+        project.status = "failed"
+        project.error = `GitHub refused access to ${folder.repo}.`
+        for (const other of project.folders) if (other.status === "done") other.status = "queued"
+        return
+      }
+      folder.status = "done"
+      step(i + 1)
+    }, 1500))
+  }
+  step(0)
+}
 
 /** Hermes Projects as projects.db holds them, with activity from the sessions in their folders. */
 let projects
@@ -698,8 +732,8 @@ http
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/info") {
       return json(res, 200, {
         name: "memento",
-        version: "0.9.0",
-        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "github", "sessions", "runs", "prs", "plans", "clarify"],
+        version: "0.11.0",
+        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "github", "sessions", "runs", "prs", "plans", "clarify"],
         clarify: true,
       })
     }
@@ -726,36 +760,50 @@ http
       const base = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "project"
       let slug = base
       for (let n = 2; all.some((p) => p.slug === slug); n++) slug = `${base}-${n}`
-      await sleep(1500 * Math.max(1, repos.length))
       const root = `/home/hermes/.hermes/projects/${slug}`
       const names = repos.map((repo) => repo.split("/")[1])
-      const folders = repos.map((repo, i) => ({
-        path: `${root}/${names.filter((n) => n === names[i]).length > 1 ? repo.replace("/", "-") : names[i]}`,
-        label: null,
-        is_primary: false,
-        git: true,
-      }))
       const project = {
-        id: `p_${randomUUID().slice(0, 8)}`,
+        id: `pending-${slug}`,
         slug,
         name: name.trim(),
         description: String(description ?? "").trim() || null,
         created_at: Date.now() / 1000,
         last_active: null,
-        folders: [{ path: root, label: null, is_primary: true, git: false }, ...folders],
+        status: "cloning",
+        error: null,
+        folders: repos.map((repo, i) => ({
+          path: `${root}/${names.filter((n) => n === names[i]).length > 1 ? repo.replace("/", "-") : names[i]}`,
+          label: names[i],
+          is_primary: false,
+          git: false,
+          repo,
+          status: "queued",
+        })),
       }
       all.push(project)
-      return json(res, 200, { object: "memento.project", id: project.id, slug, path: root, folders: folders.map((f) => f.path) })
+      cloneProject(project, root)
+      return json(res, 202, { object: "memento.project", ...project })
     }
-    const projectRoute = /^\/api\/plugins\/memento\/projects\/([^/]+)(\/remove)?$/.exec(url.pathname)
+    const projectRoute = /^\/api\/plugins\/memento\/projects\/([^/]+)(\/remove|\/retry)?$/.exec(url.pathname)
     if (PLUGIN && !profile && req.method === "POST" && projectRoute) {
       const all = mockProjects()
       const found = all.find((p) => p.id === decodeURIComponent(projectRoute[1]))
       if (!found) return json(res, 404, { error: { message: "No such project." } })
+      if (projectRoute[2] === "/retry") {
+        if (found.status !== "failed") return json(res, 404, { error: { message: "No failed project to retry." } })
+        for (const folder of found.folders) folder.status = "queued"
+        found.status = "cloning"
+        found.error = null
+        cloneProject(found, found.folders[0].path.replace(/\/[^/]+$/, ""))
+        return json(res, 202, { object: "memento.project", ...found })
+      }
       if (projectRoute[2]) {
+        clearTimeout(cloning.get(found.id))
+        cloning.delete(found.id)
         all.splice(all.indexOf(found), 1)
         return json(res, 200, { object: "memento.project", removed: true })
       }
+      if (found.status !== "ready") return json(res, 409, { error: { message: "The project is still being created." } })
       const { name, description } = await readBody(req)
       if (name !== undefined && !String(name).trim()) return json(res, 400, { error: { message: "Name the project." } })
       if (name !== undefined) found.name = String(name).trim()
