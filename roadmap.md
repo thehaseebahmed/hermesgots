@@ -60,12 +60,12 @@ The agent's own plan for a turn, shown read-only above the composer the way
 Claude Code shows its task list. This is Hermes's per-session `todo_list`
 tool, not Kanban: the agent writes and updates it, the user only watches.
 
-- [ ] `GET /api/plugins/memento/sessions/{id}/todos` — the session's latest
+- [x] `GET /api/plugins/memento/sessions/{id}/todos` — the session's latest
       `todo_list` result, read from its transcript (following compression).
-- [ ] Nudge the agent to plan: `todo_list` is a deferred tool by default, so
+- [x] Nudge the agent to plan: `todo_list` is a deferred tool by default, so
       each run sends a short `instructions` line asking for it on multi-step
       work.
-- [ ] UI: a "2/5 todos" pill above the composer that opens the list.
+- [x] UI: a "2/5 todos" pill above the composer that opens the list.
 
 ## Phase 5 — "Start a coding session in a worktree" chore
 
