@@ -8,6 +8,15 @@ Guidance for AI coding agents (and humans) working on Memento: a playful, minima
 - `plugin/` is the Memento Hermes plugin (Python, no build step). See **Plugin** below.
 - `netlify.toml` stays at the root and sets `base = "app"`.
 
+## Plugin first
+
+**A user should be able to ask the agent for something, close the app, come back later and find it done.** So work that has to keep going, or stay correct, while the app is closed belongs in the plugin (`plugin/`), which runs on the Hermes host. It doesn't belong in app-side workarounds.
+
+- Before building a feature, check whether it needs the app to be open, following a stream, polling or answering for the agent. If it does, and the plugin (or Hermes itself) could do it, build it in the plugin.
+- If a feature can't be done reliably without app-side hacks, say so **up front**, before writing code. Name what breaks: a session that is broken, blocked or stuck waiting when the user comes back. Then propose the plugin route, or not doing it. Only build the app-side version if the user explicitly insists.
+- The exceptions are things that wait for the user by design: a plan in plan mode, an approval in Accept edits mode, a clarify question. Pausing for the user there is expected. Losing work or stalling because the app was closed is not.
+- The app is the view and the controls. It may make things smoother while it's open (live streaming, faster updates), but nothing should depend on that.
+
 ## Commands
 
 ```bash
