@@ -1,5 +1,6 @@
 import { db, getMessages, type Conversation, type Message, type ToolEvent } from "@/lib/db"
 import { refreshContext } from "@/lib/context"
+import { refreshTodos } from "@/lib/todos"
 import { listSessionMessages, type HermesConfig, type SessionMessage } from "@/lib/hermes"
 
 /**
@@ -190,7 +191,7 @@ export function reconcileHistory(conversationId: string) {
   if (!pending) {
     pending = reconcile(conversationId)
       .then(async (added) => {
-        await refreshContext(conversationId)
+        await Promise.all([refreshContext(conversationId), refreshTodos(conversationId)])
         return added
       })
       .finally(() => reconciling.delete(conversationId))

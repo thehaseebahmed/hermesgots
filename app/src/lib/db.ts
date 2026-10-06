@@ -65,6 +65,21 @@ export interface Conversation {
   liveContext?: { tokens: number; window?: number }
   /** Newest Hermes transcript row this device has caught up to. Local only; never synced. */
   hermesTip?: number
+  /**
+   * The agent's own todo list (its `todo_list` tool) and when this device last set it. Local only;
+   * every device reads it from the Memento plugin.
+   */
+  todos?: { revision: number; items: Todo[]; at: number }
+}
+
+export type TodoStatus = "pending" | "in_progress" | "completed" | "cancelled"
+
+export interface Todo {
+  id: string
+  content: string
+  status: TodoStatus
+  /** Another item's id, making this one its subtask. */
+  parent?: string
 }
 
 export interface ToolEvent {

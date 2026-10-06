@@ -1,4 +1,4 @@
-import type { ApprovalChoice } from "@/lib/db"
+import type { ApprovalChoice, Todo } from "@/lib/db"
 import type { Doc } from "@/lib/merge"
 import { isNative } from "@/lib/native"
 
@@ -601,6 +601,52 @@ export async function getSessionContext(
   return tokens ? { tokens, window: count(body?.context_length) } : null
 }
 
+export interface SessionTodos {
+  revision: number
+  items: Todo[]
+}
+
+const TODO_STATUSES = new Set<string>(["pending", "in_progress", "completed", "cancelled"])
+
+/** Reads a `todo_list` result (`{ todos, revision }`), or null when it isn't one. */
+export function parseTodos(value: unknown): SessionTodos | null {
+  const body = value as { todos?: unknown; revision?: unknown } | null
+  if (!body || !Array.isArray(body.todos)) return null
+  const items: Todo[] = []
+  for (const raw of body.todos) {
+    const id = raw?.id
+    if ((typeof id !== "string" && typeof id !== "number") || typeof raw?.content !== "string")
+      continue
+    if (!TODO_STATUSES.has(raw.status)) continue
+    const parent = raw.parent
+    items.push({
+      id: String(id),
+      content: raw.content,
+      status: raw.status,
+      ...(typeof parent === "string" || typeof parent === "number"
+        ? { parent: String(parent) }
+        : {}),
+    })
+  }
+  const revision = typeof body.revision === "number" && body.revision >= 0 ? body.revision : 0
+  return { revision, items }
+}
+
+/**
+ * The agent's todo list in a session (and the ones it was compressed from), read from the
+ * transcript by the Memento plugin. Null when the agent hasn't written one.
+ */
+export async function getSessionTodos(
+  config: HermesConfig,
+  sessionId: string,
+): Promise<SessionTodos | null> {
+  const response = await request(
+    `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/sessions/${encodeURIComponent(sessionId)}/todos`,
+    { headers: headers(config) },
+  )
+  return parseTodos(await response.json())
+}
+
 /** Marks a session as Memento's, so the Hermes dashboard labels it. Needs the Memento plugin. */
 export async function labelSession(config: HermesConfig, sessionId: string) {
   try {
@@ -663,6 +709,16 @@ function runOutcome(payload: any): RunOutcome {
  * Starts a turn on `/v1/runs`. Unlike a chat completion, Hermes doesn't interrupt a run when its
  * event stream drops, so a phone that sleeps mid-reply can pick it up again.
  */
+/**
+ * Sent as a run's `instructions`, which Hermes adds to the system prompt. `todo_list` is a deferred
+ * tool by default, so without it the agent rarely keeps the list the chat shows. It never changes,
+ * so the prompt cache still holds.
+ */
+const PLAN_HINT =
+  "When a task takes three or more steps, plan it first with the todo_list tool (load it through " +
+  "tool search if it isn't loaded yet), keep exactly one item in progress, and update the list as " +
+  "each step is done."
+
 export async function startRun(
   config: HermesConfig,
   options: {
@@ -682,6 +738,7 @@ export async function startRun(
     body: JSON.stringify({
       model: options.model,
       input,
+      instructions: PLAN_HINT,
       ...(keyed ? { session_id: options.sessionId } : {}),
     }),
   })
