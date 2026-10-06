@@ -90,31 +90,19 @@ function QueuedActions({ message, paused }: { message: Message; paused: boolean 
   )
 }
 
-export function TypingBubble({ status }: { status?: string }) {
+export function TypingBubble() {
   return (
-    <div className="flex flex-col gap-1.5">
-      <Bubble variant="muted">
-        <BubbleContent
-          className="flex h-10 items-center gap-1.5 px-4"
-          aria-label="Hermes is writing"
-        >
-          {[0, 150, 300].map((delay) => (
-            <span
-              key={delay}
-              className="size-2 animate-typing-dot rounded-full bg-muted-foreground/70"
-              style={{ animationDelay: `${delay}ms` }}
-            />
-          ))}
-        </BubbleContent>
-      </Bubble>
-      <div
-        className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground"
-        aria-live="polite"
-      >
-        <Spinner className="size-3.5" />
-        <span className="truncate">{status || "Writing…"}</span>
-      </div>
-    </div>
+    <Bubble variant="muted">
+      <BubbleContent className="flex h-10 items-center gap-1.5 px-4" aria-label="Hermes is writing">
+        {[0, 150, 300].map((delay) => (
+          <span
+            key={delay}
+            className="size-2 animate-typing-dot rounded-full bg-muted-foreground/70"
+            style={{ animationDelay: `${delay}ms` }}
+          />
+        ))}
+      </BubbleContent>
+    </Bubble>
   )
 }
 
@@ -180,7 +168,6 @@ export function MessageItem({
   const toolsAfter = split ? tools.filter((t) => t.startedAt > askedAt) : []
 
   const showTyping = streaming && (!content || awaitingApproval)
-  const typingStatus = awaitingApproval ? "Waiting for your approval…" : message.statusText
   const error = (
     <>
       <AlertCircleIcon className="mt-0.5 size-4 shrink-0" />
@@ -197,7 +184,7 @@ export function MessageItem({
         )
       ) : (
         <>
-          {showTyping && <TypingBubble status={typingStatus} />}
+          {showTyping && <TypingBubble />}
           {streaming && content && message.statusText && !awaitingApproval && (
             <div className="px-1 text-xs text-muted-foreground">{message.statusText}</div>
           )}
