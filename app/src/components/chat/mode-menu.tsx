@@ -51,7 +51,7 @@ export function ModeMenu({
           onValueChange={(value) => onChange(value as SessionMode)}
         >
           {MODES.map(({ mode: option, icon: OptionIcon }) => (
-            <DropdownMenuRadioItem key={option} value={option} className="min-h-11">
+            <DropdownMenuRadioItem key={option} value={option} className="min-h-11" closeOnClick>
               <OptionIcon />
               {MODE_LABELS[option]}
             </DropdownMenuRadioItem>
