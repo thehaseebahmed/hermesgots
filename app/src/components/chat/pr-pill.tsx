@@ -1,5 +1,6 @@
 import { Browser } from "@capacitor/browser"
 import {
+  CircleAlertIcon,
   GitMergeIcon,
   GitPullRequestClosedIcon,
   GitPullRequestDraftIcon,
@@ -11,14 +12,39 @@ import type { PrState, PullRequestRef } from "@/lib/db"
 import { isNative } from "@/lib/native"
 import { cn } from "@/lib/utils"
 
-const STATES: Record<
-  PrState,
-  { label: string; icon: typeof GitPullRequestIcon; className: string }
-> = {
-  open: { label: "Open", icon: GitPullRequestIcon, className: "text-success" },
-  draft: { label: "Draft", icon: GitPullRequestDraftIcon, className: "text-muted-foreground" },
-  merged: { label: "Merged", icon: GitMergeIcon, className: "text-primary" },
-  closed: { label: "Closed", icon: GitPullRequestClosedIcon, className: "text-destructive" },
+interface Look {
+  label: string
+  icon: typeof GitPullRequestIcon
+  className: string
+}
+
+const STATES: Record<PrState, Look> = {
+  open: {
+    label: "open",
+    icon: GitPullRequestIcon,
+    className: "bg-success/15 text-success hover:bg-success/25",
+  },
+  draft: {
+    label: "draft",
+    icon: GitPullRequestDraftIcon,
+    className: "bg-muted text-muted-foreground hover:bg-muted/70",
+  },
+  merged: {
+    label: "merged",
+    icon: GitMergeIcon,
+    className: "bg-merged/15 text-merged hover:bg-merged/25",
+  },
+  closed: {
+    label: "closed",
+    icon: GitPullRequestClosedIcon,
+    className: "bg-destructive/15 text-destructive hover:bg-destructive/25",
+  },
+}
+
+const FAILING: Look = {
+  label: "checks failing",
+  icon: CircleAlertIcon,
+  className: "bg-warning/15 text-warning hover:bg-warning/25",
 }
 
 function open(url: string) {
@@ -26,20 +52,27 @@ function open(url: string) {
   else window.open(url, "_blank", "noopener")
 }
 
-/** The session's pull request, as a pill above the composer; opens it on GitHub. */
-export function PrPill({ pr }: { pr: PullRequestRef }) {
-  const { label, icon: Icon, className } = STATES[pr.state]
+/**
+ * A session's pull request as a pill above the composer, coloured by state (orange when its
+ * checks fail); opens it on GitHub. `named` adds the repo, for a session that spans several.
+ */
+export function PrPill({ pr, named }: { pr: PullRequestRef; named?: boolean }) {
+  const state = STATES[pr.state]
+  const look = pr.checks === "failure" && pr.state !== "merged" ? FAILING : state
+  const Icon = look.icon
   return (
     <Button
       type="button"
       variant="secondary"
-      className="h-11 gap-2 rounded-full px-4 tabular-nums"
+      className={cn("h-11 gap-2 rounded-full px-4 tabular-nums", look.className)}
       disabled={!pr.url}
       onClick={() => pr.url && open(pr.url)}
-      aria-label={`Pull request ${pr.number}, ${label.toLowerCase()}`}
+      aria-label={`Pull request ${pr.number} in ${pr.repo}, ${state.label}${
+        look === FAILING ? ", checks failing" : ""
+      }`}
     >
-      <Icon className={cn("size-4", className)} />
-      PR #{pr.number} · {label}
+      <Icon className="size-4" />
+      {named && pr.repo ? `${pr.repo} #${pr.number}` : `PR #${pr.number}`}
     </Button>
   )
 }
