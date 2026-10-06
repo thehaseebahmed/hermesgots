@@ -65,6 +65,61 @@ export interface Conversation {
   liveContext?: { tokens: number; window?: number }
   /** Newest Hermes transcript row this device has caught up to. Local only; never synced. */
   hermesTip?: number
+  /**
+   * The agent's own todo list (its `todo_list` tool) and when this device last set it. Local only;
+   * every device reads it from the Memento plugin.
+   */
+  todos?: { revision: number; items: Todo[]; at: number }
+  /** The Hermes Project this chat is a session of (works in its own worktree). */
+  projectId?: string
+  /** Unsent composer text a session was left with, kept on this device only. */
+  draft?: string
+  /** When the user saved the session as a draft. Synced, so the plugin's cleanup spares it. */
+  draftAt?: number
+  /** Marked done by the user; the composer gives way until it's reopened. */
+  resolvedAt?: number
+  /** Permission mode, as the plugin last reported it. Local only; the plugin holds it. */
+  mode?: SessionMode
+  /**
+   * The session's worktrees (one per repo of the project, all on `branch`), from the plugin, and
+   * the line that tells the agent where they are. Local only; no path reaches the UI.
+   */
+  worktree?: { branch: string; repos: { name: string; branch: string }[]; instructions: string }
+  /** A plan-mode turn finished and the plan awaits the user. Local only; the plugin holds it. */
+  planPending?: boolean
+  /** The newest plan the plugin saved, `plans/<file>.md` under the project's folder. Local only. */
+  planFile?: string
+  /** The branch's pull request in each repo, and when they were last read. Local only. */
+  prs?: PullRequestRef[]
+}
+
+/** How much a project session may do without asking. */
+export type SessionMode = "accept_edits" | "auto" | "plan"
+
+export type PrState = "open" | "draft" | "merged" | "closed"
+
+export type PrChecks = "success" | "failure" | "pending"
+
+export interface PullRequestRef {
+  /** `user/repo`. */
+  repo: string
+  number: number
+  title: string
+  state: PrState
+  /** The head commit's check runs and statuses; null when it has none. */
+  checks: PrChecks | null
+  url: string | null
+  at: number
+}
+
+export type TodoStatus = "pending" | "in_progress" | "completed" | "cancelled"
+
+export interface Todo {
+  id: string
+  content: string
+  status: TodoStatus
+  /** Another item's id, making this one its subtask. */
+  parent?: string
 }
 
 export interface ToolEvent {
@@ -262,6 +317,9 @@ db.version(5)
 // v6: run history comes from the Memento plugin on the Hermes server, not from each device.
 db.version(6).stores({ cronRuns: null })
 
+// v7: project sessions, listed per project.
+db.version(7).stores({ conversations: "id, updatedAt, [profileId+updatedAt], projectId" })
+
 db.on("populate", (tx) => seedProfile(tx))
 
 export async function getSettings(): Promise<Settings> {
@@ -325,7 +383,10 @@ export function conversationsOf(profileId: string) {
     .between([profileId, Dexie.minKey], [profileId, Dexie.maxKey])
 }
 
-export async function createConversation(profileId: string): Promise<Conversation> {
+export async function createConversation(
+  profileId: string,
+  fields: Partial<Pick<Conversation, "title" | "projectId" | "mode">> = {},
+): Promise<Conversation> {
   const now = Date.now()
   const conversation: Conversation = {
     id: randomId(),
@@ -335,6 +396,7 @@ export async function createConversation(profileId: string): Promise<Conversatio
     createdAt: now,
     updatedAt: now,
     changedAt: now,
+    ...fields,
   }
   await db.conversations.add(conversation)
   return conversation

@@ -1,5 +1,7 @@
 import { db, getMessages, type Conversation, type Message, type ToolEvent } from "@/lib/db"
 import { refreshContext } from "@/lib/context"
+import { refreshTodos } from "@/lib/todos"
+import { refreshPrs, refreshWorkspace } from "@/lib/workspace"
 import { listSessionMessages, type HermesConfig, type SessionMessage } from "@/lib/hermes"
 
 /**
@@ -101,8 +103,16 @@ function toolCalls(row: SessionMessage) {
     : []
 }
 
-/** Folds each turn's assistant, tool-call and tool rows into one reply, as streaming shows it. */
-export function toMessages(conversationId: string, sessionId: string, rows: SessionMessage[]) {
+/**
+ * Folds each turn's assistant, tool-call and tool rows into one reply, as streaming shows it. With
+ * `live` (a turn still running), a call without its result row stays `running`.
+ */
+export function toMessages(
+  conversationId: string,
+  sessionId: string,
+  rows: SessionMessage[],
+  options: { live?: boolean } = {},
+) {
   const messages: Message[] = []
   let reply: Message | undefined
   for (const row of rows) {
@@ -137,6 +147,7 @@ export function toMessages(conversationId: string, sessionId: string, rows: Sess
     if (row.role === "tool") {
       const tool = reply.tools?.find((t) => t.toolCallId === row.tool_call_id)
       if (tool) {
+        tool.status = "completed"
         tool.endedAt = createdAt
         if (row.content) tool.result = clip(row.content)
       }
@@ -156,16 +167,34 @@ export function toMessages(conversationId: string, sessionId: string, rows: Sess
         toolCallId: call.id,
         tool: call.name,
         label: call.label,
-        status: "completed",
+        status: "running",
         startedAt: createdAt,
-        endedAt: createdAt,
         contentOffset: reply.content.length,
       }
       reply.tools = [...(reply.tools ?? []), event]
     }
   }
+  if (!options.live) {
+    // A finished turn: a call whose result row is missing still ended.
+    for (const m of messages)
+      for (const t of m.tools ?? [])
+        if (t.status === "running") Object.assign(t, { status: "completed", endedAt: t.startedAt })
+  }
   return messages.filter(
     (m) => m.role === "user" || m.content || m.tools?.length || m.status === "error",
+  )
+}
+
+/**
+ * The reply so far of the running turn that `userContent` started, from the transcript Hermes
+ * writes after every tool round. For a client that can't read the run's events.
+ */
+export async function liveTurn(config: HermesConfig, sessionId: string, userContent: string) {
+  const rows = await listSessionMessages(config, sessionId, { limit: PAGE, offset: 0 })
+  const start = rows.findLastIndex((row) => isTurnStart(row) && row.content === userContent)
+  if (start < 0) return undefined
+  return toMessages("", sessionId, rows.slice(start), { live: true }).find(
+    (m) => m.role === "assistant",
   )
 }
 
@@ -190,7 +219,12 @@ export function reconcileHistory(conversationId: string) {
   if (!pending) {
     pending = reconcile(conversationId)
       .then(async (added) => {
-        await refreshContext(conversationId)
+        await Promise.all([
+          refreshContext(conversationId),
+          refreshTodos(conversationId),
+          refreshWorkspace(conversationId),
+          refreshPrs(conversationId),
+        ])
         return added
       })
       .finally(() => reconciling.delete(conversationId))
@@ -301,6 +335,14 @@ async function reconcile(conversationId: string) {
           next = match + 1
           writes.push({ ...unmatched[match], hermesRowId: user.hermesRowId })
           floor = turnEnd(unmatched[match])
+          // A turn streamed here without its events has no tool calls; the transcript's fill it in.
+          const local = current[current.indexOf(unmatched[match]) + 1]
+          if (local?.role === "assistant" && !local.tools?.length && reply?.tools?.length)
+            writes.push({
+              ...local,
+              tools: reply.tools,
+              reasoning: local.reasoning ?? reply.reasoning,
+            })
           continue
         }
         user.createdAt = Math.max(user.createdAt, floor)

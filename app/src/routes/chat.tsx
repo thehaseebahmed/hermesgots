@@ -1,13 +1,25 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Link, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
-import { EllipsisIcon, PencilIcon, PlusIcon, SettingsIcon, Trash2Icon } from "lucide-react"
+import {
+  ArrowLeftIcon,
+  CheckIcon,
+  EllipsisIcon,
+  PencilIcon,
+  PlusIcon,
+  RotateCcwIcon,
+  SettingsIcon,
+  Trash2Icon,
+} from "lucide-react"
 
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
+import { PrPill } from "@/components/chat/pr-pill"
+import { PlanReadyCard, ResolvedCard } from "@/components/chat/session-cards"
+import { TodosPill, TodosSheet } from "@/components/chat/todos"
 import { ContextRing, UsageSheet, type ContextUsage } from "@/components/chat/usage-sheet"
 import { Bot } from "@/components/bot"
 import {
@@ -52,7 +64,9 @@ import {
 } from "@/lib/db"
 import { loadEarlierHistory, reconcileHistory } from "@/lib/history"
 import { useLive, watchChat } from "@/lib/live"
+import { setBackGuard } from "@/lib/native"
 import { syncContextWindow } from "@/lib/models"
+import { refreshWorkspace, removeSessionWorkspace, setSessionMode } from "@/lib/workspace"
 
 /** How often an open chat checks Hermes for turns sent from another device. */
 const CATCH_UP_MS = 30_000
@@ -152,6 +166,7 @@ export function ChatPage() {
   const [deleting, setDeleting] = useState(false)
   const [title, setTitle] = useState("")
   const [usageOpen, setUsageOpen] = useState(false)
+  const [todosOpen, setTodosOpen] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const [historyMissing, setHistoryMissing] = useState<string>()
 
@@ -164,6 +179,9 @@ export function ChatPage() {
   // Only the plugin sees each model call; Hermes's API sums a turn's calls, so nothing else is exact.
   const tracked = Boolean(profile?.apiKey && profile.pluginChats)
   const live = conversation?.liveContext
+  const todos = (tracked && conversation?.todos?.items) || []
+  // A session of a Hermes Project: works in its worktree, with a mode, a PR and a resolved state.
+  const session = conversation?.projectId ? conversation : undefined
   const usage: ContextUsage = {
     tracked,
     tokens: tracked ? live?.tokens : undefined,
@@ -181,6 +199,12 @@ export function ChatPage() {
     if (!profileId) return
     void db.profiles.get(profileId).then((current) => current && syncContextWindow(current))
   }, [profileId, connection])
+
+  // The plugin holds a session's mode and pending plan; an empty session never catches up below.
+  const sessionId = session?.id
+  useEffect(() => {
+    if (sessionId) void refreshWorkspace(sessionId)
+  }, [sessionId])
 
   // A chat synced from another device arrives empty; its transcript is on Hermes.
   const needsHistory =
@@ -225,6 +249,33 @@ export function ChatPage() {
     if (id && conversation === null) navigate("/", { replace: true })
   }, [id, conversation, navigate])
 
+  // A session that was never sent anything isn't kept; typed text is the user's to keep or drop.
+  const draftRef = useRef("")
+  const onDraft = useCallback((text: string) => {
+    draftRef.current = text
+  }, [])
+  const [leavingWithDraft, setLeavingWithDraft] = useState(false)
+  const unsent =
+    session !== undefined && messages?.length === 0 && !(session.updatedAt > session.createdAt)
+  const projectPath = session && `/code/${session.profileId}/${session.projectId}`
+  const leave = () => {
+    if (!session || !projectPath) return
+    if (!unsent) return navigate(projectPath)
+    if (draftRef.current.trim()) return setLeavingWithDraft(true)
+    void deleteConversation(session.id)
+    navigate(projectPath, { replace: true })
+  }
+  useEffect(() => {
+    if (!unsent) return
+    setBackGuard(() => {
+      leave()
+      return true
+    })
+    return () => setBackGuard(undefined)
+    // `leave` only reads what `unsent` already covers, plus the ref and the router.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [unsent])
+
   const send = async (text: string) => {
     try {
       let conversationId = id
@@ -236,6 +287,8 @@ export function ChatPage() {
         conversationId = (await createConversation(profile.id)).id
         navigate(`/c/${conversationId}`)
       }
+      if (session?.draftAt)
+        void updateConversation(conversationId, { draft: undefined, draftAt: undefined })
       await sendMessage(conversationId, text)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't send your message.")
@@ -258,10 +311,12 @@ export function ChatPage() {
         <EllipsisIcon />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-44">
-        <DropdownMenuItem onClick={() => navigate("/")}>
-          <PlusIcon />
-          New chat
-        </DropdownMenuItem>
+        {!session && (
+          <DropdownMenuItem onClick={() => navigate("/")}>
+            <PlusIcon />
+            New chat
+          </DropdownMenuItem>
+        )}
         {conversation && (
           <>
             <DropdownMenuItem
@@ -271,8 +326,24 @@ export function ChatPage() {
               }}
             >
               <PencilIcon />
-              Rename
+              {session ? "Edit" : "Rename"}
             </DropdownMenuItem>
+            {session &&
+              (session.resolvedAt ? (
+                <DropdownMenuItem
+                  onClick={() => updateConversation(session.id, { resolvedAt: undefined })}
+                >
+                  <RotateCcwIcon />
+                  Reopen
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem
+                  onClick={() => updateConversation(session.id, { resolvedAt: Date.now() })}
+                >
+                  <CheckIcon />
+                  Resolve
+                </DropdownMenuItem>
+              ))}
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onClick={() => setDeleting(true)}>
               <Trash2Icon />
@@ -288,9 +359,22 @@ export function ChatPage() {
     <div className="relative flex min-h-0 flex-1 flex-col">
       <ChatHeader
         title={conversation?.title ?? "New chat"}
-        subtitle={activity}
+        subtitle={activity ?? session?.worktree?.branch}
         botId={profile?.botId}
         actions={actions}
+        leading={
+          session && (
+            <Button
+              variant="outline"
+              size="icon-lg"
+              className="size-11 rounded-full bg-background/80 backdrop-blur"
+              onClick={leave}
+              aria-label="Back to project"
+            >
+              <ArrowLeftIcon />
+            </Button>
+          )
+        }
       />
 
       {hasMessages ? (
@@ -348,20 +432,65 @@ export function ChatPage() {
       )}
 
       <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
-        {awaitingApproval ? (
+        {(todos.length > 0 || (session?.prs?.length ?? 0) > 0) && (
+          // One line, centred; wider than the screen it scrolls, from the first pill.
+          <div className="-mx-3 flex [scrollbar-width:none] overflow-x-auto px-3 pb-2 sm:-mx-4 sm:px-4 [&::-webkit-scrollbar]:hidden">
+            <div className="mx-auto flex w-max max-w-none min-w-full shrink-0 justify-center gap-2">
+              {todos.length > 0 && <TodosPill items={todos} onClick={() => setTodosOpen(true)} />}
+              {session?.prs?.map((pr) => (
+                <PrPill
+                  key={pr.repo}
+                  pr={pr}
+                  named={(session.worktree?.repos.length ?? 0) > 1}
+                  className="shrink-0"
+                />
+              ))}
+            </div>
+          </div>
+        )}
+        {session?.resolvedAt ? (
+          <div className="mx-auto w-full max-w-3xl">
+            <ResolvedCard
+              onReopen={() => updateConversation(session.id, { resolvedAt: undefined })}
+            />
+          </div>
+        ) : awaitingApproval ? (
           <div className="mx-auto w-full max-w-3xl">
             <ApprovalCard message={awaitingApproval} />
+          </div>
+        ) : session?.planPending && session.mode === "plan" && !busy ? (
+          <div className="mx-auto w-full max-w-3xl">
+            <PlanReadyCard
+              onApprove={async () => {
+                await setSessionMode(session.id, "accept_edits")
+                await send(approvalMessage(session.planFile))
+              }}
+              onKeepPlanning={() => setSessionMode(session.id, "plan")}
+            />
           </div>
         ) : (
           <Composer
             busy={busy}
             disabled={!configured}
+            draft={session?.draft}
+            onDraft={onDraft}
             onSend={send}
             onQueue={(text) => (id ? queueMessage(id, text) : send(text))}
             onStop={() => id && stopMessage(id)}
             onCommand={(command) => navigate(command === "new" ? "/" : "/settings")}
             connection={{ baseUrl: profile?.baseUrl ?? "", apiKey: profile?.apiKey ?? "" }}
             botName={profile?.name}
+            session={
+              session && {
+                mode: session.mode ?? "accept_edits",
+                onMode: (mode) =>
+                  setSessionMode(session.id, mode).catch((error) =>
+                    toast.error(
+                      error instanceof Error ? error.message : "Couldn't change the mode.",
+                    ),
+                  ),
+              }
+            }
             leading={
               hasMessages && configured ? (
                 <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />
@@ -372,6 +501,7 @@ export function ChatPage() {
       </div>
 
       <UsageSheet open={usageOpen} onOpenChange={setUsageOpen} usage={usage} profile={profile} />
+      <TodosSheet open={todosOpen} onOpenChange={setTodosOpen} items={todos} />
 
       <AlertDialog open={renaming} onOpenChange={setRenaming}>
         <AlertDialogContent>
@@ -385,7 +515,7 @@ export function ChatPage() {
             }}
           >
             <AlertDialogHeader>
-              <AlertDialogTitle>Rename chat</AlertDialogTitle>
+              <AlertDialogTitle>{session ? "Edit session" : "Rename chat"}</AlertDialogTitle>
             </AlertDialogHeader>
             <Input
               value={title}
@@ -401,12 +531,52 @@ export function ChatPage() {
         </AlertDialogContent>
       </AlertDialog>
 
+      <AlertDialog open={leavingWithDraft} onOpenChange={setLeavingWithDraft}>
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Save your draft?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This session hasn't started. Save the draft to pick it up later, or discard the
+              session.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction
+              variant="outline"
+              onClick={async () => {
+                if (!session || !projectPath) return
+                await deleteConversation(session.id)
+                navigate(projectPath, { replace: true })
+              }}
+            >
+              Discard
+            </AlertDialogAction>
+            <AlertDialogAction
+              onClick={async () => {
+                if (!session || !projectPath) return
+                await updateConversation(session.id, {
+                  draft: draftRef.current.trim(),
+                  draftAt: Date.now(),
+                })
+                navigate(projectPath)
+              }}
+            >
+              Save draft
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <AlertDialog open={deleting} onOpenChange={setDeleting}>
         <AlertDialogContent size="sm">
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this chat?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {session ? "Delete this session?" : "Delete this chat?"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              It's removed from this device. Hermes keeps its own copy of the session.
+              {session
+                ? "It's removed from this device, and its worktrees from the server unless they have uncommitted or unpushed work. Hermes keeps its own copy of the session."
+                : "It's removed from this device. Hermes keeps its own copy of the session."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -416,10 +586,20 @@ export function ChatPage() {
               onClick={async () => {
                 if (id) {
                   stopMessage(id)
+                  if (session) {
+                    const result = await removeSessionWorkspace(id)
+                    for (const kept of result.kept)
+                      toast.info(
+                        `Kept ${kept.name}: it has ${kept.reason === "dirty" ? "uncommitted" : "unpushed"} changes.`,
+                      )
+                    if (result.error) toast.error(result.error)
+                  }
                   await deleteConversation(id)
                 }
                 setDeleting(false)
-                navigate("/", { replace: true })
+                navigate(session ? `/code/${session.profileId}/${session.projectId}` : "/", {
+                  replace: true,
+                })
               }}
             >
               Delete
@@ -428,6 +608,15 @@ export function ChatPage() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  )
+}
+
+/** What approving a plan sends: the saved plan's checkpoints, each committed, or just a go-ahead. */
+function approvalMessage(planFile: string | undefined) {
+  if (!planFile) return "Go ahead with the plan."
+  return (
+    `Go ahead with the plan in \`${planFile}\`. Work through its checkpoints in order and commit ` +
+    "each one on this branch with the commit message it names. Don't push."
   )
 }
 

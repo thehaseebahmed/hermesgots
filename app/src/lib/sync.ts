@@ -48,10 +48,17 @@ import {
  */
 
 type BotValue = Omit<Profile, "id" | "updatedAt" | "pluginChats">
-type ChatValue = Pick<
-  Conversation,
-  "title" | "titleEdited" | "hermesSessionId" | "createdAt" | "updatedAt"
->
+const CHAT_FIELDS = [
+  "title",
+  "titleEdited",
+  "hermesSessionId",
+  "createdAt",
+  "updatedAt",
+  "projectId",
+  "resolvedAt",
+  "draftAt",
+] as const
+type ChatValue = Pick<Conversation, (typeof CHAT_FIELDS)[number]>
 
 /**
  * Where a bot's chat list lives: its Hermes server's Memento plugin, or the fallback.
@@ -318,13 +325,7 @@ async function localChats(profileId: string): Promise<Doc<ChatValue>> {
   for (const c of await db.conversations.where("profileId").equals(profileId).toArray()) {
     doc[c.id] = {
       at: c.changedAt,
-      value: {
-        title: c.title,
-        titleEdited: c.titleEdited,
-        hermesSessionId: c.hermesSessionId,
-        createdAt: c.createdAt,
-        updatedAt: c.updatedAt,
-      },
+      value: Object.fromEntries(CHAT_FIELDS.map((field) => [field, c[field]])) as ChatValue,
     }
   }
   const tombstones = await db.tombstones.where("id").startsWith("chat:").toArray()
@@ -343,13 +344,15 @@ async function applyChats(profileId: string, pull: [string, Entry<ChatValue>][])
       if (existing) await deleteConversation(id, { remote: true })
     } else if (entry.value) {
       await db.transaction("rw", db.conversations, db.tombstones, async () => {
+        // Field by field, so a record that dropped one (a reopened session) clears it here too.
+        const synced = Object.fromEntries(CHAT_FIELDS.map((field) => [field, entry.value![field]]))
         await db.conversations.put({
           ...(await db.conversations.get(id)),
-          ...entry.value!,
+          ...synced,
           id,
           profileId,
           changedAt: entry.at,
-        })
+        } as Conversation)
         await db.tombstones.delete(`chat:${id}`)
       })
     }

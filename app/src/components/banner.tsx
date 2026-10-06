@@ -1,7 +1,7 @@
 import type { ReactNode } from "react"
 import { CircleAlertIcon, InfoIcon, TriangleAlertIcon } from "lucide-react"
 
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
 import { cn } from "@/lib/utils"
 
 const TONES = {
@@ -14,10 +14,13 @@ const TONES = {
 export function Banner({
   tone = "warning",
   className,
+  action,
   children,
 }: {
   tone?: keyof typeof TONES
   className?: string
+  /** A button at the end, such as a dismiss. */
+  action?: ReactNode
   children: ReactNode
 }) {
   const { Icon, className: toneClass } = TONES[tone]
@@ -25,6 +28,7 @@ export function Banner({
     <Alert className={cn("rounded-2xl border-0 px-4 py-3", toneClass, className)}>
       <Icon aria-hidden />
       <AlertDescription className="text-foreground">{children}</AlertDescription>
+      {action && <AlertAction className="top-1/2 right-1 -translate-y-1/2">{action}</AlertAction>}
     </Alert>
   )
 }

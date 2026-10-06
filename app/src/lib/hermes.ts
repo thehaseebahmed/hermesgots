@@ -1,4 +1,4 @@
-import type { ApprovalChoice } from "@/lib/db"
+import type { ApprovalChoice, PrChecks, PrState, SessionMode, Todo } from "@/lib/db"
 import type { Doc } from "@/lib/merge"
 import { isNative } from "@/lib/native"
 
@@ -446,6 +446,145 @@ export async function listCronRuns(
   )
 }
 
+export interface HermesProjectFolder {
+  path: string
+  label: string | null
+  git: boolean
+  /** `user/repo` from the clone's GitHub origin; what the UI calls the folder. */
+  repo: string | null
+}
+
+/** A Hermes Project (`hermes project create`), through the Memento plugin. */
+export interface HermesProject {
+  id: string
+  name: string
+  description: string | null
+  createdAt: number
+  /** The newest session in one of its folders; unset when none has run there. */
+  lastActiveAt?: number
+  /** Primary folder first. */
+  folders: HermesProjectFolder[]
+}
+
+function toProject(raw: unknown): HermesProject | null {
+  if (!raw || typeof raw !== "object") return null
+  const p = raw as Record<string, unknown>
+  if (typeof p.id !== "string" || typeof p.name !== "string") return null
+  const seconds = (value: unknown) =>
+    typeof value === "number" && value > 0 ? value * 1000 : undefined
+  const folders = Array.isArray(p.folders) ? p.folders : []
+  return {
+    id: p.id,
+    name: p.name,
+    description: typeof p.description === "string" && p.description.trim() ? p.description : null,
+    createdAt: seconds(p.created_at) ?? 0,
+    lastActiveAt: seconds(p.last_active),
+    folders: folders
+      .filter((f): f is Record<string, unknown> => typeof f?.path === "string")
+      .map((f) => ({
+        path: f.path as string,
+        label: typeof f.label === "string" && f.label ? f.label : null,
+        git: f.git === true,
+        repo: typeof f.repo === "string" && f.repo ? f.repo : null,
+      })),
+  }
+}
+
+/** The profile's Hermes Projects. A 404 (or a CORS-blocked one) means no plugin, or an older one. */
+export async function listProjects(config: HermesConfig): Promise<HermesProject[]> {
+  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects`, {
+    headers: headers(config),
+  })
+  const body = await response.json()
+  const projects: unknown[] = Array.isArray(body?.projects) ? body.projects : []
+  return projects.map(toProject).filter((project): project is HermesProject => project !== null)
+}
+
+export interface GitHubStatus {
+  connected: boolean
+  login?: string
+  /** Why a token the server has didn't work. */
+  error?: string
+}
+
+/** The GitHub account on the bot's Hermes host, which the plugin uses to list and clone repos. */
+export async function getGitHubStatus(config: HermesConfig): Promise<GitHubStatus> {
+  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/github`, {
+    headers: headers(config),
+  })
+  const body = await response.json()
+  return {
+    connected: body?.connected === true,
+    login: typeof body?.login === "string" ? body.login : undefined,
+    error: typeof body?.error === "string" ? body.error : undefined,
+  }
+}
+
+export interface GitHubRepo {
+  fullName: string
+  description: string | null
+  private: boolean
+}
+
+/** The host account's repos, most recently pushed first. */
+export async function listGitHubRepos(config: HermesConfig): Promise<GitHubRepo[]> {
+  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/github/repos`, {
+    headers: headers(config),
+  })
+  const body = await response.json()
+  const repos: unknown[] = Array.isArray(body?.repos) ? body.repos : []
+  return repos.flatMap((raw) => {
+    const repo = raw as Record<string, unknown> | null
+    if (typeof repo?.full_name !== "string") return []
+    return [
+      {
+        fullName: repo.full_name,
+        description: typeof repo.description === "string" ? repo.description : null,
+        private: repo.private === true,
+      },
+    ]
+  })
+}
+
+/**
+ * Clones a GitHub repo onto the Hermes host and adds it to a project, or to a new one named
+ * `projectName`. Can take minutes for a big repo.
+ */
+/** Creates a project in the profile's `projects/` folder on the server, with each repo cloned into it. */
+export async function createProject(
+  config: HermesConfig,
+  project: { name: string; description?: string; repos: string[] },
+): Promise<{ id: string; path: string }> {
+  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify(project),
+  })
+  const body = await response.json()
+  return { id: String(body?.id ?? ""), path: String(body?.path ?? "") }
+}
+
+/** Renames a project or changes its description. */
+export async function updateProject(
+  config: HermesConfig,
+  id: string,
+  fields: { name?: string; description?: string },
+): Promise<void> {
+  await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects/${encodeURIComponent(id)}`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify(fields),
+  })
+}
+
+/** Deletes a project's record on the server. Its folders and clones stay on the host. */
+export async function deleteProject(config: HermesConfig, id: string): Promise<void> {
+  await request(
+    `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects/${encodeURIComponent(id)}/remove`,
+    { method: "POST", headers: headers(config), body: "{}" },
+  )
+}
+
 /**
  * Merges this device's chat list into the one the Memento plugin keeps, newer record winning, and
  * returns the merged list. A 404 (or a CORS-blocked one, with no status) means no plugin, or an older one.
@@ -527,6 +666,223 @@ export async function getSessionContext(
   return tokens ? { tokens, window: count(body?.context_length) } : null
 }
 
+export interface SessionTodos {
+  revision: number
+  items: Todo[]
+}
+
+const TODO_STATUSES = new Set<string>(["pending", "in_progress", "completed", "cancelled"])
+
+/** Reads a `todo_list` result (`{ todos, revision }`), or null when it isn't one. */
+export function parseTodos(value: unknown): SessionTodos | null {
+  const body = value as { todos?: unknown; revision?: unknown } | null
+  if (!body || !Array.isArray(body.todos)) return null
+  const items: Todo[] = []
+  for (const raw of body.todos) {
+    const id = raw?.id
+    if ((typeof id !== "string" && typeof id !== "number") || typeof raw?.content !== "string")
+      continue
+    if (!TODO_STATUSES.has(raw.status)) continue
+    const parent = raw.parent
+    items.push({
+      id: String(id),
+      content: raw.content,
+      status: raw.status,
+      ...(typeof parent === "string" || typeof parent === "number"
+        ? { parent: String(parent) }
+        : {}),
+    })
+  }
+  const revision = typeof body.revision === "number" && body.revision >= 0 ? body.revision : 0
+  return { revision, items }
+}
+
+/**
+ * The agent's todo list in a session (and the ones it was compressed from), read from the
+ * transcript by the Memento plugin. Null when the agent hasn't written one.
+ */
+export async function getSessionTodos(
+  config: HermesConfig,
+  sessionId: string,
+): Promise<SessionTodos | null> {
+  const response = await request(
+    `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/sessions/${encodeURIComponent(sessionId)}/todos`,
+    { headers: headers(config) },
+  )
+  return parseTodos(await response.json())
+}
+
+/** A project session's worktrees and permission mode, as the Memento plugin keeps them. */
+export interface SessionWorkspace {
+  projectId: string
+  branch: string
+  /** One worktree per repo of the project, primary first; `name` is `user/repo`. */
+  repos: { name: string; branch: string }[]
+  mode: SessionMode
+  planPending: boolean
+  /** The newest plan the plugin saved, as `plans/<file>.md` under the project's folder. */
+  planFile: string | null
+  /** Where the agent's worktrees are and, in plan mode, the plan's shape; every run's `instructions`. */
+  instructions: string
+}
+
+const MODES = new Set<string>(["accept_edits", "auto", "plan"])
+
+function parseWorkspace(raw: unknown): SessionWorkspace | null {
+  const body = raw as { workspace?: Record<string, unknown>; instructions?: unknown } | null
+  const record = body?.workspace
+  if (!record || typeof record.branch !== "string") return null
+  const mode =
+    typeof record.mode === "string" && MODES.has(record.mode) ? record.mode : "accept_edits"
+  const repos = Array.isArray(record.repos) ? record.repos : []
+  return {
+    projectId: String(record.project_id ?? ""),
+    branch: record.branch,
+    repos: repos
+      .filter((r): r is Record<string, unknown> => typeof r?.name === "string")
+      .map((r) => ({
+        name: r.name as string,
+        branch: typeof r.branch === "string" ? r.branch : (record.branch as string),
+      })),
+    mode: mode as SessionMode,
+    planPending: Boolean(record.plan_pending),
+    planFile: typeof record.plan_file === "string" && record.plan_file ? record.plan_file : null,
+    instructions: typeof body?.instructions === "string" ? body.instructions : "",
+  }
+}
+
+function pluginSession(config: HermesConfig, sessionId: string, path: string) {
+  return `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/sessions/${encodeURIComponent(sessionId)}${path}`
+}
+
+/**
+ * Gives a project session its worktrees (made on the first call, one per repo of the project) and
+ * points its tools into the primary one. The pointer only lives in the gateway's memory, so this
+ * runs before every turn.
+ */
+export async function ensureWorkspace(
+  config: HermesConfig,
+  sessionId: string,
+  options: { projectId: string; task?: string; mode?: SessionMode },
+): Promise<SessionWorkspace> {
+  const response = await request(pluginSession(config, sessionId, "/workspace"), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({
+      project_id: options.projectId,
+      task: options.task,
+      mode: options.mode,
+    }),
+  })
+  const workspace = parseWorkspace(await response.json())
+  if (!workspace) throw new HermesError("The plugin didn't return a workspace.")
+  return workspace
+}
+
+/** The session's workspace, or null when it has none (or the plugin predates them). */
+export async function getWorkspace(
+  config: HermesConfig,
+  sessionId: string,
+): Promise<SessionWorkspace | null> {
+  const response = await request(pluginSession(config, sessionId, "/workspace"), {
+    headers: headers(config),
+  })
+  return parseWorkspace(await response.json())
+}
+
+/** Changes a session's permission mode; also clears a pending plan. 404 before the first turn. */
+export async function setWorkspaceMode(
+  config: HermesConfig,
+  sessionId: string,
+  mode: SessionMode,
+): Promise<SessionWorkspace | null> {
+  const response = await request(pluginSession(config, sessionId, "/mode"), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ mode }),
+  })
+  return parseWorkspace(await response.json())
+}
+
+export interface KeptWorktree {
+  /** `user/repo`. */
+  name: string
+  reason: "dirty" | "unpushed"
+}
+
+/** Asks the plugin to remove the session's worktrees; it keeps those with uncommitted or unpushed work. */
+export async function removeWorkspace(
+  config: HermesConfig,
+  sessionId: string,
+): Promise<{ removed: boolean; kept: KeptWorktree[] }> {
+  const response = await request(pluginSession(config, sessionId, "/workspace/remove"), {
+    method: "POST",
+    headers: headers(config),
+  })
+  const body = await response.json()
+  const kept: unknown = body?.kept
+  return {
+    removed: Boolean(body?.removed),
+    kept: Array.isArray(kept)
+      ? kept.filter(
+          (k): k is KeptWorktree =>
+            typeof k?.name === "string" && (k.reason === "dirty" || k.reason === "unpushed"),
+        )
+      : [],
+  }
+}
+
+export interface PullRequest {
+  repo: string
+  number: number
+  title: string
+  state: PrState
+  checks: PrChecks | null
+  url: string | null
+}
+
+const PR_STATES = new Set<string>(["open", "draft", "merged", "closed"])
+const PR_CHECKS = new Set<string>(["success", "failure", "pending"])
+
+/** The pull request from the session's branch in each of its repos. Needs the Memento plugin. */
+export async function getSessionPrs(
+  config: HermesConfig,
+  sessionId: string,
+): Promise<PullRequest[]> {
+  const response = await request(pluginSession(config, sessionId, "/prs"), {
+    headers: headers(config),
+  })
+  const prs: unknown = (await response.json())?.prs
+  if (!Array.isArray(prs)) return []
+  return prs
+    .filter((pr) => typeof pr?.number === "number" && PR_STATES.has(pr.state))
+    .map((pr) => ({
+      repo: typeof pr.repo === "string" ? pr.repo : "",
+      number: pr.number,
+      title: typeof pr.title === "string" ? pr.title : "",
+      state: pr.state,
+      checks: PR_CHECKS.has(pr.checks) ? pr.checks : null,
+      url: typeof pr.url === "string" ? pr.url : null,
+    }))
+}
+
+export type LiveRunStatus = "running" | "waiting_for_approval"
+
+/** Sessions with a run in flight on the server, by Hermes session id. Needs the Memento plugin. */
+export async function listLiveRuns(config: HermesConfig): Promise<Record<string, LiveRunStatus>> {
+  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/runs/live`, {
+    headers: headers(config),
+  })
+  const sessions: unknown = (await response.json())?.sessions
+  if (!sessions || typeof sessions !== "object") return {}
+  return Object.fromEntries(
+    Object.entries(sessions).filter(
+      (entry): entry is [string, LiveRunStatus] =>
+        entry[1] === "running" || entry[1] === "waiting_for_approval",
+    ),
+  )
+}
+
 /** Marks a session as Memento's, so the Hermes dashboard labels it. Needs the Memento plugin. */
 export async function labelSession(config: HermesConfig, sessionId: string) {
   try {
@@ -586,6 +942,16 @@ function runOutcome(payload: any): RunOutcome {
 }
 
 /**
+ * Sent as a run's `instructions`, which Hermes adds to the system prompt. `todo_list` is a deferred
+ * tool by default, so without it the agent rarely keeps the list the chat shows. Fixed, so the
+ * prompt cache holds across turns. (Plan mode's own line comes from the plugin's workspace.)
+ */
+const PLAN_HINT =
+  "When a task takes three or more steps, plan it first with the todo_list tool (load it through " +
+  "tool search if it isn't loaded yet), keep exactly one item in progress, and update the list as " +
+  "each step is done."
+
+/**
  * Starts a turn on `/v1/runs`. Unlike a chat completion, Hermes doesn't interrupt a run when its
  * event stream drops, so a phone that sleeps mid-reply can pick it up again.
  */
@@ -597,6 +963,8 @@ export async function startRun(
     sessionId?: string
     /** Makes a retried POST return the run it already started. */
     idempotencyKey: string
+    /** The plugin's line for a project session: its worktrees and, in plan mode, the plan's shape. */
+    workspaceInstructions?: string
   },
 ) {
   // Like X-Hermes-Session-Id, a keyed session holds the history, so only the new message goes.
@@ -608,6 +976,7 @@ export async function startRun(
     body: JSON.stringify({
       model: options.model,
       input,
+      instructions: [PLAN_HINT, options.workspaceInstructions].filter(Boolean).join("\n"),
       ...(keyed ? { session_id: options.sessionId } : {}),
     }),
   })
@@ -638,6 +1007,8 @@ export async function followRun(
   )
   if (!response.body) throw new HermesError("Hermes returned an empty response.")
 
+  // Hermes v2026.9.24 sends no seq: number the calls here, so each gets its own card.
+  let calls = 0
   for await (const { data } of readSse(response.body)) {
     let payload: any
     try {
@@ -660,7 +1031,7 @@ export async function followRun(
         handlers.onTool?.({
           tool: String(payload.tool ?? "tool"),
           label: payload.preview ? String(payload.preview) : undefined,
-          toolCallId: `${runId}:${payload.seq}`,
+          toolCallId: `${runId}:${typeof payload.seq === "number" ? payload.seq : `t${calls++}`}`,
           status: "running",
         })
         break

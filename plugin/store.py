@@ -1,12 +1,12 @@
-"""``$HERMES_HOME/memento/memento.db``: the chat list (``chats.py``), context use (``context.py``)
-and recent changes for the app's live stream (``events.py``)."""
+"""``$HERMES_HOME/memento/memento.db``: the chat list (``chats.py``), context use (``context.py``),
+project sessions (``sessions.py``) and recent changes for the app's live stream (``events.py``)."""
 
 from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 6
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -45,5 +45,24 @@ def connect(path: Path) -> sqlite3.Connection:
                    session_id TEXT
                )"""
         )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS project_sessions (
+                   session_id TEXT PRIMARY KEY,
+                   project_id TEXT NOT NULL,
+                   repo_root TEXT NOT NULL,
+                   path TEXT,
+                   branch TEXT,
+                   mode TEXT NOT NULL DEFAULT 'accept_edits',
+                   plan_pending INTEGER NOT NULL DEFAULT 0,
+                   created_at INTEGER NOT NULL,
+                   repos TEXT,
+                   plan_file TEXT
+               )"""
+        )
+        # v4: a session has a worktree in every repo of its project. v5: its newest plan file.
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(project_sessions)")}
+        for column in ("repos", "plan_file"):
+            if column not in columns:
+                conn.execute(f"ALTER TABLE project_sessions ADD COLUMN {column} TEXT")
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     return conn

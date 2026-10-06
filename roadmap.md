@@ -28,25 +28,25 @@ frontend." Phases are ordered by that cost, cheapest first.
 
 No new Hermes-side work. Pure Memento frontend.
 
-- [ ] Add pause / resume / run-now buttons to `/routines`, calling the
-      already-documented `POST /api/jobs/{id}/pause|resume|run`.
+- [x] Add pause / resume / run-now buttons to `/routines`, calling the
+      already-documented `POST /api/jobs/{id}/pause|resume|run`. Already
+      shipped: each job's menu in `app/src/routes/routines.tsx`.
 
 ## Phase 2 — Read-only Project and Kanban visibility
 
 New Memento plugin routes, read-only, mirroring the existing
 `cron/runs` route shape.
 
-- [ ] `GET /api/plugins/memento/projects` — list the user's configured
-      Hermes Projects (name, folders, bound board). Thin wrapper around
-      `hermes project list --json`-equivalent data.
-- [ ] `GET /api/plugins/memento/kanban/tasks` — list tasks across boards
-      (status, assignee, board) by importing `kanban_db` directly when the
-      kanban plugin is installed. No mutation, so no concurrency concerns.
-- [ ] Memento UI: a "Code" nav item showing a repo/Project picker (from the
-      first route) and a flat, read-only task list (from the second) —
-      explicitly not the drag-drop board.
+- [x] `GET /api/plugins/memento/projects` — list the user's configured
+      Hermes Projects (name, description, folders and which are git repos,
+      last session time), read from `projects.db`.
+- [x] Memento UI: a "Code" nav item listing every bot's Projects in one
+      list, most recently worked on first (title, then description or git
+      repos, with the bot as the icon).
+- [x] Create a project with its GitHub repos, cloned on the Hermes host into
+      `$HERMES_HOME/projects/<project>/` with the host's GitHub account.
 
-## Phase 3 — Checkpoints/rollback viewer
+## Phase 3 (optional) — Checkpoints/rollback viewer
 
 - [ ] `GET /api/plugins/memento/checkpoints?project=<slug>` — list
       checkpoints with change stats, and a diff endpoint
@@ -54,32 +54,50 @@ New Memento plugin routes, read-only, mirroring the existing
 - [ ] New Memento frontend surface: a diff viewer (file list + unified
       diff), read-only to start.
 
-## Phase 4 — Mutating Kanban from Memento
+## Phase 4 — The agent's todos in chat
 
-- [ ] `PATCH /api/plugins/memento/kanban/tasks/:id` — status transitions
-      and task creation, routed through the same `kanban_db` layer the CLI
-      and dashboard use, with the same concurrency care the existing kanban
-      dashboard plugin takes.
-- [ ] UI: status-change actions and a create-task sheet on top of Phase 2's
-      list view.
+The agent's own plan for a turn, shown read-only above the composer the way
+Claude Code shows its task list. This is Hermes's per-session `todo_list`
+tool, not Kanban: the agent writes and updates it, the user only watches.
 
-## Phase 5 — "Start a coding session in a worktree" chore
+- [x] `GET /api/plugins/memento/sessions/{id}/todos` — the session's latest
+      `todo_list` result, read from its transcript (following compression).
+- [x] Nudge the agent to plan: `todo_list` is a deferred tool by default, so
+      each run sends a short `instructions` line asking for it on multi-step
+      work.
+- [x] UI: a "2/5 todos" pill above the composer that opens the list.
 
-The first genuinely new capability, not just a read/write proxy.
+## Phase 5 — Project sessions
 
-- [ ] `POST /api/plugins/memento/worktree-sessions` — given a Project and a
-      natural-language task, call into `hermes_cli/worktree_ops.py`'s
-      existing functions to create the worktree (don't reimplement worktree
-      logic), then start a run scoped to that directory
-      (`hermes -w -z "<task>"` or a directory-scoped `/v1/runs` call).
-- [ ] Relay run events back through Memento's existing SSE/resume machinery
-      in `chat.ts` — this part is close to free, it's the same resume model
-      already built for chat turns.
-- [ ] UI: "New chore" sheet (pick Project, type task, start) rendering as a
-      pinned chat-style thread with a header showing branch + worktree path.
-- [ ] On completion: surface commit count / branch name, with a keep/discard
-      action that calls back into `git worktree remove` via the plugin
-      (mirrors what a worktree-aware client does on exit).
+The first genuinely new capability, not just a read/write proxy: a chat
+that works in its own git worktree of a project's repo.
+
+- [x] `POST /api/plugins/memento/sessions/{id}/workspace` — makes the
+      session's worktree with `hermes_cli/worktree_ops.py`'s own function
+      and points the session's tools into it (`/v1/runs` has no cwd, but
+      Hermes's terminal tool has a per-task cwd override keyed by the
+      session id). Posted before every turn, restored by a hook after a
+      gateway restart.
+- [x] Run events come through Memento's existing SSE/resume machinery in
+      `chat.ts`; nothing new there.
+- [x] UI: "New session" on a project opens a chat with a two-line composer:
+      the text, then `+`, the permission mode, the context ring, voice and
+      send. The header shows the branch. A session spans every repo of its
+      project (a worktree in each); repos are named `user/repo`, never by
+      their path.
+- [x] Permission modes per session, held by the plugin: Accept edits
+      (Hermes's native behaviour), Auto (the app answers approvals) and Plan
+      (the plugin's `pre_tool_call` hook blocks anything that changes a
+      file; the finished plan waits for approval in place of the composer).
+- [x] Session states on the project screen: Working, Waiting on you, Idle
+      and Resolved, from the plugin's live-run list and this device's own
+      turns. Resolve, Edit and Delete in the chat menu; a resolved session
+      shows a notice in place of the composer until it's reopened.
+- [x] The branch's pull request in each repo as a pill next to the todos
+      pill (looked up on GitHub by the plugin), coloured by state and
+      orange when its checks fail, and worktree removal on delete when a
+      tree is clean and pushed.
+- [ ] The Library and PRs tabs of a project.
 
 ## Phase 6 — Arbitrary GitHub repo picker
 
@@ -93,6 +111,18 @@ needs new ground on both sides:
 - [ ] A plugin route that clones a chosen repo onto the Hermes host before
       Phase 5's worktree-session flow can target it.
 
+## Phase 7 — Composer context
+
+What the `+` button on a project session's composer should add to a message.
+The menu is there with its entries disabled.
+
+- [ ] Mention files from the project folder (a plugin route lists the
+      worktree's files; picked paths go into the message as references the
+      agent can read).
+- [ ] A photo from the camera.
+- [ ] Images from the gallery.
+- [ ] Documents from the device.
+
 ## Deferred / needs a decision before scheduling
 
 These either depend on an upstream Hermes change, or duplicate a UI that
@@ -105,6 +135,10 @@ already exists elsewhere — worth tracking, not worth building yet.
   Hermes's own gateway event schema — which, per Hermes's own contribution
   rubric ("the core is a narrow waist"), is the hardest kind of change to
   get accepted upstream, independent of Memento-side effort.
+- **Kanban from Memento** (a read-only task list, then status changes and a
+  create-task sheet through `kanban_db`). Kanban cards are shared, dispatched
+  work on a board every profile sees, not a session's plan, so Phase 4 shows
+  the agent's `todo_list` instead.
 - **Full remote Kanban board parity** (drag-drop, auto-decompose, PR
   acceptance gating) rebuilt natively in Memento at phone width. Kanban
   already has a complete dashboard SPA for this; duplicating it in a PWA is

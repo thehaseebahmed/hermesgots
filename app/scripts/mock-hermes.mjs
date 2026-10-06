@@ -7,14 +7,28 @@
 // served under /p/<profile>/, and an unknown route's 404 carries no CORS headers.
 // The plugin also keeps the chat list (GET and POST /api/plugins/memento/chats, newer record wins) and
 // labels a chat as Memento's on POST /api/plugins/memento/sessions/{id}/label. Its
-// GET /api/plugins/memento/sessions/{id}/context reports a keyed session's latest model call, and
+// GET /api/plugins/memento/sessions/{id}/context reports a keyed session's latest model call.
+// It lists Hermes Projects on GET /api/plugins/memento/projects. GET /api/plugins/memento/github and
+// github/repos stand in for the host's GitHub account (MOCK_NO_GITHUB=1 leaves it signed out), and
+// POST /api/plugins/memento/projects pretends to create a project with its repos cloned into it, and
+// POST projects/{id} and projects/{id}/remove edit and delete one.
 // GET /api/plugins/memento/events?since=N streams what changed (`session`, `title`, `chats`, `cron`)
 // after a `hello` carrying the cursor, as the plugin's hooks note it.
 // Chats are titled like Hermes does: a slice of the opener at once, a "model" title a moment later,
 // readable on GET /api/sessions/{id}. Sessions are keyed by X-Hermes-Session-Id when a key is sent,
 // and their transcripts page back from GET /api/sessions/{id}/messages?order=latest&limit&offset.
+// Say "plan" and the agent keeps a todo list with its todo_list tool as it works, which the plugin's
+// GET /api/plugins/memento/sessions/{id}/todos reads back from a keyed session's transcript.
 // Turns also run on POST /v1/runs, whose events replay from GET /v1/runs/{id}/events?last_seq=N and
 // which keep going when the client drops, unlike a chat completion. Say "long" for a slow reply.
+// Project sessions get a worktree in each of the project's repos on
+// POST /api/plugins/memento/sessions/{id}/workspace (GET reads it back, POST …/mode changes the
+// permission mode, POST …/workspace/remove removes the trees unless a turn mentioned "commit"). In
+// plan mode the agent reads a little, writes a structured plan, leaves it pending and the workspace
+// names the file the plugin would have saved it to (plan_file). The branch's PRs
+// (GET …/sessions/{id}/prs) appear after two turns: "merge", "close" or "draft" in a turn sets their
+// state and "break" fails their checks. GET /api/plugins/memento/runs/live lists the sessions with
+// a run in flight.
 //
 //   pnpm mock            # then point Settings at http://localhost:8642/v1
 
@@ -68,6 +82,76 @@ const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Authorization, Content-Type, Idempotency-Key, X-Hermes-Session-Id",
+}
+
+const GITHUB = !process.env.MOCK_NO_GITHUB
+const githubRepos = [
+  { full_name: "mock-user/memento", description: "A PWA companion for Hermes", private: false },
+  { full_name: "mock-user/theseus", description: "A tiny maze game", private: true },
+  { full_name: "mock-user/dotfiles", description: null, private: false },
+  { full_name: "mock-org/zigbee-bridge", description: "Zigbee to MQTT glue", private: true },
+  { full_name: "mock-user/ha-automations", description: "Home Assistant automations", private: false },
+]
+
+/** Hermes Projects as projects.db holds them, with activity from the sessions in their folders. */
+let projects
+function mockProjects() {
+  projects ??= seedProjects()
+  return projects
+}
+
+function seedProjects() {
+  const now = Date.now() / 1000
+  const folder = (path, git = true, label = null) => ({
+    path,
+    label,
+    is_primary: false,
+    git,
+    // As the plugin reads it from the clone's GitHub origin.
+    repo: git ? `${path.includes("zigbee") ? "mock-org" : "mock-user"}/${path.split("/").at(-1)}` : null,
+  })
+  return [
+    {
+      id: "p_1a2b3c4d",
+      slug: "memento",
+      name: "Memento",
+      description: null,
+      created_at: now - 40 * 86_400,
+      last_active: now - 15 * 60,
+      folders: [{ ...folder("/home/hermes/code/memento"), is_primary: true }],
+    },
+    {
+      id: "p_5e6f7a8b",
+      slug: "theseus",
+      name: "theseus",
+      description: "A tiny maze game for the phone, written over lunch breaks",
+      created_at: now - 20 * 86_400,
+      last_active: now - 3 * 3_600,
+      folders: [{ ...folder("/home/hermes/code/theseus"), is_primary: true }],
+    },
+    {
+      id: "p_9c0d1e2f",
+      slug: "smart-home",
+      name: "Smart Home",
+      description: null,
+      created_at: now - 300 * 86_400,
+      last_active: now - 120 * 86_400,
+      folders: [
+        { ...folder("/home/hermes/code/ha-config"), is_primary: true },
+        folder("/home/hermes/code/zigbee-bridge", true, "bridge"),
+        folder("/home/hermes/notes/home", false),
+      ],
+    },
+    {
+      id: "p_3a4b5c6d",
+      slug: "french",
+      name: "French",
+      description: null,
+      created_at: now - 80 * 86_400,
+      last_active: null,
+      folders: [{ ...folder("/home/hermes/notes/french", false), is_primary: true }],
+    },
+  ]
 }
 
 function json(res, status, body) {
@@ -141,6 +225,36 @@ function jobRecord(job) {
 }
 
 const PLUGIN = process.env.MOCK_NO_PLUGIN !== "1"
+
+/** Project sessions as the plugin's memento.db holds them, by Hermes session id. */
+const projectSessions = new Map()
+// The plugin's plan-mode instructions (sessions.PLAN_INSTRUCTIONS), word for word.
+const PLAN_INSTRUCTIONS = `You are in plan mode: change nothing. Read what you need, then make your whole final reply the plan below and stop; the user approves it before you act. It is saved to a file as written, so write it for someone who hasn't read this chat. Use this Markdown shape exactly:
+
+# Plan: <short title>
+
+## Overview
+What was asked, the problem it solves and the outcome, in two to five sentences.
+
+## Approach
+The design you chose and why. One line each for the alternatives you rejected.
+
+## Changes
+One entry per file or area: its path, what changes and why, and the existing functions you'd reuse.
+
+## Checkpoints
+Split the work into checkpoints that each leave the code building and worth committing, in order. For each:
+### Checkpoint N: <name>
+- Commit: \`type(scope): summary\` in Conventional Commits form, unless the user asked for another style
+- Steps: the concrete edits
+- Done when: how you'd know it works
+
+## Verification
+How to test the whole change end to end: commands, what to look at, expected results.
+
+## Risks and open questions
+What could go wrong, what you're assuming, and anything the user must decide.`
+const userTurns = (sessionId) => (transcripts.get(sessionId) ?? []).filter((r) => r.role === "user")
 const RUN_ERROR = "Timed out waiting for https://status.example.com"
 
 /** A run as a row of Hermes's cron execution ledger. */
@@ -211,6 +325,68 @@ async function playTurn(req, body, last, out) {
   out.status("Thinking…")
   await sleep(500)
 
+  // In plan mode the plugin blocks every tool that changes anything, so the agent reads and plans.
+  const workspace = projectSessions.get(sessionOf(req, body))
+  if (workspace) workspace.plan_pending = 0
+  if (workspace?.mode === "plan") {
+    // Read-only calls, on the stream and in the transcript: what a client without the stream polls.
+    const reads = [
+      ["terminal", "💻", { command: "git log --oneline -5" }, JSON.stringify({ output: "4f69069 style(chat): keep the pills on one line\n17189b0 feat(chat): sessions span every repo", exit_code: 0, error: null })],
+      ["read_file", "📄", { path: "scripts/rotate-logs.sh" }, "#!/bin/sh\nfind /var/log -name '*.gz' -mtime +14 -delete\n"],
+    ]
+    for (const [tool, emoji, args, result] of reads) {
+      if (out.closed()) break
+      const id = `call_${randomUUID().slice(0, 8)}`
+      out.tool({ tool, emoji, label: Object.values(args)[0], toolCallId: id, status: "running" })
+      record(req, { role: "assistant", content: null, tool_calls: [{ id, type: "function", function: { name: tool, arguments: JSON.stringify(args) } }] })
+      await sleep(1500)
+      out.tool({ tool, toolCallId: id, status: "completed", result })
+      record(req, { role: "tool", tool_call_id: id, tool_name: tool, content: result })
+    }
+    await say(
+      "# Plan: Add a dry run to log rotation\n\n" +
+        "## Overview\nRotation deletes old logs with no way to preview what goes. A `--dry-run` flag lists the files it would remove, so the cron job can be checked before it runs for real.\n\n" +
+        "## Approach\nAdd the flag to the existing script rather than a second script, so both paths share one `find` expression. A separate preview script was rejected: the two would drift.\n\n" +
+        "## Changes\n- `scripts/rotate-logs.sh`: parse `--dry-run`; print instead of `-delete` when set.\n- `tests/rotate-logs.bats`: a case for each path.\n- `README.md`: document the flag.\n\n" +
+        "## Checkpoints\n### Checkpoint 1: The flag\n- Commit: `feat(rotate): add a --dry-run flag that lists what would go`\n- Steps: parse the flag; switch `-delete` for `-print` when set.\n- Done when: `./rotate-logs.sh --dry-run` lists files and deletes nothing.\n\n" +
+        "### Checkpoint 2: Tests and docs\n- Commit: `test(rotate): cover --dry-run and document it`\n- Steps: add the bats cases; a README paragraph.\n- Done when: `bats tests/` passes.\n\n" +
+        "## Verification\nRun `bats tests/`, then `./rotate-logs.sh --dry-run` against a folder with an old `.gz`: it's listed and still there.\n\n" +
+        "## Risks and open questions\nNone of the callers pass flags today, so nothing else changes.",
+    )
+    if (!out.closed()) {
+      workspace.plan_pending = 1
+      // The plugin saves the reply as plans/<branch slug>-<stamp>.md under the project's folder.
+      const stamp = new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15)
+      workspace.plan_file = `plans/${workspace.branch.replace(/^hermes\//, "")}-${stamp}.md`
+    }
+    record(req, { role: "assistant", content: spoken, finish_reason: "stop" })
+    return { spoken, prompt_tokens: 6000, completion_tokens: pieces }
+  }
+
+  // Like Hermes's todo_list: every call returns the whole list, and the result is a transcript row.
+  const planned = /plan/i.test(last)
+  // Hermes restores the list's revision from the transcript, so it keeps counting across turns.
+  const lastTodos = (transcripts.get(sessionOf(req)) ?? []).findLast((r) => r.tool_name === "todo_list")
+  let todoRevision = lastTodos ? JSON.parse(lastTodos.content).revision : 0
+  const steps = ["Check disk use under /var/log", "Read the log rotation script", "Summarise where the space goes"]
+  const writeTodos = async (done) => {
+    if (!planned || out.closed()) return
+    const todos = steps.map((content, i) => ({
+      id: String(i + 1),
+      content,
+      status: i < done ? "completed" : i === done ? "in_progress" : "pending",
+    }))
+    const id = `call_${randomUUID().slice(0, 8)}`
+    const result = JSON.stringify({ todos, revision: ++todoRevision, summary: { total: todos.length } })
+    out.tool({ tool: "todo_list", emoji: "📋", label: "todo_list", toolCallId: id, status: "running" })
+    await sleep(300)
+    // The run stream's preview is cut at 500 characters, as on Hermes.
+    out.tool({ tool: "todo_list", toolCallId: id, status: "completed", result: result.length > 500 ? `${result.slice(0, 497)}...` : result })
+    record(req, { role: "assistant", content: null, tool_calls: [{ id, type: "function", function: { name: "todo_list", arguments: JSON.stringify({ todos }) } }] })
+    record(req, { role: "tool", tool_call_id: id, tool_name: "todo_list", content: result })
+  }
+  await writeTodos(0)
+
   const toolCallId = `call_${randomUUID().slice(0, 8)}`
   out.tool({ tool: "terminal", emoji: "💻", label: "du -sh /var/log/* | sort -rh | head", toolCallId, status: "running" })
   await sleep(1400)
@@ -219,6 +395,7 @@ async function playTurn(req, body, last, out) {
   out.tool({ tool: "terminal", toolCallId, status: "completed", result: duOutput })
   record(req, { role: "assistant", content: null, tool_calls: [{ id: toolCallId, type: "function", function: { name: "terminal", arguments: JSON.stringify({ command: "du -sh /var/log/* | sort -rh | head" }) } }] })
   record(req, { role: "tool", tool_call_id: toolCallId, tool_name: "terminal", content: duOutput })
+  await writeTodos(1)
 
   const readId = `call_${randomUUID().slice(0, 8)}`
   const readPath = "/etc/logrotate.d/rotate.py"
@@ -250,6 +427,7 @@ async function playTurn(req, body, last, out) {
   out.tool({ tool: "read_file", toolCallId: readId, status: "completed", result: readOutput })
   record(req, { role: "assistant", content: null, tool_calls: [{ id: readId, type: "function", function: { name: "read_file", arguments: JSON.stringify({ path: readPath }) } }] })
   record(req, { role: "tool", tool_call_id: readId, tool_name: "read_file", content: readOutput })
+  await writeTodos(2)
 
   await say(
     "Here's where the space is going under `/var/log`:\n\n" +
@@ -282,6 +460,8 @@ async function playTurn(req, body, last, out) {
   } else {
     await say("Want me to clean up the rotated files older than 90 days? Just say *clean them up*.")
   }
+
+  await writeTodos(steps.length)
 
   // Like Hermes, usage sums every model call in the turn: a fixed system prompt plus the transcript,
   // counted once per call (this turn makes one call per tool, plus the reply).
@@ -361,7 +541,7 @@ function startRun(req, body) {
   const replay = key && [...runs.values()].find((run) => run.key === key)
   if (replay) return replay
   const id = `run_${randomUUID().replace(/-/g, "")}`
-  const run = { id, key, status: "running", events: [], seq: 0, listeners: new Set(), stopped: false }
+  const run = { id, key, sessionId: body.session_id, status: "running", events: [], seq: 0, listeners: new Set(), stopped: false }
   runs.set(id, run)
   const push = (name, fields = {}) => {
     const event = { event: name, run_id: id, timestamp: Date.now() / 1000, ...fields, seq: run.seq++ }
@@ -472,8 +652,8 @@ http
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/info") {
       return json(res, 200, {
         name: "memento",
-        version: "0.4.0",
-        features: ["cron_runs", "session_label", "chats", "context", "events"],
+        version: "0.6.0",
+        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "github", "sessions", "runs", "prs", "plans", "events"],
       })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/events") {
@@ -486,6 +666,61 @@ http
         cronJobs().map((job) => [job.id, job.runs.slice(-perJob).reverse().map((run) => ledgerRow(job, run))]),
       )
       return json(res, 200, { object: "cron_runs", jobs })
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/github") {
+      return json(res, 200, GITHUB ? { connected: true, source: "gh", login: "mock-user" } : { connected: false })
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/github/repos") {
+      if (!GITHUB) return json(res, 409, { error: { message: "No GitHub account on the server." } })
+      return json(res, 200, { object: "memento.github.repos", repos: githubRepos })
+    }
+    if (PLUGIN && !profile && req.method === "POST" && url.pathname === "/api/plugins/memento/projects") {
+      const { name, description, repos = [] } = await readBody(req)
+      if (!String(name ?? "").trim()) return json(res, 400, { error: { message: "Name the project." } })
+      const bad = repos.find((repo) => !/^[\w-]+\/[\w.-]+$/.test(repo))
+      if (bad !== undefined) return json(res, 400, { error: { message: `${bad} isn't owner/name.` } })
+      const all = mockProjects()
+      const base = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "project"
+      let slug = base
+      for (let n = 2; all.some((p) => p.slug === slug); n++) slug = `${base}-${n}`
+      await sleep(1500 * Math.max(1, repos.length))
+      const root = `/home/hermes/.hermes/projects/${slug}`
+      const names = repos.map((repo) => repo.split("/")[1])
+      const folders = repos.map((repo, i) => ({
+        path: `${root}/${names.filter((n) => n === names[i]).length > 1 ? repo.replace("/", "-") : names[i]}`,
+        label: null,
+        is_primary: false,
+        git: true,
+      }))
+      const project = {
+        id: `p_${randomUUID().slice(0, 8)}`,
+        slug,
+        name: name.trim(),
+        description: String(description ?? "").trim() || null,
+        created_at: Date.now() / 1000,
+        last_active: null,
+        folders: [{ path: root, label: null, is_primary: true, git: false }, ...folders],
+      }
+      all.push(project)
+      return json(res, 200, { object: "memento.project", id: project.id, slug, path: root, folders: folders.map((f) => f.path) })
+    }
+    const projectRoute = /^\/api\/plugins\/memento\/projects\/([^/]+)(\/remove)?$/.exec(url.pathname)
+    if (PLUGIN && !profile && req.method === "POST" && projectRoute) {
+      const all = mockProjects()
+      const found = all.find((p) => p.id === decodeURIComponent(projectRoute[1]))
+      if (!found) return json(res, 404, { error: { message: "No such project." } })
+      if (projectRoute[2]) {
+        all.splice(all.indexOf(found), 1)
+        return json(res, 200, { object: "memento.project", removed: true })
+      }
+      const { name, description } = await readBody(req)
+      if (name !== undefined && !String(name).trim()) return json(res, 400, { error: { message: "Name the project." } })
+      if (name !== undefined) found.name = String(name).trim()
+      if (description !== undefined) found.description = String(description).trim() || null
+      return json(res, 200, { object: "memento.project", id: found.id })
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/projects") {
+      return json(res, 200, { object: "memento.projects", projects: mockProjects() })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/chats") {
       if (req.method === "POST") {
@@ -525,6 +760,91 @@ http
         provider: call ? "openrouter" : null,
         at: call ? Date.now() : null,
       })
+    }
+    const sessionTodos = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/todos$/.exec(url.pathname)
+    if (PLUGIN && !profile && req.method === "GET" && sessionTodos) {
+      const id = decodeURIComponent(sessionTodos[1])
+      const row = (transcripts.get(id) ?? []).findLast((r) => r.role === "tool" && r.tool_name === "todo_list")
+      const found = row ? JSON.parse(row.content) : null
+      return json(res, 200, { object: "memento.todos", session_id: id, revision: found?.revision ?? null, todos: found?.todos ?? null })
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/runs/live") {
+      const sessions = {}
+      for (const run of runs.values()) {
+        if (!run.sessionId || !["running", "waiting_for_approval"].includes(run.status)) continue
+        if (sessions[run.sessionId] !== "waiting_for_approval") sessions[run.sessionId] = run.status
+      }
+      return json(res, 200, { object: "memento.runs", sessions })
+    }
+    const sessionRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/(workspace|workspace\/remove|mode|prs)$/.exec(url.pathname)
+    if (PLUGIN && !profile && sessionRoute) {
+      const id = decodeURIComponent(sessionRoute[1])
+      const route = sessionRoute[2]
+      const workspace = projectSessions.get(id)
+      // What the plugin tells the agent about its worktrees, with every run, and in plan mode the
+      // plan's shape (the plugin's PLAN_INSTRUCTIONS; keep them the same).
+      const worktreeLine = (record) =>
+        record.repos.length === 1
+          ? `You are working in a git worktree of ${record.repos[0].name} at ${record.repos[0].path} (branch ${record.branch}). Keep all work inside it.`
+          : `You are working in git worktrees of this project's repos, all on branch ${record.branch}:\n${record.repos.map((r, i) => `- ${r.name} at ${r.path}${i === 0 ? " (your current directory)" : ""}`).join("\n")}\nKeep all work inside them.`
+      const instructions = (record) =>
+        record.mode === "plan" ? `${worktreeLine(record)}\n${PLAN_INSTRUCTIONS}` : worktreeLine(record)
+      const answer = (record) => json(res, 200, { object: "memento.workspace", workspace: record, instructions: record ? instructions(record) : null })
+      if (route === "workspace" && req.method === "POST") {
+        const { project_id, mode } = await readBody(req)
+        const project = mockProjects().find((p) => p.id === String(project_id ?? ""))
+        if (!project) return json(res, 400, { error: { message: "No such project." } })
+        const gitFolders = project.folders.filter((f) => f.git)
+        if (!gitFolders.length) return json(res, 400, { error: { message: "This project has no git repository." } })
+        if (mode !== undefined && !["accept_edits", "auto", "plan"].includes(mode))
+          return json(res, 400, { error: { message: "mode must be accept_edits, auto or plan." } })
+        let record = workspace
+        if (!record) {
+          await sleep(800 * gitFolders.length)
+          const pick = (words) => words[Math.floor(Math.random() * words.length)]
+          const slug = `${pick(["jazzy", "cosmic", "fuzzy", "zesty", "nimble"])}-${pick(["hopper", "otter", "comet", "waffle", "quokka"])}-${randomUUID().slice(0, 4)}`
+          const repos = gitFolders.map((f) => ({ name: f.repo, repo_root: f.path, path: `${f.path}/.worktrees/${slug}`, branch: `hermes/${slug}` }))
+          record = { session_id: id, project_id: project.id, repo_root: repos[0].repo_root, path: repos[0].path, branch: repos[0].branch, mode: mode ?? "accept_edits", plan_pending: 0, created_at: Date.now(), repos, plan_file: null }
+          projectSessions.set(id, record)
+        } else if (mode && mode !== record.mode) {
+          record.mode = mode
+          record.plan_pending = 0
+        }
+        return answer(record)
+      }
+      if (route === "workspace") return answer(workspace ?? null)
+      if (route === "mode" && req.method === "POST") {
+        const { mode } = await readBody(req)
+        if (!["accept_edits", "auto", "plan"].includes(mode)) return json(res, 400, { error: { message: "mode must be accept_edits, auto or plan." } })
+        if (!workspace) return json(res, 404, { error: { message: "This session has no workspace yet" } })
+        workspace.mode = mode
+        workspace.plan_pending = 0
+        return answer(workspace)
+      }
+      if (route === "workspace/remove" && req.method === "POST") {
+        if (!workspace) return json(res, 200, { object: "memento.workspace.removed", removed: false, kept: [] })
+        // The first repo keeps its tree after a turn that said "commit" (unpushed work).
+        if (userTurns(id).some((r) => /commit/i.test(r.content)))
+          return json(res, 200, { object: "memento.workspace.removed", removed: false, kept: [{ name: workspace.repos[0].name, reason: "unpushed" }] })
+        projectSessions.delete(id)
+        return json(res, 200, { object: "memento.workspace.removed", removed: true, kept: [] })
+      }
+      if (route === "prs" && req.method === "GET") {
+        // A PR per repo after two turns; "merge" merges them, "break" fails their checks, "draft" drafts them.
+        const turns = userTurns(id)
+        const said = (word) => turns.some((r) => new RegExp(word, "i").test(r.content))
+        const prs = workspace && turns.length >= 2
+          ? workspace.repos.map((repo, i) => ({
+              repo: repo.name,
+              number: 27 + i,
+              title: "Add a dry-run flag to log rotation",
+              url: `https://github.com/${repo.name}/pull/${27 + i}`,
+              state: said("merge") ? "merged" : said("close") ? "closed" : said("draft") ? "draft" : "open",
+              checks: said("break") ? "failure" : said("pending") ? "pending" : "success",
+            }))
+          : []
+        return json(res, 200, { object: "memento.prs", prs })
+      }
     }
     const chatSession = /^\/api\/sessions\/([^/]+)$/.exec(url.pathname)
     if (req.method === "GET" && chatSession) {
