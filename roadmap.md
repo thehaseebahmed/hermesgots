@@ -46,13 +46,19 @@ New Memento plugin routes, read-only, mirroring the existing
 - [x] Create a project with its GitHub repos, cloned on the Hermes host into
       `$HERMES_HOME/projects/<project>/` with the host's GitHub account.
 
-## Phase 3 (optional) — Checkpoints/rollback viewer
+## Phase 3 — Checkpoints viewer
 
-- [ ] `GET /api/plugins/memento/checkpoints?project=<slug>` — list
-      checkpoints with change stats, and a diff endpoint
-      (`GET /api/plugins/memento/checkpoints/:id/diff`).
-- [ ] New Memento frontend surface: a diff viewer (file list + unified
-      diff), read-only to start.
+Hermes keys checkpoints by the folder the agent writes in, and since Phase 5
+every project session writes in its own worktree per repo, so they're read
+per session rather than per project.
+
+- [x] `GET /api/plugins/memento/sessions/{id}/checkpoints` — each of the
+      session's worktrees' checkpoints with change stats, and
+      `GET …/checkpoints/{hash}/diff?repo=` for what changed since one.
+- [x] A Checkpoints item in a project session's menu: the list, then a diff
+      viewer (file list + unified diff), read-only. Checkpoints are off by
+      default in Hermes, so it shows the command that turns them on.
+- [ ] Restore from a checkpoint (Hermes's `restore`, safe mode by default).
 
 ## Phase 4 — The agent's todos in chat
 
