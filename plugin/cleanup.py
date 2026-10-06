@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from . import chats, sessions
+from . import attachments, chats, sessions
 from .store import connect, db_path
 
 logger = logging.getLogger(__name__)
@@ -112,6 +112,7 @@ def sweep(hermes_home: Path, db: Any = None, now: Optional[int] = None) -> Dict[
                 db.delete_session(sid)
             except Exception:
                 logger.debug("memento: couldn't delete Hermes session %s", sid, exc_info=True)
+        attachments.remove(hermes_home, sid)
         gone.add(sid)
         if chat_id:
             # A tombstone, so the apps drop their copy as well.
