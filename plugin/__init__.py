@@ -17,7 +17,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-from . import chats, clarify, cleanup, clones, context, github, projects, sessions, todos
+from . import attachments, chats, clarify, cleanup, clones, context, github, projects, sessions, todos
 from .store import db_path
 
 logger = logging.getLogger(__name__)
@@ -134,6 +134,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "plans",
                     "clarify",
                     "todo_tool",
+                    "attachments",
                 ],
                 "clarify": asks,
                 "todo_tool": todo_tool,
@@ -536,6 +537,33 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             {"object": "memento.clarify_response", "run_id": run_id, "clarify_id": clarify_id, "resolved": True}
         )
 
+    async def upload_attachment(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        name = request.query.get("name", "")
+        try:
+            data = await request.read()
+        except web.HTTPRequestEntityTooLarge:
+            return _error(web, "The file is too large.", 413)
+        if not data:
+            return _error(web, "The file is empty.", 400)
+        if len(data) > attachments.MAX_BYTES:
+            return _error(web, "The file is too large.", 413)
+        try:
+            saved = await asyncio.to_thread(
+                attachments.save, hermes_home(), request.match_info["session_id"], name, data
+            )
+        except ValueError as exc:
+            return _error(web, str(exc), 400)
+        except OSError:
+            logger.warning("memento: couldn't save an attachment", exc_info=True)
+            return _error(web, "Couldn't save the file on the server.", 500)
+        return web.json_response(
+            {"object": "memento.attachment", "name": saved.name, "path": str(saved), "size": len(data)}
+        )
+
+    app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/attachments", upload_attachment)
     app.router.add_get(f"{PREFIX}/runs/live", live_runs)
     app.router.add_post(f"{PREFIX}/runs/{{run_id}}/clarify", answer_clarify)
     logger.info("memento: serving %s on the API server", PREFIX)
