@@ -69,7 +69,7 @@ export function TodosPill({ items, onClick }: { items: Todo[]; onClick: () => vo
     <Button
       type="button"
       variant="secondary"
-      className="h-11 gap-2 rounded-full px-4 tabular-nums"
+      className="h-11 shrink-0 gap-2 rounded-full px-4 tabular-nums"
       onClick={onClick}
     >
       <Ring value={total ? done / total : 0} />
