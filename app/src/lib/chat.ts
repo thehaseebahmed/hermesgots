@@ -14,6 +14,7 @@ import {
   getSessionTitle,
   HermesError,
   labelSession,
+  listLiveRuns,
   respondToApproval,
   startRun,
   stopRun,
@@ -135,6 +136,26 @@ function openTurn(
   return turn
 }
 
+function raiseApproval(
+  turn: Turn,
+  event: { run_id: string; command?: string; description?: string; choices?: ApprovalChoice[] },
+) {
+  const { draft, touch } = turn
+  draft.approval = {
+    runId: event.run_id,
+    command: event.command,
+    description: event.description,
+    choices: event.choices?.length ? event.choices : ["once", "deny"],
+    contentOffset: draft.content.length,
+    requestedAt: Date.now(),
+  }
+  touch()
+  // A session in auto mode answers for the user, replayed requests included.
+  void db.conversations.get(turn.conversationId).then((conversation) => {
+    if (conversation?.mode === "auto") void answerApproval(draft, "once").catch(() => undefined)
+  })
+}
+
 function streamHandlers(turn: Turn): StreamHandlers {
   const { draft, touch } = turn
   const started = () => {
@@ -189,19 +210,7 @@ function streamHandlers(turn: Turn): StreamHandlers {
       touch()
     },
     onApproval(event) {
-      draft.approval = {
-        runId: event.run_id,
-        command: event.command,
-        description: event.description,
-        choices: event.choices?.length ? event.choices : ["once", "deny"],
-        contentOffset: draft.content.length,
-        requestedAt: Date.now(),
-      }
-      touch()
-      // A session in auto mode answers for the user, replayed requests included.
-      void db.conversations.get(turn.conversationId).then((conversation) => {
-        if (conversation?.mode === "auto") void answerApproval(draft, "once").catch(() => undefined)
-      })
+      raiseApproval(turn, event)
     },
   }
 }
@@ -245,7 +254,7 @@ const retryable = (error: unknown) =>
  * Hermes whose events stream the browser's CORS check blocks). Keyed sessions only: Hermes holds
  * the transcript under our session id only when a key is sent.
  */
-async function transcriptReader(turn: Turn) {
+async function transcriptReader(turn: Turn, runId: string) {
   const { config, draft, touch, conversationId } = turn
   if (!config.apiKey) return undefined
   const conversation = await db.conversations.get(conversationId)
@@ -253,16 +262,32 @@ async function transcriptReader(turn: Turn) {
   const index = messages.findIndex((m) => m.id === draft.id)
   const user = messages.slice(0, index < 0 ? undefined : index).findLast((m) => m.role === "user")
   if (!conversation || !user) return undefined
+  let raisedFor: string | undefined
   return async () => {
-    const reply = await liveTurn(config, conversation.hermesSessionId, user.content).catch(
-      () => undefined,
-    )
-    if (!reply) return
-    // Not through onTool: these carry Hermes's own call ids, which history matches later.
-    draft.tools = reply.tools ?? []
-    if (reply.reasoning) draft.reasoning = reply.reasoning
-    if (reply.content) draft.content = reply.content
-    touch()
+    const [reply, live] = await Promise.all([
+      liveTurn(config, conversation.hermesSessionId, user.content).catch(() => undefined),
+      listLiveRuns(config).catch(() => undefined),
+    ])
+    if (reply) {
+      // Not through onTool: these carry Hermes's own call ids, which history matches later.
+      draft.tools = reply.tools ?? []
+      if (reply.reasoning) draft.reasoning = reply.reasoning
+      if (reply.content) draft.content = reply.content
+      touch()
+    }
+    // The events stream carries approval requests, and it is the one this fallback can't read; the
+    // plugin knows the run is waiting, and the call it waits on is the one without a result.
+    if (live?.[conversation.hermesSessionId] === "waiting_for_approval") {
+      const call = draft.tools.findLast((t) => t.status === "running")
+      const key = call?.toolCallId ?? ""
+      if (raisedFor !== key) {
+        raisedFor = key
+        raiseApproval(turn, { run_id: runId, command: call?.label })
+      }
+    } else if (live && draft.approval && !draft.approval.resolved) {
+      draft.approval = { ...draft.approval, resolved: "expired" }
+      touch()
+    }
   }
 }
 
@@ -297,7 +322,7 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
         const outcome = await followRun(config, runId, { lastSeq, signal }, handlers)
         if (outcome) return { ...outcome, replaceContent: lost }
       } else {
-        readTranscript ??= await transcriptReader(turn)
+        readTranscript ??= await transcriptReader(turn, runId)
         await readTranscript?.()
       }
       const { outcome } = await getRun(config, runId, signal)
@@ -393,9 +418,33 @@ async function runTurn(turn: Turn, start: () => Promise<{ usage?: TurnUsage }>) 
   return draft.status
 }
 
+/**
+ * Tool cards and the approval sit at offsets into the text streamed so far. When the run's final
+ * text replaces it they are carried over proportionally and moved to the nearest paragraph break,
+ * so a card never lands inside a word.
+ */
+function anchorOffsets(draft: Draft, next: string) {
+  const previous = draft.content.length
+  if (draft.content === next) return
+  const breaks = [0, next.length]
+  for (let at = next.indexOf("\n\n"); at >= 0; at = next.indexOf("\n\n", at + 2))
+    breaks.push(at + 2)
+  const anchor = (offset: number | undefined) => {
+    if (offset === undefined) return undefined
+    const target = previous ? Math.round((offset / previous) * next.length) : 0
+    return breaks.reduce((a, b) => (Math.abs(b - target) < Math.abs(a - target) ? b : a))
+  }
+  draft.tools = draft.tools.map((t) => ({ ...t, contentOffset: anchor(t.contentOffset) }))
+  if (draft.approval)
+    draft.approval = { ...draft.approval, contentOffset: anchor(draft.approval.contentOffset) }
+}
+
 /** Folds a run's outcome into the reply; a run whose events were lost takes its final text. */
 function settleRun(draft: Draft, outcome: RunOutcome) {
-  if (outcome.output && (outcome.replaceContent || !draft.content)) draft.content = outcome.output
+  if (outcome.output && (outcome.replaceContent || !draft.content)) {
+    anchorOffsets(draft, outcome.output)
+    draft.content = outcome.output
+  }
   if (outcome.status === "cancelled") draft.status = "stopped"
   else if (outcome.status !== "completed") {
     draft.status = "error"
