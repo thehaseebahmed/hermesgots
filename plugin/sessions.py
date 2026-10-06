@@ -746,7 +746,10 @@ def started(**kwargs: Any) -> None:
     and a project session has its workspace before its first turn."""
     try:
         session_id = kwargs.get("session_id") or ""
-        db = getattr(adapter, "_session_db", None)
+        # ``adapter._session_db`` is an explicit override (tests/manual wiring); in normal
+        # operation the adapter caches per-profile SessionDBs and exposes them here.
+        ensure = getattr(adapter, "_ensure_session_db", None)
+        db = ensure() if callable(ensure) else getattr(adapter, "_session_db", None)
         if not session_id or db is None:
             return
         code = is_code_session(session_id)
