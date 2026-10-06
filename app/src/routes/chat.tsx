@@ -2,12 +2,23 @@ import { useEffect, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Link, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
-import { EllipsisIcon, PencilIcon, PlusIcon, SettingsIcon, Trash2Icon } from "lucide-react"
+import {
+  ArrowLeftIcon,
+  CheckIcon,
+  EllipsisIcon,
+  PencilIcon,
+  PlusIcon,
+  RotateCcwIcon,
+  SettingsIcon,
+  Trash2Icon,
+} from "lucide-react"
 
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
+import { PrPill } from "@/components/chat/pr-pill"
+import { PlanReadyCard, ResolvedCard } from "@/components/chat/session-cards"
 import { TodosPill, TodosSheet } from "@/components/chat/todos"
 import { ContextRing, UsageSheet, type ContextUsage } from "@/components/chat/usage-sheet"
 import { Bot } from "@/components/bot"
@@ -53,6 +64,7 @@ import {
 } from "@/lib/db"
 import { loadEarlierHistory, reconcileHistory } from "@/lib/history"
 import { syncContextWindow } from "@/lib/models"
+import { refreshWorkspace, removeSessionWorkspace, setSessionMode } from "@/lib/workspace"
 
 /** How often an open chat checks Hermes for turns sent from another device. */
 const CATCH_UP_MS = 30_000
@@ -164,6 +176,8 @@ export function ChatPage() {
   const tracked = Boolean(profile?.apiKey && profile.pluginChats)
   const live = conversation?.liveContext
   const todos = (tracked && conversation?.todos?.items) || []
+  // A session of a Hermes Project: works in its worktree, with a mode, a PR and a resolved state.
+  const session = conversation?.projectId ? conversation : undefined
   const usage: ContextUsage = {
     tracked,
     tokens: tracked ? live?.tokens : undefined,
@@ -181,6 +195,12 @@ export function ChatPage() {
     if (!profileId) return
     void db.profiles.get(profileId).then((current) => current && syncContextWindow(current))
   }, [profileId, connection])
+
+  // The plugin holds a session's mode and pending plan; an empty session never catches up below.
+  const sessionId = session?.id
+  useEffect(() => {
+    if (sessionId) void refreshWorkspace(sessionId)
+  }, [sessionId])
 
   // A chat synced from another device arrives empty; its transcript is on Hermes.
   const needsHistory =
@@ -255,10 +275,12 @@ export function ChatPage() {
         <EllipsisIcon />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-44">
-        <DropdownMenuItem onClick={() => navigate("/")}>
-          <PlusIcon />
-          New chat
-        </DropdownMenuItem>
+        {!session && (
+          <DropdownMenuItem onClick={() => navigate("/")}>
+            <PlusIcon />
+            New chat
+          </DropdownMenuItem>
+        )}
         {conversation && (
           <>
             <DropdownMenuItem
@@ -268,8 +290,24 @@ export function ChatPage() {
               }}
             >
               <PencilIcon />
-              Rename
+              {session ? "Edit" : "Rename"}
             </DropdownMenuItem>
+            {session &&
+              (session.resolvedAt ? (
+                <DropdownMenuItem
+                  onClick={() => updateConversation(session.id, { resolvedAt: undefined })}
+                >
+                  <RotateCcwIcon />
+                  Reopen
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem
+                  onClick={() => updateConversation(session.id, { resolvedAt: Date.now() })}
+                >
+                  <CheckIcon />
+                  Resolve
+                </DropdownMenuItem>
+              ))}
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onClick={() => setDeleting(true)}>
               <Trash2Icon />
@@ -285,9 +323,23 @@ export function ChatPage() {
     <div className="relative flex min-h-0 flex-1 flex-col">
       <ChatHeader
         title={conversation?.title ?? "New chat"}
-        subtitle={activity}
+        subtitle={activity ?? session?.worktree?.branch}
         botId={profile?.botId}
         actions={actions}
+        leading={
+          session && (
+            <Button
+              variant="outline"
+              size="icon-lg"
+              className="size-11 rounded-full bg-background/80 backdrop-blur"
+              render={<Link to={`/code/${session.profileId}/${session.projectId}`} />}
+              nativeButton={false}
+              aria-label="Back to project"
+            >
+              <ArrowLeftIcon />
+            </Button>
+          )
+        }
       />
 
       {hasMessages ? (
@@ -345,10 +397,31 @@ export function ChatPage() {
       )}
 
       <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
-        {todos.length > 0 && <TodosPill items={todos} onClick={() => setTodosOpen(true)} />}
-        {awaitingApproval ? (
+        {(todos.length > 0 || session?.pr) && (
+          <div className="mx-auto flex w-full max-w-3xl flex-wrap justify-center gap-2 pb-2">
+            {todos.length > 0 && <TodosPill items={todos} onClick={() => setTodosOpen(true)} />}
+            {session?.pr && <PrPill pr={session.pr} />}
+          </div>
+        )}
+        {session?.resolvedAt ? (
+          <div className="mx-auto w-full max-w-3xl">
+            <ResolvedCard
+              onReopen={() => updateConversation(session.id, { resolvedAt: undefined })}
+            />
+          </div>
+        ) : awaitingApproval ? (
           <div className="mx-auto w-full max-w-3xl">
             <ApprovalCard message={awaitingApproval} />
+          </div>
+        ) : session?.planPending && session.mode === "plan" && !busy ? (
+          <div className="mx-auto w-full max-w-3xl">
+            <PlanReadyCard
+              onApprove={async () => {
+                await setSessionMode(session.id, "accept_edits")
+                await send("Go ahead with the plan.")
+              }}
+              onKeepPlanning={() => setSessionMode(session.id, "plan")}
+            />
           </div>
         ) : (
           <Composer
@@ -360,6 +433,17 @@ export function ChatPage() {
             onCommand={(command) => navigate(command === "new" ? "/" : "/settings")}
             connection={{ baseUrl: profile?.baseUrl ?? "", apiKey: profile?.apiKey ?? "" }}
             botName={profile?.name}
+            session={
+              session && {
+                mode: session.mode ?? "accept_edits",
+                onMode: (mode) =>
+                  setSessionMode(session.id, mode).catch((error) =>
+                    toast.error(
+                      error instanceof Error ? error.message : "Couldn't change the mode.",
+                    ),
+                  ),
+              }
+            }
             leading={
               hasMessages && configured ? (
                 <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />
@@ -384,7 +468,7 @@ export function ChatPage() {
             }}
           >
             <AlertDialogHeader>
-              <AlertDialogTitle>Rename chat</AlertDialogTitle>
+              <AlertDialogTitle>{session ? "Edit session" : "Rename chat"}</AlertDialogTitle>
             </AlertDialogHeader>
             <Input
               value={title}
@@ -403,9 +487,13 @@ export function ChatPage() {
       <AlertDialog open={deleting} onOpenChange={setDeleting}>
         <AlertDialogContent size="sm">
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this chat?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {session ? "Delete this session?" : "Delete this chat?"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              It's removed from this device. Hermes keeps its own copy of the session.
+              {session
+                ? "It's removed from this device, and its worktree from the server unless it has uncommitted or unpushed work. Hermes keeps its own copy of the session."
+                : "It's removed from this device. Hermes keeps its own copy of the session."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -415,10 +503,20 @@ export function ChatPage() {
               onClick={async () => {
                 if (id) {
                   stopMessage(id)
+                  if (session) {
+                    const result = await removeSessionWorkspace(id)
+                    if (result.reason === "dirty" || result.reason === "unpushed")
+                      toast.info(
+                        `Kept the worktree: it has ${result.reason === "dirty" ? "uncommitted" : "unpushed"} changes.`,
+                      )
+                    else if (result.error) toast.error(result.error)
+                  }
                   await deleteConversation(id)
                 }
                 setDeleting(false)
-                navigate("/", { replace: true })
+                navigate(session ? `/code/${session.profileId}/${session.projectId}` : "/", {
+                  replace: true,
+                })
               }}
             >
               Delete

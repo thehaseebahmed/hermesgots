@@ -62,21 +62,19 @@ function Ring({ value }: { value: number }) {
   )
 }
 
-/** The agent's progress through its todo list, above the composer; opens the list. */
+/** The agent's progress through its todo list, for the pill row above the composer; opens the list. */
 export function TodosPill({ items, onClick }: { items: Todo[]; onClick: () => void }) {
   const { done, total } = progress(items)
   return (
-    <div className="mx-auto flex w-full max-w-3xl justify-center pb-2">
-      <Button
-        type="button"
-        variant="secondary"
-        className="h-11 gap-2 rounded-full px-4 tabular-nums"
-        onClick={onClick}
-      >
-        <Ring value={total ? done / total : 0} />
-        {done}/{total} todos
-      </Button>
-    </div>
+    <Button
+      type="button"
+      variant="secondary"
+      className="h-11 gap-2 rounded-full px-4 tabular-nums"
+      onClick={onClick}
+    >
+      <Ring value={total ? done / total : 0} />
+      {done}/{total} todos
+    </Button>
   )
 }
 

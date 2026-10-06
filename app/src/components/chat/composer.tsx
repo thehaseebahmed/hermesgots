@@ -1,6 +1,8 @@
 import { useId, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react"
 import { ArrowUpIcon, MicIcon, SquareIcon } from "lucide-react"
 
+import { AttachMenu } from "@/components/chat/attach-menu"
+import { ModeMenu } from "@/components/chat/mode-menu"
 import { SlashMenu } from "@/components/chat/slash-menu"
 import { VoiceBar } from "@/components/chat/voice-bar"
 import {
@@ -9,6 +11,7 @@ import {
   InputGroupButton,
   InputGroupTextarea,
 } from "@/components/ui/input-group"
+import type { SessionMode } from "@/lib/db"
 import type { HermesConfig } from "@/lib/hermes"
 import { joinText, useDictation } from "@/lib/speech"
 import { cn } from "@/lib/utils"
@@ -30,13 +33,16 @@ export function Composer({
   connection,
   botName = "Hermes",
   leading,
+  session,
 }: {
   busy: boolean
   /** The chat's Hermes profile, for the skills in the `/` menu. */
   connection: HermesConfig
   botName?: string
-  /** Shown at the start of the input, e.g. the context ring. */
+  /** Shown at the start of the input (in a session, on its bottom row), e.g. the context ring. */
   leading?: ReactNode
+  /** A project session: two lines, with the `+` menu and its permission mode under the text. */
+  session?: { mode: SessionMode; onMode: (mode: SessionMode) => void }
   disabled?: boolean
   onSend: (text: string) => Promise<void> | void
   /** Called instead of `onSend` while a reply is streaming: Enter queues the message. */
@@ -145,6 +151,46 @@ export function Composer({
     }
   }
 
+  const controls = (
+    <>
+      {dictation.supported && !disabled && (
+        <InputGroupButton
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="size-11 rounded-full"
+          onClick={dictation.start}
+          aria-label="Voice"
+        >
+          <MicIcon />
+        </InputGroupButton>
+      )}
+      {busy ? (
+        <InputGroupButton
+          type="button"
+          variant="secondary"
+          size="icon-sm"
+          className="size-11 rounded-full"
+          onClick={onStop}
+          aria-label="Stop"
+        >
+          <SquareIcon className="fill-current" />
+        </InputGroupButton>
+      ) : (
+        <InputGroupButton
+          type="submit"
+          variant="default"
+          size="icon-sm"
+          className="size-11 rounded-full"
+          disabled={!canSend}
+          aria-label="Send"
+        >
+          <ArrowUpIcon />
+        </InputGroupButton>
+      )}
+    </>
+  )
+
   return (
     <form onSubmit={submit} className="relative mx-auto w-full max-w-3xl">
       {menuOpen && (
@@ -157,8 +203,13 @@ export function Composer({
           onActive={setActive}
         />
       )}
-      <InputGroup className="bg-background shadow-lg shadow-black/5 has-[textarea]:rounded-[1.75rem] dark:bg-input/30">
-        {leading && (
+      <InputGroup
+        className={cn(
+          "bg-background shadow-lg shadow-black/5 has-[textarea]:rounded-[1.75rem] dark:bg-input/30",
+          session && "has-data-[align=block-end]:rounded-[1.75rem]",
+        )}
+      >
+        {leading && !session && (
           <InputGroupAddon align="inline-start" className="self-end py-1.5 pl-2.5">
             {leading}
           </InputGroupAddon>
@@ -190,48 +241,29 @@ export function Composer({
           disabled={disabled}
           rows={1}
           className={cn(
-            "max-h-48 min-h-14 py-4 text-base md:text-[15px]",
-            leading ? "pr-5 pl-2" : "px-5",
+            "max-h-48 text-base md:text-[15px]",
+            session ? "min-h-12 px-5 pt-4 pb-2" : "min-h-14 py-4",
+            !session && (leading ? "pr-5 pl-2" : "px-5"),
           )}
           aria-label="Message"
         />
-        <InputGroupAddon align="inline-end" className="self-end py-1.5 pr-2.5">
-          {dictation.supported && !disabled && (
-            <InputGroupButton
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              className="size-11 rounded-full"
-              onClick={dictation.start}
-              aria-label="Voice"
-            >
-              <MicIcon />
-            </InputGroupButton>
-          )}
-          {busy ? (
-            <InputGroupButton
-              type="button"
-              variant="secondary"
-              size="icon-sm"
-              className="size-11 rounded-full"
-              onClick={onStop}
-              aria-label="Stop"
-            >
-              <SquareIcon className="fill-current" />
-            </InputGroupButton>
-          ) : (
-            <InputGroupButton
-              type="submit"
-              variant="default"
-              size="icon-sm"
-              className="size-11 rounded-full"
-              disabled={!canSend}
-              aria-label="Send"
-            >
-              <ArrowUpIcon />
-            </InputGroupButton>
-          )}
-        </InputGroupAddon>
+        {session ? (
+          <InputGroupAddon
+            align="block-end"
+            className="gap-1 px-2.5 pt-0 pb-1.5"
+            onClick={() => textarea.current?.focus()}
+          >
+            <AttachMenu disabled={disabled} />
+            <ModeMenu mode={session.mode} onChange={session.onMode} disabled={disabled} />
+            <span className="flex-1" />
+            {leading}
+            {controls}
+          </InputGroupAddon>
+        ) : (
+          <InputGroupAddon align="inline-end" className="self-end py-1.5 pr-2.5">
+            {controls}
+          </InputGroupAddon>
+        )}
       </InputGroup>
     </form>
   )
