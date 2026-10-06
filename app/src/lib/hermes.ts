@@ -1,4 +1,12 @@
-import type { ApprovalChoice, PrChecks, PrState, SessionMode, Todo } from "@/lib/db"
+import type {
+  ApprovalChoice,
+  ClarifyAnswers,
+  ClarifyQuestion,
+  PrChecks,
+  PrState,
+  SessionMode,
+  Todo,
+} from "@/lib/db"
 import type { Doc } from "@/lib/merge"
 import { isNative } from "@/lib/native"
 
@@ -38,6 +46,36 @@ export interface ApprovalRequestEvent {
   choices?: ApprovalChoice[]
 }
 
+/** The plugin's `clarify.request` run event: the agent's questions, one card's worth. */
+export interface ClarifyRequestEvent {
+  run_id: string
+  clarify_id: string
+  questions?: { id?: string; question?: string; choices?: string[]; multi_select?: boolean }[]
+}
+
+/** The plugin's `clarify.responded` run event: how the question ended (answered here or elsewhere). */
+export interface ClarifyRespondedEvent {
+  run_id: string
+  clarify_id: string
+  outcome?: string
+  answers?: ClarifyAnswers
+}
+
+/** The questions of a `clarify.request` event in the app's shape; none when the event has none. */
+export function clarifyQuestions(event: ClarifyRequestEvent): ClarifyQuestion[] {
+  return (event.questions ?? []).flatMap((q, i) => {
+    if (!q || typeof q !== "object" || !q.question) return []
+    const choices = Array.isArray(q.choices) ? q.choices.map(String).filter(Boolean) : []
+    return [
+      {
+        id: String(q.id ?? `q${i}`),
+        question: String(q.question),
+        ...(choices.length ? { choices, multiSelect: Boolean(q.multi_select) } : {}),
+      },
+    ]
+  })
+}
+
 export interface StreamHandlers {
   onRunId?: (runId: string) => void
   onContent?: (delta: string) => void
@@ -47,6 +85,8 @@ export interface StreamHandlers {
   onTool?: (event: ToolProgressEvent) => void
   onStatus?: (text: string) => void
   onApproval?: (event: ApprovalRequestEvent) => void
+  onClarify?: (event: ClarifyRequestEvent) => void
+  onClarifyResolved?: (event: ClarifyRespondedEvent) => void
 }
 
 /** Hermes sums these over every model call in the turn, tool loops included. */
@@ -842,6 +882,26 @@ export async function listLiveRuns(config: HermesConfig): Promise<Record<string,
   )
 }
 
+/** Answers the agent's questions. Needs the Memento plugin, which serves the clarify tool on runs. */
+export async function respondToClarify(
+  config: HermesConfig,
+  runId: string,
+  reply: { clarifyId: string; answers: ClarifyAnswers; outcome: "submitted" | "cancelled" },
+) {
+  await request(
+    `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/runs/${encodeURIComponent(runId)}/clarify`,
+    {
+      method: "POST",
+      headers: headers(config),
+      body: JSON.stringify({
+        clarify_id: reply.clarifyId,
+        answers: reply.answers,
+        outcome: reply.outcome,
+      }),
+    },
+  )
+}
+
 /** Marks a session as Memento's, so the Hermes dashboard labels it. Needs the Memento plugin. */
 export async function labelSession(config: HermesConfig, sessionId: string) {
   try {
@@ -1004,6 +1064,12 @@ export async function followRun(
       case "approval.request":
         handlers.onApproval?.(payload as ApprovalRequestEvent)
         break
+      case "clarify.request":
+        handlers.onClarify?.(payload as ClarifyRequestEvent)
+        break
+      case "clarify.responded":
+        handlers.onClarifyResolved?.(payload as ClarifyRespondedEvent)
+        break
       case "replay.truncated":
         handlers.onTruncated?.()
         break
@@ -1017,7 +1083,10 @@ export async function followRun(
   return null
 }
 
-/** The run's status; `outcome` is set once it has finished. */
+/**
+ * The run's status; `outcome` is set once it has finished, and `clarify` while the agent waits for
+ * an answer (the plugin keeps the question on the status, for a client that can't read the events).
+ */
 export async function getRun(config: HermesConfig, runId: string, signal?: AbortSignal) {
   const response = await request(endpoint(config.baseUrl, `/runs/${encodeURIComponent(runId)}`), {
     headers: headers(config),
@@ -1025,6 +1094,7 @@ export async function getRun(config: HermesConfig, runId: string, signal?: Abort
   })
   const body = await response.json()
   const pending = body?.status === "waiting_for_approval" ? body.approval : undefined
+  const clarify = body?.clarify
   return {
     status: String(body?.status ?? ""),
     /** The approval the run is waiting on; Hermes keeps it on the status for clients that can't read the events. */
@@ -1032,6 +1102,10 @@ export async function getRun(config: HermesConfig, runId: string, signal?: Abort
       ? ({ ...pending, run_id: String(pending.run_id ?? runId) } as ApprovalRequestEvent)
       : undefined,
     outcome: TERMINAL_RUN_STATUSES.has(body?.status) ? runOutcome(body) : undefined,
+    clarify:
+      clarify && typeof clarify === "object" && typeof clarify.clarify_id === "string"
+        ? (clarify as ClarifyRequestEvent)
+        : undefined,
   }
 }
 

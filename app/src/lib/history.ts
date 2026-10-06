@@ -56,6 +56,14 @@ function argsLabel(name: string, args: unknown) {
   if (!args || typeof args !== "object" || Array.isArray(args)) return ""
   const record = args as Record<string, unknown>
   if (!Object.keys(record).length) return ""
+  if (name === "clarify" && Array.isArray(record.questions)) {
+    const asked = record.questions
+      .map((q) =>
+        q && typeof q === "object" ? String((q as { question?: unknown }).question ?? "") : "",
+      )
+      .filter(Boolean)
+    if (asked.length) return asked[0]
+  }
   const key = PRIMARY_ARGS[name] ?? FALLBACK_ARGS.find((k) => k in record)
   let value = key ? record[key] : undefined
   if (Array.isArray(value)) value = value[0]

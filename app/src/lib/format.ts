@@ -33,6 +33,7 @@ export function formatRelative(timestamp: number, now: number) {
 
 /** One line saying what the bot is doing right now. */
 export function describeActivity(message: Message) {
+  if (message.clarify && !message.clarify.resolved) return "Waiting for your answer"
   if (message.approval && !message.approval.resolved) return "Waiting for approval"
   const tool = message.tools?.findLast((t) => t.status === "running")
   if (tool) return `${tool.emoji ? `${tool.emoji} ` : ""}${tool.label}…`

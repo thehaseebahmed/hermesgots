@@ -170,10 +170,10 @@ export async function removeSessionWorkspace(
 export function sessionState(
   conversation: Pick<Conversation, "resolvedAt" | "planPending">,
   live?: LiveRunStatus,
-  local?: { streaming?: boolean; approval?: boolean },
+  local?: { streaming?: boolean; waiting?: boolean },
 ): SessionState {
   if (conversation.resolvedAt) return "resolved"
-  if (local?.approval || live === "waiting_for_approval" || conversation.planPending)
+  if (local?.waiting || live === "waiting_for_approval" || conversation.planPending)
     return "waiting"
   if (local?.streaming || live === "running") return "working"
   return "idle"

@@ -105,38 +105,88 @@ function CentredCard({
   )
 }
 
-/** The answer in a clarify result, which may be JSON or plain text. */
-function clarifyAnswer(result: string | undefined) {
-  if (!result) return undefined
-  try {
-    const parsed = JSON.parse(result)
-    if (typeof parsed === "string") return parsed
-    for (const key of ["user_response", "response", "answer", "choice"])
-      if (typeof parsed?.[key] === "string" && parsed[key]) return parsed[key] as string
-  } catch {
-    // Plain text.
-  }
-  return result
+interface Asked {
+  question?: string
+  answers: string[]
 }
 
+const listOf = (value: unknown) =>
+  (Array.isArray(value) ? value : [value])
+    .filter((item) => typeof item === "string" && item.trim())
+    .map((item) => String(item).trim())
+
+/**
+ * What a clarify call asked and was answered: Hermes's `{ responses, outcome }`, or the one answer
+ * older shapes and plain text carry. The call's label is its first question.
+ */
+function readClarify(tool: ToolEvent): { asked: Asked[]; outcome?: string } {
+  const first = tool.label && tool.label !== tool.tool ? tool.label : undefined
+  const raw = tool.result
+  if (!raw) return { asked: first ? [{ question: first, answers: [] }] : [] }
+  try {
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed?.responses)) {
+      return {
+        outcome: typeof parsed.outcome === "string" ? parsed.outcome : undefined,
+        asked: parsed.responses.map((r: Record<string, unknown>) => ({
+          question: typeof r?.question === "string" ? r.question : undefined,
+          answers: listOf(r?.user_response),
+        })),
+      }
+    }
+    const direct = typeof parsed === "string" ? [parsed] : []
+    const keyed = ["user_response", "response", "answer", "choice"].flatMap((key) =>
+      listOf(parsed?.[key]),
+    )
+    return { asked: [{ question: first, answers: [...direct, ...keyed] }] }
+  } catch {
+    return { asked: [{ question: first, answers: [raw] }] }
+  }
+}
+
+/** A clarify call in the thread: its questions and the answers, or that it's waiting for them. */
 export function ClarifyCard({ tool }: { tool: ToolEvent }) {
-  const question = tool.label && tool.label !== tool.tool ? tool.label : undefined
-  const answer = tool.status === "running" ? undefined : clarifyAnswer(tool.result)
+  const running = tool.status === "running"
+  const { asked, outcome } = readClarify(tool)
+  const answered = asked.some((a) => a.answers.length > 0)
+  const title = running
+    ? "Question"
+    : answered
+      ? "Answered"
+      : outcome === "submitted"
+        ? "Skipped"
+        : outcome === "cancelled"
+          ? "Not answered"
+          : "No answer"
   return (
-    <CentredCard
-      icon={<MessageCircleQuestionIcon className="size-4" />}
-      title={tool.status === "running" ? "Question" : "Answered"}
-    >
-      {question && <p>{question}</p>}
-      {tool.status === "running" ? (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Spinner className="size-3.5" />
-          Waiting for an answer…
-        </p>
+    <CentredCard icon={<MessageCircleQuestionIcon className="size-4" />} title={title}>
+      {running ? (
+        <>
+          {asked[0]?.question && <p>{asked[0].question}</p>}
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Spinner className="size-3.5" />
+            Waiting for an answer…
+          </p>
+        </>
       ) : (
-        answer && (
-          <p className="rounded-2xl bg-background px-3 py-2 whitespace-pre-wrap">{answer}</p>
-        )
+        answered &&
+        asked.map((a, i) => (
+          <div key={i} className="space-y-1">
+            {a.question && <p className="font-medium">{a.question}</p>}
+            {a.answers.length ? (
+              a.answers.map((answer) => (
+                <p
+                  key={answer}
+                  className="rounded-2xl bg-background px-3 py-2 wrap-anywhere whitespace-pre-wrap"
+                >
+                  {answer}
+                </p>
+              ))
+            ) : (
+              <p className="text-sm text-muted-foreground">Skipped</p>
+            )}
+          </div>
+        ))
       )}
     </CentredCard>
   )

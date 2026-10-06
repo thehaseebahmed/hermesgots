@@ -18,6 +18,7 @@ import { ChatHeader } from "@/components/chat/chat-header"
 import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
 import { PrPill } from "@/components/chat/pr-pill"
+import { QuestionCard } from "@/components/chat/question-card"
 import { PlanReadyCard, ResolvedCard } from "@/components/chat/session-cards"
 import { TodosPill, TodosSheet } from "@/components/chat/todos"
 import { ContextRing, UsageSheet, type ContextUsage } from "@/components/chat/usage-sheet"
@@ -128,7 +129,7 @@ function EmptyState({
   )
 }
 
-/** The approval card temporarily replaces the composer; once answered, follow the reply again. */
+/** An approval or question card temporarily replaces the composer; once answered, follow the reply again. */
 function FollowAfterApproval({ pending }: { pending: boolean }) {
   const { scrollToEnd } = useMessageScroller()
   const wasPending = useRef(pending)
@@ -177,6 +178,7 @@ export function ChatPage() {
   const streaming = messages?.find((m) => m.status === "streaming")
   const busy = Boolean(streaming)
   const awaitingApproval = messages?.find((m) => m.approval && !m.approval.resolved)
+  const awaitingClarify = messages?.find((m) => m.clarify && !m.clarify.resolved)
   const activity = streaming && describeActivity(streaming)
   // Only the plugin sees each model call; Hermes's API sums a turn's calls, so nothing else is exact.
   const tracked = Boolean(profile?.apiKey && profile.pluginChats)
@@ -414,7 +416,7 @@ export function ChatPage() {
               </MessageScrollerContent>
             </MessageScrollerViewport>
             <MessageScrollerButton />
-            <FollowAfterApproval pending={Boolean(awaitingApproval)} />
+            <FollowAfterApproval pending={Boolean(awaitingApproval || awaitingClarify)} />
             <FollowOnSend lastUserId={messages!.findLast((m) => m.role === "user")?.id} />
           </MessageScroller>
         </MessageScrollerProvider>
@@ -457,6 +459,10 @@ export function ChatPage() {
         ) : awaitingApproval ? (
           <div className="mx-auto w-full max-w-3xl">
             <ApprovalCard message={awaitingApproval} />
+          </div>
+        ) : awaitingClarify ? (
+          <div className="mx-auto w-full max-w-3xl">
+            <QuestionCard message={awaitingClarify} />
           </div>
         ) : session?.planPending && session.mode === "plan" && !busy ? (
           <div className="mx-auto w-full max-w-3xl">
