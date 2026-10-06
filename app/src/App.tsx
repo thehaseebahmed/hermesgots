@@ -5,6 +5,7 @@ import { Route, Routes } from "react-router"
 import { AppShell } from "@/components/app-shell"
 import { BotsPage } from "@/routes/bots"
 import { ChatPage } from "@/routes/chat"
+import { CheckpointPage } from "@/routes/checkpoint"
 import { CodePage } from "@/routes/code"
 import { ProjectPage } from "@/routes/project"
 import { RoutinesPage } from "@/routes/routines"
@@ -44,6 +45,10 @@ export default function App() {
             <Route path="c/:id" element={<ChatPage />} />
             <Route path="code" element={<CodePage />} />
             <Route path="code/:profileId/:projectId" element={<ProjectPage />} />
+            <Route
+              path="code/:profileId/:projectId/checkpoints/:checkpointId"
+              element={<CheckpointPage />}
+            />
             <Route path="routines" element={<RoutinesPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="bots" element={<BotsPage />} />
