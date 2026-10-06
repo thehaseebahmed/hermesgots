@@ -54,6 +54,7 @@ async function store(conversationId: string, workspace: SessionWorkspace | null)
       instructions: workspace.instructions,
     },
     planPending: workspace.planPending,
+    planFile: workspace.planFile ?? undefined,
   })
 }
 
@@ -85,6 +86,7 @@ export async function ensureSessionWorkspace(
       projectId: conversation.projectId!,
       mode: conversation.mode ?? "accept_edits",
       planPending: Boolean(conversation.planPending),
+      planFile: conversation.planFile ?? null,
     }
   }
 }

@@ -432,7 +432,6 @@ export async function sendMessage(conversationId: string, text: string, queuedId
     const runId = await startRun(config, {
       ...options,
       idempotencyKey: reply.id,
-      mode: workspace?.mode,
       workspaceInstructions: workspace?.instructions,
     })
     turn.draft.runId = runId
