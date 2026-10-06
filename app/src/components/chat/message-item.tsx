@@ -13,6 +13,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { removeQueued, sendMessage } from "@/lib/chat"
 import type { Message, ToolEvent } from "@/lib/db"
 import { describeActivity, formatDuration } from "@/lib/format"
+import { useReveal } from "@/lib/reveal"
 import { isPlanApproval } from "@/lib/workspace"
 
 type Part =
@@ -142,6 +143,10 @@ export function MessageItem({
   /** A project session's thread: no avatars, and the agent's replies sit on the page, not in bubbles. */
   plain?: boolean
 }) {
+  // Replies type out a word at a time, however Hermes delivers them.
+  const content = useReveal(message.role === "assistant" ? message.content : "")
+  const revealing = content.length < message.content.length && message.role === "assistant"
+
   if (message.role === "user") {
     if (plain && isPlanApproval(message.content)) return <PlanApprovedCard />
     const queued = message.status === "queued"
@@ -168,13 +173,13 @@ export function MessageItem({
   // everything Hermes said and ran before asking, the card, then everything after.
   const split = approval?.resolved && approval.contentOffset !== undefined
   const offset = split ? approval.contentOffset! : message.content.length
-  const before = message.content.slice(0, offset)
-  const after = message.content.slice(offset)
+  const before = content.slice(0, offset)
+  const after = content.slice(offset)
   const askedAt = approval?.requestedAt ?? Infinity
   const toolsBefore = split ? tools.filter((t) => t.startedAt <= askedAt) : tools
   const toolsAfter = split ? tools.filter((t) => t.startedAt > askedAt) : []
 
-  const showTyping = streaming && (!message.content || awaitingApproval)
+  const showTyping = streaming && (!content || awaitingApproval)
   const typingStatus = awaitingApproval ? "Waiting for your approval…" : message.statusText
   const error = (
     <>
@@ -193,7 +198,7 @@ export function MessageItem({
       ) : (
         <>
           {showTyping && <TypingBubble status={typingStatus} />}
-          {streaming && message.content && message.statusText && !awaitingApproval && (
+          {streaming && content && message.statusText && !awaitingApproval && (
             <div className="px-1 text-xs text-muted-foreground">{message.statusText}</div>
           )}
         </>
@@ -209,7 +214,7 @@ export function MessageItem({
       {message.status === "stopped" && !message.content && (
         <div className="px-1 text-xs text-muted-foreground">Stopped</div>
       )}
-      {showStats && !streaming && <Stats message={message} />}
+      {showStats && !streaming && !revealing && <Stats message={message} />}
     </>
   )
 
