@@ -3,6 +3,7 @@ import { refreshContext } from "@/lib/context"
 import { refreshTodos } from "@/lib/todos"
 import { refreshPrs, refreshWorkspace } from "@/lib/workspace"
 import { getSessionTitle, listSessionMessages, type HermesConfig, type SessionMessage } from "@/lib/hermes"
+import { splitAttachments } from "@/lib/attachments"
 
 /**
  * Message bodies don't sync; every device's turns live in the chat's Hermes session. Opening a chat
@@ -130,11 +131,13 @@ export function toMessages(
     const id = `h-${sessionId}-${row.id}`
     if (row.role === "user") {
       reply = undefined
+      const { text, attachments } = splitAttachments(row.content ?? "")
       messages.push({
         id,
         conversationId,
         role: "user",
-        content: row.content ?? "",
+        content: text,
+        ...(attachments.length ? { attachments } : {}),
         status: "done",
         createdAt,
         hermesRowId: row.id,

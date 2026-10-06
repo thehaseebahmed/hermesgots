@@ -55,6 +55,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { queueMessage, reattachRun, sendMessage, stopMessage } from "@/lib/chat"
 import {
   DEFAULT_SETTINGS,
+  type Attachment,
   createConversation,
   db,
   deleteConversation,
@@ -279,7 +280,7 @@ export function ChatPage() {
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [unsent])
 
-  const send = async (text: string) => {
+  const send = async (text: string, attachments: Attachment[] = []) => {
     try {
       let conversationId = id
       if (conversationId) {
@@ -292,7 +293,7 @@ export function ChatPage() {
       }
       if (session?.draftAt)
         void updateConversation(conversationId, { draft: undefined, draftAt: undefined })
-      await sendMessage(conversationId, text)
+      await sendMessage(conversationId, text, { attachments })
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't send your message.")
       throw error
@@ -483,7 +484,10 @@ export function ChatPage() {
             draft={session?.draft}
             onDraft={onDraft}
             onSend={send}
-            onQueue={(text) => (id ? queueMessage(id, text) : send(text))}
+            onQueue={(text, attachments) =>
+              id ? queueMessage(id, text, attachments) : send(text, attachments)
+            }
+            filesAvailable={Boolean(profile?.pluginChats)}
             onStop={() => id && stopMessage(id)}
             onCommand={(command) => navigate(command === "new" ? "/" : "/settings")}
             connection={{ baseUrl: profile?.baseUrl ?? "", apiKey: profile?.apiKey ?? "" }}

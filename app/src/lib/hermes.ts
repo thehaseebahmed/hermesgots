@@ -23,9 +23,14 @@ export interface HermesConfig {
   apiKey: string
 }
 
+/** A message part in the OpenAI vision shape, which both `/v1/runs` and chat completions take. */
+export type ContentPart =
+  { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant"
-  content: string
+  /** Parts only on the newest message: Hermes flattens history entries to text. */
+  content: string | ContentPart[]
 }
 
 export interface ToolProgressEvent {
@@ -822,6 +827,39 @@ export async function ensureWorkspace(
   const workspace = parseWorkspace(await response.json())
   if (!workspace) throw new HermesError("The plugin didn't return a workspace.")
   return workspace
+}
+
+/**
+ * Saves a file the user attached on the Hermes host, under the session, and returns its path there
+ * for the message to name.
+ */
+export async function uploadAttachment(
+  config: HermesConfig,
+  sessionId: string,
+  file: { name: string; blob: Blob },
+) {
+  let response: Response
+  try {
+    response = await request(
+      `${pluginSession(config, sessionId, "/attachments")}?name=${encodeURIComponent(file.name)}`,
+      {
+        method: "POST",
+        headers: headers(config, { "Content-Type": "application/octet-stream" }),
+        body: file.blob,
+      },
+    )
+  } catch (error) {
+    // An older plugin's 404 skips CORS, so it fails like an unreachable server.
+    if (error instanceof HermesError && (error.status === 404 || error.status === undefined))
+      throw new HermesError(
+        `Couldn't attach ${file.name}. Check that Hermes is reachable and its Memento plugin is up to date.`,
+        error.status,
+      )
+    throw error
+  }
+  const body = await response.json()
+  if (typeof body?.path !== "string") throw new HermesError("The plugin didn't save the file.")
+  return body.path as string
 }
 
 /** The session's workspace, or null when it has none (or the plugin predates them). */

@@ -8,8 +8,10 @@ import {
   type ReactNode,
 } from "react"
 import { ArrowUpIcon, MicIcon, SquareIcon } from "lucide-react"
+import { toast } from "sonner"
 
 import { AttachMenu } from "@/components/chat/attach-menu"
+import { AttachmentTile } from "@/components/chat/attachments"
 import { ModeMenu } from "@/components/chat/mode-menu"
 import { SlashMenu } from "@/components/chat/slash-menu"
 import { VoiceBar } from "@/components/chat/voice-bar"
@@ -19,7 +21,8 @@ import {
   InputGroupButton,
   InputGroupTextarea,
 } from "@/components/ui/input-group"
-import type { SessionMode } from "@/lib/db"
+import { MAX_ATTACHMENTS, prepareAttachment } from "@/lib/attachments"
+import type { Attachment, SessionMode } from "@/lib/db"
 import type { HermesConfig } from "@/lib/hermes"
 import { joinText, useDictation } from "@/lib/speech"
 import { cn } from "@/lib/utils"
@@ -42,6 +45,7 @@ export function Composer({
   botName = "Hermes",
   leading,
   session,
+  filesAvailable,
   draft,
   onDraft,
 }: {
@@ -57,14 +61,17 @@ export function Composer({
   leading?: ReactNode
   /** A project session: two lines, with the `+` menu and its permission mode under the text. */
   session?: { mode: SessionMode; onMode: (mode: SessionMode) => void; autoAvailable: boolean }
+  /** Whether files can be attached (they need the Memento plugin); photos always can. */
+  filesAvailable: boolean
   disabled?: boolean
-  onSend: (text: string) => Promise<void> | void
+  onSend: (text: string, attachments: Attachment[]) => Promise<void> | void
   /** Called instead of `onSend` while a reply is streaming: Enter queues the message. */
-  onQueue: (text: string) => Promise<void> | void
+  onQueue: (text: string, attachments: Attachment[]) => Promise<void> | void
   onStop: () => void
   onCommand: (command: LocalCommand) => void
 }) {
   const [value, setValue] = useState("")
+  const [attachments, setAttachments] = useState<Attachment[]>([])
   const seeded = useRef(false)
   useEffect(() => {
     if (seeded.current || !draft) return
@@ -77,7 +84,7 @@ export function Composer({
   const textarea = useRef<HTMLTextAreaElement>(null)
   const listId = useId()
   const dictation = useDictation()
-  const canSend = value.trim().length > 0 && !disabled
+  const canSend = (value.trim().length > 0 || attachments.length > 0) && !disabled
 
   const query = /^\/(\S*)$/.exec(value)?.[1]
   const slash = useSlashItems(query !== undefined && !disabled, query ?? "", connection)
@@ -100,12 +107,38 @@ export function Composer({
   }
 
   const submitText = (text: string) => {
+    const sent = attachments
     setValue("")
-    // Hand the text back if it never made it into the chat, unless something new was typed.
-    void Promise.resolve((busy ? onQueue : onSend)(text)).catch(() =>
-      setValue((current) => current || text),
-    )
+    setAttachments([])
+    // Hand the message back if it never made it into the chat, unless something new was added.
+    void Promise.resolve((busy ? onQueue : onSend)(text, sent)).catch(() => {
+      setValue((current) => current || text)
+      setAttachments((current) => (current.length ? current : sent))
+    })
   }
+
+  const addFiles = async (files: File[]) => {
+    const room = MAX_ATTACHMENTS - attachments.length
+    if (files.length > room) toast.error(`A message can carry ${MAX_ATTACHMENTS} attachments.`)
+    const added: Attachment[] = []
+    for (const file of files.slice(0, Math.max(room, 0))) {
+      try {
+        added.push(await prepareAttachment(file))
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : `Couldn't attach ${file.name}.`)
+      }
+    }
+    if (added.length) setAttachments((current) => [...current, ...added].slice(0, MAX_ATTACHMENTS))
+    textarea.current?.focus()
+  }
+
+  const attach = (
+    <AttachMenu
+      disabled={disabled}
+      filesAvailable={filesAvailable}
+      onAdd={(files) => void addFiles(files)}
+    />
+  )
 
   const submit = (event?: FormEvent) => {
     event?.preventDefault()
@@ -224,14 +257,28 @@ export function Composer({
           onActive={setActive}
         />
       )}
+      {attachments.length > 0 && (
+        <div className="-mt-3 mb-2 flex gap-2.5 overflow-x-auto px-1 pt-3">
+          {attachments.map((attachment) => (
+            <AttachmentTile
+              key={attachment.id}
+              attachment={attachment}
+              onRemove={() =>
+                setAttachments((current) => current.filter((a) => a.id !== attachment.id))
+              }
+            />
+          ))}
+        </div>
+      )}
       <InputGroup
         className={cn(
           "bg-background shadow-lg shadow-black/5 has-[textarea]:rounded-[1.75rem] dark:bg-input/30",
           session && "has-data-[align=block-end]:rounded-[1.75rem]",
         )}
       >
-        {leading && !session && (
-          <InputGroupAddon align="inline-start" className="self-end py-1.5 pl-2.5">
+        {!session && (
+          <InputGroupAddon align="inline-start" className="gap-0 self-end py-1.5 pl-1.5">
+            {attach}
             {leading}
           </InputGroupAddon>
         )}
@@ -264,7 +311,7 @@ export function Composer({
           className={cn(
             "max-h-48 text-base md:text-[15px]",
             session ? "min-h-12 px-5 pt-4 pb-2" : "min-h-14 py-4",
-            !session && (leading ? "pr-5 pl-2" : "px-5"),
+            !session && "pr-5 pl-1",
           )}
           aria-label="Message"
         />
@@ -274,7 +321,7 @@ export function Composer({
             className="gap-1 px-2.5 pt-0 pb-1.5"
             onClick={() => textarea.current?.focus()}
           >
-            <AttachMenu disabled={disabled} />
+            {attach}
             <ModeMenu
               mode={session.mode}
               onChange={session.onMode}

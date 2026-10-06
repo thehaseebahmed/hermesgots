@@ -3,6 +3,7 @@ import {
   getActiveProfile,
   getMessages,
   type ApprovalChoice,
+  type Attachment,
   type ClarifyAnswers,
   type ClarifyRequest,
   type Message,
@@ -24,12 +25,14 @@ import {
   stopRun,
   streamChat,
   supportsRuns,
+  uploadAttachment,
   type ChatMessage,
   type HermesConfig,
   type RunOutcome,
   type StreamHandlers,
   type TurnUsage,
 } from "@/lib/hermes"
+import { attachmentsText, wireContent } from "@/lib/attachments"
 import { refreshContext } from "@/lib/context"
 import { liveTurn } from "@/lib/history"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
@@ -549,10 +552,47 @@ async function followTurnRun(turn: Turn, runId: string) {
   return settleRun(turn.draft, await trackRun(turn, runId))
 }
 
+/**
+ * Saves each attachment on the Hermes host through the plugin, so the agent can open it on later
+ * turns too. An image still goes inline when that fails; a file has no other way to get there.
+ */
+async function uploadAttachments(
+  config: HermesConfig,
+  sessionId: string,
+  attachments: Attachment[],
+  plugin: boolean,
+) {
+  const saved: Attachment[] = []
+  for (const attachment of attachments) {
+    if (attachment.path || !attachment.blob || (!plugin && attachment.image)) {
+      saved.push(attachment)
+      continue
+    }
+    if (!plugin) throw new HermesError(`Attaching ${attachment.name} needs the Memento plugin.`)
+    try {
+      const path = await uploadAttachment(config, sessionId, {
+        name: attachment.name,
+        blob: attachment.blob,
+      })
+      saved.push({ ...attachment, path })
+    } catch (error) {
+      if (!attachment.image) throw error
+      saved.push(attachment)
+    }
+  }
+  return saved
+}
+
 /** `queuedId` sends a queued message, keeping its id so the bubble doesn't remount. */
-export async function sendMessage(conversationId: string, text: string, queuedId?: string) {
+export async function sendMessage(
+  conversationId: string,
+  text: string,
+  options: { queuedId?: string; attachments?: Attachment[] } = {},
+) {
+  const { queuedId } = options
   const content = text.trim()
-  if (!content || controllers.has(conversationId)) return
+  const attachments = options.attachments ?? []
+  if ((!content && !attachments.length) || controllers.has(conversationId)) return
 
   const conversation = await db.conversations.get(conversationId)
   if (!conversation) return
@@ -566,6 +606,7 @@ export async function sendMessage(conversationId: string, text: string, queuedId
     conversationId,
     role: "user",
     content,
+    ...(attachments.length ? { attachments } : {}),
     status: "done",
     createdAt: now,
   }
@@ -584,33 +625,48 @@ export async function sendMessage(conversationId: string, text: string, queuedId
     await db.messages.bulkAdd([userMessage, reply])
     await updateConversation(conversationId, {
       updatedAt: now,
-      ...(history.length === 0 && !conversation.titleEdited ? { title: titleFrom(content) } : {}),
+      ...(history.length === 0 && !conversation.titleEdited
+        ? { title: titleFrom(content || attachments[0].name) }
+        : {}),
     })
   })
 
-  const transcript: ChatMessage[] = [...history, userMessage]
+  const transcript: ChatMessage[] = history
     .filter((m) => m.status === "done" || (m.role === "assistant" && m.content))
-    .map((m) => ({ role: m.role, content: m.content }))
+    .map((m) => ({ role: m.role, content: attachmentsText(m.content, m.attachments) }))
 
   const config = { baseUrl: profile.baseUrl, apiKey: profile.apiKey }
   const turn = openTurn(conversationId, config, reply)
-  const options = {
-    model: profile.model,
-    messages: transcript,
-    sessionId: conversation.hermesSessionId,
-  }
   const status = await runTurn(turn, async () => {
     // A project session works in its worktree; the plugin can't be told about it any other way.
-    const workspace = await ensureSessionWorkspace(conversationId, content)
+    const workspace = await ensureSessionWorkspace(conversationId, content || attachments[0].name)
+    let sent = attachments
+    if (attachments.length) {
+      sent = await uploadAttachments(
+        config,
+        conversation.hermesSessionId,
+        attachments,
+        Boolean(profile.pluginChats),
+      )
+      await db.messages.update(userMessage.id, { attachments: sent })
+    }
+    const turnOptions = {
+      model: profile.model,
+      sessionId: conversation.hermesSessionId,
+      messages: [
+        ...transcript,
+        { role: "user" as const, content: await wireContent(content, sent) },
+      ],
+    }
     if (!(await supportsRuns(config))) {
       return streamChat(
         config,
-        { ...options, signal: turn.controller.signal },
+        { ...turnOptions, signal: turn.controller.signal },
         streamHandlers(turn),
       )
     }
     const runId = await startRun(config, {
-      ...options,
+      ...turnOptions,
       idempotencyKey: reply.id,
       workspaceInstructions: workspace?.instructions,
     })
@@ -682,14 +738,19 @@ async function resumeReply(reply: Message) {
 }
 
 /** Holds a message until the current reply finishes. */
-export async function queueMessage(conversationId: string, text: string) {
+export async function queueMessage(
+  conversationId: string,
+  text: string,
+  attachments: Attachment[] = [],
+) {
   const content = text.trim()
-  if (!content) return
+  if (!content && !attachments.length) return
   await db.messages.add({
     id: randomId(),
     conversationId,
     role: "user",
     content,
+    ...(attachments.length ? { attachments } : {}),
     status: "queued",
     createdAt: Date.now(),
   })
@@ -697,7 +758,11 @@ export async function queueMessage(conversationId: string, text: string) {
 
 export async function sendNextQueued(conversationId: string) {
   const next = (await getMessages(conversationId)).find((m) => m.status === "queued")
-  if (next) await sendMessage(conversationId, next.content, next.id)
+  if (next)
+    await sendMessage(conversationId, next.content, {
+      queuedId: next.id,
+      attachments: next.attachments,
+    })
 }
 
 export async function removeQueued(id: string) {
