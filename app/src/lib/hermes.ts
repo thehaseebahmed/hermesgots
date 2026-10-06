@@ -679,7 +679,9 @@ export interface SessionWorkspace {
   repos: { name: string; branch: string }[]
   mode: SessionMode
   planPending: boolean
-  /** Tells the agent where its worktrees are; goes into every run's `instructions`. */
+  /** The newest plan the plugin saved, as `plans/<file>.md` under the project's folder. */
+  planFile: string | null
+  /** Where the agent's worktrees are and, in plan mode, the plan's shape; every run's `instructions`. */
   instructions: string
 }
 
@@ -703,6 +705,7 @@ function parseWorkspace(raw: unknown): SessionWorkspace | null {
       })),
     mode: mode as SessionMode,
     planPending: Boolean(record.plan_pending),
+    planFile: typeof record.plan_file === "string" && record.plan_file ? record.plan_file : null,
     instructions: typeof body?.instructions === "string" ? body.instructions : "",
   }
 }
@@ -899,17 +902,13 @@ function runOutcome(payload: any): RunOutcome {
 
 /**
  * Sent as a run's `instructions`, which Hermes adds to the system prompt. `todo_list` is a deferred
- * tool by default, so without it the agent rarely keeps the list the chat shows. Fixed per mode, so
- * the prompt cache holds across the turns of one mode.
+ * tool by default, so without it the agent rarely keeps the list the chat shows. Fixed, so the
+ * prompt cache holds across turns. (Plan mode's own line comes from the plugin's workspace.)
  */
 const PLAN_HINT =
   "When a task takes three or more steps, plan it first with the todo_list tool (load it through " +
   "tool search if it isn't loaded yet), keep exactly one item in progress, and update the list as " +
   "each step is done."
-/** Plan mode: the Memento plugin blocks tools that change anything; this tells the agent why. */
-const PLAN_MODE_HINT =
-  "You are in plan mode: change nothing. Read what you need, then present a numbered plan of the " +
-  "changes you would make in your reply and stop; the user approves it before you act."
 
 /**
  * Starts a turn on `/v1/runs`. Unlike a chat completion, Hermes doesn't interrupt a run when its
@@ -923,9 +922,7 @@ export async function startRun(
     sessionId?: string
     /** Makes a retried POST return the run it already started. */
     idempotencyKey: string
-    /** A project session's permission mode. */
-    mode?: SessionMode
-    /** A project session's worktree line from the plugin. Fixed per session. */
+    /** The plugin's line for a project session: its worktrees and, in plan mode, the plan's shape. */
     workspaceInstructions?: string
   },
 ) {
@@ -938,13 +935,7 @@ export async function startRun(
     body: JSON.stringify({
       model: options.model,
       input,
-      instructions: [
-        PLAN_HINT,
-        options.workspaceInstructions,
-        options.mode === "plan" ? PLAN_MODE_HINT : undefined,
-      ]
-        .filter(Boolean)
-        .join("\n"),
+      instructions: [PLAN_HINT, options.workspaceInstructions].filter(Boolean).join("\n"),
       ...(keyed ? { session_id: options.sessionId } : {}),
     }),
   })

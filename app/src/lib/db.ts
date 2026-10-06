@@ -87,6 +87,8 @@ export interface Conversation {
   worktree?: { branch: string; repos: { name: string; branch: string }[]; instructions: string }
   /** A plan-mode turn finished and the plan awaits the user. Local only; the plugin holds it. */
   planPending?: boolean
+  /** The newest plan the plugin saved, `plans/<file>.md` under the project's folder. Local only. */
+  planFile?: string
   /** The branch's pull request in each repo, and when they were last read. Local only. */
   prs?: PullRequestRef[]
 }

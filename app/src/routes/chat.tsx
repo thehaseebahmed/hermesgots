@@ -457,7 +457,7 @@ export function ChatPage() {
             <PlanReadyCard
               onApprove={async () => {
                 await setSessionMode(session.id, "accept_edits")
-                await send("Go ahead with the plan.")
+                await send(approvalMessage(session.planFile))
               }}
               onKeepPlanning={() => setSessionMode(session.id, "plan")}
             />
@@ -602,6 +602,15 @@ export function ChatPage() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  )
+}
+
+/** What approving a plan sends: the saved plan's checkpoints, each committed, or just a go-ahead. */
+function approvalMessage(planFile: string | undefined) {
+  if (!planFile) return "Go ahead with the plan."
+  return (
+    `Go ahead with the plan in \`${planFile}\`. Work through its checkpoints in order and commit ` +
+    "each one on this branch with the commit message it names. Don't push."
   )
 }
 
