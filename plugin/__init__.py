@@ -416,6 +416,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), 400)
         if record is None:
             return _error(web, "This session has no workspace yet", 404)
+        if record["mode"] == "auto":
+            # On the loop thread: Hermes's approval queues belong to it.
+            try:
+                sessions.answer_waiting(request.match_info["session_id"])
+            except Exception:
+                logger.debug("memento: answering waiting approvals failed", exc_info=True)
         return workspace_response(record)
 
     async def remove_workspace(request: "web.Request") -> "web.Response":
