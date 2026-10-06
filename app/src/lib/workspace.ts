@@ -24,7 +24,7 @@ const RETRY_MS = 5 * 60 * 1000
 /** How long a known pull request is trusted before it's read again. */
 const PR_MS = 30_000
 
-export type SessionState = "working" | "waiting" | "idle" | "resolved"
+export type SessionState = "working" | "waiting" | "idle" | "draft" | "resolved"
 
 export const MODE_LABELS: Record<SessionMode, string> = {
   accept_edits: "Accept edits",
@@ -171,11 +171,16 @@ export async function removeSessionWorkspace(
  * device sees of its own turn, which is exact here and invisible elsewhere.
  */
 export function sessionState(
-  conversation: Pick<Conversation, "resolvedAt" | "planPending">,
+  conversation: Pick<
+    Conversation,
+    "resolvedAt" | "planPending" | "draftAt" | "createdAt" | "updatedAt"
+  >,
   live?: LiveRunStatus,
   local?: { streaming?: boolean; approval?: boolean },
 ): SessionState {
   if (conversation.resolvedAt) return "resolved"
+  // Saved as a draft and nothing sent since: a turn moves `updatedAt` past `createdAt`.
+  if (conversation.draftAt && conversation.updatedAt <= conversation.createdAt) return "draft"
   if (local?.approval || live === "waiting_for_approval" || conversation.planPending)
     return "waiting"
   if (local?.streaming || live === "running") return "working"

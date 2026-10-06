@@ -61,6 +61,7 @@ const GROUPS: { state: SessionState; label: string }[] = [
   { state: "working", label: "Working" },
   { state: "waiting", label: "Waiting on you" },
   { state: "idle", label: "Idle" },
+  { state: "draft", label: "Drafts" },
   { state: "resolved", label: "Resolved" },
 ]
 
@@ -156,14 +157,14 @@ export function ProjectPage() {
 
   // A session nothing was sent in (or typed for) isn't one yet. Synced ones carry their activity in
   // `updatedAt`, since their messages load only when opened.
-  const sessions = rows?.filter((c) => c.draft || c.updatedAt > c.createdAt || local?.[c.id]?.any)
+  const sessions = rows?.filter((c) => c.draftAt || c.updatedAt > c.createdAt || local?.[c.id]?.any)
 
   // A session spans every repo of the project; without one there's nowhere for it to work.
   const canStart = Boolean(profile?.apiKey && project?.folders.some((folder) => folder.git))
 
   const start = async () => {
     if (!profile) return
-    const conversation = await createConversation(profile.id, { title: "New session", projectId })
+    const conversation = await createConversation(profile.id, { title: "Draft session", projectId })
     navigate(`/c/${conversation.id}`)
   }
 
@@ -408,10 +409,7 @@ function SessionItem({
   state: SessionState
   now: number
 }) {
-  const line2 =
-    prLine(session) ??
-    session.worktree?.branch ??
-    (session.draft ? `Draft: ${session.draft}` : undefined)
+  const line2 = prLine(session) ?? session.worktree?.branch ?? session.draft
   return (
     <Link
       to={`/c/${session.id}`}

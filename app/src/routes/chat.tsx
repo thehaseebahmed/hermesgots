@@ -281,7 +281,8 @@ export function ChatPage() {
         conversationId = (await createConversation(profile.id)).id
         navigate(`/c/${conversationId}`)
       }
-      if (session?.draft) void db.conversations.update(conversationId, { draft: undefined })
+      if (session?.draftAt)
+        void updateConversation(conversationId, { draft: undefined, draftAt: undefined })
       await sendMessage(conversationId, text)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't send your message.")
@@ -534,7 +535,6 @@ export function ChatPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep writing</AlertDialogCancel>
             <AlertDialogAction
               variant="outline"
               onClick={async () => {
@@ -548,10 +548,9 @@ export function ChatPage() {
             <AlertDialogAction
               onClick={async () => {
                 if (!session || !projectPath) return
-                // Counts as activity, so neither the list nor the plugin's daily cleanup treats it as empty.
                 await updateConversation(session.id, {
                   draft: draftRef.current.trim(),
-                  updatedAt: Date.now(),
+                  draftAt: Date.now(),
                 })
                 navigate(projectPath)
               }}
