@@ -630,17 +630,25 @@ export async function reattachRun(conversationId: string) {
   if (controllers.has(conversationId)) return
   const conversation = await db.conversations.get(conversationId)
   const profile = await profileFor(conversation?.profileId)
-  if (!conversation || !profile?.apiKey) return
+  if (!conversation || !profile) return
   const stale = (await getMessages(conversationId)).findLast(
     (m) => m.role === "assistant" && m.status === "streaming",
   )
   if (!stale) return
-  const live = await liveRunOf(
-    { baseUrl: profile.baseUrl, apiKey: profile.apiKey },
-    conversation.hermesSessionId,
-  ).catch(() => undefined)
+  // Hermes only keys the session by our id with an API key, so only then can the run be looked up.
+  const live = profile.apiKey
+    ? await liveRunOf(
+        { baseUrl: profile.baseUrl, apiKey: profile.apiKey },
+        conversation.hermesSessionId,
+      ).catch(() => undefined)
+    : undefined
   const runId = stale.runId ?? live?.runId
-  if (!runId) return
+  if (!runId) {
+    // Nothing is running for it: a streamed chat completion died with the tab, or the run never
+    // started.
+    await db.messages.update(stale.id, { status: "stopped", statusText: undefined })
+    return
+  }
   if (!stale.runId) await db.messages.update(stale.id, { runId })
   await resumeReply({ ...stale, runId })
 }
@@ -743,9 +751,7 @@ export async function recoverInterruptedMessages() {
   const interrupted = await db.messages.filter((m) => m.status === "streaming").toArray()
   await Promise.all(
     interrupted.map((reply) =>
-      reply.runId
-        ? resumeReply(reply)
-        : db.messages.update(reply.id, { status: "stopped", statusText: undefined }),
+      reply.runId ? resumeReply(reply) : reattachRun(reply.conversationId),
     ),
   )
 }
