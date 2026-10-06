@@ -468,7 +468,7 @@ export function ChatPage() {
           <div className="mx-auto w-full max-w-3xl">
             <PlanReadyCard
               onApprove={async () => {
-                await setSessionMode(session.id, "accept_edits")
+                await setSessionMode(session.id, "auto")
                 await send(planApprovalMessage(session.planFile))
               }}
               onKeepPlanning={() => setSessionMode(session.id, "plan")}
