@@ -335,6 +335,14 @@ async function reconcile(conversationId: string) {
           next = match + 1
           writes.push({ ...unmatched[match], hermesRowId: user.hermesRowId })
           floor = turnEnd(unmatched[match])
+          // A turn streamed here without its events has no tool calls; the transcript's fill it in.
+          const local = current[current.indexOf(unmatched[match]) + 1]
+          if (local?.role === "assistant" && !local.tools?.length && reply?.tools?.length)
+            writes.push({
+              ...local,
+              tools: reply.tools,
+              reasoning: local.reasoning ?? reply.reasoning,
+            })
           continue
         }
         user.createdAt = Math.max(user.createdAt, floor)
