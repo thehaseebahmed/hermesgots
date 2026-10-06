@@ -495,7 +495,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         denied = unauthorized(request)
         if denied is not None:
             return denied
-        return web.json_response({"object": "memento.runs", "sessions": sessions.live_runs(adapter)})
+        live, run_ids = sessions.live_runs(adapter)
+        return web.json_response({"object": "memento.runs", "sessions": live, "run_ids": run_ids})
 
     app.router.add_get(f"{PREFIX}/info", info)
     app.router.add_get(f"{PREFIX}/chats", list_chats)
