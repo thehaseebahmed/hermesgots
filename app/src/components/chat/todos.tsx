@@ -1,0 +1,164 @@
+import { CheckIcon, XIcon } from "lucide-react"
+
+import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { Button } from "@/components/ui/button"
+import { Separator } from "@/components/ui/separator"
+import type { Todo } from "@/lib/db"
+import { cn } from "@/lib/utils"
+
+function progress(items: Todo[]) {
+  const counted = items.filter((item) => item.status !== "cancelled")
+  return {
+    done: counted.filter((item) => item.status === "completed").length,
+    total: counted.length,
+  }
+}
+
+/** How deep each item sits under its parents, so subtasks indent. */
+function depths(items: Todo[]) {
+  const parents = new Map(items.map((item) => [item.id, item.parent]))
+  return items.map((item) => {
+    let depth = 0
+    let parent = item.parent
+    const seen = new Set([item.id])
+    while (parent && parents.has(parent) && !seen.has(parent) && depth < 3) {
+      seen.add(parent)
+      depth += 1
+      parent = parents.get(parent)
+    }
+    return depth
+  })
+}
+
+function Ring({ value }: { value: number }) {
+  const radius = 8
+  const circumference = 2 * Math.PI * radius
+  return (
+    <svg viewBox="0 0 20 20" className="size-5" aria-hidden>
+      <g transform="rotate(-90 10 10)">
+        <circle
+          cx="10"
+          cy="10"
+          r={radius}
+          fill="none"
+          strokeWidth="2.5"
+          className="stroke-muted-foreground/30"
+        />
+        {value > 0 && (
+          <circle
+            cx="10"
+            cy="10"
+            r={radius}
+            fill="none"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={circumference * (1 - value)}
+            className="stroke-primary"
+          />
+        )}
+      </g>
+    </svg>
+  )
+}
+
+/** The agent's progress through its todo list, above the composer; opens the list. */
+export function TodosPill({ items, onClick }: { items: Todo[]; onClick: () => void }) {
+  const { done, total } = progress(items)
+  return (
+    <div className="mx-auto flex w-full max-w-3xl justify-center pb-2">
+      <Button
+        type="button"
+        variant="secondary"
+        className="h-11 gap-2 rounded-full px-4 tabular-nums"
+        onClick={onClick}
+      >
+        <Ring value={total ? done / total : 0} />
+        {done}/{total} todos
+      </Button>
+    </div>
+  )
+}
+
+function StatusIcon({ status }: { status: Todo["status"] }) {
+  if (status === "completed")
+    return (
+      <span className="flex size-7 items-center justify-center rounded-full bg-primary/15 text-primary">
+        <CheckIcon className="size-4" aria-label="Done" />
+      </span>
+    )
+  if (status === "in_progress")
+    return (
+      <span className="flex size-7 items-center justify-center" aria-label="In progress">
+        <span className="size-5 rounded-full border-2 border-muted border-t-primary motion-safe:animate-spin" />
+      </span>
+    )
+  if (status === "cancelled")
+    return (
+      <span className="flex size-7 items-center justify-center text-muted-foreground">
+        <XIcon className="size-4" aria-label="Cancelled" />
+      </span>
+    )
+  return (
+    <span className="flex size-7 items-center justify-center" aria-label="Pending">
+      <span className="size-5 rounded-full border-2 border-muted-foreground/50" />
+    </span>
+  )
+}
+
+export function TodosSheet({
+  open,
+  onOpenChange,
+  items,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  items: Todo[]
+}) {
+  const { done, total } = progress(items)
+  const levels = depths(items)
+  return (
+    <Popup open={open} onOpenChange={onOpenChange}>
+      <PopupContent>
+        <PopupHeader className="pb-2">
+          <PopupTitle className="tabular-nums">
+            {done}/{total} todos complete
+          </PopupTitle>
+        </PopupHeader>
+        <div className="px-6">
+          <Separator />
+        </div>
+        <ol className="flex flex-col px-6 pt-4">
+          {items.map((item, index) => {
+            const finished = item.status === "completed" || item.status === "cancelled"
+            return (
+              <li
+                key={item.id}
+                className="flex gap-3"
+                style={{ paddingInlineStart: `${levels[index] * 1.5}rem` }}
+              >
+                <div className="relative w-7 shrink-0">
+                  <div className="flex h-11 items-center">
+                    <StatusIcon status={item.status} />
+                  </div>
+                  {/* Runs from under this item's icon to the next one's. */}
+                  {index < items.length - 1 && (
+                    <div className="absolute top-10 -bottom-1 left-1/2 w-px -translate-x-1/2 bg-border" />
+                  )}
+                </div>
+                <p
+                  className={cn(
+                    "min-w-0 flex-1 py-2.5 text-[15px] leading-6 break-words",
+                    finished && "text-muted-foreground line-through",
+                  )}
+                >
+                  {item.content}
+                </p>
+              </li>
+            )
+          })}
+        </ol>
+      </PopupContent>
+    </Popup>
+  )
+}

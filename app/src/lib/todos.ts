@@ -28,15 +28,23 @@ async function store(conversationId: string, todos: SessionTodos | null, live: b
   })
 }
 
+/** The chat and its bot, when the bot's plugin can read its list. */
+async function tracked(conversationId: string) {
+  const conversation = await db.conversations.get(conversationId)
+  const profile = conversation && (await db.profiles.get(conversation.profileId))
+  // Keyless chats have no session id Hermes knows.
+  if (!conversation || !profile?.apiKey || !profile.pluginChats) return null
+  return { conversation, profile }
+}
+
 /**
  * Reads the agent's todo list for a chat from its server's Memento plugin. Keyless chats and bots
  * without the plugin have no list.
  */
 export async function refreshTodos(conversationId: string) {
-  const conversation = await db.conversations.get(conversationId)
-  const profile = conversation && (await db.profiles.get(conversation.profileId))
-  // Keyless chats have no session id Hermes knows.
-  if (!conversation || !profile?.apiKey || !profile.pluginChats) return
+  const found = await tracked(conversationId)
+  if (!found) return
+  const { conversation, profile } = found
   const key = `${profile.baseUrl}\n${profile.apiKey}`
   if (Date.now() - (unsupported.get(key) ?? -Infinity) < RETRY_MS) return
   let todos
@@ -54,13 +62,16 @@ export async function refreshTodos(conversationId: string) {
  * Picks up a todo tool call from a run's live events. The preview is cut at 500 characters, so a
  * long list only arrives once the plugin reads the transcript, which Hermes writes after the round.
  */
-export function onTodoTool(conversationId: string, tool: string, preview?: string) {
+export async function onTodoTool(conversationId: string, tool: string, preview?: string) {
   if (!TODO_TOOLS.has(tool) && !(tool === "tool_call" && preview?.includes('"todos"'))) return
+  // Only lists the plugin can bring back on every device, so the chat shows the same everywhere.
+  if (!(await tracked(conversationId))) return
+  let todos = null
   try {
-    const todos = preview ? parseTodos(JSON.parse(preview)) : null
-    if (todos) void store(conversationId, todos, true)
+    todos = preview ? parseTodos(JSON.parse(preview)) : null
   } catch {
     // Cut short; the plugin has the whole list.
   }
+  if (todos) await store(conversationId, todos, true)
   window.setTimeout(() => void refreshTodos(conversationId), 1500)
 }
