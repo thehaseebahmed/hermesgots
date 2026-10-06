@@ -160,7 +160,9 @@ export function ProjectPage() {
   const sessions = rows?.filter((c) => c.draftAt || c.updatedAt > c.createdAt || local?.[c.id]?.any)
 
   // A session spans every repo of the project; without one there's nowhere for it to work.
-  const canStart = Boolean(profile?.apiKey && project?.folders.some((folder) => folder.git))
+  const canStart = Boolean(
+    profile?.apiKey && project?.status === "ready" && project.folders.some((folder) => folder.git),
+  )
 
   const start = async () => {
     if (!profile) return
@@ -229,7 +231,7 @@ export function ProjectPage() {
           </Button>
         }
         actions={
-          project && (
+          project?.status === "ready" && (
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={

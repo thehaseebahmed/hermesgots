@@ -491,7 +491,11 @@ export interface HermesProjectFolder {
   git: boolean
   /** `user/repo` from the clone's GitHub origin; what the UI calls the folder. */
   repo: string | null
+  /** Only while the project is being created: this repo's clone. */
+  status?: "queued" | "cloning" | "done" | "failed"
 }
+
+export type ProjectStatus = "ready" | "cloning" | "failed"
 
 /** A Hermes Project (`hermes project create`), through the Memento plugin. */
 export interface HermesProject {
@@ -501,6 +505,10 @@ export interface HermesProject {
   createdAt: number
   /** The newest session in one of its folders; unset when none has run there. */
   lastActiveAt?: number
+  /** `cloning` and `failed` are a project the plugin is still creating, which has no sessions yet. */
+  status: ProjectStatus
+  /** Why a `failed` project failed. */
+  error?: string
   /** Primary folder first. */
   folders: HermesProjectFolder[]
 }
@@ -518,6 +526,8 @@ function toProject(raw: unknown): HermesProject | null {
     description: typeof p.description === "string" && p.description.trim() ? p.description : null,
     createdAt: seconds(p.created_at) ?? 0,
     lastActiveAt: seconds(p.last_active),
+    status: p.status === "cloning" || p.status === "failed" ? p.status : "ready",
+    error: typeof p.error === "string" && p.error ? p.error : undefined,
     folders: folders
       .filter((f): f is Record<string, unknown> => typeof f?.path === "string")
       .map((f) => ({
@@ -525,6 +535,13 @@ function toProject(raw: unknown): HermesProject | null {
         label: typeof f.label === "string" && f.label ? f.label : null,
         git: f.git === true,
         repo: typeof f.repo === "string" && f.repo ? f.repo : null,
+        status:
+          f.status === "queued" ||
+          f.status === "cloning" ||
+          f.status === "done" ||
+          f.status === "failed"
+            ? f.status
+            : undefined,
       })),
   }
 }
@@ -586,21 +603,26 @@ export async function listGitHubRepos(config: HermesConfig): Promise<GitHubRepo[
 }
 
 /**
- * Clones a GitHub repo onto the Hermes host and adds it to a project, or to a new one named
- * `projectName`. Can take minutes for a big repo.
+ * Starts a project in the profile's `projects/` folder on the server. The plugin clones each repo in
+ * the background, so this answers at once with a project that is `cloning` until they are all in.
  */
-/** Creates a project in the profile's `projects/` folder on the server, with each repo cloned into it. */
 export async function createProject(
   config: HermesConfig,
   project: { name: string; description?: string; repos: string[] },
-): Promise<{ id: string; path: string }> {
-  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects`, {
+): Promise<void> {
+  await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects`, {
     method: "POST",
     headers: headers(config),
     body: JSON.stringify(project),
   })
-  const body = await response.json()
-  return { id: String(body?.id ?? ""), path: String(body?.path ?? "") }
+}
+
+/** Starts a `failed` project's clones over. */
+export async function retryProject(config: HermesConfig, id: string): Promise<void> {
+  await request(
+    `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects/${encodeURIComponent(id)}/retry`,
+    { method: "POST", headers: headers(config), body: "{}" },
+  )
 }
 
 /** Renames a project or changes its description. */
@@ -616,7 +638,10 @@ export async function updateProject(
   })
 }
 
-/** Deletes a project's record on the server. Its folders and clones stay on the host. */
+/**
+ * Deletes a project's record on the server. Its folders and clones stay on the host, except for a
+ * project still being created, which is stopped and wiped.
+ */
 export async function deleteProject(config: HermesConfig, id: string): Promise<void> {
   await request(
     `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects/${encodeURIComponent(id)}/remove`,
