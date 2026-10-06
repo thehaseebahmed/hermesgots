@@ -35,9 +35,10 @@
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
 
-  /* App-specific: the approval accent and the routine run bars. */
+  /* App-specific: the approval accent, the routine run bars and a merged pull request. */
   --warning: oklch(0.7 0.17 55);
   --success: oklch(0.65 0.17 152);
+  --merged: oklch(0.55 0.2 300);
 
   /* Syntax highlighting in tool cards. */
   --syntax-keyword: oklch(0.55 0.2 15);
@@ -78,6 +79,7 @@
 
   --warning: oklch(0.76 0.16 60);
   --success: oklch(0.72 0.17 152);
+  --merged: oklch(0.74 0.17 300);
 
   --syntax-keyword: oklch(0.72 0.16 15);
   --syntax-string: oklch(0.78 0.13 150);
@@ -118,6 +120,7 @@
   --color-sidebar-ring: var(--sidebar-ring);
   --color-warning: var(--warning);
   --color-success: var(--success);
+  --color-merged: var(--merged);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
