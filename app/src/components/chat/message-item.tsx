@@ -22,10 +22,10 @@ type Part =
   | { kind: "clarify"; tool: ToolEvent }
 
 /**
- * Interleaves a slice of the reply (starting at `start`) with the tools run during it. With
- * `cards`, a clarify call is a card of its own rather than a tool row.
+ * Interleaves a slice of the reply (starting at `start`) with the tools run during it. A clarify
+ * call is a card of its own (its question and the answer) rather than a tool row.
  */
-function toParts(content: string, tools: ToolEvent[], start: number, cards?: boolean): Part[] {
+function toParts(content: string, tools: ToolEvent[], start: number): Part[] {
   const end = start + content.length
   const parts: Part[] = []
   let cursor = start
@@ -39,7 +39,7 @@ function toParts(content: string, tools: ToolEvent[], start: number, cards?: boo
     const at = Math.min(Math.max(tool.contentOffset ?? 0, cursor), end)
     if (at > cursor) pushText(at)
     const last = parts.at(-1)
-    if (cards && tool.tool === "clarify") parts.push({ kind: "clarify", tool })
+    if (tool.tool === "clarify") parts.push({ kind: "clarify", tool })
     else if (last?.kind === "tools") last.tools.push(tool)
     else parts.push({ kind: "tools", tools: [tool] })
   }
@@ -156,6 +156,7 @@ export function MessageItem({
   const tools = message.tools ?? []
   const approval = message.approval
   const awaitingApproval = Boolean(approval && !approval.resolved)
+  const awaitingClarify = Boolean(message.clarify && !message.clarify.resolved)
 
   // An answered approval splits the reply in two so the card sits where it happened:
   // everything Hermes said and ran before asking, the card, then everything after.
@@ -167,7 +168,7 @@ export function MessageItem({
   const toolsBefore = split ? tools.filter((t) => t.startedAt <= askedAt) : tools
   const toolsAfter = split ? tools.filter((t) => t.startedAt > askedAt) : []
 
-  const showTyping = streaming && (!content || awaitingApproval)
+  const showTyping = streaming && (!content || awaitingApproval || awaitingClarify)
   const error = (
     <>
       <AlertCircleIcon className="mt-0.5 size-4 shrink-0" />
@@ -185,7 +186,7 @@ export function MessageItem({
       ) : (
         <>
           {showTyping && <TypingBubble />}
-          {streaming && content && message.statusText && !awaitingApproval && (
+          {streaming && content && message.statusText && !awaitingApproval && !awaitingClarify && (
             <div className="px-1 text-xs text-muted-foreground">{message.statusText}</div>
           )}
         </>
@@ -207,13 +208,13 @@ export function MessageItem({
 
   return (
     <div className="flex flex-col gap-3">
-      <AssistantRow botId={botId} plain={plain} parts={toParts(before, toolsBefore, 0, plain)}>
+      <AssistantRow botId={botId} plain={plain} parts={toParts(before, toolsBefore, 0)}>
         {!split && footer}
       </AssistantRow>
       {/* A pending approval lives in the composer slot; once answered it sits in the thread, unattributed. */}
       {approval?.resolved && <ApprovalCard message={message} />}
       {split && (
-        <AssistantRow botId={botId} plain={plain} parts={toParts(after, toolsAfter, offset, plain)}>
+        <AssistantRow botId={botId} plain={plain} parts={toParts(after, toolsAfter, offset)}>
           {footer}
         </AssistantRow>
       )}

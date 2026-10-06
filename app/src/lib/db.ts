@@ -150,6 +150,26 @@ export interface ApprovalRequest {
   resolved?: ApprovalChoice | "expired"
 }
 
+export interface ClarifyQuestion {
+  id: string
+  question: string
+  /** Pickable answers, the first one recommended; none for an open-ended question. */
+  choices?: string[]
+  multiSelect?: boolean
+}
+
+/** A choice or typed text per question id, a list for multi-select, null for a skipped one. */
+export type ClarifyAnswers = Record<string, string | string[] | null>
+
+/** The agent's questions (Hermes's `clarify` tool, served by the Memento plugin). */
+export interface ClarifyRequest {
+  runId: string
+  clarifyId: string
+  questions: ClarifyQuestion[]
+  /** Set once the user answers (or the turn ends without an answer). */
+  resolved?: { answers: ClarifyAnswers; outcome: "submitted" | "cancelled" } | "expired"
+}
+
 export interface MessageStats {
   tokens: number
   estimated: boolean
@@ -172,6 +192,7 @@ export interface Message {
   reasoning?: string
   tools?: ToolEvent[]
   approval?: ApprovalRequest
+  clarify?: ClarifyRequest
   status: MessageStatus
   /** Latest `hermes.status` text while streaming, or the error text. */
   statusText?: string

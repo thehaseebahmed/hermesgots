@@ -3,18 +3,22 @@ import {
   getActiveProfile,
   getMessages,
   type ApprovalChoice,
+  type ClarifyAnswers,
+  type ClarifyRequest,
   type Message,
   type MessageStats,
   type ToolEvent,
   updateConversation,
 } from "@/lib/db"
 import {
+  clarifyQuestions,
   followRun,
   getRun,
   getSessionTitle,
   HermesError,
   labelSession,
   respondToApproval,
+  respondToClarify,
   startRun,
   stopRun,
   streamChat,
@@ -135,6 +139,38 @@ function openTurn(
   return turn
 }
 
+/** What Hermes's clarify tool returns for the answers given, so a question reads the same live and from the transcript. */
+function clarifyResult(clarify: ClarifyRequest, answers: ClarifyAnswers, outcome: string) {
+  return JSON.stringify({
+    responses: clarify.questions.map((q) => {
+      const answer = answers[q.id] ?? null
+      return {
+        question: q.question,
+        choices_offered: q.choices ?? null,
+        status: answer ? "answered" : outcome === "submitted" ? "skipped" : "unanswered",
+        user_response: answer,
+      }
+    }),
+    outcome,
+  })
+}
+
+/**
+ * Marks the reply's question answered and gives its `clarify` call the full result: the run
+ * stream's own preview of it is cut at 500 characters, and the thread's card reads the call.
+ */
+function settledClarify(
+  message: Pick<Message, "clarify" | "tools">,
+  answers: ClarifyAnswers,
+  outcome: "submitted" | "cancelled",
+) {
+  const clarify = { ...message.clarify!, resolved: { answers, outcome } }
+  const tools = [...(message.tools ?? [])]
+  const at = tools.findLastIndex((t) => t.tool === "clarify")
+  if (at >= 0) tools[at] = { ...tools[at], result: clarifyResult(clarify, answers, outcome) }
+  return { clarify, tools }
+}
+
 function raiseApproval(
   turn: Turn,
   event: { run_id: string; command?: string; description?: string; choices?: ApprovalChoice[] },
@@ -186,7 +222,9 @@ function streamHandlers(turn: Turn): StreamHandlers {
         if (event.status !== "running") existing.endedAt = Date.now()
         if (event.status === "completed")
           void onTodoTool(turn.conversationId, existing.tool, event.result)
-        if (event.result) existing.result = event.result
+        // A question's full result is written when it's answered; the stream's preview is cut short.
+        if (event.result && !(existing.tool === "clarify" && existing.result))
+          existing.result = event.result
       } else {
         // A completion with no start to match still happened; it gets its own card.
         draft.tools.push({
@@ -205,6 +243,28 @@ function streamHandlers(turn: Turn): StreamHandlers {
     },
     onApproval(event) {
       raiseApproval(turn, event)
+    },
+    // A question is for the user, whatever the mode: nothing answers it for them.
+    onClarify(event) {
+      if (draft.clarify?.clarifyId === event.clarify_id) return
+      const questions = clarifyQuestions(event)
+      if (!questions.length) return
+      draft.clarify = { runId: event.run_id, clarifyId: event.clarify_id, questions }
+      touch()
+    },
+    // Answered on another device, or a replay of an answer this one gave.
+    onClarifyResolved(event) {
+      if (!draft.clarify || draft.clarify.clarifyId !== event.clarify_id) return
+      if (draft.clarify.resolved && draft.clarify.resolved !== "expired") return
+      Object.assign(
+        draft,
+        settledClarify(
+          draft,
+          event.answers ?? {},
+          event.outcome === "cancelled" ? "cancelled" : "submitted",
+        ),
+      )
+      touch()
     },
   }
 }
@@ -304,7 +364,7 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
         readTranscript ??= await transcriptReader(turn)
         await readTranscript?.()
       }
-      const { outcome, approval } = await getRun(config, runId, signal)
+      const { outcome, approval, clarify } = await getRun(config, runId, signal)
       if (outcome) return { ...outcome, replaceContent: lost }
       // The events stream carries approval requests; when it can't be read, the run's status holds
       // the one it waits on.
@@ -320,6 +380,12 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
           draft.approval = { ...draft.approval, resolved: "expired" }
           touch()
         }
+      }
+      // A client that can only poll still gets the question: the plugin keeps it on the status.
+      if (clarify) handlers.onClarify?.(clarify)
+      else if (polling && draft.clarify && !draft.clarify.resolved) {
+        draft.clarify = { ...draft.clarify, resolved: "expired" }
+        touch()
       }
       failures = 0
       errored = false
@@ -363,6 +429,9 @@ async function finishTurn(turn: Turn, usage: TurnUsage | undefined) {
   )
   if (draft.approval && !draft.approval.resolved) {
     draft.approval = { ...draft.approval, resolved: "expired" }
+  }
+  if (draft.clarify && !draft.clarify.resolved) {
+    draft.clarify = { ...draft.clarify, resolved: "expired" }
   }
   if (draft.status !== "error") draft.statusText = undefined
   if (draft.content || usage) {
@@ -609,6 +678,31 @@ export async function answerApproval(message: Message, choice: ApprovalChoice) {
     active.touch()
   } else {
     await db.messages.update(message.id, { approval: { ...message.approval, resolved: choice } })
+  }
+}
+
+/** Sends the user's answers to the agent's questions; a question left blank is skipped. */
+export async function answerClarify(
+  message: Message,
+  answers: ClarifyAnswers,
+  outcome: "submitted" | "cancelled" = "submitted",
+) {
+  const clarify = message.clarify
+  if (!clarify) return
+  const conversation = await db.conversations.get(message.conversationId)
+  const profile = await profileFor(conversation?.profileId)
+  if (!profile) return
+  await respondToClarify({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }, clarify.runId, {
+    clarifyId: clarify.clarifyId,
+    answers,
+    outcome,
+  })
+  const active = activeDrafts.get(message.id)
+  if (active?.draft.clarify) {
+    Object.assign(active.draft, settledClarify(active.draft, answers, outcome))
+    active.touch()
+  } else {
+    await db.messages.update(message.id, settledClarify(message, answers, outcome))
   }
 }
 

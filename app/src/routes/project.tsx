@@ -139,17 +139,18 @@ export function ProjectPage() {
   const rows = listed?.rows
   const now = listed?.now ?? 0
 
-  // What this device sees of its own turns: a reply streaming, an approval waiting.
+  // What this device sees of its own turns: a reply streaming, an approval or a question waiting.
   const ids = rows?.map((c) => c.id) ?? []
   const local = useLiveQuery(async () => {
-    const signals: Record<string, { any?: boolean; streaming?: boolean; approval?: boolean }> = {}
+    const signals: Record<string, { any?: boolean; streaming?: boolean; waiting?: boolean }> = {}
     if (ids.length === 0) return signals
     const messages = await db.messages.where("conversationId").anyOf(ids).toArray()
     for (const m of messages) {
       const signal = (signals[m.conversationId] ??= {})
       signal.any = true
       if (m.status === "streaming") signal.streaming = true
-      if (m.approval && !m.approval.resolved) signal.approval = true
+      if ((m.approval && !m.approval.resolved) || (m.clarify && !m.clarify.resolved))
+        signal.waiting = true
     }
     return signals
   }, [ids.join("\n")])
