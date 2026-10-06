@@ -17,7 +17,6 @@ export function ChatHeader({
   botId,
   showBot = true,
   leading,
-  extra,
   actions,
   className,
 }: {
@@ -26,8 +25,6 @@ export function ChatHeader({
   showBot?: boolean
   subtitle?: string
   leading?: ReactNode
-  /** Beside `actions`, on their left. */
-  extra?: ReactNode
   actions?: ReactNode
   className?: string
 }) {
@@ -40,16 +37,8 @@ export function ChatHeader({
         className,
       )}
     >
-      {/* Side columns share a minimum as wide as the wider side, so the title stays centred. */}
-      <div
-        className={cn(
-          "mx-auto grid max-w-3xl items-center gap-3",
-          extra
-            ? "grid-cols-[minmax(6rem,1fr)_minmax(0,max-content)_minmax(6rem,1fr)]"
-            : "grid-cols-[minmax(2.75rem,1fr)_minmax(0,max-content)_minmax(2.75rem,1fr)]",
-        )}
-      >
-        <div className="pointer-events-auto size-11 justify-self-start">
+      <div className="mx-auto flex max-w-3xl items-center gap-3">
+        <div className="pointer-events-auto size-11 shrink-0">
           {leading ?? (
             <Button
               variant="outline"
@@ -62,9 +51,9 @@ export function ChatHeader({
             </Button>
           )}
         </div>
-        <div className="pointer-events-auto flex min-w-0 flex-col items-center">
+        <div className="pointer-events-auto flex min-w-0 flex-1 flex-col items-center">
           {showBot && <Bot id={botId} animate className="size-11" />}
-          <div className="flex max-w-full min-w-0 flex-col items-center">
+          <div className="flex max-w-1/2 min-w-0 flex-col items-center">
             <span className="max-w-full truncate text-sm font-semibold">{title}</span>
             {subtitle && (
               <span className="max-w-full truncate text-[11px] leading-tight text-muted-foreground">
@@ -73,10 +62,7 @@ export function ChatHeader({
             )}
           </div>
         </div>
-        <div className="pointer-events-auto flex gap-2 justify-self-end">
-          {extra}
-          {actions}
-        </div>
+        <div className="pointer-events-auto size-11 shrink-0">{actions}</div>
       </div>
     </header>
   )

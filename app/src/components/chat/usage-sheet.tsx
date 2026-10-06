@@ -5,7 +5,6 @@ import { Link } from "react-router"
 import { Banner } from "@/components/banner"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
 import type { Profile } from "@/lib/db"
 import { formatTokens } from "@/lib/format"
 import { getModelInfo, type ModelInfo } from "@/lib/hermes"
@@ -22,16 +21,8 @@ function fraction({ tokens, window }: ContextUsage) {
   return tokens && window ? Math.min(1, tokens / window) : 0
 }
 
-/** Fill ring the size of the send button (in a session, the header's buttons); opens the usage sheet. */
-export function ContextRing({
-  usage,
-  onClick,
-  className,
-}: {
-  usage: ContextUsage
-  onClick: () => void
-  className?: string
-}) {
+/** Fill ring for the composer, the size of the send button; opens the usage sheet. */
+export function ContextRing({ usage, onClick }: { usage: ContextUsage; onClick: () => void }) {
   const filled = fraction(usage)
   const percent = Math.round(filled * 100)
   const radius = 20
@@ -43,7 +34,7 @@ export function ContextRing({
       type="button"
       variant="ghost"
       size="icon-lg"
-      className={cn("size-11 rounded-full text-muted-foreground", className)}
+      className="size-11 rounded-full text-muted-foreground"
       onClick={onClick}
       aria-label={label}
     >
