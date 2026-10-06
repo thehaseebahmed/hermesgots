@@ -19,7 +19,10 @@ function CodeBlock({ language, code }: { language?: string; code: string }) {
   }
 
   return (
-    <div className="my-3 overflow-hidden rounded-2xl bg-background/70 dark:bg-background/40">
+    <div
+      data-md-code
+      className="my-3 overflow-hidden rounded-2xl bg-background/70 dark:bg-background/40"
+    >
       <div className="flex items-center justify-between pt-1.5 pr-1.5 pl-4 text-xs text-muted-foreground">
         <span>{language || "code"}</span>
         <Button
@@ -47,7 +50,10 @@ const components: ComponentProps<typeof ReactMarkdown>["components"] = {
       return <CodeBlock language={match?.[1]} code={text.replace(/\n$/, "")} />
     }
     return (
-      <code className="rounded-md bg-background/60 px-1.5 py-0.5 font-mono text-[0.85em]">
+      <code
+        data-md-code
+        className="rounded-md bg-background/60 px-1.5 py-0.5 font-mono text-[0.85em]"
+      >
         {children}
       </code>
     )
@@ -69,14 +75,18 @@ const components: ComponentProps<typeof ReactMarkdown>["components"] = {
 export const Markdown = memo(function Markdown({
   children,
   className,
+  plain,
 }: {
   children: string
   className?: string
+  /** On the page rather than in a bubble, so code needs its own background. */
+  plain?: boolean
 }) {
   return (
     <div
       className={cn(
         "min-w-0 space-y-3 break-words [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_blockquote]:italic [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-medium [&_li]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5",
+        plain && "[&_[data-md-code]]:bg-muted",
         className,
       )}
     >

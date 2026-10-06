@@ -1,3 +1,5 @@
+import type { Message } from "@/lib/db"
+
 export function formatDuration(ms: number) {
   if (ms < 60_000) return `${Math.max(0.1, ms / 1000).toFixed(1)}s`
   const minutes = Math.floor(ms / 60_000)
@@ -27,4 +29,14 @@ export function formatRelative(timestamp: number, now: number) {
     if (Math.abs(seconds) >= size) return relative.format(Math.round(seconds / size), unit)
   }
   return relative.format(seconds, "second")
+}
+
+/** One line saying what the bot is doing right now. */
+export function describeActivity(message: Message) {
+  if (message.approval && !message.approval.resolved) return "Waiting for approval"
+  const tool = message.tools?.findLast((t) => t.status === "running")
+  if (tool) return `${tool.emoji ? `${tool.emoji} ` : ""}${tool.label}…`
+  if (message.statusText) return message.statusText
+  if (message.reasoning && !message.content) return "Thinking…"
+  return "Writing…"
 }
