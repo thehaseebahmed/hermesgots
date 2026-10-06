@@ -126,7 +126,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "github",
                     "sessions",
                     "runs",
-                    "pr",
+                    "prs",
                 ],
             }
         )
@@ -318,7 +318,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return body if isinstance(body, dict) else None
 
     def workspace_response(record: Dict[str, Any] | None):
-        return web.json_response({"object": "memento.workspace", "workspace": record})
+        return web.json_response(
+            {
+                "object": "memento.workspace",
+                "workspace": record,
+                "instructions": sessions.instructions(record) if record else None,
+            }
+        )
 
     async def post_workspace(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -336,7 +342,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 home,
                 session_id,
                 body.get("project_id"),
-                body.get("repo_root"),
                 body.get("task"),
                 body.get("mode"),
             )
@@ -399,10 +404,19 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return denied
         path, home = store_path(), hermes_home()
         record = await asyncio.to_thread(sessions.record_for, path, home, request.match_info["session_id"])
-        pr = None
-        if record and record.get("path") and record.get("branch"):
-            pr = await asyncio.to_thread(github.pull_request, home, record["repo_root"], record["branch"])
-        return web.json_response({"object": "memento.pr", "pr": pr})
+
+        def lookup():
+            found = []
+            for repo in (record or {}).get("repos", []):
+                if not repo.get("path") or not repo.get("branch"):
+                    continue
+                pr = github.pull_request(home, repo["repo_root"], repo["branch"])
+                if pr:
+                    found.append(pr)
+            return found
+
+        prs = await asyncio.to_thread(lookup) if record else []
+        return web.json_response({"object": "memento.prs", "prs": prs})
 
     async def live_runs(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -425,7 +439,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/workspace", get_workspace)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/workspace/remove", remove_workspace)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/mode", post_mode)
-    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/pr", session_pr)
+    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/prs", session_pr)
     app.router.add_get(f"{PREFIX}/runs/live", live_runs)
     logger.info("memento: serving %s on the API server", PREFIX)
 

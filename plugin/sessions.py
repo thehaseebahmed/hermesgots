@@ -1,4 +1,8 @@
-"""Memento's project sessions: chats that work in their own git worktree of a Hermes Project.
+"""Memento's project sessions: chats that work in their own git worktrees of a Hermes Project.
+
+A session spans the project: every git folder of it gets a worktree on the session's branch. The
+primary repo's worktree is the session's cwd, and the run's instructions tell the agent where the
+others are.
 
 The API server can't put a run in a directory (``POST /v1/runs`` has no cwd), but Hermes's terminal
 and file tools take a per-session cwd override (``register_task_env_overrides``), keyed by the run's
@@ -12,6 +16,7 @@ change anything) and every device sees the same mode.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -27,7 +32,18 @@ from .store import connect
 logger = logging.getLogger(__name__)
 
 MODES = ("accept_edits", "auto", "plan")
-FIELDS = ("session_id", "project_id", "repo_root", "path", "branch", "mode", "plan_pending", "created_at")
+FIELDS = (
+    "session_id",
+    "project_id",
+    "repo_root",
+    "path",
+    "branch",
+    "mode",
+    "plan_pending",
+    "created_at",
+    "repos",
+)
+REPO_FIELDS = ("name", "repo_root", "path", "branch")
 MAX_PARENT_HOPS = 5
 SLUG_CHARS = 40
 GIT_TIMEOUT_S = 60
@@ -63,7 +79,31 @@ class WorkspaceError(Exception):
 def _record(row: Any) -> Dict[str, Any]:
     record = dict(zip(FIELDS, row))
     record["plan_pending"] = bool(record["plan_pending"])
+    try:
+        repos = json.loads(record["repos"]) if record["repos"] else []
+    except ValueError:
+        repos = []
+    record["repos"] = [
+        {field: repo.get(field) for field in REPO_FIELDS} for repo in repos if isinstance(repo, dict)
+    ]
+    # A row from before repos were kept: the one tree it has.
+    if not record["repos"] and record["path"]:
+        record["repos"] = [
+            {
+                "name": _repo_name(record["repo_root"]),
+                "repo_root": record["repo_root"],
+                "path": record["path"],
+                "branch": record["branch"],
+            }
+        ]
     return record
+
+
+def _repo_name(repo_root: str) -> str:
+    """``user/repo`` from the checkout's GitHub origin, else the folder's name; never a path."""
+    from . import github
+
+    return github.origin_repo(repo_root) or os.path.basename(repo_root.rstrip("/\\")) or repo_root
 
 
 def read(path: Path, session_id: str) -> Optional[Dict[str, Any]]:
@@ -116,7 +156,8 @@ def slug(task: Any) -> str:
     return f"{base or 'session'}-{secrets.token_hex(3)}"
 
 
-def _check_folder(projects_db: Path, project_id: str, repo_root: str) -> None:
+def _project_repos(projects_db: Path, project_id: str) -> list[str]:
+    """The project's git folders, primary first."""
     from hermes_cli import projects_db as pdb
 
     if not projects_db.exists():
@@ -126,11 +167,15 @@ def _check_folder(projects_db: Path, project_id: str, repo_root: str) -> None:
     project = next((p for p in projects if str(p.id) == project_id), None)
     if project is None:
         raise ValueError("No such project.")
-    folders = {os.path.abspath(os.path.expanduser(folder.path)) for folder in project.folders}
-    if repo_root not in folders:
-        raise ValueError("repo_root isn't a folder of this project.")
-    if not os.path.exists(os.path.join(repo_root, ".git")):
-        raise ValueError(f"{repo_root} isn't a git repository.")
+    folders = sorted(project.folders, key=lambda folder: not folder.is_primary)
+    repos = []
+    for folder in folders:
+        root = os.path.abspath(os.path.expanduser(folder.path))
+        if os.path.exists(os.path.join(root, ".git")) and root not in repos:
+            repos.append(root)
+    if not repos:
+        raise ValueError("This project has no git repository.")
+    return repos
 
 
 def _create_worktree(repo_root: str, name: str) -> Dict[str, str]:
@@ -152,18 +197,28 @@ def _create_worktree(repo_root: str, name: str) -> Dict[str, str]:
     return {"path": str(info["path"]), "branch": str(info["branch"])}
 
 
-def _upsert(path: Path, session_id: str, project_id: str, repo_root: str, tree: Dict[str, str], mode: str):
+def _upsert(path: Path, session_id: str, project_id: str, repos: list[Dict[str, str]], mode: str):
+    first = repos[0]
     conn = connect(path)
     try:
         conn.execute(
             """INSERT INTO project_sessions
-                   (session_id, project_id, repo_root, path, branch, mode, plan_pending, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+                   (session_id, project_id, repo_root, path, branch, mode, plan_pending, created_at, repos)
+               VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
                ON CONFLICT(session_id) DO UPDATE SET
                    project_id = excluded.project_id, repo_root = excluded.repo_root,
                    path = excluded.path, branch = excluded.branch, mode = excluded.mode,
-                   plan_pending = 0""",
-            (session_id, project_id, repo_root, tree["path"], tree["branch"], mode, int(time.time() * 1000)),
+                   plan_pending = 0, repos = excluded.repos""",
+            (
+                session_id,
+                project_id,
+                first["repo_root"],
+                first["path"],
+                first["branch"],
+                mode,
+                int(time.time() * 1000),
+                json.dumps(repos, separators=(",", ":")),
+            ),
         )
     finally:
         conn.close()
@@ -175,29 +230,59 @@ def ensure(
     hermes_home: Path,
     session_id: str,
     project_id: Any,
-    repo_root: Any,
     task: Any,
     mode: Any,
 ) -> Dict[str, Any]:
-    """The session's workspace, creating its worktree the first time. Doesn't register the cwd."""
+    """The session's workspace: a worktree in each of the project's repos, made the first time (a
+    missing one is made on a later call, so a half-made workspace heals on retry). Doesn't register
+    the cwd."""
     if not isinstance(project_id, (str, int)) or isinstance(project_id, bool) or not str(project_id).strip():
         raise ValueError("project_id is required.")
-    if not isinstance(repo_root, str) or not repo_root.strip():
-        raise ValueError("repo_root is required.")
     if mode is not None and mode not in MODES:
         raise ValueError("mode must be accept_edits, auto or plan.")
     if task is not None and not isinstance(task, str):
         raise ValueError("task must be a string.")
     project_id = str(project_id).strip()
-    repo_root = os.path.abspath(os.path.expanduser(repo_root.strip()))
-    _check_folder(hermes_home / "projects.db", project_id, repo_root)
+    roots = _project_repos(hermes_home / "projects.db", project_id)
     record = read(path, session_id)
-    if record and record["path"] and os.path.isdir(record["path"]):
+    existing = {repo["repo_root"]: repo for repo in (record or {}).get("repos", [])}
+    if record and all(root in existing and os.path.isdir(existing[root]["path"] or "") for root in roots):
         if mode and mode != record["mode"]:
             record = set_mode(path, session_id, mode)
         return record
-    tree = _create_worktree(repo_root, slug(task))
-    return _upsert(path, session_id, project_id, repo_root, tree, mode or (record or {}).get("mode") or MODES[0])
+    # One branch name across the repos; a later repo joins the name the first one got.
+    name = next((repo["branch"].split("/", 1)[1] for repo in existing.values() if repo.get("branch")), None)
+    name = name or slug(task)
+    repos = []
+    for root in roots:
+        kept = existing.get(root)
+        if kept and os.path.isdir(kept["path"] or ""):
+            repos.append(kept)
+            continue
+        tree = _create_worktree(root, name)
+        repos.append({"name": _repo_name(root), "repo_root": root, **tree})
+    return _upsert(path, session_id, project_id, repos, mode or (record or {}).get("mode") or MODES[0])
+
+
+def instructions(record: Dict[str, Any]) -> str:
+    """What the run's system prompt tells the agent about its worktrees. Fixed per session."""
+    repos = record.get("repos") or []
+    if not repos:
+        return ""
+    if len(repos) == 1:
+        return (
+            f"You are working in a git worktree of {repos[0]['name']} at {repos[0]['path']} "
+            f"(branch {repos[0]['branch']}). Keep all work inside it."
+        )
+    lines = [
+        f"- {repo['name']} at {repo['path']}" + (" (your current directory)" if i == 0 else "")
+        for i, repo in enumerate(repos)
+    ]
+    return (
+        f"You are working in git worktrees of this project's repos, all on branch {repos[0]['branch']}:\n"
+        + "\n".join(lines)
+        + "\nKeep all work inside them."
+    )
 
 
 def apply_cwd(session_id: str, cwd: str) -> None:
@@ -298,37 +383,49 @@ def _git(cwd: str, *args: str) -> subprocess.CompletedProcess:
         raise WorkspaceError("git took too long.", 504) from None
 
 
-def remove(path: Path, session_id: str) -> Dict[str, Any]:
-    """Removes the session's worktree if nothing in it would be lost, and forgets the session.
-
-    A tree with uncommitted changes or with commits no remote has is kept, with its record, so a
-    later delete can try again once the work is pushed. Doesn't clear the cwd override.
-    """
-    record = read(path, session_id)
-    if not record:
-        return {"removed": False, "reason": "missing"}
-    tree = record["path"]
-    if not tree or not os.path.isdir(tree):
-        _delete(path, session_id)
-        return {"removed": False, "reason": "missing"}
+def _keep_reason(tree: str) -> Optional[str]:
+    """Why a worktree can't go: ``dirty`` or ``unpushed``, else None."""
     status = _git(tree, "status", "--porcelain")
     if status.returncode != 0:
         raise WorkspaceError(status.stderr.strip() or "git status failed.")
     if status.stdout.strip():
-        return {"removed": False, "reason": "dirty"}
+        return "dirty"
     # Commits no remote ref holds; with no remote at all everything counts, so the tree stays.
     unpushed = _git(tree, "rev-list", "--count", "HEAD", "--not", "--remotes")
     if unpushed.returncode != 0 or (unpushed.stdout.strip() or "1") != "0":
-        return {"removed": False, "reason": "unpushed"}
-    repo_root = record["repo_root"]
-    _git(repo_root, "worktree", "unlock", tree)
-    removed = _git(repo_root, "worktree", "remove", tree)
-    if removed.returncode != 0:
-        raise WorkspaceError(removed.stderr.strip() or "git worktree remove failed.")
-    if record["branch"]:
-        _git(repo_root, "branch", "-d", record["branch"])
+        return "unpushed"
+    return None
+
+
+def remove(path: Path, session_id: str) -> Dict[str, Any]:
+    """Removes the session's worktrees where nothing would be lost, and forgets the session once
+    none is left.
+
+    A tree with uncommitted changes or with commits no remote has is kept, and so is the record, so
+    a later delete can try again once the work is pushed. Doesn't clear the cwd override.
+    """
+    record = read(path, session_id)
+    if not record:
+        return {"removed": False, "kept": []}
+    kept = []
+    for repo in record["repos"]:
+        tree = repo["path"]
+        if not tree or not os.path.isdir(tree):
+            continue
+        reason = _keep_reason(tree)
+        if reason:
+            kept.append({"name": repo["name"], "reason": reason})
+            continue
+        _git(repo["repo_root"], "worktree", "unlock", tree)
+        removed = _git(repo["repo_root"], "worktree", "remove", tree)
+        if removed.returncode != 0:
+            raise WorkspaceError(removed.stderr.strip() or "git worktree remove failed.")
+        if repo["branch"]:
+            _git(repo["repo_root"], "branch", "-d", repo["branch"])
+    if kept:
+        return {"removed": False, "kept": kept}
     _delete(path, session_id)
-    return {"removed": True}
+    return {"removed": True, "kept": []}
 
 
 def live_runs(adapter: Any) -> Dict[str, str]:

@@ -39,6 +39,8 @@ def _last_active(projects: List[Any], cwds: Iterable[Dict[str, Any]]) -> Dict[st
 def read(projects_db: Path, session_db: Optional[Any]) -> List[Dict[str, Any]]:
     from hermes_cli import projects_db as pdb
 
+    from . import github
+
     if not projects_db.exists():
         return []
     with pdb.connect_closing(db_path=projects_db) as conn:
@@ -59,6 +61,8 @@ def read(projects_db: Path, session_db: Optional[Any]) -> List[Dict[str, Any]]:
                     "label": folder.label,
                     "is_primary": bool(folder.is_primary),
                     "git": _is_git_repo(folder.path),
+                    # The app names repos `user/repo`, never by their path.
+                    "repo": github.origin_repo(folder.path) if _is_git_repo(folder.path) else None,
                 }
                 for folder in project.folders
             ],

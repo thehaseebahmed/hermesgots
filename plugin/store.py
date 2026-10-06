@@ -6,7 +6,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -46,8 +46,13 @@ def connect(path: Path) -> sqlite3.Connection:
                    branch TEXT,
                    mode TEXT NOT NULL DEFAULT 'accept_edits',
                    plan_pending INTEGER NOT NULL DEFAULT 0,
-                   created_at INTEGER NOT NULL
+                   created_at INTEGER NOT NULL,
+                   repos TEXT
                )"""
         )
+        # v4: a session has a worktree in every repo of its project.
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(project_sessions)")}
+        if "repos" not in columns:
+            conn.execute("ALTER TABLE project_sessions ADD COLUMN repos TEXT")
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     return conn
