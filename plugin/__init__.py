@@ -16,7 +16,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-from . import chats, context, github, projects, sessions, todos
+from . import chats, cleanup, context, github, projects, sessions, todos
 from .store import db_path
 
 logger = logging.getLogger(__name__)
@@ -25,10 +25,6 @@ PREFIX = "/api/plugins/memento"
 # Memento shows 24 runs per job.
 DEFAULT_PER_JOB = 24
 MAX_PER_JOB = 200
-# The dashboard shows a session's source as its label. /api/sessions only accepts a fixed set of
-# sources, so Memento's chats start as the API server's and the plugin relabels them.
-SESSION_SOURCE = "memento"
-RELABELLED_SOURCES = ("api_server", "unknown")
 
 
 def _version() -> str:
@@ -73,22 +69,6 @@ def _runs_by_job(job_id: str | None, per_job: int) -> Dict[str, List[Dict[str, A
     }
 
 
-def _label_session(db: Any, session_id: str) -> bool:
-    def write(conn):
-        placeholders = ", ".join("?" for _ in RELABELLED_SOURCES)
-        # Never takes a session from another surface (Telegram, the CLI, ...).
-        cursor = conn.execute(
-            f"UPDATE sessions SET source = ? WHERE id = ? AND source IN ({placeholders})",
-            (SESSION_SOURCE, session_id, *RELABELLED_SOURCES),
-        )
-        if cursor.rowcount:
-            return True
-        row = conn.execute("SELECT source FROM sessions WHERE id = ?", (session_id,)).fetchone()
-        return bool(row) and row[0] == SESSION_SOURCE
-
-    return db._execute_write(write)
-
-
 def _error(web: Any, message: str, status: int):
     # The API server's own error shape, so clients read every error the same way.
     return web.json_response({"error": {"message": message}}, status=status)
@@ -99,6 +79,18 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
     # The hooks have no other way to the session store.
     sessions.adapter = adapter
+
+    async def daily_cleanup(_app: Any):
+        from hermes_constants import get_hermes_home
+
+        task = asyncio.ensure_future(cleanup.run_daily(adapter, Path(get_hermes_home())))
+        yield
+        task.cancel()
+
+    try:
+        app.cleanup_ctx.append(daily_cleanup)
+    except RuntimeError:
+        logger.warning("memento: the API server already started; no daily cleanup until restart")
 
     def unauthorized(request: "web.Request"):
         # The API server's own Bearer check, so the routes take the same key as /v1. Fail closed if
@@ -156,10 +148,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         db = await open_db() if callable(open_db) else None
         if db is None or not callable(getattr(db, "_execute_write", None)):
             return _error(web, "Session database unavailable", 503)
-        labelled = await asyncio.to_thread(_label_session, db, session_id)
+        labelled = await asyncio.to_thread(sessions.label, db, session_id)
         if not labelled:
             return _error(web, "Session not found", 404)
-        return web.json_response({"id": session_id, "source": SESSION_SOURCE})
+        return web.json_response({"id": session_id, "source": sessions.SESSION_SOURCE})
 
     def store_path() -> Path:
         # On the loop thread: the API server scopes get_hermes_home() to the request's profile, and
