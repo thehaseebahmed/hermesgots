@@ -6,6 +6,7 @@ import {
   ArrowLeftIcon,
   CheckIcon,
   EllipsisIcon,
+  HistoryIcon,
   PencilIcon,
   PlusIcon,
   RotateCcwIcon,
@@ -15,6 +16,7 @@ import {
 
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { ChatHeader } from "@/components/chat/chat-header"
+import { CheckpointsSheet } from "@/components/chat/checkpoints"
 import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
 import { PrPill } from "@/components/chat/pr-pill"
@@ -164,6 +166,8 @@ export function ChatPage() {
   const [title, setTitle] = useState("")
   const [usageOpen, setUsageOpen] = useState(false)
   const [todosOpen, setTodosOpen] = useState(false)
+  const [checkpointsOpen, setCheckpointsOpen] = useState(false)
+  const [checkpointsKey, setCheckpointsKey] = useState(0)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const [historyMissing, setHistoryMissing] = useState<string>()
 
@@ -322,6 +326,17 @@ export function ChatPage() {
               <PencilIcon />
               {session ? "Edit" : "Rename"}
             </DropdownMenuItem>
+            {session && profile?.apiKey && (
+              <DropdownMenuItem
+                onClick={() => {
+                  setCheckpointsKey((key) => key + 1)
+                  setCheckpointsOpen(true)
+                }}
+              >
+                <HistoryIcon />
+                Checkpoints
+              </DropdownMenuItem>
+            )}
             {session &&
               (session.resolvedAt ? (
                 <DropdownMenuItem
@@ -496,6 +511,15 @@ export function ChatPage() {
 
       <UsageSheet open={usageOpen} onOpenChange={setUsageOpen} usage={usage} profile={profile} />
       <TodosSheet open={todosOpen} onOpenChange={setTodosOpen} items={todos} />
+      {session && profile && (
+        <CheckpointsSheet
+          key={checkpointsKey}
+          open={checkpointsOpen}
+          onOpenChange={setCheckpointsOpen}
+          profile={profile}
+          sessionId={session.hermesSessionId}
+        />
+      )}
 
       <AlertDialog open={renaming} onOpenChange={setRenaming}>
         <AlertDialogContent>

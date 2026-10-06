@@ -825,6 +825,96 @@ export async function getSessionPrs(
     }))
 }
 
+export const UPDATE_PLUGIN = `hermes plugins update memento
+hermes gateway restart`
+
+export const ENABLE_CHECKPOINTS = "hermes config set checkpoints.enabled true"
+
+/** What the Memento plugin on the server can do, or null when it doesn't answer. */
+export async function getPluginFeatures(config: HermesConfig): Promise<string[] | null> {
+  try {
+    const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/info`, {
+      headers: headers(config),
+    })
+    const features: unknown = (await response.json())?.features
+    return Array.isArray(features) ? features.filter((f) => typeof f === "string") : []
+  } catch {
+    return null
+  }
+}
+
+/** A snapshot Hermes took of a worktree before the agent changed it, at most one per turn. */
+export interface Checkpoint {
+  hash: string
+  shortHash: string
+  at: number
+  /** What it was taken before, such as `before patch`. */
+  reason: string
+  /** What changed between the checkpoint before it and this one, as Hermes's /rollback shows it. */
+  filesChanged: number
+  insertions: number
+  deletions: number
+}
+
+export interface SessionCheckpoints {
+  /** Whether the server takes checkpoints (`checkpoints.enabled`); off by default. */
+  enabled: boolean
+  /** One per repo of the session, primary first; checkpoints newest first. */
+  repos: { name: string; branch: string; checkpoints: Checkpoint[] }[]
+}
+
+const count = (value: unknown) => (typeof value === "number" && value > 0 ? value : 0)
+
+/** The session's checkpoints in each of its worktrees. Needs the Memento plugin. */
+export async function getSessionCheckpoints(
+  config: HermesConfig,
+  sessionId: string,
+): Promise<SessionCheckpoints> {
+  const response = await request(pluginSession(config, sessionId, "/checkpoints"), {
+    headers: headers(config),
+  })
+  const body = await response.json()
+  const repos: unknown = body?.repos
+  return {
+    enabled: Boolean(body?.enabled),
+    repos: (Array.isArray(repos) ? repos : [])
+      .filter((r) => typeof r?.name === "string" && Array.isArray(r.checkpoints))
+      .map((r) => ({
+        name: r.name,
+        branch: typeof r.branch === "string" ? r.branch : "",
+        checkpoints: (r.checkpoints as Record<string, unknown>[])
+          .filter((c) => typeof c?.hash === "string")
+          .map((c) => ({
+            hash: c.hash as string,
+            shortHash: typeof c.short_hash === "string" ? c.short_hash : String(c.hash).slice(0, 7),
+            at: typeof c.timestamp === "string" ? Date.parse(c.timestamp) || 0 : 0,
+            reason: typeof c.reason === "string" ? c.reason : "",
+            filesChanged: count(c.files_changed),
+            insertions: count(c.insertions),
+            deletions: count(c.deletions),
+          })),
+      })),
+  }
+}
+
+/** What changed in the repo's worktree since the checkpoint, as a unified diff. */
+export async function getCheckpointDiff(
+  config: HermesConfig,
+  sessionId: string,
+  repo: string,
+  hash: string,
+): Promise<{ diff: string; truncated: boolean }> {
+  const path = `/checkpoints/${encodeURIComponent(hash)}/diff?repo=${encodeURIComponent(repo)}`
+  const response = await request(pluginSession(config, sessionId, path), {
+    headers: headers(config),
+  })
+  const body = await response.json()
+  return {
+    diff: typeof body?.diff === "string" ? body.diff : "",
+    truncated: Boolean(body?.truncated),
+  }
+}
+
 export type LiveRunStatus = "running" | "waiting_for_approval"
 
 /** Sessions with a run in flight on the server, by Hermes session id. Needs the Memento plugin. */

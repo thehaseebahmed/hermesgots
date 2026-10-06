@@ -26,7 +26,9 @@
 // names the file the plugin would have saved it to (plan_file). The branch's PRs
 // (GET …/sessions/{id}/prs) appear after two turns: "merge", "close" or "draft" in a turn sets their
 // state and "break" fails their checks. GET /api/plugins/memento/runs/live lists the sessions with
-// a run in flight.
+// a run in flight. Each turn of a project session leaves a checkpoint in each repo
+// (GET …/sessions/{id}/checkpoints, and …/checkpoints/{hash}/diff?repo= for what changed since one);
+// MOCK_NO_CHECKPOINTS=1 turns them off, as they are by default in Hermes.
 //
 //   pnpm mock            # then point Settings at http://localhost:8642/v1
 
@@ -223,6 +225,85 @@ How to test the whole change end to end: commands, what to look at, expected res
 ## Risks and open questions
 What could go wrong, what you're assuming, and anything the user must decide.`
 const userTurns = (sessionId) => (transcripts.get(sessionId) ?? []).filter((r) => r.role === "user")
+const CHECKPOINTS = !process.env.MOCK_NO_CHECKPOINTS
+const CHECKPOINT_REASONS = ["before write_file", "before patch", "before terminal: rm -rf build/"]
+/** What each turn changed, newest last; a checkpoint's diff is every change after it. */
+const CHECKPOINT_CHANGES = [
+  `diff --git a/scripts/rotate-logs.sh b/scripts/rotate-logs.sh
+index 3b18e51..a9c2f04 100755
+--- a/scripts/rotate-logs.sh
++++ b/scripts/rotate-logs.sh
+@@ -1,9 +1,17 @@
+ #!/usr/bin/env bash
+ set -euo pipefail
+ 
++DRY_RUN=0
++if [[ "\${1:-}" == "--dry-run" ]]; then
++  DRY_RUN=1
++fi
++
+ LOG_DIR=/var/log/home-assistant
+ KEEP_DAYS=14
+ 
+ find "$LOG_DIR" -name '*.log' -mtime +"$KEEP_DAYS" -print0 |
+-  xargs -0 rm -f
++  while IFS= read -r -d '' file; do
++    if (( DRY_RUN )); then echo "would remove $file"; else rm -f "$file"; fi
++  done
+`,
+  `diff --git a/README.md b/README.md
+index 81c3d2e..f0e1b7a 100644
+--- a/README.md
++++ b/README.md
+@@ -12,6 +12,10 @@ Logs older than two weeks are removed every night.
+ 
+ ## Log rotation
+ 
+-Run \`scripts/rotate-logs.sh\` from cron.
++Run \`scripts/rotate-logs.sh\` from cron. Pass \`--dry-run\` to list what it would remove:
++
++\`\`\`sh
++scripts/rotate-logs.sh --dry-run
++\`\`\`
+`,
+  `diff --git a/tests/rotate-logs.bats b/tests/rotate-logs.bats
+new file mode 100644
+index 0000000..5d1e8a2
+--- /dev/null
++++ b/tests/rotate-logs.bats
+@@ -0,0 +1,8 @@
++#!/usr/bin/env bats
++
++@test "dry run removes nothing" {
++  touch -d '30 days ago' "$BATS_TMPDIR/old.log"
++  LOG_DIR=$BATS_TMPDIR run scripts/rotate-logs.sh --dry-run
++  [ -f "$BATS_TMPDIR/old.log" ]
++  [[ "$output" == *"would remove"* ]]
++}
+`,
+]
+/** One checkpoint per turn after the first, in each repo, newest first, as Hermes lists them. */
+function mockCheckpoints(id, repo) {
+  const turns = userTurns(id).slice(1)
+  return turns
+    .map((turn, i) => {
+      const hash = Buffer.from(`${id}:${repo}:${i}`).toString("hex").padEnd(40, "0").slice(-40)
+      // Hermes's stats are what changed between the previous checkpoint and this one.
+      const before = CHECKPOINT_CHANGES[(i + CHECKPOINT_CHANGES.length - 1) % CHECKPOINT_CHANGES.length]
+      const stats = i === 0 ? [] : (before.match(/^[+-](?![+-])/gm) ?? [])
+      return {
+        hash,
+        short_hash: hash.slice(0, 7),
+        timestamp: new Date(turn.timestamp * 1000 - 5000).toISOString(),
+        reason: CHECKPOINT_REASONS[i % CHECKPOINT_REASONS.length],
+        files_changed: i === 0 ? 0 : 1,
+        insertions: stats.filter((m) => m === "+").length,
+        deletions: stats.filter((m) => m === "-").length,
+        index: i,
+      }
+    })
+    .reverse()
+}
 const RUN_ERROR = "Timed out waiting for https://status.example.com"
 
 /** A run as a row of Hermes's cron execution ledger. */
@@ -613,7 +694,7 @@ http
       return json(res, 200, {
         name: "memento",
         version: "0.6.0",
-        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "github", "sessions", "runs", "prs", "plans"],
+        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "github", "sessions", "runs", "prs", "plans", "checkpoints"],
       })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/cron/runs") {
@@ -726,6 +807,26 @@ http
         if (sessions[run.sessionId] !== "waiting_for_approval") sessions[run.sessionId] = run.status
       }
       return json(res, 200, { object: "memento.runs", sessions })
+    }
+    const checkpointRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/checkpoints(?:\/([^/]+)\/diff)?$/.exec(url.pathname)
+    if (PLUGIN && !profile && checkpointRoute && req.method === "GET") {
+      const id = decodeURIComponent(checkpointRoute[1])
+      const workspace = projectSessions.get(id)
+      const list = (repo) => (CHECKPOINTS ? mockCheckpoints(id, repo) : [])
+      if (!checkpointRoute[2]) {
+        const repos = (workspace?.repos ?? []).map((r) => ({ name: r.name, branch: r.branch, checkpoints: list(r.name).map(({ index: _index, ...c }) => c) }))
+        return json(res, 200, { object: "memento.checkpoints", enabled: CHECKPOINTS, repos })
+      }
+      const repo = workspace?.repos.find((r) => r.name === url.searchParams.get("repo"))
+      const found = repo && list(repo.name).find((c) => [c.hash, c.short_hash].includes(checkpointRoute[2]))
+      if (!found) return json(res, 400, { error: { message: "This session has no such checkpoint." } })
+      await sleep(400)
+      const { index, ...checkpoint } = found
+      const turns = userTurns(id).length - 1
+      const diff = Array.from({ length: turns - index }, (_, i) => CHECKPOINT_CHANGES[(index + i) % CHECKPOINT_CHANGES.length])
+        .filter((d, i, all) => all.indexOf(d) === i)
+        .join("")
+      return json(res, 200, { object: "memento.checkpoint.diff", checkpoint, repo: repo.name, diff, truncated: false })
     }
     const sessionRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/(workspace|workspace\/remove|mode|prs)$/.exec(url.pathname)
     if (PLUGIN && !profile && sessionRoute) {
