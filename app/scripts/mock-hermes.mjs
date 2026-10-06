@@ -22,7 +22,8 @@
 // Project sessions get a worktree in each of the project's repos on
 // POST /api/plugins/memento/sessions/{id}/workspace (GET reads it back, POST …/mode changes the
 // permission mode, POST …/workspace/remove removes the trees unless a turn mentioned "commit"). In
-// plan mode the agent only writes a plan and leaves it pending. The branch's PRs
+// plan mode the agent reads a little, writes a structured plan, leaves it pending and the workspace
+// names the file the plugin would have saved it to (plan_file). The branch's PRs
 // (GET …/sessions/{id}/prs) appear after two turns: "merge", "close" or "draft" in a turn sets their
 // state and "break" fails their checks. GET /api/plugins/memento/runs/live lists the sessions with
 // a run in flight.
@@ -195,6 +196,32 @@ const PLUGIN = process.env.MOCK_NO_PLUGIN !== "1"
 
 /** Project sessions as the plugin's memento.db holds them, by Hermes session id. */
 const projectSessions = new Map()
+// The plugin's plan-mode instructions (sessions.PLAN_INSTRUCTIONS), word for word.
+const PLAN_INSTRUCTIONS = `You are in plan mode: change nothing. Read what you need, then make your whole final reply the plan below and stop; the user approves it before you act. It is saved to a file as written, so write it for someone who hasn't read this chat. Use this Markdown shape exactly:
+
+# Plan: <short title>
+
+## Overview
+What was asked, the problem it solves and the outcome, in two to five sentences.
+
+## Approach
+The design you chose and why. One line each for the alternatives you rejected.
+
+## Changes
+One entry per file or area: its path, what changes and why, and the existing functions you'd reuse.
+
+## Checkpoints
+Split the work into checkpoints that each leave the code building and worth committing, in order. For each:
+### Checkpoint N: <name>
+- Commit: \`type(scope): summary\` in Conventional Commits form, unless the user asked for another style
+- Steps: the concrete edits
+- Done when: how you'd know it works
+
+## Verification
+How to test the whole change end to end: commands, what to look at, expected results.
+
+## Risks and open questions
+What could go wrong, what you're assuming, and anything the user must decide.`
 const userTurns = (sessionId) => (transcripts.get(sessionId) ?? []).filter((r) => r.role === "user")
 const RUN_ERROR = "Timed out waiting for https://status.example.com"
 
@@ -262,18 +289,40 @@ async function playTurn(req, body, last, out) {
   out.status("Thinking…")
   await sleep(500)
 
-  // In plan mode the plugin blocks every tool that changes anything, so the agent only plans.
+  // In plan mode the plugin blocks every tool that changes anything, so the agent reads and plans.
   const workspace = projectSessions.get(sessionOf(req, body))
   if (workspace) workspace.plan_pending = 0
   if (workspace?.mode === "plan") {
+    // Read-only calls, on the stream and in the transcript: what a client without the stream polls.
+    const reads = [
+      ["terminal", "💻", { command: "git log --oneline -5" }, JSON.stringify({ output: "4f69069 style(chat): keep the pills on one line\n17189b0 feat(chat): sessions span every repo", exit_code: 0, error: null })],
+      ["read_file", "📄", { path: "scripts/rotate-logs.sh" }, "#!/bin/sh\nfind /var/log -name '*.gz' -mtime +14 -delete\n"],
+    ]
+    for (const [tool, emoji, args, result] of reads) {
+      if (out.closed()) break
+      const id = `call_${randomUUID().slice(0, 8)}`
+      out.tool({ tool, emoji, label: Object.values(args)[0], toolCallId: id, status: "running" })
+      record(req, { role: "assistant", content: null, tool_calls: [{ id, type: "function", function: { name: tool, arguments: JSON.stringify(args) } }] })
+      await sleep(1500)
+      out.tool({ tool, toolCallId: id, status: "completed", result })
+      record(req, { role: "tool", tool_call_id: id, tool_name: tool, content: result })
+    }
     await say(
-      `Here's my plan for \`${workspace.branch}\`:\n\n` +
-        "1. Read the log rotation script and its tests.\n" +
-        "2. Add a `--dry-run` flag that lists what would be removed.\n" +
-        "3. Cover it with a test and update the README.\n\n" +
-        "Approve the plan and I'll make the changes.",
+      "# Plan: Add a dry run to log rotation\n\n" +
+        "## Overview\nRotation deletes old logs with no way to preview what goes. A `--dry-run` flag lists the files it would remove, so the cron job can be checked before it runs for real.\n\n" +
+        "## Approach\nAdd the flag to the existing script rather than a second script, so both paths share one `find` expression. A separate preview script was rejected: the two would drift.\n\n" +
+        "## Changes\n- `scripts/rotate-logs.sh`: parse `--dry-run`; print instead of `-delete` when set.\n- `tests/rotate-logs.bats`: a case for each path.\n- `README.md`: document the flag.\n\n" +
+        "## Checkpoints\n### Checkpoint 1: The flag\n- Commit: `feat(rotate): add a --dry-run flag that lists what would go`\n- Steps: parse the flag; switch `-delete` for `-print` when set.\n- Done when: `./rotate-logs.sh --dry-run` lists files and deletes nothing.\n\n" +
+        "### Checkpoint 2: Tests and docs\n- Commit: `test(rotate): cover --dry-run and document it`\n- Steps: add the bats cases; a README paragraph.\n- Done when: `bats tests/` passes.\n\n" +
+        "## Verification\nRun `bats tests/`, then `./rotate-logs.sh --dry-run` against a folder with an old `.gz`: it's listed and still there.\n\n" +
+        "## Risks and open questions\nNone of the callers pass flags today, so nothing else changes.",
     )
-    if (!out.closed()) workspace.plan_pending = 1
+    if (!out.closed()) {
+      workspace.plan_pending = 1
+      // The plugin saves the reply as plans/<branch slug>-<stamp>.md under the project's folder.
+      const stamp = new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15)
+      workspace.plan_file = `plans/${workspace.branch.replace(/^hermes\//, "")}-${stamp}.md`
+    }
     record(req, { role: "assistant", content: spoken, finish_reason: "stop" })
     return { spoken, prompt_tokens: 6000, completion_tokens: pieces }
   }
@@ -564,7 +613,7 @@ http
       return json(res, 200, {
         name: "memento",
         version: "0.6.0",
-        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "github", "sessions", "runs", "pr"],
+        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "github", "sessions", "runs", "prs", "plans"],
       })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/cron/runs") {
@@ -683,11 +732,14 @@ http
       const id = decodeURIComponent(sessionRoute[1])
       const route = sessionRoute[2]
       const workspace = projectSessions.get(id)
-      // What the plugin tells the agent about its worktrees, with every run.
-      const instructions = (record) =>
+      // What the plugin tells the agent about its worktrees, with every run, and in plan mode the
+      // plan's shape (the plugin's PLAN_INSTRUCTIONS; keep them the same).
+      const worktreeLine = (record) =>
         record.repos.length === 1
           ? `You are working in a git worktree of ${record.repos[0].name} at ${record.repos[0].path} (branch ${record.branch}). Keep all work inside it.`
           : `You are working in git worktrees of this project's repos, all on branch ${record.branch}:\n${record.repos.map((r, i) => `- ${r.name} at ${r.path}${i === 0 ? " (your current directory)" : ""}`).join("\n")}\nKeep all work inside them.`
+      const instructions = (record) =>
+        record.mode === "plan" ? `${worktreeLine(record)}\n${PLAN_INSTRUCTIONS}` : worktreeLine(record)
       const answer = (record) => json(res, 200, { object: "memento.workspace", workspace: record, instructions: record ? instructions(record) : null })
       if (route === "workspace" && req.method === "POST") {
         const { project_id, mode } = await readBody(req)
@@ -703,7 +755,7 @@ http
           const pick = (words) => words[Math.floor(Math.random() * words.length)]
           const slug = `${pick(["jazzy", "cosmic", "fuzzy", "zesty", "nimble"])}-${pick(["hopper", "otter", "comet", "waffle", "quokka"])}-${randomUUID().slice(0, 4)}`
           const repos = gitFolders.map((f) => ({ name: f.repo, repo_root: f.path, path: `${f.path}/.worktrees/${slug}`, branch: `hermes/${slug}` }))
-          record = { session_id: id, project_id: project.id, repo_root: repos[0].repo_root, path: repos[0].path, branch: repos[0].branch, mode: mode ?? "accept_edits", plan_pending: 0, created_at: Date.now(), repos }
+          record = { session_id: id, project_id: project.id, repo_root: repos[0].repo_root, path: repos[0].path, branch: repos[0].branch, mode: mode ?? "accept_edits", plan_pending: 0, created_at: Date.now(), repos, plan_file: null }
           projectSessions.set(id, record)
         } else if (mode && mode !== record.mode) {
           record.mode = mode
