@@ -108,9 +108,11 @@ LIVE_STATUSES = {
 
 # The dashboard shows a session's source as its label. /api/sessions only accepts a fixed set of
 # sources, so Memento's sessions start as the API server's and the plugin relabels them.
-SESSION_SOURCE = "memento"
-CODE_SESSION_SOURCE = "memento-code"
+SESSION_SOURCE = "Memento"
+CODE_SESSION_SOURCE = "Memento Code"
 RELABELLED_SOURCES = ("api_server", "unknown")
+# What earlier plugin versions wrote; both are still ours to upgrade.
+LEGACY_SOURCES = ("memento", "memento-code")
 # How the app starts the session ids of its chats (`createConversation`).
 MEMENTO_ID_PREFIX = "memento-"
 
@@ -561,12 +563,14 @@ def remove(path: Path, session_id: str) -> Dict[str, Any]:
 
 
 def label(db: Any, session_id: str, code: bool = False) -> Optional[str]:
-    """Marks a session as Memento's, so the Hermes dashboard labels it: ``memento`` for a chat,
-    ``memento-code`` for a project session. Answers the session's source, or None when it isn't
+    """Marks a session as Memento's, so the Hermes dashboard labels it: ``Memento`` for a chat,
+    ``Memento Code`` for a project session. Answers the session's source, or None when it isn't
     one the plugin may label."""
     source = CODE_SESSION_SOURCE if code else SESSION_SOURCE
-    # A project session was a chat's ``memento`` until its workspace existed; never the other way.
-    from_sources = RELABELLED_SOURCES + ((SESSION_SOURCE,) if code else ())
+    # A project session was a chat's source until its workspace existed; never the other way.
+    from_sources = RELABELLED_SOURCES + LEGACY_SOURCES[:1]
+    if code:
+        from_sources += (SESSION_SOURCE, LEGACY_SOURCES[1])
 
     def write(conn):
         placeholders = ", ".join("?" for _ in from_sources)
@@ -578,9 +582,8 @@ def label(db: Any, session_id: str, code: bool = False) -> Optional[str]:
         if cursor.rowcount:
             return source
         row = conn.execute("SELECT source FROM sessions WHERE id = ?", (session_id,)).fetchone()
-        if row and row[0] == SESSION_SOURCE and not code:
-            return SESSION_SOURCE
-        return row[0] if row and row[0] == CODE_SESSION_SOURCE else None
+        current = row[0] if row else None
+        return current if current in (source, CODE_SESSION_SOURCE if code else None) else None
 
     return db._execute_write(write)
 
@@ -732,7 +735,7 @@ def before_llm(**kwargs: Any) -> None:
 
 def started(**kwargs: Any) -> None:
     """The ``on_session_start`` hook: labels a brand-new session as Memento's when it is one
-    (``memento-code`` for a project session). Memento mints its chats' session ids (``memento-…``),
+    (``Memento Code`` for a project session). Memento mints its chats' session ids (``memento-…``),
     and a project session has its workspace before its first turn."""
     try:
         session_id = kwargs.get("session_id") or ""
