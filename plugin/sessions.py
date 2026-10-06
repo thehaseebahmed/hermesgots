@@ -74,7 +74,7 @@ PLANS_DIR = "plans"
 PLAN_HEADING = "# Plan:"
 # Added to the run's instructions in plan mode. Fixed per mode, so the prompt cache holds across
 # the turns of one mode. The app's mock repeats it; keep them the same.
-PLAN_INSTRUCTIONS = """You are in plan mode: change nothing. Read what you need, then make your whole final reply the plan below and stop; the user approves it before you act. It is saved to a file as written, so write it for someone who hasn't read this chat. Use this Markdown shape exactly:
+PLAN_INSTRUCTIONS = """You are in plan mode: change nothing. Read what you need. Then, before you write the plan, settle every choice the user would otherwise be left to make: ask with the clarify tool, every question in one call, your recommended answer first. If you can't ask (no clarify tool, or no answer came), decide it yourself and record the decision under Risks and assumptions. Then make your whole final reply the plan below and stop; the user approves it before you act. It is saved to a file as written, so write it for someone who hasn't read this chat, and a plan with an open question isn't finished. Use this Markdown shape exactly:
 
 # Plan: <short title>
 
@@ -97,8 +97,8 @@ Split the work into checkpoints that each leave the code building and worth comm
 ## Verification
 How to test the whole change end to end: commands, what to look at, expected results.
 
-## Risks and open questions
-What could go wrong, what you're assuming, and anything the user must decide."""
+## Risks and assumptions
+What could go wrong, and each decision you made without the user: what you chose and why. Nothing here is left for the user to decide."""
 LIVE_STATUSES = {
     "queued": "running",
     "running": "running",
