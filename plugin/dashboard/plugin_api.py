@@ -83,6 +83,6 @@ def status() -> Dict[str, Any]:
             "/api/plugins/memento/sessions/{session_id}/workspace",
             "/api/plugins/memento/sessions/{session_id}/workspace/remove",
             "/api/plugins/memento/sessions/{session_id}/mode",
-            "/api/plugins/memento/sessions/{session_id}/pr",
+            "/api/plugins/memento/sessions/{session_id}/prs",
         ],
     }
