@@ -18,6 +18,11 @@
 // GET /api/plugins/memento/sessions/{id}/todos reads back from a keyed session's transcript.
 // Turns also run on POST /v1/runs, whose events replay from GET /v1/runs/{id}/events?last_seq=N and
 // which keep going when the client drops, unlike a chat completion. Say "long" for a slow reply.
+// Project sessions get a worktree on POST /api/plugins/memento/sessions/{id}/workspace (GET reads
+// it back, POST …/mode changes the permission mode, POST …/workspace/remove removes a tree unless a
+// turn mentioned "commit"). In plan mode the agent only writes a plan and leaves it pending. The
+// branch's PR (GET …/sessions/{id}/pr) appears after two turns, merged once a turn says "merge",
+// and GET /api/plugins/memento/runs/live lists the sessions with a run in flight.
 //
 //   pnpm mock            # then point Settings at http://localhost:8642/v1
 
@@ -177,6 +182,10 @@ function jobRecord(job) {
 }
 
 const PLUGIN = process.env.MOCK_NO_PLUGIN !== "1"
+
+/** Project sessions as the plugin's memento.db holds them, by Hermes session id. */
+const projectSessions = new Map()
+const userTurns = (sessionId) => (transcripts.get(sessionId) ?? []).filter((r) => r.role === "user")
 const RUN_ERROR = "Timed out waiting for https://status.example.com"
 
 /** A run as a row of Hermes's cron execution ledger. */
@@ -242,6 +251,22 @@ async function playTurn(req, body, last, out) {
 
   out.status("Thinking…")
   await sleep(500)
+
+  // In plan mode the plugin blocks every tool that changes anything, so the agent only plans.
+  const workspace = projectSessions.get(sessionOf(req, body))
+  if (workspace) workspace.plan_pending = 0
+  if (workspace?.mode === "plan") {
+    await say(
+      `Here's my plan for \`${workspace.branch}\`:\n\n` +
+        "1. Read the log rotation script and its tests.\n" +
+        "2. Add a `--dry-run` flag that lists what would be removed.\n" +
+        "3. Cover it with a test and update the README.\n\n" +
+        "Approve the plan and I'll make the changes.",
+    )
+    if (!out.closed()) workspace.plan_pending = 1
+    record(req, { role: "assistant", content: spoken, finish_reason: "stop" })
+    return { spoken, prompt_tokens: 6000, completion_tokens: pieces }
+  }
 
   // Like Hermes's todo_list: every call returns the whole list, and the result is a transcript row.
   const planned = /plan/i.test(last)
@@ -421,7 +446,7 @@ function startRun(req, body) {
   const replay = key && [...runs.values()].find((run) => run.key === key)
   if (replay) return replay
   const id = `run_${randomUUID().replace(/-/g, "")}`
-  const run = { id, key, status: "running", events: [], seq: 0, listeners: new Set(), stopped: false }
+  const run = { id, key, sessionId: body.session_id, status: "running", events: [], seq: 0, listeners: new Set(), stopped: false }
   runs.set(id, run)
   const push = (name, fields = {}) => {
     const event = { event: name, run_id: id, timestamp: Date.now() / 1000, ...fields, seq: run.seq++ }
@@ -528,8 +553,8 @@ http
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/info") {
       return json(res, 200, {
         name: "memento",
-        version: "0.4.0",
-        features: ["cron_runs", "session_label", "chats", "context", "projects", "github"],
+        version: "0.6.0",
+        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "github", "sessions", "runs", "pr"],
       })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/cron/runs") {
@@ -619,6 +644,62 @@ http
       const row = (transcripts.get(id) ?? []).findLast((r) => r.role === "tool" && r.tool_name === "todo_list")
       const found = row ? JSON.parse(row.content) : null
       return json(res, 200, { object: "memento.todos", session_id: id, revision: found?.revision ?? null, todos: found?.todos ?? null })
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/runs/live") {
+      const sessions = {}
+      for (const run of runs.values()) {
+        if (!run.sessionId || !["running", "waiting_for_approval"].includes(run.status)) continue
+        if (sessions[run.sessionId] !== "waiting_for_approval") sessions[run.sessionId] = run.status
+      }
+      return json(res, 200, { object: "memento.runs", sessions })
+    }
+    const sessionRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/(workspace|workspace\/remove|mode|pr)$/.exec(url.pathname)
+    if (PLUGIN && !profile && sessionRoute) {
+      const id = decodeURIComponent(sessionRoute[1])
+      const route = sessionRoute[2]
+      const workspace = projectSessions.get(id)
+      if (route === "workspace" && req.method === "POST") {
+        const { project_id, repo_root, task, mode } = await readBody(req)
+        const project = mockProjects().find((p) => p.id === String(project_id ?? ""))
+        if (!project) return json(res, 400, { error: { message: "No such project." } })
+        if (!project.folders.some((f) => f.git && f.path === repo_root))
+          return json(res, 400, { error: { message: "repo_root isn't a folder of this project." } })
+        if (mode !== undefined && !["accept_edits", "auto", "plan"].includes(mode))
+          return json(res, 400, { error: { message: "mode must be accept_edits, auto or plan." } })
+        let record = workspace
+        if (!record) {
+          await sleep(800)
+          const slug = `${String(task ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/, "") || "session"}-${randomUUID().slice(0, 6)}`
+          record = { session_id: id, project_id: project.id, repo_root, path: `${repo_root}/.worktrees/${slug}`, branch: `hermes/${slug}`, mode: mode ?? "accept_edits", plan_pending: 0, created_at: Date.now() }
+          projectSessions.set(id, record)
+        } else if (mode && mode !== record.mode) {
+          record.mode = mode
+          record.plan_pending = 0
+        }
+        return json(res, 200, { object: "memento.workspace", workspace: record })
+      }
+      if (route === "workspace") return json(res, 200, { object: "memento.workspace", workspace: workspace ?? null })
+      if (route === "mode" && req.method === "POST") {
+        const { mode } = await readBody(req)
+        if (!["accept_edits", "auto", "plan"].includes(mode)) return json(res, 400, { error: { message: "mode must be accept_edits, auto or plan." } })
+        if (!workspace) return json(res, 404, { error: { message: "This session has no workspace yet" } })
+        workspace.mode = mode
+        workspace.plan_pending = 0
+        return json(res, 200, { object: "memento.workspace", workspace })
+      }
+      if (route === "workspace/remove" && req.method === "POST") {
+        if (!workspace) return json(res, 200, { object: "memento.workspace.removed", removed: false, reason: "missing" })
+        if (userTurns(id).some((r) => /commit/i.test(r.content))) return json(res, 200, { object: "memento.workspace.removed", removed: false, reason: "unpushed" })
+        projectSessions.delete(id)
+        return json(res, 200, { object: "memento.workspace.removed", removed: true })
+      }
+      if (route === "pr" && req.method === "GET") {
+        const turns = userTurns(id)
+        const pr = workspace && turns.length >= 2
+          ? { number: 27, title: "Add a dry-run flag to log rotation", url: "https://github.com/mock-user/memento/pull/27", state: turns.some((r) => /merge/i.test(r.content)) ? "merged" : "open" }
+          : null
+        return json(res, 200, { object: "memento.pr", pr })
+      }
     }
     const chatSession = /^\/api\/sessions\/([^/]+)$/.exec(url.pathname)
     if (req.method === "GET" && chatSession) {
