@@ -1,8 +1,20 @@
-import { db, getMessages, updateConversation, type Conversation, type Message, type ToolEvent } from "@/lib/db"
+import {
+  db,
+  getMessages,
+  updateConversation,
+  type Conversation,
+  type Message,
+  type ToolEvent,
+} from "@/lib/db"
 import { refreshContext } from "@/lib/context"
 import { refreshTodos } from "@/lib/todos"
 import { refreshPrs, refreshWorkspace } from "@/lib/workspace"
-import { getSessionTitle, listSessionMessages, type HermesConfig, type SessionMessage } from "@/lib/hermes"
+import {
+  getSessionTitle,
+  listSessionMessages,
+  type HermesConfig,
+  type SessionMessage,
+} from "@/lib/hermes"
 import { splitAttachments } from "@/lib/attachments"
 
 /**
@@ -236,8 +248,7 @@ async function refreshTitle(conversationId: string) {
   const config = await connection(conversation)
   if (!config) return
   const title = await getSessionTitle(config, conversation.hermesSessionId)
-  if (title && title !== conversation.title)
-    await updateConversation(conversationId, { title })
+  if (title && title !== conversation.title) await updateConversation(conversationId, { title })
 }
 
 /**
