@@ -642,6 +642,7 @@ def _before_tool(kwargs: Dict[str, Any]) -> Optional[Dict[str, str]]:
     if record["path"] and task_id and not _has_cwd(task_id):
         # The gateway restarted since the app last posted the workspace.
         apply_cwd(task_id, record["path"])
+    follow_auto(record["mode"] == "auto")
     if record["mode"] != "plan":
         return None
     tool = kwargs.get("tool_name")
@@ -649,6 +650,50 @@ def _before_tool(kwargs: Dict[str, Any]) -> Optional[Dict[str, str]]:
     if tool in MUTATING_TOOLS or (tool == "terminal" and not read_only(args.get("command"))):
         return {"action": "block", "message": PLAN_BLOCK}
     return None
+
+
+def follow_auto(auto: bool) -> None:
+    """Switches Hermes's own approval bypass for the run this tool call belongs to (its approval key
+    is the run id) to match the session's mode, so Auto needs no app to answer. The bypass skips
+    the prompt only: the hardline blocklist is checked first and still blocks. Runs before every
+    tool call, so a mode change made mid-run takes effect on the next one."""
+    try:
+        from tools.approval import (
+            disable_session_yolo,
+            enable_session_yolo,
+            is_session_yolo_enabled,
+        )
+        from tools.approval_context import get_current_session_key
+    except ImportError:
+        logger.debug("memento: this Hermes has no per-session approval bypass")
+        return
+    key = get_current_session_key(default="")
+    if not key or key == "default" or is_session_yolo_enabled(key) == auto:
+        return
+    (enable_session_yolo if auto else disable_session_yolo)(key)
+
+
+def answer_waiting(session_id: str) -> int:
+    """Approves, once, the dangerous commands this session's runs are already waiting on, for a
+    session that has just been switched to Auto. A guardian's DENY is left for the user. Returns
+    how many requests were answered."""
+    statuses = getattr(adapter, "_run_statuses", None)
+    if not isinstance(statuses, dict):
+        return 0
+    try:
+        from tools.approval import list_gateway_approvals, resolve_gateway_approval
+    except ImportError:
+        return 0
+    answered = 0
+    for run_id, status in list(statuses.items()):
+        if not isinstance(status, dict) or status.get("session_id") != session_id:
+            continue
+        if status.get("status") != "waiting_for_approval":
+            continue
+        if any(entry.get("smart_denied") for entry in list_gateway_approvals(run_id)):
+            continue
+        answered += resolve_gateway_approval(run_id, "once", resolve_all=True)
+    return answered
 
 
 def before_llm(**kwargs: Any) -> None:

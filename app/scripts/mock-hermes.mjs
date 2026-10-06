@@ -426,7 +426,8 @@ async function playTurn(req, body, last, out) {
     await say("The live logs and anything written in the last 90 days stay untouched. Here is the command I want to run:\n\n```bash\nfind /var/log -name '*.log.*' -mtime +90 -delete\n```\n")
     const cleanupId = `call_${randomUUID().slice(0, 8)}`
     out.tool({ tool: "terminal", emoji: "💻", label: "find /var/log -name '*.log.*' -mtime +90 -delete", toolCallId: cleanupId, status: "running" })
-    const choice = await out.approve({
+    // In Auto the plugin turns Hermes's own approval bypass on for the run, so nothing is asked.
+    const choice = projectSessions.get(sessionOf(req, body))?.mode === "auto" ? "once" : await out.approve({
       command: "find /var/log -name '*.log.*' -mtime +90 -delete",
       pattern_key: "recursive_delete",
       description: "Delete 34 rotated log files older than 90 days (4.2 GB) under /var/log",
@@ -799,6 +800,10 @@ http
         if (!workspace) return json(res, 404, { error: { message: "This session has no workspace yet" } })
         workspace.mode = mode
         workspace.plan_pending = 0
+        // Switching to Auto answers what a run of the session already waits on, like the plugin.
+        if (mode === "auto")
+          for (const run of runs.values())
+            if (run.sessionId === id && run.status === "waiting_for_approval") pendingApprovals.get(run.id)?.("once")
         return answer(workspace)
       }
       if (route === "workspace/remove" && req.method === "POST") {
