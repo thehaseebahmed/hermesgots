@@ -482,7 +482,12 @@ export function ChatPage() {
             botName={profile?.name}
             session={
               session && {
-                mode: session.mode ?? "accept_edits",
+                // Without the plugin nothing answers for Auto, so the session runs as Accept edits.
+                mode:
+                  session.mode === "auto" && !tracked
+                    ? "accept_edits"
+                    : (session.mode ?? "accept_edits"),
+                autoAvailable: tracked,
                 onMode: (mode) =>
                   setSessionMode(session.id, mode).catch((error) =>
                     toast.error(

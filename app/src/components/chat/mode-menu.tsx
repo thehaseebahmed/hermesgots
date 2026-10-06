@@ -22,10 +22,13 @@ export function ModeMenu({
   mode,
   onChange,
   disabled,
+  autoAvailable,
 }: {
   mode: SessionMode
   onChange: (mode: SessionMode) => void
   disabled?: boolean
+  /** Auto is answered by the plugin on the server, so it needs the plugin. */
+  autoAvailable: boolean
 }) {
   const Icon = MODES.find((m) => m.mode === mode)?.icon ?? PencilLineIcon
   return (
@@ -45,15 +48,26 @@ export function ModeMenu({
         {MODE_LABELS[mode]}
         <ChevronDownIcon className="text-muted-foreground" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-44">
+      <DropdownMenuContent align="start" className="min-w-56">
         <DropdownMenuRadioGroup
           value={mode}
           onValueChange={(value) => onChange(value as SessionMode)}
         >
           {MODES.map(({ mode: option, icon: OptionIcon }) => (
-            <DropdownMenuRadioItem key={option} value={option} className="min-h-11" closeOnClick>
+            <DropdownMenuRadioItem
+              key={option}
+              value={option}
+              className="min-h-11"
+              closeOnClick
+              disabled={option === "auto" && !autoAvailable}
+            >
               <OptionIcon />
-              {MODE_LABELS[option]}
+              <span className="flex flex-col">
+                {MODE_LABELS[option]}
+                {option === "auto" && !autoAvailable && (
+                  <span className="text-xs text-muted-foreground">Needs the plugin</span>
+                )}
+              </span>
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
