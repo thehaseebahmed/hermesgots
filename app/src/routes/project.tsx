@@ -136,22 +136,27 @@ export function ProjectPage() {
       now: Date.now(),
     }
   }, [profile, projectId])
-  const sessions = listed?.rows
+  const rows = listed?.rows
   const now = listed?.now ?? 0
 
   // What this device sees of its own turns: a reply streaming, an approval waiting.
-  const ids = sessions?.map((c) => c.id) ?? []
+  const ids = rows?.map((c) => c.id) ?? []
   const local = useLiveQuery(async () => {
-    const signals: Record<string, { streaming?: boolean; approval?: boolean }> = {}
+    const signals: Record<string, { any?: boolean; streaming?: boolean; approval?: boolean }> = {}
     if (ids.length === 0) return signals
     const messages = await db.messages.where("conversationId").anyOf(ids).toArray()
     for (const m of messages) {
       const signal = (signals[m.conversationId] ??= {})
+      signal.any = true
       if (m.status === "streaming") signal.streaming = true
       if (m.approval && !m.approval.resolved) signal.approval = true
     }
     return signals
   }, [ids.join("\n")])
+
+  // A session nothing was sent in (or typed for) isn't one yet. Synced ones carry their activity in
+  // `updatedAt`, since their messages load only when opened.
+  const sessions = rows?.filter((c) => c.draft || c.updatedAt > c.createdAt || local?.[c.id]?.any)
 
   // A session spans every repo of the project; without one there's nowhere for it to work.
   const canStart = Boolean(profile?.apiKey && project?.folders.some((folder) => folder.git))
@@ -403,7 +408,10 @@ function SessionItem({
   state: SessionState
   now: number
 }) {
-  const line2 = prLine(session) ?? session.worktree?.branch
+  const line2 =
+    prLine(session) ??
+    session.worktree?.branch ??
+    (session.draft ? `Draft: ${session.draft}` : undefined)
   return (
     <Link
       to={`/c/${session.id}`}

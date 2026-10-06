@@ -72,6 +72,8 @@ export interface Conversation {
   todos?: { revision: number; items: Todo[]; at: number }
   /** The Hermes Project this chat is a session of (works in its own worktree). */
   projectId?: string
+  /** Unsent composer text a session was left with, kept on this device only. */
+  draft?: string
   /** Marked done by the user; the composer gives way until it's reopened. */
   resolvedAt?: number
   /** Permission mode, as the plugin last reported it. Local only; the plugin holds it. */

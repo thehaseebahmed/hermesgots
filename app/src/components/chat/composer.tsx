@@ -1,4 +1,12 @@
-import { useId, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react"
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react"
 import { ArrowUpIcon, MicIcon, SquareIcon } from "lucide-react"
 
 import { AttachMenu } from "@/components/chat/attach-menu"
@@ -34,8 +42,14 @@ export function Composer({
   botName = "Hermes",
   leading,
   session,
+  draft,
+  onDraft,
 }: {
   busy: boolean
+  /** Text to start with, e.g. a session's saved draft. */
+  draft?: string
+  /** Called with the text as it changes. */
+  onDraft?: (text: string) => void
   /** The chat's Hermes profile, for the skills in the `/` menu. */
   connection: HermesConfig
   botName?: string
@@ -51,6 +65,13 @@ export function Composer({
   onCommand: (command: LocalCommand) => void
 }) {
   const [value, setValue] = useState("")
+  const seeded = useRef(false)
+  useEffect(() => {
+    if (seeded.current || !draft) return
+    seeded.current = true
+    setValue((current) => current || draft)
+  }, [draft])
+  useEffect(() => onDraft?.(value), [value, onDraft])
   const [dismissed, setDismissed] = useState(false)
   const [active, setActive] = useState(0)
   const textarea = useRef<HTMLTextAreaElement>(null)

@@ -27,10 +27,18 @@ export function handBackNativeSignIn() {
   return true
 }
 
+let backGuard: (() => boolean) | undefined
+
+/** A screen's say over the back button: return true when it handled the press itself. */
+export function setBackGuard(guard: (() => boolean) | undefined) {
+  backGuard = guard
+}
+
 /** Android's back button walks the router history, then leaves the app. */
 export function handleBackButton() {
   if (!isNative) return
   void App.addListener("backButton", ({ canGoBack }) => {
+    if (backGuard?.()) return
     if (canGoBack) history.back()
     else void App.exitApp()
   })
