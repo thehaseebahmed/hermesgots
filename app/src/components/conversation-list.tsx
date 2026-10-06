@@ -25,7 +25,7 @@ function BotStrip({ onNavigate }: { onNavigate?: () => void }) {
 
   const select = async (profileId: string) => {
     await setActiveProfile(profileId)
-    const last = await conversationsOf(profileId).last()
+    const last = (await conversationsOf(profileId).toArray()).filter((c) => !c.projectId).pop()
     navigate(last ? `/c/${last.id}` : "/")
   }
 
@@ -61,7 +61,9 @@ export function ConversationList({ onNavigate }: { onNavigate?: () => void }) {
   const navigate = useNavigate()
   const conversations = useLiveQuery(async () => {
     const profile = await getActiveProfile()
-    return profile ? conversationsOf(profile.id).reverse().toArray() : []
+    return profile
+      ? (await conversationsOf(profile.id).reverse().toArray()).filter((c) => !c.projectId)
+      : []
   }, [])
 
   return (
