@@ -295,6 +295,16 @@ export function ChatPage() {
     }
   }
 
+  // A session's composer holds the mode and + menu too, so its ring sits in the header.
+  const showRing = hasMessages && configured
+  const ring = (
+    <ContextRing
+      usage={usage}
+      onClick={() => setUsageOpen(true)}
+      className={session ? "bg-background/80 backdrop-blur" : undefined}
+    />
+  )
+
   const actions = (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -361,6 +371,7 @@ export function ChatPage() {
         subtitle={activity ?? session?.worktree?.branch}
         botId={profile?.botId}
         actions={actions}
+        extra={showRing && session ? ring : undefined}
         leading={
           session && (
             <Button
@@ -491,11 +502,7 @@ export function ChatPage() {
                   ),
               }
             }
-            leading={
-              hasMessages && configured ? (
-                <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />
-              ) : undefined
-            }
+            leading={showRing && !session ? ring : undefined}
           />
         )}
       </div>
