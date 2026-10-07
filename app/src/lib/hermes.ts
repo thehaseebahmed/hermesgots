@@ -517,8 +517,12 @@ export interface HermesProjectFolder {
   git: boolean
   /** `user/repo` from the clone's GitHub origin; what the UI calls the folder. */
   repo: string | null
-  /** Only while the project is being created: this repo's clone. */
-  status?: "queued" | "cloning" | "done" | "failed"
+  /**
+   * While the project is being created, this repo's clone; on a ready project, a repo being added
+   * (`cloning`, or `failed` with `error`) or removed (`removing`). Unset once it's settled.
+   */
+  status?: "queued" | "cloning" | "done" | "failed" | "removing"
+  error?: string
 }
 
 export type ProjectStatus = "ready" | "cloning" | "failed"
@@ -535,9 +539,14 @@ export interface HermesProject {
   status: ProjectStatus
   /** Why a `failed` project failed. */
   error?: string
+  archived: boolean
+  /** When it was pinned, which sorts it to the top of the Code screen; unset when it isn't. */
+  pinnedAt?: number
   /** Primary folder first. */
   folders: HermesProjectFolder[]
 }
+
+const FOLDER_STATUSES = ["queued", "cloning", "done", "failed", "removing"] as const
 
 function toProject(raw: unknown): HermesProject | null {
   if (!raw || typeof raw !== "object") return null
@@ -554,6 +563,8 @@ function toProject(raw: unknown): HermesProject | null {
     lastActiveAt: seconds(p.last_active),
     status: p.status === "cloning" || p.status === "failed" ? p.status : "ready",
     error: typeof p.error === "string" && p.error ? p.error : undefined,
+    archived: p.archived === true,
+    pinnedAt: seconds(p.pinned_at),
     folders: folders
       .filter((f): f is Record<string, unknown> => typeof f?.path === "string")
       .map((f) => ({
@@ -561,13 +572,8 @@ function toProject(raw: unknown): HermesProject | null {
         label: typeof f.label === "string" && f.label ? f.label : null,
         git: f.git === true,
         repo: typeof f.repo === "string" && f.repo ? f.repo : null,
-        status:
-          f.status === "queued" ||
-          f.status === "cloning" ||
-          f.status === "done" ||
-          f.status === "failed"
-            ? f.status
-            : undefined,
+        status: FOLDER_STATUSES.find((status) => status === f.status),
+        error: typeof f.error === "string" && f.error ? f.error : undefined,
       })),
   }
 }
@@ -651,17 +657,64 @@ export async function retryProject(config: HermesConfig, id: string): Promise<vo
   )
 }
 
-/** Renames a project or changes its description. */
+/** Renames a project, changes its description, archives or restores it, or pins it. */
 export async function updateProject(
   config: HermesConfig,
   id: string,
-  fields: { name?: string; description?: string },
+  fields: { name?: string; description?: string; archived?: boolean; pinned?: boolean },
 ): Promise<void> {
   await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects/${encodeURIComponent(id)}`, {
     method: "POST",
     headers: headers(config),
     body: JSON.stringify(fields),
   })
+}
+
+/**
+ * Clones another GitHub repo into a project. The plugin clones in the background and adds the repo
+ * to the project once it's in; until then the project lists it as `cloning`.
+ */
+export async function addProjectRepo(config: HermesConfig, id: string, repo: string) {
+  await request(
+    `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects/${encodeURIComponent(id)}/repos`,
+    { method: "POST", headers: headers(config), body: JSON.stringify({ repo }) },
+  )
+}
+
+/** Takes a repo out of a project (or stops adding it); the plugin deletes its clone in the background. */
+export async function removeProjectRepo(config: HermesConfig, id: string, repo: string) {
+  await request(
+    `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects/${encodeURIComponent(id)}/repos/remove`,
+    { method: "POST", headers: headers(config), body: JSON.stringify({ repo }) },
+  )
+}
+
+export interface ProjectUsage {
+  sessions: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  /** Unset when Hermes priced none of the sessions. */
+  costUsd?: number
+}
+
+/** What the sessions that ran in a project's folders used, from Hermes's session store. */
+export async function getProjectUsage(config: HermesConfig, id: string): Promise<ProjectUsage> {
+  const response = await request(
+    `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects/${encodeURIComponent(id)}/usage`,
+    { headers: headers(config) },
+  )
+  const body = await response.json()
+  const count = (value: unknown) => (typeof value === "number" && value > 0 ? value : 0)
+  return {
+    sessions: count(body?.sessions),
+    inputTokens: count(body?.input_tokens),
+    outputTokens: count(body?.output_tokens),
+    cacheReadTokens: count(body?.cache_read_tokens),
+    cacheWriteTokens: count(body?.cache_write_tokens),
+    costUsd: typeof body?.cost_usd === "number" ? body.cost_usd : undefined,
+  }
 }
 
 /**
@@ -774,12 +827,18 @@ export interface SessionWorkspace {
   planFile: string | null
   /** Where the agent's worktrees are and, in plan mode, the plan's shape; every run's `instructions`. */
   instructions: string
+  /** Why the session can't take another turn: a repo it works in left the project, or it's archived. */
+  blocked: string | null
 }
 
 const MODES = new Set<string>(["accept_edits", "auto", "plan"])
 
 function parseWorkspace(raw: unknown): SessionWorkspace | null {
-  const body = raw as { workspace?: Record<string, unknown>; instructions?: unknown } | null
+  const body = raw as {
+    workspace?: Record<string, unknown>
+    instructions?: unknown
+    blocked?: unknown
+  } | null
   const record = body?.workspace
   if (!record || typeof record.branch !== "string") return null
   const mode =
@@ -798,6 +857,7 @@ function parseWorkspace(raw: unknown): SessionWorkspace | null {
     planPending: Boolean(record.plan_pending),
     planFile: typeof record.plan_file === "string" && record.plan_file ? record.plan_file : null,
     instructions: typeof body?.instructions === "string" ? body.instructions : "",
+    blocked: typeof body?.blocked === "string" && body.blocked ? body.blocked : null,
   }
 }
 

@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react"
-import { CheckCircle2Icon, MapIcon, MessageCircleQuestionIcon } from "lucide-react"
+import { CheckCircle2Icon, LockIcon, MapIcon, MessageCircleQuestionIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -60,6 +60,21 @@ export function PlanReadyCard({
           Approve
         </Button>
       </CardFooter>
+    </Card>
+  )
+}
+
+/** In place of the composer when the session can't go on: a repo it worked in left the project. */
+export function BlockedCard({ reason }: { reason: string }) {
+  return (
+    <Card size="sm" className={CARD}>
+      <CardContent className="flex items-center gap-3">
+        <LockIcon className="size-6 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1 text-sm">
+          <p className="font-medium">This session is read-only.</p>
+          <p className="text-muted-foreground">{reason}</p>
+        </div>
+      </CardContent>
     </Card>
   )
 }

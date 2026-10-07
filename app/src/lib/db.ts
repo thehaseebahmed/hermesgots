@@ -91,6 +91,11 @@ export interface Conversation {
   planPending?: boolean
   /** The newest plan the plugin saved, `plans/<file>.md` under the project's folder. Local only. */
   planFile?: string
+  /**
+   * Why the session can't take another turn (a repo it works in was removed from the project, or
+   * the project is archived), from the plugin. Local only.
+   */
+  blocked?: string
   /** The branch's pull request in each repo, and when they were last read. Local only. */
   prs?: PullRequestRef[]
 }

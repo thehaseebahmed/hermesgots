@@ -54,14 +54,16 @@ async function store(conversationId: string, workspace: SessionWorkspace | null)
     },
     planPending: workspace.planPending,
     planFile: workspace.planFile ?? undefined,
+    blocked: workspace.blocked ?? undefined,
   })
 }
 
 /**
  * Gets the session its worktrees (made on the first turn, named after `task`) and points the
- * agent's tools into the primary one, which has to happen before every turn. Throws only while the
- * session has no worktree yet: afterwards the plugin's own hook restores the pointer on the next
- * tool call.
+ * agent's tools into the primary one, which has to happen before every turn. Throws while the
+ * session has no worktree yet (afterwards the plugin's own hook restores the pointer on the next
+ * tool call), and when the plugin refuses the turn: a repo is still being added to the project, a
+ * repo the session works in was removed, or the project is archived.
  */
 export async function ensureSessionWorkspace(
   conversationId: string,
@@ -79,6 +81,11 @@ export async function ensureSessionWorkspace(
     await store(conversationId, workspace)
     return workspace
   } catch (error) {
+    if (error instanceof HermesError && error.status === 409) {
+      if (conversation.worktree)
+        await db.conversations.update(conversationId, { blocked: error.message })
+      throw error
+    }
     if (!conversation.worktree) throw error
     return {
       ...conversation.worktree,
@@ -86,6 +93,7 @@ export async function ensureSessionWorkspace(
       mode: conversation.mode ?? "accept_edits",
       planPending: Boolean(conversation.planPending),
       planFile: conversation.planFile ?? null,
+      blocked: null,
     }
   }
 }
