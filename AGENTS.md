@@ -183,6 +183,7 @@ These behaviours were verified against Hermes's `gateway/platforms/api_server*.p
 
 - **The UI renders from Dexie live queries.** Streaming writes into IndexedDB (throttled), and components never hold stream state.
 - **History mirrors the sidebar.** Top-level screens (chats, Code, Routines, Settings) open with `root` as the only history entry, so back leaves the app; a deeper screen (a project, a session, a Settings section) is pushed on its parent, goes back with `up`, and sets `setBackGuard` so Android's back does the same. From a top-level screen Android's back minimizes the app.
+- **Screens and tabs animate in.** `AppShell` slides the main pane in from the right on a push, from the left on back, and fades it on a replace; a `replace` navigation that keeps the same screen passes `state: { quiet: true }`. Tab panels slide in from the side of the tab they were opened from. Everything respects `prefers-reduced-motion`.
 - **If you change the schema, bump the Dexie version** in `src/lib/db.ts` and keep existing data loading.
 - **Every screen must work at phone (390px) and tablet (≥768px) widths, in light and dark mode.**
 - **Pop-ups are sheets on phones and dialogs on bigger screens.** Build them with `Popup` / `PopupContent` (`src/components/popup.tsx`), which picks with `useWide`, rather than a bare `Sheet` or dialog. Side drawers (the sidebar) and the tool-details drawer are not pop-ups.

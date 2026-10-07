@@ -88,7 +88,13 @@ export function SettingsPage() {
       <MenuContext.Provider value={{ active: open, replace: true }}>
         <MenuScreen className="w-90 flex-none border-r min-[1200px]:w-103" />
       </MenuContext.Provider>
-      <Screen title={SECTIONS[open].title}>{SECTIONS[open].render()}</Screen>
+      <Screen
+        key={open}
+        title={SECTIONS[open].title}
+        className="duration-200 ease-out motion-safe:animate-in motion-safe:fade-in-0"
+      >
+        {SECTIONS[open].render()}
+      </Screen>
     </div>
   )
 }

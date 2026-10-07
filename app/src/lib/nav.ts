@@ -6,7 +6,7 @@ import { useNavigate } from "react-router"
  * the first entry, and each entry after it is a child of the one before. So back from a top-level
  * screen leaves the app, and back from a deeper one returns to its parent.
  */
-const depth = () => (window.history.state as { idx?: number } | null)?.idx ?? 0
+export const depth = () => (window.history.state as { idx?: number } | null)?.idx ?? 0
 
 export function useNav() {
   const navigate = useNavigate()
