@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { MenuIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, Trash2Icon, XIcon } from "lucide-react"
+import {
+  ChevronUpIcon,
+  MenuIcon,
+  PinIcon,
+  PlusIcon,
+  RefreshCwIcon,
+  RotateCcwIcon,
+  Trash2Icon,
+  XIcon,
+} from "lucide-react"
 import { Link } from "react-router"
 import { toast } from "sonner"
 
@@ -9,6 +18,7 @@ import { Bot } from "@/components/bot"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { NewProjectPopup } from "@/components/new-project"
 import { Button } from "@/components/ui/button"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Toaster } from "@/components/ui/sonner"
 import { Spinner } from "@/components/ui/spinner"
 import { listProfiles, type Profile } from "@/lib/db"
@@ -65,7 +75,10 @@ function toRows(results: BotResult[], profiles: Map<string, Profile>) {
       rows.set(key, { key, profile, project, at: project.lastActiveAt ?? project.createdAt })
     }
   }
-  return [...rows.values()].sort((a, b) => b.at - a.at)
+  // Pinned first, the most recently pinned on top.
+  return [...rows.values()].sort(
+    (a, b) => (b.project.pinnedAt ?? 0) - (a.project.pinnedAt ?? 0) || b.at - a.at,
+  )
 }
 
 function describeError(error: unknown) {
@@ -88,7 +101,7 @@ async function loadBot({ id: profileId, pluginOff, ...config }: Target): Promise
   }
 }
 
-/** Hermes Projects from every bot, most recently worked on first. */
+/** Hermes Projects from every bot, pinned ones and then the most recently worked on first. */
 export function CodePage() {
   const openDrawer = useOpenDrawer()
   const wide = useWide()
@@ -115,7 +128,13 @@ export function CodePage() {
   }, [refresh])
 
   const cloning = results?.some(
-    (result) => "projects" in result && result.projects.some((p) => p.status === "cloning"),
+    (result) =>
+      "projects" in result &&
+      result.projects.some(
+        (p) =>
+          p.status === "cloning" ||
+          p.folders.some((f) => f.status === "cloning" || f.status === "removing"),
+      ),
   )
   useEffect(() => {
     if (!cloning) return
@@ -151,7 +170,9 @@ export function CodePage() {
   }, [targetsKey, tick])
 
   const byId = new Map(profiles?.map((profile) => [profile.id, profile]))
-  const rows = results ? toRows(results, byId) : []
+  const all = results ? toRows(results, byId) : []
+  const rows = all.filter((row) => !row.project.archived)
+  const archived = all.filter((row) => row.project.archived)
   const failed = (results ?? []).flatMap((result) => {
     const profile = byId.get(result.profileId)
     return profile && "error" in result ? [{ ...result, profile }] : []
@@ -221,6 +242,25 @@ export function CodePage() {
         ) : failed.length < results.length ? (
           <p className="px-1 text-sm text-muted-foreground">No projects yet.</p>
         ) : null}
+        {archived.length > 0 && (
+          <Collapsible render={<section aria-label="Archived" />}>
+            <h2>
+              <CollapsibleTrigger className="group -mx-1 flex min-h-11 items-center gap-1.5 rounded-xl px-2 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+                Archived ({archived.length})
+                <ChevronUpIcon className="size-4 rotate-180 transition-transform group-data-panel-open:rotate-0 motion-reduce:transition-none" />
+              </CollapsibleTrigger>
+            </h2>
+            <CollapsibleContent>
+              <ul className="flex flex-col">
+                {archived.map((row) => (
+                  <li key={row.key}>
+                    <ProjectItem row={row} now={now} onChanged={refresh} />
+                  </li>
+                ))}
+              </ul>
+            </CollapsibleContent>
+          </Collapsible>
+        )}
       </div>
 
       {withPlugin.length > 0 && (
@@ -426,6 +466,12 @@ function ProjectItem({
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-3">
           <span className="min-w-0 flex-1 truncate font-medium">{project.name}</span>
+          {project.pinnedAt && (
+            <PinIcon
+              className="size-3.5 shrink-0 self-center text-muted-foreground"
+              aria-label="Pinned"
+            />
+          )}
           {at > 0 && (
             <span className="shrink-0 text-xs text-muted-foreground">{formatWhen(at, now)}</span>
           )}

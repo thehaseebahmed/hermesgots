@@ -20,7 +20,7 @@ import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
 import { PrPill } from "@/components/chat/pr-pill"
 import { QuestionCard } from "@/components/chat/question-card"
-import { PlanReadyCard, ResolvedCard } from "@/components/chat/session-cards"
+import { BlockedCard, PlanReadyCard, ResolvedCard } from "@/components/chat/session-cards"
 import { TodosPill, TodosSheet } from "@/components/chat/todos"
 import { ContextRing, UsageSheet, type ContextUsage } from "@/components/chat/usage-sheet"
 import { Bot } from "@/components/bot"
@@ -476,6 +476,10 @@ export function ChatPage() {
         ) : awaitingClarify ? (
           <div className="mx-auto w-full max-w-3xl">
             <QuestionCard key={awaitingClarify.clarify!.clarifyId} message={awaitingClarify} />
+          </div>
+        ) : session?.blocked && !busy ? (
+          <div className="mx-auto w-full max-w-3xl">
+            <BlockedCard reason={session.blocked} />
           </div>
         ) : session?.planPending && session.mode === "plan" && !busy ? (
           <div className="mx-auto w-full max-w-3xl">

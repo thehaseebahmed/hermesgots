@@ -12,7 +12,11 @@
 // github/repos stand in for the host's GitHub account (MOCK_NO_GITHUB=1 leaves it signed out), and
 // POST /api/plugins/memento/projects answers at once with a project that clones its repos in the
 // background (1.5s each; a repo named like `fail` fails it, as does MOCK_FAIL_CLONE=1), and
-// POST projects/{id}, projects/{id}/retry and projects/{id}/remove edit, retry and delete one.
+// POST projects/{id}, projects/{id}/retry and projects/{id}/remove edit (name, description,
+// archived, pinned), retry and delete one. POST projects/{id}/repos clones another repo in (4s; a
+// name like `fail` fails it) and POST …/repos/remove takes one out (2s); GET …/usage sums made-up
+// usage. While a repo is being added, a new session's workspace is refused, and a session whose repo
+// was removed is refused with the reason, which the workspace also reports as `blocked`.
 // Chats are titled like Hermes does: a slice of the opener at once, a "model" title a moment later,
 // readable on GET /api/sessions/{id}. Sessions are keyed by X-Hermes-Session-Id when a key is sent,
 // and their transcripts page back from GET /api/sessions/{id}/messages?order=latest&limit&offset.
@@ -102,6 +106,17 @@ function cloneProject(project, root) {
     }, 1500))
   }
   step(0)
+}
+
+/** Why a session can't take another turn, as the plugin's sessions.blocked says it. */
+function blockedReason(project, record) {
+  if (!project) return "This project was deleted."
+  if (project.archived) return "This project is archived."
+  if (!record) return null
+  const current = new Set(project.folders.filter((f) => f.git).map((f) => f.path))
+  const gone = record.repos.filter((r) => !current.has(r.repo_root)).map((r) => r.name)
+  if (!gone.length) return null
+  return `${gone.join(" and ")} ${gone.length === 1 ? "was" : "were"} removed from this project.`
 }
 
 /** Hermes Projects as projects.db holds them, with activity from the sessions in their folders. */
@@ -797,7 +812,7 @@ http
       return json(res, 200, {
         name: "memento",
         version: "0.12.0",
-        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments"],
+        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments"],
         clarify: true,
       })
     }
@@ -848,11 +863,66 @@ http
       cloneProject(project, root)
       return json(res, 202, { object: "memento.project", ...project })
     }
-    const projectRoute = /^\/api\/plugins\/memento\/projects\/([^/]+)(\/remove|\/retry)?$/.exec(url.pathname)
+    const projectRoute = /^\/api\/plugins\/memento\/projects\/([^/]+)(\/remove|\/retry|\/repos|\/repos\/remove|\/usage)?$/.exec(url.pathname)
+    if (PLUGIN && !profile && projectRoute?.[2] === "/usage") {
+      const found = mockProjects().find((p) => p.id === decodeURIComponent(projectRoute[1]))
+      if (!found || found.status === "cloning" || found.status === "failed")
+        return json(res, 404, { error: { message: "No such project." } })
+      const sessions = [...projectSessions.values()].filter((r) => r.project_id === found.id).length
+      return json(res, 200, {
+        object: "memento.project.usage",
+        sessions: sessions + 3,
+        input_tokens: 1_284_000 + sessions * 42_000,
+        output_tokens: 86_400 + sessions * 3_100,
+        cache_read_tokens: 3_920_000,
+        cache_write_tokens: 214_000,
+        cost_usd: 18.42 + sessions * 0.61,
+      })
+    }
     if (PLUGIN && !profile && req.method === "POST" && projectRoute) {
       const all = mockProjects()
       const found = all.find((p) => p.id === decodeURIComponent(projectRoute[1]))
       if (!found) return json(res, 404, { error: { message: "No such project." } })
+      if (projectRoute[2] === "/repos" || projectRoute[2] === "/repos/remove") {
+        if (found.status === "cloning" || found.status === "failed")
+          return json(res, 409, { error: { message: "The project is still being created." } })
+        const { repo } = await readBody(req)
+        const folder = found.folders.find((f) => f.repo === repo)
+        if (projectRoute[2] === "/repos/remove") {
+          if (!folder) return json(res, 404, { error: { message: "That repo isn't in this project." } })
+          if (folder.status === "cloning" || folder.status === "failed") {
+            clearTimeout(folder.timer)
+            found.folders.splice(found.folders.indexOf(folder), 1)
+          } else if (folder.status !== "removing") {
+            folder.git = false
+            folder.status = "removing"
+            setTimeout(() => found.folders.splice(found.folders.indexOf(folder), 1), 2000)
+          }
+          return json(res, 202, { object: "memento.project.repo", removed: true })
+        }
+        if (!/^[\w-]+\/[\w.-]+$/.test(String(repo ?? ""))) return json(res, 400, { error: { message: "repo must be owner/name." } })
+        if (folder?.status === "removing") return json(res, 409, { error: { message: `${repo} is still being removed.` } })
+        if (folder && !folder.status) return json(res, 409, { error: { message: `${repo} is already in this project.` } })
+        const added = folder ?? { path: `/home/hermes/.hermes/projects/${found.slug}/${repo.split("/")[1]}`, label: null, is_primary: false, git: false, repo }
+        if (!folder) found.folders.push(added)
+        added.status = "cloning"
+        added.error = undefined
+        Object.defineProperty(added, "timer", {
+          enumerable: false,
+          writable: true,
+          value: setTimeout(() => {
+            if (process.env.MOCK_FAIL_CLONE === "1" || /fail/i.test(repo)) {
+              added.status = "failed"
+              added.error = `GitHub refused access to ${repo}.`
+              return
+            }
+            added.status = undefined
+            added.error = undefined
+            added.git = true
+          }, Number(process.env.MOCK_REPO_CLONE_MS ?? 4000)),
+        })
+        return json(res, 202, { object: "memento.project.repo", project_id: found.id, repo, path: added.path, status: "cloning" })
+      }
       if (projectRoute[2] === "/retry") {
         if (found.status !== "failed") return json(res, 404, { error: { message: "No failed project to retry." } })
         for (const folder of found.folders) folder.status = "queued"
@@ -868,10 +938,12 @@ http
         return json(res, 200, { object: "memento.project", removed: true })
       }
       if (found.status !== "ready") return json(res, 409, { error: { message: "The project is still being created." } })
-      const { name, description } = await readBody(req)
+      const { name, description, archived, pinned } = await readBody(req)
       if (name !== undefined && !String(name).trim()) return json(res, 400, { error: { message: "Name the project." } })
       if (name !== undefined) found.name = String(name).trim()
       if (description !== undefined) found.description = String(description).trim() || null
+      if (archived !== undefined) found.archived = Boolean(archived)
+      if (pinned !== undefined) found.pinned_at = pinned ? (found.pinned_at ?? Math.floor(Date.now() / 1000)) : null
       return json(res, 200, { object: "memento.project", id: found.id })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/projects") {
@@ -966,11 +1038,21 @@ http
           : `You are working in git worktrees of this project's repos, all on branch ${record.branch}:\n${record.repos.map((r, i) => `- ${r.name} at ${r.path}${i === 0 ? " (your current directory)" : ""}`).join("\n")}\nKeep all work inside them.`
       const instructions = (record) =>
         [worktreeLine(record), PR_INSTRUCTIONS, record.mode === "plan" ? PLAN_INSTRUCTIONS : ""].filter(Boolean).join("\n")
-      const answer = (record) => json(res, 200, { object: "memento.workspace", workspace: record, instructions: record ? instructions(record) : null })
+      const answer = (record) =>
+        json(res, 200, {
+          object: "memento.workspace",
+          workspace: record,
+          instructions: record ? instructions(record) : null,
+          blocked: record ? blockedReason(mockProjects().find((p) => p.id === record.project_id), record) : null,
+        })
       if (route === "workspace" && req.method === "POST") {
         const { project_id, mode } = await readBody(req)
         const project = mockProjects().find((p) => p.id === String(project_id ?? ""))
         if (!project) return json(res, 400, { error: { message: "No such project." } })
+        const reason = blockedReason(project, workspace)
+        if (reason) return json(res, 409, { error: { message: reason } })
+        if (!workspace && project.folders.some((f) => f.status === "cloning"))
+          return json(res, 409, { error: { message: "A repository is still being added to this project." } })
         const gitFolders = project.folders.filter((f) => f.git)
         if (!gitFolders.length) return json(res, 400, { error: { message: "This project has no git repository." } })
         if (mode !== undefined && !["accept_edits", "auto", "plan"].includes(mode))

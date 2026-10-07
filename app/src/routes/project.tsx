@@ -1,20 +1,21 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
+  ArchiveIcon,
   ArrowLeftIcon,
   CheckIcon,
   ChevronUpIcon,
   CircleAlertIcon,
-  EllipsisIcon,
-  PencilIcon,
+  LockIcon,
   PlusIcon,
-  Trash2Icon,
+  Settings2Icon,
 } from "lucide-react"
 import { Link, useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
 
 import { ChatHeader } from "@/components/chat/chat-header"
 import { PrRow } from "@/components/chat/pr-pill"
+import { ProjectSettings } from "@/components/project-settings"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,16 +28,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
-import { Textarea } from "@/components/ui/textarea"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { stopMessage } from "@/lib/chat"
 import {
@@ -54,7 +46,6 @@ import {
   deleteProject,
   listLiveRuns,
   listProjects,
-  updateProject,
   type HermesProject,
   type LiveRunStatus,
 } from "@/lib/hermes"
@@ -62,6 +53,8 @@ import { refreshPrs, refreshWorkspace, sessionState, type SessionState } from "@
 
 /** How often the plugin is asked which sessions have a run in flight, while the screen is on. */
 const LIVE_MS = 10_000
+/** While a repo is being added or removed: the plugin does the work, this watches for it to finish. */
+const CHANGING_MS = 3_000
 const DAY_MS = 86_400_000
 const GROUPS: { state: SessionState; label: string }[] = [
   { state: "working", label: "Working" },
@@ -117,27 +110,37 @@ export function ProjectPage() {
   const passed = (useLocation().state as { project?: HermesProject } | null)?.project
   const profile = useLiveQuery(() => db.profiles.get(profileId), [profileId])
   const [fetched, setFetched] = useState<HermesProject>()
-  const [edits, setEdits] = useState<Pick<HermesProject, "name" | "description">>()
-  const base = passed?.id === projectId ? passed : fetched
-  const project = base && { ...base, ...edits }
-  const [editing, setEditing] = useState(false)
+  // The Code screen hands the project over, so it shows at once; it's read again here regardless.
+  const project = fetched ?? (passed?.id === projectId ? passed : undefined)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const [name, setName] = useState("")
-  const [description, setDescription] = useState("")
   const [busy, setBusy] = useState(false)
+  const [reads, setReads] = useState(0)
+  const reload = () => setReads((n) => n + 1)
   const live = useLiveRuns(profile)
+  const changing = project?.folders.some((f) => f.status === "cloning" || f.status === "removing")
 
-  // Opened from a link or a reload, with no project handed over by the Code screen.
   useEffect(() => {
-    if (!profile || passed?.id === projectId) return
+    if (!profile) return
     let cancelled = false
     listProjects(profile)
-      .then((all) => !cancelled && setFetched(all.find((p) => p.id === projectId)))
+      .then((all) => {
+        const found = all.find((p) => p.id === projectId)
+        if (!cancelled && found) setFetched(found)
+      })
       .catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [profile, passed, projectId])
+  }, [profile, projectId, reads])
+
+  useEffect(() => {
+    if (!changing) return
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") setReads((n) => n + 1)
+    }, CHANGING_MS)
+    return () => window.clearInterval(timer)
+  }, [changing])
 
   // Bots on one server share its projects, so their sessions all belong here.
   const listed = useLiveQuery(async () => {
@@ -188,32 +191,30 @@ export function ProjectPage() {
 
   const prs = projectPrs(sessions ?? [])
 
-  // A session spans every repo of the project; without one there's nowhere for it to work.
+  // A session spans every repo of the project; without one there's nowhere for it to work, and
+  // while one is still being cloned it would start without it.
+  const adding = project?.folders.flatMap((f) => (f.status === "cloning" && f.repo ? [f.repo] : []))
   const canStart = Boolean(
-    profile?.apiKey && project?.status === "ready" && project.folders.some((folder) => folder.git),
+    profile?.apiKey &&
+    project?.status === "ready" &&
+    !project.archived &&
+    !adding?.length &&
+    project.folders.some((folder) => folder.git),
   )
+  // The repos a session works in that are no longer in the project.
+  // Named as the plugin names a session's repos: by GitHub origin, else by folder.
+  const current = new Set(
+    project?.folders.filter((f) => f.git).map((f) => f.repo ?? f.path.split(/[\\/]/).at(-1)),
+  )
+  const removedRepos = (c: Conversation) =>
+    project?.status === "ready"
+      ? (c.worktree?.repos ?? []).map((r) => r.name).filter((name) => !current.has(name))
+      : []
 
   const start = async () => {
     if (!profile) return
     const conversation = await createConversation(profile.id, { title: "Draft session", projectId })
     navigate(`/c/${conversation.id}`)
-  }
-
-  const save = async () => {
-    if (!profile || !name.trim()) return
-    setBusy(true)
-    try {
-      await updateProject(profile, projectId, {
-        name: name.trim(),
-        description: description.trim(),
-      })
-      setEdits({ name: name.trim(), description: description.trim() || null })
-      setEditing(false)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't save the project.")
-    } finally {
-      setBusy(false)
-    }
   }
 
   const remove = async () => {
@@ -260,37 +261,15 @@ export function ProjectPage() {
         }
         actions={
           project?.status === "ready" && (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    variant="outline"
-                    size="icon-lg"
-                    className="size-11 rounded-full bg-background/80 backdrop-blur"
-                    aria-label="Project options"
-                  />
-                }
-              >
-                <EllipsisIcon />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-44">
-                <DropdownMenuItem
-                  onClick={() => {
-                    setName(project.name)
-                    setDescription(project.description ?? "")
-                    setEditing(true)
-                  }}
-                >
-                  <PencilIcon />
-                  Edit
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem variant="destructive" onClick={() => setDeleting(true)}>
-                  <Trash2Icon />
-                  Delete
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <Button
+              variant="outline"
+              size="icon-lg"
+              className="size-11 rounded-full bg-background/80 backdrop-blur"
+              onClick={() => setSettingsOpen(true)}
+              aria-label="Project settings"
+            >
+              <Settings2Icon />
+            </Button>
           )
         }
       />
@@ -315,7 +294,12 @@ export function ProjectPage() {
                   >
                     {group.sessions.map((c) => (
                       <li key={c.id}>
-                        <SessionItem session={c} state={group.state} now={now} />
+                        <SessionItem
+                          session={c}
+                          state={group.state}
+                          now={now}
+                          removed={removedRepos(c)}
+                        />
                       </li>
                     ))}
                   </Group>
@@ -323,18 +307,29 @@ export function ProjectPage() {
               </div>
             )}
           </div>
-          {canStart && (
-            <div className="sticky bottom-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-              <div className="mx-auto flex w-full max-w-2xl justify-end">
-                <Button
-                  size="lg"
-                  className="h-12 rounded-full px-5 shadow-lg"
-                  onClick={() => void start()}
-                >
-                  <PlusIcon /> New session
-                </Button>
+          {project?.archived ? (
+            <BottomNote icon={<ArchiveIcon className="size-4 shrink-0" />}>
+              This project is archived. Unarchive it in settings to start a session.
+            </BottomNote>
+          ) : adding?.length ? (
+            <BottomNote icon={<Spinner className="size-4 shrink-0" />}>
+              Adding {names.format(adding)}. New sessions can start once{" "}
+              {adding.length === 1 ? "it's" : "they're"} cloned.
+            </BottomNote>
+          ) : (
+            canStart && (
+              <div className="sticky bottom-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+                <div className="mx-auto flex w-full max-w-2xl justify-end">
+                  <Button
+                    size="lg"
+                    className="h-12 rounded-full px-5 shadow-lg"
+                    onClick={() => void start()}
+                  >
+                    <PlusIcon /> New session
+                  </Button>
+                </div>
               </div>
-            </div>
+            )
           )}
         </TabsContent>
         <TabsContent value="library" />
@@ -368,40 +363,17 @@ export function ProjectPage() {
         </TabsContent>
       </Tabs>
 
-      <AlertDialog open={editing} onOpenChange={setEditing}>
-        <AlertDialogContent>
-          <form
-            className="contents"
-            onSubmit={(event) => {
-              event.preventDefault()
-              void save()
-            }}
-          >
-            <AlertDialogHeader>
-              <AlertDialogTitle>Edit project</AlertDialogTitle>
-            </AlertDialogHeader>
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              autoFocus
-              aria-label="Project name"
-            />
-            <Textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={3}
-              placeholder="Description (optional)"
-              aria-label="Project description"
-            />
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction type="submit" disabled={busy || !name.trim()}>
-                Save
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </form>
-        </AlertDialogContent>
-      </AlertDialog>
+      {profile && project?.status === "ready" && (
+        <ProjectSettings
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+          profile={profile}
+          project={project}
+          onChanged={reload}
+          onArchived={() => up("/code")}
+          onDelete={() => setDeleting(true)}
+        />
+      )}
 
       <AlertDialog open={deleting} onOpenChange={setDeleting}>
         <AlertDialogContent size="sm">
@@ -420,6 +392,23 @@ export function ProjectPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  )
+}
+
+const names = new Intl.ListFormat(undefined, { type: "conjunction" })
+
+/** In place of the New session button: why there's none right now. */
+function BottomNote({ icon, children }: { icon: ReactNode; children: ReactNode }) {
+  return (
+    <div className="sticky bottom-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <div
+        role="status"
+        className="mx-auto flex w-full max-w-2xl items-center gap-3 rounded-3xl border bg-background/90 px-4 py-3 text-sm shadow-lg backdrop-blur"
+      >
+        {icon}
+        <span className="min-w-0 flex-1">{children}</span>
+      </div>
     </div>
   )
 }
@@ -456,19 +445,28 @@ function SessionItem({
   session,
   state,
   now,
+  removed,
 }: {
   session: Conversation
   state: SessionState
   now: number
+  /** Repos the session works in that were removed from the project, which makes it read-only. */
+  removed: string[]
 }) {
-  const line2 = prLine(session) ?? session.worktree?.branch ?? session.draft
+  const line2 = removed.length
+    ? `${names.format(removed)} removed`
+    : (prLine(session) ?? session.worktree?.branch ?? session.draft)
   return (
     <Link
       to={`/c/${session.id}`}
       className="-mx-2 flex min-h-14 items-center gap-3 rounded-2xl px-2 py-3 outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
     >
       <span className="flex w-5 shrink-0 items-center justify-center">
-        <StateIcon state={state} />
+        {removed.length && state !== "working" ? (
+          <LockIcon className="size-4 text-muted-foreground" />
+        ) : (
+          <StateIcon state={state} />
+        )}
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-3">
