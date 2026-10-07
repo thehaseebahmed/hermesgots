@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   ArrowLeftIcon,
   CheckIcon,
+  ChevronUpIcon,
   CircleAlertIcon,
   EllipsisIcon,
   PencilIcon,
@@ -13,6 +14,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
 
 import { ChatHeader } from "@/components/chat/chat-header"
+import { PrRow } from "@/components/chat/pr-pill"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,6 +26,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -42,6 +45,7 @@ import {
   deleteConversation,
   type Conversation,
   type Profile,
+  type PullRequestRef,
 } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import {
@@ -52,7 +56,7 @@ import {
   type HermesProject,
   type LiveRunStatus,
 } from "@/lib/hermes"
-import { sessionState, type SessionState } from "@/lib/workspace"
+import { refreshPrs, refreshWorkspace, sessionState, type SessionState } from "@/lib/workspace"
 
 /** How often the plugin is asked which sessions have a run in flight, while the screen is on. */
 const LIVE_MS = 10_000
@@ -63,6 +67,8 @@ const GROUPS: { state: SessionState; label: string }[] = [
   { state: "idle", label: "Idle" },
   { state: "resolved", label: "Resolved" },
 ]
+/** A finished group longer than this starts collapsed. */
+const FOLD_OVER = 5
 
 function serverKey(baseUrl: string) {
   return baseUrl.trim().replace(/\/+$/, "").replace(/\/v1$/, "")
@@ -158,6 +164,19 @@ export function ProjectPage() {
   // A session nothing was sent in (or typed for) isn't one yet. Synced ones carry their activity in
   // `updatedAt`, since their messages load only when opened.
   const sessions = rows?.filter((c) => c.draftAt || c.updatedAt > c.createdAt || local?.[c.id]?.any)
+
+  // A session's PRs are read when it's open; this reads them for every session once per visit, its
+  // worktree first when this device hasn't seen it (a session started elsewhere).
+  const read = useRef(new Set<string>())
+  useEffect(() => {
+    for (const c of sessions ?? []) {
+      if (read.current.has(c.id)) continue
+      read.current.add(c.id)
+      void (c.worktree ? Promise.resolve() : refreshWorkspace(c.id)).then(() => refreshPrs(c.id))
+    }
+  }, [sessions])
+
+  const prs = projectPrs(sessions ?? [])
 
   // A session spans every repo of the project; without one there's nowhere for it to work.
   const canStart = Boolean(
@@ -267,13 +286,11 @@ export function ProjectPage() {
         }
       />
       <Tabs defaultValue="sessions" className="flex-1">
-        <div className="px-4">
-          <TabsList className="mx-auto max-w-2xl">
-            <TabsTrigger value="sessions">Sessions</TabsTrigger>
-            <TabsTrigger value="library">Library</TabsTrigger>
-            <TabsTrigger value="prs">PRs</TabsTrigger>
-          </TabsList>
-        </div>
+        <TabsList>
+          <TabsTrigger value="sessions">Sessions</TabsTrigger>
+          <TabsTrigger value="library">Library</TabsTrigger>
+          <TabsTrigger value="prs">PRs</TabsTrigger>
+        </TabsList>
         <TabsContent value="sessions" className="flex flex-col overflow-y-auto">
           <div className="mx-auto w-full max-w-2xl flex-1 px-4 py-6">
             {sessions && sessions.length === 0 ? (
@@ -281,21 +298,18 @@ export function ProjectPage() {
             ) : (
               <div className="flex flex-col gap-6">
                 {grouped.map((group) => (
-                  <section key={group.state} aria-label={group.label}>
-                    <h2 className="flex items-center gap-3 px-1 pb-1 text-sm text-muted-foreground">
-                      <span>
-                        {group.label} ({group.sessions.length})
-                      </span>
-                      <span className="h-px flex-1 bg-border" />
-                    </h2>
-                    <ul>
-                      {group.sessions.map((c) => (
-                        <li key={c.id}>
-                          <SessionItem session={c} state={group.state} now={now} />
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
+                  <Group
+                    key={group.state}
+                    label={group.label}
+                    count={group.sessions.length}
+                    fold={group.state === "resolved"}
+                  >
+                    {group.sessions.map((c) => (
+                      <li key={c.id}>
+                        <SessionItem session={c} state={group.state} now={now} />
+                      </li>
+                    ))}
+                  </Group>
                 ))}
               </div>
             )}
@@ -315,7 +329,34 @@ export function ProjectPage() {
           )}
         </TabsContent>
         <TabsContent value="library" />
-        <TabsContent value="prs" />
+        <TabsContent value="prs" className="overflow-y-auto">
+          <div className="mx-auto w-full max-w-2xl px-4 py-6">
+            {sessions && prs.length === 0 ? (
+              <p className="px-1 text-sm text-muted-foreground">No pull requests yet.</p>
+            ) : (
+              <div className="flex flex-col gap-6">
+                {PR_GROUPS.map((group) => {
+                  const list = prs.filter((pr) => group.states.includes(pr.state))
+                  if (!list.length) return null
+                  return (
+                    <Group
+                      key={group.label}
+                      label={group.label}
+                      count={list.length}
+                      fold={group.fold}
+                    >
+                      {list.map((pr) => (
+                        <li key={`${pr.repo}#${pr.number}`}>
+                          <PrRow pr={pr} />
+                        </li>
+                      ))}
+                    </Group>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </TabsContent>
       </Tabs>
 
       <AlertDialog open={editing} onOpenChange={setEditing}>
@@ -431,4 +472,50 @@ function SessionItem({
       </span>
     </Link>
   )
+}
+
+/**
+ * A titled list that folds away; a finished one (`fold`) longer than `FOLD_OVER` starts folded.
+ * It's mounted once its first item is known, so that count decides.
+ */
+function Group({
+  label,
+  count,
+  fold,
+  children,
+}: {
+  label: string
+  count: number
+  fold?: boolean
+  children: ReactNode
+}) {
+  return (
+    <Collapsible defaultOpen={!fold || count <= FOLD_OVER} render={<section aria-label={label} />}>
+      <h2>
+        <CollapsibleTrigger className="group -mx-1 flex min-h-11 items-center gap-1.5 rounded-xl px-2 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+          {label} ({count})
+          <ChevronUpIcon className="size-4 rotate-180 transition-transform group-data-panel-open:rotate-0 motion-reduce:transition-none" />
+        </CollapsibleTrigger>
+      </h2>
+      <CollapsibleContent>
+        <ul>{children}</ul>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+const PR_GROUPS: { label: string; states: PullRequestRef["state"][]; fold?: boolean }[] = [
+  { label: "Open", states: ["open", "draft"] },
+  { label: "Done", states: ["merged", "closed"], fold: true },
+]
+
+/** Every session's pull requests, each once, newest number first. */
+function projectPrs(sessions: Conversation[]) {
+  const byKey = new Map<string, PullRequestRef>()
+  for (const pr of sessions.flatMap((c) => c.prs ?? [])) {
+    const key = `${pr.repo}#${pr.number}`
+    const known = byKey.get(key)
+    if (!known || pr.at > known.at) byKey.set(key, pr)
+  }
+  return [...byKey.values()].sort((a, b) => b.number - a.number || a.repo.localeCompare(b.repo))
 }
