@@ -327,7 +327,8 @@ export const BOTS: BotDefinition[] = [
   {
     id: "tri",
     name: "Tri",
-    description: "A soft little triangle who tilts its head left, then right, and reads everything twice.",
+    description:
+      "A soft little triangle who tilts its head left, then right, and reads everything twice.",
     draw: (uid) => (
       <g className="bot-breathe">
         {body(uid, tri, TRI)}
@@ -473,7 +474,8 @@ export const BOTS: BotDefinition[] = [
   {
     id: "gem",
     name: "Gem",
-    description: "A plump purple diamond that floats up and does a full flip when it's thinking hard.",
+    description:
+      "A plump purple diamond that floats up and does a full flip when it's thinking hard.",
     draw: (uid) => (
       <g className="bot-float">
         {body(uid, gem, GEM)}
