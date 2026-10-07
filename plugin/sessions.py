@@ -27,7 +27,7 @@ import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from .store import connect
 
@@ -630,11 +630,13 @@ def is_code_session(session_id: str) -> bool:
     return bool(path.exists() and read(path, session_id))
 
 
-def live_runs(adapter: Any) -> Tuple[Dict[str, str], Dict[str, str]]:
+def live_runs(
+    adapter: Any, owned: Optional[Callable[[str], bool]] = None
+) -> Tuple[Dict[str, str], Dict[str, str]]:
     """Each session with a run in flight: ``running`` or ``waiting_for_approval``, and its run id.
 
     The run id is what lets a client that lost track of a reply (a reload, a dropped stream) follow
-    the run again.
+    the run again. ``owned`` keeps only the runs the caller's profile started.
     """
     statuses = getattr(adapter, "_run_statuses", None)
     if not isinstance(statuses, dict):
@@ -642,7 +644,7 @@ def live_runs(adapter: Any) -> Tuple[Dict[str, str], Dict[str, str]]:
     live: Dict[str, str] = {}
     run_ids: Dict[str, str] = {}
     for run_id, status in list(statuses.items()):
-        if not isinstance(status, dict):
+        if not isinstance(status, dict) or (owned and not owned(run_id)):
             continue
         state = LIVE_STATUSES.get(status.get("status"))
         session_id = status.get("session_id")
@@ -655,13 +657,17 @@ def live_runs(adapter: Any) -> Tuple[Dict[str, str], Dict[str, str]]:
     return live, run_ids
 
 
-def waiting(adapter: Any, path: Path, hermes_home: Path) -> Dict[str, Dict[str, Any]]:
+def waiting(
+    adapter: Any, path: Path, hermes_home: Path, owned: Optional[Callable[[str], bool]] = None
+) -> Dict[str, Dict[str, Any]]:
     """Why each session waits on the user: its run's questions or approval, or a plan to review.
     A project session also names its project."""
     found: Dict[str, Dict[str, Any]] = {}
     statuses = getattr(adapter, "_run_statuses", None)
-    for status in list(statuses.values()) if isinstance(statuses, dict) else []:
+    for run_id, status in list(statuses.items()) if isinstance(statuses, dict) else []:
         if not isinstance(status, dict) or status.get("status") != "waiting_for_approval":
+            continue
+        if owned and not owned(run_id):
             continue
         session_id = status.get("session_id")
         if not isinstance(session_id, str) or not session_id:

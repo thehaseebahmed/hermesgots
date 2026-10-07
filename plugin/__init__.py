@@ -75,6 +75,39 @@ def _error(web: Any, message: str, status: int):
     return web.json_response({"error": {"message": message}}, status=status)
 
 
+def mirror_for_profiles(app: Any, web: Any) -> None:
+    """Serve every route again at ``PREFIX/p/{profile}/...`` for bots at ``/p/<profile>``.
+
+    Hermes registers a catch-all for ``/p/{profile}/...`` before plugin routes, so the natural
+    ``/p/<profile>/api/plugins/...`` can't be reached. A path with ``{profile}`` inside the plugin's
+    own prefix still gets Hermes's prefix middleware: it validates the profile, scopes the home
+    and credentials, and ``_check_auth`` then takes that profile's own key.
+    """
+    try:
+        from gateway.platforms.api_server import _api_request_profile
+    except ImportError:
+        logger.warning("memento: this Hermes can't scope routes by profile; /p/<profile> bots stay off")
+        return
+
+    def scoped(handler: Any):
+        async def run(request: "web.Request"):
+            # A single-profile gateway resolves any prefix to None, so only a request the middleware
+            # really scoped to the named profile may reach the handler.
+            if _api_request_profile.get() != request.match_info.get("profile"):
+                return _error(web, "Unknown or unconfigured profile", 404)
+            return await handler(request)
+
+        return run
+
+    for route in list(app.router.routes()):
+        path = route.resource.canonical if route.resource else ""
+        if route.method == "HEAD" or not path.startswith(PREFIX + "/"):
+            continue
+        app.router.add_route(
+            route.method, f"{PREFIX}/p/{{profile}}{path[len(PREFIX):]}", scoped(route.handler)
+        )
+
+
 def _wire_api_server(app: Any, adapter: Any) -> None:
     from aiohttp import web
 
@@ -112,6 +145,30 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "Unauthorized", 401)
         return check(request)
 
+    def hooks_live() -> bool:
+        # The routes of a /p/<profile> bot are served by the default profile's copy of the plugin,
+        # but the hooks (context, todos, labels, plans) run only where the profile loaded it too.
+        try:
+            from hermes_cli.plugins import get_plugin_manager
+
+            loaded = getattr(get_plugin_manager(), "_plugins", {}).get("memento")
+            return bool(loaded and loaded.enabled and not loaded.error)
+        except Exception:
+            return True
+
+    def owned_runs(request: "web.Request"):
+        # _run_statuses belongs to the one adapter every profile shares; a run is owned by the
+        # profile and key that started it. Fail open if a Hermes update renames the scope.
+        owners = getattr(adapter, "_run_owners", None)
+        scope = getattr(adapter, "_run_idempotency_scope", None)
+        if not isinstance(owners, dict) or not callable(scope):
+            return None
+        try:
+            mine = scope(request)
+        except Exception:
+            return None
+        return lambda run_id: owners.get(run_id) == mine
+
     async def info(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -138,9 +195,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "clarify",
                     "todo_tool",
                     "attachments",
+                    "profile_routes",
                 ],
                 "clarify": asks,
                 "todo_tool": todo_tool,
+                "hooks": hooks_live(),
             }
         )
 
@@ -570,10 +629,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         denied = unauthorized(request)
         if denied is not None:
             return denied
-        live, run_ids = sessions.live_runs(adapter)
+        owned = owned_runs(request)
+        live, run_ids = sessions.live_runs(adapter, owned)
         try:
             waiting = await asyncio.to_thread(
-                sessions.waiting, adapter, store_path(), hermes_home()
+                sessions.waiting, adapter, store_path(), hermes_home(), owned
             )
         except Exception:
             logger.debug("memento: reading waiting sessions failed", exc_info=True)
@@ -648,6 +708,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/attachments", upload_attachment)
     app.router.add_get(f"{PREFIX}/runs/live", live_runs)
     app.router.add_post(f"{PREFIX}/runs/{{run_id}}/clarify", answer_clarify)
+    mirror_for_profiles(app, web)
     logger.info("memento: serving %s on the API server", PREFIX)
 
 
