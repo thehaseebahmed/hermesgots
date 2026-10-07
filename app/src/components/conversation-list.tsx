@@ -19,7 +19,7 @@ import { db } from "@/lib/db"
 import { useNav } from "@/lib/nav"
 import { useSyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
-import { reasonText, useWaitingSessions, type WaitingReason } from "@/lib/waiting"
+import { reasonText, useWaiting, useWaitingSessions, type WaitingReason } from "@/lib/waiting"
 
 const RECENTS = 10
 
@@ -47,8 +47,18 @@ function RootLink({ to, onClick, ...props }: NavLinkProps & { to: string }) {
   )
 }
 
-/** The newest chats across every bot, each with its bot's image. Project sessions stay on Code. */
+const REASON_ICONS: Record<WaitingReason["kind"], typeof ListChecksIcon> = {
+  question: MessageCircleQuestionMarkIcon,
+  approval: ShieldAlertIcon,
+  plan: ListChecksIcon,
+}
+
+/**
+ * The newest chats across every bot, each with its bot's image, and why one waits on the user when
+ * it does. Project sessions stay on Code.
+ */
 function Recents({ onNavigate }: { onNavigate?: () => void }) {
+  const live = useWaiting()
   const recents = useLiveQuery(async () => {
     const [chats, profiles] = await Promise.all([
       db.conversations
@@ -60,7 +70,22 @@ function Recents({ onNavigate }: { onNavigate?: () => void }) {
       db.profiles.toArray(),
     ])
     const bots = new Map(profiles.map((p) => [p.id, p]))
-    return chats.map((chat) => ({ chat, bot: bots.get(chat.profileId) }))
+    // This device's own unanswered approval or question, which a keyless bot or one without the
+    // plugin can't report.
+    const open = await db.messages
+      .where("conversationId")
+      .anyOf(chats.map((c) => c.id))
+      .filter((m) => !!(m.approval && !m.approval.resolved) || !!(m.clarify && !m.clarify.resolved))
+      .toArray()
+    const local = new Map<string, WaitingReason>(
+      open.map((m) => [
+        m.conversationId,
+        m.clarify && !m.clarify.resolved
+          ? { kind: "question", count: m.clarify.questions.length || 1 }
+          : { kind: "approval", command: m.approval?.command },
+      ]),
+    )
+    return chats.map((chat) => ({ chat, bot: bots.get(chat.profileId), local: local.get(chat.id) }))
   }, [])
 
   return (
@@ -72,14 +97,30 @@ function Recents({ onNavigate }: { onNavigate?: () => void }) {
         <p className="px-3 py-2 text-sm text-muted-foreground">No chats yet. Say hi to Hermes!</p>
       )}
       <ul className="flex flex-col gap-0.5">
-        {recents?.map(({ chat, bot }) => (
-          <li key={chat.id}>
-            <RootLink to={`/c/${chat.id}`} onClick={onNavigate} className={rowClass}>
-              <Bot id={bot?.botId} className="size-5" />
-              <span className="min-w-0 flex-1 truncate">{chat.title}</span>
-            </RootLink>
-          </li>
-        ))}
+        {recents?.map(({ chat, bot, local }) => {
+          const reason = local ?? live[chat.hermesSessionId]
+          const Icon = reason && REASON_ICONS[reason.kind]
+          return (
+            <li key={chat.id}>
+              <RootLink
+                to={`/c/${chat.id}`}
+                onClick={onNavigate}
+                className={(state) => cn(rowClass(state), reason && "py-2")}
+              >
+                <Bot id={bot?.botId} className={cn("size-5", reason && "self-start")} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{chat.title}</span>
+                  {Icon && (
+                    <span className="flex items-center gap-1 text-xs text-warning">
+                      <Icon className="size-3.5 shrink-0" />
+                      <span className="min-w-0 truncate">{reasonText(reason)}</span>
+                    </span>
+                  )}
+                </span>
+              </RootLink>
+            </li>
+          )
+        })}
       </ul>
       {(recents?.length ?? 0) > 0 && (
         <button
@@ -92,12 +133,6 @@ function Recents({ onNavigate }: { onNavigate?: () => void }) {
       )}
     </nav>
   )
-}
-
-const REASON_ICONS: Record<WaitingReason["kind"], typeof ListChecksIcon> = {
-  question: MessageCircleQuestionMarkIcon,
-  approval: ShieldAlertIcon,
-  plan: ListChecksIcon,
 }
 
 /** Project sessions, across every project, that wait on the user. Hidden when there are none. */
