@@ -395,6 +395,68 @@ def env_changes(home: Path, url: str, origins: List[str]) -> Dict[str, str]:
     return changes
 
 
+def is_linked(state: Dict[str, Any]) -> bool:
+    """Linked, and the registry still knows this host's token."""
+    if not state.get("token") or state.get("revoked"):
+        return False
+    try:
+        call(state["site"], "GET", "inbox", token=state["token"])
+    except LinkError as error:
+        if error.status != 401:
+            raise
+        return False
+    return True
+
+
+def claim(home: Path, state: Dict[str, Any], code: str, site: str) -> Dict[str, Any]:
+    """Claims a link code, checks the account's key against it and saves the host token."""
+    code_id, secret, expected = parse_code(code)
+    answer = call(site, "POST", "claim", body={"codeId": code_id, "secret": secret})
+    inbox = answer["inbox"]
+    # The code came from the app, not the registry: a registry that swapped in its own key would
+    # get every API key sealed to it.
+    if to_base32(fingerprint(inbox["publicKey"]), 13) != expected:
+        try:
+            call(site, "DELETE", "host", token=answer["token"])
+        except LinkError:
+            pass
+        raise LinkError(
+            "The account's key doesn't match the link code, so nothing was sent. "
+            "Copy a new command from the app."
+        )
+    state = {
+        "site": site,
+        "userId": answer["userId"],
+        "hostId": answer["hostId"],
+        "token": answer["token"],
+        "inbox": inbox,
+        "origins": answer.get("origins") or [],
+        **({"url": state["url"]} if state.get("url") else {}),
+    }
+    save_state(home, state)
+    return state
+
+
+def set_url(home: Path, state: Dict[str, Any], url: str) -> str:
+    url = url.strip().rstrip("/")
+    if not re.match(r"^https?://[^\s/]+", url):
+        raise LinkError(f"{url} isn't an http(s) URL.")
+    state["url"] = url
+    save_state(home, state)
+    return url
+
+
+def apply_env(home: Path, changes: Dict[str, str]) -> None:
+    for key, value in changes.items():
+        _set_env(home, key, value)
+
+
+def http_warning(url: str) -> Optional[str]:
+    if url.startswith("http://") and not re.match(r"^http://(localhost|127\.|\[::1\])", url):
+        return "A browser on https won't call an http:// URL. Use https (Tailscale, a tunnel or a proxy)."
+    return None
+
+
 def cmd_link(args: Any) -> int:
     from hermes_constants import get_hermes_home
 
@@ -407,98 +469,76 @@ def cmd_link(args: Any) -> int:
     assume = bool(args.yes)
 
     try:
-        linked = bool(state.get("token")) and not state.get("revoked")
-        if linked:
-            try:
-                call(state["site"], "GET", "inbox", token=state["token"])
-            except LinkError as error:
-                if error.status != 401:
-                    raise
-                linked = False
-        if linked:
+        if is_linked(state):
             print("This profile is already linked. To link it to another account, run "
                   "`hermes memento unlink` first.")
         else:
             if not args.code:
                 print("Paste the link code from Memento: hermes memento link <code> --site <url>")
                 return 2
-            code_id, secret, expected = parse_code(args.code)
-            answer = call(site, "POST", "claim", body={"codeId": code_id, "secret": secret})
-            inbox = answer["inbox"]
-            # The code came from the app, not the registry: a registry that swapped in its own key
-            # would get every API key sealed to it.
-            if to_base32(fingerprint(inbox["publicKey"]), 13) != expected:
-                try:
-                    call(site, "DELETE", "host", token=answer["token"])
-                except LinkError:
-                    pass
-                print("The account's key doesn't match the link code, so nothing was sent. "
-                      "Copy a new command from the app.")
-                return 1
-            state = {
-                "site": site,
-                "userId": answer["userId"],
-                "hostId": answer["hostId"],
-                "token": answer["token"],
-                "inbox": inbox,
-                "origins": answer.get("origins") or [],
-                **({"url": state["url"]} if state.get("url") else {}),
-            }
-            save_state(home, state)
+            state = claim(home, state, args.code, site)
 
-        url = args.url or _ask(
+        url = set_url(home, state, args.url or _ask(
             "The URL your phone reaches this profile's API server at", default_url(home, state), assume
-        )
-        url = url.strip().rstrip("/")
-        if not re.match(r"^https?://[^\s/]+", url):
-            print(f"{url} isn't an http(s) URL.")
-            return 2
-        state["url"] = url
-        save_state(home, state)
+        ))
 
         changes = env_changes(home, url, state.get("origins") or [])
         restart = False
         if changes:
             print(f"Memento needs these lines in {home / '.env'}:")
             for key, value in changes.items():
-                shown = value if key != "API_SERVER_KEY" else value[:6] + "…"
-                print(f"  {key}={shown}")
+                print(f"  {key}={shown_env(key, value)}")
             if _confirm("Add them?", assume):
-                for key, value in changes.items():
-                    _set_env(home, key, value)
+                apply_env(home, changes)
                 restart = True
             else:
                 print("Skipped. The app can't reach this profile until they're set.")
 
         if publish(home, state, process_env=True, force=True):
+            # Checks in at once, so the app shows it online without waiting for the gateway.
+            check_in(home, process_env=True)
             print(f"Linked {record(home, state, process_env=True)['name']}. It shows up in Memento now.")
         else:
             print("Linked, but this profile has no API_SERVER_KEY yet, so the app can't use it.")
         if restart:
             print("Restart the gateway to apply the .env changes: hermes gateway restart")
-        if url.startswith("http://") and not re.match(r"^http://(localhost|127\.|\[::1\])", url):
-            print("Note: a browser on https won't call an http:// URL. Use https (Tailscale, a tunnel or a proxy).")
+        warning = http_warning(url)
+        if warning:
+            print(f"Note: {warning}")
         return 0
     except LinkError as error:
         print(str(error))
         return 1
 
 
-def cmd_unlink(args: Any) -> int:
-    from hermes_constants import get_hermes_home
+def shown_env(key: str, value: str) -> str:
+    return value if key != "API_SERVER_KEY" else value[:6] + "…"
 
-    home = Path(get_hermes_home())
+
+def unlink(home: Path) -> Optional[str]:
+    """Drops the link, here and at the registry. Returns a problem worth showing, if any."""
     state = load_state(home)
-    if not state.get("token"):
-        print("This profile isn't linked.")
-        return 0
+    problem = None
     try:
         call(state["site"], "DELETE", "host", token=state["token"])
     except LinkError as error:
         if error.status != 401:
-            print(f"{error} The link is forgotten here anyway; remove the bot in Memento too.")
+            problem = f"{error} The link is forgotten here anyway; remove the bot in Memento too."
     # The next link to another account reuses them as its defaults.
     save_state(home, {key: state[key] for key in ("site", "url") if state.get(key)})
+    return problem
+
+
+def cmd_unlink(args: Any) -> int:
+    from hermes_constants import get_hermes_home
+
+    home = Path(get_hermes_home())
+    if not load_state(home).get("token"):
+        print("This profile isn't linked.")
+        return 0
+    problem = unlink(home)
+    if problem:
+        print(problem)
     print("Unlinked. The bot is gone from Memento.")
     return 0
 

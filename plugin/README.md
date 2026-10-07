@@ -48,6 +48,10 @@ To update, run `hermes plugins update memento`, then restart the gateway.
 
 The gateway then checks in at start and every 10 minutes for each profile it serves, re-publishing the record when the URL or key changed, when the app lost it, or when the account's key changed. A host removed in the app stops (`Check-in: removed in Memento`). `hermes memento status` checks in once and says how it went; `hermes memento unlink` removes the profile from the account.
 
+The Hermes dashboard's **Memento** tab does the same for the dashboard's profile: paste the code, the address you open Memento at and the API server URL, then add the `.env` lines it lists if any. It also shows the link and unlinks.
+
+Memento needs this plugin on every profile it uses: chat lists, context use, todos, questions and Code all live here.
+
 ## Requirements
 
 - A Hermes version with the cron execution ledger and `ctx.register_platform_handler` (and `ctx.register_cli_command` for `hermes memento`).
