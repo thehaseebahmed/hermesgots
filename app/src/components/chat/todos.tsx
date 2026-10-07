@@ -1,4 +1,4 @@
-import { CheckIcon, XIcon } from "lucide-react"
+import { CheckIcon, PauseIcon, XIcon } from "lucide-react"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
@@ -62,9 +62,25 @@ function Ring({ value }: { value: number }) {
   )
 }
 
+/**
+ * An item the agent left in progress when its turn ended: it isn't being worked on any more, so it
+ * doesn't spin.
+ */
+const stalled = (item: Todo, live: boolean) => item.status === "in_progress" && !live
+
 /** The agent's progress through its todo list, for the pill row above the composer; opens the list. */
-export function TodosPill({ items, onClick }: { items: Todo[]; onClick: () => void }) {
+export function TodosPill({
+  items,
+  live,
+  onClick,
+}: {
+  items: Todo[]
+  live: boolean
+  onClick: () => void
+}) {
   const { done, total } = progress(items)
+  // A part-filled ring reads as a spinner, so a list the agent stopped on shows it paused.
+  const stopped = items.some((item) => stalled(item, live))
   return (
     <Button
       type="button"
@@ -72,13 +88,23 @@ export function TodosPill({ items, onClick }: { items: Todo[]; onClick: () => vo
       className="h-11 shrink-0 gap-2 rounded-full px-4 tabular-nums"
       onClick={onClick}
     >
-      <Ring value={total ? done / total : 0} />
+      {stopped ? (
+        <PauseIcon className="size-5 text-muted-foreground" aria-label="Stopped" />
+      ) : (
+        <Ring value={total ? done / total : 0} />
+      )}
       {done}/{total} todos
     </Button>
   )
 }
 
-function StatusIcon({ status }: { status: Todo["status"] }) {
+function StatusIcon({ status, stopped }: { status: Todo["status"]; stopped?: boolean }) {
+  if (stopped)
+    return (
+      <span className="flex size-7 items-center justify-center text-muted-foreground">
+        <PauseIcon className="size-4" aria-label="Stopped" />
+      </span>
+    )
   if (status === "completed")
     return (
       <span className="flex size-7 items-center justify-center rounded-full bg-primary/15 text-primary">
@@ -108,10 +134,13 @@ export function TodosSheet({
   open,
   onOpenChange,
   items,
+  live,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   items: Todo[]
+  /** A turn is running, so an item in progress is being worked on. */
+  live: boolean
 }) {
   const { done, total } = progress(items)
   const levels = depths(items)
@@ -129,6 +158,7 @@ export function TodosSheet({
         <ol className="flex flex-col px-6 pt-4">
           {items.map((item, index) => {
             const finished = item.status === "completed" || item.status === "cancelled"
+            const stopped = stalled(item, live)
             return (
               <li
                 key={item.id}
@@ -137,7 +167,7 @@ export function TodosSheet({
               >
                 <div className="relative w-7 shrink-0">
                   <div className="flex h-11 items-center">
-                    <StatusIcon status={item.status} />
+                    <StatusIcon status={item.status} stopped={stopped} />
                   </div>
                   {/* Runs from under this item's icon to the next one's. */}
                   {index < items.length - 1 && (
@@ -151,6 +181,7 @@ export function TodosSheet({
                   )}
                 >
                   {item.content}
+                  {stopped && <span className="text-muted-foreground"> · Stopped</span>}
                 </p>
               </li>
             )

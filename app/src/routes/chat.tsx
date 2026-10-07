@@ -446,7 +446,9 @@ export function ChatPage() {
           // One line, centred; wider than the screen it scrolls, from the first pill.
           <div className="-mx-3 flex [scrollbar-width:none] overflow-x-auto px-3 pb-2 sm:-mx-4 sm:px-4 [&::-webkit-scrollbar]:hidden">
             <div className="mx-auto flex w-max max-w-none min-w-full shrink-0 justify-center gap-2">
-              {todos.length > 0 && <TodosPill items={todos} onClick={() => setTodosOpen(true)} />}
+              {todos.length > 0 && (
+                <TodosPill items={todos} live={busy} onClick={() => setTodosOpen(true)} />
+              )}
               {session?.prs?.map((pr) => (
                 <PrPill
                   key={pr.repo}
@@ -533,7 +535,7 @@ export function ChatPage() {
       </div>
 
       <UsageSheet open={usageOpen} onOpenChange={setUsageOpen} usage={usage} profile={profile} />
-      <TodosSheet open={todosOpen} onOpenChange={setTodosOpen} items={todos} />
+      <TodosSheet open={todosOpen} onOpenChange={setTodosOpen} items={todos} live={busy} />
 
       <AlertDialog open={renaming} onOpenChange={setRenaming}>
         <AlertDialogContent>
