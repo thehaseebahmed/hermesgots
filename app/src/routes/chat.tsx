@@ -526,7 +526,7 @@ export function ChatPage() {
               }
             }
             leading={
-              hasMessages && configured ? (
+              hasMessages && configured && !(tracked && !live?.tokens) ? (
                 <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />
               ) : undefined
             }
