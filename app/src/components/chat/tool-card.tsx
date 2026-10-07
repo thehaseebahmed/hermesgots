@@ -1,10 +1,12 @@
-import { Fragment, useEffect, useState } from "react"
+import { Fragment, useEffect, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { WrapTextIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { getSettings, saveSettings, type ToolEvent } from "@/lib/db"
 import { formatTool, splitHtml, type Block } from "@/lib/highlight"
+import { exitCode } from "@/lib/tools"
+import { cn } from "@/lib/utils"
 
 const INPUT_TITLES: Record<string, string> = {
   terminal: "Command",
@@ -19,17 +21,17 @@ const INPUT_LANGUAGES: Record<string, string> = {
 /** Tools whose label is a file path, so the output is highlighted as that file. */
 const FILE_TOOLS = new Set(["read_file", "write_file", "patch"])
 
-function useFormatted(text: string, hint?: string) {
+function useFormatted(text: string, hint?: string, omit?: string) {
   const [formatted, setFormatted] = useState<{ text: string; blocks: Block[] }>()
   useEffect(() => {
     let cancelled = false
-    void formatTool(text, hint).then((blocks) => {
+    void formatTool(text, hint, omit ? [omit] : []).then((blocks) => {
       if (!cancelled) setFormatted({ text, blocks })
     })
     return () => {
       cancelled = true
     }
-  }, [text, hint])
+  }, [text, hint, omit])
   return formatted?.text === text ? formatted.blocks : [{ code: text }]
 }
 
@@ -96,17 +98,25 @@ function Section({
   title,
   text,
   hint,
+  omit,
+  aside,
   wrapToggle,
 }: {
   title: string
   text: string
   hint?: string
+  /** A field of the result shown in `aside` instead. */
+  omit?: string
+  aside?: ReactNode
   wrapToggle?: boolean
 }) {
-  const blocks = useFormatted(text, hint)
+  const blocks = useFormatted(text, hint, omit)
   return (
     <section className="flex flex-col gap-2">
-      <h3 className="px-1 text-sm text-muted-foreground">{title}</h3>
+      <div className="flex items-baseline justify-between gap-3 px-1 text-sm text-muted-foreground">
+        <h3>{title}</h3>
+        {aside}
+      </div>
       {blocks.map((block, i) => (
         <CodeBlock key={i} block={block} toggle={wrapToggle} />
       ))}
@@ -116,6 +126,7 @@ function Section({
 
 export function Details({ tool }: { tool: ToolEvent }) {
   const hasLabel = Boolean(tool.label) && tool.label !== tool.tool
+  const code = tool.tool === "terminal" ? exitCode(tool.result) : undefined
   return (
     <>
       {hasLabel && (
@@ -131,6 +142,14 @@ export function Details({ tool }: { tool: ToolEvent }) {
           wrapToggle
           text={tool.result}
           hint={FILE_TOOLS.has(tool.tool) && hasLabel ? tool.label : undefined}
+          omit={code === undefined ? undefined : "exit_code"}
+          aside={
+            code !== undefined && (
+              <span className={cn("tabular-nums", code !== 0 && "text-destructive")}>
+                Exit code {code}
+              </span>
+            )
+          }
         />
       )}
     </>
