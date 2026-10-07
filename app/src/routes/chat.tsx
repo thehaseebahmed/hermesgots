@@ -3,6 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { Link, useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
 import {
+  ArchiveXIcon,
   ArrowLeftIcon,
   CheckIcon,
   EllipsisIcon,
@@ -20,7 +21,12 @@ import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
 import { PrPill } from "@/components/chat/pr-pill"
 import { QuestionCard } from "@/components/chat/question-card"
-import { BlockedCard, PlanReadyCard, ResolvedCard } from "@/components/chat/session-cards"
+import {
+  BlockedCard,
+  DiscardedCard,
+  PlanReadyCard,
+  ResolvedCard,
+} from "@/components/chat/session-cards"
 import { TodosPill, TodosSheet } from "@/components/chat/todos"
 import { ContextRing, UsageSheet, type ContextUsage } from "@/components/chat/usage-sheet"
 import { Bot } from "@/components/bot"
@@ -75,7 +81,7 @@ import {
   planApprovalMessage,
   projectRepos,
   refreshWorkspace,
-  removeSessionWorkspace,
+  closeSessionWork,
   setSessionMode,
   type RepoRef,
 } from "@/lib/workspace"
@@ -192,6 +198,7 @@ export function ChatPage() {
   const messages = useLiveQuery(() => (id ? getMessages(id) : []), [id])
   const [renaming, setRenaming] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [discarding, setDiscarding] = useState(false)
   const [title, setTitle] = useState("")
   const [usageOpen, setUsageOpen] = useState(false)
   const [todosOpen, setTodosOpen] = useState(false)
@@ -329,6 +336,18 @@ export function ChatPage() {
     })
   }, [projectPath])
 
+  /** Before a session is deleted or discarded: its run, worktrees, pull requests and branches. */
+  const closeSession = async () => {
+    if (!session) return
+    stopMessage(session.id)
+    const { kept, errors } = await closeSessionWork(session.id)
+    for (const tree of kept)
+      toast.info(
+        `Kept ${tree.name}: it has ${tree.reason === "dirty" ? "uncommitted" : "unpushed"} changes.`,
+      )
+    for (const error of errors) toast.error(error)
+  }
+
   const send = async (text: string, attachments: Attachment[] = []) => {
     try {
       let conversationId = id
@@ -382,6 +401,7 @@ export function ChatPage() {
               {session ? "Edit" : "Rename"}
             </DropdownMenuItem>
             {session &&
+              !session.discardedAt &&
               (session.resolvedAt ? (
                 <DropdownMenuItem
                   onClick={() => updateConversation(session.id, { resolvedAt: undefined })}
@@ -398,6 +418,12 @@ export function ChatPage() {
                 </DropdownMenuItem>
               ))}
             <DropdownMenuSeparator />
+            {session && !session.discardedAt && (
+              <DropdownMenuItem onClick={() => setDiscarding(true)}>
+                <ArchiveXIcon />
+                Discard
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem variant="destructive" onClick={() => setDeleting(true)}>
               <Trash2Icon />
               Delete
@@ -510,7 +536,11 @@ export function ChatPage() {
             <BotPicker profile={profile} />
           </div>
         )}
-        {session?.resolvedAt ? (
+        {session?.discardedAt ? (
+          <div className="mx-auto w-full max-w-3xl">
+            <DiscardedCard />
+          </div>
+        ) : session?.resolvedAt ? (
           <div className="mx-auto w-full max-w-3xl">
             <ResolvedCard
               onReopen={() => updateConversation(session.id, { resolvedAt: undefined })}
@@ -616,7 +646,7 @@ export function ChatPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Save your draft?</AlertDialogTitle>
             <AlertDialogDescription>
-              This session hasn't started. Save the draft to pick it up later, or discard the
+              This session hasn't started. Save the draft to pick it up later, or delete the
               session.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -629,7 +659,7 @@ export function ChatPage() {
                 up(projectPath)
               }}
             >
-              Discard
+              Delete
             </AlertDialogAction>
             <AlertDialogAction
               onClick={async () => {
@@ -655,7 +685,7 @@ export function ChatPage() {
             </AlertDialogTitle>
             <AlertDialogDescription>
               {session
-                ? "It's removed from this device, and its worktrees from the server unless they have uncommitted or unpushed work. Hermes keeps its own copy of the session."
+                ? "Its pull request is closed and its branch deleted on GitHub, and it's removed from the app. Hermes keeps its own copy of the session."
                 : "It's removed from this device. Hermes keeps its own copy of the session."}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -665,15 +695,8 @@ export function ChatPage() {
               variant="destructive"
               onClick={async () => {
                 if (id) {
-                  stopMessage(id)
-                  if (session) {
-                    const result = await removeSessionWorkspace(id)
-                    for (const kept of result.kept)
-                      toast.info(
-                        `Kept ${kept.name}: it has ${kept.reason === "dirty" ? "uncommitted" : "unpushed"} changes.`,
-                      )
-                    if (result.error) toast.error(result.error)
-                  }
+                  if (session) await closeSession()
+                  else stopMessage(id)
                   await deleteConversation(id)
                 }
                 setDeleting(false)
@@ -682,6 +705,33 @@ export function ChatPage() {
               }}
             >
               Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={discarding} onOpenChange={setDiscarding}>
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard this session?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Its pull request is closed and its branch deleted on GitHub. The session moves to
+              Discarded.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={async () => {
+                if (session) {
+                  await closeSession()
+                  await updateConversation(session.id, { discardedAt: Date.now() })
+                }
+                setDiscarding(false)
+              }}
+            >
+              Discard
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -83,8 +83,10 @@ export interface Conversation {
   draft?: string
   /** When the user saved the session as a draft. Synced, so the plugin's cleanup spares it. */
   draftAt?: number
-  /** Marked done by the user; the composer gives way until it's reopened. */
+  /** Marked done by the user, or by the plugin once its pull request merged; the composer gives way until it's reopened. */
   resolvedAt?: number
+  /** Moved to the project's Discarded pile: its pull request closed and its branch deleted. */
+  discardedAt?: number
   /** Permission mode, as the plugin last reported it. Local only; the plugin holds it. */
   mode?: SessionMode
   /**

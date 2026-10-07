@@ -95,7 +95,7 @@ export function useWaitingSessions(): WaitingSession[] {
         ? db.conversations
             .where("projectId")
             .above("")
-            .filter((c) => ids.includes(c.hermesSessionId) && !c.resolvedAt)
+            .filter((c) => ids.includes(c.hermesSessionId) && !c.resolvedAt && !c.discardedAt)
             .toArray()
         : [],
     [ids.join()],

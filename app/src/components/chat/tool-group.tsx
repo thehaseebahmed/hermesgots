@@ -4,6 +4,7 @@ import {
   ChevronRightIcon,
   EyeIcon,
   FilePlusIcon,
+  GitPullRequestArrowIcon,
   GlobeIcon,
   PencilIcon,
   SearchIcon,
@@ -41,6 +42,7 @@ const ICONS: Record<KindId, LucideIcon> = {
   web: GlobeIcon,
   browsed: GlobeIcon,
   plan: ListTodoIcon,
+  pr: GitPullRequestArrowIcon,
   used: WrenchIcon,
 }
 

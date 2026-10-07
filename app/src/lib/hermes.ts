@@ -998,6 +998,54 @@ export interface KeptWorktree {
 }
 
 /** Asks the plugin to remove the session's worktrees; it keeps those with uncommitted or unpushed work. */
+export interface ClosedRepo {
+  name: string
+  /** The pull request it closed. */
+  closed: number | null
+  branchDeleted: boolean
+  error: string | null
+}
+
+/**
+ * Ends a deleted or discarded session on the server: removes its worktrees (keeping those with
+ * uncommitted or unpushed work), closes its open pull requests and deletes its branches on GitHub.
+ * Needs plugin 0.20.
+ */
+export async function closeSession(
+  config: HermesConfig,
+  sessionId: string,
+): Promise<{ removed: boolean; kept: KeptWorktree[]; results: ClosedRepo[] }> {
+  const response = await request(pluginSession(config, sessionId, "/close"), {
+    method: "POST",
+    headers: headers(config),
+  })
+  const body = await response.json()
+  const results: unknown = body?.results
+  return {
+    removed: Boolean(body?.removed),
+    kept: parseKept(body?.kept),
+    results: Array.isArray(results)
+      ? results
+          .filter((r) => typeof r?.name === "string")
+          .map((r) => ({
+            name: r.name,
+            closed: typeof r.closed === "number" ? r.closed : null,
+            branchDeleted: Boolean(r.branch_deleted),
+            error: typeof r.error === "string" && r.error ? r.error : null,
+          }))
+      : [],
+  }
+}
+
+function parseKept(kept: unknown): KeptWorktree[] {
+  return Array.isArray(kept)
+    ? kept.filter(
+        (k): k is KeptWorktree =>
+          typeof k?.name === "string" && (k.reason === "dirty" || k.reason === "unpushed"),
+      )
+    : []
+}
+
 export async function removeWorkspace(
   config: HermesConfig,
   sessionId: string,
@@ -1007,16 +1055,7 @@ export async function removeWorkspace(
     headers: headers(config),
   })
   const body = await response.json()
-  const kept: unknown = body?.kept
-  return {
-    removed: Boolean(body?.removed),
-    kept: Array.isArray(kept)
-      ? kept.filter(
-          (k): k is KeptWorktree =>
-            typeof k?.name === "string" && (k.reason === "dirty" || k.reason === "unpushed"),
-        )
-      : [],
-  }
+  return { removed: Boolean(body?.removed), kept: parseKept(body?.kept) }
 }
 
 export interface PullRequest {

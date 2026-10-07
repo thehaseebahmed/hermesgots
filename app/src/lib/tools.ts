@@ -3,7 +3,7 @@
 import type { ToolEvent } from "@/lib/db"
 
 export type KindId =
-  "ran" | "read" | "edited" | "created" | "code" | "web" | "browsed" | "plan" | "used"
+  "ran" | "read" | "edited" | "created" | "code" | "web" | "browsed" | "plan" | "pr" | "used"
 
 export interface Kind {
   id: KindId
@@ -34,6 +34,7 @@ const BROWSED: Kind = {
 }
 const PLANNED: Kind = { id: "plan", verb: "Updated", doing: "Updating", title: "the plan" }
 const CHECKED_PLAN: Kind = { id: "plan", verb: "Checked", doing: "Checking", title: "the plan" }
+const OPENED_PR: Kind = { id: "pr", verb: "Opened", doing: "Opening", title: "a pull request" }
 const USED: Kind = {
   id: "used",
   verb: "Used",
@@ -49,6 +50,7 @@ const KINDS: Record<string, Kind> = {
   search_files: CODE,
   web_search: WEB,
   web_extract: WEB,
+  open_pull_request: OPENED_PR,
 }
 
 export const TODO_TOOLS = new Set(["todo_list", "todo"])
