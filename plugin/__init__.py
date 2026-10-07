@@ -6,7 +6,7 @@ device, keep its chat list on the server (``chats.py``), report each chat's cont
 (``context.py``) and the agent's todo list (``todos.py``), list and create Hermes Projects (``projects.py``) with GitHub repos cloned into
 them in the background (``clones.py``, ``github.py``), add and remove a project's repos (``repos.py``), run project sessions in their own worktrees with a permission mode and save their plans
 (``sessions.py``), let the agent ask the user questions with Hermes's ``clarify`` tool (``clarify.py``) and
-label its chats as Memento's. The dashboard half lives in ``dashboard/``.
+label its chats as Memento's, and links the profile to a Memento account (``link.py``). The dashboard half lives in ``dashboard/``.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-from . import attachments, chats, clarify, cleanup, clones, context, github, projects, repos, sessions, todos
+from . import attachments, chats, clarify, cleanup, clones, context, github, link, projects, repos, sessions, todos
 from .store import db_path
 
 logger = logging.getLogger(__name__)
@@ -129,8 +129,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except Exception:
             logger.debug("memento: couldn't resume project clones", exc_info=True)
         task = asyncio.ensure_future(cleanup.run_daily(adapter, home))
+        # Linked profiles keep their bot record current in the Memento registry; see link.py.
+        check_ins = asyncio.ensure_future(link.run(adapter))
         yield
         task.cancel()
+        check_ins.cancel()
 
     try:
         app.cleanup_ctx.append(daily_cleanup)
@@ -721,6 +724,14 @@ def register(ctx) -> None:
         register_hook("on_session_start", sessions.started)
         register_hook("post_llm_call", sessions.after_llm)
         register_hook("on_session_end", sessions.after_run)
+    register_cli = getattr(ctx, "register_cli_command", None)
+    if register_cli is not None:
+        register_cli(
+            name="memento",
+            help="Link this profile to the Memento app",
+            setup_fn=link.setup_cli,
+            description="hermes memento link <code> --site <url>, unlink or status",
+        )
     register_handler = getattr(ctx, "register_platform_handler", None)
     if register_handler is None:
         logger.warning("memento: this Hermes version can't add API server routes; update Hermes")
