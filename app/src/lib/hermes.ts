@@ -1026,6 +1026,44 @@ export async function listLiveRuns(config: HermesConfig): Promise<Record<string,
   )
 }
 
+/** Why a session waits on the user. */
+export type WaitingReason =
+  { kind: "question"; count: number } | { kind: "approval"; command?: string } | { kind: "plan" }
+
+/**
+ * Sessions waiting on the user (a question, an approval or a plan to review), by Hermes session id,
+ * each with its project's name when it's a project session. Needs the Memento plugin (0.16).
+ */
+export async function listWaiting(
+  config: HermesConfig,
+  signal?: AbortSignal,
+): Promise<Record<string, WaitingReason & { project?: string }>> {
+  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/runs/live`, {
+    headers: headers(config),
+    signal,
+  })
+  const waiting: unknown = (await response.json())?.waiting
+  if (!waiting || typeof waiting !== "object") return {}
+  const found: Record<string, WaitingReason & { project?: string }> = {}
+  for (const [id, raw] of Object.entries(waiting as Record<string, Record<string, unknown>>)) {
+    const project = typeof raw?.project === "string" ? raw.project : undefined
+    if (raw?.kind === "question")
+      found[id] = {
+        kind: "question",
+        count: typeof raw.count === "number" ? raw.count : 1,
+        project,
+      }
+    else if (raw?.kind === "approval")
+      found[id] = {
+        kind: "approval",
+        command: typeof raw.command === "string" ? raw.command : undefined,
+        project,
+      }
+    else if (raw?.kind === "plan") found[id] = { kind: "plan", project }
+  }
+  return found
+}
+
 /** The run in flight for a session, if the plugin reports one (it adds `run_ids` from 0.12). */
 export async function liveRunOf(config: HermesConfig, sessionId: string) {
   const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/runs/live`, {

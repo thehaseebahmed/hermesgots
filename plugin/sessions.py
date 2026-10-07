@@ -655,6 +655,62 @@ def live_runs(adapter: Any) -> Tuple[Dict[str, str], Dict[str, str]]:
     return live, run_ids
 
 
+def waiting(adapter: Any, path: Path, hermes_home: Path) -> Dict[str, Dict[str, Any]]:
+    """Why each session waits on the user: its run's questions or approval, or a plan to review.
+    A project session also names its project."""
+    found: Dict[str, Dict[str, Any]] = {}
+    statuses = getattr(adapter, "_run_statuses", None)
+    for status in list(statuses.values()) if isinstance(statuses, dict) else []:
+        if not isinstance(status, dict) or status.get("status") != "waiting_for_approval":
+            continue
+        session_id = status.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            continue
+        clarify = status.get("clarify")
+        if isinstance(clarify, dict):
+            questions = clarify.get("questions")
+            count = len(questions) if isinstance(questions, list) and questions else 1
+            found[session_id] = {"kind": "question", "count": count}
+            continue
+        approval = status.get("approval")
+        command = approval.get("command") if isinstance(approval, dict) else None
+        reason: Dict[str, Any] = {"kind": "approval"}
+        if isinstance(command, str) and command.strip():
+            reason["command"] = command.strip()
+        found.setdefault(session_id, reason)
+    if not path.exists():
+        return found
+    conn = connect(path)
+    try:
+        rows = conn.execute(f"SELECT {', '.join(FIELDS)} FROM project_sessions").fetchall()
+    finally:
+        conn.close()
+    records = {record["session_id"]: record for record in map(_record, rows)}
+    for session_id, record in records.items():
+        if record["plan_pending"]:
+            found.setdefault(session_id, {"kind": "plan"})
+    names = _project_names(hermes_home) if any(s in records for s in found) else {}
+    for session_id, reason in found.items():
+        record = records.get(session_id)
+        if record and names.get(record["project_id"]):
+            reason["project"] = names[record["project_id"]]
+    return found
+
+
+def _project_names(hermes_home: Path) -> Dict[str, str]:
+    projects_db = hermes_home / "projects.db"
+    try:
+        from hermes_cli import projects_db as pdb
+
+        if not projects_db.exists():
+            return {}
+        with pdb.connect_closing(db_path=projects_db) as conn:
+            return {str(p.id): p.name for p in pdb.list_projects(conn, include_archived=True)}
+    except Exception:
+        logger.debug("memento: couldn't read project names", exc_info=True)
+        return {}
+
+
 def read_only(command: Any) -> bool:
     """Whether a shell command only looks: a plain pipeline of listing commands and read-only git."""
     if not isinstance(command, str) or not command.strip():

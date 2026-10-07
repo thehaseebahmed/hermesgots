@@ -1,6 +1,10 @@
-/** Why a project session is paused on the user. */
-export type WaitingReason =
-  { kind: "question"; count: number } | { kind: "approval"; command?: string } | { kind: "plan" }
+import { useEffect, useSyncExternalStore } from "react"
+import { useLiveQuery } from "dexie-react-hooks"
+
+import { db } from "@/lib/db"
+import { listWaiting, type WaitingReason } from "@/lib/hermes"
+
+export type { WaitingReason }
 
 /** A project session, in any project, that waits for the user. */
 export interface WaitingSession {
@@ -8,94 +12,94 @@ export interface WaitingSession {
   title: string
   reason: WaitingReason
   project?: string
-  /** When it started waiting, newest first. */
-  since: number
 }
 
 export function reasonText(reason: WaitingReason) {
   if (reason.kind === "question")
     return reason.count > 1 ? `${reason.count} questions to answer` : "Awaiting your answer"
-  if (reason.kind === "approval")
-    return reason.command ? `Approve ${reason.command}` : "Needs approval to run a command"
+  if (reason.kind === "approval") {
+    const command = reason.command?.split("\n")[0].trim()
+    return command ? `Approve ${command}` : "Needs approval to run a command"
+  }
   return "Plan ready for review"
 }
 
-// MOCK: design-only fixtures until the plugin reports waiting sessions. Open the app with
-// `?mock-waiting=few` or `?mock-waiting=many` to show them, and `?mock-waiting=off` to hide them.
-const MOCK_KEY = "memento:mock-waiting"
-const now = Date.now()
-const min = 60_000
+const POLL_MS = 10_000
+const TIMEOUT_MS = 15_000
 
-const FEW: WaitingSession[] = [
-  {
-    sessionId: "mock-waiting-1",
-    title: "Add a waiting section to the sidebar",
-    reason: { kind: "question", count: 1 },
-    project: "Memento",
-    since: now - 2 * min,
-  },
-  {
-    sessionId: "mock-waiting-2",
-    title: "Fix the flaky clone retry test",
-    reason: { kind: "approval", command: "git push --force-with-lease" },
-    project: "Hermes",
-    since: now - 14 * min,
-  },
-  {
-    sessionId: "mock-waiting-3",
-    title: "Migrate settings to the new sheet",
-    reason: { kind: "plan" },
-    project: "Memento",
-    since: now - 45 * min,
-  },
-]
+type Found = Record<string, WaitingReason & { project?: string }>
 
-const MORE: WaitingSession[] = [
-  {
-    sessionId: "mock-waiting-4",
-    title: "Upgrade Capacitor to the latest release and fix the Android build",
-    reason: { kind: "question", count: 3 },
-    project: "Memento",
-    since: now - 70 * min,
-  },
-  {
-    sessionId: "mock-waiting-5",
-    title: "Clean up stale worktrees",
-    reason: { kind: "approval" },
-    project: "Homelab scripts",
-    since: now - 3 * 60 * min,
-  },
-  {
-    sessionId: "mock-waiting-6",
-    title: "Write the release notes",
-    reason: { kind: "question", count: 1 },
-    project: "Hermes",
-    since: now - 5 * 60 * min,
-  },
-  {
-    sessionId: "mock-waiting-7",
-    title: "Rework the cron run ledger",
-    reason: { kind: "plan" },
-    project: "Hermes",
-    since: now - 26 * 60 * min,
-  },
-]
+/**
+ * What every bot's server reports waiting, by Hermes session id. One poll for the whole app, shared
+ * by every sidebar that's mounted, and only while one is.
+ */
+let found: Found = {}
+let servers: { baseUrl: string; apiKey: string }[] = []
+const listeners = new Set<() => void>()
+let timer: number | undefined
 
-function mockMode() {
-  try {
-    const param = new URLSearchParams(window.location.search).get("mock-waiting")
-    if (param === "off") localStorage.removeItem(MOCK_KEY)
-    else if (param) localStorage.setItem(MOCK_KEY, param)
-    return localStorage.getItem(MOCK_KEY)
-  } catch {
-    return null
+async function poll() {
+  if (document.visibilityState !== "visible") return
+  const answers = await Promise.all(
+    servers.map((server) =>
+      listWaiting(server, AbortSignal.timeout(TIMEOUT_MS)).catch(() => ({}) as Found),
+    ),
+  )
+  found = Object.assign({}, ...answers)
+  listeners.forEach((listener) => listener())
+}
+
+function subscribe(listener: () => void) {
+  listeners.add(listener)
+  if (listeners.size === 1) {
+    timer = window.setInterval(poll, POLL_MS)
+    document.addEventListener("visibilitychange", poll)
+  }
+  return () => {
+    listeners.delete(listener)
+    if (listeners.size) return
+    window.clearInterval(timer)
+    document.removeEventListener("visibilitychange", poll)
   }
 }
 
-const mock = mockMode()
-const fixtures = mock === "many" ? [...FEW, ...MORE] : mock === "few" ? FEW : []
-
-/** Project sessions waiting for the user, newest first. Mock data only for now. */
+/** Project sessions, across every bot, waiting on the user, newest first. Needs the plugin. */
 export function useWaitingSessions(): WaitingSession[] {
-  return fixtures
+  const waiting = useSyncExternalStore(subscribe, () => found)
+  // Keyless bots have no session ids, so nothing of theirs can be matched.
+  const keyed = useLiveQuery(async () => {
+    const profiles = await db.profiles.toArray()
+    const unique = new Map(
+      profiles
+        .filter((p) => p.apiKey)
+        .map((p) => [`${p.baseUrl.trim().replace(/\/+$/, "")} ${p.apiKey}`, p]),
+    )
+    return JSON.stringify([...unique.values()].map(({ baseUrl, apiKey }) => ({ baseUrl, apiKey })))
+  }, [])
+  useEffect(() => {
+    if (keyed === undefined) return
+    servers = JSON.parse(keyed)
+    void poll()
+  }, [keyed])
+
+  const ids = Object.keys(waiting)
+  const sessions = useLiveQuery(
+    () =>
+      ids.length
+        ? db.conversations
+            .where("projectId")
+            .above("")
+            .filter((c) => ids.includes(c.hermesSessionId) && !c.resolvedAt)
+            .toArray()
+        : [],
+    [ids.join()],
+  )
+  // The query can lag a poll, so a session no longer waiting is skipped.
+  return [...(sessions ?? [])]
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .flatMap(({ id, title, hermesSessionId }) => {
+      if (!waiting[hermesSessionId]) return []
+      const { project, ...reason } = waiting[hermesSessionId]
+      return [{ sessionId: id, title, reason, project }]
+    })
 }
