@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react"
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTheme } from "next-themes"
 import { Link, Navigate, useParams } from "react-router"
@@ -36,6 +36,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
 import { DEFAULT_SETTINGS, clearAllData, db, listProfiles, saveSettings } from "@/lib/db"
+import { useLarge } from "@/lib/media"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { forgetLocalKey, useSyncState } from "@/lib/sync"
@@ -54,8 +55,45 @@ const SECTIONS: Record<string, { title: string; render: () => ReactNode }> = {
   data: { title: "Local data", render: () => <DataSettings /> },
 }
 
-/** The first Settings screen: a menu of groups, each row opening its own screen. */
+/** Which section the menu shows as open, and whether picking one swaps it in place. */
+const MenuContext = createContext<{ active?: string; replace: boolean }>({ replace: false })
+
+/**
+ * Settings: a menu whose rows each open a section. Up to tablet width the menu and a section are
+ * separate screens; wider, they sit side by side, with the first section open by default.
+ */
 export function SettingsPage() {
+  const { section } = useParams()
+  const large = useLarge()
+  const { up } = useNav()
+  const { account } = useSyncState()
+  const separate = !large && Boolean(section)
+  // On its own screen, a section sits under the Settings menu.
+  useEffect(() => {
+    if (!separate) return
+    return setBackGuard(() => {
+      up("/settings")
+      return true
+    })
+  }, [separate, up])
+
+  if (section && !SECTIONS[section]) return <Navigate to="/settings" replace />
+  if (!large) return section ? <SectionScreen section={section} /> : <MenuScreen />
+
+  const open =
+    section ??
+    (account.status === "signed-in" || account.status === "signed-out" ? "account" : "bots")
+  return (
+    <div className="flex min-h-0 flex-1">
+      <MenuContext.Provider value={{ active: open, replace: true }}>
+        <MenuScreen className="w-96 flex-none border-r" />
+      </MenuContext.Provider>
+      <Screen title={SECTIONS[open].title}>{SECTIONS[open].render()}</Screen>
+    </div>
+  )
+}
+
+function MenuScreen({ className }: { className?: string }) {
   const openDrawer = useOpenDrawer()
   const settings = useLiveQuery(
     async () => ({ ...DEFAULT_SETTINGS, ...(await db.settings.get("settings")) }),
@@ -67,6 +105,7 @@ export function SettingsPage() {
   return (
     <Screen
       title="Settings"
+      className={className}
       leading={
         <Button
           variant="outline"
@@ -116,19 +155,9 @@ export function SettingsPage() {
   )
 }
 
-/** One settings screen under the menu. */
-export function SettingsSectionPage() {
-  const { section = "" } = useParams()
+function SectionScreen({ section }: { section: string }) {
   const { up } = useNav()
-  // Every section sits under the Settings menu.
-  useEffect(() => {
-    return setBackGuard(() => {
-      up("/settings")
-      return true
-    })
-  }, [up])
   const page = SECTIONS[section]
-  if (!page) return <Navigate to="/settings" replace />
   return (
     <Screen
       title={page.title}
@@ -152,16 +181,18 @@ export function SettingsSectionPage() {
 function Screen({
   title,
   leading,
+  className,
   children,
 }: {
   title: string
-  leading: ReactNode
+  leading?: ReactNode
+  className?: string
   children: ReactNode
 }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+    <div className={cn("flex min-h-0 flex-1 flex-col overflow-y-auto", className)}>
       <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
-        <div className="mx-auto flex max-w-2xl items-center gap-3">
+        <div className="mx-auto flex min-h-11 max-w-2xl items-center gap-3">
           {leading}
           <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
         </div>
@@ -206,8 +237,14 @@ function Row({
   title: ReactNode
   subtitle?: ReactNode
 }) {
+  const { active, replace } = useContext(MenuContext)
   return (
-    <Link to={`/settings/${to}`} className={cn(rowClass, "transition-colors hover:bg-muted")}>
+    <Link
+      to={`/settings/${to}`}
+      replace={replace}
+      aria-current={active === to ? "page" : undefined}
+      className={cn(rowClass, "transition-colors hover:bg-muted aria-[current=page]:bg-muted")}
+    >
       {image ? (
         <img
           src={image}
