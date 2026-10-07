@@ -61,7 +61,7 @@ import {
   multiplexedProfile,
   PLUGIN_DOCS,
 } from "@/lib/hermes"
-import { syncContextWindow } from "@/lib/models"
+import { syncContextWindow, useModelsDevUnreachable } from "@/lib/models"
 import { recheckChatStores, stopUsingPlugin, useSyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
 
@@ -476,9 +476,24 @@ export function BotEditor({
 }
 
 function ContextWindowHint({ profile }: { profile: Profile }) {
+  const unreachable = useModelsDevUnreachable()
   const model = profile.contextModel && (
     <code className="font-mono break-all">{profile.contextModel}</code>
   )
+  if (profile.contextSource === "models.dev" && profile.contextWindow && model) {
+    return <>Found on models.dev for {model}. It resets when the bot's model changes.</>
+  }
+  if (profile.contextSource === "manual" && profile.contextWindow && model) {
+    return <>Set by hand for {model}. It resets when the bot's model changes.</>
+  }
+  if (unreachable && !model && !profile.contextWindow) {
+    return (
+      <>
+        Couldn't reach models.dev to look up the model's context size. Test the connection to try
+        again, or set it by hand.
+      </>
+    )
+  }
   if (!model) {
     return (
       <>
@@ -486,12 +501,6 @@ function ContextWindowHint({ profile }: { profile: Profile }) {
         models.dev.
       </>
     )
-  }
-  if (profile.contextSource === "models.dev" && profile.contextWindow) {
-    return <>Found on models.dev for {model}. It resets when the bot's model changes.</>
-  }
-  if (profile.contextSource === "manual" && profile.contextWindow) {
-    return <>Set by hand for {model}. It resets when the bot's model changes.</>
   }
   return <>{model} isn't on models.dev, so set its context size by hand.</>
 }

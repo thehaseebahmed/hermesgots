@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react"
+
 import { updateProfile, type Profile } from "@/lib/db"
 import { getModelInfo, type ModelInfo } from "@/lib/hermes"
 
@@ -12,6 +14,27 @@ type Catalog = Record<string, { models?: Record<string, CatalogModel> }>
 
 let catalog: Promise<Catalog> | undefined
 
+/** The last attempt to load models.dev failed (offline, blocked), so "not listed" isn't known. */
+let unreachable = false
+const listeners = new Set<() => void>()
+
+function setUnreachable(next: boolean) {
+  if (next === unreachable) return
+  unreachable = next
+  listeners.forEach((listener) => listener())
+}
+
+/** Whether the last models.dev lookup couldn't reach it. */
+export function useModelsDevUnreachable() {
+  return useSyncExternalStore(
+    (listener) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    () => unreachable,
+  )
+}
+
 /** models.dev's catalog, fetched once per page load (it's large and rarely needed). */
 function loadCatalog() {
   catalog ??= fetch(CATALOG_URL)
@@ -19,8 +42,13 @@ function loadCatalog() {
       if (!response.ok) throw new Error(`models.dev responded ${response.status}`)
       return response.json() as Promise<Catalog>
     })
+    .then((data) => {
+      setUnreachable(false)
+      return data
+    })
     .catch((error) => {
       catalog = undefined
+      setUnreachable(true)
       throw error
     })
   return catalog
@@ -60,23 +88,19 @@ function matchIn<T>(
   return undefined
 }
 
-/** What models.dev says about the model, or undefined if it isn't listed (or unreachable). */
+/** What models.dev says about the model, or undefined if it isn't listed. Throws when unreachable. */
 async function lookUp<T>(
   { provider, model }: ModelInfo,
   pick: (entry: CatalogModel | undefined) => T | undefined,
 ) {
   if (!model) return undefined
-  try {
-    const data = await loadCatalog()
-    // Hermes's provider ids don't always match models.dev's, so fall back to any provider.
-    const own = provider ? matchIn(data[provider]?.models, model, pick) : undefined
-    if (own !== undefined) return own
-    for (const entry of Object.values(data)) {
-      const value = matchIn(entry?.models, model, pick)
-      if (value !== undefined) return value
-    }
-  } catch {
-    // Offline, blocked or malformed: the user can still set it by hand.
+  const data = await loadCatalog()
+  // Hermes's provider ids don't always match models.dev's, so fall back to any provider.
+  const own = provider ? matchIn(data[provider]?.models, model, pick) : undefined
+  if (own !== undefined) return own
+  for (const entry of Object.values(data)) {
+    const value = matchIn(entry?.models, model, pick)
+    if (value !== undefined) return value
   }
   return undefined
 }
@@ -89,7 +113,8 @@ export const findImageInput = (info: ModelInfo) => lookUp(info, imageInputOf)
 
 /**
  * Fills in the profile's context window from models.dev whenever the model behind it changes,
- * clearing it when the new model isn't listed so the user is asked for it.
+ * clearing it when the new model isn't listed so the user is asked for it. When models.dev can't be
+ * reached the profile is left alone, so the next sync looks again.
  */
 export async function syncContextWindow(profile: Profile) {
   if (!profile.baseUrl.trim()) return
@@ -99,12 +124,25 @@ export async function syncContextWindow(profile: Profile) {
   if (key === profile.contextModel) {
     // Bots from before image detection learn it once.
     if (profile.imageInput === undefined) {
-      const imageInput = await findImageInput(info)
+      const imageInput = await findImageInput(info).catch(() => undefined)
       if (imageInput !== undefined) await updateProfile(profile.id, { imageInput })
     }
     return
   }
-  const [found, imageInput] = await Promise.all([findContextWindow(info), findImageInput(info)])
+  let found, imageInput
+  try {
+    ;[found, imageInput] = await Promise.all([findContextWindow(info), findImageInput(info)])
+  } catch {
+    // The old model's window would be wrong for this one; the next sync looks the new one up.
+    if (profile.contextModel) {
+      await updateProfile(profile.id, {
+        contextModel: undefined,
+        contextWindow: undefined,
+        contextSource: undefined,
+      })
+    }
+    return
+  }
   // Bots from before detection keep a hand-set window rather than losing it on the first sync.
   const keep = !profile.contextModel && !found && profile.contextWindow
   await updateProfile(profile.id, {
