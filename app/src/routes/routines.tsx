@@ -36,6 +36,7 @@ import {
 } from "@/lib/cron"
 import { listEnabledProfiles, type Profile } from "@/lib/db"
 import { formatDuration, formatRelative } from "@/lib/format"
+import { describeSchedule } from "@/lib/schedule"
 import { HermesError, INSTALL_PLUGIN, controlCronJob, type CronJob } from "@/lib/hermes"
 import { cn } from "@/lib/utils"
 
@@ -328,6 +329,7 @@ function JobCard({
   const latest = runs.at(-1)
   const paused = isPaused(job)
   const nextRun = job.nextRunAt ? Date.parse(job.nextRunAt) : NaN
+  const schedule = describeSchedule(job.schedule, job.nextRunAt)
   const slots: (CronRun | null)[] = [
     ...Array<null>(Math.max(0, HISTORY_LENGTH - runs.length)).fill(null),
     ...runs.slice(-HISTORY_LENGTH),
@@ -357,7 +359,7 @@ function JobCard({
             <h3 className="truncate font-medium">{job.name}</h3>
             <JobStatus job={job} latest={latest} />
           </div>
-          {job.schedule && <p className="text-xs text-muted-foreground">{job.schedule}</p>}
+          {schedule && <p className="text-xs text-muted-foreground">{schedule}</p>}
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger
