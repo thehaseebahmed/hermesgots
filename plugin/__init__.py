@@ -5,7 +5,7 @@ can read cron run history from Hermes's execution ledger instead of piecing it t
 device, keep its chat list on the server (``chats.py``), report each chat's context use
 (``context.py``) and the agent's todo list (``todos.py``), list and create Hermes Projects (``projects.py``) with GitHub repos cloned into
 them in the background (``clones.py``, ``github.py``), add and remove a project's repos (``repos.py``), run project sessions in their own worktrees with a permission mode and save their plans
-(``sessions.py``), let the agent ask the user questions with Hermes's ``clarify`` tool (``clarify.py``) and
+(``sessions.py``), let the agent push and open its pull requests, close them when a session is dropped (``ship.py``) and resolve a session once its pull request merges (``merges.py``), let the agent ask the user questions with Hermes's ``clarify`` tool (``clarify.py``) and
 label its chats as Memento's, and links the profile to a Memento account (``link.py``). The dashboard half lives in ``dashboard/``.
 """
 
@@ -17,7 +17,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-from . import attachments, chats, clarify, cleanup, clones, context, github, link, projects, repos, sessions, todos
+from . import attachments, chats, clarify, cleanup, clones, context, github, link, merges, projects, repos, sessions, ship, todos
 from .store import db_path
 
 logger = logging.getLogger(__name__)
@@ -117,6 +117,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     asks = clarify.wire(adapter)
     # Hermes defers todo_list behind tool_search, where the agent can't always find it; see todos.py.
     todo_tool = todos.wire(adapter)
+    # The agent ships its own work; see ship.py.
+    ship.wire(adapter)
 
     async def daily_cleanup(_app: Any):
         from hermes_constants import get_hermes_home
@@ -128,12 +130,15 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             await asyncio.to_thread(repos.resume, home)
         except Exception:
             logger.debug("memento: couldn't resume project clones", exc_info=True)
-        task = asyncio.ensure_future(cleanup.run_daily(adapter, home))
-        # Linked profiles keep their bot record current in the Memento registry; see link.py.
-        check_ins = asyncio.ensure_future(link.run(adapter))
+        tasks = [
+            asyncio.ensure_future(cleanup.run_daily(adapter, home)),
+            # Linked profiles keep their bot record current in the Memento registry; see link.py.
+            asyncio.ensure_future(link.run(adapter)),
+            asyncio.ensure_future(merges.run(home)),
+        ]
         yield
-        task.cancel()
-        check_ins.cancel()
+        for task in tasks:
+            task.cancel()
 
     try:
         app.cleanup_ctx.append(daily_cleanup)
@@ -199,6 +204,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "todo_tool",
                     "attachments",
                     "profile_routes",
+                    "pr_tool",
+                    "close",
+                    "merge_resolve",
                 ],
                 "clarify": asks,
                 "todo_tool": todo_tool,
@@ -626,7 +634,31 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return found
 
         prs = await asyncio.to_thread(lookup) if record else []
+        if any(pr["state"] == "merged" for pr in prs):
+            try:
+                await asyncio.to_thread(merges.check, home, {request.match_info["session_id"]})
+            except Exception:
+                logger.debug("memento: resolving a merged session failed", exc_info=True)
         return web.json_response({"object": "memento.prs", "prs": prs})
+
+    async def close_session(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        session_id = request.match_info["session_id"]
+        path, home = store_path(), hermes_home()
+        record = await asyncio.to_thread(sessions.record_for, path, home, session_id)
+        if not record:
+            return web.json_response({"object": "memento.closed", "removed": True, "kept": [], "results": []})
+        # Before the branches go: a tree whose commits are only on its remote branch can still go.
+        try:
+            removed = await asyncio.to_thread(sessions.remove, path, record["session_id"])
+        except sessions.WorkspaceError as error:
+            removed = {"removed": False, "kept": [], "error": str(error)}
+        if removed.get("removed"):
+            sessions._clear_cwd(session_id)
+        results = await asyncio.to_thread(ship.close, home, record)
+        return web.json_response({"object": "memento.closed", **removed, "results": results})
 
     async def live_runs(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -667,6 +699,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/workspace/remove", remove_workspace)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/mode", post_mode)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/prs", session_pr)
+    app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/close", close_session)
     async def answer_clarify(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -732,6 +765,7 @@ def register(ctx) -> None:
             setup_fn=link.setup_cli,
             description="hermes memento link <code> --site <url>, unlink or status",
         )
+    ship.register(ctx)
     register_handler = getattr(ctx, "register_platform_handler", None)
     if register_handler is None:
         logger.warning("memento: this Hermes version can't add API server routes; update Hermes")

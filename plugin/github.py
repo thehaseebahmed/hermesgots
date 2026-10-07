@@ -76,26 +76,50 @@ def token(hermes_home: Path) -> tuple[Optional[str], Optional[str]]:
     return (value, "gh") if value else (None, None)
 
 
-def _get(path: str, auth: Optional[str]) -> Any:
+def _request(path: str, auth: Optional[str], method: str = "GET", data: Optional[Dict[str, Any]] = None) -> Any:
     # Without a token, public repos still answer (rate-limited).
     request = urllib.request.Request(
         f"{API}{path}",
+        method=method,
+        data=json.dumps(data).encode() if data is not None else None,
         headers={
             "Accept": "application/vnd.github+json",
             **({"Authorization": f"Bearer {auth}"} if auth else {}),
+            **({"Content-Type": "application/json"} if data is not None else {}),
             "User-Agent": "memento-hermes-plugin",
             "X-GitHub-Api-Version": "2022-11-28",
         },
     )
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
-            return json.load(response)
+            raw = response.read()
+            # A DELETE answers 204 with no body.
+            return json.loads(raw) if raw.strip() else None
     except urllib.error.HTTPError as error:
         if error.code == 401:
             raise GitHubError("GitHub rejected the server's token.", 401) from None
-        raise GitHubError(f"GitHub answered {error.code}.") from None
+        raise GitHubError(_error_message(error) or f"GitHub answered {error.code}.") from None
     except (urllib.error.URLError, TimeoutError, ValueError):
         raise GitHubError("Couldn't reach GitHub from the server.") from None
+
+
+def _error_message(error: urllib.error.HTTPError) -> Optional[str]:
+    """What GitHub said was wrong (a 422's first error, e.g. "No commits between main and ...")."""
+    try:
+        body = json.load(error)
+    except (ValueError, OSError):
+        return None
+    if not isinstance(body, dict):
+        return None
+    errors = body.get("errors")
+    first = errors[0] if isinstance(errors, list) and errors else None
+    detail = first.get("message") if isinstance(first, dict) else None
+    message = detail if isinstance(detail, str) and detail else body.get("message")
+    return message if isinstance(message, str) and message else None
+
+
+def _get(path: str, auth: Optional[str]) -> Any:
+    return _request(path, auth)
 
 
 def status(hermes_home: Path) -> Dict[str, Any]:
@@ -256,14 +280,35 @@ def _checks(repo: str, sha: str, auth: Optional[str]) -> Optional[str]:
     return "pending" if "pending" in outcomes else "success"
 
 
-def pull_request(hermes_home: Path, repo_root: str, branch: str) -> Optional[Dict[str, Any]]:
+def _pr(repo: str, row: Any, auth: Optional[str], checks: bool = True) -> Optional[Dict[str, Any]]:
+    if not isinstance(row, dict) or not isinstance(row.get("number"), int):
+        return None
+    sha = (row.get("head") or {}).get("sha") if isinstance(row.get("head"), dict) else None
+    return {
+        "repo": repo,
+        "number": row["number"],
+        "title": row.get("title") if isinstance(row.get("title"), str) else "",
+        "url": row.get("html_url") if isinstance(row.get("html_url"), str) else None,
+        "state": "merged"
+        if row.get("merged_at")
+        else "draft"
+        if row.get("draft")
+        else ("closed" if row.get("state") == "closed" else "open"),
+        "checks": _checks(repo, sha, auth) if checks and isinstance(sha, str) and sha else None,
+    }
+
+
+def pull_request(
+    hermes_home: Path, repo_root: str, branch: str, fresh: bool = False, checks: bool = True
+) -> Optional[Dict[str, Any]]:
     """The newest pull request from ``branch`` of the checkout's GitHub repo, with its checks, or None.
 
-    Cached for a short while per branch: the app asks after every turn and on every catch-up.
+    Cached for a short while per branch: the app asks after every turn and on every catch-up. A
+    cached answer serves a call without ``checks`` too; one without them isn't cached.
     """
     key = (repo_root, branch)
     cached = _pr_cache.get(key)
-    if cached and time.time() - cached[0] < PR_CACHE_S:
+    if not fresh and cached and time.time() - cached[0] < PR_CACHE_S:
         return cached[1]
     value = None
     repo = origin_repo(repo_root)
@@ -274,20 +319,52 @@ def pull_request(hermes_home: Path, repo_root: str, branch: str) -> Optional[Dic
             rows = _get(f"/repos/{repo}/pulls?head={head}&state=all&per_page=1", auth)
         except GitHubError:
             rows = []
-        row = rows[0] if isinstance(rows, list) and rows and isinstance(rows[0], dict) else None
-        if row and isinstance(row.get("number"), int):
-            sha = (row.get("head") or {}).get("sha") if isinstance(row.get("head"), dict) else None
-            value = {
-                "repo": repo,
-                "number": row["number"],
-                "title": row.get("title") if isinstance(row.get("title"), str) else "",
-                "url": row.get("html_url") if isinstance(row.get("html_url"), str) else None,
-                "state": "merged"
-                if row.get("merged_at")
-                else "draft"
-                if row.get("draft")
-                else ("closed" if row.get("state") == "closed" else "open"),
-                "checks": _checks(repo, sha, auth) if isinstance(sha, str) and sha else None,
-            }
-    _pr_cache[key] = (time.time(), value)
+        value = _pr(repo, rows[0], auth, checks) if isinstance(rows, list) and rows else None
+    if checks:
+        _pr_cache[key] = (time.time(), value)
     return value
+
+
+def forget_pull_request(repo_root: str, branch: str) -> None:
+    _pr_cache.pop((repo_root, branch), None)
+
+
+def create_pull_request(
+    repo: str, branch: str, base: str, title: str, body: str, draft: bool, auth: str
+) -> Dict[str, Any]:
+    """Opens a pull request from ``branch`` into ``base`` of ``repo`` (``owner/name``)."""
+    row = _request(
+        f"/repos/{repo}/pulls",
+        auth,
+        "POST",
+        {"title": title, "head": branch, "base": base, "body": body, "draft": draft},
+    )
+    # Brand new: its checks haven't started.
+    found = _pr(repo, row, None, checks=False)
+    if not found:
+        raise GitHubError("GitHub didn't return the pull request.")
+    return found
+
+
+def close_pull_request(repo: str, number: int, auth: str) -> None:
+    _request(f"/repos/{repo}/pulls/{number}", auth, "PATCH", {"state": "closed"})
+
+
+def _ref(branch: str) -> str:
+    return urllib.parse.quote(f"heads/{branch}", safe="/")
+
+
+def delete_branch(repo: str, branch: str, auth: str) -> None:
+    """Deletes the branch on GitHub; one that's already gone counts as deleted."""
+    try:
+        _request(f"/repos/{repo}/git/refs/{_ref(branch)}", auth, "DELETE")
+    except GitHubError as error:
+        if "Reference does not exist" not in str(error) and "Not Found" not in str(error):
+            raise
+
+
+def branch_exists(repo: str, branch: str, auth: Optional[str]) -> bool:
+    try:
+        return bool(_get(f"/repos/{repo}/git/ref/{_ref(branch)}", auth))
+    except GitHubError:
+        return False
