@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { Link, useNavigate, useParams } from "react-router"
+import { Link, useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
 import {
   ArrowLeftIcon,
@@ -24,6 +24,7 @@ import { BlockedCard, PlanReadyCard, ResolvedCard } from "@/components/chat/sess
 import { TodosPill, TodosSheet } from "@/components/chat/todos"
 import { ContextRing, UsageSheet, type ContextUsage } from "@/components/chat/usage-sheet"
 import { Bot } from "@/components/bot"
+import { RepoChips } from "@/components/repos"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -65,15 +66,18 @@ import {
   updateConversation,
 } from "@/lib/db"
 import { describeActivity } from "@/lib/format"
+import { listProjects, type HermesProject } from "@/lib/hermes"
 import { loadEarlierHistory, reconcileHistory } from "@/lib/history"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { syncContextWindow } from "@/lib/models"
 import {
   planApprovalMessage,
+  projectRepos,
   refreshWorkspace,
   removeSessionWorkspace,
   setSessionMode,
+  type RepoRef,
 } from "@/lib/workspace"
 
 /** How often an open chat checks Hermes for turns sent from another device. */
@@ -86,32 +90,49 @@ const SUGGESTIONS = [
   "Summarise what you remember about me",
   "Check disk usage under /var/log",
 ]
+const SESSION_SUGGESTIONS = [
+  "Give me a tour of this codebase",
+  "Run the tests and fix what fails",
+  "Find a small bug worth fixing",
+]
 
 function EmptyState({
   name,
   botId,
   configured,
+  session,
   onPick,
 }: {
   name: string
   botId?: string
   configured: boolean
+  /** A project session: its project's name and the repos it will work in. */
+  session?: { title?: string; repos: RepoRef[] }
   onPick: (text: string) => void
 }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 pt-24 pb-8 text-center">
       <Bot id={botId} animate className="size-24" />
-      <div className="space-y-1.5">
-        <h1 className="text-2xl font-semibold tracking-tight">Hey, I'm {name}</h1>
-        <p className="max-w-sm text-sm text-muted-foreground">
-          {configured
-            ? "Ask me anything. I can run tools on your machine and I'll ask before doing anything risky."
-            : "Point Memento at your Hermes Agent API server to start chatting."}
-        </p>
-      </div>
+      {session ? (
+        <div className="flex max-w-md flex-col items-center gap-3">
+          {session.title && (
+            <h1 className="text-2xl font-semibold tracking-tight">{session.title}</h1>
+          )}
+          <RepoChips repos={session.repos} />
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          <h1 className="text-2xl font-semibold tracking-tight">Hey, I'm {name}</h1>
+          <p className="max-w-sm text-sm text-muted-foreground">
+            {configured
+              ? "Ask me anything. I can run tools on your machine and I'll ask before doing anything risky."
+              : "Point Memento at your Hermes Agent API server to start chatting."}
+          </p>
+        </div>
+      )}
       {configured ? (
         <div className="flex max-w-md flex-wrap justify-center gap-2">
-          {SUGGESTIONS.map((text) => (
+          {(session ? SESSION_SUGGESTIONS : SUGGESTIONS).map((text) => (
             <Button
               key={text}
               variant="outline"
@@ -250,6 +271,29 @@ export function ChatPage() {
       window.removeEventListener("online", catchUp)
     }
   }, [id, hasMessages, updatedAt])
+
+  // A session not started yet names the repos it will work in; the project screen hands its project
+  // over, and it's read again here regardless.
+  const handed = (useLocation().state as { project?: HermesProject } | null)?.project
+  const [fetchedProject, setFetchedProject] = useState<HermesProject>()
+  const projectId = session?.projectId
+  useEffect(() => {
+    if (!projectId || hasMessages || !connection) return
+    const [baseUrl, apiKey] = connection.split("\n")
+    let cancelled = false
+    listProjects({ baseUrl, apiKey })
+      .then((all) => !cancelled && setFetchedProject(all.find((p) => p.id === projectId)))
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [projectId, hasMessages, connection])
+  const project = [fetchedProject, handed].find((p) => p && p.id === projectId)
+  const sessionRepos: RepoRef[] = session?.worktree?.repos.length
+    ? session.worktree.repos
+    : project
+      ? projectRepos(project)
+      : []
 
   // A deleted (or unknown) conversation id falls back to a fresh chat.
   useEffect(() => {
@@ -437,6 +481,7 @@ export function ChatPage() {
           name={profile?.name ?? "Hermes"}
           botId={profile?.botId}
           configured={configured}
+          session={session && { title: project?.name, repos: sessionRepos }}
           onPick={(text) => void send(text).catch(() => {})}
         />
       )}
