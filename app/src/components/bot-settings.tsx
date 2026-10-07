@@ -54,13 +54,7 @@ import {
   updateProfile,
   type Profile,
 } from "@/lib/db"
-import {
-  checkHealth,
-  getPluginVersion,
-  listModels,
-  multiplexedProfile,
-  PLUGIN_DOCS,
-} from "@/lib/hermes"
+import { checkHealth, getPluginVersion, listModels, PLUGIN_DOCS } from "@/lib/hermes"
 import { syncContextWindow, useModelsDevUnreachable } from "@/lib/models"
 import { recheckChatStores, stopUsingPlugin, useSyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
@@ -135,18 +129,10 @@ function PluginSetting({ profile }: { profile: Profile }) {
   const sync = useSyncState()
   const [checking, setChecking] = useState(false)
   const on = Boolean(profile.pluginChats)
-  const multiplexed = multiplexedProfile(profile.baseUrl)
   const install = (
     <a href={PLUGIN_DOCS} target="_blank" rel="noreferrer">
       Install the plugin
     </a>
-  )
-  // Hermes doesn't mount plugin routes under /p/<profile>, so installing it there changes nothing.
-  const unserved = multiplexed && (
-    <>
-      Hermes doesn't serve plugins to profiles under{" "}
-      <code className="font-mono">/p/{multiplexed}</code>.
-    </>
   )
 
   return (
@@ -173,15 +159,9 @@ function PluginSetting({ profile }: { profile: Profile }) {
           {on ? (
             "All of this bot's chat data is now stored on your Hermes server."
           ) : sync.vault === "unlocked" ? (
-            <>
-              Some chat data is stored on our servers.{" "}
-              {unserved || <>{install} to store it on yours.</>}
-            </>
+            <>Some chat data is stored on our servers. {install} to store it on yours.</>
           ) : (
-            <>
-              This bot's chat data is only on this device.{" "}
-              {unserved || <>{install} to store it on your server.</>}
-            </>
+            <>This bot's chat data is only on this device. {install} to store it on your server.</>
           )}
         </FieldDescription>
       </div>
@@ -195,11 +175,7 @@ function PluginSetting({ profile }: { profile: Profile }) {
           try {
             await recheckChatStores()
             if (!(await db.profiles.get(profile.id))?.pluginChats) {
-              toast.error(
-                multiplexed
-                  ? `Hermes doesn't serve plugins to profiles under /p/${multiplexed}.`
-                  : "Couldn't find the plugin on this bot's server.",
-              )
+              toast.error("Couldn't find the plugin on this bot's server.")
             }
           } finally {
             setChecking(false)

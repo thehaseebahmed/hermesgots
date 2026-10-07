@@ -4,7 +4,9 @@
 // POST /v1/runs/{id}/approval. Mention "clean" or "delete" in a message to trigger an approval.
 // Cron jobs live on /api/jobs, and their past runs on GET /api/plugins/memento/cron/runs, like a
 // Hermes with the Memento plugin (MOCK_NO_PLUGIN=1 leaves it out). As on Hermes, the plugin isn't
-// served under /p/<profile>/, and an unknown route's 404 carries no CORS headers.
+// served under /p/<profile>/ (a profile's bot reaches it at /api/plugins/memento/p/<profile>/..., where
+// the chat list and the project list are the profile's own and the rest is shared), and an unknown
+// route's 404 carries no CORS headers.
 // The plugin also keeps the chat list (GET and POST /api/plugins/memento/chats, newer record wins) and
 // labels a chat as Memento's on POST /api/plugins/memento/sessions/{id}/label. Its
 // GET /api/plugins/memento/sessions/{id}/context reports a keyed session's latest model call.
@@ -55,6 +57,7 @@ const chatTitles = new Map()
 const labelledSessions = new Map()
 /** The plugin's chat list: id -> { at, deleted?, value? }. */
 const pluginChats = new Map()
+const pluginChatLists = new Map()
 /** What the plugin's hook saw last per session: one call's prompt, not the turn's sum. */
 const lastCalls = new Map()
 const transcripts = new Map()
@@ -784,6 +787,9 @@ http
     // Like a gateway with multiplex_profiles: other profiles live under /p/<profile>/.
     const profile = /^\/p\/([^/]+)(?=\/)/.exec(url.pathname)?.[1]
     if (profile) url.pathname = url.pathname.slice(profile.length + 3)
+    // The plugin's own prefix carries the profile, since Hermes's /p/<profile>/ catch-all comes first.
+    const pluginProfile = /^\/api\/plugins\/memento\/p\/([^/]+)(?=\/)/.exec(url.pathname)?.[1]
+    if (pluginProfile) url.pathname = `/api/plugins/memento${url.pathname.slice(pluginProfile.length + 23)}`
     if (url.pathname === "/health") return json(res, 200, { status: "ok", platform: "mock-hermes" })
     if (url.pathname === "/v1/models") {
       // Named profiles advertise their name as the model id.
@@ -827,8 +833,9 @@ http
       return json(res, 200, {
         name: "memento",
         version: "0.12.0",
-        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments"],
+        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "profile_routes"],
         clarify: true,
+        hooks: true,
       })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/cron/runs") {
@@ -963,19 +970,22 @@ http
       return json(res, 200, { object: "memento.project", id: found.id })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/projects") {
-      return json(res, 200, { object: "memento.projects", projects: mockProjects() })
+      return json(res, 200, { object: "memento.projects", projects: pluginProfile ? [] : mockProjects() })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/chats") {
+      const key = pluginProfile ?? ""
+      if (!pluginChatLists.has(key)) pluginChatLists.set(key, key ? new Map() : pluginChats)
+      const chatList = pluginChatLists.get(key)
       if (req.method === "POST") {
         const { chats } = await readBody(req)
         if (!chats || typeof chats !== "object") {
           return json(res, 400, { error: { message: "chats must be an object" } })
         }
         for (const [id, entry] of Object.entries(chats)) {
-          if (entry.at > (pluginChats.get(id)?.at ?? -1)) pluginChats.set(id, entry)
+          if (entry.at > (chatList.get(id)?.at ?? -1)) chatList.set(id, entry)
         }
       }
-      return json(res, 200, { object: "memento.chats", chats: Object.fromEntries(pluginChats) })
+      return json(res, 200, { object: "memento.chats", chats: Object.fromEntries(chatList) })
     }
     const sessionLabel = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/label$/.exec(url.pathname)
     if (PLUGIN && !profile && req.method === "POST" && sessionLabel) {

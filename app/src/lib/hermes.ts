@@ -483,8 +483,19 @@ export interface CronExecutionRun extends CronExecution {
   delivery_outcome?: string | null
 }
 
-/** Where the Memento Hermes plugin serves its routes on the API server. */
 const PLUGIN_ROOT = "/api/plugins/memento"
+
+/**
+ * Where the Memento Hermes plugin serves its routes for this bot. Hermes registers its catch-all
+ * for `/p/<profile>/...` before plugin routes, so a multiplexed profile's plugin is reached with
+ * the profile inside the plugin's own prefix, which Hermes still scopes to that profile.
+ */
+export function pluginRoot(baseUrl: string) {
+  const root = serverRoot(baseUrl)
+  const profile = multiplexedProfile(baseUrl)
+  if (!profile) return `${root}${PLUGIN_ROOT}`
+  return `${root.slice(0, -`/p/${profile}`.length)}${PLUGIN_ROOT}/p/${profile}`
+}
 
 export const PLUGIN_DOCS = "https://github.com/thehaseebahmed/memento/tree/main/plugin#install"
 
@@ -497,7 +508,7 @@ hermes gateway restart`
  */
 export async function getPluginVersion(config: HermesConfig): Promise<string | null> {
   try {
-    const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/info`, {
+    const response = await request(`${pluginRoot(config.baseUrl)}/info`, {
       headers: headers(config),
     })
     const body = await response.json()
@@ -515,9 +526,8 @@ export function generateApiKey() {
 
 /**
  * The profile `name` when the bot is a profile a multiplexing gateway serves at `/p/<name>/`.
- * Hermes mounts plugin routes only on the gateway's own root, so such a bot never reaches the plugin.
  */
-export function multiplexedProfile(baseUrl: string) {
+function multiplexedProfile(baseUrl: string) {
   return serverRoot(baseUrl).match(/\/p\/([^/?#]+)$/)?.[1]
 }
 
@@ -526,10 +536,9 @@ export async function listCronRuns(
   config: HermesConfig,
   perJob: number,
 ): Promise<Record<string, CronExecutionRun[]>> {
-  const response = await request(
-    `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/cron/runs?per_job=${perJob}`,
-    { headers: headers(config) },
-  )
+  const response = await request(`${pluginRoot(config.baseUrl)}/cron/runs?per_job=${perJob}`, {
+    headers: headers(config),
+  })
   const body = await response.json()
   const jobs: unknown = body?.jobs
   if (!jobs || typeof jobs !== "object") return {}
@@ -613,7 +622,7 @@ function toProject(raw: unknown): HermesProject | null {
 
 /** The profile's Hermes Projects. A 404 (or a CORS-blocked one) means no plugin, or an older one. */
 export async function listProjects(config: HermesConfig): Promise<HermesProject[]> {
-  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects`, {
+  const response = await request(`${pluginRoot(config.baseUrl)}/projects`, {
     headers: headers(config),
   })
   const body = await response.json()
@@ -630,7 +639,7 @@ export interface GitHubStatus {
 
 /** The GitHub account on the bot's Hermes host, which the plugin uses to list and clone repos. */
 export async function getGitHubStatus(config: HermesConfig): Promise<GitHubStatus> {
-  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/github`, {
+  const response = await request(`${pluginRoot(config.baseUrl)}/github`, {
     headers: headers(config),
   })
   const body = await response.json()
@@ -649,7 +658,7 @@ export interface GitHubRepo {
 
 /** The host account's repos, most recently pushed first. */
 export async function listGitHubRepos(config: HermesConfig): Promise<GitHubRepo[]> {
-  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/github/repos`, {
+  const response = await request(`${pluginRoot(config.baseUrl)}/github/repos`, {
     headers: headers(config),
   })
   const body = await response.json()
@@ -675,7 +684,7 @@ export async function createProject(
   config: HermesConfig,
   project: { name: string; description?: string; repos: string[] },
 ): Promise<void> {
-  await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects`, {
+  await request(`${pluginRoot(config.baseUrl)}/projects`, {
     method: "POST",
     headers: headers(config),
     body: JSON.stringify(project),
@@ -684,10 +693,11 @@ export async function createProject(
 
 /** Starts a `failed` project's clones over. */
 export async function retryProject(config: HermesConfig, id: string): Promise<void> {
-  await request(
-    `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects/${encodeURIComponent(id)}/retry`,
-    { method: "POST", headers: headers(config), body: "{}" },
-  )
+  await request(`${pluginRoot(config.baseUrl)}/projects/${encodeURIComponent(id)}/retry`, {
+    method: "POST",
+    headers: headers(config),
+    body: "{}",
+  })
 }
 
 /** Renames a project, changes its description, archives or restores it, or pins it. */
@@ -696,7 +706,7 @@ export async function updateProject(
   id: string,
   fields: { name?: string; description?: string; archived?: boolean; pinned?: boolean },
 ): Promise<void> {
-  await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects/${encodeURIComponent(id)}`, {
+  await request(`${pluginRoot(config.baseUrl)}/projects/${encodeURIComponent(id)}`, {
     method: "POST",
     headers: headers(config),
     body: JSON.stringify(fields),
@@ -708,18 +718,20 @@ export async function updateProject(
  * to the project once it's in; until then the project lists it as `cloning`.
  */
 export async function addProjectRepo(config: HermesConfig, id: string, repo: string) {
-  await request(
-    `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects/${encodeURIComponent(id)}/repos`,
-    { method: "POST", headers: headers(config), body: JSON.stringify({ repo }) },
-  )
+  await request(`${pluginRoot(config.baseUrl)}/projects/${encodeURIComponent(id)}/repos`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ repo }),
+  })
 }
 
 /** Takes a repo out of a project (or stops adding it); the plugin deletes its clone in the background. */
 export async function removeProjectRepo(config: HermesConfig, id: string, repo: string) {
-  await request(
-    `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects/${encodeURIComponent(id)}/repos/remove`,
-    { method: "POST", headers: headers(config), body: JSON.stringify({ repo }) },
-  )
+  await request(`${pluginRoot(config.baseUrl)}/projects/${encodeURIComponent(id)}/repos/remove`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ repo }),
+  })
 }
 
 export interface ProjectUsage {
@@ -735,7 +747,7 @@ export interface ProjectUsage {
 /** What the sessions that ran in a project's folders used, from Hermes's session store. */
 export async function getProjectUsage(config: HermesConfig, id: string): Promise<ProjectUsage> {
   const response = await request(
-    `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects/${encodeURIComponent(id)}/usage`,
+    `${pluginRoot(config.baseUrl)}/projects/${encodeURIComponent(id)}/usage`,
     { headers: headers(config) },
   )
   const body = await response.json()
@@ -755,10 +767,11 @@ export async function getProjectUsage(config: HermesConfig, id: string): Promise
  * project still being created, which is stopped and wiped.
  */
 export async function deleteProject(config: HermesConfig, id: string): Promise<void> {
-  await request(
-    `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/projects/${encodeURIComponent(id)}/remove`,
-    { method: "POST", headers: headers(config), body: "{}" },
-  )
+  await request(`${pluginRoot(config.baseUrl)}/projects/${encodeURIComponent(id)}/remove`, {
+    method: "POST",
+    headers: headers(config),
+    body: "{}",
+  })
 }
 
 /**
@@ -766,7 +779,7 @@ export async function deleteProject(config: HermesConfig, id: string): Promise<v
  * returns the merged list. A 404 (or a CORS-blocked one, with no status) means no plugin, or an older one.
  */
 export async function mergeChatList<T>(config: HermesConfig, chats: Doc<T>): Promise<Doc<T>> {
-  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/chats`, {
+  const response = await request(`${pluginRoot(config.baseUrl)}/chats`, {
     method: "POST",
     headers: headers(config),
     body: JSON.stringify({ chats }),
@@ -792,7 +805,7 @@ export async function getSessionContext(
   sessionId: string,
 ): Promise<SessionContext | null> {
   const response = await request(
-    `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/sessions/${encodeURIComponent(sessionId)}/context`,
+    `${pluginRoot(config.baseUrl)}/sessions/${encodeURIComponent(sessionId)}/context`,
     { headers: headers(config) },
   )
   const body = await response.json()
@@ -842,7 +855,7 @@ export async function getSessionTodos(
   sessionId: string,
 ): Promise<SessionTodos | null> {
   const response = await request(
-    `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/sessions/${encodeURIComponent(sessionId)}/todos`,
+    `${pluginRoot(config.baseUrl)}/sessions/${encodeURIComponent(sessionId)}/todos`,
     { headers: headers(config) },
   )
   return parseTodos(await response.json())
@@ -895,7 +908,7 @@ function parseWorkspace(raw: unknown): SessionWorkspace | null {
 }
 
 function pluginSession(config: HermesConfig, sessionId: string, path: string) {
-  return `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/sessions/${encodeURIComponent(sessionId)}${path}`
+  return `${pluginRoot(config.baseUrl)}/sessions/${encodeURIComponent(sessionId)}${path}`
 }
 
 /**
@@ -1046,7 +1059,7 @@ export type LiveRunStatus = "running" | "waiting_for_approval"
 
 /** Sessions with a run in flight on the server, by Hermes session id. Needs the Memento plugin. */
 export async function listLiveRuns(config: HermesConfig): Promise<Record<string, LiveRunStatus>> {
-  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/runs/live`, {
+  const response = await request(`${pluginRoot(config.baseUrl)}/runs/live`, {
     headers: headers(config),
   })
   const sessions: unknown = (await response.json())?.sessions
@@ -1071,7 +1084,7 @@ export async function listWaiting(
   config: HermesConfig,
   signal?: AbortSignal,
 ): Promise<Record<string, WaitingReason & { project?: string }>> {
-  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/runs/live`, {
+  const response = await request(`${pluginRoot(config.baseUrl)}/runs/live`, {
     headers: headers(config),
     signal,
   })
@@ -1099,7 +1112,7 @@ export async function listWaiting(
 
 /** The run in flight for a session, if the plugin reports one (it adds `run_ids` from 0.12). */
 export async function liveRunOf(config: HermesConfig, sessionId: string) {
-  const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/runs/live`, {
+  const response = await request(`${pluginRoot(config.baseUrl)}/runs/live`, {
     headers: headers(config),
   })
   const body = await response.json()
@@ -1115,27 +1128,24 @@ export async function respondToClarify(
   runId: string,
   reply: { clarifyId: string; answers: ClarifyAnswers; outcome: "submitted" | "cancelled" },
 ) {
-  await request(
-    `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/runs/${encodeURIComponent(runId)}/clarify`,
-    {
-      method: "POST",
-      headers: headers(config),
-      body: JSON.stringify({
-        clarify_id: reply.clarifyId,
-        answers: reply.answers,
-        outcome: reply.outcome,
-      }),
-    },
-  )
+  await request(`${pluginRoot(config.baseUrl)}/runs/${encodeURIComponent(runId)}/clarify`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({
+      clarify_id: reply.clarifyId,
+      answers: reply.answers,
+      outcome: reply.outcome,
+    }),
+  })
 }
 
 /** Marks a session as Memento's, so the Hermes dashboard labels it. Needs the Memento plugin. */
 export async function labelSession(config: HermesConfig, sessionId: string) {
   try {
-    await request(
-      `${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/sessions/${encodeURIComponent(sessionId)}/label`,
-      { method: "POST", headers: headers(config) },
-    )
+    await request(`${pluginRoot(config.baseUrl)}/sessions/${encodeURIComponent(sessionId)}/label`, {
+      method: "POST",
+      headers: headers(config),
+    })
   } catch {
     // Without the plugin the chat just keeps the API server's label.
   }
