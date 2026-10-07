@@ -37,9 +37,20 @@ Restart `hermes dashboard` too if it's running, so it picks up the new tab.
 
 To update, run `hermes plugins update memento`, then restart the gateway.
 
+## Linking to Memento
+
+`hermes memento link <code> --site <url>` (from Memento's link screen; `hermes -p <name> memento link …` for another profile) links the profile to a Memento account, so it shows up in the app by itself:
+
+- It claims the code, checks the account's key against the code's fingerprint, and keeps a host token in `$HERMES_HOME/memento/link.json` (owner-only).
+- It always asks for the URL the app reaches the profile at. The default is the URL saved before, else `<main profile's URL>/p/<name>` for another profile, else Hermes's dashboard public URL (`HERMES_DASHBOARD_PUBLIC_URL`, then `dashboard.public_url`; Hermes has none for the API server), else `http://<hostname>:<API_SERVER_PORT>`. `--url` sets it without asking.
+- It offers to add what `.env` still lacks: `API_SERVER_KEY`, `API_SERVER_ENABLED=true` and the app's origins in `API_SERVER_CORS_ORIGINS` (never for a profile under `/p/<name>`, which rides the main gateway). `--yes` accepts the defaults.
+- It seals the bot record (name, URL, API key) to the account's key before it leaves; the registry can't read it.
+
+The gateway then checks in at start and every 10 minutes for each profile it serves, re-publishing the record when the URL or key changed, when the app lost it, or when the account's key changed. A host removed in the app stops (`Check-in: removed in Memento`). `hermes memento status` checks in once and says how it went; `hermes memento unlink` removes the profile from the account.
+
 ## Requirements
 
-- A Hermes version with the cron execution ledger and `ctx.register_platform_handler`.
+- A Hermes version with the cron execution ledger and `ctx.register_platform_handler` (and `ctx.register_cli_command` for `hermes memento`).
 - The API server enabled with an `API_SERVER_KEY`, the same setup Memento needs anyway.
 
 ## Limitations
