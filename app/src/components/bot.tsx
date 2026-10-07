@@ -1,5 +1,3 @@
-import { useId } from "react"
-
 import { BOTS, DEFAULT_BOT_ID } from "@/components/bots"
 import { cn } from "@/lib/utils"
 
@@ -13,17 +11,20 @@ export function Bot({
   animate?: boolean
   className?: string
 }) {
-  const uid = `bot-${useId().replace(/[^\w-]/g, "")}`
   const bot = BOTS.find((b) => b.id === id) ?? BOTS[0]
 
   return (
-    <svg
-      viewBox="0 0 100 100"
+    <span
       role="img"
       aria-label={bot.name}
-      className={cn("size-8 shrink-0 overflow-visible", animate && "bot-animate", className)}
+      className={cn("inline-block size-8 shrink-0", animate && "bot-animate", className)}
     >
-      {bot.draw(uid)}
-    </svg>
+      <img
+        src={`/bots/${bot.id}.png`}
+        alt=""
+        draggable={false}
+        className="bot-float size-full object-contain select-none"
+      />
+    </span>
   )
 }
