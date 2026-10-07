@@ -94,8 +94,8 @@ const summary = (parts: string[], shown = parts.length) =>
   sentence(parts.slice(0, shown)) + (shown < parts.length ? ` (+${parts.length - shown})` : "")
 
 /** How many phrases of the summary fit on the row's line, with "(+N)" standing in for the rest. */
-function useFittingPhrases(parts: string[], deps: unknown[]) {
-  const row = useRef<HTMLButtonElement>(null)
+function useFittingPhrases<T extends HTMLElement>(parts: string[], deps: unknown[] = []) {
+  const row = useRef<T>(null)
   const text = useRef<HTMLSpanElement>(null)
   const ruler = useRef<HTMLSpanElement>(null)
   const [shown, setShown] = useState(parts.length)
@@ -198,10 +198,15 @@ function ToolDetail({ tool, onBack }: { tool: ToolEvent; onBack: () => void }) {
 }
 
 function ToolList({ tools, onSelect }: { tools: ToolEvent[]; onSelect: (id: string) => void }) {
+  const parts = phrases(tools)
+  const { row, text, ruler, shown } = useFittingPhrases<HTMLHeadingElement>(parts)
   return (
     <>
       <PopupHeader className="px-14 pb-2 text-center">
-        <PopupTitle className="text-balance">{summary(phrases(tools))}</PopupTitle>
+        <PopupTitle ref={row} className="relative truncate" title={summary(parts)}>
+          <span ref={text}>{summary(parts, shown)}</span>
+          <span ref={ruler} className="invisible absolute w-max whitespace-nowrap" aria-hidden />
+        </PopupTitle>
       </PopupHeader>
       <ol className="flex flex-col px-6 pt-2">
         {tools.map((tool, index) => {
@@ -246,7 +251,7 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
   const running = tools.some((t) => t.status === "running")
   const failed = tools.some((t) => t.status === "failed")
   const parts = phrases(tools)
-  const { row, text, ruler, shown } = useFittingPhrases(parts, [running, failed])
+  const { row, text, ruler, shown } = useFittingPhrases<HTMLButtonElement>(parts, [running, failed])
   return (
     <>
       <button
