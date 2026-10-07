@@ -44,5 +44,6 @@ To update, run `hermes plugins update memento`, then restart the gateway.
 
 ## Limitations
 
-- Routes are served on the API server's own listener, not under `/p/<profile>/` on a multiplexed gateway. Give each profile its own API server port to use routines, and keep its chats here, with Memento.
+- On a multiplexed gateway, a profile's routes are at `/api/plugins/memento/p/<profile>/...`, not `/p/<profile>/api/plugins/...`: Hermes's own catch-all for `/p/<profile>/` is registered before plugin routes. Memento handles that itself. The routes answer with the profile's own `API_SERVER_KEY`, home and chat list, but the hooks (context use, todos, plan files, labels) run only in profiles that have the plugin installed and enabled too; `info` reports `hooks: false` otherwise.
+- The daily cleanup only covers the profile home the plugin was loaded in.
 - The ledger keeps the newest 1,000 finished runs across all jobs.
