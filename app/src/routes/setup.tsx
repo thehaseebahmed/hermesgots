@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useNavigate } from "react-router"
 import { FingerprintIcon, LogInIcon } from "lucide-react"
@@ -6,18 +6,15 @@ import { toast } from "sonner"
 
 import { RecoveryCodeDialog, UnlockSync } from "@/components/account-settings"
 import { Bot } from "@/components/bot"
-import { CopyBlock } from "@/components/copy-block"
-import { BotEditor } from "@/components/bot-settings"
+import { LinkBots } from "@/components/link-bots"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { signIn } from "@/lib/account"
-import { getActiveProfile, getSettings, saveSettings, updateProfile } from "@/lib/db"
-import { generateApiKey, INSTALL_PLUGIN } from "@/lib/hermes"
+import { getActiveProfile, getSettings, saveSettings } from "@/lib/db"
 import { needsBotSetup, setUpSync, syncNow, useSyncState, type SyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
 
-type Step = "sign-in" | "sync" | "checking" | "server" | "plugin" | "bot"
+type Step = "sign-in" | "sync" | "checking" | "link"
 
 function isAuthed({ account, vault }: SyncState) {
   return (
@@ -27,11 +24,12 @@ function isAuthed({ account, vault }: SyncState) {
 
 /**
  * Keeps the app behind sign-in and unlocked sync wherever the deploy has Identity, and behind
- * first-run setup until it's done.
+ * linking a bot until there's one.
  */
 export function SetupGate({ children }: { children: ReactNode }) {
   const sync = useSyncState()
   const onboarded = useLiveQuery(async () => (await getSettings()).onboarded ?? null, [])
+  const noBots = useLiveQuery(needsBotSetup, [])
   // Held here so the dialog outlives the wizard if unlocking is all this device needed.
   const [recoveryCode, setRecoveryCode] = useState<string>()
 
@@ -39,13 +37,16 @@ export function SetupGate({ children }: { children: ReactNode }) {
   const waiting =
     account.status === "loading" ||
     onboarded === undefined ||
+    noBots === undefined ||
     (account.status === "signed-in" && sync.vault === "unknown" && !sync.error)
   if (waiting) return <div className="h-dvh bg-background" />
-  if (isAuthed(sync) && onboarded && !recoveryCode) return children
+  // Without Identity nothing can link, so the seed bot is set up by hand in Settings instead.
+  const linking = account.status !== "unavailable" && noBots
+  if (isAuthed(sync) && onboarded && !linking && !recoveryCode) return children
   return <SetupPage recoveryCode={recoveryCode} setRecoveryCode={setRecoveryCode} />
 }
 
-/** First-run setup: sign in and unlock sync (where the deploy has Identity), then connect Hermes. */
+/** First-run setup: sign in, unlock sync, then link a bot from its Hermes host. */
 function SetupPage({
   recoveryCode,
   setRecoveryCode,
@@ -56,17 +57,16 @@ function SetupPage({
   const sync = useSyncState()
   const navigate = useNavigate()
   const profile = useLiveQuery(getActiveProfile, [])
-  const [hermesStep, setHermesStep] = useState<"checking" | "server" | "plugin" | "bot">("checking")
-  // Held here so going back and forth shows the same key; a key the bot already has wins.
-  const [newKey] = useState(generateApiKey)
-  const apiKey = profile?.apiKey || newKey
+  const [linkStep, setLinkStep] = useState<"checking" | "link">("checking")
   const [busy, setBusy] = useState(false)
+  const [reachable, setReachable] = useState(false)
+  const onReachable = useCallback((ok: boolean) => setReachable(ok), [])
 
   const { account } = sync
   const identity = account.status !== "unavailable"
   const authed = isAuthed(sync)
   const step: Step =
-    account.status === "signed-out" ? "sign-in" : !authed || recoveryCode ? "sync" : hermesStep
+    account.status === "signed-out" ? "sign-in" : !authed || recoveryCode ? "sync" : linkStep
 
   // Once in, a returning user's bots arrive through sync and there's nothing left to set up.
   useEffect(() => {
@@ -74,27 +74,23 @@ function SetupPage({
     let cancelled = false
     void (async () => {
       await syncNow()
+      if (cancelled) return
+      if (!identity) return void (await saveSettings({ onboarded: true }))
       const { onboarded } = await getSettings()
-      if (cancelled || onboarded) return
-      if (onboarded === undefined) {
-        await saveSettings({ onboarded: !(await needsBotSetup()) })
-        if (cancelled) return
-      }
-      setHermesStep((current) => (current === "checking" ? "server" : current))
+      if (onboarded === undefined) await saveSettings({ onboarded: !(await needsBotSetup()) })
+      if (!cancelled) setLinkStep("link")
     })()
     return () => {
       cancelled = true
     }
-  }, [authed, recoveryCode])
+  }, [authed, recoveryCode, identity])
 
   const finish = async () => {
     await saveSettings({ onboarded: true })
     navigate("/", { replace: true })
   }
 
-  const steps: Step[] = identity
-    ? ["sign-in", "sync", "server", "plugin", "bot"]
-    : ["server", "plugin", "bot"]
+  const steps: Step[] = ["sign-in", "sync", "link"]
 
   return (
     <div className="flex h-dvh flex-col overflow-y-auto bg-background">
@@ -154,23 +150,14 @@ function SetupPage({
 
         {step === "checking" && <Spinner className="self-center" />}
 
-        {step === "server" && (
-          <ServerStep
-            apiKey={apiKey}
-            onNext={async () => {
-              // The bot step's key field starts with the key the .env lines carry.
-              const active = await getActiveProfile()
-              if (active && !active.apiKey) await updateProfile(active.id, { apiKey: newKey })
-              setHermesStep("plugin")
-            }}
-          />
+        {step === "link" && (
+          <Section title="Link your bots">
+            <LinkBots onReachable={onReachable} />
+            <Button size="lg" className="h-11" disabled={!reachable} onClick={finish}>
+              Start chatting
+            </Button>
+          </Section>
         )}
-
-        {step === "plugin" && (
-          <PluginStep onBack={() => setHermesStep("server")} onNext={() => setHermesStep("bot")} />
-        )}
-
-        {step === "bot" && <BotStep onBack={() => setHermesStep("plugin")} onDone={finish} />}
       </div>
 
       <RecoveryCodeDialog code={recoveryCode} onDone={() => setRecoveryCode(undefined)} />
@@ -212,130 +199,5 @@ function Section({
       </div>
       {children}
     </section>
-  )
-}
-
-function Code({ children }: { children: ReactNode }) {
-  return <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">{children}</code>
-}
-
-/** How to turn on Hermes's API server, from its `.env` file or the Hermes Dashboard. */
-function ServerStep({ apiKey, onNext }: { apiKey: string; onNext: () => void }) {
-  const [method, setMethod] = useState<"env" | "dashboard">("env")
-  const origin = window.location.origin
-  const cors = `API_SERVER_CORS_ORIGINS=${origin}`
-
-  return (
-    <Section title="Turn on the API server" description="Memento talks to Hermes through it.">
-      <ToggleGroup
-        variant="outline"
-        className="w-full"
-        value={[method]}
-        onValueChange={(value) => value[0] && setMethod(value[0] as "env" | "dashboard")}
-      >
-        <ToggleGroupItem value="env" className="h-11 flex-1">
-          .env file
-        </ToggleGroupItem>
-        <ToggleGroupItem value="dashboard" className="h-11 flex-1">
-          Hermes Dashboard
-        </ToggleGroupItem>
-      </ToggleGroup>
-
-      {method === "env" ? (
-        <ol className="flex list-decimal flex-col gap-3 pl-5 text-sm marker:text-muted-foreground">
-          <li className="space-y-2">
-            <p>
-              Add these lines to <Code>~/.hermes/.env</Code>:
-            </p>
-            <CopyBlock
-              label="Copy .env lines"
-              text={`API_SERVER_ENABLED=true\nAPI_SERVER_KEY=${apiKey}\n${cors}`}
-            />
-          </li>
-          <li className="space-y-2">
-            <p>Restart the gateway:</p>
-            <CopyBlock label="Copy restart command" text="hermes gateway restart" />
-          </li>
-        </ol>
-      ) : (
-        <ol className="flex list-decimal flex-col gap-3 pl-5 text-sm marker:text-muted-foreground">
-          <li>
-            <p>
-              Run <Code>hermes dashboard</Code> and open <Code>http://localhost:9119</Code>.
-            </p>
-          </li>
-          <li className="space-y-2">
-            <p>
-              Go to <strong>Channels</strong>, find <strong>API server</strong> and choose{" "}
-              <strong>Configure</strong>. Set <strong>Enable API server</strong> to{" "}
-              <Code>true</Code> and paste this key as the auth key:
-            </p>
-            <CopyBlock label="Copy key" text={apiKey} />
-          </li>
-          <li className="space-y-2">
-            <p>
-              The dashboard has no CORS setting, so add this line to <Code>~/.hermes/.env</Code>:
-            </p>
-            <CopyBlock label="Copy CORS line" text={cors} />
-          </li>
-          <li>
-            <p>
-              Turn the API server on and choose <strong>Restart gateway</strong>.
-            </p>
-          </li>
-        </ol>
-      )}
-
-      <p className="text-sm text-muted-foreground">
-        For a named profile, use <Code>~/.hermes/profiles/&lt;name&gt;/.env</Code> instead.
-      </p>
-
-      <Button size="lg" className="h-11" onClick={onNext}>
-        Next
-      </Button>
-    </Section>
-  )
-}
-
-/** The Memento plugin, which Code, Routines, the agent's questions and chat sync need. */
-function PluginStep({ onBack, onNext }: { onBack: () => void; onNext: () => void }) {
-  return (
-    <Section
-      title="Add the Memento plugin"
-      description="Code, Routines, the agent's questions and chat sync need it. You can add it later."
-    >
-      <div className="space-y-2 text-sm">
-        <p>Install it on the Hermes host and restart the gateway:</p>
-        <CopyBlock label="Copy install commands" text={INSTALL_PLUGIN} />
-      </div>
-      <div className="flex flex-col gap-2">
-        <Button size="lg" className="h-11" onClick={onNext}>
-          Next
-        </Button>
-        <Button variant="ghost" className="h-11 self-start" onClick={onBack}>
-          Back
-        </Button>
-      </div>
-    </Section>
-  )
-}
-
-function BotStep({ onBack, onDone }: { onBack: () => void; onDone: () => void }) {
-  const profile = useLiveQuery(getActiveProfile, [])
-  const [connected, setConnected] = useState(false)
-  if (!profile) return <Spinner className="self-center" />
-
-  return (
-    <Section title="Connect your bot" description="Point it at your Hermes API server.">
-      <BotEditor profile={profile} setup onConnectionChange={setConnected} />
-      <div className="flex flex-col gap-2">
-        <Button size="lg" className="h-11" disabled={!connected} onClick={onDone}>
-          Start chatting
-        </Button>
-        <Button variant="ghost" className="h-11 self-start" onClick={onBack}>
-          Back
-        </Button>
-      </div>
-    </Section>
   )
 }
