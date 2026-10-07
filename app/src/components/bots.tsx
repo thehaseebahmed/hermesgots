@@ -327,7 +327,7 @@ export const BOTS: BotDefinition[] = [
   {
     id: "tri",
     name: "Tri",
-    description: "A soft triangle in round glasses who reads everything twice.",
+    description: "A soft little triangle who tilts its head left, then right, and reads everything twice.",
     draw: (uid) => (
       <g className="bot-breathe">
         {body(uid, tri, TRI)}
@@ -346,7 +346,7 @@ export const BOTS: BotDefinition[] = [
   {
     id: "cubby",
     name: "Cubby",
-    description: "A squishy square in a knitted beanie, unbothered by the weather.",
+    description: "A squishy square with a happy squint who jiggles whenever it's pleased.",
     draw: (uid) => (
       <g className="bot-jiggle">
         {body(uid, cubby, CUBBY)}
@@ -379,7 +379,7 @@ export const BOTS: BotDefinition[] = [
   {
     id: "penny",
     name: "Penny",
-    description: "A cosy pentagon who keeps its headphones on while it works.",
+    description: "A cheeky coral blob with a wink who bobs along to a beat only it can hear.",
     draw: (uid) => (
       <g className="bot-breathe">
         {body(uid, penny, PENNY)}
@@ -405,7 +405,7 @@ export const BOTS: BotDefinition[] = [
   {
     id: "hex",
     name: "Hex",
-    description: "A calm hexagon with a glowing antenna that lights up when it has an idea.",
+    description: "A calm blue hexagon that hovers quietly and glows when it has an idea.",
     draw: (uid) => (
       <>
         <defs>{gradient(`${uid}-bulb`, bulb)}</defs>
@@ -436,7 +436,7 @@ export const BOTS: BotDefinition[] = [
   {
     id: "stella",
     name: "Stella",
-    description: "A soft star with a small glass crown and a knowing wink.",
+    description: "A sunny little star that wiggles and twinkles like it knows something you don't.",
     draw: (uid) => (
       <g className="bot-wiggle">
         {body(uid, stella, STELLA)}
@@ -454,7 +454,7 @@ export const BOTS: BotDefinition[] = [
   {
     id: "orbi",
     name: "Orbi",
-    description: "A round, wobbly blob with a glass bow who drifts like a jellyfish.",
+    description: "A round, wobbly blob who drifts and pulses like a jellyfish.",
     draw: (uid) => (
       <g className="bot-float">
         {body(uid, orbi, ORBI)}
@@ -473,7 +473,7 @@ export const BOTS: BotDefinition[] = [
   {
     id: "gem",
     name: "Gem",
-    description: "A plump diamond whose propeller cap spins up when it's thinking hard.",
+    description: "A plump purple diamond that floats up and does a full flip when it's thinking hard.",
     draw: (uid) => (
       <g className="bot-float">
         {body(uid, gem, GEM)}
@@ -503,7 +503,7 @@ export const BOTS: BotDefinition[] = [
   {
     id: "bloom",
     name: "Bloom",
-    description: "A gentle heart with a flower on top that sways in a breeze only it can feel.",
+    description: "A gentle heart whose glow beats softly, in time with a heart of its own.",
     draw: (uid) => (
       <>
         <defs>
