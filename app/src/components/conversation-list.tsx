@@ -3,8 +3,11 @@ import { NavLink, type NavLinkProps } from "react-router"
 import {
   ChevronRightIcon,
   CodeXmlIcon,
+  ListChecksIcon,
+  MessageCircleQuestionMarkIcon,
   PlusIcon,
   SearchIcon,
+  ShieldAlertIcon,
   TimerIcon,
   UserIcon,
 } from "lucide-react"
@@ -16,6 +19,7 @@ import { db } from "@/lib/db"
 import { useNav } from "@/lib/nav"
 import { useSyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
+import { reasonText, useWaitingSessions, type WaitingReason } from "@/lib/waiting"
 
 const RECENTS = 10
 
@@ -90,6 +94,58 @@ function Recents({ onNavigate }: { onNavigate?: () => void }) {
   )
 }
 
+const REASON_ICONS: Record<WaitingReason["kind"], typeof ListChecksIcon> = {
+  question: MessageCircleQuestionMarkIcon,
+  approval: ShieldAlertIcon,
+  plan: ListChecksIcon,
+}
+
+/** Project sessions, across every project, that wait on the user. Hidden when there are none. */
+function Waiting({ onNavigate }: { onNavigate?: () => void }) {
+  const waiting = useWaitingSessions()
+  if (!waiting.length) return null
+
+  return (
+    <>
+      <nav className="flex flex-col gap-0.5" aria-labelledby="waiting-heading">
+        <h2
+          id="waiting-heading"
+          className="flex items-center gap-2 px-3 pt-1 pb-2 text-sm font-medium text-muted-foreground"
+        >
+          Waiting for input
+          <span className="rounded-full bg-warning/15 px-1.5 text-xs leading-5 font-semibold text-warning tabular-nums">
+            {waiting.length}
+          </span>
+        </h2>
+        <ul className="flex flex-col gap-0.5">
+          {waiting.map(({ sessionId, title, reason, project }) => {
+            const Icon = REASON_ICONS[reason.kind]
+            return (
+              <li key={sessionId}>
+                <RootLink
+                  to={`/c/${sessionId}`}
+                  onClick={onNavigate}
+                  className={(state) => cn(rowClass(state), "py-2")}
+                >
+                  <Icon className="size-5 shrink-0 self-start text-warning" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{title}</span>
+                    <span className="flex gap-1 text-xs text-muted-foreground">
+                      <span className="max-w-full shrink-0 truncate">{reasonText(reason)}</span>
+                      {project && <span className="min-w-0 truncate">· {project}</span>}
+                    </span>
+                  </span>
+                </RootLink>
+              </li>
+            )
+          })}
+        </ul>
+      </nav>
+      <Separator className="mx-1 my-3 w-auto" />
+    </>
+  )
+}
+
 /** The signed-in GitHub picture, or a plain figure; opens Settings. */
 function ProfileButton({ onNavigate }: { onNavigate?: () => void }) {
   const { account } = useSyncState()
@@ -140,6 +196,7 @@ export function ConversationList({ onNavigate }: { onNavigate?: () => void }) {
           </RootLink>
         </nav>
         <Separator className="mx-1 my-3 w-auto" />
+        <Waiting onNavigate={onNavigate} />
         <Recents onNavigate={onNavigate} />
       </div>
 
