@@ -210,7 +210,7 @@ def _project(projects_db: Path, project_id: str) -> Any:
     if not projects_db.exists():
         raise ValueError("No such project.")
     with pdb.connect_closing(db_path=projects_db) as conn:
-        projects = pdb.list_projects(conn)
+        projects = pdb.list_projects(conn, include_archived=True)
     project = next((p for p in projects if str(p.id) == project_id), None)
     if project is None:
         raise ValueError("No such project.")
@@ -223,15 +223,40 @@ def _project_folders(project: Any) -> list[str]:
     return [os.path.abspath(os.path.expanduser(folder.path)) for folder in folders]
 
 
-def _project_repos(projects_db: Path, project_id: str) -> list[str]:
+def _git_folders(project: Any) -> list[str]:
     """The project's git folders, primary first."""
     repos = []
-    for root in _project_folders(_project(projects_db, project_id)):
+    for root in _project_folders(project):
         if os.path.exists(os.path.join(root, ".git")) and root not in repos:
             repos.append(root)
-    if not repos:
-        raise ValueError("This project has no git repository.")
     return repos
+
+
+def _blocked(project: Any, record: Optional[Dict[str, Any]]) -> Optional[str]:
+    if getattr(project, "archived", False):
+        return "This project is archived."
+    if not record:
+        return None
+    roots = _git_folders(project)
+    gone = [repo["name"] for repo in record["repos"] if repo["repo_root"] not in roots]
+    if gone:
+        names = " and ".join(gone)
+        return f"{names} {'was' if len(gone) == 1 else 'were'} removed from this project."
+    return None
+
+
+def blocked(hermes_home: Path, record: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Why the session can't take another turn: its project is archived, or a repo it works in was
+    removed from the project. None when it can."""
+    if not record:
+        return None
+    try:
+        project = _project(hermes_home / "projects.db", record["project_id"])
+    except ValueError:
+        return "This project was deleted."
+    except ImportError:
+        return None
+    return _blocked(project, record)
 
 
 def _create_worktree(repo_root: str, name: str) -> Dict[str, str]:
@@ -299,8 +324,19 @@ def ensure(
     if task is not None and not isinstance(task, str):
         raise ValueError("task must be a string.")
     project_id = str(project_id).strip()
-    roots = _project_repos(hermes_home / "projects.db", project_id)
+    project = _project(hermes_home / "projects.db", project_id)
     record = read(path, session_id)
+    reason = _blocked(project, record)
+    if reason:
+        raise WorkspaceError(reason, 409)
+    if not record:
+        from . import repos as repo_changes
+
+        if repo_changes.cloning(hermes_home, project_id):
+            raise WorkspaceError("A repository is still being added to this project.", 409)
+    roots = _git_folders(project)
+    if not roots:
+        raise ValueError("This project has no git repository.")
     existing = {repo["repo_root"]: repo for repo in (record or {}).get("repos", [])}
     if record and all(root in existing and os.path.isdir(existing[root]["path"] or "") for root in roots):
         if mode and mode != record["mode"]:
