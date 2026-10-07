@@ -59,6 +59,7 @@ const CHAT_FIELDS = [
   "updatedAt",
   "projectId",
   "resolvedAt",
+  "discardedAt",
   "draftAt",
 ] as const
 type ChatValue = Pick<Conversation, (typeof CHAT_FIELDS)[number]>

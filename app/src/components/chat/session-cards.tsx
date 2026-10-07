@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react"
 import {
+  ArchiveXIcon,
   CheckCircle2Icon,
   LockIcon,
   MapIcon,
@@ -117,6 +118,18 @@ export function ResolvedCard({ onReopen }: { onReopen: () => void }) {
         <Button variant="outline" className="h-11 rounded-full px-4" onClick={onReopen}>
           Reopen
         </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+/** In place of the composer once the session is discarded. */
+export function DiscardedCard() {
+  return (
+    <Card size="sm" className={CARD}>
+      <CardContent className="flex min-h-11 items-center gap-3">
+        <ArchiveXIcon className="size-6 shrink-0 text-muted-foreground" />
+        <p className="min-w-0 flex-1 text-sm font-medium">This session is discarded.</p>
       </CardContent>
     </Card>
   )

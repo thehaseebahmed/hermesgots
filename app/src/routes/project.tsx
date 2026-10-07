@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   ArchiveIcon,
+  ArchiveXIcon,
   ArrowLeftIcon,
   CheckIcon,
   ChevronUpIcon,
@@ -68,6 +69,7 @@ const GROUPS: { state: SessionState; label: string }[] = [
   { state: "waiting", label: "Waiting on you" },
   { state: "idle", label: "Idle" },
   { state: "resolved", label: "Resolved" },
+  { state: "discarded", label: "Discarded" },
 ]
 /** A finished group longer than this starts collapsed. */
 const FOLD_OVER = 5
@@ -305,7 +307,7 @@ export function ProjectPage() {
                     key={group.state}
                     label={group.label}
                     count={group.sessions.length}
-                    fold={group.state === "resolved"}
+                    fold={group.state === "discarded" ? "always" : group.state === "resolved"}
                   >
                     {group.sessions.map((c) => (
                       <li key={c.id}>
@@ -453,6 +455,7 @@ function StateIcon({ state }: { state: SessionState }) {
   if (state === "working") return <Spinner className="size-4" />
   if (state === "waiting") return <CircleAlertIcon className="size-4 text-warning" />
   if (state === "resolved") return <CheckIcon className="size-4 text-success" />
+  if (state === "discarded") return <ArchiveXIcon className="size-4 text-muted-foreground" />
   return null
 }
 
@@ -497,7 +500,8 @@ function SessionItem({
 }
 
 /**
- * A titled list that folds away; a finished one (`fold`) longer than `FOLD_OVER` starts folded.
+ * A titled list that folds away; a finished one (`fold`) longer than `FOLD_OVER` starts folded,
+ * and an `"always"` one always does.
  * It's mounted once its first item is known, so that count decides.
  */
 function Group({
@@ -508,11 +512,14 @@ function Group({
 }: {
   label: string
   count: number
-  fold?: boolean
+  fold?: boolean | "always"
   children: ReactNode
 }) {
   return (
-    <Collapsible defaultOpen={!fold || count <= FOLD_OVER} render={<section aria-label={label} />}>
+    <Collapsible
+      defaultOpen={!fold || (fold !== "always" && count <= FOLD_OVER)}
+      render={<section aria-label={label} />}
+    >
       <h2>
         <CollapsibleTrigger className="group -mx-1 flex min-h-11 items-center gap-1.5 rounded-xl px-2 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
           {label} ({count})

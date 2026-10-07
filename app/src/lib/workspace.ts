@@ -4,6 +4,7 @@ import {
   getSessionPrs,
   getWorkspace,
   HermesError,
+  closeSession,
   removeWorkspace,
   setWorkspaceMode,
   type HermesProject,
@@ -12,6 +13,7 @@ import {
   type LiveRunStatus,
   type SessionWorkspace,
 } from "@/lib/hermes"
+import { syncNow } from "@/lib/sync"
 
 /**
  * A project session's workspace: the worktrees the Memento plugin made for it on the Hermes host
@@ -25,7 +27,7 @@ const RETRY_MS = 5 * 60 * 1000
 /** How long a known pull request is trusted before it's read again. */
 const PR_MS = 30_000
 
-export type SessionState = "working" | "waiting" | "idle" | "resolved"
+export type SessionState = "working" | "waiting" | "idle" | "resolved" | "discarded"
 
 export const MODE_LABELS: Record<SessionMode, string> = {
   accept_edits: "Accept edits",
@@ -118,7 +120,8 @@ export async function refreshWorkspace(conversationId: string) {
 /** Reads the branch's pull request in each of the session's repos from the plugin. */
 export async function refreshPrs(conversationId: string, { force = false } = {}) {
   const found = await tracked(conversationId)
-  if (!found?.conversation.worktree || cooling(found.key)) return
+  // A discarded session's pull requests stay as it closed them; its branch is gone.
+  if (!found?.conversation.worktree || found.conversation.discardedAt || cooling(found.key)) return
   const { conversation, profile } = found
   const newest = Math.min(...(conversation.prs ?? []).map((pr) => pr.at))
   if (!force && conversation.prs?.length && Date.now() - newest < PR_MS) return
@@ -132,6 +135,11 @@ export async function refreshPrs(conversationId: string, { force = false } = {})
   unsupported.delete(found.key)
   const at = Date.now()
   await db.conversations.update(conversationId, { prs: prs.map((pr) => ({ ...pr, at })) })
+  // The plugin resolves the session once its pull request merges; the chat list brings that here.
+  const merged = (pr: { repo: string; state: string }) =>
+    pr.state === "merged" &&
+    conversation.prs?.find((old) => old.repo === pr.repo)?.state !== "merged"
+  if (!conversation.resolvedAt && prs.some(merged)) void syncNow()
 }
 
 /**
@@ -156,19 +164,40 @@ export async function setSessionMode(conversationId: string, mode: SessionMode) 
   }
 }
 
-/** Asks the plugin to remove the worktrees; it keeps those with uncommitted or unpushed work. */
-export async function removeSessionWorkspace(
+/**
+ * Ends a session being deleted or discarded on the plugin: its worktrees go (the plugin keeps those
+ * with uncommitted or unpushed work), and its pull requests and pushed branches are closed and
+ * deleted on GitHub. What it couldn't do comes back as `errors`.
+ */
+export async function closeSessionWork(
   conversationId: string,
-): Promise<{ removed: boolean; kept: KeptWorktree[]; error?: string }> {
+): Promise<{ kept: KeptWorktree[]; errors: string[] }> {
   const found = await tracked(conversationId)
-  if (!found?.conversation.worktree) return { removed: false, kept: [] }
+  if (!found?.conversation.worktree) return { kept: [], errors: [] }
+  const { profile, conversation } = found
+  const named = conversation.worktree!.repos.length > 1
   try {
-    return await removeWorkspace(found.profile, found.conversation.hermesSessionId)
+    const { kept, results } = await closeSession(profile, conversation.hermesSessionId)
+    const closed = new Set(results.filter((r) => r.closed !== null).map((r) => r.name))
+    if (closed.size && conversation.prs)
+      await db.conversations.update(conversationId, {
+        prs: conversation.prs.map((pr) => (closed.has(pr.repo) ? { ...pr, state: "closed" } : pr)),
+      })
+    return {
+      kept,
+      errors: results
+        .filter((result) => result.error)
+        .map((result) => (named ? `${result.name}: ${result.error}` : result.error!)),
+    }
+  } catch {
+    // A plugin from before 0.20 can only remove the worktrees.
+  }
+  try {
+    return { kept: (await removeWorkspace(profile, conversation.hermesSessionId)).kept, errors: [] }
   } catch (error) {
     return {
-      removed: false,
       kept: [],
-      error: error instanceof Error ? error.message : "Couldn't reach the plugin.",
+      errors: [error instanceof Error ? error.message : "Couldn't reach the plugin."],
     }
   }
 }
@@ -178,10 +207,11 @@ export async function removeSessionWorkspace(
  * device sees of its own turn, which is exact here and invisible elsewhere.
  */
 export function sessionState(
-  conversation: Pick<Conversation, "resolvedAt" | "planPending">,
+  conversation: Pick<Conversation, "resolvedAt" | "discardedAt" | "planPending">,
   live?: LiveRunStatus,
   local?: { streaming?: boolean; waiting?: boolean },
 ): SessionState {
+  if (conversation.discardedAt) return "discarded"
   if (conversation.resolvedAt) return "resolved"
   if (local?.waiting || live === "waiting_for_approval" || conversation.planPending)
     return "waiting"
@@ -196,7 +226,7 @@ export function planApprovalMessage(planFile: string | undefined) {
   if (!planFile) return `${PLAN_GO_AHEAD}.`
   return (
     `${PLAN_GO_AHEAD} in \`${planFile}\`. Work through its checkpoints in order and commit ` +
-    "each one on this branch with the commit message it names. Don't push."
+    "each one on this branch with the commit message it names, then open the pull request."
   )
 }
 
