@@ -60,16 +60,14 @@ const REASON_ICONS: Record<WaitingReason["kind"], typeof ListChecksIcon> = {
 function Recents({ onNavigate }: { onNavigate?: () => void }) {
   const live = useWaiting()
   const recents = useLiveQuery(async () => {
-    const [chats, profiles] = await Promise.all([
-      db.conversations
-        .orderBy("updatedAt")
-        .reverse()
-        .filter((c) => !c.projectId)
-        .limit(RECENTS)
-        .toArray(),
-      db.profiles.toArray(),
-    ])
+    const profiles = await db.profiles.toArray()
     const bots = new Map(profiles.map((p) => [p.id, p]))
+    const chats = await db.conversations
+      .orderBy("updatedAt")
+      .reverse()
+      .filter((c) => !c.projectId && !bots.get(c.profileId)?.disabled)
+      .limit(RECENTS)
+      .toArray()
     // This device's own unanswered approval or question, which a keyless bot or one without the
     // plugin can't report.
     const open = await db.messages

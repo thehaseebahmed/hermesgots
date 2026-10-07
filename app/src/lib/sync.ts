@@ -10,7 +10,7 @@ import {
   watchAccount,
   type Account,
 } from "@/lib/account"
-import { checkHealth, HermesError, mergeChatList } from "@/lib/hermes"
+import { mergeChatList } from "@/lib/hermes"
 import {
   DEFAULT_PROFILE,
   db,
@@ -22,6 +22,7 @@ import {
   type Profile,
 } from "@/lib/db"
 import { mergeDocs, type Doc, type Entry } from "@/lib/merge"
+import { syncRegistry } from "@/lib/registry"
 import {
   PrfUnsupportedError,
   generateDataKey,
@@ -42,14 +43,14 @@ import {
 } from "@/lib/vault"
 
 /**
- * Syncs bots and the chat list (titles, Hermes session ids and context use, not messages). Each
- * bot's chat list lives with the Memento plugin on its own Hermes server; without the plugin it falls
- * back to the Netlify function, like bots. Everything sent there is sealed with the account's data
- * key, and each document's associated data names its owner and slot, so the server can't swap one
+ * Syncs bots and the chat list (titles, Hermes session ids and context use, not messages). Bots come
+ * from the registry and the sealed `bots` document; each bot's chat list lives with the Memento
+ * plugin on its own Hermes server. Everything sent to Netlify is sealed with the account's data key,
+ * and each document's associated data names its owner and slot, so the server can't swap one
  * document for another.
  */
 
-type BotValue = Omit<Profile, "id" | "updatedAt" | "pluginChats">
+type BotValue = Omit<Profile, "id" | "updatedAt" | "disabled" | "seenAt">
 const CHAT_FIELDS = [
   "title",
   "titleEdited",
@@ -62,11 +63,8 @@ const CHAT_FIELDS = [
 ] as const
 type ChatValue = Pick<Conversation, (typeof CHAT_FIELDS)[number]>
 
-/**
- * Where a bot's chat list lives: its Hermes server's Memento plugin, or the fallback.
- * `unreachable`: the bot has the plugin, but its server didn't answer the last sync.
- */
-export type ChatStore = "plugin" | "fallback" | "unreachable"
+/** Whether the bot's Memento plugin answered the last chat list sync. */
+export type ChatStore = "plugin" | "unreachable"
 
 export interface SyncState {
   account: Account
@@ -77,6 +75,8 @@ export interface SyncState {
   syncedAt?: number
   /** By profile id; missing until the bot's server has answered. */
   chatStores: Record<string, ChatStore>
+  /** Why the last registry read failed, if it did. */
+  registryError?: string
 }
 
 let state: SyncState = {
@@ -119,6 +119,11 @@ async function localKey() {
 
 function inboxAad() {
   return `memento:${userId()}:inbox`
+}
+
+/** The account's inbox public key, which link codes carry the fingerprint of. */
+export function inboxPublic() {
+  return remoteVault?.vault.inbox?.publicKey
 }
 
 /** This device's copy of the inbox's private key, for opening bot records plugins publish. */
@@ -290,7 +295,8 @@ async function syncDoc<T>(
 function botValue({
   id: _id,
   updatedAt: _updatedAt,
-  pluginChats: _pluginChats,
+  disabled: _disabled,
+  seenAt: _seenAt,
   ...value
 }: Profile): BotValue {
   return value
@@ -333,9 +339,10 @@ async function syncBots(key: CryptoKey) {
   const merged = await syncDoc<BotValue>(
     key,
     "bots",
-    async (remote) => {
+    async () => {
       const doc = await localBots()
-      if (seed && hasBots(remote)) delete doc[seed.id]
+      // The untouched seed is only a placeholder until a bot links; other devices have their own.
+      if (seed) delete doc[seed.id]
       return doc
     },
     async (pull, remote) => {
@@ -344,8 +351,8 @@ async function syncBots(key: CryptoKey) {
           if (await db.profiles.get(id)) await deleteProfile(id, { remote: true })
         } else if (entry.value) {
           await db.transaction("rw", db.profiles, db.tombstones, async () => {
-            const { pluginChats } = (await db.profiles.get(id)) ?? {}
-            await db.profiles.put({ ...entry.value!, id, updatedAt: entry.at, pluginChats })
+            const { disabled, seenAt } = (await db.profiles.get(id)) ?? {}
+            await db.profiles.put({ ...entry.value!, id, updatedAt: entry.at, disabled, seenAt })
             await db.tombstones.delete(`bot:${id}`)
           })
         }
@@ -409,36 +416,30 @@ async function settleChatTombstones(profileId: string, merged: Doc<ChatValue>) {
   }
 }
 
-async function syncChats(key: CryptoKey, profileId: string) {
-  const merged = await syncDoc<ChatValue>(
-    key,
-    `chats/${profileId}`,
-    () => localChats(profileId),
-    (pull) => applyChats(profileId, pull),
-  )
-  await settleChatTombstones(profileId, merged)
+/**
+ * Pulls what the bot's old Netlify chat list still holds onto this device, so the plugin sync after
+ * it carries it over. True when there was a list to move.
+ */
+async function pullFallbackChats(key: CryptoKey, profileId: string) {
+  const remote = await readDoc<ChatValue>(key, `chats/${profileId}`)
+  if (!remote.etag) return false
+  const local = await localChats(profileId)
+  await applyChats(profileId, mergeDocs(remote.entries, local).pull)
+  return true
 }
 
-/** Syncs a bot's chats with its server's Memento plugin; undefined when the server didn't answer. */
-async function syncPluginChats(profile: Profile): Promise<ChatStore | undefined> {
+/** Syncs a bot's chats with its server's Memento plugin; false when it didn't answer. */
+async function syncPluginChats(profile: Profile) {
   const local = await localChats(profile.id)
   let merged: Doc<ChatValue>
   try {
     merged = await mergeChatList(profile, local)
-  } catch (error) {
-    if (!(error instanceof HermesError) || (error.status && error.status !== 404)) return undefined
-    // Hermes's 404 for an unknown route skips its CORS middleware, so fetch fails without a
-    // status. If the server itself answers, it's the plugin that's missing (or too old).
-    try {
-      await checkHealth(profile)
-    } catch {
-      return undefined
-    }
-    return "fallback"
+  } catch {
+    return false
   }
   await applyChats(profile.id, mergeDocs(merged, local).pull)
   await settleChatTombstones(profile.id, merged)
-  return "plugin"
+  return true
 }
 
 async function fingerprint() {
@@ -453,10 +454,6 @@ async function fingerprint() {
   return `${bots}|${conversations.length}@${chats}|${tombstones}|${settings.onboarded}`
 }
 
-/** How often a bot without the plugin is asked again, in case it was installed since. */
-const PROBE_INTERVAL_MS = 5 * 60_000
-const probedAt = new Map<string, number>()
-
 let running: Promise<void> | undefined
 let again = false
 let syncedFingerprint = ""
@@ -466,35 +463,22 @@ async function runSync() {
   try {
     if (key) await ensureInbox(key)
     if (key) await syncBots(key)
+    if (key) await pullRegistry()
     const chatStores = { ...state.chatStores }
-    // A new device's seed bot may point at a server it's about to be swapped out for.
-    const { onboarded } = await getSettings()
+    const seed = await pristineSeed()
+    const { movedChats = [] } = await getSettings()
     for (const profile of await db.profiles.toArray()) {
-      if (!onboarded) {
-        if (key) await syncChats(key, profile.id)
-        continue
+      // Turned off: nothing checks on it. Without a key, Hermes keeps no session for our ids.
+      if (profile.disabled || !profile.apiKey || profile.id === seed?.id) continue
+      const moving = Boolean(key && !movedChats.includes(profile.id))
+      const held = moving && (await pullFallbackChats(key!, profile.id))
+      const answered = await syncPluginChats(profile)
+      chatStores[profile.id] = answered ? "plugin" : "unreachable"
+      if (moving && answered) {
+        if (held) await deleteDoc(`chats/${profile.id}`).catch(() => undefined)
+        await saveSettings({ movedChats: [...movedChats, profile.id] })
+        movedChats.push(profile.id)
       }
-      // Once found, a bot keeps to the plugin until the user says it's gone, so an unreachable
-      // server never sends its chats back to the fallback.
-      if (profile.pluginChats) {
-        chatStores[profile.id] =
-          (await syncPluginChats(profile)) === "plugin" ? "plugin" : "unreachable"
-        continue
-      }
-      const known = chatStores[profile.id]
-      // Until the plugin has answered, the fallback goes first, so what only it holds moves over.
-      if (key) await syncChats(key, profile.id)
-      if (
-        known === "fallback" &&
-        Date.now() - (probedAt.get(profile.id) ?? 0) < PROBE_INTERVAL_MS
-      ) {
-        continue
-      }
-      probedAt.set(profile.id, Date.now())
-      const store = (await syncPluginChats(profile)) ?? known
-      // Not a synced change (no clock bump): each device finds the plugin itself.
-      if (store === "plugin") await db.profiles.update(profile.id, { pluginChats: true })
-      if (store) chatStores[profile.id] = store
     }
     setState({ chatStores })
     syncedFingerprint = await fingerprint()
@@ -505,6 +489,28 @@ async function runSync() {
   } catch (error) {
     setState({ syncing: false, error: error instanceof Error ? error.message : "Sync failed" })
   }
+}
+
+/** Reads the registry; once a linked bot is in, the untouched seed bot makes way for it. */
+async function pullRegistry() {
+  // Looked for first: once linked bots are in, the seed is no longer the only bot.
+  const seed = await pristineSeed()
+  try {
+    await syncRegistry()
+    setState({ registryError: undefined })
+  } catch (error) {
+    setState({ registryError: error instanceof Error ? error.message : "Couldn't refresh bots" })
+    return
+  }
+  if (seed && (await db.profiles.filter((p) => Boolean(p.hostId)).count())) {
+    await deleteProfile(seed.id, { remote: true })
+  }
+}
+
+/** Reads the registry now, for screens that wait on a bot to link. */
+export async function refreshBots() {
+  if (state.vault !== "unlocked") return
+  await pullRegistry()
 }
 
 /** Syncs now, or once more after the sync already running. */
@@ -522,21 +528,6 @@ export function syncNow(): Promise<void> {
     }
   })
   return running
-}
-
-/** Asks every bot's server for the plugin again, without waiting for the next probe. */
-export function recheckChatStores() {
-  probedAt.clear()
-  return syncNow()
-}
-
-/** For a bot whose server no longer has the plugin: back to looking for it, and the fallback. */
-export async function stopUsingPlugin(profileId: string) {
-  await db.profiles.update(profileId, { pluginChats: false })
-  const { [profileId]: _forgotten, ...chatStores } = state.chatStores
-  setState({ chatStores })
-  probedAt.delete(profileId)
-  return syncNow()
 }
 
 let started = false

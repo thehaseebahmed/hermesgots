@@ -38,7 +38,7 @@ async function tracked(conversationId: string) {
   const conversation = await db.conversations.get(conversationId)
   const profile = conversation && (await db.profiles.get(conversation.profileId))
   // Keyless chats have no session id Hermes knows.
-  if (!conversation?.projectId || !profile?.apiKey || !profile.pluginChats) return null
+  if (!conversation?.projectId || !profile?.apiKey || profile.disabled) return null
   return { conversation, profile, key: `${profile.baseUrl}\n${profile.apiKey}` }
 }
 
@@ -143,7 +143,7 @@ export async function setSessionMode(conversationId: string, mode: SessionMode) 
   if (!conversation) return
   await db.conversations.update(conversationId, { mode, planPending: false })
   const profile = await db.profiles.get(conversation.profileId)
-  if (profile?.apiKey && profile.pluginChats) {
+  if (profile?.apiKey && !profile.disabled) {
     try {
       await store(
         conversationId,

@@ -641,6 +641,8 @@ export async function sendMessage(
   const config = { baseUrl: profile.baseUrl, apiKey: profile.apiKey }
   const turn = openTurn(conversationId, config, reply)
   const status = await runTurn(turn, async () => {
+    // Without a key Hermes keeps no session under our id, so nothing would sync or resume.
+    if (!config.apiKey) throw new HermesError("This bot has no API key. Link it in Settings.")
     // A project session works in its worktree; the plugin can't be told about it any other way.
     const workspace = await ensureSessionWorkspace(conversationId, content || attachments[0].name)
     let sent = attachments
@@ -649,7 +651,7 @@ export async function sendMessage(
         config,
         conversation.hermesSessionId,
         attachments,
-        Boolean(profile.pluginChats),
+        Boolean(profile.apiKey),
       )
       await db.messages.update(userMessage.id, { attachments: sent })
     }
@@ -709,7 +711,7 @@ export async function reattachRun(conversationId: string) {
   // Hermes only keys the session by our id with an API key, so only then can the run be looked up,
   // and only the plugin lists runs.
   const live =
-    profile.apiKey && profile.pluginChats
+    profile.apiKey && !profile.disabled
       ? await liveRunOf(
           { baseUrl: profile.baseUrl, apiKey: profile.apiKey },
           conversation.hermesSessionId,

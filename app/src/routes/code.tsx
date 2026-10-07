@@ -23,7 +23,7 @@ import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Toaster } from "@/components/ui/sonner"
 import { Spinner } from "@/components/ui/spinner"
-import { listProfiles, type Profile } from "@/lib/db"
+import { listEnabledProfiles, type Profile } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useWide } from "@/lib/media"
 import {
@@ -53,8 +53,6 @@ interface ProjectRow {
 
 interface Target extends HermesConfig {
   id: string
-  /** The bot's Plugin setting is off. */
-  pluginOff: boolean
 }
 
 type BotResult =
@@ -91,8 +89,7 @@ function describeError(error: unknown) {
   return error instanceof Error ? error.message : "Couldn't load projects."
 }
 
-async function loadBot({ id: profileId, pluginOff, ...config }: Target): Promise<BotResult> {
-  if (pluginOff) return { profileId, error: "The Memento plugin is off.", pluginMissing: true }
+async function loadBot({ id: profileId, ...config }: Target): Promise<BotResult> {
   try {
     return { profileId, projects: await listProjects(config) }
   } catch (reason) {
@@ -107,7 +104,7 @@ async function loadBot({ id: profileId, pluginOff, ...config }: Target): Promise
 export function CodePage() {
   const openDrawer = useOpenDrawer()
   const wide = useWide()
-  const profiles = useLiveQuery(listProfiles, [])
+  const profiles = useLiveQuery(listEnabledProfiles, [])
   const [results, setResults] = useState<BotResult[]>()
   const [now, setNow] = useState(() => Date.now())
   const [tick, setTick] = useState(0)
@@ -148,12 +145,7 @@ export function CodePage() {
 
   // Sync rewrites profile rows often; only a change to what's fetched should fetch again.
   const targetsKey = JSON.stringify(
-    profiles?.map(({ id, baseUrl, apiKey, pluginChats }): Target => ({
-      id,
-      baseUrl,
-      apiKey,
-      pluginOff: pluginChats === false,
-    })) ?? null,
+    profiles?.map(({ id, baseUrl, apiKey }): Target => ({ id, baseUrl, apiKey })) ?? null,
   )
 
   useEffect(() => {

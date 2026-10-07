@@ -206,7 +206,7 @@ export function ChatPage() {
   const awaitingClarify = messages?.find((m) => m.clarify && !m.clarify.resolved)
   const activity = streaming && describeActivity(streaming)
   // Only the plugin sees each model call; Hermes's API sums a turn's calls, so nothing else is exact.
-  const tracked = Boolean(profile?.apiKey && profile.pluginChats)
+  const tracked = Boolean(profile?.apiKey && !profile.disabled)
   const live = conversation?.liveContext
   const todos = (tracked && conversation?.todos?.items) || []
   // A session of a Hermes Project: works in its worktree, with a mode, a PR and a resolved state.
@@ -549,7 +549,7 @@ export function ChatPage() {
             onQueue={(text, attachments) =>
               id ? queueMessage(id, text, attachments) : send(text, attachments)
             }
-            filesAvailable={Boolean(profile?.pluginChats)}
+            filesAvailable={Boolean(profile?.apiKey)}
             imagesAvailable={profile?.imageInput !== false}
             onStop={() => id && stopMessage(id)}
             onCommand={(command) => root(command === "new" ? "/" : "/settings")}

@@ -497,8 +497,6 @@ export function pluginRoot(baseUrl: string) {
   return `${root.slice(0, -`/p/${profile}`.length)}${PLUGIN_ROOT}/p/${profile}`
 }
 
-export const PLUGIN_DOCS = "https://github.com/thehaseebahmed/memento/tree/main/plugin#install"
-
 export const INSTALL_PLUGIN = `hermes plugins install thehaseebahmed/memento/plugin --enable
 hermes gateway restart`
 

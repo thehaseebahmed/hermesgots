@@ -11,6 +11,8 @@ export function BotCard({
   selected = false,
   icon,
   warning,
+  online,
+  dimmed = false,
   className,
   ...props
 }: ComponentProps<"button"> & {
@@ -21,6 +23,10 @@ export function BotCard({
   icon?: ReactNode
   /** Flags the card, with this as its accessible description. */
   warning?: string
+  /** A dot for whether its host is checking in; none when unknown. */
+  online?: boolean
+  /** Turned off. */
+  dimmed?: boolean
 }) {
   const ref = useRef<HTMLButtonElement>(null)
 
@@ -37,10 +43,23 @@ export function BotCard({
       className={cn(
         "relative flex w-19 shrink-0 flex-col items-center gap-1 rounded-2xl bg-card px-1.5 pt-2 pb-1.5 text-card-foreground ring-1 ring-foreground/10 transition-colors outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50",
         selected && "bg-primary/10 ring-2 ring-primary hover:bg-primary/15",
+        dimmed && "text-muted-foreground",
         className,
       )}
       {...props}
     >
+      {online !== undefined && !warning && (
+        <span className="absolute top-1.5 right-1.5">
+          <span
+            aria-hidden
+            className={cn(
+              "block size-2 rounded-full",
+              online ? "bg-success" : "bg-muted-foreground/40",
+            )}
+          />
+          <span className="sr-only">{online ? "Online" : "Offline"}</span>
+        </span>
+      )}
       {warning && (
         <span className="absolute top-1 right-1 text-warning">
           <TriangleAlertIcon aria-hidden className="size-3.5" />
@@ -48,7 +67,7 @@ export function BotCard({
         </span>
       )}
       <span aria-hidden className="flex size-10 items-center justify-center text-muted-foreground">
-        {icon ?? <Bot id={botId} className="size-10" />}
+        {icon ?? <Bot id={botId} className={cn("size-10", dimmed && "opacity-40")} />}
       </span>
       <span className={cn("w-full truncate text-center text-xs", selected && "font-semibold")}>
         {name}

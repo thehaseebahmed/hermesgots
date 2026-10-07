@@ -15,9 +15,13 @@ export interface Settings {
   onboarded?: boolean
   /** Soft-wrap in tool output; unset until the user flips it (wrapped by default). */
   wrapToolOutput?: boolean
+  /** Bots whose old Netlify chat list was moved onto their Memento plugin and deleted. */
+  movedChats?: string[]
+  /** Saw the notice that bots added by hand need linking. */
+  linkNoticeSeen?: boolean
 }
 
-/** A Hermes profile Memento can talk to. Hermes can't list its profiles, so the user adds them. */
+/** A Hermes profile Memento can talk to. Its Memento plugin registers it (see `registry.ts`). */
 export interface Profile {
   id: string
   name: string
@@ -33,11 +37,12 @@ export interface Profile {
   contextSource?: "models.dev" | "manual"
   /** Whether the model takes images, per models.dev; unset when it doesn't list the model. */
   imageInput?: boolean
-  /**
-   * Its server's Memento plugin keeps its chat list. Set once the plugin answers, and kept until the
-   * user turns it off, so an unreachable server doesn't flip chats to the fallback. Local only.
-   */
-  pluginChats?: boolean
+  /** The linked host that registered it; unset for a bot added by hand before linking. */
+  hostId?: string
+  /** Turned off in the app: hidden, and nothing checks on it. Local copy of the registry's flag. */
+  disabled?: boolean
+  /** When its host last checked in with the registry. Local only. */
+  seenAt?: number
   createdAt: number
   /** Last change to the config, the clock sync merges on. */
   updatedAt: number
@@ -376,6 +381,16 @@ db.version(6).stores({ cronRuns: null })
 // v7: project sessions, listed per project.
 db.version(7).stores({ conversations: "id, updatedAt, [profileId+updatedAt], projectId" })
 
+// v8: every bot keeps its chats on its Memento plugin, so the per-bot flag for it goes.
+db.version(8).upgrade((tx) =>
+  tx
+    .table("profiles")
+    .toCollection()
+    .modify((profile: Record<string, unknown>) => {
+      delete profile.pluginChats
+    }),
+)
+
 db.on("populate", (tx) => seedProfile(tx))
 
 export async function getSettings(): Promise<Settings> {
@@ -391,11 +406,18 @@ export async function listProfiles() {
   return db.profiles.orderBy("createdAt").toArray()
 }
 
-/** The selected profile, falling back to the oldest one. */
+/** The bots the app shows and checks on: every one not turned off. */
+export async function listEnabledProfiles() {
+  return (await listProfiles()).filter((profile) => !profile.disabled)
+}
+
+/** The selected profile, falling back to the oldest one that's turned on. */
 export async function getActiveProfile(): Promise<Profile | undefined> {
   const { activeProfileId } = await getSettings()
   const active = activeProfileId ? await db.profiles.get(activeProfileId) : undefined
-  return active ?? (await db.profiles.orderBy("createdAt").first())
+  if (active && !active.disabled) return active
+  const profiles = await listProfiles()
+  return profiles.find((profile) => !profile.disabled) ?? active ?? profiles[0]
 }
 
 export async function setActiveProfile(id: string) {
@@ -416,18 +438,21 @@ export async function updateProfile(id: string, patch: Partial<Omit<Profile, "id
 }
 
 /**
- * Deletes a profile and its chats. The last profile can't be deleted. `remote` is a deletion sync
- * pulled from another device, which needs no tombstone of its own.
+ * Deletes a profile and its chats. The last profile can't be deleted, except by `last` (a linked bot
+ * that left the registry), which puts a fresh seed in its place. `remote` is a deletion sync pulled
+ * from another device, which needs no tombstone of its own.
  */
-export async function deleteProfile(id: string, { remote = false } = {}) {
+export async function deleteProfile(id: string, { remote = false, last = false } = {}) {
   const tables = [db.profiles, db.conversations, db.messages, db.tombstones]
   return db.transaction("rw", tables, async () => {
-    if ((await db.profiles.count()) <= 1) return false
+    const alone = (await db.profiles.count()) <= 1
+    if (alone && !last) return false
     const ids = await conversationsOf(id).primaryKeys()
     await db.messages.where("conversationId").anyOf(ids).delete()
     await db.conversations.bulkDelete(ids)
     await db.profiles.delete(id)
     if (!remote) await db.tombstones.put({ id: `bot:${id}`, deletedAt: Date.now(), profileId: id })
+    if (alone) await db.profiles.add(newProfile({}, []))
     return true
   })
 }

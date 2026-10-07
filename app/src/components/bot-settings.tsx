@@ -1,18 +1,14 @@
 import { useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import {
-  EyeIcon,
-  EyeOffIcon,
-  PlugZapIcon,
-  PlusIcon,
-  Trash2Icon,
-  TriangleAlertIcon,
-} from "lucide-react"
+import { useSearchParams } from "react-router"
+import { EyeIcon, EyeOffIcon, PlugZapIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react"
 import { toast } from "sonner"
 
+import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BotCard } from "@/components/bot-card"
 import { BOTS } from "@/components/bots"
+import { LinkSheet } from "@/components/link-bots"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,10 +22,9 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Switch } from "@/components/ui/switch"
 import {
   InputGroup,
@@ -45,18 +40,21 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
-  addProfile,
   db,
   deleteProfile,
   getActiveProfile,
+  getSettings,
   listProfiles,
+  saveSettings,
   setActiveProfile,
   updateProfile,
   type Profile,
 } from "@/lib/db"
-import { checkHealth, getPluginVersion, listModels, PLUGIN_DOCS } from "@/lib/hermes"
+import { formatRelative } from "@/lib/format"
+import { checkHealth, getPluginVersion, listModels } from "@/lib/hermes"
 import { syncContextWindow, useModelsDevUnreachable } from "@/lib/models"
-import { recheckChatStores, stopUsingPlugin, useSyncState } from "@/lib/sync"
+import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
+import { useSyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
 
 type Connection =
@@ -68,22 +66,51 @@ type Connection =
 /** Hermes's default model id; any other advertised id is the profile's name. */
 const UNNAMED_MODEL = "hermes-agent"
 
-/** Bots are Hermes profiles. Hermes can't list them, so each one is added here by hand. */
+/** A bot added by hand before linking, as opposed to the untouched seed of a fresh install. */
+function handAdded(profile: Profile) {
+  return !profile.hostId && (Boolean(profile.apiKey) || profile.updatedAt !== profile.createdAt)
+}
+
+/** Bots are Hermes profiles, linked from their hosts. Tap one to edit it. */
 export function BotSettings() {
   const profiles = useLiveQuery(listProfiles, [])
   const active = useLiveQuery(getActiveProfile, [])
+  const settings = useLiveQuery(getSettings, [])
   const [editingId, setEditingId] = useState<string>()
+  const [params, setParams] = useSearchParams()
   const editing = profiles?.find((p) => p.id === editingId) ?? active
-  const { chatStores } = useSyncState()
+  const { chatStores, registryError } = useSyncState()
+  const now = useNow()
+  const linking = params.get("link") === "1"
+  const setLinking = (open: boolean) =>
+    setParams(open ? { link: "1" } : {}, { replace: true, state: { quiet: true } })
+  const unlinked = settings && !settings.linkNoticeSeen && profiles?.some(handAdded)
 
   return (
     <Card className="rounded-3xl">
-      <CardHeader>
-        <CardDescription>
-          Each bot is a Hermes profile with its own API server and key. Tap one to edit it.
-        </CardDescription>
-      </CardHeader>
       <CardContent className="flex flex-col gap-6">
+        {registryError && <Banner tone="error">Couldn't refresh bots. {registryError}</Banner>}
+        {unlinked && (
+          <Banner
+            action={
+              <Button
+                variant="ghost"
+                size="icon-lg"
+                className="size-11"
+                aria-label="Dismiss"
+                onClick={() => void saveSettings({ linkNoticeSeen: true })}
+              >
+                <XIcon />
+              </Button>
+            }
+          >
+            Bots added by hand can't be added any more.{" "}
+            <button type="button" className="underline" onClick={() => setLinking(true)}>
+              Link them
+            </button>{" "}
+            to keep them up to date.
+          </Banner>
+        )}
         <div className="-mx-6 flex [scrollbar-width:none] gap-2 overflow-x-auto px-6 py-1 [&::-webkit-scrollbar]:hidden">
           {profiles?.map((profile) => (
             <BotCard
@@ -91,24 +118,25 @@ export function BotSettings() {
               botId={profile.botId}
               name={profile.name}
               selected={profile.id === editing?.id}
+              dimmed={profile.disabled}
+              online={profile.hostId && !profile.disabled ? isOnline(profile, now) : undefined}
               warning={
-                chatStores[profile.id] === "fallback"
-                  ? "Chats aren't saved on its Hermes server"
-                  : chatStores[profile.id] === "unreachable"
-                    ? "Can't reach its Memento plugin"
-                    : undefined
+                profile.disabled
+                  ? undefined
+                  : !profile.hostId && handAdded(profile)
+                    ? "Not linked"
+                    : chatStores[profile.id] === "unreachable"
+                      ? "Can't reach its Memento plugin"
+                      : undefined
               }
               onClick={() => setEditingId(profile.id)}
             />
           ))}
           <BotCard
-            name="Add bot"
+            name="Link a bot"
             icon={<PlusIcon className="size-5" />}
             className="border border-dashed border-foreground/25 bg-transparent ring-0"
-            onClick={async () => {
-              const profile = await addProfile({ name: "New bot" })
-              setEditingId(profile.id)
-            }}
+            onClick={() => setLinking(true)}
           />
         </div>
         {editing && (
@@ -120,65 +148,53 @@ export function BotSettings() {
           />
         )}
       </CardContent>
+      <LinkSheet open={linking} onOpenChange={setLinking} />
     </Card>
   )
 }
 
-/** The Memento plugin switch: on once the bot's server has the plugin, which then keeps its chats. */
-function PluginSetting({ profile }: { profile: Profile }) {
-  const sync = useSyncState()
-  const [checking, setChecking] = useState(false)
-  const on = Boolean(profile.pluginChats)
-  const install = (
-    <a href={PLUGIN_DOCS} target="_blank" rel="noreferrer">
-      Install the plugin
-    </a>
-  )
+/** The time now, ticking each minute, for "last seen" and online dots. */
+function useNow() {
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
+  return now
+}
+
+/** The registry's Enabled flag, with when the bot's host last checked in. */
+function EnabledSetting({ profile }: { profile: Profile }) {
+  const now = useNow()
+  const [saving, setSaving] = useState(false)
+  const seen = profile.seenAt
+    ? isOnline(profile, now)
+      ? "Online"
+      : `Last seen ${formatRelative(profile.seenAt, Math.max(now, profile.seenAt))}`
+    : "Not seen yet"
 
   return (
     <Field orientation="horizontal">
       <div className="flex-1 space-y-1">
-        <div className="flex items-center gap-1">
-          <FieldLabel htmlFor="plugin">Plugin</FieldLabel>
-          {on && sync.chatStores[profile.id] === "unreachable" && (
-            <Popover>
-              <PopoverTrigger
-                openOnHover
-                aria-label="Plugin is unreachable"
-                className="-my-3 flex size-11 items-center justify-center rounded-full text-warning outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-              >
-                <TriangleAlertIcon className="size-4" />
-              </PopoverTrigger>
-              <PopoverContent side="top" className="w-64">
-                Plugin is unreachable. If you removed the plugin, turn it off below.
-              </PopoverContent>
-            </Popover>
-          )}
-        </div>
-        <FieldDescription>
-          {on ? (
-            "All of this bot's chat data is now stored on your Hermes server."
-          ) : sync.vault === "unlocked" ? (
-            <>Some chat data is stored on our servers. {install} to store it on yours.</>
-          ) : (
-            <>This bot's chat data is only on this device. {install} to store it on your server.</>
-          )}
-        </FieldDescription>
+        <FieldLabel htmlFor="enabled">Enabled</FieldLabel>
+        <FieldDescription>{profile.disabled ? "Hidden in Memento" : seen}</FieldDescription>
       </div>
       <Switch
-        id="plugin"
-        checked={on}
-        disabled={checking}
+        id="enabled"
+        checked={!profile.disabled}
+        disabled={saving}
         onCheckedChange={async (checked) => {
-          if (!checked) return void stopUsingPlugin(profile.id)
-          setChecking(true)
+          setSaving(true)
           try {
-            await recheckChatStores()
-            if (!(await db.profiles.get(profile.id))?.pluginChats) {
-              toast.error("Couldn't find the plugin on this bot's server.")
+            await setBotEnabled(profile, checked)
+            if (!checked && (await getSettings()).activeProfileId === profile.id) {
+              const next = await getActiveProfile()
+              if (next) await setActiveProfile(next.id)
             }
+          } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Couldn't save that.")
           } finally {
-            setChecking(false)
+            setSaving(false)
           }
         }}
       />
@@ -186,28 +202,69 @@ function PluginSetting({ profile }: { profile: Profile }) {
   )
 }
 
+/** Unlinks the bot's host, which takes every bot it linked with it. */
+function RemoveBot({ profile, onDeleted }: { profile: Profile; onDeleted?: () => void }) {
+  const siblings = useLiveQuery(
+    () => db.profiles.filter((p) => p.hostId === profile.hostId && p.id !== profile.id).toArray(),
+    [profile.hostId, profile.id],
+  )
+  const others = siblings?.map((p) => p.name).join(", ")
+
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger render={<Button variant="outline" className="ml-auto" />}>
+        <Trash2Icon data-icon="inline-start" />
+        Remove
+      </AlertDialogTrigger>
+      <AlertDialogContent size="sm">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Remove {profile.name}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Its host is unlinked{others ? `, and so is every bot it linked: ${others}` : ""}. Its
+            chats stay on your Hermes server, and linking it again brings them back.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            variant="destructive"
+            onClick={async () => {
+              try {
+                await removeHost(profile.hostId!)
+              } catch (error) {
+                toast.error(error instanceof Error ? error.message : "Couldn't remove it.")
+                return
+              }
+              const next = await getActiveProfile()
+              if (next) await setActiveProfile(next.id)
+              onDeleted?.()
+            }}
+          >
+            Remove
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
 /**
- * `setup` trims it to the connection fields for first-run setup. `onConnectionChange` reports
- * whether the current URL and key passed Test connection.
+ * A bot's settings. A linked bot's address and key come from its host; a bot added by hand before
+ * linking keeps its own.
  */
 export function BotEditor({
   profile,
   canDelete = false,
   onDeleted,
-  setup = false,
-  onConnectionChange,
 }: {
   profile: Profile
   canDelete?: boolean
   onDeleted?: () => void
-  setup?: boolean
-  onConnectionChange?: (ok: boolean) => void
 }) {
+  const linked = Boolean(profile.hostId)
   const [showKey, setShowKey] = useState(false)
   const [models, setModels] = useState<string[]>([])
   const [connection, setConnection] = useState<Connection>({ state: "idle" })
-
-  useEffect(() => onConnectionChange?.(connection.state === "ok"), [connection, onConnectionChange])
 
   // Local drafts so typing isn't fighting the live query; persisted on every change.
   const [name, setName] = useState(profile.name)
@@ -220,7 +277,7 @@ export function BotEditor({
 
   const test = async () => {
     setConnection({ state: "testing" })
-    const config = { baseUrl, apiKey }
+    const config = linked ? profile : { baseUrl, apiKey }
     try {
       await checkHealth(config)
       const ids = await listModels(config)
@@ -228,7 +285,7 @@ export function BotEditor({
       if (ids.length && !ids.includes(profile.model)) save({ model: ids[0] })
       // A named profile advertises its name as the model id.
       const advertised = ids.find((id) => id !== UNNAMED_MODEL)
-      if (advertised && !nameTouched) {
+      if (advertised && !nameTouched && !linked) {
         setName(advertised)
         save({ name: advertised })
       }
@@ -247,6 +304,8 @@ export function BotEditor({
 
   return (
     <FieldGroup>
+      {linked && <EnabledSetting profile={profile} />}
+
       <Field>
         <FieldLabel htmlFor="bot-name">Name</FieldLabel>
         <Input
@@ -262,90 +321,89 @@ export function BotEditor({
         />
       </Field>
 
-      {!setup && (
+      <Field>
+        <FieldLabel id="bot-image-label">Image</FieldLabel>
+        <div
+          role="radiogroup"
+          aria-labelledby="bot-image-label"
+          className="grid grid-cols-4 gap-2 sm:grid-cols-8"
+        >
+          {BOTS.map((bot) => {
+            const checked = bot.id === profile.botId
+            return (
+              <button
+                key={bot.id}
+                type="button"
+                role="radio"
+                aria-checked={checked}
+                aria-label={bot.name}
+                onClick={() => save({ botId: bot.id })}
+                className={cn(
+                  "flex aspect-square min-h-11 items-center justify-center rounded-2xl ring-1 ring-foreground/10 transition-colors outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50",
+                  checked && "bg-primary/10 ring-2 ring-primary hover:bg-primary/15",
+                )}
+              >
+                <Bot id={bot.id} className="size-3/5" />
+              </button>
+            )
+          })}
+        </div>
+      </Field>
+
+      {linked ? (
         <Field>
-          <FieldLabel id="bot-image-label">Image</FieldLabel>
-          <div
-            role="radiogroup"
-            aria-labelledby="bot-image-label"
-            className="grid grid-cols-4 gap-2 sm:grid-cols-8"
-          >
-            {BOTS.map((bot) => {
-              const checked = bot.id === profile.botId
-              return (
-                <button
-                  key={bot.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={checked}
-                  aria-label={bot.name}
-                  onClick={() => save({ botId: bot.id })}
-                  className={cn(
-                    "flex aspect-square min-h-11 items-center justify-center rounded-2xl ring-1 ring-foreground/10 transition-colors outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50",
-                    checked && "bg-primary/10 ring-2 ring-primary hover:bg-primary/15",
-                  )}
-                >
-                  <Bot id={bot.id} className="size-3/5" />
-                </button>
-              )
-            })}
-          </div>
+          <FieldLabel htmlFor="base-url">Address</FieldLabel>
+          <Input id="base-url" readOnly value={profile.baseUrl.replace(/\/v1\/?$/, "")} />
         </Field>
+      ) : (
+        <>
+          <Field>
+            <FieldLabel htmlFor="base-url">API base URL</FieldLabel>
+            <Input
+              id="base-url"
+              inputMode="url"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder="http://localhost:8642/v1"
+              value={baseUrl}
+              onChange={(e) => {
+                setBaseUrl(e.target.value)
+                setConnection({ state: "idle" })
+                save({ baseUrl: e.target.value.trim() })
+              }}
+            />
+          </Field>
+
+          <Field>
+            <FieldLabel htmlFor="api-key">API key</FieldLabel>
+            <InputGroup>
+              <InputGroupInput
+                id="api-key"
+                type={showKey ? "text" : "password"}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="API_SERVER_KEY"
+                value={apiKey}
+                onChange={(e) => {
+                  setApiKey(e.target.value)
+                  setConnection({ state: "idle" })
+                  save({ apiKey: e.target.value.trim() })
+                }}
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupButton
+                  size="icon-xs"
+                  aria-label={showKey ? "Hide key" : "Show key"}
+                  onClick={() => setShowKey((v) => !v)}
+                >
+                  {showKey ? <EyeOffIcon /> : <EyeIcon />}
+                </InputGroupButton>
+              </InputGroupAddon>
+            </InputGroup>
+          </Field>
+        </>
       )}
-
-      <Field>
-        <FieldLabel htmlFor="base-url">API base URL</FieldLabel>
-        <Input
-          id="base-url"
-          inputMode="url"
-          autoCapitalize="off"
-          autoCorrect="off"
-          spellCheck={false}
-          placeholder="http://localhost:8642/v1"
-          value={baseUrl}
-          onChange={(e) => {
-            setBaseUrl(e.target.value)
-            setConnection({ state: "idle" })
-            save({ baseUrl: e.target.value.trim() })
-          }}
-        />
-        <FieldDescription>
-          Hermes listens on port 8642 by default. A gateway serving several profiles puts the others
-          under <code className="font-mono">/p/&lt;profile&gt;/v1</code>. From this HTTPS site,
-          anything other than localhost must be served over HTTPS.
-        </FieldDescription>
-      </Field>
-
-      <Field>
-        <FieldLabel htmlFor="api-key">API key</FieldLabel>
-        <InputGroup>
-          <InputGroupInput
-            id="api-key"
-            type={showKey ? "text" : "password"}
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="API_SERVER_KEY"
-            value={apiKey}
-            onChange={(e) => {
-              setApiKey(e.target.value)
-              setConnection({ state: "idle" })
-              save({ apiKey: e.target.value.trim() })
-            }}
-          />
-          <InputGroupAddon align="inline-end">
-            <InputGroupButton
-              size="icon-xs"
-              aria-label={showKey ? "Hide key" : "Show key"}
-              onClick={() => setShowKey((v) => !v)}
-            >
-              {showKey ? <EyeOffIcon /> : <EyeIcon />}
-            </InputGroupButton>
-          </InputGroupAddon>
-        </InputGroup>
-        <FieldDescription>
-          The profile's own key. Required for Hermes to keep one session per chat.
-        </FieldDescription>
-      </Field>
 
       {models.length > 1 && (
         <Field>
@@ -365,34 +423,30 @@ export function BotEditor({
         </Field>
       )}
 
-      {!setup && (
-        <Field>
-          <FieldLabel htmlFor="context-window">Context window</FieldLabel>
-          <InputGroup>
-            <InputGroupInput
-              id="context-window"
-              inputMode="numeric"
-              autoComplete="off"
-              placeholder="200000"
-              value={contextWindow}
-              onChange={(e) => {
-                const digits = e.target.value.replace(/\D/g, "")
-                setContextWindow(digits)
-                save({ contextWindow: Number(digits) || undefined, contextSource: "manual" })
-              }}
-            />
-            <InputGroupAddon align="inline-end">tokens</InputGroupAddon>
-          </InputGroup>
-          <FieldDescription>
-            <ContextWindowHint profile={profile} />
-          </FieldDescription>
-        </Field>
-      )}
-
-      {!setup && <PluginSetting profile={profile} />}
+      <Field>
+        <FieldLabel htmlFor="context-window">Context window</FieldLabel>
+        <InputGroup>
+          <InputGroupInput
+            id="context-window"
+            inputMode="numeric"
+            autoComplete="off"
+            placeholder="200000"
+            value={contextWindow}
+            onChange={(e) => {
+              const digits = e.target.value.replace(/\D/g, "")
+              setContextWindow(digits)
+              save({ contextWindow: Number(digits) || undefined, contextSource: "manual" })
+            }}
+          />
+          <InputGroupAddon align="inline-end">tokens</InputGroupAddon>
+        </InputGroup>
+        <FieldDescription>
+          <ContextWindowHint profile={profile} />
+        </FieldDescription>
+      </Field>
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button onClick={test} disabled={connection.state === "testing"}>
+        <Button onClick={test} disabled={connection.state === "testing" || profile.disabled}>
           <PlugZapIcon data-icon="inline-start" />
           {connection.state === "testing" ? "Testing…" : "Test connection"}
         </Button>
@@ -408,7 +462,9 @@ export function BotEditor({
             )}
           </div>
         )}
-        {!setup && (
+        {linked ? (
+          <RemoveBot profile={profile} onDeleted={onDeleted} />
+        ) : (
           <AlertDialog>
             <AlertDialogTrigger
               render={<Button variant="outline" className="ml-auto" disabled={!canDelete} />}

@@ -30,7 +30,8 @@ export type Account =
   | { status: "signed-out" }
   | { status: "signed-in"; user: User }
 
-const ENDPOINT = `${isNative ? SITE_URL : ""}/.netlify/functions/sync`
+const FUNCTIONS = `${isNative ? SITE_URL : ""}/.netlify/functions`
+const ENDPOINT = `${FUNCTIONS}/sync`
 
 export class SyncError extends Error {
   readonly status?: number
@@ -77,10 +78,11 @@ export async function signOut() {
   await logout()
 }
 
-async function call(method: string, doc: string, body?: unknown) {
-  if (isNative) return nativeSyncCall(method, `${ENDPOINT}?doc=${encodeURIComponent(doc)}`, body)
+/** A signed-in call to one of the site's functions. */
+export async function callFunction(method: string, url: string, body?: unknown) {
+  if (isNative) return nativeSyncCall(method, url, body)
   const send = () =>
-    fetch(`${ENDPOINT}?doc=${encodeURIComponent(doc)}`, {
+    fetch(url, {
       method,
       credentials: "same-origin",
       headers: body === undefined ? undefined : { "Content-Type": "application/json" },
@@ -91,7 +93,15 @@ async function call(method: string, doc: string, body?: unknown) {
   return response
 }
 
-async function failure(response: Response) {
+function call(method: string, doc: string, body?: unknown) {
+  return callFunction(method, `${ENDPOINT}?doc=${encodeURIComponent(doc)}`, body)
+}
+
+export function functionUrl(name: string, query: Record<string, string>) {
+  return `${FUNCTIONS}/${name}?${new URLSearchParams(query)}`
+}
+
+export async function failure(response: Response) {
   const body = await response.json().catch(() => null)
   return new SyncError(body?.error ?? `Sync failed (${response.status})`, response.status)
 }
