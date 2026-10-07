@@ -86,7 +86,7 @@ export function SettingsPage() {
   return (
     <div className="flex min-h-0 flex-1">
       <MenuContext.Provider value={{ active: open, replace: true }}>
-        <MenuScreen className="w-96 flex-none border-r" />
+        <MenuScreen className="w-90 flex-none border-r min-[1200px]:w-103" />
       </MenuContext.Provider>
       <Screen title={SECTIONS[open].title}>{SECTIONS[open].render()}</Screen>
     </div>
