@@ -1,161 +1,142 @@
 import { useLiveQuery } from "dexie-react-hooks"
 import { NavLink, useNavigate } from "react-router"
-import { CodeXmlIcon, PlusIcon, SettingsIcon, TimerIcon } from "lucide-react"
+import {
+  ChevronRightIcon,
+  CodeXmlIcon,
+  PlusIcon,
+  SearchIcon,
+  TimerIcon,
+  UserIcon,
+} from "lucide-react"
 
 import { Bot } from "@/components/bot"
-import { BotCard } from "@/components/bot-card"
 import { Button } from "@/components/ui/button"
-import { conversationsOf, getActiveProfile, listProfiles, setActiveProfile } from "@/lib/db"
+import { Separator } from "@/components/ui/separator"
+import { db } from "@/lib/db"
+import { useSyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
 
-function relativeDay(timestamp: number) {
-  const days = Math.floor((Date.now() - timestamp) / 86_400_000)
-  if (days <= 0)
-    return new Date(timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
-  if (days === 1) return "Yesterday"
-  if (days < 7) return new Date(timestamp).toLocaleDateString([], { weekday: "short" })
-  return new Date(timestamp).toLocaleDateString([], { month: "short", day: "numeric" })
-}
+const RECENTS = 10
 
-/** Every bot (Hermes profile) in a horizontal strip; picking one filters the chats below. */
-function BotStrip({ onNavigate }: { onNavigate?: () => void }) {
-  const navigate = useNavigate()
-  const profiles = useLiveQuery(listProfiles, [])
-  const active = useLiveQuery(getActiveProfile, [])
+const rowClass = ({ isActive }: { isActive: boolean }) =>
+  cn(
+    "flex min-h-11 items-center gap-3 rounded-2xl px-3 text-sm transition-colors hover:bg-muted",
+    isActive && "bg-muted font-medium",
+  )
 
-  const select = async (profileId: string) => {
-    await setActiveProfile(profileId)
-    const last = (await conversationsOf(profileId).toArray()).filter((c) => !c.projectId).pop()
-    navigate(last ? `/c/${last.id}` : "/")
-  }
+/** The newest chats across every bot, each with its bot's image. Project sessions stay on Code. */
+function Recents({ onNavigate }: { onNavigate?: () => void }) {
+  const recents = useLiveQuery(async () => {
+    const [chats, profiles] = await Promise.all([
+      db.conversations
+        .orderBy("updatedAt")
+        .reverse()
+        .filter((c) => !c.projectId)
+        .limit(RECENTS)
+        .toArray(),
+      db.profiles.toArray(),
+    ])
+    const bots = new Map(profiles.map((p) => [p.id, p]))
+    return chats.map((chat) => ({ chat, bot: bots.get(chat.profileId) }))
+  }, [])
 
   return (
-    <div
-      role="group"
-      aria-label="Bots"
-      className="flex [scrollbar-width:none] gap-2 overflow-x-auto px-4 pt-1 pb-3 [&::-webkit-scrollbar]:hidden"
+    <nav className="flex flex-col gap-0.5" aria-labelledby="recents-heading">
+      <h2 id="recents-heading" className="px-3 pt-1 pb-2 text-sm font-medium text-muted-foreground">
+        Recents
+      </h2>
+      {recents?.length === 0 && (
+        <p className="px-3 py-2 text-sm text-muted-foreground">No chats yet. Say hi to Hermes!</p>
+      )}
+      <ul className="flex flex-col gap-0.5">
+        {recents?.map(({ chat, bot }) => (
+          <li key={chat.id}>
+            <NavLink to={`/c/${chat.id}`} onClick={onNavigate} className={rowClass}>
+              <Bot id={bot?.botId} className="size-5" />
+              <span className="min-w-0 flex-1 truncate">{chat.title}</span>
+            </NavLink>
+          </li>
+        ))}
+      </ul>
+      {(recents?.length ?? 0) > 0 && (
+        <button
+          type="button"
+          className="flex min-h-11 items-center gap-1 rounded-2xl px-3 text-sm text-muted-foreground transition-colors hover:bg-muted"
+        >
+          View all
+          <ChevronRightIcon className="size-4" />
+        </button>
+      )}
+    </nav>
+  )
+}
+
+/** The signed-in GitHub picture, or a plain figure; opens Settings. */
+function ProfileButton({ onNavigate }: { onNavigate?: () => void }) {
+  const { account } = useSyncState()
+  const picture = account.status === "signed-in" ? account.user.pictureUrl : undefined
+
+  return (
+    <NavLink
+      to="/settings"
+      onClick={onNavigate}
+      aria-label="Settings"
+      className={({ isActive }) =>
+        cn(
+          "flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-muted-foreground ring-1 ring-foreground/10 transition-shadow",
+          isActive && "ring-2 ring-foreground/40",
+        )
+      }
     >
-      {profiles?.map((profile) => (
-        <BotCard
-          key={profile.id}
-          botId={profile.botId}
-          name={profile.name}
-          selected={profile.id === active?.id}
-          onClick={() => void select(profile.id)}
-        />
-      ))}
-      <BotCard
-        name="Add bot"
-        icon={<PlusIcon className="size-5" />}
-        className="border border-dashed border-foreground/25 bg-transparent ring-0"
-        onClick={() => {
-          navigate("/settings#bots")
-          onNavigate?.()
-        }}
-      />
-    </div>
+      {picture ? (
+        <img src={picture} alt="" className="size-full object-cover" />
+      ) : (
+        <UserIcon className="size-5" />
+      )}
+    </NavLink>
   )
 }
 
 export function ConversationList({ onNavigate }: { onNavigate?: () => void }) {
   const navigate = useNavigate()
-  const conversations = useLiveQuery(async () => {
-    const profile = await getActiveProfile()
-    return profile
-      ? (await conversationsOf(profile.id).reverse().toArray()).filter((c) => !c.projectId)
-      : []
-  }, [])
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-2 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-3">
-        <Bot className="size-8" />
-        <span className="flex-1 text-lg font-semibold tracking-tight">Memento</span>
+      <div className="flex items-center gap-2 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-2">
+        <span className="flex-1 pl-1 text-xl font-semibold tracking-tight">Memento</span>
+        <Button variant="ghost" size="icon-lg" className="size-11 rounded-full" aria-label="Search">
+          <SearchIcon />
+        </Button>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+        <nav className="flex flex-col gap-0.5" aria-label="Main">
+          <NavLink to="/code" onClick={onNavigate} className={rowClass}>
+            <CodeXmlIcon className="size-5 text-muted-foreground" />
+            Code
+          </NavLink>
+          <NavLink to="/routines" onClick={onNavigate} className={rowClass}>
+            <TimerIcon className="size-5 text-muted-foreground" />
+            Routines
+          </NavLink>
+        </nav>
+        <Separator className="mx-1 my-3 w-auto" />
+        <Recents onNavigate={onNavigate} />
+      </div>
+
+      <div className="flex items-center justify-between gap-3 px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <ProfileButton onNavigate={onNavigate} />
         <Button
-          variant="outline"
-          size="icon"
-          className="rounded-full"
-          aria-label="New chat"
+          size="lg"
+          className="h-11 rounded-full px-5"
           onClick={() => {
             navigate("/")
             onNavigate?.()
           }}
         >
-          <PlusIcon />
+          <PlusIcon data-icon="inline-start" />
+          New chat
         </Button>
-      </div>
-
-      <BotStrip onNavigate={onNavigate} />
-
-      <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-2" aria-label="Conversations">
-        {conversations?.length === 0 && (
-          <p className="px-3 py-6 text-center text-sm text-muted-foreground">
-            No chats yet. Say hi to Hermes!
-          </p>
-        )}
-        <ul className="flex flex-col gap-0.5">
-          {conversations?.map((conversation) => (
-            <li key={conversation.id}>
-              <NavLink
-                to={`/c/${conversation.id}`}
-                onClick={onNavigate}
-                className={({ isActive }) =>
-                  cn(
-                    "flex min-h-11 items-center gap-3 rounded-2xl px-3 py-2 text-sm transition-colors hover:bg-muted",
-                    isActive && "bg-muted font-medium",
-                  )
-                }
-              >
-                <span className="min-w-0 flex-1 truncate">{conversation.title}</span>
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  {relativeDay(conversation.updatedAt)}
-                </span>
-              </NavLink>
-            </li>
-          ))}
-        </ul>
-      </nav>
-
-      <div className="flex flex-col gap-0.5 border-t p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-        <NavLink
-          to="/code"
-          onClick={onNavigate}
-          className={({ isActive }) =>
-            cn(
-              "flex min-h-11 items-center gap-3 rounded-2xl px-3 text-sm transition-colors hover:bg-muted",
-              isActive && "bg-muted font-medium",
-            )
-          }
-        >
-          <CodeXmlIcon className="size-4 text-muted-foreground" />
-          Code
-        </NavLink>
-        <NavLink
-          to="/routines"
-          onClick={onNavigate}
-          className={({ isActive }) =>
-            cn(
-              "flex min-h-11 items-center gap-3 rounded-2xl px-3 text-sm transition-colors hover:bg-muted",
-              isActive && "bg-muted font-medium",
-            )
-          }
-        >
-          <TimerIcon className="size-4 text-muted-foreground" />
-          Routines
-        </NavLink>
-        <NavLink
-          to="/settings"
-          onClick={onNavigate}
-          className={({ isActive }) =>
-            cn(
-              "flex min-h-11 items-center gap-3 rounded-2xl px-3 text-sm transition-colors hover:bg-muted",
-              isActive && "bg-muted font-medium",
-            )
-          }
-        >
-          <SettingsIcon className="size-4 text-muted-foreground" />
-          Settings
-        </NavLink>
       </div>
     </div>
   )

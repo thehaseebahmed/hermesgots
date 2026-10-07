@@ -14,6 +14,7 @@ import {
 } from "lucide-react"
 
 import { ApprovalCard } from "@/components/chat/approval-card"
+import { BotPicker } from "@/components/chat/bot-picker"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
@@ -451,6 +452,11 @@ export function ChatPage() {
                 />
               ))}
             </div>
+          </div>
+        )}
+        {!id && profile && (
+          <div className="mx-auto flex w-full max-w-3xl pb-2">
+            <BotPicker profile={profile} />
           </div>
         )}
         {session?.resolvedAt ? (

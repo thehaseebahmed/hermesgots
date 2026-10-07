@@ -91,12 +91,13 @@ PR titles follow the same format. Fill in `.github/pull_request_template.md` for
 | `public/auth/native.html` | Sign-in bridge the app opens in a Custom Tab; hands the tokens back via `memento://auth` |
 | `android/`, `capacitor.config.ts`, `assets/icon.png` | Capacitor Android project (icons and splash generated from `assets/icon.png` with `@capacitor/assets`) |
 | `src/routes/` | `chat.tsx`, `settings.tsx`, `routines.tsx` (cron jobs), `code.tsx` (Hermes Projects), `project.tsx` (one project's sessions grouped by state, and the Library and PRs tabs, still empty), `bots.tsx` (gallery), `setup.tsx` (sign-in gate and first-run wizard) |
-| `src/components/chat/` | Message rendering, tool and approval cards, the form for the agent's questions (`question-card.tsx`, which pages through several questions with Skip and Next), composer, the `+` button and its Add context sheet (`attach-menu.tsx`, Camera, Photos and Files, in every chat) and the attached photos and files (`attachments.tsx`), header, the todos pill and list (`todos.tsx`), and for project sessions the mode pill (`mode-menu.tsx`), the PR pill (`pr-pill.tsx`) and the plan-ready, resolved, answered-question and plan-approved cards (`session-cards.tsx`) |
+| `src/components/conversation-list.tsx` | The sidebar: Code and Routines, the 10 newest chats across every bot, the profile button (Settings) and New chat |
+| `src/components/chat/` | Message rendering, the bot picker above a new chat's composer (`bot-picker.tsx`), tool and approval cards, the form for the agent's questions (`question-card.tsx`, which pages through several questions with Skip and Next), composer, the `+` button and its Add context sheet (`attach-menu.tsx`, Camera, Photos and Files, in every chat) and the attached photos and files (`attachments.tsx`), header, the todos pill and list (`todos.tsx`), and for project sessions the mode pill (`mode-menu.tsx`), the PR pill (`pr-pill.tsx`) and the plan-ready, resolved, answered-question and plan-approved cards (`session-cards.tsx`) |
 | `src/components/bots.tsx` | Bot character definitions (SVG). `bot.tsx` renders them |
 | `src/components/popup.tsx` | `Popup`: the app's pop-up, a bottom sheet on phones and a centred dialog from tablet width up |
 | `src/components/banner.tsx` | `Banner`: a one-line info, warning or error notice (on shadcn's `Alert`) for the top of a screen or sheet |
 | `src/components/new-project.tsx` | The Code screen's pop-up for creating a project with its GitHub repos |
-| `src/components/bot-card.tsx`, `bot-settings.tsx` | Bot cards (sidebar strip, settings) and the bot editor |
+| `src/components/bot-card.tsx`, `bot-settings.tsx` | Bot cards (settings) and the bot editor |
 | `src/index.css` | Theme tokens (light and dark) and bot/typing animations |
 | `scripts/mock-hermes.mjs` | Dev-only Hermes stand-in |
 
