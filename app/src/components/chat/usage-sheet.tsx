@@ -168,7 +168,7 @@ export function UsageSheet({
                   className="min-h-11"
                   onClick={() => {
                     onOpenChange(false)
-                    root("/settings")
+                    root("/settings/bots")
                   }}
                 >
                   Set context window

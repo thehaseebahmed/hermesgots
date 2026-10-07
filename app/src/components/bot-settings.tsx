@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   EyeIcon,
@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -72,17 +72,10 @@ export function BotSettings() {
   const [editingId, setEditingId] = useState<string>()
   const editing = profiles?.find((p) => p.id === editingId) ?? active
   const { chatStores } = useSyncState()
-  const section = useRef<HTMLDivElement>(null)
-
-  // The sidebar's "Add bot" card links to #bots.
-  useEffect(() => {
-    if (window.location.hash === "#bots") section.current?.scrollIntoView({ block: "start" })
-  }, [])
 
   return (
-    <Card ref={section} id="bots" className="scroll-mt-20 rounded-3xl">
+    <Card className="rounded-3xl">
       <CardHeader>
-        <CardTitle>Bots</CardTitle>
         <CardDescription>
           Each bot is a Hermes profile with its own API server and key. Tap one to edit it.
         </CardDescription>

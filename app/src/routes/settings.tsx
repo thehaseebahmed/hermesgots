@@ -1,7 +1,21 @@
-import { useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTheme } from "next-themes"
-import { MenuIcon, MonitorIcon, MoonIcon, SunIcon } from "lucide-react"
+import { Link, Navigate, useParams } from "react-router"
+import {
+  ArrowLeftIcon,
+  BotIcon,
+  CheckIcon,
+  ChevronRightIcon,
+  DatabaseIcon,
+  GaugeIcon,
+  MenuIcon,
+  MonitorIcon,
+  MoonIcon,
+  SunIcon,
+  UserIcon,
+  type LucideIcon,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import { AccountSettings } from "@/components/account-settings"
@@ -20,131 +34,307 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Switch } from "@/components/ui/switch"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { DEFAULT_SETTINGS, clearAllData, db, saveSettings, type Settings } from "@/lib/db"
-import { forgetLocalKey } from "@/lib/sync"
+import { DEFAULT_SETTINGS, clearAllData, db, listProfiles, saveSettings } from "@/lib/db"
+import { setBackGuard } from "@/lib/native"
+import { useNav } from "@/lib/nav"
+import { forgetLocalKey, useSyncState } from "@/lib/sync"
+import { cn } from "@/lib/utils"
 
-export function SettingsPage() {
-  const stored = useLiveQuery(async () => (await db.settings.get("settings")) ?? null, [])
-  if (stored === undefined) return null
-  return <SettingsForm stored={stored} />
+const THEMES = [
+  { value: "system", label: "System", icon: MonitorIcon },
+  { value: "light", label: "Light", icon: SunIcon },
+  { value: "dark", label: "Dark", icon: MoonIcon },
+]
+
+const SECTIONS: Record<string, { title: string; render: () => ReactNode }> = {
+  account: { title: "Account", render: () => <AccountSettings /> },
+  bots: { title: "Bots", render: () => <BotSettings /> },
+  theme: { title: "Color mode", render: () => <ThemeSettings /> },
+  data: { title: "Local data", render: () => <DataSettings /> },
 }
 
-function SettingsForm({ stored }: { stored: Settings | null }) {
+/** The first Settings screen: a menu of groups, each row opening its own screen. */
+export function SettingsPage() {
   const openDrawer = useOpenDrawer()
-  const settings = { ...DEFAULT_SETTINGS, ...stored }
-  const { theme, setTheme } = useTheme()
-  const [clearing, setClearing] = useState(false)
+  const settings = useLiveQuery(
+    async () => ({ ...DEFAULT_SETTINGS, ...(await db.settings.get("settings")) }),
+    [],
+  )
+  const bots = useLiveQuery(async () => (await listProfiles()).length, [])
+  const { theme } = useTheme()
 
+  return (
+    <Screen
+      title="Settings"
+      leading={
+        <Button
+          variant="outline"
+          size="icon-lg"
+          className="size-11 rounded-full md:hidden"
+          onClick={openDrawer}
+          aria-label="Open conversations"
+        >
+          <MenuIcon />
+        </Button>
+      }
+    >
+      <AccountRow />
+      <Group>
+        <Row
+          to="bots"
+          icon={BotIcon}
+          title="Bots"
+          subtitle={bots === undefined ? undefined : `${bots} ${bots === 1 ? "bot" : "bots"}`}
+        />
+      </Group>
+      <Group>
+        <Row
+          to="theme"
+          icon={MoonIcon}
+          title="Color mode"
+          subtitle={THEMES.find((t) => t.value === (theme ?? "system"))?.label}
+        />
+        <SwitchRow
+          id="show-stats"
+          icon={GaugeIcon}
+          title="Reply stats"
+          subtitle="Tokens, speed and time under each reply"
+          checked={settings?.showStats ?? DEFAULT_SETTINGS.showStats}
+          onCheckedChange={(checked) => saveSettings({ showStats: checked })}
+        />
+      </Group>
+      <Group>
+        <Row to="data" icon={DatabaseIcon} title="Local data" />
+      </Group>
+      <p className="text-center text-xs text-muted-foreground">
+        Memento v{__APP_VERSION__}
+        <br />
+        Built {new Date(__BUILD_TIME__).toLocaleString()}
+      </p>
+    </Screen>
+  )
+}
+
+/** One settings screen under the menu. */
+export function SettingsSectionPage() {
+  const { section = "" } = useParams()
+  const { up } = useNav()
+  // Every section sits under the Settings menu.
+  useEffect(() => {
+    return setBackGuard(() => {
+      up("/settings")
+      return true
+    })
+  }, [up])
+  const page = SECTIONS[section]
+  if (!page) return <Navigate to="/settings" replace />
+  return (
+    <Screen
+      title={page.title}
+      leading={
+        <Button
+          variant="outline"
+          size="icon-lg"
+          className="size-11 rounded-full"
+          onClick={() => up("/settings")}
+          aria-label="Back"
+        >
+          <ArrowLeftIcon />
+        </Button>
+      }
+    >
+      {page.render()}
+    </Screen>
+  )
+}
+
+function Screen({
+  title,
+  leading,
+  children,
+}: {
+  title: string
+  leading: ReactNode
+  children: ReactNode
+}) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
         <div className="mx-auto flex max-w-2xl items-center gap-3">
-          <Button
-            variant="outline"
-            size="icon-lg"
-            className="size-11 rounded-full md:hidden"
-            onClick={openDrawer}
-            aria-label="Open conversations"
-          >
-            <MenuIcon />
-          </Button>
-          <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
+          {leading}
+          <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
         </div>
       </header>
-
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pb-[max(2rem,env(safe-area-inset-bottom))]">
-        <AccountSettings />
-        <BotSettings />
-
-        <Card className="rounded-3xl">
-          <CardHeader>
-            <CardTitle>Appearance</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <FieldGroup>
-              <Field>
-                <FieldLabel>Theme</FieldLabel>
-                <ToggleGroup
-                  variant="outline"
-                  value={[theme ?? "system"]}
-                  onValueChange={(value) => value[0] && setTheme(value[0])}
-                >
-                  <ToggleGroupItem value="system" aria-label="System">
-                    <MonitorIcon /> System
-                  </ToggleGroupItem>
-                  <ToggleGroupItem value="light" aria-label="Light">
-                    <SunIcon /> Light
-                  </ToggleGroupItem>
-                  <ToggleGroupItem value="dark" aria-label="Dark">
-                    <MoonIcon /> Dark
-                  </ToggleGroupItem>
-                </ToggleGroup>
-              </Field>
-              <Field orientation="horizontal">
-                <div className="flex-1 space-y-1">
-                  <FieldLabel htmlFor="show-stats">Show reply stats</FieldLabel>
-                  <FieldDescription>
-                    Estimated tokens, speed and time under each reply.
-                  </FieldDescription>
-                </div>
-                <Switch
-                  id="show-stats"
-                  checked={settings.showStats}
-                  onCheckedChange={(checked) => saveSettings({ showStats: checked })}
-                />
-              </Field>
-            </FieldGroup>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-3xl">
-          <CardHeader>
-            <CardTitle>Data</CardTitle>
-            <CardDescription>
-              Bots, chats and settings are cached on this device in IndexedDB.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <AlertDialog open={clearing} onOpenChange={setClearing}>
-              <AlertDialogTrigger render={<Button variant="destructive" />}>
-                Clear local data
-              </AlertDialogTrigger>
-              <AlertDialogContent size="sm">
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Clear everything?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    Deletes all bots, chats and settings stored in this browser. Sessions on your
-                    Hermes server are untouched.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction
-                    variant="destructive"
-                    onClick={async () => {
-                      await clearAllData()
-                      forgetLocalKey()
-                      setClearing(false)
-                      toast.success("Local data cleared")
-                    }}
-                  >
-                    Clear
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </CardContent>
-        </Card>
-
-        <p className="text-center text-xs text-muted-foreground">
-          Memento v{__APP_VERSION__}
-          <br />
-          Built {new Date(__BUILD_TIME__).toLocaleString()}
-        </p>
+        {children}
       </div>
     </div>
+  )
+}
+
+function Group({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-px overflow-hidden rounded-3xl bg-border ring-1 ring-foreground/10 *:rounded-none">
+      {children}
+    </div>
+  )
+}
+
+const rowClass =
+  "flex min-h-14 w-full items-center gap-4 bg-card px-5 py-3 text-left text-card-foreground"
+
+function RowText({ title, subtitle }: { title: ReactNode; subtitle?: ReactNode }) {
+  return (
+    <span className="flex min-w-0 flex-1 flex-col">
+      <span className="truncate text-base">{title}</span>
+      {subtitle && <span className="line-clamp-2 text-sm text-muted-foreground">{subtitle}</span>}
+    </span>
+  )
+}
+
+function Row({
+  to,
+  icon: Icon,
+  image,
+  title,
+  subtitle,
+}: {
+  to: string
+  icon: LucideIcon
+  image?: string
+  title: ReactNode
+  subtitle?: ReactNode
+}) {
+  return (
+    <Link to={`/settings/${to}`} className={cn(rowClass, "transition-colors hover:bg-muted")}>
+      {image ? (
+        <img
+          src={image}
+          alt=""
+          className="size-8 shrink-0 rounded-full ring-1 ring-foreground/10"
+        />
+      ) : (
+        <Icon className="size-5 shrink-0 text-muted-foreground" />
+      )}
+      <RowText title={title} subtitle={subtitle} />
+      <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
+    </Link>
+  )
+}
+
+function SwitchRow({
+  id,
+  icon: Icon,
+  title,
+  subtitle,
+  checked,
+  onCheckedChange,
+}: {
+  id: string
+  icon: LucideIcon
+  title: string
+  subtitle?: string
+  checked: boolean
+  onCheckedChange: (checked: boolean) => void
+}) {
+  return (
+    <label htmlFor={id} className={cn(rowClass, "cursor-pointer")}>
+      <Icon className="size-5 shrink-0 text-muted-foreground" />
+      <RowText title={title} subtitle={subtitle} />
+      <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} />
+    </label>
+  )
+}
+
+/** The signed-in account on top, like the Claude app; hidden where there's no sign-in at all. */
+function AccountRow() {
+  const sync = useSyncState()
+  const { account } = sync
+  if (account.status === "loading" || account.status === "unavailable") return null
+  if (account.status === "signed-out")
+    return (
+      <Group>
+        <Row to="account" icon={UserIcon} title="Account" subtitle="Signed out" />
+      </Group>
+    )
+  const status =
+    sync.vault === "locked" ? "Sync locked" : sync.vault === "missing" ? "Sync off" : undefined
+  return (
+    <Group>
+      <Row
+        to="account"
+        icon={UserIcon}
+        image={account.user.pictureUrl}
+        title={account.user.name ?? account.user.email}
+        subtitle={status ?? (account.user.name ? account.user.email : undefined)}
+      />
+    </Group>
+  )
+}
+
+function ThemeSettings() {
+  const { theme, setTheme } = useTheme()
+  const current = theme ?? "system"
+  return (
+    <Group>
+      {THEMES.map(({ value, label, icon: Icon }) => (
+        <button
+          key={value}
+          type="button"
+          className={cn(rowClass, "transition-colors hover:bg-muted")}
+          aria-pressed={current === value}
+          onClick={() => setTheme(value)}
+        >
+          <Icon className="size-5 shrink-0 text-muted-foreground" />
+          <RowText title={label} />
+          {current === value && <CheckIcon className="size-5 shrink-0" />}
+        </button>
+      ))}
+    </Group>
+  )
+}
+
+function DataSettings() {
+  const [clearing, setClearing] = useState(false)
+  return (
+    <Card className="rounded-3xl">
+      <CardHeader>
+        <CardTitle>Data</CardTitle>
+        <CardDescription>
+          Bots, chats and settings are cached on this device in IndexedDB.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <AlertDialog open={clearing} onOpenChange={setClearing}>
+          <AlertDialogTrigger render={<Button variant="destructive" />}>
+            Clear local data
+          </AlertDialogTrigger>
+          <AlertDialogContent size="sm">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Clear everything?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Deletes all bots, chats and settings stored in this browser. Sessions on your Hermes
+                server are untouched.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                onClick={async () => {
+                  await clearAllData()
+                  forgetLocalKey()
+                  setClearing(false)
+                  toast.success("Local data cleared")
+                }}
+              >
+                Clear
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </CardContent>
+    </Card>
   )
 }
