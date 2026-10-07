@@ -294,7 +294,7 @@ export function ChatPage() {
       } else {
         if (!profile) return
         conversationId = (await createConversation(profile.id)).id
-        navigate(`/c/${conversationId}`, { replace: true })
+        navigate(`/c/${conversationId}`, { replace: true, state: { quiet: true } })
       }
       if (session?.draftAt)
         void updateConversation(conversationId, { draft: undefined, draftAt: undefined })
