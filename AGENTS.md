@@ -84,6 +84,7 @@ PR titles follow the same format. Fill in `.github/pull_request_template.md` for
 | `src/lib/context.ts` | Reads a chat's context use from the Memento plugin |
 | `src/lib/todos.ts` | Reads the agent's todo list for a chat from the Memento plugin (and from a run's live `todo_list` events) |
 | `src/lib/workspace.ts` | Project sessions: their worktree and permission mode on the plugin, their pull request, and `sessionState` |
+| `src/lib/nav.ts` | `useNav`: `root` opens a top-level screen as the only history entry, `up` returns to a screen's parent |
 | `src/lib/media.ts` | `useWide`: whether the screen is tablet-sized (768px) or wider |
 | `src/lib/highlight.ts` | Formats and highlights tool input and output (highlight.js, loaded on first use) |
 | `netlify/functions/sync.mts`, `netlify/lib/docs.ts` | The opaque per-user document store (Netlify Blobs) |
@@ -177,6 +178,7 @@ These behaviours were verified against Hermes's `gateway/platforms/api_server*.p
 ## Conventions
 
 - **The UI renders from Dexie live queries.** Streaming writes into IndexedDB (throttled), and components never hold stream state.
+- **History mirrors the sidebar.** Top-level screens (chats, Code, Routines, Settings) open with `root` as the only history entry, so back leaves the app; a deeper screen (a project, a session) is pushed on its parent, goes back with `up`, and sets `setBackGuard` so Android's back does the same. From a top-level screen Android's back minimizes the app.
 - **If you change the schema, bump the Dexie version** in `src/lib/db.ts` and keep existing data loading.
 - **Every screen must work at phone (390px) and tablet (≥768px) widths, in light and dark mode.**
 - **Pop-ups are sheets on phones and dialogs on bigger screens.** Build them with `Popup` / `PopupContent` (`src/components/popup.tsx`), which picks with `useWide`, rather than a bare `Sheet` or dialog. Side drawers (the sidebar) and the tool-details drawer are not pop-ups.

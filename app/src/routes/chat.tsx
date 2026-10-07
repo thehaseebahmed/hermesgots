@@ -67,6 +67,7 @@ import {
 import { describeActivity } from "@/lib/format"
 import { loadEarlierHistory, reconcileHistory } from "@/lib/history"
 import { setBackGuard } from "@/lib/native"
+import { useNav } from "@/lib/nav"
 import { syncContextWindow } from "@/lib/models"
 import {
   planApprovalMessage,
@@ -122,7 +123,7 @@ function EmptyState({
           ))}
         </div>
       ) : (
-        <Button nativeButton={false} render={<Link to="/settings" />} size="lg">
+        <Button nativeButton={false} render={<Link to="/settings" replace />} size="lg">
           <SettingsIcon data-icon="inline-start" />
           Open settings
         </Button>
@@ -156,6 +157,7 @@ function FollowOnSend({ lastUserId }: { lastUserId?: string }) {
 export function ChatPage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { root, up } = useNav()
   const settings = useLiveQuery(() => db.settings.get("settings"), [])
   const conversation = useLiveQuery(
     async () => (id ? ((await db.conversations.get(id)) ?? null) : undefined),
@@ -251,8 +253,8 @@ export function ChatPage() {
 
   // A deleted (or unknown) conversation id falls back to a fresh chat.
   useEffect(() => {
-    if (id && conversation === null) navigate("/", { replace: true })
-  }, [id, conversation, navigate])
+    if (id && conversation === null) root("/")
+  }, [id, conversation, root])
 
   // A session that was never sent anything isn't kept; typed text is the user's to keep or drop.
   const draftRef = useRef("")
@@ -265,21 +267,23 @@ export function ChatPage() {
   const projectPath = session && `/code/${session.profileId}/${session.projectId}`
   const leave = () => {
     if (!session || !projectPath) return
-    if (!unsent) return navigate(projectPath)
+    if (!unsent) return up(projectPath)
     if (draftRef.current.trim()) return setLeavingWithDraft(true)
     void deleteConversation(session.id)
-    navigate(projectPath, { replace: true })
+    up(projectPath)
   }
+  const leaveRef = useRef(leave)
   useEffect(() => {
-    if (!unsent) return
-    setBackGuard(() => {
-      leave()
+    leaveRef.current = leave
+  })
+  // A session sits under its project; a plain chat is top-level, so back leaves the app.
+  useEffect(() => {
+    if (!projectPath) return
+    return setBackGuard(() => {
+      leaveRef.current()
       return true
     })
-    return () => setBackGuard(undefined)
-    // `leave` only reads what `unsent` already covers, plus the ref and the router.
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [unsent])
+  }, [projectPath])
 
   const send = async (text: string, attachments: Attachment[] = []) => {
     try {
@@ -290,7 +294,7 @@ export function ChatPage() {
       } else {
         if (!profile) return
         conversationId = (await createConversation(profile.id)).id
-        navigate(`/c/${conversationId}`)
+        navigate(`/c/${conversationId}`, { replace: true })
       }
       if (session?.draftAt)
         void updateConversation(conversationId, { draft: undefined, draftAt: undefined })
@@ -317,7 +321,7 @@ export function ChatPage() {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-44">
         {!session && (
-          <DropdownMenuItem onClick={() => navigate("/")}>
+          <DropdownMenuItem onClick={() => root("/")}>
             <PlusIcon />
             New chat
           </DropdownMenuItem>
@@ -496,7 +500,7 @@ export function ChatPage() {
             filesAvailable={Boolean(profile?.pluginChats)}
             imagesAvailable={profile?.imageInput !== false}
             onStop={() => id && stopMessage(id)}
-            onCommand={(command) => navigate(command === "new" ? "/" : "/settings")}
+            onCommand={(command) => root(command === "new" ? "/" : "/settings")}
             connection={{ baseUrl: profile?.baseUrl ?? "", apiKey: profile?.apiKey ?? "" }}
             botName={profile?.name}
             session={
@@ -570,7 +574,7 @@ export function ChatPage() {
               onClick={async () => {
                 if (!session || !projectPath) return
                 await deleteConversation(session.id)
-                navigate(projectPath, { replace: true })
+                up(projectPath)
               }}
             >
               Discard
@@ -582,7 +586,7 @@ export function ChatPage() {
                   draft: draftRef.current.trim(),
                   draftAt: Date.now(),
                 })
-                navigate(projectPath)
+                up(projectPath)
               }}
             >
               Save draft
@@ -621,9 +625,8 @@ export function ChatPage() {
                   await deleteConversation(id)
                 }
                 setDeleting(false)
-                navigate(session ? `/code/${session.profileId}/${session.projectId}` : "/", {
-                  replace: true,
-                })
+                if (projectPath) up(projectPath)
+                else root("/")
               }}
             >
               Delete
