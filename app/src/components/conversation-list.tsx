@@ -54,7 +54,7 @@ const REASON_ICONS: Record<WaitingReason["kind"], typeof ListChecksIcon> = {
 }
 
 /**
- * The newest chats across every bot, each with its bot's image, and a dot after the title when one
+ * The newest chats across every bot, each with its bot's image, and a dot at the row's end when one
  * waits on the user. Project sessions stay on Code.
  */
 function Recents({ onNavigate }: { onNavigate?: () => void }) {
@@ -103,15 +103,13 @@ function Recents({ onNavigate }: { onNavigate?: () => void }) {
             <li key={chat.id}>
               <RootLink to={`/c/${chat.id}`} onClick={onNavigate} className={rowClass}>
                 <Bot id={bot?.botId} className="size-5" />
-                <span className="flex min-w-0 flex-1 items-center gap-1.5">
-                  <span className="truncate">{chat.title}</span>
-                  {reason && (
-                    <>
-                      <span aria-hidden className="size-2 shrink-0 rounded-full bg-warning" />
-                      <span className="sr-only">{reasonText(reason)}</span>
-                    </>
-                  )}
-                </span>
+                <span className="min-w-0 flex-1 truncate">{chat.title}</span>
+                {reason && (
+                  <>
+                    <span aria-hidden className="size-2 shrink-0 rounded-full bg-warning" />
+                    <span className="sr-only">{reasonText(reason)}</span>
+                  </>
+                )}
               </RootLink>
             </li>
           )
