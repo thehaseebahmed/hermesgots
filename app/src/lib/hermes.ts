@@ -9,6 +9,7 @@ import type {
 } from "@/lib/db"
 import type { Doc } from "@/lib/merge"
 import { isNative } from "@/lib/native"
+import type { CronSchedule } from "@/lib/schedule"
 
 /**
  * Client for the Hermes Agent API server (OpenAI-compatible, default port 8642).
@@ -424,7 +425,7 @@ export interface CronExecution {
 export interface CronJob {
   id: string
   name: string
-  schedule: string
+  schedule: CronSchedule
   enabled: boolean
   /** `scheduled`, `paused`, `running`, `completed` or `error`. */
   state?: string
@@ -438,11 +439,18 @@ export interface CronJob {
 
 function toCronJob(raw: any): CronJob | null {
   if (typeof raw?.id !== "string") return null
-  const schedule = raw.schedule_display ?? raw.schedule?.display ?? raw.schedule?.expr
+  const spec = raw.schedule && typeof raw.schedule === "object" ? raw.schedule : {}
+  const display = raw.schedule_display ?? spec.display ?? spec.expr ?? raw.schedule
   return {
     id: raw.id,
     name: typeof raw.name === "string" && raw.name ? raw.name : raw.id,
-    schedule: typeof schedule === "string" ? schedule : "",
+    schedule: {
+      kind: typeof spec.kind === "string" ? spec.kind : undefined,
+      minutes: typeof spec.minutes === "number" ? spec.minutes : undefined,
+      expr: typeof spec.expr === "string" ? spec.expr : undefined,
+      runAt: typeof spec.run_at === "string" ? spec.run_at : undefined,
+      display: typeof display === "string" ? display : "",
+    },
     enabled: raw.enabled !== false,
     state: raw.state ?? undefined,
     nextRunAt: raw.next_run_at,

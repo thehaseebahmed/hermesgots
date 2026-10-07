@@ -220,7 +220,8 @@ const MINUTE = 60_000
 function cronJobs(profile = "default") {
   if (cronByProfile.has(profile)) return cronByProfile.get(profile)
   const seed = [...profile].reduce((n, c) => n + c.charCodeAt(0), 0)
-  const make = (n, name, display, every, { paused = false, streak = 0, history = 30 } = {}) => {
+  // `schedule` is a cron expression, else the job runs every `every` minutes.
+  const make = (n, name, schedule, every, { paused = false, streak = 0, history = 30 } = {}) => {
     const now = Date.now()
     const runs = Array.from({ length: history }, (_, i) => {
       // The latest run was a third of a period ago, so the next one is still ahead.
@@ -229,12 +230,13 @@ function cronJobs(profile = "default") {
       const end = start + 20_000 + ((i * 13) % 50) * 1000
       return { start, end, ok: !failed, provider: failed && i % 2 === 0 }
     })
-    return { id: `${seed.toString(16)}a${n}c0ffee`.slice(0, 12), name, display, every, paused, runs }
+    return { id: `${seed.toString(16)}a${n}c0ffee`.slice(0, 12), name, schedule, every, paused, runs }
   }
   const jobs = [
-    make(1, "Inbox triage", "every 60m", 60),
-    make(2, "Uptime check", "every 15m", 15, { streak: 2 }),
+    make(1, "Inbox triage", null, 60),
+    make(2, "Uptime check", null, 15, { streak: 2 }),
     make(3, "Morning digest", "0 8 * * *", 1440, { paused: true, history: 9 }),
+    make(4, "Standup notes", "30 9 * * 1-5", 1440, { history: 12 }),
   ]
   cronByProfile.set(profile, jobs)
   return jobs
@@ -254,8 +256,11 @@ function jobRecord(job) {
   return {
     id: job.id,
     name: job.name,
-    schedule: { kind: "interval", display: job.display },
-    schedule_display: job.display,
+    // As Hermes's parse_schedule stores it.
+    schedule: job.schedule
+      ? { kind: "cron", expr: job.schedule, display: job.schedule }
+      : { kind: "interval", minutes: job.every, display: `every ${job.every}m` },
+    schedule_display: job.schedule ?? `every ${job.every}m`,
     enabled: !job.paused,
     state: job.paused ? "paused" : last && !last.end ? "running" : "scheduled",
     next_run_at: job.paused ? null : iso((last?.start ?? Date.now()) + job.every * MINUTE),
