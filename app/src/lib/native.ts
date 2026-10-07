@@ -1,5 +1,6 @@
 import { App } from "@capacitor/app"
 import { Capacitor } from "@capacitor/core"
+import { toast } from "sonner"
 
 /** True inside the Android app, where the page is served from `https://localhost`. */
 export const isNative = Capacitor.isNativePlatform()
@@ -40,14 +41,31 @@ export function setBackGuard(guard: () => boolean) {
   }
 }
 
+/** How long a second back press has to leave the app after the first. */
+const EXIT_WINDOW = 2000
+const EXIT_TOAST = "exit"
+
 /**
  * Android's back button goes up from a screen that sets a guard (a project, a session) and leaves
- * the app from a top-level one, whatever was opened before it. Leaving minimizes rather than
- * exits, as Android's own back does from 12 on, so a reply keeps streaming and the screen stays.
+ * the app from a top-level one, whatever was opened before it, but only on a second press within
+ * `EXIT_WINDOW`, so a stray press doesn't. Leaving minimizes rather than exits, as Android's own
+ * back does from 12 on, so a reply keeps streaming and the screen stays.
  */
 export function handleBackButton() {
   if (!isNative) return
+  let armedAt = 0
   void App.addListener("backButton", () => {
-    if (!backGuard?.()) void App.minimizeApp()
+    if (backGuard?.()) {
+      armedAt = 0
+      return
+    }
+    if (Date.now() - armedAt < EXIT_WINDOW) {
+      armedAt = 0
+      toast.dismiss(EXIT_TOAST)
+      void App.minimizeApp()
+      return
+    }
+    armedAt = Date.now()
+    toast("Press back again to exit", { id: EXIT_TOAST, duration: EXIT_WINDOW })
   })
 }
