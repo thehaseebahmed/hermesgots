@@ -190,7 +190,6 @@ export function MessageItem({
   const toolsBefore = split ? tools.filter((t) => t.startedAt <= askedAt) : tools
   const toolsAfter = split ? tools.filter((t) => t.startedAt > askedAt) : []
 
-  const showTyping = streaming && (!content || awaitingApproval || awaitingClarify)
   const error = (
     <>
       <AlertCircleIcon className="mt-0.5 size-4 shrink-0" />
@@ -209,10 +208,11 @@ export function MessageItem({
         )
       ) : (
         <>
-          {showTyping && <TypingBubble />}
           {streaming && content && message.statusText && !awaitingApproval && !awaitingClarify && (
             <div className="px-1 text-xs text-muted-foreground">{message.statusText}</div>
           )}
+          {/* Last, so the avatar stays level with it however much the turn has said or run. */}
+          {streaming && <TypingBubble />}
         </>
       )}
       {message.status === "error" &&
