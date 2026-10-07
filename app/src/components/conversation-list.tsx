@@ -54,8 +54,8 @@ const REASON_ICONS: Record<WaitingReason["kind"], typeof ListChecksIcon> = {
 }
 
 /**
- * The newest chats across every bot, each with its bot's image, and why one waits on the user when
- * it does. Project sessions stay on Code.
+ * The newest chats across every bot, each with its bot's image, and a dot after the title when one
+ * waits on the user. Project sessions stay on Code.
  */
 function Recents({ onNavigate }: { onNavigate?: () => void }) {
   const live = useWaiting()
@@ -99,22 +99,17 @@ function Recents({ onNavigate }: { onNavigate?: () => void }) {
       <ul className="flex flex-col gap-0.5">
         {recents?.map(({ chat, bot, local }) => {
           const reason = local ?? live[chat.hermesSessionId]
-          const Icon = reason && REASON_ICONS[reason.kind]
           return (
             <li key={chat.id}>
-              <RootLink
-                to={`/c/${chat.id}`}
-                onClick={onNavigate}
-                className={(state) => cn(rowClass(state), reason && "py-2")}
-              >
-                <Bot id={bot?.botId} className={cn("size-5", reason && "self-start")} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate">{chat.title}</span>
-                  {Icon && (
-                    <span className="flex items-center gap-1 text-xs text-warning">
-                      <Icon className="size-3.5 shrink-0" />
-                      <span className="min-w-0 truncate">{reasonText(reason)}</span>
-                    </span>
+              <RootLink to={`/c/${chat.id}`} onClick={onNavigate} className={rowClass}>
+                <Bot id={bot?.botId} className="size-5" />
+                <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                  <span className="truncate">{chat.title}</span>
+                  {reason && (
+                    <>
+                      <span aria-hidden className="size-2 shrink-0 rounded-full bg-warning" />
+                      <span className="sr-only">{reasonText(reason)}</span>
+                    </>
                   )}
                 </span>
               </RootLink>
