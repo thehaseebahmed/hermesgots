@@ -491,6 +491,28 @@ export const PLUGIN_DOCS = "https://github.com/thehaseebahmed/memento/tree/main/
 export const INSTALL_PLUGIN = `hermes plugins install thehaseebahmed/memento/plugin --enable
 hermes gateway restart`
 
+/**
+ * The Memento plugin's version on the bot's server, or null when it doesn't answer. Hermes's 404
+ * for an unknown route skips CORS, so a missing plugin usually fails with no status at all.
+ */
+export async function getPluginVersion(config: HermesConfig): Promise<string | null> {
+  try {
+    const response = await request(`${serverRoot(config.baseUrl)}${PLUGIN_ROOT}/info`, {
+      headers: headers(config),
+    })
+    const body = await response.json()
+    return typeof body?.version === "string" && body.version ? body.version : null
+  } catch {
+    return null
+  }
+}
+
+/** A fresh `API_SERVER_KEY`: 32 random bytes as 64 hex characters, like `openssl rand -hex 32`. */
+export function generateApiKey() {
+  const bytes = crypto.getRandomValues(new Uint8Array(32))
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")
+}
+
 /** Each job's newest runs, newest first. A 404 means the Memento plugin isn't installed. */
 export async function listCronRuns(
   config: HermesConfig,

@@ -54,13 +54,16 @@ import {
   updateProfile,
   type Profile,
 } from "@/lib/db"
-import { checkHealth, listModels, PLUGIN_DOCS } from "@/lib/hermes"
+import { checkHealth, getPluginVersion, listModels, PLUGIN_DOCS } from "@/lib/hermes"
 import { syncContextWindow } from "@/lib/models"
 import { recheckChatStores, stopUsingPlugin, useSyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
 
 type Connection =
-  { state: "idle" } | { state: "testing" } | { state: "ok" } | { state: "error"; message: string }
+  | { state: "idle" }
+  | { state: "testing" }
+  | { state: "ok"; plugin: string | null }
+  | { state: "error"; message: string }
 
 /** Hermes's default model id; any other advertised id is the profile's name. */
 const UNNAMED_MODEL = "hermes-agent"
@@ -229,7 +232,7 @@ export function BotEditor({
         setName(advertised)
         save({ name: advertised })
       }
-      setConnection({ state: "ok" })
+      setConnection({ state: "ok", plugin: await getPluginVersion(config) })
       const saved = await db.profiles.get(profile.id)
       if (saved) await syncContextWindow(saved)
       const synced = await db.profiles.get(profile.id)
@@ -394,9 +397,16 @@ export function BotEditor({
           {connection.state === "testing" ? "Testing…" : "Test connection"}
         </Button>
         {connection.state === "ok" && (
-          <Badge className="bg-primary/15 text-primary dark:bg-primary/30 dark:text-sidebar-primary">
-            Connected
-          </Badge>
+          <div className="flex flex-wrap gap-2">
+            <Badge className="bg-primary/15 text-primary dark:bg-primary/30 dark:text-sidebar-primary">
+              Connected
+            </Badge>
+            {connection.plugin ? (
+              <Badge variant="secondary">Plugin {connection.plugin}</Badge>
+            ) : (
+              <Badge variant="outline">No plugin</Badge>
+            )}
+          </div>
         )}
         {!setup && (
           <AlertDialog>
