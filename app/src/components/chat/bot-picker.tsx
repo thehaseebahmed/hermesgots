@@ -12,13 +12,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { listProfiles, setActiveProfile, type Profile } from "@/lib/db"
+import { listEnabledProfiles, setActiveProfile, type Profile } from "@/lib/db"
 import { useNav } from "@/lib/nav"
 
 /** Which bot a new chat goes to, as a pill above the composer. */
 export function BotPicker({ profile }: { profile: Profile }) {
   const { root } = useNav()
-  const profiles = useLiveQuery(listProfiles, [])
+  const profiles = useLiveQuery(listEnabledProfiles, [])
 
   return (
     <DropdownMenu>
@@ -54,9 +54,9 @@ export function BotPicker({ profile }: { profile: Profile }) {
           ))}
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
-        <DropdownMenuItem className="min-h-11" onClick={() => root("/settings/bots")}>
+        <DropdownMenuItem className="min-h-11" onClick={() => root("/settings/bots?link=1")}>
           <PlusIcon />
-          Add bot
+          Link a bot
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

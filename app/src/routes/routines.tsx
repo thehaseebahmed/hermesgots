@@ -34,7 +34,7 @@ import {
   type CronRun,
   type CronState,
 } from "@/lib/cron"
-import { listProfiles, type Profile } from "@/lib/db"
+import { listEnabledProfiles, type Profile } from "@/lib/db"
 import { formatDuration, formatRelative } from "@/lib/format"
 import { HermesError, INSTALL_PLUGIN, controlCronJob, type CronJob } from "@/lib/hermes"
 import { cn } from "@/lib/utils"
@@ -44,7 +44,7 @@ const REFRESH_MS = 60_000
 /** Hermes cron jobs, grouped by bot, each with its recent runs as Gatus-style bars. */
 export function RoutinesPage() {
   const openDrawer = useOpenDrawer()
-  const profiles = useLiveQuery(listProfiles, [])
+  const profiles = useLiveQuery(listEnabledProfiles, [])
   const [tick, setTick] = useState(0)
   const [collapsed, setOpen] = useCollapsedBots()
   const refresh = useCallback(() => setTick((n) => n + 1), [])

@@ -14,7 +14,7 @@ export async function refreshContext(conversationId: string) {
   const conversation = await db.conversations.get(conversationId)
   const profile = conversation && (await db.profiles.get(conversation.profileId))
   // Keyless chats have no session id Hermes knows.
-  if (!conversation || !profile?.apiKey || !profile.pluginChats) return
+  if (!conversation || !profile?.apiKey || profile.disabled) return
   const key = `${profile.baseUrl}\n${profile.apiKey}`
   if (Date.now() - (unsupported.get(key) ?? -Infinity) < RETRY_MS) return
   let live

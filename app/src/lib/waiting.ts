@@ -72,7 +72,7 @@ export function useWaiting(): Found {
     const profiles = await db.profiles.toArray()
     const unique = new Map(
       profiles
-        .filter((p) => p.apiKey && p.pluginChats)
+        .filter((p) => p.apiKey && !p.disabled)
         .map((p) => [`${p.baseUrl.trim().replace(/\/+$/, "")} ${p.apiKey}`, p]),
     )
     return JSON.stringify([...unique.values()].map(({ baseUrl, apiKey }) => ({ baseUrl, apiKey })))
