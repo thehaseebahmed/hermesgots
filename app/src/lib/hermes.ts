@@ -547,6 +547,8 @@ export interface HermesProjectFolder {
   git: boolean
   /** `user/repo` from the clone's GitHub origin; what the UI calls the folder. */
   repo: string | null
+  /** The branch a session's worktree starts from (plugin 0.17). */
+  branch: string | null
   /**
    * While the project is being created, this repo's clone; on a ready project, a repo being added
    * (`cloning`, or `failed` with `error`) or removed (`removing`). Unset once it's settled.
@@ -602,6 +604,7 @@ function toProject(raw: unknown): HermesProject | null {
         label: typeof f.label === "string" && f.label ? f.label : null,
         git: f.git === true,
         repo: typeof f.repo === "string" && f.repo ? f.repo : null,
+        branch: typeof f.branch === "string" && f.branch ? f.branch : null,
         status: FOLDER_STATUSES.find((status) => status === f.status),
         error: typeof f.error === "string" && f.error ? f.error : undefined,
       })),
