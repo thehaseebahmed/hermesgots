@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import {
   ArrowLeftIcon,
   ChevronRightIcon,
@@ -68,14 +68,14 @@ function kindOf(tool: ToolEvent): Kind {
   return KINDS[tool.tool] ?? USED
 }
 
-/** "Searched code, read a file, created a file": each kind once, in the order it first appears. */
-function summarize(tools: ToolEvent[]) {
+/** "Ran a command", "read a file", "searched code": each kind once, in the order it first appears. */
+function phrases(tools: ToolEvent[]) {
   const counts = new Map<Kind, number>()
   for (const tool of tools) {
     const kind = kindOf(tool)
     counts.set(kind, (counts.get(kind) ?? 0) + 1)
   }
-  const phrases = [...counts].map(([kind, count]) => {
+  return [...counts].map(([kind, count]) => {
     const noun =
       typeof kind.title === "string"
         ? kind.title
@@ -84,7 +84,50 @@ function summarize(tools: ToolEvent[]) {
           : `${count} ${kind.title.many}`
     return `${kind.verb} ${noun}`
   })
-  return phrases.map((p, i) => (i ? p[0].toLowerCase() + p.slice(1) : p)).join(", ")
+}
+
+const sentence = (parts: string[]) =>
+  parts.map((p, i) => (i ? p[0].toLowerCase() + p.slice(1) : p)).join(", ")
+
+/** The summary with the first `shown` phrases, and how many more there are when it's cut short. */
+const summary = (parts: string[], shown = parts.length) =>
+  sentence(parts.slice(0, shown)) + (shown < parts.length ? ` (+${parts.length - shown})` : "")
+
+/** How many phrases of the summary fit on the row's line, with "(+N)" standing in for the rest. */
+function useFittingPhrases(parts: string[], deps: unknown[]) {
+  const row = useRef<HTMLButtonElement>(null)
+  const text = useRef<HTMLSpanElement>(null)
+  const ruler = useRef<HTMLSpanElement>(null)
+  const [shown, setShown] = useState(parts.length)
+  const key = parts.join("|")
+  useLayoutEffect(() => {
+    const button = row.current
+    const measure = ruler.current
+    if (!button || !measure) return
+    const fit = () => {
+      let taken = 0
+      let siblings = 0
+      for (const child of button.children) {
+        if (child === text.current || child === measure) continue
+        taken += child.getBoundingClientRect().width
+        siblings++
+      }
+      // The row's gap-2 sits between every item, the text included.
+      const room = button.clientWidth - taken - siblings * 8
+      for (let count = parts.length; count > 1; count--) {
+        measure.textContent = summary(parts, count)
+        if (measure.offsetWidth <= room) return setShown(count)
+      }
+      setShown(1)
+    }
+    fit()
+    const observer = new ResizeObserver(fit)
+    observer.observe(button)
+    return () => observer.disconnect()
+    // `parts` is rebuilt every render; its content is what `key` stands for.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, ...deps])
+  return { row, text, ruler, shown: Math.min(shown, parts.length) }
 }
 
 const MAX_NAME = 26
@@ -158,7 +201,7 @@ function ToolList({ tools, onSelect }: { tools: ToolEvent[]; onSelect: (id: stri
   return (
     <>
       <PopupHeader className="px-14 pb-2 text-center">
-        <PopupTitle className="text-balance">{summarize(tools)}</PopupTitle>
+        <PopupTitle className="text-balance">{summary(phrases(tools))}</PopupTitle>
       </PopupHeader>
       <ol className="flex flex-col px-6 pt-2">
         {tools.map((tool, index) => {
@@ -202,18 +245,25 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
   const selected = tools.find((t) => t.toolCallId === selectedId)
   const running = tools.some((t) => t.status === "running")
   const failed = tools.some((t) => t.status === "failed")
+  const parts = phrases(tools)
+  const { row, text, ruler, shown } = useFittingPhrases(parts, [running, failed])
   return (
     <>
       <button
+        ref={row}
         type="button"
-        className="flex min-h-11 w-full items-center gap-2 text-left text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        aria-label={summary(parts)}
+        className="relative flex min-h-11 w-full items-center gap-2 text-left text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         onClick={() => setOpen(true)}
       >
         {running && <Spinner className="size-4 shrink-0" />}
         {failed && !running && (
           <XIcon className="size-4 shrink-0 text-destructive" strokeWidth={3} aria-label="Failed" />
         )}
-        <span className="min-w-0 truncate">{summarize(tools)}</span>
+        <span ref={text} className="min-w-0 truncate">
+          {summary(parts, shown)}
+        </span>
+        <span ref={ruler} className="invisible absolute w-max whitespace-nowrap" aria-hidden />
         <ChevronRightIcon className="size-4 shrink-0" />
       </button>
       <Popup
