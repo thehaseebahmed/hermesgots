@@ -571,7 +571,16 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if denied is not None:
             return denied
         live, run_ids = sessions.live_runs(adapter)
-        return web.json_response({"object": "memento.runs", "sessions": live, "run_ids": run_ids})
+        try:
+            waiting = await asyncio.to_thread(
+                sessions.waiting, adapter, store_path(), hermes_home()
+            )
+        except Exception:
+            logger.debug("memento: reading waiting sessions failed", exc_info=True)
+            waiting = {}
+        return web.json_response(
+            {"object": "memento.runs", "sessions": live, "run_ids": run_ids, "waiting": waiting}
+        )
 
     app.router.add_get(f"{PREFIX}/info", info)
     app.router.add_get(f"{PREFIX}/chats", list_chats)

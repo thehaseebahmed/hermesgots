@@ -32,8 +32,9 @@
 // names the file the plugin would have saved it to (plan_file). The branch's PRs
 // (GET …/sessions/{id}/prs) appear after two turns: "merge", "close" or "draft" in a turn sets their
 // state and "break" fails their checks. GET /api/plugins/memento/runs/live lists the sessions with
-// a run in flight. The agent asks the user questions with Hermes's clarify tool, which the plugin
-// serves on runs: say "ask" for one, or "ask five" for five (plan mode asks before planning), the run carries
+// a run in flight, and why each one waiting on the user waits. The agent asks the user questions
+// with Hermes's clarify tool, which the plugin serves on runs: say "ask" for one, or "ask five" for
+// five (plan mode asks before planning), the run carries
 // `clarify.request` and waits, and POST /api/plugins/memento/runs/{id}/clarify answers it.
 // POST /api/plugins/memento/sessions/{id}/attachments saves an attached file under the temp dir, and a
 // message that carries attachments (inline images, `<attachment>` lines) gets a reply naming them.
@@ -1023,7 +1024,20 @@ http
           run_ids[run.sessionId] = runId
         }
       }
-      return json(res, 200, { object: "memento.runs", sessions, run_ids })
+      // Why each session waits: its run's questions or approval, else a plan to review.
+      const waiting = {}
+      for (const run of runs.values()) {
+        if (!run.sessionId || run.status !== "waiting_for_approval") continue
+        if (run.clarify) waiting[run.sessionId] = { kind: "question", count: run.clarify.questions?.length || 1 }
+        else waiting[run.sessionId] ??= { kind: "approval", ...(run.approval?.command ? { command: run.approval.command } : {}) }
+      }
+      for (const record of projectSessions.values()) if (record.plan_pending) waiting[record.session_id] ??= { kind: "plan" }
+      for (const [id, reason] of Object.entries(waiting)) {
+        const record = projectSessions.get(id)
+        const name = record && mockProjects().find((p) => p.id === record.project_id)?.name
+        if (name) reason.project = name
+      }
+      return json(res, 200, { object: "memento.runs", sessions, run_ids, waiting })
     }
     const sessionRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/(workspace|workspace\/remove|mode|prs)$/.exec(url.pathname)
     if (PLUGIN && !profile && sessionRoute) {
