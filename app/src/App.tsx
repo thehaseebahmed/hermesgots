@@ -3,6 +3,7 @@ import { useTheme } from "next-themes"
 import { Route, Routes } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
+import { useLaunchRestore, useRecordLastChat } from "@/lib/launch"
 import { BotsPage } from "@/routes/bots"
 import { ChatPage } from "@/routes/chat"
 import { CodePage } from "@/routes/code"
@@ -33,23 +34,31 @@ function ThemeColor() {
   return null
 }
 
+function AppRoutes() {
+  useRecordLastChat()
+  if (!useLaunchRestore()) return null
+  return (
+    <Routes>
+      <Route element={<AppShell />}>
+        <Route index element={<ChatPage />} />
+        <Route path="c/:id" element={<ChatPage />} />
+        <Route path="code" element={<CodePage />} />
+        <Route path="code/:profileId/:projectId" element={<ProjectPage />} />
+        <Route path="routines" element={<RoutinesPage />} />
+        <Route path="settings/:section?" element={<SettingsPage />} />
+        <Route path="bots" element={<BotsPage />} />
+        <Route path="*" element={<ChatPage />} />
+      </Route>
+    </Routes>
+  )
+}
+
 export default function App() {
   return (
     <>
       <ThemeColor />
       <SetupGate>
-        <Routes>
-          <Route element={<AppShell />}>
-            <Route index element={<ChatPage />} />
-            <Route path="c/:id" element={<ChatPage />} />
-            <Route path="code" element={<CodePage />} />
-            <Route path="code/:profileId/:projectId" element={<ProjectPage />} />
-            <Route path="routines" element={<RoutinesPage />} />
-            <Route path="settings/:section?" element={<SettingsPage />} />
-            <Route path="bots" element={<BotsPage />} />
-            <Route path="*" element={<ChatPage />} />
-          </Route>
-        </Routes>
+        <AppRoutes />
       </SetupGate>
     </>
   )
