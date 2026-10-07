@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import type { Profile } from "@/lib/db"
 import { formatTokens } from "@/lib/format"
 import { getModelInfo, type ModelInfo } from "@/lib/hermes"
+import { useModelsDevUnreachable } from "@/lib/models"
 import { useNav } from "@/lib/nav"
 
 export interface ContextUsage {
@@ -104,6 +105,7 @@ export function UsageSheet({
   profile?: Profile | null
 }) {
   const { root } = useNav()
+  const unreachable = useModelsDevUnreachable()
   const [info, setInfo] = useState<{ baseUrl: string; value: ModelInfo | null }>()
   const baseUrl = profile?.baseUrl ?? ""
   const apiKey = profile?.apiKey ?? ""
@@ -160,8 +162,10 @@ export function UsageSheet({
                   {usage.tokens
                     ? `The last model call used ${formatTokens(usage.tokens)} prompt tokens. `
                     : ""}
-                  This model's context size isn't on models.dev. Set it on this bot to see how full
-                  the chat is.
+                  {unreachable
+                    ? "Couldn't reach models.dev for this model's context size."
+                    : "This model's context size isn't on models.dev."}{" "}
+                  Set it on this bot to see how full the chat is.
                 </p>
                 <Button
                   variant="outline"
