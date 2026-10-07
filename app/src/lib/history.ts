@@ -16,6 +16,7 @@ import {
   type SessionMessage,
 } from "@/lib/hermes"
 import { splitAttachments } from "@/lib/attachments"
+import { failureReason, TODO_TOOLS } from "@/lib/tools"
 
 /**
  * Message bodies don't sync; every device's turns live in the chat's Hermes session. Opening a chat
@@ -69,6 +70,11 @@ function argsLabel(name: string, args: unknown) {
   if (!args || typeof args !== "object" || Array.isArray(args)) return ""
   const record = args as Record<string, unknown>
   if (!Object.keys(record).length) return ""
+  // Like Hermes's preview, so a streamed call and its transcript row read the same.
+  if (TODO_TOOLS.has(name))
+    return Array.isArray(record.todos)
+      ? `${record.todos.length} ${record.todos.length === 1 ? "task" : "tasks"}`
+      : ""
   if (name === "clarify" && Array.isArray(record.questions)) {
     const asked = record.questions
       .map((q) =>
@@ -212,6 +218,9 @@ export function toMessages(
         if (row.content) {
           tool.result = clip(row.content)
           if (tool.tool === "patch") Object.assign(tool, patchStats(row.content))
+          // Hermes doesn't store whether a call failed; its result says, as Hermes itself reads it.
+          const error = failureReason(tool.tool, row.content)
+          if (error) Object.assign(tool, { status: "failed", error })
         }
       }
       continue
@@ -250,17 +259,38 @@ export function toMessages(
   )
 }
 
-/** Streamed calls know their edits' size only from the transcript; matched by tool and path, in order. */
-function withEditStats(local: ToolEvent[], fromHermes: ToolEvent[]) {
-  const spare = fromHermes.filter((t) => t.added !== undefined)
+/** A streamed call's preview, which Hermes cuts at 500 characters ("..." marks the cut). */
+const isPreview = (tool: ToolEvent) =>
+  tool.result !== undefined && tool.result.length >= 500 && tool.result.endsWith("...")
+
+/**
+ * What streamed calls only learn from the transcript: their edits' size, and the whole result
+ * where the stream sent a cut preview. Matched by tool and label, in order.
+ */
+function withTranscriptDetails(local: ToolEvent[], fromHermes: ToolEvent[]) {
+  const spare = [...fromHermes]
   let changed = false
   const tools = local.map((tool) => {
-    if (tool.added !== undefined) return tool
-    const i = spare.findIndex((t) => t.tool === tool.tool && t.label === tool.label)
+    // A todo call's streamed label is Hermes's preview, worded unlike the transcript's.
+    const i = spare.findIndex(
+      (t) => t.tool === tool.tool && (t.label === tool.label || TODO_TOOLS.has(t.tool)),
+    )
     if (i < 0) return tool
-    const [{ added, removed, created }] = spare.splice(i, 1)
+    const [found] = spare.splice(i, 1)
+    const needsStats = tool.added === undefined
+    // A question's result is written here when it's answered, whole.
+    const needsResult = isPreview(tool) && tool.tool !== "clarify"
+    if (!needsStats && !needsResult) return tool
+    const next = { ...tool }
+    if (needsStats && found.added !== undefined)
+      Object.assign(next, { added: found.added, removed: found.removed, created: found.created })
+    if (needsResult && found.result) {
+      next.result = found.result
+      if (found.error) next.error = found.error
+    }
+    if (next.added === tool.added && next.result === tool.result) return tool
     changed = true
-    return { ...tool, added, removed, created }
+    return next
   })
   return changed ? tools : undefined
 }
@@ -444,7 +474,7 @@ async function reconcile(conversationId: string) {
               reasoning: local.reasoning ?? reply.reasoning,
             })
           else if (local?.role === "assistant" && local.tools?.length && reply?.tools?.length) {
-            const tools = withEditStats(local.tools, reply.tools)
+            const tools = withTranscriptDetails(local.tools, reply.tools)
             if (tools) writes.push({ ...local, tools })
           }
           continue

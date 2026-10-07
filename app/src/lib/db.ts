@@ -141,6 +141,8 @@ export interface ToolEvent {
   contentOffset?: number
   /** What the call returned (a preview while streaming). */
   result?: string
+  /** Why it failed, read from the whole result before it was clipped. */
+  error?: string
   /** Lines a file edit added and removed, counted from the transcript (the stream's preview is cut short). */
   added?: number
   removed?: number

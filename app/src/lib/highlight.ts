@@ -1,5 +1,7 @@
 /** Formatting and syntax highlighting for tool input and output; highlight.js loads on first use. */
 
+import { readEnvelope } from "@/lib/tools"
+
 type Hljs = typeof import("highlight.js").default
 
 let loading: Promise<Hljs> | undefined
@@ -62,22 +64,30 @@ const json = (hljs: Hljs, value: unknown) =>
 
 /**
  * A tool's text as blocks to show: an envelope's body on its own (highlighted by `hint`, a
- * language or a file name, or by guessing), then its other fields as JSON.
+ * language or a file name, or by guessing), then its other fields as JSON, leaving out empty ones
+ * and those named in `omit`. An envelope cut short is read as far as it goes.
  */
-export async function formatTool(text: string, hint?: string): Promise<Block[]> {
+export async function formatTool(text: string, hint?: string, omit: string[] = []) {
   const hljs = await load()
   const language = languageOf(hljs, hint)
-  const parsed = parseJson(text)
-  if (parsed === undefined) return [highlightWith(hljs, text, language)]
-  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-    const record = parsed as Record<string, unknown>
-    const key = BODY_KEYS.find((k) => typeof record[k] === "string")
+  const envelope = readEnvelope(text)
+  if (envelope) {
+    const { fields, cut } = envelope
+    const key = BODY_KEYS.find((k) => typeof fields[k] === "string")
     if (key) {
-      const { [key]: body, ...rest } = record
-      const blocks = body ? [highlightWith(hljs, String(body), language)] : []
+      const rest = Object.fromEntries(
+        Object.entries(fields).filter(
+          ([k, value]) => k !== key && !omit.includes(k) && value !== null && value !== "",
+        ),
+      )
+      // The body is the last field read when the text was cut inside it.
+      const body = String(fields[key]) + (cut && Object.keys(fields).at(-1) === key ? "\n…" : "")
+      const blocks: Block[] = fields[key] ? [highlightWith(hljs, body, language)] : []
       return Object.keys(rest).length ? [...blocks, json(hljs, rest)] : blocks
     }
   }
+  const parsed = parseJson(text)
+  if (parsed === undefined) return [highlightWith(hljs, text, language)]
   return [json(hljs, parsed)]
 }
 

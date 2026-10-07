@@ -1,4 +1,5 @@
 import type { Message } from "@/lib/db"
+import { activityOf } from "@/lib/tools"
 
 export function formatDuration(ms: number) {
   if (ms < 60_000) return `${Math.max(0.1, ms / 1000).toFixed(1)}s`
@@ -36,8 +37,11 @@ export function describeActivity(message: Message) {
   if (message.clarify && !message.clarify.resolved) return "Waiting for your answer"
   if (message.approval && !message.approval.resolved) return "Waiting for approval"
   const tool = message.tools?.findLast((t) => t.status === "running")
-  if (tool) return `${tool.emoji ? `${tool.emoji} ` : ""}${tool.label}…`
+  if (tool) return `${activityOf(tool)}…`
   if (message.statusText) return message.statusText
   if (message.reasoning && !message.content) return "Thinking…"
+  // After a tool round the model works out its next step before it writes anything.
+  const last = message.tools?.at(-1)
+  if (last && (last.contentOffset ?? 0) >= message.content.length) return "Thinking…"
   return "Writing…"
 }

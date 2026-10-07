@@ -8,6 +8,7 @@ import {
   PencilIcon,
   SearchIcon,
   SquareTerminalIcon,
+  ListTodoIcon,
   WrenchIcon,
   XIcon,
   type LucideIcon,
@@ -19,6 +20,7 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { Spinner } from "@/components/ui/spinner"
 import type { ToolEvent } from "@/lib/db"
 import { formatDuration } from "@/lib/format"
+import { failureReason, kindOf, phrases, todoTarget, TODO_TOOLS, type KindId } from "@/lib/tools"
 
 function useElapsed(tool: ToolEvent) {
   const [now, setNow] = useState(() => Date.now())
@@ -30,60 +32,16 @@ function useElapsed(tool: ToolEvent) {
   return (tool.endedAt ?? now) - tool.startedAt
 }
 
-interface Kind {
-  icon: LucideIcon
-  verb: string
-  /** How the title counts calls of this kind: a fixed phrase, or a noun to count. */
-  title: string | { one: string; many: string }
-}
-
-const FILE = { one: "a file", many: "files" }
-const RAN: Kind = {
-  icon: SquareTerminalIcon,
-  verb: "Ran",
-  title: { one: "a command", many: "commands" },
-}
-const READ: Kind = { icon: EyeIcon, verb: "Read", title: FILE }
-const EDITED: Kind = { icon: PencilIcon, verb: "Edited", title: FILE }
-const CREATED: Kind = { icon: FilePlusIcon, verb: "Created", title: FILE }
-const CODE: Kind = { icon: SearchIcon, verb: "Searched", title: "code" }
-const WEB: Kind = { icon: GlobeIcon, verb: "Searched", title: "the web" }
-const BROWSED: Kind = { icon: GlobeIcon, verb: "Browsed", title: { one: "a page", many: "pages" } }
-const USED: Kind = { icon: WrenchIcon, verb: "Used", title: { one: "a tool", many: "tools" } }
-
-const KINDS: Record<string, Kind> = {
-  terminal: RAN,
-  execute_code: RAN,
-  browser_exec: RAN,
-  read_file: READ,
-  search_files: CODE,
-  web_search: WEB,
-  web_extract: WEB,
-}
-
-function kindOf(tool: ToolEvent): Kind {
-  if (tool.tool === "write_file") return CREATED
-  if (tool.tool === "patch") return tool.created ? CREATED : EDITED
-  if (tool.tool.startsWith("browser_")) return BROWSED
-  return KINDS[tool.tool] ?? USED
-}
-
-/** "Ran a command", "read a file", "searched code": each kind once, in the order it first appears. */
-function phrases(tools: ToolEvent[]) {
-  const counts = new Map<Kind, number>()
-  for (const tool of tools) {
-    const kind = kindOf(tool)
-    counts.set(kind, (counts.get(kind) ?? 0) + 1)
-  }
-  return [...counts].map(([kind, count]) => {
-    const noun =
-      typeof kind.title === "string"
-        ? kind.title
-        : count === 1
-          ? kind.title.one
-          : `${count} ${kind.title.many}`
-    return `${kind.verb} ${noun}`
-  })
+const ICONS: Record<KindId, LucideIcon> = {
+  ran: SquareTerminalIcon,
+  read: EyeIcon,
+  edited: PencilIcon,
+  created: FilePlusIcon,
+  code: SearchIcon,
+  web: GlobeIcon,
+  browsed: GlobeIcon,
+  plan: ListTodoIcon,
+  used: WrenchIcon,
 }
 
 const sentence = (parts: string[]) =>
@@ -130,6 +88,12 @@ function useFittingPhrases<T extends HTMLElement>(parts: string[], deps: unknown
   return { row, text, ruler, shown: Math.min(shown, parts.length) }
 }
 
+/** Why a failed call failed: what Hermes said, else its result's error, for the row under its name. */
+function whyFailed(tool: ToolEvent) {
+  if (tool.status !== "failed") return undefined
+  return tool.error ?? failureReason(tool.tool, tool.result) ?? "Failed"
+}
+
 const MAX_NAME = 26
 
 /** A file's name, with the middle dropped when it's long: the start and the extension survive. */
@@ -143,6 +107,7 @@ function shortName(path: string) {
 const FILE_TOOLS = new Set(["read_file", "write_file", "patch"])
 
 function targetOf(tool: ToolEvent) {
+  if (TODO_TOOLS.has(tool.tool)) return todoTarget(tool)
   const label = tool.label && tool.label !== tool.tool ? tool.label : ""
   if (!label) return tool.tool
   return FILE_TOOLS.has(tool.tool) ? shortName(label) : label
@@ -211,11 +176,12 @@ function ToolList({ tools, onSelect }: { tools: ToolEvent[]; onSelect: (id: stri
       <ol className="flex flex-col px-6 pt-2">
         {tools.map((tool, index) => {
           const kind = kindOf(tool)
+          const reason = whyFailed(tool)
           return (
             <li key={tool.toolCallId} className="flex gap-3">
               <div className="relative w-7 shrink-0">
                 <div className="flex h-11 items-center justify-center">
-                  <StatusIcon tool={tool} icon={kind.icon} />
+                  <StatusIcon tool={tool} icon={ICONS[kind.id]} />
                 </div>
                 {/* Runs from under this row's icon to the next one's. */}
                 {index < tools.length - 1 && (
@@ -227,11 +193,23 @@ function ToolList({ tools, onSelect }: { tools: ToolEvent[]; onSelect: (id: stri
                 className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg text-left text-[15px] outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                 onClick={() => onSelect(tool.toolCallId)}
               >
-                <span className="min-w-0 flex-1 truncate">
-                  <span>{kind.verb}</span>{" "}
-                  <span className="font-mono text-[13px] text-muted-foreground">
-                    {targetOf(tool)}
+                <span className="flex min-w-0 flex-1 flex-col py-2">
+                  <span className="truncate">
+                    <span>{tool.status === "running" ? kind.doing : kind.verb}</span>{" "}
+                    {kind.id === "plan" ? (
+                      <>
+                        the plan
+                        {targetOf(tool) && (
+                          <span className="text-muted-foreground">, {targetOf(tool)}</span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="font-mono text-[13px] text-muted-foreground">
+                        {targetOf(tool)}
+                      </span>
+                    )}
                   </span>
+                  {reason && <span className="truncate text-sm text-destructive">{reason}</span>}
                 </span>
                 <DiffBadge tool={tool} />
               </button>
@@ -249,7 +227,8 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
   const [selectedId, setSelectedId] = useState<string>()
   const selected = tools.find((t) => t.toolCallId === selectedId)
   const running = tools.some((t) => t.status === "running")
-  const failed = tools.some((t) => t.status === "failed")
+  const failures = tools.filter((t) => t.status === "failed")
+  const failed = failures.length > 0
   const parts = phrases(tools)
   const { row, text, ruler, shown } = useFittingPhrases<HTMLButtonElement>(parts, [running, failed])
   return (
@@ -271,6 +250,11 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
         <span ref={ruler} className="invisible absolute w-max whitespace-nowrap" aria-hidden />
         <ChevronRightIcon className="size-4 shrink-0" />
       </button>
+      {failed && (
+        <p className="-mt-2 truncate pb-1 pl-6 text-sm text-destructive">
+          {failures.length === 1 ? whyFailed(failures[0]) : `${failures.length} calls failed`}
+        </p>
+      )}
       <Popup
         open={open}
         onOpenChange={(next) => {

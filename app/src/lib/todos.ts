@@ -1,12 +1,12 @@
 import { db } from "@/lib/db"
 import { getSessionTodos, parseTodos, type SessionTodos } from "@/lib/hermes"
+import { TODO_TOOLS } from "@/lib/tools"
 
 /** Bots whose plugin has no todos route (an older plugin), and when they were last asked. */
 const unsupported = new Map<string, number>()
 const RETRY_MS = 5 * 60 * 1000
 /** How long a list from the live stream beats the plugin's, whose transcript may not have it yet. */
 const LIVE_MS = 10_000
-const TODO_TOOLS = new Set(["todo_list", "todo"])
 
 async function store(conversationId: string, todos: SessionTodos | null, live: boolean) {
   const current = (await db.conversations.get(conversationId))?.todos

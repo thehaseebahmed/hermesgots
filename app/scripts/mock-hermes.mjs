@@ -448,7 +448,8 @@ async function playTurn(req, body, last, out) {
     }))
     const id = `call_${randomUUID().slice(0, 8)}`
     const result = JSON.stringify({ todos, revision: ++todoRevision, summary: { total: todos.length } })
-    out.tool({ tool: "todo_list", emoji: "📋", label: "todo_list", toolCallId: id, status: "running" })
+    // Hermes's preview for the call (agent/display.py's _preview_todo_list).
+    out.tool({ tool: "todo_list", emoji: "📋", label: `planning ${todos.length} task(s)`, toolCallId: id, status: "running" })
     await sleep(300)
     // The run stream's preview is cut at 500 characters, as on Hermes.
     out.tool({ tool: "todo_list", toolCallId: id, status: "completed", result: result.length > 500 ? `${result.slice(0, 497)}...` : result })
@@ -461,8 +462,10 @@ async function playTurn(req, body, last, out) {
   out.tool({ tool: "terminal", emoji: "💻", label: "du -sh /var/log/* | sort -rh | head", toolCallId, status: "running" })
   await sleep(1400)
   // Hermes's terminal tool returns a JSON envelope.
-  const duOutput = JSON.stringify({ output: "2.1G nginx\n1.4G postgres\n0.7G app", exit_code: 0, error: null })
-  out.tool({ tool: "terminal", toolCallId, status: "completed", result: duOutput })
+  // Long enough that the run stream's preview is cut, as Hermes cuts it at 500 characters.
+  const logs = ["nginx", "postgres", "app", "journal", "apt", "installer", "unattended-upgrades", "dist-upgrade", "cups", "private", "redis", "mysql", "letsencrypt", "sysstat", "landscape", "fontconfig.log", "dpkg.log", "auth.log", "kern.log", "syslog", "btmp", "wtmp", "lastlog", "faillog"]
+  const duOutput = JSON.stringify({ output: logs.map((name, i) => `${(2100 / (i + 1)).toFixed(1)}M\t/var/log/${name}`).join("\n"), exit_code: 0, error: null })
+  out.tool({ tool: "terminal", toolCallId, status: "completed", result: duOutput.length > 500 ? `${duOutput.slice(0, 497)}...` : duOutput })
   record(req, { role: "assistant", content: null, tool_calls: [{ id: toolCallId, type: "function", function: { name: "terminal", arguments: JSON.stringify({ command: "du -sh /var/log/* | sort -rh | head" }) } }] })
   record(req, { role: "tool", tool_call_id: toolCallId, tool_name: "terminal", content: duOutput })
   await writeTodos(1)
@@ -571,7 +574,16 @@ async function playTurn(req, body, last, out) {
     out.tool({ tool: "terminal", toolCallId: failId, status: "failed", result: failOutput })
     record(req, { role: "assistant", content: null, tool_calls: [{ id: failId, type: "function", function: { name: "terminal", arguments: JSON.stringify({ command }) } }] })
     record(req, { role: "tool", tool_call_id: failId, tool_name: "terminal", content: failOutput })
-    await say("I tried to trim the journal too, but I don't have permission to.")
+    // Like Hermes's read_file for a missing file: an `error` in the envelope.
+    const readFailId = `call_${randomUUID().slice(0, 8)}`
+    const missing = "/etc/logrotate.d/journal"
+    out.tool({ tool: "read_file", emoji: "📄", label: missing, toolCallId: readFailId, status: "running" })
+    await sleep(400)
+    const readFail = JSON.stringify({ content: "", error: `File not found: ${missing}`, similar_files: ["/etc/logrotate.d/rsyslog"] })
+    out.tool({ tool: "read_file", toolCallId: readFailId, status: "failed", result: readFail })
+    record(req, { role: "assistant", content: null, tool_calls: [{ id: readFailId, type: "function", function: { name: "read_file", arguments: JSON.stringify({ path: missing }) } }] })
+    record(req, { role: "tool", tool_call_id: readFailId, tool_name: "read_file", content: readFail })
+    await say("I tried to trim the journal too, but I don't have permission to, and there's no rotation config for it.")
   } else if (/clean|delete/i.test(last)) {
     await say("The live logs and anything written in the last 90 days stay untouched. Here is the command I want to run:\n\n```bash\nfind /var/log -name '*.log.*' -mtime +90 -delete\n```\n")
     const cleanupId = `call_${randomUUID().slice(0, 8)}`
