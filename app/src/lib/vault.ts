@@ -12,6 +12,30 @@ export interface Vault {
   /** Shared PRF input for every passkey; each credential still derives its own secret from it. */
   prfSalt: string
   wrappers: Wrapper[]
+  /** Added on the first unlock after it shipped, so older vaults lack it until then. */
+  inbox?: Inbox
+}
+
+/**
+ * The account's inbox: Memento plugins seal their bot records to its public half, so the registry
+ * passes along URLs and API keys it can't read. The private half is sealed with the data key.
+ */
+export interface Inbox {
+  /** Hex of the first 8 bytes of the public key's SHA-256; a link code carries the same bytes. */
+  keyId: string
+  /** P-256, SPKI DER, base64. */
+  publicKey: string
+  /** PKCS #8, base64, sealed for `memento:<userId>:inbox`. */
+  privateKey: Sealed
+}
+
+/** A record sealed to the inbox: an ephemeral P-256 key, ECDH, HKDF-SHA256 and AES-256-GCM. */
+export interface SealedToInbox {
+  v: 1
+  /** The ephemeral public key, uncompressed point, base64. */
+  epk: string
+  iv: string
+  ct: string
 }
 
 export type Wrapper =
@@ -105,22 +129,29 @@ export async function unseal<T>(key: CryptoKey, sealed: Sealed, aad: string): Pr
   return JSON.parse(decoder.decode(plain)) as T
 }
 
-// Recovery code: 125 random bits as 25 Crockford base32 characters, shown in five groups of five.
-
-export function newRecoveryCode() {
-  const bytes = random(16)
+/** Crockford base32, most significant bit first, the last character padded with zero bits. */
+export function toBase32(bytes: Uint8Array, length = Math.ceil((bytes.length * 8) / 5)) {
   let bits = 0
   let value = 0
   let code = ""
   for (const byte of bytes) {
-    value = (value << 8) | byte
+    value = ((value << 8) | byte) & 0xffff
     bits += 8
-    while (bits >= 5 && code.length < 25) {
+    while (bits >= 5 && code.length < length) {
       code += CROCKFORD[(value >>> (bits - 5)) & 31]
       bits -= 5
     }
   }
-  return code.match(/.{1,5}/g)!.join("-")
+  if (bits > 0 && code.length < length) code += CROCKFORD[(value << (5 - bits)) & 31]
+  return code
+}
+
+// Recovery code: 125 random bits as 25 Crockford base32 characters, shown in five groups of five.
+
+export function newRecoveryCode() {
+  return toBase32(random(16), 25)
+    .match(/.{1,5}/g)!
+    .join("-")
 }
 
 /** Accepts the code however it was retyped: any case, spacing, and the usual look-alikes. */
@@ -263,4 +294,64 @@ export async function unlockWithPasskey(vault: Vault) {
   const wrapper = passkeys.find((w) => w.credentialId === credentialId)
   if (!wrapper) throw new Error("That passkey isn't set up for Memento.")
   return unwrap(wrapper, await prfKey(secret, vault.prfSalt), true)
+}
+
+// Inbox: plugins seal bot records to the account's public key (see `Inbox`).
+
+const INBOX_KEY = { name: "ECDH", namedCurve: "P-256" } as const
+
+/** The first 8 bytes of the public key's SHA-256: the key id, and the fingerprint in link codes. */
+export async function inboxFingerprint(publicKey: string) {
+  const digest = await crypto.subtle.digest("SHA-256", fromBase64(publicKey))
+  return new Uint8Array(digest).slice(0, 8)
+}
+
+function hex(bytes: Uint8Array) {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")
+}
+
+/** A new inbox, and this device's non-extractable copy of its private key. */
+export async function newInbox(dataKey: CryptoKey, aad: string) {
+  const pair = (await crypto.subtle.generateKey(INBOX_KEY, true, ["deriveBits"])) as CryptoKeyPair
+  const publicKey = toBase64(await crypto.subtle.exportKey("spki", pair.publicKey))
+  const pkcs8 = toBase64(await crypto.subtle.exportKey("pkcs8", pair.privateKey))
+  const inbox: Inbox = {
+    keyId: hex(await inboxFingerprint(publicKey)),
+    publicKey,
+    privateKey: await seal(dataKey, pkcs8, aad),
+  }
+  return { inbox, privateKey: await importInboxKey(pkcs8) }
+}
+
+function importInboxKey(pkcs8: string) {
+  return crypto.subtle.importKey("pkcs8", fromBase64(pkcs8), INBOX_KEY, false, ["deriveBits"])
+}
+
+/** Throws if the inbox was tampered with or sealed for a different `aad`. */
+export async function openInbox(dataKey: CryptoKey, inbox: Inbox, aad: string) {
+  return importInboxKey(await unseal<string>(dataKey, inbox.privateKey, aad))
+}
+
+/** Opens a record a plugin sealed to the inbox. Throws if it was tampered with or misaddressed. */
+export async function openFromInbox<T>(
+  privateKey: CryptoKey,
+  sealed: SealedToInbox,
+  aad: string,
+): Promise<T> {
+  const epk = fromBase64(sealed.epk)
+  const ephemeral = await crypto.subtle.importKey("raw", epk, INBOX_KEY, false, [])
+  const shared = await crypto.subtle.deriveBits(
+    { name: "ECDH", public: ephemeral },
+    privateKey,
+    256,
+  )
+  const material = await crypto.subtle.importKey("raw", shared, "HKDF", false, ["deriveKey"])
+  const key = await crypto.subtle.deriveKey(
+    { name: "HKDF", hash: "SHA-256", salt: epk, info: encoder.encode("memento-inbox-v1") },
+    material,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["decrypt"],
+  )
+  return unseal<T>(key, { v: 1, iv: sealed.iv, ct: sealed.ct }, aad)
 }

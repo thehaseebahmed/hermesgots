@@ -242,11 +242,16 @@ export interface Tombstone {
   profileId: string
 }
 
-/** This device's copy of the sync key, imported non-extractable so script can use but not read it. */
+/**
+ * This device's copy of the sync key, and of the inbox's private key, each imported non-extractable
+ * so script can use but not read it.
+ */
 export interface VaultKey {
-  id: "key"
+  id: "key" | "inbox"
   userId: string
   key: CryptoKey
+  /** The inbox's key id, to tell a rotated inbox apart. */
+  keyId?: string
 }
 
 export const DEFAULT_SETTINGS: Settings = {

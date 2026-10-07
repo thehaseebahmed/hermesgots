@@ -28,7 +28,9 @@ import {
   hasPasskeys,
   lockDown,
   newRecoveryCode,
+  newInbox,
   newVault,
+  openInbox,
   passkeyWrapper,
   recoveryWrapper,
   seal,
@@ -115,6 +117,42 @@ async function localKey() {
   return stored && stored.userId === id ? stored.key : undefined
 }
 
+function inboxAad() {
+  return `memento:${userId()}:inbox`
+}
+
+/** This device's copy of the inbox's private key, for opening bot records plugins publish. */
+export async function inboxKey() {
+  const stored = await db.vault.get("inbox")
+  const current = remoteVault?.vault.inbox?.keyId
+  if (!stored || stored.userId !== userId()) return undefined
+  return !current || stored.keyId === current ? stored : undefined
+}
+
+/** Gives a vault from before the inbox one, and keeps this device's copy of its private key. */
+async function ensureInbox(dataKey: CryptoKey) {
+  const id = userId()
+  if (!id) return
+  for (let attempt = 0; attempt < 3 && remoteVault; attempt++) {
+    const { vault, etag } = remoteVault
+    if (vault.inbox) {
+      const stored = await inboxKey()
+      if (stored?.keyId === vault.inbox.keyId) return
+      const key = await openInbox(dataKey, vault.inbox, inboxAad())
+      await db.vault.put({ id: "inbox", userId: id, key, keyId: vault.inbox.keyId })
+      return
+    }
+    const { inbox, privateKey } = await newInbox(dataKey, inboxAad())
+    if (await putDoc("vault", { ...vault, inbox }, etag)) {
+      await db.vault.put({ id: "inbox", userId: id, key: privateKey, keyId: inbox.keyId })
+      await refreshVault()
+      return
+    }
+    // Another device wrote first, maybe with its own inbox; take whichever is there now.
+    await refreshVault()
+  }
+}
+
 async function refreshVault() {
   const doc = await getDoc<Vault>("vault")
   remoteVault = doc && { vault: doc.data, etag: doc.etag }
@@ -154,11 +192,14 @@ export async function setUpSync() {
   }
   const recoveryCode = newRecoveryCode()
   vault.wrappers.push(await recoveryWrapper(dataKey, recoveryCode))
+  const { inbox, privateKey } = await newInbox(dataKey, inboxAad())
+  vault.inbox = inbox
   if (!(await putDoc("vault", vault))) {
     await refreshVault()
     throw new Error("Sync was already set up from another device. Unlock it instead.")
   }
   await refreshVault()
+  await db.vault.put({ id: "inbox", userId: userId()!, key: privateKey, keyId: inbox.keyId })
   await keep(dataKey)
   return { recoveryCode, passkey }
 }
@@ -423,6 +464,7 @@ let syncedFingerprint = ""
 async function runSync() {
   const key = state.vault === "unlocked" ? await localKey() : undefined
   try {
+    if (key) await ensureInbox(key)
     if (key) await syncBots(key)
     const chatStores = { ...state.chatStores }
     // A new device's seed bot may point at a server it's about to be swapped out for.
