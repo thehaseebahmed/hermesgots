@@ -43,7 +43,23 @@ export function setBackGuard(guard: () => boolean) {
 
 /** How long a second back press has to leave the app after the first. */
 const EXIT_WINDOW = 2000
-const EXIT_TOAST = "exit"
+export const EXIT_TOASTER = "exit"
+
+/**
+ * Sits the exit toast at the bottom, above whatever the screen keeps there (marked
+ * `data-toast-above`: a chat's composer, the Code screen's New project button).
+ */
+function placeExitToast() {
+  let bottom = 0
+  for (const el of document.querySelectorAll("[data-toast-above]")) {
+    const { top, height } = el.getBoundingClientRect()
+    if (height) bottom = Math.max(bottom, window.innerHeight - top)
+  }
+  document.documentElement.style.setProperty(
+    "--exit-toast-bottom",
+    bottom ? `${bottom + 8}px` : "max(1rem, env(safe-area-inset-bottom))",
+  )
+}
 
 /**
  * Android's back button goes up from a screen that sets a guard (a project, a session) and leaves
@@ -61,11 +77,16 @@ export function handleBackButton() {
     }
     if (Date.now() - armedAt < EXIT_WINDOW) {
       armedAt = 0
-      toast.dismiss(EXIT_TOAST)
+      toast.dismiss(EXIT_TOASTER)
       void App.minimizeApp()
       return
     }
     armedAt = Date.now()
-    toast("Press back again to exit", { id: EXIT_TOAST, duration: EXIT_WINDOW })
+    placeExitToast()
+    toast("Press back again to exit", {
+      id: EXIT_TOASTER,
+      toasterId: EXIT_TOASTER,
+      duration: EXIT_WINDOW,
+    })
   })
 }
