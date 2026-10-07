@@ -9,15 +9,15 @@ import type { ApprovalChoice, Message } from "@/lib/db"
 import { cn } from "@/lib/utils"
 
 const LABELS: Record<ApprovalChoice, string> = {
-  once: "Once",
-  session: "Session",
-  always: "Always",
+  once: "Allow once",
+  session: "Allow in chat",
+  always: "Always allow",
   deny: "Deny",
 }
 
 const RESOLVED: Record<string, string> = {
   once: "Approved once",
-  session: "Approved for this session",
+  session: "Approved for this chat",
   always: "Always approved",
   deny: "Denied",
   expired: "No longer waiting for an answer",

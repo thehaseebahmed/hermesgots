@@ -33,7 +33,7 @@ export function ChatHeader({
   return (
     <header
       className={cn(
-        "pointer-events-none absolute inset-x-0 top-0 z-10 bg-gradient-to-b from-background via-background/90 to-transparent px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-6",
+        "pointer-events-none absolute inset-x-0 top-0 z-10 bg-gradient-to-b from-background from-75% to-transparent px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-6",
         className,
       )}
     >
