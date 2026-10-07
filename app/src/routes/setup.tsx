@@ -12,11 +12,12 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { signIn } from "@/lib/account"
-import { getActiveProfile, getSettings, saveSettings } from "@/lib/db"
+import { getActiveProfile, getSettings, saveSettings, updateProfile } from "@/lib/db"
+import { generateApiKey, INSTALL_PLUGIN } from "@/lib/hermes"
 import { needsBotSetup, setUpSync, syncNow, useSyncState, type SyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
 
-type Step = "sign-in" | "sync" | "checking" | "server" | "bot"
+type Step = "sign-in" | "sync" | "checking" | "server" | "plugin" | "bot"
 
 function isAuthed({ account, vault }: SyncState) {
   return (
@@ -54,9 +55,12 @@ function SetupPage({
 }) {
   const sync = useSyncState()
   const navigate = useNavigate()
-  const [hermesStep, setHermesStep] = useState<"checking" | "server" | "bot">("checking")
-  const [busy, setBusy] = useState(false)
   const profile = useLiveQuery(getActiveProfile, [])
+  const [hermesStep, setHermesStep] = useState<"checking" | "server" | "plugin" | "bot">("checking")
+  // Held here so going back and forth shows the same key; a key the bot already has wins.
+  const [newKey] = useState(generateApiKey)
+  const apiKey = profile?.apiKey || newKey
+  const [busy, setBusy] = useState(false)
 
   const { account } = sync
   const identity = account.status !== "unavailable"
@@ -88,7 +92,9 @@ function SetupPage({
     navigate("/", { replace: true })
   }
 
-  const steps: Step[] = identity ? ["sign-in", "sync", "server", "bot"] : ["server", "bot"]
+  const steps: Step[] = identity
+    ? ["sign-in", "sync", "server", "plugin", "bot"]
+    : ["server", "plugin", "bot"]
 
   return (
     <div className="flex h-dvh flex-col overflow-y-auto bg-background">
@@ -148,9 +154,23 @@ function SetupPage({
 
         {step === "checking" && <Spinner className="self-center" />}
 
-        {step === "server" && <ServerStep onNext={() => setHermesStep("bot")} />}
+        {step === "server" && (
+          <ServerStep
+            apiKey={apiKey}
+            onNext={async () => {
+              // The bot step's key field starts with the key the .env lines carry.
+              const active = await getActiveProfile()
+              if (active && !active.apiKey) await updateProfile(active.id, { apiKey: newKey })
+              setHermesStep("plugin")
+            }}
+          />
+        )}
 
-        {step === "bot" && <BotStep onBack={() => setHermesStep("server")} onDone={finish} />}
+        {step === "plugin" && (
+          <PluginStep onBack={() => setHermesStep("server")} onNext={() => setHermesStep("bot")} />
+        )}
+
+        {step === "bot" && <BotStep onBack={() => setHermesStep("plugin")} onDone={finish} />}
       </div>
 
       <RecoveryCodeDialog code={recoveryCode} onDone={() => setRecoveryCode(undefined)} />
@@ -200,14 +220,8 @@ function Code({ children }: { children: ReactNode }) {
 }
 
 /** How to turn on Hermes's API server, from its `.env` file or the Hermes Dashboard. */
-function ServerStep({ onNext }: { onNext: () => void }) {
+function ServerStep({ apiKey, onNext }: { apiKey: string; onNext: () => void }) {
   const [method, setMethod] = useState<"env" | "dashboard">("env")
-  const generate = (
-    <li className="space-y-2">
-      <p>Generate a 64-character key:</p>
-      <CopyBlock label="Copy key command" text="openssl rand -hex 32" />
-    </li>
-  )
   const origin = window.location.origin
   const cors = `API_SERVER_CORS_ORIGINS=${origin}`
 
@@ -229,15 +243,13 @@ function ServerStep({ onNext }: { onNext: () => void }) {
 
       {method === "env" ? (
         <ol className="flex list-decimal flex-col gap-3 pl-5 text-sm marker:text-muted-foreground">
-          {generate}
           <li className="space-y-2">
             <p>
-              Add these lines to <Code>~/.hermes/.env</Code>, with your key in place of the
-              placeholder:
+              Add these lines to <Code>~/.hermes/.env</Code>:
             </p>
             <CopyBlock
               label="Copy .env lines"
-              text={`API_SERVER_ENABLED=true\nAPI_SERVER_KEY=<your 64-character key>\n${cors}`}
+              text={`API_SERVER_ENABLED=true\nAPI_SERVER_KEY=${apiKey}\n${cors}`}
             />
           </li>
           <li className="space-y-2">
@@ -247,18 +259,18 @@ function ServerStep({ onNext }: { onNext: () => void }) {
         </ol>
       ) : (
         <ol className="flex list-decimal flex-col gap-3 pl-5 text-sm marker:text-muted-foreground">
-          {generate}
           <li>
             <p>
               Run <Code>hermes dashboard</Code> and open <Code>http://localhost:9119</Code>.
             </p>
           </li>
-          <li>
+          <li className="space-y-2">
             <p>
               Go to <strong>Channels</strong>, find <strong>API server</strong> and choose{" "}
               <strong>Configure</strong>. Set <strong>Enable API server</strong> to{" "}
-              <Code>true</Code> and paste your key as the auth key.
+              <Code>true</Code> and paste this key as the auth key:
             </p>
+            <CopyBlock label="Copy key" text={apiKey} />
           </li>
           <li className="space-y-2">
             <p>
@@ -281,6 +293,29 @@ function ServerStep({ onNext }: { onNext: () => void }) {
       <Button size="lg" className="h-11" onClick={onNext}>
         Next
       </Button>
+    </Section>
+  )
+}
+
+/** The Memento plugin, which Code, Routines, the agent's questions and chat sync need. */
+function PluginStep({ onBack, onNext }: { onBack: () => void; onNext: () => void }) {
+  return (
+    <Section
+      title="Add the Memento plugin"
+      description="Code, Routines, the agent's questions and chat sync need it. You can add it later."
+    >
+      <div className="space-y-2 text-sm">
+        <p>Install it on the Hermes host and restart the gateway:</p>
+        <CopyBlock label="Copy install commands" text={INSTALL_PLUGIN} />
+      </div>
+      <div className="flex flex-col gap-2">
+        <Button size="lg" className="h-11" onClick={onNext}>
+          Next
+        </Button>
+        <Button variant="ghost" className="h-11 self-start" onClick={onBack}>
+          Back
+        </Button>
+      </div>
     </Section>
   )
 }
