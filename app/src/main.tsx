@@ -18,7 +18,15 @@ if (!handBackNativeSignIn()) {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+    <ThemeProvider
+      attribute="class"
+      defaultTheme="system"
+      enableSystem
+      disableTransitionOnChange
+      // The provider's anti-flash script only runs when server-rendered; as a data block React
+      // doesn't warn about it.
+      scriptProps={{ type: "application/json" }}
+    >
       <BrowserRouter>
         <App />
       </BrowserRouter>
