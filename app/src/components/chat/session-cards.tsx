@@ -63,7 +63,8 @@ export function PlanReadyCard({
         </p>
       </CardContent>
       {autoAvailable ? (
-        <CardFooter className="grid gap-2 sm:grid-cols-3">
+        // Stacked on a phone; from `sm` one row, Approve in Auto rightmost and Keep planning apart.
+        <CardFooter className="flex flex-col items-stretch gap-2 sm:flex-row-reverse sm:flex-wrap">
           <Button {...button("auto")}>
             <ZapIcon data-icon="inline-start" />
             Approve in Auto
@@ -72,7 +73,7 @@ export function PlanReadyCard({
             <PencilLineIcon data-icon="inline-start" />
             Approve in Accept edits
           </Button>
-          <Button variant="ghost" {...button("keep")}>
+          <Button variant="ghost" {...button("keep")} className="h-11 sm:mr-auto">
             Keep planning
           </Button>
         </CardFooter>
