@@ -269,6 +269,7 @@ export function CodePage() {
         <div className="pointer-events-none sticky bottom-0 mt-auto flex justify-end px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto flex w-full max-w-2xl justify-end">
             <Button
+              data-toast-above
               size="lg"
               className="pointer-events-auto h-12 rounded-full px-5 shadow-lg"
               onClick={() => setCreating(true)}
