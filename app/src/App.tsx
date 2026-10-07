@@ -8,7 +8,7 @@ import { ChatPage } from "@/routes/chat"
 import { CodePage } from "@/routes/code"
 import { ProjectPage } from "@/routes/project"
 import { RoutinesPage } from "@/routes/routines"
-import { SettingsPage } from "@/routes/settings"
+import { SettingsPage, SettingsSectionPage } from "@/routes/settings"
 import { SetupGate } from "@/routes/setup"
 
 /** Computed colours come back as oklch(), which browser chrome may not parse; hex always works. */
@@ -46,6 +46,7 @@ export default function App() {
             <Route path="code/:profileId/:projectId" element={<ProjectPage />} />
             <Route path="routines" element={<RoutinesPage />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route path="settings/:section" element={<SettingsSectionPage />} />
             <Route path="bots" element={<BotsPage />} />
             <Route path="*" element={<ChatPage />} />
           </Route>

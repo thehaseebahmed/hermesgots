@@ -54,7 +54,7 @@ export function BotPicker({ profile }: { profile: Profile }) {
           ))}
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
-        <DropdownMenuItem className="min-h-11" onClick={() => root("/settings#bots")}>
+        <DropdownMenuItem className="min-h-11" onClick={() => root("/settings/bots")}>
           <PlusIcon />
           Add bot
         </DropdownMenuItem>
