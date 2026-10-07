@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   ChevronUpIcon,
+  FolderGit2Icon,
+  FolderIcon,
   MenuIcon,
   PinIcon,
   PlusIcon,
@@ -32,8 +34,8 @@ import {
   retryProject,
   type HermesConfig,
   type HermesProject,
-  type HermesProjectFolder,
 } from "@/lib/hermes"
+import { folderName } from "@/lib/workspace"
 
 const REFRESH_MS = 60_000
 // While a project is being cloned: the plugin does the work, this just watches for it to finish.
@@ -369,18 +371,13 @@ function PluginNotice({ bots, onDismiss }: { bots: Profile[]; onDismiss: () => v
   )
 }
 
-/** A repo as `user/repo`; any other folder by its label or name, never its path. */
-function folderName(folder: HermesProjectFolder) {
-  return (
-    folder.repo ?? folder.label ?? folder.path.split(/[\\/]/).filter(Boolean).at(-1) ?? folder.path
-  )
-}
-
-/** The description, or else the project's git repos (its folders when none is a repo). */
-function subtitle(project: HermesProject) {
-  if (project.description) return project.description
+/** The project's git repos (its folders when none is a repo). */
+function repoLine(project: HermesProject) {
   const repos = project.folders.filter((folder) => folder.git)
-  return (repos.length ? repos : project.folders).map(folderName).join(", ")
+  return {
+    git: repos.length > 0,
+    names: (repos.length ? repos : project.folders).map(folderName).join(", "),
+  }
 }
 
 function formatWhen(at: number, now: number) {
@@ -471,7 +468,7 @@ function ProjectItem({
 }) {
   const { profile, project, at } = row
   if (project.status !== "ready") return <PendingItem row={row} onChanged={onChanged} />
-  const line2 = subtitle(project)
+  const repos = repoLine(project)
   return (
     <Link
       to={`/code/${profile.id}/${project.id}`}
@@ -492,7 +489,21 @@ function ProjectItem({
             <span className="shrink-0 text-xs text-muted-foreground">{formatWhen(at, now)}</span>
           )}
         </span>
-        {line2 && <span className="block truncate text-sm text-muted-foreground">{line2}</span>}
+        {project.description && (
+          <span className="block truncate text-sm text-muted-foreground">
+            {project.description}
+          </span>
+        )}
+        {repos.names && (
+          <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            {repos.git ? (
+              <FolderGit2Icon className="size-3.5 shrink-0" aria-hidden />
+            ) : (
+              <FolderIcon className="size-3.5 shrink-0" aria-hidden />
+            )}
+            <span className="min-w-0 truncate">{repos.names}</span>
+          </span>
+        )}
       </span>
     </Link>
   )

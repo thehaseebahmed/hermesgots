@@ -16,6 +16,7 @@ import { toast } from "sonner"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { PrRow } from "@/components/chat/pr-pill"
 import { ProjectSettings } from "@/components/project-settings"
+import { RepoChips } from "@/components/repos"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -49,7 +50,13 @@ import {
   type HermesProject,
   type LiveRunStatus,
 } from "@/lib/hermes"
-import { refreshPrs, refreshWorkspace, sessionState, type SessionState } from "@/lib/workspace"
+import {
+  projectRepos,
+  refreshPrs,
+  refreshWorkspace,
+  sessionState,
+  type SessionState,
+} from "@/lib/workspace"
 
 /** How often the plugin is asked which sessions have a run in flight, while the screen is on. */
 const LIVE_MS = 10_000
@@ -214,7 +221,8 @@ export function ProjectPage() {
   const start = async () => {
     if (!profile) return
     const conversation = await createConversation(profile.id, { title: "Draft session", projectId })
-    navigate(`/c/${conversation.id}`)
+    // So the new session can name its repos at once.
+    navigate(`/c/${conversation.id}`, { state: { project } })
   }
 
   const remove = async () => {
@@ -273,6 +281,13 @@ export function ProjectPage() {
           )
         }
       />
+      {project?.status === "ready" && (
+        <RepoChips
+          repos={projectRepos(project).map(({ name }) => ({ name }))}
+          line
+          className="-mt-1 px-4 pb-3"
+        />
+      )}
       <Tabs defaultValue="sessions" className="flex-1">
         <TabsList>
           <TabsTrigger value="sessions">Sessions</TabsTrigger>

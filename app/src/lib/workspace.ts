@@ -6,6 +6,8 @@ import {
   HermesError,
   removeWorkspace,
   setWorkspaceMode,
+  type HermesProject,
+  type HermesProjectFolder,
   type KeptWorktree,
   type LiveRunStatus,
   type SessionWorkspace,
@@ -200,3 +202,24 @@ export function planApprovalMessage(planFile: string | undefined) {
 
 /** Matched on its text so a copy loaded from the transcript, on any device, reads the same. */
 export const isPlanApproval = (text: string) => text.startsWith(PLAN_GO_AHEAD)
+
+export interface RepoRef {
+  name: string
+  /** The session's own branch, or else the one a new session's branch starts from (`base`). */
+  branch?: string | null
+  base?: boolean
+}
+
+/** A repo as `user/repo`; any other folder by its label or name, never its path. */
+export function folderName(folder: HermesProjectFolder) {
+  return (
+    folder.repo ?? folder.label ?? folder.path.split(/[\\/]/).filter(Boolean).at(-1) ?? folder.path
+  )
+}
+
+/** The repos a session of the project works in, primary first; not ones being added or removed. */
+export function projectRepos(project: HermesProject): RepoRef[] {
+  return project.folders
+    .filter((folder) => folder.git && !folder.status)
+    .map((folder) => ({ name: folderName(folder), branch: folder.branch, base: true }))
+}
