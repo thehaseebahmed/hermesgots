@@ -1,5 +1,12 @@
 import { useState, type ReactNode } from "react"
-import { CheckCircle2Icon, LockIcon, MapIcon, MessageCircleQuestionIcon } from "lucide-react"
+import {
+  CheckCircle2Icon,
+  LockIcon,
+  MapIcon,
+  MessageCircleQuestionIcon,
+  PencilLineIcon,
+  ZapIcon,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -9,16 +16,22 @@ import type { ToolEvent } from "@/lib/db"
 
 const CARD = "w-full rounded-3xl border shadow-xl ring-0 shadow-black/10 dark:shadow-black/40"
 
-/** In place of the composer once a plan-mode turn has finished: the plan waits for the user. */
+/**
+ * In place of the composer once a plan-mode turn has finished: the plan waits for the user, who
+ * picks the mode it runs in.
+ */
 export function PlanReadyCard({
+  autoAvailable,
   onApprove,
   onKeepPlanning,
 }: {
-  onApprove: () => Promise<void>
+  /** Auto is answered by the plugin on the server, so it needs the plugin. */
+  autoAvailable: boolean
+  onApprove: (mode: "auto" | "accept_edits") => Promise<void>
   onKeepPlanning: () => Promise<void>
 }) {
-  const [pending, setPending] = useState<"approve" | "keep" | null>(null)
-  const run = async (which: "approve" | "keep", action: () => Promise<void>) => {
+  const [pending, setPending] = useState<"auto" | "accept_edits" | "keep" | null>(null)
+  const run = async (which: NonNullable<typeof pending>, action: () => Promise<void>) => {
     setPending(which)
     try {
       await action()
@@ -28,6 +41,12 @@ export function PlanReadyCard({
       setPending(null)
     }
   }
+  const button = (which: NonNullable<typeof pending>) => ({
+    size: "lg" as const,
+    className: "h-11",
+    disabled: pending !== null,
+    onClick: () => run(which, which === "keep" ? onKeepPlanning : () => onApprove(which)),
+  })
   return (
     <Card size="sm" className={CARD}>
       <CardHeader>
@@ -38,28 +57,33 @@ export function PlanReadyCard({
       </CardHeader>
       <CardContent>
         <p className="text-[15px]">
-          Approve it to let the agent make the changes, or keep planning.
+          {autoAvailable
+            ? "Approve to let the agent make the changes. In Auto it runs without asking; in Accept edits it still asks before risky commands."
+            : "Approve it to let the agent make the changes, or keep planning."}
         </p>
       </CardContent>
-      <CardFooter className="grid grid-cols-2 gap-2">
-        <Button
-          size="lg"
-          variant="outline"
-          className="h-11"
-          disabled={pending !== null}
-          onClick={() => run("keep", onKeepPlanning)}
-        >
-          Keep planning
-        </Button>
-        <Button
-          size="lg"
-          className="h-11"
-          disabled={pending !== null}
-          onClick={() => run("approve", onApprove)}
-        >
-          Approve
-        </Button>
-      </CardFooter>
+      {autoAvailable ? (
+        <CardFooter className="grid gap-2 sm:grid-cols-3">
+          <Button {...button("auto")}>
+            <ZapIcon data-icon="inline-start" />
+            Approve in Auto
+          </Button>
+          <Button variant="outline" {...button("accept_edits")}>
+            <PencilLineIcon data-icon="inline-start" />
+            Approve in Accept edits
+          </Button>
+          <Button variant="ghost" {...button("keep")}>
+            Keep planning
+          </Button>
+        </CardFooter>
+      ) : (
+        <CardFooter className="grid grid-cols-2 gap-2">
+          <Button variant="outline" {...button("keep")}>
+            Keep planning
+          </Button>
+          <Button {...button("accept_edits")}>Approve</Button>
+        </CardFooter>
+      )}
     </Card>
   )
 }

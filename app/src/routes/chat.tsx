@@ -486,8 +486,9 @@ export function ChatPage() {
         ) : session?.planPending && session.mode === "plan" && !busy ? (
           <div className="mx-auto w-full max-w-3xl">
             <PlanReadyCard
-              onApprove={async () => {
-                await setSessionMode(session.id, "auto")
+              autoAvailable={tracked}
+              onApprove={async (mode) => {
+                await setSessionMode(session.id, mode)
                 await send(planApprovalMessage(session.planFile))
               }}
               onKeepPlanning={() => setSessionMode(session.id, "plan")}
