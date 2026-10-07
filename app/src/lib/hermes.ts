@@ -513,6 +513,14 @@ export function generateApiKey() {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")
 }
 
+/**
+ * The profile `name` when the bot is a profile a multiplexing gateway serves at `/p/<name>/`.
+ * Hermes mounts plugin routes only on the gateway's own root, so such a bot never reaches the plugin.
+ */
+export function multiplexedProfile(baseUrl: string) {
+  return serverRoot(baseUrl).match(/\/p\/([^/?#]+)$/)?.[1]
+}
+
 /** Each job's newest runs, newest first. A 404 means the Memento plugin isn't installed. */
 export async function listCronRuns(
   config: HermesConfig,
