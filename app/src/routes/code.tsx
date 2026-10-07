@@ -30,7 +30,6 @@ import {
   HermesError,
   deleteProject,
   listProjects,
-  multiplexedProfile,
   retryProject,
   type HermesConfig,
   type HermesProject,
@@ -225,7 +224,7 @@ export function CodePage() {
         ))}
         {unseen && (
           <PluginNotice
-            bots={missing.map((result) => result.profile)}
+            names={missing.map((result) => result.profile.name)}
             onDismiss={() => dismiss(missing.map((result) => result.profileId))}
           />
         )}
@@ -334,10 +333,7 @@ function useDismissedBots() {
 
 const names = new Intl.ListFormat(undefined, { type: "conjunction" })
 
-function PluginNotice({ bots, onDismiss }: { bots: Profile[]; onDismiss: () => void }) {
-  // Hermes doesn't mount plugin routes under /p/<profile>, so installing it there changes nothing.
-  const multiplexed = bots.filter((bot) => multiplexedProfile(bot.baseUrl))
-  const missing = bots.filter((bot) => !multiplexedProfile(bot.baseUrl)).map((bot) => bot.name)
+function PluginNotice({ names: bots, onDismiss }: { names: string[]; onDismiss: () => void }) {
   return (
     <Banner
       action={
@@ -352,21 +348,9 @@ function PluginNotice({ bots, onDismiss }: { bots: Profile[]; onDismiss: () => v
         </Button>
       }
     >
-      {missing.length > 0 && (
-        <>
-          Projects need the Memento plugin, installed on the bot's Hermes server and turned on in
-          its settings. It's missing for {names.format(missing)}, so{" "}
-          {missing.length === 1 ? "its" : "their"} projects aren't listed here.
-        </>
-      )}
-      {missing.length > 0 && multiplexed.length > 0 && " "}
-      {multiplexed.length > 0 && (
-        <>
-          Hermes doesn't serve plugins to profiles under{" "}
-          <code className="font-mono">/p/&lt;profile&gt;</code>, so projects aren't listed for{" "}
-          {names.format(multiplexed.map((bot) => bot.name))}.
-        </>
-      )}
+      Projects need the Memento plugin, installed on the bot's Hermes server and turned on in its
+      settings. It's missing for {names.format(bots)}, so {bots.length === 1 ? "its" : "their"}{" "}
+      projects aren't listed here.
     </Banner>
   )
 }

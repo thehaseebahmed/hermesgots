@@ -36,13 +36,7 @@ import {
 } from "@/lib/cron"
 import { listProfiles, type Profile } from "@/lib/db"
 import { formatDuration, formatRelative } from "@/lib/format"
-import {
-  HermesError,
-  INSTALL_PLUGIN,
-  controlCronJob,
-  multiplexedProfile,
-  type CronJob,
-} from "@/lib/hermes"
+import { HermesError, INSTALL_PLUGIN, controlCronJob, type CronJob } from "@/lib/hermes"
 import { cn } from "@/lib/utils"
 
 const REFRESH_MS = 60_000
@@ -156,18 +150,7 @@ function failingCount({ jobs, runs }: CronState) {
   }).length
 }
 
-function PluginMissing({ profile }: { profile: Profile }) {
-  const multiplexed = multiplexedProfile(profile.baseUrl)
-  if (multiplexed) {
-    return (
-      <Card className="gap-3 rounded-3xl px-4 py-4">
-        <p className="text-sm">
-          Routines need the Memento plugin, and Hermes doesn't serve plugins to profiles under{" "}
-          <code className="font-mono">/p/{multiplexed}</code>.
-        </p>
-      </Card>
-    )
-  }
+function PluginMissing() {
   return (
     <Card className="gap-3 rounded-3xl px-4 py-4">
       <p className="text-sm">
@@ -264,7 +247,7 @@ function BotRoutines({
       <CollapsibleContent>
         <div className="flex flex-col gap-3 pt-2">
           {pluginMissing ? (
-            <PluginMissing profile={profile} />
+            <PluginMissing />
           ) : !jobs ? (
             <p className="flex items-center gap-2 px-1 text-sm text-muted-foreground">
               <Spinner className="size-4" /> Loading routines…

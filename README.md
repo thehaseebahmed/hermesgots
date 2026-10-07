@@ -40,7 +40,7 @@ hermes plugins install thehaseebahmed/memento/plugin --enable
 hermes gateway restart
 ```
 
-**Profiles:** Hermes's API can't list its profiles, so add one bot per profile. Point it at the profile's own gateway, or at `/p/<profile>/v1` on a gateway running with `gateway.multiplex_profiles`. Each profile has its own `API_SERVER_KEY`. A named profile advertises its name on `/v1/models`, so **Test connection** fills in the bot's name. The Memento plugin isn't served under `/p/<profile>/`, so Routines need the profile's own gateway.
+**Profiles:** Hermes's API can't list its profiles, so add one bot per profile. Point it at the profile's own gateway, or at `/p/<profile>/v1` on a gateway running with `gateway.multiplex_profiles`. Each profile has its own `API_SERVER_KEY`. A named profile advertises its name on `/v1/models`, so **Test connection** fills in the bot's name. The plugin reaches a `/p/<profile>` bot too, but it has to be installed and enabled in that profile as well (`hermes -p <profile> plugins install thehaseebahmed/memento/plugin --enable`), then `hermes gateway restart`.
 
 **HTTPS:** a page served over HTTPS (Netlify) can call `http://localhost`, but browsers block plain-HTTP servers on any other host. To use Hermes from your phone, expose it over HTTPS, for example with Tailscale Serve or a Cloudflare Tunnel, and add that origin to `API_SERVER_CORS_ORIGINS`.
 
