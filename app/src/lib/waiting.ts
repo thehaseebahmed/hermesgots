@@ -66,12 +66,13 @@ function subscribe(listener: () => void) {
 /** Why each session, by Hermes session id, waits on the user, across every keyed bot's server. */
 export function useWaiting(): Found {
   const waiting = useSyncExternalStore(subscribe, () => found)
-  // Keyless bots have no session ids, so nothing of theirs can be matched.
+  // Keyless bots have no session ids, so nothing of theirs can be matched. A bot whose plugin hasn't
+  // answered would only fail every poll; sync's own probe finds the plugin once it's there.
   const keyed = useLiveQuery(async () => {
     const profiles = await db.profiles.toArray()
     const unique = new Map(
       profiles
-        .filter((p) => p.apiKey)
+        .filter((p) => p.apiKey && p.pluginChats)
         .map((p) => [`${p.baseUrl.trim().replace(/\/+$/, "")} ${p.apiKey}`, p]),
     )
     return JSON.stringify([...unique.values()].map(({ baseUrl, apiKey }) => ({ baseUrl, apiKey })))

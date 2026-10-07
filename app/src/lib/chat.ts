@@ -706,13 +706,15 @@ export async function reattachRun(conversationId: string) {
     (m) => m.role === "assistant" && m.status === "streaming",
   )
   if (!stale) return
-  // Hermes only keys the session by our id with an API key, so only then can the run be looked up.
-  const live = profile.apiKey
-    ? await liveRunOf(
-        { baseUrl: profile.baseUrl, apiKey: profile.apiKey },
-        conversation.hermesSessionId,
-      ).catch(() => undefined)
-    : undefined
+  // Hermes only keys the session by our id with an API key, so only then can the run be looked up,
+  // and only the plugin lists runs.
+  const live =
+    profile.apiKey && profile.pluginChats
+      ? await liveRunOf(
+          { baseUrl: profile.baseUrl, apiKey: profile.apiKey },
+          conversation.hermesSessionId,
+        ).catch(() => undefined)
+      : undefined
   const runId = stale.runId ?? live?.runId
   if (!runId) {
     // Nothing is running for it: a streamed chat completion died with the tab, or the run never
