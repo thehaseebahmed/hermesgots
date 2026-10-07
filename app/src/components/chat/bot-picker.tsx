@@ -1,5 +1,4 @@
 import { useLiveQuery } from "dexie-react-hooks"
-import { useNavigate } from "react-router"
 import { ChevronDownIcon, PlusIcon } from "lucide-react"
 
 import { Bot } from "@/components/bot"
@@ -14,10 +13,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { listProfiles, setActiveProfile, type Profile } from "@/lib/db"
+import { useNav } from "@/lib/nav"
 
 /** Which bot a new chat goes to, as a pill above the composer. */
 export function BotPicker({ profile }: { profile: Profile }) {
-  const navigate = useNavigate()
+  const { root } = useNav()
   const profiles = useLiveQuery(listProfiles, [])
 
   return (
@@ -54,7 +54,7 @@ export function BotPicker({ profile }: { profile: Profile }) {
           ))}
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
-        <DropdownMenuItem className="min-h-11" onClick={() => navigate("/settings#bots")}>
+        <DropdownMenuItem className="min-h-11" onClick={() => root("/settings#bots")}>
           <PlusIcon />
           Add bot
         </DropdownMenuItem>

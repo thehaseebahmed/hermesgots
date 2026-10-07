@@ -1,5 +1,5 @@
 import { useLiveQuery } from "dexie-react-hooks"
-import { NavLink, useNavigate } from "react-router"
+import { NavLink, type NavLinkProps } from "react-router"
 import {
   ChevronRightIcon,
   CodeXmlIcon,
@@ -13,6 +13,7 @@ import { Bot } from "@/components/bot"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { db } from "@/lib/db"
+import { useNav } from "@/lib/nav"
 import { useSyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
 
@@ -23,6 +24,24 @@ const rowClass = ({ isActive }: { isActive: boolean }) =>
     "flex min-h-11 items-center gap-3 rounded-2xl px-3 text-sm transition-colors hover:bg-muted",
     isActive && "bg-muted font-medium",
   )
+
+/** A sidebar destination: top-level, so it opens as the only entry and back leaves the app. */
+function RootLink({ to, onClick, ...props }: NavLinkProps & { to: string }) {
+  const { root } = useNav()
+  return (
+    <NavLink
+      to={to}
+      replace
+      onClick={(event) => {
+        onClick?.(event)
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+        event.preventDefault()
+        root(to)
+      }}
+      {...props}
+    />
+  )
+}
 
 /** The newest chats across every bot, each with its bot's image. Project sessions stay on Code. */
 function Recents({ onNavigate }: { onNavigate?: () => void }) {
@@ -51,10 +70,10 @@ function Recents({ onNavigate }: { onNavigate?: () => void }) {
       <ul className="flex flex-col gap-0.5">
         {recents?.map(({ chat, bot }) => (
           <li key={chat.id}>
-            <NavLink to={`/c/${chat.id}`} onClick={onNavigate} className={rowClass}>
+            <RootLink to={`/c/${chat.id}`} onClick={onNavigate} className={rowClass}>
               <Bot id={bot?.botId} className="size-5" />
               <span className="min-w-0 flex-1 truncate">{chat.title}</span>
-            </NavLink>
+            </RootLink>
           </li>
         ))}
       </ul>
@@ -77,7 +96,7 @@ function ProfileButton({ onNavigate }: { onNavigate?: () => void }) {
   const picture = account.status === "signed-in" ? account.user.pictureUrl : undefined
 
   return (
-    <NavLink
+    <RootLink
       to="/settings"
       onClick={onNavigate}
       aria-label="Settings"
@@ -93,12 +112,12 @@ function ProfileButton({ onNavigate }: { onNavigate?: () => void }) {
       ) : (
         <UserIcon className="size-5" />
       )}
-    </NavLink>
+    </RootLink>
   )
 }
 
 export function ConversationList({ onNavigate }: { onNavigate?: () => void }) {
-  const navigate = useNavigate()
+  const { root } = useNav()
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -111,14 +130,14 @@ export function ConversationList({ onNavigate }: { onNavigate?: () => void }) {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         <nav className="flex flex-col gap-0.5" aria-label="Main">
-          <NavLink to="/code" onClick={onNavigate} className={rowClass}>
+          <RootLink to="/code" onClick={onNavigate} className={rowClass}>
             <CodeXmlIcon className="size-5 text-muted-foreground" />
             Code
-          </NavLink>
-          <NavLink to="/routines" onClick={onNavigate} className={rowClass}>
+          </RootLink>
+          <RootLink to="/routines" onClick={onNavigate} className={rowClass}>
             <TimerIcon className="size-5 text-muted-foreground" />
             Routines
-          </NavLink>
+          </RootLink>
         </nav>
         <Separator className="mx-1 my-3 w-auto" />
         <Recents onNavigate={onNavigate} />
@@ -130,7 +149,7 @@ export function ConversationList({ onNavigate }: { onNavigate?: () => void }) {
           size="lg"
           className="h-11 rounded-full px-5"
           onClick={() => {
-            navigate("/")
+            root("/")
             onNavigate?.()
           }}
         >

@@ -48,6 +48,8 @@ import {
   type PullRequestRef,
 } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
+import { setBackGuard } from "@/lib/native"
+import { useNav } from "@/lib/nav"
 import {
   deleteProject,
   listLiveRuns,
@@ -104,6 +106,14 @@ function useLiveRuns(profile: Profile | undefined) {
 export function ProjectPage() {
   const { profileId = "", projectId = "" } = useParams()
   const navigate = useNavigate()
+  const { up } = useNav()
+  // A project sits under Code.
+  useEffect(() => {
+    return setBackGuard(() => {
+      up("/code")
+      return true
+    })
+  }, [up])
   const passed = (useLocation().state as { project?: HermesProject } | null)?.project
   const profile = useLiveQuery(() => db.profiles.get(profileId), [profileId])
   const [fetched, setFetched] = useState<HermesProject>()
@@ -215,7 +225,7 @@ export function ProjectPage() {
         stopMessage(c.id)
         await deleteConversation(c.id)
       }
-      navigate("/code", { replace: true })
+      up("/code")
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't delete the project.")
       setBusy(false)
@@ -242,8 +252,7 @@ export function ProjectPage() {
             variant="outline"
             size="icon-lg"
             className="size-11 rounded-full"
-            render={<Link to="/code" />}
-            nativeButton={false}
+            onClick={() => up("/code")}
             aria-label="Back"
           >
             <ArrowLeftIcon />

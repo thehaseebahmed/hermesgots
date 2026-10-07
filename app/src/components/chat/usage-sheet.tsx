@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react"
 import { Meter } from "@base-ui/react/meter"
-import { Link } from "react-router"
 
 import { Banner } from "@/components/banner"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
@@ -8,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import type { Profile } from "@/lib/db"
 import { formatTokens } from "@/lib/format"
 import { getModelInfo, type ModelInfo } from "@/lib/hermes"
+import { useNav } from "@/lib/nav"
 
 export interface ContextUsage {
   /** The bot's server has the Memento plugin, which is what records context use. */
@@ -103,6 +103,7 @@ export function UsageSheet({
   usage: ContextUsage
   profile?: Profile | null
 }) {
+  const { root } = useNav()
   const [info, setInfo] = useState<{ baseUrl: string; value: ModelInfo | null }>()
   const baseUrl = profile?.baseUrl ?? ""
   const apiKey = profile?.apiKey ?? ""
@@ -165,8 +166,10 @@ export function UsageSheet({
                 <Button
                   variant="outline"
                   className="min-h-11"
-                  nativeButton={false}
-                  render={<Link to="/settings" />}
+                  onClick={() => {
+                    onOpenChange(false)
+                    root("/settings")
+                  }}
                 >
                   Set context window
                 </Button>

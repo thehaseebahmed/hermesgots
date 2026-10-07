@@ -29,17 +29,25 @@ export function handBackNativeSignIn() {
 
 let backGuard: (() => boolean) | undefined
 
-/** A screen's say over the back button: return true when it handled the press itself. */
-export function setBackGuard(guard: (() => boolean) | undefined) {
+/**
+ * A screen's say over the back button: return true when it handled the press itself. Returns the
+ * cleanup, which leaves a guard the next screen already set alone.
+ */
+export function setBackGuard(guard: () => boolean) {
   backGuard = guard
+  return () => {
+    if (backGuard === guard) backGuard = undefined
+  }
 }
 
-/** Android's back button walks the router history, then leaves the app. */
+/**
+ * Android's back button goes up from a screen that sets a guard (a project, a session) and leaves
+ * the app from a top-level one, whatever was opened before it. Leaving minimizes rather than
+ * exits, as Android's own back does from 12 on, so a reply keeps streaming and the screen stays.
+ */
 export function handleBackButton() {
   if (!isNative) return
-  void App.addListener("backButton", ({ canGoBack }) => {
-    if (backGuard?.()) return
-    if (canGoBack) history.back()
-    else void App.exitApp()
+  void App.addListener("backButton", () => {
+    if (!backGuard?.()) void App.minimizeApp()
   })
 }
