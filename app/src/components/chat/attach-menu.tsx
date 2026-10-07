@@ -1,6 +1,7 @@
 import { useRef, useState, type ChangeEvent } from "react"
 import { CameraIcon, FileUpIcon, ImageIcon, PlusIcon, type LucideIcon } from "lucide-react"
 
+import { Banner } from "@/components/banner"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 
@@ -86,6 +87,11 @@ export function AttachMenu({
           <PopupHeader className="items-center pb-2">
             <PopupTitle>Add context</PopupTitle>
           </PopupHeader>
+          {!filesAvailable && (
+            <div className="px-4 pb-4 sm:px-6">
+              <Banner>File uploads need the Memento plugin.</Banner>
+            </div>
+          )}
           <div className="grid grid-cols-3 gap-4 px-4 pb-24 sm:gap-5 sm:px-6 md:pb-2">
             {SOURCES.map(({ id, label, icon: Icon }) => (
               <Button
