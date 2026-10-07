@@ -63,8 +63,8 @@ function subscribe(listener: () => void) {
   }
 }
 
-/** Project sessions, across every bot, waiting on the user, newest first. Needs the plugin. */
-export function useWaitingSessions(): WaitingSession[] {
+/** Why each session, by Hermes session id, waits on the user, across every keyed bot's server. */
+export function useWaiting(): Found {
   const waiting = useSyncExternalStore(subscribe, () => found)
   // Keyless bots have no session ids, so nothing of theirs can be matched.
   const keyed = useLiveQuery(async () => {
@@ -81,7 +81,12 @@ export function useWaitingSessions(): WaitingSession[] {
     servers = JSON.parse(keyed)
     void poll()
   }, [keyed])
+  return waiting
+}
 
+/** Project sessions, across every bot, waiting on the user, newest first. Needs the plugin. */
+export function useWaitingSessions(): WaitingSession[] {
+  const waiting = useWaiting()
   const ids = Object.keys(waiting)
   const sessions = useLiveQuery(
     () =>
