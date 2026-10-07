@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import sqlite3
+import subprocess
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -24,6 +25,25 @@ def _owns(folder: str, path: str) -> bool:
 def _is_git_repo(path: str) -> bool:
     # A worktree's .git is a file, so exists() rather than isdir().
     return os.path.exists(os.path.join(path, ".git"))
+
+
+def _base_branch(path: str) -> Optional[str]:
+    """The branch a session's worktree starts from: the remote's default, else what's checked out."""
+    for args in (["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"], ["branch", "--show-current"]):
+        try:
+            result = subprocess.run(
+                ["git", "-C", path, *args],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                stdin=subprocess.DEVNULL,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        name = result.stdout.strip()
+        if result.returncode == 0 and name:
+            return name.split("/", 1)[1] if name.startswith("origin/") else name
+    return None
 
 
 def _last_active(projects: List[Any], cwds: Iterable[Dict[str, Any]]) -> Dict[str, float]:
@@ -80,6 +100,7 @@ def read(
                         "git": _is_git_repo(folder.path),
                         # The app names repos `user/repo`, never by their path.
                         "repo": github.origin_repo(folder.path) if _is_git_repo(folder.path) else None,
+                        "branch": _base_branch(folder.path) if _is_git_repo(folder.path) else None,
                     }
                     for folder in project.folders
                 ]

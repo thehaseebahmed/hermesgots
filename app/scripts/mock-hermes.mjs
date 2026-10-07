@@ -86,8 +86,8 @@ function cloneProject(project, root) {
       project.id = `p_${randomUUID().slice(0, 8)}`
       project.status = "ready"
       project.folders = [
-        { path: root, label: null, is_primary: true, git: false, repo: null },
-        ...project.folders.map((f) => ({ ...f, git: true, status: undefined })),
+        { path: root, label: null, is_primary: true, git: false, repo: null, branch: null },
+        ...project.folders.map((f) => ({ ...f, git: true, branch: "main", status: undefined })),
       ]
       return
     }
@@ -136,6 +136,8 @@ function seedProjects() {
     git,
     // As the plugin reads it from the clone's GitHub origin.
     repo: git ? `${path.includes("zigbee") ? "mock-org" : "mock-user"}/${path.split("/").at(-1)}` : null,
+    // The branch a session's worktree starts from.
+    branch: git ? "main" : null,
   })
   return [
     {
@@ -932,6 +934,7 @@ http
             added.status = undefined
             added.error = undefined
             added.git = true
+            added.branch = "main"
           }, Number(process.env.MOCK_REPO_CLONE_MS ?? 4000)),
         })
         return json(res, 202, { object: "memento.project.repo", project_id: found.id, repo, path: added.path, status: "cloning" })
