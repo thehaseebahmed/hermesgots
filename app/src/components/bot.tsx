@@ -23,7 +23,7 @@ export function Bot({
         src={`/bots/${bot.id}.png`}
         alt=""
         draggable={false}
-        className="bot-float size-full object-contain select-none"
+        className={cn("size-full object-contain select-none", `bot-anim-${bot.id}`)}
       />
     </span>
   )
