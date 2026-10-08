@@ -30,6 +30,7 @@ import {
 } from "@/components/chat/session-cards"
 import { TheseusCard, TheseusPill, TheseusSheet, type SheetView } from "@/components/chat/theseus"
 import { TodosPill, TodosSheet } from "@/components/chat/todos"
+import { ModelMenu } from "@/components/chat/model-picker"
 import { ContextRing, UsageSheet, type ContextUsage } from "@/components/chat/usage-sheet"
 import { Bot } from "@/components/bot"
 import { RepoChips } from "@/components/repos"
@@ -66,6 +67,7 @@ import { queueMessage, reattachRun, sendMessage, stopMessage } from "@/lib/chat"
 import {
   DEFAULT_SETTINGS,
   type Attachment,
+  type ModelChoice,
   createConversation,
   db,
   deleteConversation,
@@ -207,6 +209,8 @@ export function ChatPage() {
   const [discarding, setDiscarding] = useState(false)
   const [title, setTitle] = useState("")
   const [usageOpen, setUsageOpen] = useState(false)
+  // A new chat's pick, held until its first message makes the chat; it follows the chosen bot.
+  const [pendingModel, setPendingModel] = useState<{ profileId?: string; choice?: ModelChoice }>()
   const [todosOpen, setTodosOpen] = useState(false)
   const [theseusView, setTheseusView] = useState<SheetView | null>(null)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
@@ -225,6 +229,15 @@ export function ChatPage() {
   const todos = (tracked && conversation?.todos?.items) || []
   // A session of a Hermes Project: works in its worktree, with a mode, a PR and a resolved state.
   const session = conversation?.projectId ? conversation : undefined
+  const modelChoice = conversation
+    ? conversation.modelChoice
+    : pendingModel?.profileId === profile?.id
+      ? pendingModel?.choice
+      : undefined
+  const chooseModel = (choice: ModelChoice | undefined) => {
+    if (conversation) void updateConversation(conversation.id, { modelChoice: choice })
+    else setPendingModel({ profileId: profile?.id, choice })
+  }
   const usage: ContextUsage = {
     tracked,
     tokens: tracked ? live?.tokens : undefined,
@@ -412,7 +425,7 @@ export function ChatPage() {
         await Promise.race([reconcileHistory(conversationId).catch(() => undefined), wait(1500)])
       } else {
         if (!profile) return
-        conversationId = (await createConversation(profile.id)).id
+        conversationId = (await createConversation(profile.id, { modelChoice: modelChoice })).id
         navigate(`/c/${conversationId}`, { replace: true, state: { quiet: true } })
       }
       if (session?.draftAt)
@@ -671,6 +684,16 @@ export function ChatPage() {
                   ),
               }
             }
+            model={
+              configured && (
+                <ModelMenu
+                  profile={profile}
+                  choice={modelChoice}
+                  onChoose={chooseModel}
+                  disabled={busy}
+                />
+              )
+            }
             leading={
               hasMessages && configured && !(tracked && !live?.tokens) ? (
                 <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />
@@ -680,18 +703,7 @@ export function ChatPage() {
         )}
       </div>
 
-      <UsageSheet
-        open={usageOpen}
-        onOpenChange={setUsageOpen}
-        usage={usage}
-        profile={profile}
-        choice={conversation?.modelChoice}
-        onChoose={
-          conversation
-            ? (modelChoice) => void updateConversation(conversation.id, { modelChoice })
-            : undefined
-        }
-      />
+      <UsageSheet open={usageOpen} onOpenChange={setUsageOpen} usage={usage} />
       <TodosSheet open={todosOpen} onOpenChange={setTodosOpen} items={todos} live={busy} />
       {theseus && (
         <TheseusSheet run={theseus} info={theseusInfo} view={theseusView} onView={setTheseusView} />

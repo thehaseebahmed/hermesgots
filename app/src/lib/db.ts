@@ -45,6 +45,8 @@ export interface Profile {
   contextSource?: "models.dev" | "manual"
   /** Whether the model takes images, per models.dev; unset when it doesn't list the model. */
   imageInput?: boolean
+  /** The model new turns run on when a chat hasn't picked its own; unset runs the host's. */
+  modelChoice?: ModelChoice
   /** The linked host that registered it; unset for a bot added by hand before linking. */
   hostId?: string
   /** Turned off in the app: hidden, and nothing checks on it. Local copy of the registry's flag. */
@@ -54,6 +56,12 @@ export interface Profile {
   createdAt: number
   /** Last change to the config, the clock sync merges on. */
   updatedAt: number
+}
+
+/** One of the models a Hermes host is configured for. */
+export interface ModelChoice {
+  provider: string
+  model: string
 }
 
 export interface Conversation {
@@ -86,7 +94,7 @@ export interface Conversation {
    */
   todos?: { revision: number; items: Todo[]; at: number }
   /** A model the user picked for this chat from its host's configured ones; unset runs the bot's. */
-  modelChoice?: { provider: string; model: string }
+  modelChoice?: ModelChoice
   /** The Hermes Project this chat is a session of (works in its own worktree). */
   projectId?: string
   /** Unsent composer text a session was left with, kept on this device only. */
@@ -480,7 +488,7 @@ export function conversationsOf(profileId: string) {
 
 export async function createConversation(
   profileId: string,
-  fields: Partial<Pick<Conversation, "title" | "projectId" | "mode">> = {},
+  fields: Partial<Pick<Conversation, "title" | "projectId" | "mode" | "modelChoice">> = {},
 ): Promise<Conversation> {
   const now = Date.now()
   const conversation: Conversation = {

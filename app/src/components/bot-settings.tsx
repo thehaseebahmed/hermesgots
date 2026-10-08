@@ -8,6 +8,7 @@ import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BotCard } from "@/components/bot-card"
 import { BOTS } from "@/components/bots"
+import { DefaultModelSetting } from "@/components/chat/model-picker"
 import { LinkSheet } from "@/components/link-bots"
 import {
   AlertDialog,
@@ -420,6 +421,16 @@ export function BotEditor({
               ))}
             </SelectContent>
           </Select>
+        </Field>
+      )}
+
+      {profile.baseUrl.trim() && (
+        <Field>
+          <FieldLabel htmlFor="default-model">Default model</FieldLabel>
+          <DefaultModelSetting
+            profile={profile}
+            onChoose={(modelChoice) => save({ modelChoice })}
+          />
         </Field>
       )}
 
