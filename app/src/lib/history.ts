@@ -211,7 +211,11 @@ export function toMessages(
       messages.push(reply)
     }
     if (row.role === "tool") {
-      const tool = reply.tools?.find((t) => t.toolCallId === row.tool_call_id)
+      // Match the result to the first unresolved call with this ID. A duplicate
+      // call ID (server-side assembly issue) creates two tool events; finding the
+      // first running one ensures each attempt gets its own result and the later
+      // empty-argument failure doesn't overwrite the earlier successful output.
+      const tool = reply.tools?.find((t) => t.toolCallId === row.tool_call_id && t.status === "running")
       if (tool) {
         tool.status = "completed"
         tool.endedAt = createdAt
