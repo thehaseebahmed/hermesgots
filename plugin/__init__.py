@@ -6,12 +6,13 @@ device, keep its chat list on the server (``chats.py``), report each chat's cont
 (``context.py``) and the agent's todo list (``todos.py``), list and create Hermes Projects (``projects.py``) with GitHub repos cloned into
 them in the background (``clones.py``, ``github.py``), add and remove a project's repos (``repos.py``), run project sessions in their own worktrees with a permission mode and save their plans
 (``sessions.py``), let the agent push and open its pull requests, close them when a session is dropped (``ship.py``) and resolve a session once its pull request merges (``merges.py``), run a session end to end with the Theseus skill (``theseus.py``), let the agent ask the user questions with Hermes's ``clarify`` tool (``clarify.py``), keep its delegations in the turn that made them (``delegation.py``) and
-label its chats as Memento's, tell the app what changed as it happens (``events.py``, ``stream.py``), and links the profile to a Memento account (``link.py``). The dashboard half lives in ``dashboard/``.
+set the profile's main model from a bot's Default model (``host_model.py``), label its chats as Memento's, tell the app what changed as it happens (``events.py``, ``stream.py``), and links the profile to a Memento account (``link.py``). The dashboard half lives in ``dashboard/``.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import re
@@ -28,6 +29,7 @@ from . import (
     delegation,
     events,
     github,
+    host_model,
     link,
     merges,
     projects,
@@ -237,6 +239,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "theseus",
                     "push",
                     "sync_delegation",
+                    "host_model",
                 ],
                 "clarify": asks,
                 "todo_tool": todo_tool,
@@ -276,6 +279,47 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if not source:
             return _error(web, "Session not found", 404)
         return web.json_response({"id": session_id, "source": source})
+
+    async def set_host_model(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            provider, model = host_model.clean(await json_body(request))
+        except ValueError as error:
+            return _error(web, str(error), 400)
+        from hermes_constants import get_hermes_home
+
+        # Both on the loop thread, where the request's profile scope is visible: the worker
+        # re-enters it, so switch_model reads this profile's credentials.
+        config_path = Path(get_hermes_home()) / "config.yaml"
+        scope = profile_scope()
+
+        def run() -> Dict[str, str]:
+            with scope():
+                return host_model.set_main(config_path, provider, model)
+
+        try:
+            chosen = await asyncio.to_thread(run)
+        except ValueError as error:
+            return _error(web, str(error), 400)
+        except ImportError:
+            return _error(web, "This Hermes version can't switch models from here.", 501)
+        return web.json_response({"object": "memento.host_model", **chosen})
+
+    def profile_scope():
+        # The API server's own per-profile scope (home and secrets) for the request being served, or
+        # nothing when this Hermes has none.
+        enter = getattr(adapter, "_profile_scope", None)
+        try:
+            from gateway.platforms.api_server import _api_request_profile
+
+            profile = _api_request_profile.get()
+        except Exception:
+            profile = None
+        if not callable(enter):
+            return contextlib.nullcontext
+        return lambda: enter(profile)
 
     def store_path() -> Path:
         # On the loop thread: the API server scopes get_hermes_home() to the request's profile, and
@@ -864,6 +908,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/projects/{{project_id}}/repos", add_repo)
     app.router.add_post(f"{PREFIX}/projects/{{project_id}}/repos/remove", remove_repo)
     app.router.add_get(f"{PREFIX}/projects/{{project_id}}/usage", project_usage)
+    app.router.add_post(f"{PREFIX}/model", set_host_model)
     app.router.add_get(f"{PREFIX}/github", github_status)
     app.router.add_get(f"{PREFIX}/github/repos", github_repos)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/label", label_session)

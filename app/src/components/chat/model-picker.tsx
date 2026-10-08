@@ -221,12 +221,14 @@ export function DefaultModelSetting({
   onChoose,
 }: {
   profile: Profile
-  onChoose: (choice: ModelChoice | undefined) => void
+  onChoose: (choice: ModelChoice | undefined) => Promise<void>
 }) {
   const [open, setOpen] = useState(false)
+  // The pick while the host saves it, so the field doesn't flick back to the old model.
+  const [saving, setSaving] = useState<ModelChoice>()
   const info = useModelInfo(profile)
   const providers = info?.providers ?? []
-  const current = profile.modelChoice?.model ?? info?.model
+  const current = saving?.model ?? profile.modelChoice?.model ?? info?.model
   return (
     <>
       <Button
@@ -248,7 +250,8 @@ export function DefaultModelSetting({
             recent={profile.recentModels}
             choice={profile.modelChoice}
             onChoose={(next) => {
-              onChoose(next)
+              setSaving(next)
+              void onChoose(next).finally(() => setSaving(undefined))
               if (next) void rememberModel(profile.id, next)
               setOpen(false)
             }}
