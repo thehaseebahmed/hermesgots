@@ -42,7 +42,10 @@ export interface Thread {
 
 const line = (text?: string) => text?.replace(/\s+/g, " ").trim() || undefined
 
-/** A bot's chats as threads, oldest first so the newest sits at the bottom by the composer. */
+/**
+ * A bot's chats as threads, oldest started first so the newest sits at the bottom by the composer.
+ * They keep the order they were started in, so a new message doesn't move a thread.
+ */
 export function useThreads(profileId: string | undefined): Thread[] | undefined {
   const live = useWaiting()
   const rows = useLiveQuery(async () => {
@@ -58,28 +61,30 @@ export function useThreads(profileId: string | undefined): Thread[] | undefined 
       .where("conversationId")
       .anyOf(chats.map((c) => c.id))
       .toArray()
-    return chats.reverse().map((chat) => {
-      const own = messages
-        .filter((m) => m.conversationId === chat.id)
-        .sort((a, b) => a.createdAt - b.createdAt)
-      const replies = own.filter((m) => m.role === "assistant")
-      const latest = replies.at(-1)
-      const local: WaitingReason | undefined =
-        latest?.clarify && !latest.clarify.resolved
-          ? { kind: "question", count: latest.clarify.questions.length || 1 }
-          : latest?.approval && !latest.approval.resolved
-            ? { kind: "approval", command: latest.approval.command }
-            : undefined
-      return {
-        chat,
-        opener: line(own.find((m) => m.role === "user")?.content),
-        last: line(replies.findLast((m) => m.content.trim())?.content),
-        replies: replies.length,
-        streaming: latest?.status === "streaming",
-        failed: latest?.status === "error",
-        local,
-      }
-    })
+    return chats
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .map((chat) => {
+        const own = messages
+          .filter((m) => m.conversationId === chat.id)
+          .sort((a, b) => a.createdAt - b.createdAt)
+        const replies = own.filter((m) => m.role === "assistant")
+        const latest = replies.at(-1)
+        const local: WaitingReason | undefined =
+          latest?.clarify && !latest.clarify.resolved
+            ? { kind: "question", count: latest.clarify.questions.length || 1 }
+            : latest?.approval && !latest.approval.resolved
+              ? { kind: "approval", command: latest.approval.command }
+              : undefined
+        return {
+          chat,
+          opener: line(own.find((m) => m.role === "user")?.content),
+          last: line(replies.findLast((m) => m.content.trim())?.content),
+          replies: replies.length,
+          streaming: latest?.status === "streaming",
+          failed: latest?.status === "error",
+          local,
+        }
+      })
   }, [profileId])
 
   return rows?.map(({ chat, opener, last, replies, streaming, failed, local }) => {
