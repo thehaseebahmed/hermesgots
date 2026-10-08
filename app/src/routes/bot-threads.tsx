@@ -14,6 +14,7 @@ import {
 import { ChatHeader } from "@/components/chat/chat-header"
 import { Composer } from "@/components/chat/composer"
 import { Bot } from "@/components/bot"
+import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -55,7 +56,10 @@ function StateIcon({ state }: { state: Thread["state"] }) {
   )
 }
 
-/** One thread, from the bot so left aligned: a card with its state and title, and a link to open it. */
+/**
+ * One thread: what it was opened with, then from the bot, left aligned, a card with its state and
+ * title and a link to open it.
+ */
 function ThreadItem({
   thread,
   profileId,
@@ -70,9 +74,14 @@ function ThreadItem({
   const label = thread.reason ? reasonText(thread.reason) : undefined
   return (
     <li className="flex flex-col items-start gap-1.5">
+      <Bubble variant="default" align="end" className="max-w-[85%] self-end">
+        <BubbleContent className="line-clamp-4 px-4 py-2.5 text-[15px] whitespace-pre-wrap">
+          {thread.opener ?? thread.chat.title}
+        </BubbleContent>
+      </Bubble>
       <div
         className={cn(
-          "flex min-h-14 w-full max-w-[85%] items-center gap-3 rounded-2xl border bg-card px-4 py-2",
+          "mt-1.5 flex min-h-14 w-full max-w-[85%] items-center gap-3 rounded-2xl border bg-card px-4 py-2",
           open && "border-foreground/20 bg-muted",
         )}
       >
@@ -89,7 +98,7 @@ function ThreadItem({
         aria-current={open ? "page" : undefined}
         className="flex min-h-11 items-center gap-1 rounded-full px-2 text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <span className="text-info font-medium">View thread</span>
+        <span className="font-medium text-info">View thread</span>
         {thread.replies > 0 && (
           <span>
             · {thread.replies} {thread.replies === 1 ? "reply" : "replies"}
