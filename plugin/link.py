@@ -21,9 +21,10 @@ import os
 import re
 import socket
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,25 @@ def seal(public_key: str, value: Any, aad: str) -> Dict[str, Any]:
 # The registry
 
 
+class _SameRequest(urllib.request.HTTPRedirectHandler):
+    """Follows a site that moved (Netlify sends its old address on to the new primary domain with a
+    301) with the same request. urllib would turn a POST into a GET without its body and refuse a
+    PUT, so every check-in would fail. Only the registry's own path is followed, never to plain http
+    from https."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        old, new = urllib.parse.urlsplit(req.full_url), urllib.parse.urlsplit(newurl)
+        if (new.path, new.query) != (old.path, old.query) or new.scheme not in ("https", old.scheme):
+            return None
+        return urllib.request.Request(
+            newurl, data=req.data, headers=dict(req.header_items()), method=req.get_method()
+        )
+
+
+_opener = urllib.request.build_opener(_SameRequest)
+REGISTRY_PATH = "/.netlify/functions/registry"
+
+
 def call(
     site: str,
     method: str,
@@ -107,10 +127,12 @@ def call(
     token: str | None = None,
     body: Any = None,
     bot_id: str | None = None,
+    moved: Optional[Callable[[str], None]] = None,
 ) -> Any:
+    """One registry request. ``moved`` gets the site's new address when it redirected there."""
     query = f"route={route}" + (f"&id={bot_id}" if bot_id else "")
     request = urllib.request.Request(
-        f"{site.rstrip('/')}/.netlify/functions/registry?{query}",
+        f"{site.rstrip('/')}{REGISTRY_PATH}?{query}",
         method=method,
         data=None if body is None else json.dumps(body).encode(),
         headers={
@@ -120,8 +142,9 @@ def call(
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
+        with _opener.open(request, timeout=TIMEOUT_SECONDS) as response:
             raw = response.read()
+            final = response.geturl().split(REGISTRY_PATH)[0]
     except urllib.error.HTTPError as error:
         try:
             message = json.loads(error.read() or b"{}").get("error")
@@ -130,7 +153,20 @@ def call(
         raise LinkError(message or f"Memento answered {error.code}", error.code) from None
     except (urllib.error.URLError, OSError) as error:
         raise LinkError(f"Couldn't reach Memento at {site}: {error}") from None
+    if moved and final and final != site.rstrip("/"):
+        moved(final)
     return json.loads(raw) if raw else None
+
+
+def registry(home: Path, state: Dict[str, Any], method: str, route: str, **kwargs: Any) -> Any:
+    """A request for a linked profile, which keeps following the site when its address changes."""
+
+    def moved(site: str) -> None:
+        logger.info("memento: %s moved to %s", state["site"], site)
+        state["site"] = site
+        save_state(home, state)
+
+    return call(state["site"], method, route, token=state["token"], moved=moved, **kwargs)
 
 
 # State and the profile
@@ -230,18 +266,14 @@ def publish(home: Path, state: Dict[str, Any], *, process_env: bool, force: bool
         return False
     bot = bot_id(state, value["profile"])
     sealed = seal(inbox["publicKey"], value, f"memento:{state['userId']}:bot:{bot}")
-    call(
-        state["site"],
-        "PUT",
-        "bots",
-        token=state["token"],
-        bot_id=bot,
-        body={"keyId": inbox["keyId"], "sealed": sealed},
-    )
+    registry(home, state, "PUT", "bots", bot_id=bot, body={"keyId": inbox["keyId"], "sealed": sealed})
     state["published"] = current
     state["botId"] = bot
     save_state(home, state)
     return True
+
+
+_last_error: Dict[Path, str] = {}
 
 
 def check_in(home: Path, *, process_env: bool) -> Optional[str]:
@@ -257,22 +289,19 @@ def check_in(home: Path, *, process_env: bool) -> Optional[str]:
             return "no URL or API key yet"
         from . import VERSION
 
-        answer = call(
-            state["site"],
-            "POST",
-            "seen",
-            token=state["token"],
-            body={"bots": [bot], "pluginVersion": VERSION},
+        answer = registry(
+            home, state, "POST", "seen", body={"bots": [bot], "pluginVersion": VERSION}
         )
         key_id = answer.get("keyId")
         if key_id and key_id != state["inbox"]["keyId"]:
             # The account reset its vault; its devices can only open records sealed to the new key.
-            fresh = call(state["site"], "GET", "inbox", token=state["token"])
+            fresh = registry(home, state, "GET", "inbox")
             state["inbox"] = fresh["inbox"]
             save_state(home, state)
             publish(home, state, process_env=process_env, force=True)
         elif (answer.get("bots") or {}).get(bot) is None:
             publish(home, state, process_env=process_env, force=True)
+        _last_error.pop(home, None)
         return "linked"
     except LinkError as error:
         if error.status == 401:
@@ -280,7 +309,10 @@ def check_in(home: Path, *, process_env: bool) -> Optional[str]:
             state["revoked"] = True
             save_state(home, state)
             return "removed in Memento"
-        logger.debug("memento: check-in failed for %s: %s", home, error)
+        # Said once per new error, so an outage doesn't fill the log but a broken link is visible.
+        if _last_error.get(home) != str(error):
+            logger.warning("memento: check-in failed for %s: %s", home, error)
+        _last_error[home] = str(error)
         return str(error)
 
 
@@ -470,8 +502,15 @@ def cmd_link(args: Any) -> int:
 
     try:
         if is_linked(state):
-            print("This profile is already linked. To link it to another account, run "
-                  "`hermes memento unlink` first.")
+            if site != state["site"].rstrip("/"):
+                # The app moved to another address; the registry behind it is the same.
+                call(site, "GET", "inbox", token=state["token"])
+                state["site"] = site
+                save_state(home, state)
+                print(f"This profile now checks in with {site}.")
+            else:
+                print("This profile is already linked. To link it to another account, run "
+                      "`hermes memento unlink` first.")
         else:
             if not args.code:
                 print("Paste the link code from Memento: hermes memento link <code> --site <url>")
