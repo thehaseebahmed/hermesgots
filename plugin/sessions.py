@@ -29,7 +29,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
 
-from . import events
+from . import events, push
 from .store import connect
 
 logger = logging.getLogger(__name__)
@@ -594,6 +594,8 @@ def set_plan_pending(path: Path, session_id: str, pending: bool) -> None:
     finally:
         conn.close()
     events.note("runs", session_id, path, True)
+    if pending:
+        push.notify("plan", session_id, path)
 
 
 def _delete(path: Path, session_id: str) -> None:

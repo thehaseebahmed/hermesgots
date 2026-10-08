@@ -18,7 +18,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import events
+from . import events, push
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +180,7 @@ class Asker:
         # The question is already pollable through run status; the push is an optimization.
         if stream is not None and loop is not None:
             _push(loop, stream, asked)
+        push.notify("question", getattr(agent, "session_id", None))
         try:
             outcome = _wait(pending, agent, adapter)
         finally:

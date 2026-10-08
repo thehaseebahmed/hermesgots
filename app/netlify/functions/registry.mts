@@ -1,5 +1,6 @@
 import { getStore } from "@netlify/blobs"
 
+import { createFcm } from "../lib/fcm.ts"
 import { requireUser } from "../lib/identity.ts"
 import { handleRegistry, type Caller, type Inbox } from "../lib/registry.ts"
 
@@ -31,6 +32,7 @@ export default async (req: Request) => {
     store: getStore({ name: "memento-registry", consistency: "strong" }),
     caller,
     inbox,
+    fcm: createFcm(process.env.FCM_SERVICE_ACCOUNT),
     // The Android app's WebView runs on https://localhost.
     origins: [new URL(site).origin, "https://localhost"],
   })

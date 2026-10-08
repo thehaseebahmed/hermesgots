@@ -5,6 +5,8 @@
  * and times; chats never pass through here.
  */
 
+import type { FcmSender, PushKind } from "./fcm.ts"
+
 export interface RegistryStore {
   getWithMetadata(
     key: string,
@@ -55,6 +57,12 @@ export interface BotRecord {
   updatedAt: number
 }
 
+/** An Android install that wants pushes, as its app registered it. */
+interface Device {
+  token: string
+  updatedAt: number
+}
+
 interface Seen {
   at: number
   pluginVersion?: string
@@ -66,6 +74,11 @@ const MAX_CLAIMS = 20
 /** Wrong secrets for a known code id before the code is burned. */
 const MAX_FAILURES = 10
 const MAX_BYTES = 16 * 1024
+const MAX_DEVICES = 10
+/** A host may ask for one push a second; the plugin throttles harder, this bounds a misbehaving one. */
+const PUSH_GAP_MS = 1000
+const PUSH_KINDS: readonly string[] = ["approval", "question", "plan"]
+const DEVICE_TOKEN = /^\S{20,4096}$/
 
 const CODE_ID = /^[0-9A-HJKMNP-TV-Z]{8}$/
 const SECRET = /^[0-9A-HJKMNP-TV-Z]{16}$/
@@ -150,6 +163,7 @@ async function deleteHost(store: RegistryStore, userId: string, hostId: string) 
     await store.delete(key)
     await store.delete(`users/${userId}/seen/${botId}`)
   }
+  await store.delete(`users/${userId}/pushed/${hostId}`)
   await store.delete(`users/${userId}/hosts/${hostId}`)
 }
 
@@ -160,6 +174,8 @@ export interface RegistryContext {
   inbox: (userId: string) => Promise<Inbox | undefined>
   /** Origins the app runs on, which the plugin adds to Hermes's CORS list. */
   origins: string[]
+  /** Sends to Android installs; null when no Firebase service account is configured. */
+  fcm?: FcmSender | null
   now?: number
 }
 
@@ -285,6 +301,36 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
       return json({ keyId: inbox?.keyId ?? null, bots })
     }
 
+    if (op === "POST push") {
+      const input = await body(req)
+      const kind = input?.kind
+      const sessionId = input?.session_id
+      if (typeof kind !== "string" || !PUSH_KINDS.includes(kind)) return error("Invalid kind", 400)
+      if (typeof sessionId !== "string" || !sessionId || sessionId.length > 200) {
+        return error("Invalid session", 400)
+      }
+      // Devices that have the app open already know.
+      const skip = Array.isArray(input?.skip)
+        ? new Set(input.skip.filter((d): d is string => typeof d === "string").slice(0, 50))
+        : new Set<string>()
+      if (!ctx.fcm) return error("Push isn't set up on this site", 503)
+      const gapKey = `users/${userId}/pushed/${hostId}`
+      const last = await read<{ at: number }>(store, gapKey)
+      if (last && now - last.data.at < PUSH_GAP_MS) return error("Slow down", 429)
+      await store.setJSON(gapKey, { at: now })
+      let sent = 0
+      for (const { key } of (await store.list({ prefix: `users/${userId}/devices/` })).blobs) {
+        const deviceId = key.slice(key.lastIndexOf("/") + 1)
+        if (skip.has(deviceId)) continue
+        const device = await read<Device>(store, key)
+        if (!device) continue
+        const result = await ctx.fcm.send(device.data.token, kind as PushKind, sessionId)
+        if (result === "ok") sent++
+        else if (result === "gone") await store.delete(key)
+      }
+      return json({ sent })
+    }
+
     if (op === "DELETE host") {
       await deleteHost(store, userId, hostId)
       return new Response(null, { status: 204 })
@@ -356,6 +402,26 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
     })
     if (missing || !record) return error("Not found", 404)
     return json({ bot: record })
+  }
+
+  if (op === "POST devices") {
+    const input = await body(req)
+    const token = input?.token
+    if (!ID.test(id)) return error("Invalid device id", 400)
+    if (typeof token !== "string" || !DEVICE_TOKEN.test(token)) return error("Invalid token", 400)
+    const prefix = `users/${userId}/devices/`
+    const known = (await store.list({ prefix })).blobs.map((b) => b.key)
+    if (!known.includes(`${prefix}${id}`) && known.length >= MAX_DEVICES) {
+      return error("Too many devices", 409)
+    }
+    await store.setJSON(`${prefix}${id}`, { token, updatedAt: now } satisfies Device)
+    return json({ ok: true })
+  }
+
+  if (op === "DELETE devices") {
+    if (!ID.test(id)) return error("Invalid device id", 400)
+    await store.delete(`users/${userId}/devices/${id}`)
+    return new Response(null, { status: 204 })
   }
 
   if (op === "DELETE hosts") {
