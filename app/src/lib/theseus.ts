@@ -1,4 +1,11 @@
 import { useSyncExternalStore } from "react"
+import {
+  FlaskConicalIcon,
+  ListChecksIcon,
+  ScanEyeIcon,
+  ShieldCheckIcon,
+  UserCheckIcon,
+} from "lucide-react"
 
 /**
  * Theseus: a session mode that runs the THA Theseus skill end to end in Auto. The work is split
@@ -103,26 +110,69 @@ export const GATES: { id: GateId; label: string }[] = [
   { id: "human", label: "Your approval" },
 ]
 
-export const SETTING_OPTIONS = {
-  autonomy: [
-    { value: "step", label: "Every checkpoint" },
-    { value: "batch:3", label: "Every 3 checkpoints" },
-    { value: "unattended", label: "Only at the end" },
-  ],
-  visual: [
-    { value: "on", label: "On" },
-    { value: "off", label: "Off" },
-  ],
-  reviewers: [
-    { value: 2, label: "2 reviewers" },
-    { value: 1, label: "1 reviewer" },
-    { value: 0, label: "Off" },
-  ],
-  granularity: [
-    { value: "s-m", label: "Small slices" },
-    { value: "xs-s", label: "Tiny steps" },
-  ],
+export const GATE_ICONS: Record<GateId, typeof FlaskConicalIcon> = {
+  red: FlaskConicalIcon,
+  tests: ListChecksIcon,
+  visual: ScanEyeIcon,
+  review: ShieldCheckIcon,
+  human: UserCheckIcon,
+}
+
+/** Each setting as the question the user answers; the first choice is the skill's default. */
+export const SETTING_QUESTIONS = {
+  autonomy: {
+    label: "Approvals",
+    question: "How often should Theseus stop for your approval?",
+    options: [
+      { value: "step", label: "After every checkpoint", short: "Every checkpoint" },
+      { value: "batch:3", label: "Every 3 checkpoints", short: "Every 3" },
+      { value: "unattended", label: "Only at the end, in the pull request", short: "At the end" },
+    ],
+  },
+  visual: {
+    label: "Visual review",
+    question: "Should each screen change be compared against the reference?",
+    options: [
+      { value: "on", label: "Yes, compare every screen change", short: "On" },
+      { value: "off", label: "No, skip the visual check", short: "Off" },
+    ],
+  },
+  reviewers: {
+    label: "Code review",
+    question: "How many independent reviewers should check the code?",
+    options: [
+      { value: 2, label: "Two reviewers", short: "2 reviewers" },
+      { value: 1, label: "One reviewer", short: "1 reviewer" },
+      { value: 0, label: "No code review", short: "Off" },
+    ],
+  },
 } as const
+
+export type SettingKey = keyof typeof SETTING_QUESTIONS
+
+export const SETTING_KEYS = Object.keys(SETTING_QUESTIONS) as SettingKey[]
+
+export const settingLabel = (key: SettingKey, settings: TheseusSettings) =>
+  (SETTING_QUESTIONS[key].options as readonly { value: unknown; short: string }[]).find(
+    (o) => o.value === settings[key],
+  )?.short
+
+/** Whether this device has shown the intro, which comes up the first time Theseus is picked. */
+const INTRO_KEY = "memento.theseusIntro"
+export function introSeen() {
+  try {
+    return localStorage.getItem(INTRO_KEY) === "1"
+  } catch {
+    return false
+  }
+}
+export function markIntroSeen() {
+  try {
+    localStorage.setItem(INTRO_KEY, "1")
+  } catch {
+    // Shown again next time; nothing breaks.
+  }
+}
 
 const PLAN: TheseusPlan = {
   task: "Create and edit routines from the Routines screen",

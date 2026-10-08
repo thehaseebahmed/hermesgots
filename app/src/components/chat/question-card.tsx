@@ -31,7 +31,7 @@ function answerOf(question: ClarifyQuestion, picked: Picked): string | string[] 
   return picked.choices[0] ?? null
 }
 
-function ChoiceRow({
+export function ChoiceRow({
   label,
   selected,
   recommended,
