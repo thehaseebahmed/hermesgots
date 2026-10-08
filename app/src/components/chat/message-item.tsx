@@ -179,6 +179,8 @@ export function MessageItem({
     ? message.tools?.findLast((t) => t.tool === "clarify" && t.status === "running")
     : undefined
   const tools = (message.tools ?? []).filter((t) => t !== asking)
+  // The tool group right above already names the running call, so repeating it here is noise.
+  const runningTool = tools.some((t) => t.status === "running")
 
   // An answered approval splits the reply in two so the card sits where it happened:
   // everything Hermes said and ran before asking, the card, then everything after.
@@ -201,7 +203,8 @@ export function MessageItem({
   const footer = (
     <>
       {plain ? (
-        streaming && (
+        streaming &&
+        !runningTool && (
           <StatusLine
             text={awaitingApproval ? "Waiting for your approval…" : describeActivity(message)}
           />
