@@ -266,9 +266,23 @@ def blocked(hermes_home: Path, record: Optional[Dict[str, Any]]) -> Optional[str
     return _blocked(project, record)
 
 
+def _fetch_origin(repo_root: str) -> None:
+    """Best-effort fetch so a new worktree branches from the latest remote tip, not a stale
+    local ref. _setup_worktree's own fetch has a short timeout and a freshness window that can
+    skip it; this runs first with the plugin's longer timeout. Never raises — offline or auth
+    failures fall through to _setup_worktree's cached ref or the local-HEAD fallback."""
+    try:
+        result = _git(repo_root, "fetch", "origin", "--prune")
+        if result.returncode != 0:
+            logger.debug("memento: fetch origin in %s failed: %s", repo_root, result.stderr.strip())
+    except WorkspaceError:
+        logger.debug("memento: fetch origin in %s failed", repo_root, exc_info=True)
+
+
 def _create_worktree(repo_root: str, name: str) -> Dict[str, str]:
     from hermes_cli.worktree_ops import _setup_worktree
 
+    _fetch_origin(repo_root)
     info = None
     try:
         info = _setup_worktree(repo_root=repo_root, sync_base=True, name=name)
