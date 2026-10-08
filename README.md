@@ -127,7 +127,7 @@ One-time setup, in the Firebase project that already holds the `app.memento` And
 1. In the Firebase console, open **App Distribution**, accept its terms, and under **Testers & Groups** create a group (e.g. `testers`) and add the testers' emails.
 2. In Google Cloud's **IAM & Admin → Service accounts** for the same project, create a service account with the **Firebase App Distribution Admin** role (`roles/firebaseappdistro.admin`) and download a JSON key for it.
 3. Add to the repo's Actions settings:
-   - secret: `FIREBASE_SERVICE_ACCOUNT`, that key's JSON (as is, or base64). The same key goes in Netlify's `FIREBASE_SERVICE_ACCOUNT` so the registry can send push notifications with it; for that the account also needs **Firebase Cloud Messaging API Admin**. The older names `FIREBASE_DISTRIBUTION_KEY` and `FCM_SERVICE_ACCOUNT` still work.
+   - secret: `FIREBASE_SERVICE_ACCOUNT`, that key's JSON (as is, or base64). The same key goes in Netlify's `FIREBASE_SERVICE_ACCOUNT` so the registry can send push notifications with it; for that the account also needs **Firebase Cloud Messaging API Admin**.
    - variable (optional): `FIREBASE_TESTER_GROUPS`, the group aliases to send to, comma-separated (default `testers`).
    - variable (optional): `FIREBASE_APP_ID`, the app's id (`1:…:android:…`). By default it's read from `FIREBASE_GOOGLE_SERVICES`.
 

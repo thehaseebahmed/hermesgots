@@ -32,7 +32,7 @@ export default async (req: Request) => {
     store: getStore({ name: "memento-registry", consistency: "strong" }),
     caller,
     inbox,
-    fcm: createFcm(process.env.FIREBASE_SERVICE_ACCOUNT ?? process.env.FCM_SERVICE_ACCOUNT),
+    fcm: createFcm(process.env.FIREBASE_SERVICE_ACCOUNT),
     // The Android app's WebView runs on https://localhost.
     origins: [new URL(site).origin, "https://localhost"],
   })
