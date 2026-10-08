@@ -116,6 +116,7 @@ function openTurn(
   config: HermesConfig,
   reply: Message,
   resumed = false,
+  existingController?: AbortController,
 ): Turn {
   const draft: Draft = { ...reply, tools: [...(reply.tools ?? [])] }
   let dirty = false
@@ -129,7 +130,7 @@ function openTurn(
   const touch = () => {
     dirty = true
   }
-  const controller = new AbortController()
+  const controller = existingController ?? new AbortController()
   const close = async () => {
     window.clearInterval(timer)
     controllers.delete(conversationId)
@@ -601,11 +602,21 @@ export async function sendMessage(
   const content = text.trim()
   const attachments = options.attachments ?? []
   if ((!content && !attachments.length) || controllers.has(conversationId)) return
+  // Acquire the guard before any await: two concurrent calls for the same chat both
+  // passed it once and each started a run, duplicating the turn.
+  const controller = new AbortController()
+  controllers.set(conversationId, controller)
 
   const conversation = await db.conversations.get(conversationId)
-  if (!conversation) return
+  if (!conversation) {
+    controllers.delete(conversationId)
+    return
+  }
   const profile = await profileFor(conversation.profileId)
-  if (!profile) return
+  if (!profile) {
+    controllers.delete(conversationId)
+    return
+  }
 
   const history = await getMessages(conversationId)
   const now = Date.now()
@@ -644,7 +655,7 @@ export async function sendMessage(
     .map((m) => ({ role: m.role, content: attachmentsText(m.content, m.attachments) }))
 
   const config = { baseUrl: profile.baseUrl, apiKey: profile.apiKey }
-  const turn = openTurn(conversationId, config, reply)
+  const turn = openTurn(conversationId, config, reply, false, controller)
   const status = await runTurn(turn, async () => {
     // Without a key Hermes keeps no session under our id, so nothing would sync or resume.
     if (!config.apiKey) throw new HermesError("This bot has no API key. Link it in Settings.")
@@ -737,14 +748,17 @@ export async function reattachRun(conversationId: string) {
 async function resumeReply(reply: Message) {
   const { conversationId, runId } = reply
   if (!runId || controllers.has(conversationId)) return
+  const controller = new AbortController()
+  controllers.set(conversationId, controller)
   const conversation = await db.conversations.get(conversationId)
   const profile = await profileFor(conversation?.profileId)
   if (!conversation || !profile) {
+    controllers.delete(conversationId)
     await db.messages.update(reply.id, { status: "stopped", statusText: undefined })
     return
   }
   const config = { baseUrl: profile.baseUrl, apiKey: profile.apiKey }
-  const turn = openTurn(conversationId, config, reply, true)
+  const turn = openTurn(conversationId, config, reply, true, controller)
   const status = await runTurn(turn, () => followTurnRun(turn, runId))
   if (status === "done") await sendNextQueued(conversationId)
 }
