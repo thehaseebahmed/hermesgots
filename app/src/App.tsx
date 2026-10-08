@@ -1,9 +1,13 @@
 import { useEffect } from "react"
 import { useTheme } from "next-themes"
-import { Route, Routes } from "react-router"
+import { useLiveQuery } from "dexie-react-hooks"
+import { Navigate, Route, Routes } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
+import { getActiveProfile } from "@/lib/db"
 import { useLaunchRestore, useRecordLastChat } from "@/lib/launch"
+import { useBotThreads } from "@/lib/threads"
+import { BotThreadsPage } from "@/routes/bot-threads"
 import { BotsPage } from "@/routes/bots"
 import { ChatPage } from "@/routes/chat"
 import { OpenSessionPage } from "@/routes/open-session"
@@ -35,13 +39,25 @@ function ThemeColor() {
   return null
 }
 
+/** A new chat, or with bot threads on, the active bot, where a new thread starts. */
+function Home() {
+  const botThreads = useBotThreads()
+  const active = useLiveQuery(
+    async () => (botThreads ? ((await getActiveProfile()) ?? null) : null),
+    [botThreads],
+  )
+  if (botThreads === undefined || (botThreads && active === undefined)) return null
+  return active ? <Navigate to={`/b/${active.id}`} replace /> : <ChatPage />
+}
+
 function AppRoutes() {
   useRecordLastChat()
   if (!useLaunchRestore()) return null
   return (
     <Routes>
       <Route element={<AppShell />}>
-        <Route index element={<ChatPage />} />
+        <Route index element={<Home />} />
+        <Route path="b/:profileId" element={<BotThreadsPage />} />
         <Route path="c/:id" element={<ChatPage />} />
         <Route path="s/:sessionId" element={<OpenSessionPage />} />
         <Route path="code" element={<CodePage />} />

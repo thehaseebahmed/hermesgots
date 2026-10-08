@@ -6,16 +6,28 @@ import { DrawerContext } from "@/components/drawer-context"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { useLarge } from "@/lib/media"
 import { depth } from "@/lib/nav"
-import { useProjectPane, type ProjectPane } from "@/lib/pane"
+import { useProjectPane } from "@/lib/pane"
+import { useBotPane, useBotThreads } from "@/lib/threads"
 import { cn } from "@/lib/utils"
+import { BotThreadsPage } from "@/routes/bot-threads"
 import { ProjectPage } from "@/routes/project"
 
 /**
- * From `lg` Settings' sections open beside its menu, and from `xl` a project's sessions beside the
- * project, so each counts as one screen.
+ * A list kept on screen, from `xl`, beside what it opened: a project beside its session, or a bot
+ * beside its thread. `screen` is the list's own path.
  */
-function screenOf(path: string, large: boolean, pane: ProjectPane | undefined) {
-  if (pane) return `/code/${pane.profileId}/${pane.projectId}`
+interface ListPane {
+  screen: string
+  open: boolean
+  node: ReactNode
+}
+
+/**
+ * From `lg` Settings' sections open beside its menu, and from `xl` a project's sessions beside the
+ * project (and a bot's threads beside the bot), so each counts as one screen.
+ */
+function screenOf(path: string, large: boolean, pane: ListPane | undefined) {
+  if (pane) return pane.screen
   return large && path.startsWith("/settings") ? "/settings" : path
 }
 
@@ -23,7 +35,7 @@ function screenOf(path: string, large: boolean, pane: ProjectPane | undefined) {
  * Animates the main pane in when the screen changes: from the right when it was opened on top of
  * the last one, from the left when going back to it, and a fade when it took the last one's place.
  */
-function usePageTransition(ref: RefObject<HTMLElement | null>, pane: ProjectPane | undefined) {
+function usePageTransition(ref: RefObject<HTMLElement | null>, pane: ListPane | undefined) {
   const location = useLocation()
   const type = useNavigationType()
   const large = useLarge()
@@ -56,9 +68,9 @@ function usePageTransition(ref: RefObject<HTMLElement | null>, pane: ProjectPane
  * From `xl`, a project and the session open beside it: the project narrows to a list pane and the
  * session slides in to its right. Both stay mounted while sessions are swapped.
  */
-function Panes({ pane, children }: { pane: ProjectPane | undefined; children: ReactNode }) {
+function Panes({ pane, children }: { pane: ListPane | undefined; children: ReactNode }) {
   const session = useRef<HTMLDivElement>(null)
-  const open = Boolean(pane?.session)
+  const open = Boolean(pane?.open)
   useLayoutEffect(() => {
     if (!open || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
     session.current?.animate(
@@ -80,11 +92,7 @@ function Panes({ pane, children }: { pane: ProjectPane | undefined; children: Re
             open ? "w-103 border-r" : "w-full",
           )}
         >
-          <ProjectPage
-            key={`${pane.profileId}/${pane.projectId}`}
-            pane={pane}
-            session={pane.session}
-          />
+          {pane.node}
         </div>
       )}
       <div ref={session} className="flex min-w-0 flex-1 flex-col">
@@ -98,7 +106,25 @@ function Panes({ pane, children }: { pane: ProjectPane | undefined; children: Re
 export function AppShell({ children }: { children?: ReactNode }) {
   const [open, setOpen] = useState(false)
   const main = useRef<HTMLElement>(null)
-  const pane = useProjectPane()
+  const project = useProjectPane()
+  const bot = useBotPane(useBotThreads())
+  const pane: ListPane | undefined = project
+    ? {
+        screen: `/code/${project.profileId}/${project.projectId}`,
+        open: Boolean(project.session),
+        node: (
+          <ProjectPage
+            key={`${project.profileId}/${project.projectId}`}
+            pane={project}
+            session={project.session}
+          />
+        ),
+      }
+    : bot && {
+        screen: `/b/${bot.profileId}`,
+        open: Boolean(bot.thread),
+        node: <BotThreadsPage key={bot.profileId} profileId={bot.profileId} thread={bot.thread} />,
+      }
   usePageTransition(main, pane)
 
   return (

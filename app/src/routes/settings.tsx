@@ -12,6 +12,7 @@ import {
   DatabaseIcon,
   MenuIcon,
   MessageCircleIcon,
+  MessagesSquareIcon,
   MonitorIcon,
   MoonIcon,
   PaletteIcon,
@@ -261,6 +262,19 @@ function DeveloperSettings() {
           subtitle="Very unstable"
           checked={Boolean(settings?.theseus)}
           onCheckedChange={(checked) => saveSettings({ theseus: checked })}
+        />
+        <SwitchRow
+          id="bot-threads"
+          icon={MessagesSquareIcon}
+          title={
+            <span className="flex items-center gap-2">
+              Bot threads
+              <ExperimentalBadge />
+            </span>
+          }
+          subtitle="Bots in the sidebar, chats as threads"
+          checked={Boolean(settings?.botThreads)}
+          onCheckedChange={(checked) => saveSettings({ botThreads: checked })}
         />
       </Group>
       <Group>

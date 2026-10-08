@@ -95,6 +95,8 @@ import {
   setSessionMode,
   type RepoRef,
 } from "@/lib/workspace"
+import { SESSION_SUGGESTIONS, SUGGESTIONS } from "@/lib/suggestions"
+import { useBotThreads } from "@/lib/threads"
 import { useTheseusInfo, useTheseusRun, waitsOnUser } from "@/lib/theseus"
 import { AgentsContext, DELEGATE_TOOL, useSessionAgents } from "@/lib/agents"
 
@@ -102,17 +104,6 @@ import { AgentsContext, DELEGATE_TOOL, useSessionAgents } from "@/lib/agents"
 const CATCH_UP_MS = 30_000
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
-
-const SUGGESTIONS = [
-  "What can you do on my machine?",
-  "Summarise what you remember about me",
-  "Check disk usage under /var/log",
-]
-const SESSION_SUGGESTIONS = [
-  "Give me a tour of this codebase",
-  "Run the tests and fix what fails",
-  "Find a small bug worth fixing",
-]
 
 function EmptyState({
   name,
@@ -398,8 +389,20 @@ export function ChatPage() {
       else await deleteConversation(left)
     })()
   }, [id])
-  // From `xl` a session opens beside its project, which it closes back to.
-  const beside = useXLarge() && Boolean(session)
+  // With bot threads on, a chat is a thread of its bot, which it goes back to.
+  const botThreads = useBotThreads()
+  const botPath =
+    botThreads && conversation && !session ? `/b/${conversation.profileId}` : undefined
+  // From `xl` a session opens beside its project, and a thread beside its bot, which they close to.
+  const xl = useXLarge()
+  const beside = xl && Boolean(session)
+  useEffect(() => {
+    if (!botPath) return
+    return setBackGuard(() => {
+      up(botPath)
+      return true
+    })
+  }, [botPath, up])
   // A session sits under its project; a plain chat is top-level, so back leaves the app.
   useEffect(() => {
     if (!projectPath) return
@@ -456,6 +459,12 @@ export function ChatPage() {
         <EllipsisIcon />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-44">
+        {botPath && (
+          <DropdownMenuItem onClick={() => root(botPath)}>
+            <PlusIcon />
+            New thread
+          </DropdownMenuItem>
+        )}
         {configured && !simple && (
           <>
             <DropdownMenuItem onClick={() => setUsageOpen(true)}>
@@ -515,16 +524,28 @@ export function ChatPage() {
         botId={profile?.botId}
         actions={actions}
         leading={
-          session && (
+          botPath ? (
             <Button
               variant="outline"
               size="icon-lg"
               className="size-11 rounded-full bg-background/80 backdrop-blur"
-              onClick={leave}
-              aria-label={beside ? "Close session" : "Back to project"}
+              onClick={() => up(botPath)}
+              aria-label={xl ? "Close thread" : `Back to ${profile?.name ?? "bot"}`}
             >
-              {beside ? <XIcon /> : <ArrowLeftIcon />}
+              {xl ? <XIcon /> : <ArrowLeftIcon />}
             </Button>
+          ) : (
+            session && (
+              <Button
+                variant="outline"
+                size="icon-lg"
+                className="size-11 rounded-full bg-background/80 backdrop-blur"
+                onClick={leave}
+                aria-label={beside ? "Close session" : "Back to project"}
+              >
+                {beside ? <XIcon /> : <ArrowLeftIcon />}
+              </Button>
+            )
           )
         }
       />
@@ -611,7 +632,7 @@ export function ChatPage() {
             </div>
           </div>
         )}
-        {!id && profile && (
+        {!id && profile && !botThreads && (
           <div className="mx-auto flex w-full max-w-3xl pb-2">
             <BotPicker profile={profile} />
           </div>
@@ -668,7 +689,7 @@ export function ChatPage() {
             filesAvailable={Boolean(profile?.apiKey)}
             imagesAvailable={profile?.imageInput !== false}
             onStop={() => id && stopMessage(id)}
-            onCommand={(command) => root(command === "new" ? "/" : "/settings")}
+            onCommand={(command) => root(command === "new" ? (botPath ?? "/") : "/settings")}
             connection={{ baseUrl: profile?.baseUrl ?? "", apiKey: profile?.apiKey ?? "" }}
             botName={profile?.name}
             session={
@@ -797,7 +818,7 @@ export function ChatPage() {
                 }
                 setDeleting(false)
                 if (projectPath) up(projectPath)
-                else root("/")
+                else root(botPath ?? "/")
               }}
             >
               Delete

@@ -1,5 +1,5 @@
 import { useLiveQuery } from "dexie-react-hooks"
-import { NavLink, type NavLinkProps } from "react-router"
+import { matchPath, NavLink, useLocation, type NavLinkProps } from "react-router"
 import {
   ChevronRightIcon,
   CodeXmlIcon,
@@ -17,8 +17,10 @@ import { Bot } from "@/components/bot"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { db } from "@/lib/db"
+import { formatRelative } from "@/lib/format"
 import { useNav } from "@/lib/nav"
 import { useSyncState } from "@/lib/sync"
+import { useBotSummaries, useBotThreads, useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { reasonText, useWaiting, useWaitingSessions, type WaitingReason } from "@/lib/waiting"
 
@@ -128,6 +130,77 @@ function Recents({ onNavigate }: { onNavigate?: () => void }) {
   )
 }
 
+/**
+ * With bot threads on, in place of Recents: every bot that's turned on, each with its newest thread
+ * and a count of the threads waiting on the user. A bot opens as one chat holding its threads.
+ */
+function Bots({ onNavigate }: { onNavigate?: () => void }) {
+  const bots = useBotSummaries()
+  const { pathname } = useLocation()
+  const chat = matchPath("/c/:id", pathname)?.params.id
+  const owner = useLiveQuery(
+    async () => (chat ? (await db.conversations.get(chat))?.profileId : undefined),
+    [chat],
+  )
+  const now = useNow()
+
+  return (
+    <nav className="flex flex-col gap-0.5" aria-labelledby="bots-heading">
+      <h2 id="bots-heading" className="px-3 pt-1 pb-2 text-sm font-medium text-muted-foreground">
+        Bots
+      </h2>
+      <ul className="flex flex-col gap-0.5">
+        {bots?.map(({ bot, latest, waiting }) => (
+          <li key={bot.id}>
+            <RootLink
+              to={`/b/${bot.id}`}
+              onClick={onNavigate}
+              className={({ isActive }) =>
+                cn(rowClass({ isActive: isActive || owner === bot.id }), "min-h-14 py-2")
+              }
+            >
+              <Bot id={bot.botId} className="size-9" />
+              <span className="min-w-0 flex-1">
+                <span className="flex items-baseline gap-2">
+                  <span className="min-w-0 flex-1 truncate font-medium">{bot.name}</span>
+                  {latest && (
+                    <span className="shrink-0 text-xs font-normal text-muted-foreground">
+                      {formatRelative(latest.updatedAt, now)}
+                    </span>
+                  )}
+                </span>
+                <span className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate text-xs font-normal text-muted-foreground">
+                    {latest?.title ?? "No threads yet"}
+                  </span>
+                  {waiting > 0 && (
+                    <span className="shrink-0 rounded-full bg-warning/15 px-1.5 text-xs leading-5 font-semibold text-warning tabular-nums">
+                      {waiting}
+                      <span className="sr-only"> waiting for you</span>
+                    </span>
+                  )}
+                </span>
+              </span>
+            </RootLink>
+          </li>
+        ))}
+        <li>
+          <RootLink
+            to="/settings/bots?link=1"
+            onClick={onNavigate}
+            className={() => cn(rowClass({ isActive: false }), "text-muted-foreground")}
+          >
+            <span className="flex size-9 items-center justify-center">
+              <PlusIcon className="size-5" />
+            </span>
+            Link a bot
+          </RootLink>
+        </li>
+      </ul>
+    </nav>
+  )
+}
+
 /** Project sessions, across every project, that wait on the user. Hidden when there are none. */
 function Waiting({ onNavigate }: { onNavigate?: () => void }) {
   const waiting = useWaitingSessions()
@@ -202,6 +275,7 @@ function ProfileButton({ onNavigate }: { onNavigate?: () => void }) {
 
 export function ConversationList({ onNavigate }: { onNavigate?: () => void }) {
   const { root } = useNav()
+  const botThreads = useBotThreads()
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -225,22 +299,28 @@ export function ConversationList({ onNavigate }: { onNavigate?: () => void }) {
         </nav>
         <Separator className="mx-1 my-3 data-horizontal:w-auto" />
         <Waiting onNavigate={onNavigate} />
-        <Recents onNavigate={onNavigate} />
+        {botThreads ? (
+          <Bots onNavigate={onNavigate} />
+        ) : (
+          botThreads === false && <Recents onNavigate={onNavigate} />
+        )}
       </div>
 
       <div className="flex items-center justify-between gap-3 px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <ProfileButton onNavigate={onNavigate} />
-        <Button
-          size="lg"
-          className="h-11 rounded-full px-5"
-          onClick={() => {
-            root("/")
-            onNavigate?.()
-          }}
-        >
-          <PlusIcon data-icon="inline-start" />
-          New chat
-        </Button>
+        {botThreads === false && (
+          <Button
+            size="lg"
+            className="h-11 rounded-full px-5"
+            onClick={() => {
+              root("/")
+              onNavigate?.()
+            }}
+          >
+            <PlusIcon data-icon="inline-start" />
+            New chat
+          </Button>
+        )}
       </div>
     </div>
   )
