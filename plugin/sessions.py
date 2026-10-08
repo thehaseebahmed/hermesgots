@@ -22,6 +22,7 @@ import logging
 import os
 import re
 import secrets
+import shutil
 import sqlite3
 import subprocess
 import time
@@ -399,7 +400,7 @@ def instructions(record: Dict[str, Any]) -> str:
     if record.get("mode") == "theseus":
         from . import theseus
 
-        lines.append(theseus.instructions())
+        lines.append(theseus.instructions(record))
     return "\n".join(line for line in lines if line)
 
 
@@ -515,6 +516,14 @@ def _record_cwd(session_id: str, cwd: Optional[str]) -> None:
     except ImportError:
         return
     record_session_cwd(session_id, cwd)
+
+
+def _cwd(session_id: str) -> Optional[str]:
+    try:
+        from tools.terminal_tool import get_session_cwd
+    except ImportError:
+        return None
+    return get_session_cwd(session_id) if session_id else None
 
 
 def _has_cwd(session_id: str) -> bool:
@@ -674,6 +683,11 @@ def remove(path: Path, session_id: str) -> Dict[str, Any]:
             _git(repo["repo_root"], "branch", "-d", repo["branch"])
     if kept:
         return {"removed": False, "kept": kept}
+    from . import theseus
+
+    folder = theseus.session_folder(record, path.parent.parent)
+    if folder:
+        shutil.rmtree(folder, ignore_errors=True)
     _delete(path, session_id)
     return {"removed": True, "kept": []}
 
@@ -868,6 +882,9 @@ def _before_tool(kwargs: Dict[str, Any]) -> Optional[Dict[str, str]]:
         args = kwargs.get("args") if isinstance(kwargs.get("args"), dict) else {}
         if theseus.blocks_record(kwargs.get("tool_name"), args):
             return {"action": "block", "message": theseus.THESEUS_BLOCK}
+        misplaced = theseus.misplaced_init(kwargs.get("tool_name"), args, record, _cwd(task_id))
+        if misplaced:
+            return {"action": "block", "message": misplaced}
         if kwargs.get("tool_name") == "delegate_task" and task_id:
             # A child starts in the parent's current folder, and the run may live in another repo
             # of the session (or above them), where the planner has to work.
