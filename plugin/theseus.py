@@ -25,7 +25,7 @@ import urllib.error
 import urllib.request
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
 # Fixed text, so the prompt cache holds across a session's turns.
 INSTRUCTIONS = """This session is a Theseus run: the user decides, you build in small checkpoints that each pass four gates. Follow the tha-theseus skill. Read {skill}/SKILL.md first (api.md, gates.md and checkpoints.md sit next to it) and run its CLI as `node {script} <command>`, called `theseus` in the skill.
 How it works on this host:
-- Work only in your worktree. Start the run with `theseus init` from the worktree's top folder, never a subfolder such as app/, and run every theseus command from there. The user sees it in Memento and approves the plan, the checkpoints and each checkpoint there. Never run `theseus serve`: Memento serves it.
+- {start} The user sees it in Memento and approves the plan, the checkpoints and each checkpoint there. Never run `theseus serve`: Memento serves it.
 - Settle requirements with the user in chat, asking with the clarify tool. After that nobody answers for the user, so wait for them with `theseus wait --timeout 120` and run it again each time it times out.
 - Reviews are done by the theseus_review tool, which asks another model and records its verdict itself. Call it with gate `coverage` once the checkpoints are loaded (the user can't approve them until it is clean; on findings a fresh planner revises the list, you load it again and call it again), then once per reviewer a checkpoint needs (`a`, `b`; `look`, `behave` for visual). Never run `theseus coverage --verdict`, `theseus record ... review` or `visual --reviewer` yourself. `visual --skip` and `--carry` are still yours to record.
 - Everything runs in Auto: you are never asked to approve a command, and only the user approves checkpoints.
@@ -144,8 +144,54 @@ def info() -> Dict[str, Any]:
     }
 
 
-def instructions() -> str:
-    return INSTRUCTIONS.format(skill=SKILL, script=SCRIPT)
+SINGLE_START = "Work only in your worktree. Start the run with `theseus init` from the worktree's top folder, never a subfolder such as app/, and run every theseus command from there."
+MULTI_START = "This session spans several repos, and one run covers them all, in {folder}. Start it there with `cd {folder} && theseus init --repos {repos}` (add `--test-cmd-<name>` where a repo's test command differs), run every theseus command from {folder}, and name in each checkpoint the repos it changes."
+
+
+def instructions(record: Optional[Dict[str, Any]] = None) -> str:
+    folder = session_folder(record or {})
+    if folder:
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            logger.warning("memento: couldn't make the Theseus run folder %s", folder, exc_info=True)
+            folder = None
+    start = (
+        MULTI_START.format(folder=folder, repos=",".join(f"{name}={tree}" for name, tree in _repo_names(record or {})))
+        if folder
+        else SINGLE_START
+    )
+    return INSTRUCTIONS.format(skill=SKILL, script=SCRIPT, start=start)
+
+
+def session_folder(record: Dict[str, Any], home: Optional[Path] = None) -> Optional[Path]:
+    """Where a multi-repo session keeps its one run: a folder of its own under the profile home, so
+    every repo's checkpoints sit in the same run and two sessions of a project never share one. A
+    single-repo session's run stays in its worktree."""
+    session_id = record.get("session_id")
+    if not session_id or len([r for r in record.get("repos") or [] if r.get("path")]) < 2:
+        return None
+    if home is None:
+        from hermes_constants import get_hermes_home
+
+        home = Path(get_hermes_home())
+    return home / "memento" / "theseus" / re.sub(r"[^A-Za-z0-9._-]", "_", str(session_id))
+
+
+def _repo_names(record: Dict[str, Any]) -> List[Tuple[str, str]]:
+    """Each worktree under the short name the skill's ``--repos`` takes (``web`` for owner/web)."""
+    named: List[Tuple[str, str]] = []
+    taken: set = set()
+    for repo in record.get("repos") or []:
+        if not repo.get("path"):
+            continue
+        base = re.sub(r"[^A-Za-z0-9._-]", "-", str(repo.get("name") or "repo").rsplit("/", 1)[-1]) or "repo"
+        name, n = base, 2
+        while name in taken:
+            name, n = f"{base}{n}", n + 1
+        taken.add(name)
+        named.append((name, repo["path"]))
+    return named
 
 
 # --- the CLI and the server --------------------------------------------------------------------
@@ -250,6 +296,9 @@ def run_home(record: Dict[str, Any]) -> Optional[str]:
     runs it, which isn't always the worktree's top (a repo whose commands run from ``app/``, say), and
     a run over several repos sits above them. So look in each worktree, then below it, then above it
     for a run that lists the worktree; the newest wins. Falls back to the session's own worktree."""
+    folder = session_folder(record)
+    if folder and _has_run(folder):
+        return str(folder)
     primary = record.get("path")
     trees = [Path(r["path"]) for r in record.get("repos") or [] if r.get("path")]
     if primary and Path(primary) not in trees:
@@ -752,6 +801,21 @@ def wire(adapter: Any) -> bool:
 
     adapter._create_agent = create_agent
     return True
+
+
+_INIT = re.compile(r"theseus(?:\.js)?\s+init\b")
+
+
+def misplaced_init(tool: Any, args: Dict[str, Any], record: Dict[str, Any], cwd: Optional[str]) -> Optional[str]:
+    """For a multi-repo session, the refusal for a ``theseus init`` outside its run folder, which
+    would split the session's checkpoints over two runs."""
+    command = args.get("command") if isinstance(args, dict) else None
+    if tool != "terminal" or not isinstance(command, str) or not _INIT.search(command):
+        return None
+    folder = session_folder(record)
+    if not folder or str(folder) in command or (cwd and Path(cwd) == folder):
+        return None
+    return f"This session's Theseus run covers all its repos in {folder}. Run `theseus init` from there: `cd {folder} && theseus init --repos ...`."
 
 
 def blocks_record(tool: Any, args: Dict[str, Any]) -> bool:
