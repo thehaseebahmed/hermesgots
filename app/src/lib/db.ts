@@ -7,7 +7,8 @@ export type ThemePreference = "system" | "light" | "dark"
 
 export interface Settings {
   id: "settings"
-  showStats: boolean
+  /** Plain chats leave out context use, reply stats and tool calls; project sessions show them. */
+  simplifiedChats: boolean
   /** Shows the Developer section in Settings (tapping the version five times). */
   developer?: boolean
   /** Offers Theseus among a project session's modes; a Developer setting, off by default. Local. */
@@ -286,7 +287,7 @@ export interface VaultKey {
 
 export const DEFAULT_SETTINGS: Settings = {
   id: "settings",
-  showStats: true,
+  simplifiedChats: true,
 }
 
 export const DEFAULT_PROFILE = {
