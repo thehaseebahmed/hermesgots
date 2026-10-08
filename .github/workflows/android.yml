@@ -58,11 +58,6 @@ jobs:
 
       - run: pnpm lint
 
-      - name: Build web assets and sync them into the Android project
-        run: pnpm build:android
-        env:
-          VITE_SITE_URL: ${{ vars.MEMENTO_SITE_URL }}
-
       - name: Firebase config
         if: env.FIREBASE_GOOGLE_SERVICES != ''
         run: |
@@ -79,6 +74,14 @@ jobs:
             exit 1
           fi
           rm -f "$RUNNER_TEMP/firebase.raw"
+
+      - name: Build web assets and sync them into the Android project
+        run: |
+          # Push only works in a build that carries google-services.json.
+          if [ -f android/app/google-services.json ]; then export VITE_FIREBASE=1; fi
+          pnpm build:android
+        env:
+          VITE_SITE_URL: ${{ vars.MEMENTO_SITE_URL }}
 
       - name: Version
         id: version

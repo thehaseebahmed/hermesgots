@@ -28,7 +28,7 @@ export type PushPermission = NotificationPermission | "unsupported"
 
 /** Whether this device can get push: a browser with the Push API, or the Android app. */
 export function pushAvailable() {
-  return isNative || webSupported()
+  return isNative ? nativeConfigured : webSupported()
 }
 
 /** The Android app's WebView has no Push API; it gets Firebase messaging (see below) instead. */
@@ -210,6 +210,23 @@ function startWeb() {
 
 type Push = typeof import("@capacitor/push-notifications").PushNotifications
 
+/**
+ * Whether this APK was built with a google-services.json. Without one Firebase never starts, and
+ * the plugin's `register()` throws on the native side, which ends the app.
+ */
+const nativeConfigured = import.meta.env.VITE_FIREBASE === "1"
+
+/** `fcm.trying` is set across a native `register()`: if the app died in it, it is not tried again. */
+async function guarded<T>(device: string, run: () => Promise<T>): Promise<T> {
+  await saveSettings({ fcm: { device, on: false, trying: true } })
+  try {
+    return await run()
+  } finally {
+    // Only a native crash leaves the flag behind; an error in JS comes back here.
+    await saveSettings({ fcm: { device, on: true } })
+  }
+}
+
 let nativeListening = false
 let registeredToken: string | undefined
 let pendingToken: { resolve: (token: string) => void; reject: (error: Error) => void } | undefined
@@ -303,7 +320,7 @@ async function enableNative(): Promise<PushPermission> {
   if (status.receive !== "granted") return "denied"
   const settings = await getSettings()
   const device = settings.fcm?.device ?? crypto.randomUUID()
-  await saveSettings({ fcm: { device, on: true } })
+  if (!nativeConfigured) throw new Error("This build has no Firebase configuration")
   try {
     await listen(push)
     const token = new Promise<string>((resolve, reject) => {
@@ -311,7 +328,8 @@ async function enableNative(): Promise<PushPermission> {
     })
     // Rejected later by a timeout or a failed register(), and read below only when it gets there.
     token.catch(() => {})
-    await step("Registering with Firebase", push.register())
+    await guarded(device, () => step("Registering with Firebase", push.register()))
+    await saveSettings({ fcm: { device, on: true } })
     await sendToken(
       device,
       await step("Firebase's token", token).finally(() => {
@@ -346,11 +364,16 @@ async function disableNative() {
 function startNative() {
   const sync = async () => {
     const { fcm } = await getSettings()
-    if (!fcm?.on) return
+    if (fcm?.trying) {
+      // The last attempt to register ended the app; stay off until the user turns it on again.
+      await saveSettings({ fcm: { device: fcm.device, on: false } })
+      return
+    }
+    if (!fcm?.on || !nativeConfigured) return
     const { push } = await plugin()
     if ((await push.checkPermissions()).receive !== "granted") return
     await listen(push)
-    await push.register()
+    await guarded(fcm.device, () => push.register())
   }
   void sync().catch(() => {})
   void App.addListener("resume", () => void sync().catch(() => {}))
