@@ -202,8 +202,8 @@ export function BotThreadsPage({
         <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
           <ul className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-4 pt-32 pb-6">
             {threads.map((thread, index) => {
-              const day = dayOf(thread.chat.updatedAt, now)
-              const newDay = index === 0 || dayOf(threads[index - 1].chat.updatedAt, now) !== day
+              const day = dayOf(thread.chat.createdAt, now)
+              const newDay = index === 0 || dayOf(threads[index - 1].chat.createdAt, now) !== day
               return (
                 <Fragment key={thread.chat.id}>
                   {newDay && (
