@@ -38,6 +38,7 @@ import { liveTurn, patchStats } from "@/lib/history"
 import { isLive } from "@/lib/live"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { randomId } from "@/lib/utils"
+import { onWake } from "@/lib/wake"
 import { ensureSessionWorkspace, refreshPrs, refreshWorkspace } from "@/lib/workspace"
 
 /**
@@ -375,14 +376,19 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
   let polling = false
   let raisedFor: string | undefined
   let readTranscript: ((signal: AbortSignal) => Promise<void>) | undefined
-  const timed = () => AbortSignal.any([signal, AbortSignal.timeout(POLL_TIMEOUT_MS)])
   let failures = 0
   let errored = false
   for (let attempt = 0; ; attempt++) {
+    // Coming back to the app drops this attempt's connection, which may have died meanwhile, and
+    // reads the run again at once rather than once a timeout notices.
+    const woken = new AbortController()
+    const stopWaking = onWake(() => woken.abort(new DOMException("Woken", "AbortError")))
+    const current = AbortSignal.any([signal, woken.signal])
+    const timed = () => AbortSignal.any([current, AbortSignal.timeout(POLL_TIMEOUT_MS)])
     try {
       if (!polling) {
         const lastSeq = draft.runSeq ?? -1
-        const outcome = await followRun(config, runId, { lastSeq, signal }, handlers)
+        const outcome = await followRun(config, runId, { lastSeq, signal: current }, handlers)
         if (outcome) return { ...outcome, replaceContent: lost }
       } else {
         readTranscript ??= await transcriptReader(turn)
@@ -415,6 +421,7 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
       errored = false
     } catch (error) {
       if (signal.aborted) throw error
+      if (woken.signal.aborted) continue
       if (error instanceof HermesError && error.status === 404) {
         if (polling) return { status: "interrupted", error: "Hermes no longer has this reply." }
         polling = true
@@ -437,6 +444,8 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
       if (document.visibilityState === "visible" && navigator.onLine) {
         if (++failures >= MAX_VISIBLE_FAILURES) throw error
       }
+    } finally {
+      stopWaking()
     }
     const backoff = RETRY_MS[Math.min(attempt, RETRY_MS.length - 1)]
     await waitToRetry(polling && !errored ? POLL_MS : backoff, signal)
