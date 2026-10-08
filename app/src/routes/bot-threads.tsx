@@ -2,12 +2,18 @@ import { Fragment, useEffect, useLayoutEffect, useRef } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Link, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
-import { ChevronRightIcon, EllipsisIcon, SettingsIcon } from "lucide-react"
+import {
+  CheckIcon,
+  ChevronRightIcon,
+  CircleAlertIcon,
+  CircleXIcon,
+  EllipsisIcon,
+  SettingsIcon,
+} from "lucide-react"
 
 import { ChatHeader } from "@/components/chat/chat-header"
 import { Composer } from "@/components/chat/composer"
 import { Bot } from "@/components/bot"
-import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -18,7 +24,6 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { sendMessage } from "@/lib/chat"
 import { createConversation, db, setActiveProfile, type Attachment } from "@/lib/db"
-import { formatRelative } from "@/lib/format"
 import { useNav } from "@/lib/nav"
 import { useNow, useThreads, type Thread } from "@/lib/threads"
 import { cn } from "@/lib/utils"
@@ -38,77 +43,59 @@ function dayOf(timestamp: number, now: number) {
   return dayFormat.format(timestamp)
 }
 
-function StatusLine({ thread, now }: { thread: Thread; now: number }) {
-  if (thread.state === "waiting" && thread.reason)
-    return (
-      <span className="flex min-w-0 items-center gap-1.5 text-warning">
-        <span aria-hidden className="size-2 shrink-0 rounded-full bg-warning" />
-        <span className="truncate">{reasonText(thread.reason)}</span>
-      </span>
-    )
-  if (thread.state === "working")
-    return (
-      <span className="flex items-center gap-1.5">
-        <Spinner className="size-3" />
-        Replying…
-      </span>
-    )
-  if (thread.state === "failed") return <span className="text-destructive">Reply failed</span>
-  const count = thread.replies || thread.chat.updatedAt > thread.chat.createdAt
+/** The thread's state as the card's leading icon, like a project session's. */
+function StateIcon({ state }: { state: Thread["state"] }) {
+  if (state === "waiting") return <CircleAlertIcon className="size-5 text-warning" />
+  if (state === "failed") return <CircleXIcon className="size-5 text-destructive" />
+  if (state === "working") return <Spinner className="size-5" />
   return (
-    <span className="truncate">
-      {thread.replies
-        ? `${thread.replies} ${thread.replies === 1 ? "reply" : "replies"}`
-        : count
-          ? "Replies on Hermes"
-          : "No replies yet"}
-      {" · "}
-      {formatRelative(thread.chat.updatedAt, now)}
+    <span className="flex size-5 items-center justify-center rounded-full bg-success text-background">
+      <CheckIcon className="size-3.5" strokeWidth={3} />
     </span>
   )
 }
 
-/** One thread: what it was opened with, and under it the row that opens it. */
+/** One thread, from the bot so left aligned: a card with its state and title, and a link to open it. */
 function ThreadItem({
   thread,
-  botId,
   profileId,
   open,
   beside,
-  now,
 }: {
   thread: Thread
-  botId: string
   profileId: string
   open: boolean
   beside: boolean
-  now: number
 }) {
+  const label = thread.reason ? reasonText(thread.reason) : undefined
   return (
-    <li className="flex flex-col items-end gap-1.5">
-      <Bubble variant="default" align="end" className="max-w-[85%]">
-        <BubbleContent className="line-clamp-4 px-4 py-2.5 text-[15px] whitespace-pre-wrap">
-          {thread.opener ?? thread.chat.title}
-        </BubbleContent>
-      </Bubble>
+    <li className="flex flex-col items-start gap-1.5">
+      <div
+        className={cn(
+          "flex min-h-14 w-full max-w-[85%] items-center gap-3 rounded-2xl border bg-card px-4 py-2",
+          open && "border-foreground/20 bg-muted",
+        )}
+      >
+        <StateIcon state={thread.state} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate">{thread.chat.title}</span>
+          {label && <span className="block truncate text-xs text-warning">{label}</span>}
+        </span>
+      </div>
       <Link
         to={`/c/${thread.chat.id}`}
         replace={beside}
         state={{ bot: profileId }}
         aria-current={open ? "page" : undefined}
-        className={cn(
-          "flex min-h-14 w-full max-w-[85%] items-center gap-3 rounded-2xl border bg-card px-3 py-2 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring",
-          open && "border-foreground/20 bg-muted hover:bg-muted",
-        )}
+        className="flex min-h-11 items-center gap-1 rounded-full px-2 text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <Bot id={botId} className="size-7" />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium">{thread.chat.title}</span>
-          <span className="flex text-xs text-muted-foreground">
-            <StatusLine thread={thread} now={now} />
+        <span className="text-info font-medium">View thread</span>
+        {thread.replies > 0 && (
+          <span>
+            · {thread.replies} {thread.replies === 1 ? "reply" : "replies"}
           </span>
-        </span>
-        <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
+        )}
+        <ChevronRightIcon className="size-4" />
       </Link>
     </li>
   )
@@ -219,11 +206,9 @@ export function BotThreadsPage({
                   )}
                   <ThreadItem
                     thread={thread}
-                    botId={profile?.botId ?? ""}
                     profileId={profileId}
                     open={thread.chat.id === openThread}
                     beside={Boolean(openThread)}
-                    now={now}
                   />
                 </Fragment>
               )
