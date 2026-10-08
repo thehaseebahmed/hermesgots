@@ -89,7 +89,7 @@ import {
   setSessionMode,
   type RepoRef,
 } from "@/lib/workspace"
-import { useTheseusRun } from "@/lib/theseus"
+import { useTheseusInfo, useTheseusRun, waitsOnUser } from "@/lib/theseus"
 
 /** How often an open chat checks Hermes for turns sent from another device. */
 const CATCH_UP_MS = 30_000
@@ -267,12 +267,14 @@ export function ChatPage() {
   // when this tab comes back, and now and then while it's on screen.
   const updatedAt = conversation?.updatedAt
   const hasMessages = (messages?.length ?? 0) > 0
+  // A Theseus session's run, once its first turn has started it.
+  const theseus = useTheseusRun(session, profile, session?.mode === "theseus" && hasMessages)
+  const theseusInfo = useTheseusInfo(profile)
+  // The agent sits in `theseus wait` while it waits, so the turn is still running: busy or not.
+  const theseusWaits = theseus && waitsOnUser(theseus)
   // A server that streams its changes says when this chat's session moves; the timer is a net.
   const streamOpen = useLive(profile)
   useEffect(() => (id ? watchChat(id) : undefined), [id])
-  // A Theseus session's run, once its first turn has started it.
-  const theseus = useTheseusRun(session?.mode === "theseus" && hasMessages)
-  const theseusWaits = theseus && !["discovery", "building"].includes(theseus.stage)
   useEffect(() => {
     if (!id || !hasMessages) return
     const catchUp = () => {
@@ -599,7 +601,7 @@ export function ChatPage() {
           <div className="mx-auto w-full max-w-3xl">
             <BlockedCard reason={session.blocked} />
           </div>
-        ) : theseusWaits && !busy ? (
+        ) : theseusWaits ? (
           <div className="mx-auto w-full max-w-3xl">
             <TheseusCard run={theseus} onOpen={setTheseusView} />
           </div>
@@ -640,6 +642,7 @@ export function ChatPage() {
                     ? "accept_edits"
                     : (session.mode ?? "accept_edits"),
                 autoAvailable: tracked,
+                theseus: theseusInfo,
                 started: hasMessages,
                 onMode: (mode) =>
                   setSessionMode(session.id, mode).catch((error) =>
@@ -660,7 +663,9 @@ export function ChatPage() {
 
       <UsageSheet open={usageOpen} onOpenChange={setUsageOpen} usage={usage} profile={profile} />
       <TodosSheet open={todosOpen} onOpenChange={setTodosOpen} items={todos} live={busy} />
-      {theseus && <TheseusSheet run={theseus} view={theseusView} onView={setTheseusView} />}
+      {theseus && (
+        <TheseusSheet run={theseus} info={theseusInfo} view={theseusView} onView={setTheseusView} />
+      )}
 
       <AlertDialog open={renaming} onOpenChange={setRenaming}>
         <AlertDialogContent>

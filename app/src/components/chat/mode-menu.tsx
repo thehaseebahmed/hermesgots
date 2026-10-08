@@ -20,7 +20,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import type { SessionMode } from "@/lib/db"
-import { introSeen, THESEUS_PREVIEW } from "@/lib/theseus"
+import type { TheseusInfo } from "@/lib/hermes"
+import { introSeen } from "@/lib/theseus"
 import { MODE_LABELS } from "@/lib/workspace"
 
 const MODES: { mode: SessionMode; icon: typeof ZapIcon }[] = [
@@ -35,6 +36,7 @@ export function ModeMenu({
   onChange,
   disabled,
   autoAvailable,
+  theseus,
   started,
 }: {
   mode: SessionMode
@@ -42,6 +44,8 @@ export function ModeMenu({
   disabled?: boolean
   /** Auto is answered by the plugin on the server, so it needs the plugin. */
   autoAvailable: boolean
+  /** Theseus runs on the host's Node and needs the plugin to have it; undefined while that's asked. */
+  theseus?: TheseusInfo | null
   /** The session has had a turn: Theseus can't be picked any more, and can't be left. */
   started?: boolean
 }) {
@@ -49,22 +53,31 @@ export function ModeMenu({
   const Icon =
     mode === "theseus" ? SailboatIcon : (MODES.find((m) => m.mode === mode)?.icon ?? PencilLineIcon)
   const locked = mode === "theseus" && started
+  // Why Theseus can't be picked on this host, if it can't.
+  const unavailable =
+    theseus === undefined
+      ? "Checking the host"
+      : theseus === null
+        ? "Needs a newer plugin"
+        : theseus.ready
+          ? null
+          : (theseus.reason ?? "Not available on this host")
   const note = (option: SessionMode) => {
-    if ((option === "auto" || option === "theseus") && !autoAvailable) return "Needs the plugin"
+    if (option === "auto" && !autoAvailable) return "Needs the plugin"
     if (locked && option !== "theseus") return "Not in a Theseus session"
-    if (option === "theseus")
-      return started ? "Only for a new session" : "Gated checkpoints, in Auto"
+    if (option === "theseus") {
+      if (!autoAvailable) return "Needs the plugin"
+      if (started && mode !== "theseus") return "Only for a new session"
+      return unavailable && mode !== "theseus" ? unavailable : "Gated checkpoints, in Auto"
+    }
   }
   const off = (option: SessionMode) =>
-    ((option === "auto" || option === "theseus") && !autoAvailable) ||
+    (option === "auto" && !autoAvailable) ||
     (locked && option !== "theseus") ||
-    (option === "theseus" && Boolean(started) && mode !== "theseus")
-  const options = [
-    ...MODES,
-    ...(THESEUS_PREVIEW || mode === "theseus"
-      ? [{ mode: "theseus" as SessionMode, icon: SailboatIcon }]
-      : []),
-  ]
+    (option === "theseus" &&
+      mode !== "theseus" &&
+      (!autoAvailable || Boolean(started) || unavailable !== null))
+  const options = [...MODES, { mode: "theseus" as SessionMode, icon: SailboatIcon }]
   return (
     <>
       <TheseusIntro open={intro} onOpenChange={setIntro} onUse={() => onChange("theseus")} />

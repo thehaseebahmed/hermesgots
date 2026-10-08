@@ -22,8 +22,16 @@ export function reasonText(reason: WaitingReason) {
     const command = reason.command?.split("\n")[0].trim()
     return command ? `Approve ${command}` : "Needs approval to run a command"
   }
+  if (reason.kind === "theseus") return THESEUS_WAITS[reason.stage]
   return "Plan ready for review"
 }
+
+const THESEUS_WAITS = {
+  plan: "Plan ready to confirm",
+  checkpoints: "Checkpoints ready to approve",
+  approval: "A checkpoint needs your approval",
+  closing: "Ready to close the run",
+} as const
 
 const POLL_MS = 10_000
 const TIMEOUT_MS = 15_000

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import {
   ArrowLeftIcon,
   CheckIcon,
@@ -13,11 +13,15 @@ import {
 } from "lucide-react"
 
 import { ChoiceRow } from "@/components/chat/question-card"
+import { Banner } from "@/components/banner"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
+import { Textarea } from "@/components/ui/textarea"
+import type { ReviewerModel, TheseusInfo, TheseusModels } from "@/lib/hermes"
 import {
   currentCheckpoint,
   GATE_ICONS,
@@ -27,12 +31,12 @@ import {
   SETTING_QUESTIONS,
   settingLabel,
   type SettingKey,
-  theseusActions,
+  useAnswer,
+  waitsOnUser,
   type GateId,
   type GateState,
   type TheseusCheckpoint,
   type TheseusRun,
-  type TheseusSettings,
 } from "@/lib/theseus"
 import { cn } from "@/lib/utils"
 
@@ -42,7 +46,7 @@ const CARD = "w-full rounded-3xl border shadow-xl ring-0 shadow-black/10 dark:sh
 export function TheseusPill({ run, onClick }: { run: TheseusRun; onClick: () => void }) {
   const done = run.checkpoints.filter((cp) => cp.status === "done").length
   const total = run.checkpoints.length
-  const waiting = run.next.startsWith("Your turn")
+  const waiting = waitsOnUser(run)
   return (
     <Button
       type="button"
@@ -136,13 +140,15 @@ function GateStrip({ cp }: { cp: TheseusCheckpoint }) {
 /** One setting as a question, its choices as rows like the agent's own questions. */
 function SettingQuestion({
   setting,
-  settings,
+  run,
   onPick,
 }: {
   setting: SettingKey
-  settings: TheseusSettings
+  run: TheseusRun
   onPick?: () => void
 }) {
+  const answer = useAnswer()
+  const settings = run.settings
   const { question, options } = SETTING_QUESTIONS[setting]
   return (
     <div className="space-y-2">
@@ -156,7 +162,9 @@ function SettingQuestion({
             recommended={i === 0}
             disabled={false}
             onClick={() => {
-              theseusActions.settings({ [setting]: option.value })
+              void answer(() =>
+                run.actions.settings({ [setting]: option.value as string | number }),
+              )
               onPick?.()
             }}
           />
@@ -177,47 +185,68 @@ export function TheseusCard({
   run: TheseusRun
   onOpen: (view: SheetView) => void
 }) {
+  const answer = useAnswer()
+  const [asking, setAsking] = useState<{
+    title: string
+    send: (text: string) => Promise<void>
+  } | null>(null)
   // Stacked on a phone; from `sm` one row, the primary rightmost and Request changes apart.
-  const footer = (secondary: ReactNode, primary: ReactNode, changes?: () => void) => (
+  const footer = (secondary: ReactNode, primary: ReactNode, changes?: typeof asking) => (
     <CardFooter className="flex flex-col items-stretch gap-2 sm:flex-row-reverse sm:flex-wrap">
       {primary}
       {secondary}
       {changes && (
-        <Button variant="ghost" size="lg" className="h-11 sm:mr-auto" onClick={changes}>
+        <Button
+          variant="ghost"
+          size="lg"
+          className="h-11 sm:mr-auto"
+          onClick={() => setAsking(changes)}
+        >
           Request changes
         </Button>
       )}
     </CardFooter>
   )
   const button = { size: "lg" as const, className: "h-11" }
+  const dialog = (
+    <ChangesPopup
+      key={asking?.title}
+      asking={asking}
+      onClose={() => setAsking(null)}
+      onSend={(text) => (asking ? answer(() => asking.send(text)) : Promise.resolve(false))}
+    />
+  )
 
   if (run.stage === "plan")
     return (
-      <Card size="sm" className={CARD}>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <MapIcon className="size-5 text-primary" />
-            Plan ready
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-1">
-          <p className="text-[15px] font-medium">{run.plan.task}</p>
-          <p className="text-sm text-muted-foreground">
-            {run.plan.acceptance.length} acceptance criteria · {run.plan.rejected.length} option
-            weighed and dropped
-          </p>
-        </CardContent>
-        {footer(
-          <Button variant="outline" {...button} onClick={() => onOpen({ kind: "plan" })}>
-            Read the plan
-          </Button>,
-          <Button {...button} onClick={theseusActions.confirmPlan}>
-            <CheckIcon data-icon="inline-start" />
-            Confirm plan
-          </Button>,
-          theseusActions.revisePlan,
-        )}
-      </Card>
+      <>
+        {dialog}
+        <Card size="sm" className={CARD}>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <MapIcon className="size-5 text-primary" />
+              Plan ready
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-1">
+            <p className="text-[15px] font-medium">{run.plan.task}</p>
+            <p className="text-sm text-muted-foreground">
+              {run.plan.acceptance.length} acceptance criteria · {run.plan.rejected.length} option
+              weighed and dropped
+            </p>
+          </CardContent>
+          {footer(
+            <Button variant="outline" {...button} onClick={() => onOpen({ kind: "plan" })}>
+              Read the plan
+            </Button>,
+            <Button {...button} onClick={() => void answer(run.actions.confirmPlan)}>
+              <CheckIcon data-icon="inline-start" />
+              Confirm plan
+            </Button>,
+            { title: "What should change in the plan?", send: run.actions.revisePlan },
+          )}
+        </Card>
+      </>
     )
 
   if (run.stage === "checkpoints") return <CheckpointsCard run={run} onOpen={onOpen} />
@@ -225,61 +254,119 @@ export function TheseusCard({
   const waiting = run.checkpoints.find((cp) => cp.status === "awaiting-approval")
   if (run.stage === "approval" && waiting)
     return (
-      <Card size="sm" className={CARD}>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <UserCheckIcon className="size-5 text-primary" />
-            {waiting.id} passed every gate
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2">
-          <p className="text-[15px] font-medium">{waiting.title}</p>
-          <GateStrip cp={waiting} />
-        </CardContent>
-        {footer(
-          <Button
-            variant="outline"
-            {...button}
-            onClick={() => onOpen({ kind: "checkpoint", id: waiting.id })}
-          >
-            See evidence
-          </Button>,
-          <Button {...button} onClick={theseusActions.approve}>
-            <CheckIcon data-icon="inline-start" />
-            Approve {waiting.id}
-          </Button>,
-          theseusActions.requestChanges,
-        )}
-      </Card>
+      <>
+        {dialog}
+        <Card size="sm" className={CARD}>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <UserCheckIcon className="size-5 text-primary" />
+              {waiting.id} passed every gate
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            <p className="text-[15px] font-medium">{waiting.title}</p>
+            <GateStrip cp={waiting} />
+          </CardContent>
+          {footer(
+            <Button
+              variant="outline"
+              {...button}
+              onClick={() => onOpen({ kind: "checkpoint", id: waiting.id })}
+            >
+              See evidence
+            </Button>,
+            <Button {...button} onClick={() => void answer(() => run.actions.approve(waiting.id))}>
+              <CheckIcon data-icon="inline-start" />
+              Approve {waiting.id}
+            </Button>,
+            {
+              title: `What should change in ${waiting.id}?`,
+              send: (text) => run.actions.requestChanges(waiting.id, text),
+            },
+          )}
+        </Card>
+      </>
     )
 
   if (run.stage === "closing")
     return (
-      <Card size="sm" className={CARD}>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <SailboatIcon className="size-5 text-success" />
-            Every checkpoint is done
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-[15px]">
-            Try the whole feature. Close the run to have the agent open the pull request, or keep it
-            open to ask for changes.
-          </p>
-        </CardContent>
-        {footer(
-          <Button variant="outline" {...button} onClick={theseusActions.requestChanges}>
-            Keep it open
-          </Button>,
-          <Button {...button} onClick={theseusActions.close}>
-            Close the run
-          </Button>,
-        )}
-      </Card>
+      <>
+        {dialog}
+        <Card size="sm" className={CARD}>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <SailboatIcon className="size-5 text-success" />
+              Every checkpoint is done
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-[15px]">
+              Try the whole feature. Close the run to have the agent open the pull request, or keep
+              it open to ask for changes.
+            </p>
+          </CardContent>
+          {footer(
+            <Button
+              variant="outline"
+              {...button}
+              onClick={() => void answer(() => run.actions.close("keep"))}
+            >
+              Keep it open
+            </Button>,
+            <Button {...button} onClick={() => void answer(() => run.actions.close("confirm"))}>
+              Close the run
+            </Button>,
+          )}
+        </Card>
+      </>
     )
 
   return null
+}
+
+/** Asks what the user wants changed, then sends it. */
+function ChangesPopup({
+  asking,
+  onClose,
+  onSend,
+}: {
+  asking: { title: string } | null
+  onClose: () => void
+  onSend: (text: string) => Promise<boolean>
+}) {
+  const [text, setText] = useState("")
+  const [sending, setSending] = useState(false)
+  return (
+    <Popup open={asking !== null} onOpenChange={(open) => !open && onClose()}>
+      <PopupContent className="sm:max-w-md">
+        <PopupHeader>
+          <PopupTitle>{asking?.title}</PopupTitle>
+        </PopupHeader>
+        <form
+          className="flex flex-col gap-3 px-6"
+          onSubmit={async (event) => {
+            event.preventDefault()
+            if (!text.trim() || sending) return
+            setSending(true)
+            const sent = await onSend(text)
+            setSending(false)
+            if (sent) onClose()
+          }}
+        >
+          <Textarea
+            autoFocus
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            aria-label="What should change"
+            className="min-h-28"
+          />
+          <Button type="submit" size="lg" className="h-11" disabled={!text.trim() || sending}>
+            Send
+          </Button>
+        </form>
+      </PopupContent>
+    </Popup>
+  )
 }
 
 /**
@@ -287,6 +374,7 @@ export function TheseusCard({
  * starts with whatever they say), then Approve and start.
  */
 function CheckpointsCard({ run, onOpen }: { run: TheseusRun; onOpen: (view: SheetView) => void }) {
+  const answer = useAnswer()
   const [page, setPage] = useState(0)
   const setting = SETTING_KEYS[page - 1]
   const last = page === SETTING_KEYS.length
@@ -309,7 +397,7 @@ function CheckpointsCard({ run, onOpen }: { run: TheseusRun; onOpen: (view: Shee
       </CardHeader>
       <CardContent>
         {setting ? (
-          <SettingQuestion setting={setting} settings={run.settings} />
+          <SettingQuestion setting={setting} run={run} />
         ) : (
           <div className="flex flex-col gap-3">
             <p className="text-sm text-muted-foreground">
@@ -340,7 +428,7 @@ function CheckpointsCard({ run, onOpen }: { run: TheseusRun; onOpen: (view: Shee
           </Button>
         )}
         {last ? (
-          <Button {...button} onClick={theseusActions.approveCheckpoints}>
+          <Button {...button} onClick={() => void answer(run.actions.approveCheckpoints)}>
             <SailboatIcon data-icon="inline-start" />
             Approve and start
           </Button>
@@ -359,14 +447,18 @@ export type SheetView =
   | { kind: "plan" }
   | { kind: "checkpoint"; id: string }
   | { kind: "setting"; key: SettingKey }
+  | { kind: "models" }
 
 /** The run: its settings, checkpoints and learnings, with each checkpoint's evidence and the plan. */
 export function TheseusSheet({
   run,
+  info,
   view,
   onView,
 }: {
   run: TheseusRun
+  /** What the bot's host allows reviewers to be; null while unknown. */
+  info?: TheseusInfo | null
   view: SheetView | null
   onView: (view: SheetView | null) => void
 }) {
@@ -387,13 +479,15 @@ export function TheseusSheet({
             <div className="px-6 pt-2">
               <SettingQuestion
                 setting={view.key}
-                settings={run.settings}
+                run={run}
                 onPick={() => onView({ kind: "run" })}
               />
             </div>
           </>
+        ) : view?.kind === "models" ? (
+          <ModelsView run={run} info={info} onBack={() => onView({ kind: "run" })} />
         ) : checkpoint ? (
-          <CheckpointView cp={checkpoint} onBack={() => onView({ kind: "run" })} />
+          <CheckpointView run={run} cp={checkpoint} onBack={() => onView({ kind: "run" })} />
         ) : (
           <RunView run={run} onView={onView} />
         )}
@@ -435,9 +529,7 @@ function RunView({ run, onView }: { run: TheseusRun; onView: (view: SheetView) =
           Theseus
         </PopupTitle>
         <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
-          <CircleDotIcon
-            className={cn("size-3.5", run.server === "running" ? "text-success" : "")}
-          />
+          <CircleDotIcon className={cn("size-3.5", waitsOnUser(run) && "text-warning")} />
           {run.next}
         </p>
       </PopupHeader>
@@ -476,6 +568,19 @@ function RunView({ run, onView }: { run: TheseusRun; onView: (view: SheetView) =
                   </button>
                 </li>
               ))}
+              <li>
+                <button
+                  type="button"
+                  className="flex min-h-11 w-full items-center gap-3 rounded-2xl px-2 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={() => onView({ kind: "models" })}
+                >
+                  <span className="flex-1 text-[15px]">Reviewer models</span>
+                  <span className="truncate text-sm text-muted-foreground">
+                    {modelsLabel(run.models)}
+                  </span>
+                  <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
+                </button>
+              </li>
             </ul>
           </Section>
           <Section title="Checkpoints">
@@ -523,9 +628,9 @@ function RunView({ run, onView }: { run: TheseusRun; onView: (view: SheetView) =
         <Section title="Learnings">
           <ul className="flex flex-col gap-2">
             {run.learnings.map((learning) => (
-              <li key={learning.text} className="flex gap-2 text-sm">
+              <li key={`${learning.cp}${learning.text}`} className="flex gap-2 text-sm">
                 <Badge variant="outline" className="mt-0.5">
-                  {learning.source === "human" ? "You" : learning.cp}
+                  {learning.source === "human" ? "You" : (learning.cp ?? "Review")}
                 </Badge>
                 <span className="min-w-0 flex-1">{learning.text}</span>
               </li>
@@ -546,7 +651,15 @@ const GATE_STATE_LABELS: Record<GateState, string> = {
   skipped: "Skipped",
 }
 
-function CheckpointView({ cp, onBack }: { cp: TheseusCheckpoint; onBack: () => void }) {
+function CheckpointView({
+  run,
+  cp,
+  onBack,
+}: {
+  run: TheseusRun
+  cp: TheseusCheckpoint
+  onBack: () => void
+}) {
   const rounds = [...(cp.reviews ?? [])].sort((a, b) => b.round - a.round)
   return (
     <>
@@ -590,9 +703,11 @@ function CheckpointView({ cp, onBack }: { cp: TheseusCheckpoint; onBack: () => v
         <Section title="Visual match">
           <div className="grid grid-cols-2 gap-3">
             {cp.screenshots.map((shot) => (
-              <figure key={shot.label} className="flex flex-col gap-1.5">
-                <MockCapture tone={shot.tone} />
-                <figcaption className="text-xs text-muted-foreground">{shot.label}</figcaption>
+              <figure key={shot.file} className="flex flex-col gap-1.5">
+                <Capture run={run} cp={cp.id} shot={shot} />
+                <figcaption className="text-xs text-muted-foreground capitalize">
+                  {shot.label}
+                </figcaption>
               </figure>
             ))}
           </div>
@@ -605,15 +720,16 @@ function CheckpointView({ cp, onBack }: { cp: TheseusCheckpoint; onBack: () => v
         )
       )}
       {rounds.length > 0 && (
-        <Section title="Code review">
+        <Section title="Reviews">
           <ul className="flex flex-col gap-3">
             {rounds.map((round) => (
               <li
-                key={`${round.reviewer}${round.round}`}
+                key={`${round.gate}${round.reviewer}${round.round}`}
                 className="rounded-2xl border px-4 py-3 text-sm"
               >
                 <p className="flex items-center gap-2 font-medium">
-                  Reviewer {round.reviewer.toUpperCase()} · round {round.round}
+                  {REVIEWER_NAMES[round.reviewer] ?? `Reviewer ${round.reviewer.toUpperCase()}`} ·
+                  round {round.round}
                   <span
                     className={cn(
                       "ml-auto text-xs font-normal",
@@ -625,11 +741,9 @@ function CheckpointView({ cp, onBack }: { cp: TheseusCheckpoint; onBack: () => v
                       : "Clean"}
                   </span>
                 </p>
-                {round.findings.map((finding) => (
-                  <dl
-                    key={finding.where}
-                    className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1"
-                  >
+                {round.via && <p className="mt-0.5 text-xs text-muted-foreground">{round.via}</p>}
+                {round.findings.map((finding, i) => (
+                  <dl key={i} className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
                     <dt className="text-muted-foreground">Where</dt>
                     <dd className="font-mono text-xs leading-5">{finding.where}</dd>
                     <dt className="text-muted-foreground">What</dt>
@@ -649,27 +763,164 @@ function CheckpointView({ cp, onBack }: { cp: TheseusCheckpoint; onBack: () => v
   )
 }
 
-/** MOCK: stands in for a gate 2 capture until the plugin serves the evidence images. */
-function MockCapture({ tone }: { tone: "reference" | "build" }) {
+const REVIEWER_NAMES: Record<string, string> = {
+  a: "Reviewer A",
+  b: "Reviewer B",
+  look: "Appearance",
+  behave: "Interaction",
+}
+
+/** One screenshot from a checkpoint's evidence; the plugin serves it behind the bot's key. */
+function Capture({
+  run,
+  cp,
+  shot,
+}: {
+  run: TheseusRun
+  cp: string
+  shot: { file: string; label: string; tone: "reference" | "build" }
+}) {
+  const [url, setUrl] = useState<string | null>()
+  const { capture } = run.actions
+  useEffect(() => {
+    let current: string | undefined
+    let stale = false
+    capture(cp, shot.file)
+      .then((next) => {
+        current = next
+        if (stale) URL.revokeObjectURL(next)
+        else setUrl(next)
+      })
+      .catch(() => !stale && setUrl(null))
+    return () => {
+      stale = true
+      if (current) URL.revokeObjectURL(current)
+    }
+  }, [capture, cp, shot.file])
   return (
     <div
       className={cn(
-        "flex aspect-[3/4] flex-col gap-2 rounded-xl border bg-background p-3",
-        tone === "reference" && "border-dashed",
+        "flex aspect-[3/4] items-center justify-center overflow-hidden rounded-xl border bg-muted/40",
+        shot.tone === "reference" && "border-dashed",
       )}
-      aria-hidden
     >
-      <div className="h-2.5 w-1/2 rounded-full bg-foreground/70" />
-      <div className="mt-2 h-6 rounded-lg border" />
-      <div className="h-12 rounded-lg border" />
-      <div className="h-6 rounded-lg border border-destructive/60" />
-      <div className="h-1.5 w-2/3 rounded-full bg-destructive/60" />
-      <div className="mt-auto h-6 w-1/2 self-end rounded-full bg-primary/40" />
+      {url ? (
+        <img src={url} alt={shot.label} className="size-full object-contain" />
+      ) : url === null ? (
+        <span className="px-2 text-center text-xs text-muted-foreground">Couldn't load</span>
+      ) : null}
     </div>
   )
 }
 
+/** The reviewers' models in a line, for the run's list of settings. */
+function modelsLabel(models: TheseusModels) {
+  const set = [...models.review, ...models.visual].filter((m) => m.model).length
+  return set ? `${set} chosen` : "Your own model"
+}
+
+const SLOTS = {
+  review: ["Reviewer A", "Reviewer B"],
+  visual: ["Appearance", "Interaction"],
+} as const
+
+/**
+ * Which models review each gate. A reviewer left empty uses the model the bot already runs on;
+ * choosing another is what makes the second opinion worth having. Reviews are model calls the
+ * plugin makes, so a bot can't be a reviewer.
+ */
+function ModelsView({
+  run,
+  info,
+  onBack,
+}: {
+  run: TheseusRun
+  info?: TheseusInfo | null
+  onBack: () => void
+}) {
+  const answer = useAnswer()
+  const [draft, setDraft] = useState<TheseusModels>({
+    review: [0, 1].map((i) => run.models.review[i] ?? { provider: null, model: null }),
+    visual: [0, 1].map((i) => run.models.visual[i] ?? { provider: null, model: null }),
+  })
+  const [saving, setSaving] = useState(false)
+  const set = (gate: "review" | "visual", i: number, patch: Partial<ReviewerModel>) =>
+    setDraft((d) => ({ ...d, [gate]: d[gate].map((m, j) => (j === i ? { ...m, ...patch } : m)) }))
+  const gates = [
+    { gate: "review" as const, label: "Code review", count: run.settings.reviewers },
+    {
+      gate: "visual" as const,
+      label: "Visual review",
+      count: run.settings.visual === "on" ? 2 : 0,
+    },
+  ]
+  const blocked = info && !info.reviewers.model
+  return (
+    <>
+      <PopupHeader className="flex-row items-center gap-1 pb-2">
+        <Back onClick={onBack} label="Back to the run" />
+        <PopupTitle className="min-w-0 flex-1 truncate">Reviewer models</PopupTitle>
+      </PopupHeader>
+      {blocked && (
+        <div className="px-6 pt-2">
+          <Banner>
+            This Hermes host only lets reviewers use your own model. Allow model choices for the
+            Memento plugin in its Hermes config (plugins.entries.memento.llm.allow_model_override)
+            to pick others.
+          </Banner>
+        </div>
+      )}
+      {gates.map(({ gate, label, count }) => (
+        <Section key={gate} title={label}>
+          {count === 0 ? (
+            <p className="text-sm text-muted-foreground">Off for this run.</p>
+          ) : (
+            <div className="flex flex-col gap-4">
+              {SLOTS[gate].slice(0, gate === "review" ? count : 2).map((name, i) => (
+                <div key={name} className="flex flex-col gap-1.5">
+                  <p className="text-[15px] font-medium">{name}</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input
+                      aria-label={`${name} provider`}
+                      placeholder="Provider"
+                      disabled={Boolean(blocked)}
+                      value={draft[gate][i].provider ?? ""}
+                      onChange={(e) => set(gate, i, { provider: e.target.value || null })}
+                    />
+                    <Input
+                      aria-label={`${name} model`}
+                      placeholder="Your own model"
+                      disabled={Boolean(blocked)}
+                      value={draft[gate][i].model ?? ""}
+                      onChange={(e) => set(gate, i, { model: e.target.value || null })}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Section>
+      ))}
+      <div className="flex flex-col gap-2 px-6 pt-6">
+        <Button
+          size="lg"
+          className="h-11"
+          disabled={saving || Boolean(blocked)}
+          onClick={async () => {
+            setSaving(true)
+            if (await answer(() => run.actions.models(draft))) onBack()
+            setSaving(false)
+          }}
+        >
+          Save
+        </Button>
+      </div>
+    </>
+  )
+}
+
 function PlanView({ run, onBack }: { run: TheseusRun; onBack: () => void }) {
+  const answer = useAnswer()
   const { plan } = run
   return (
     <>
@@ -724,7 +975,7 @@ function PlanView({ run, onBack }: { run: TheseusRun; onBack: () => void }) {
       </Section>
       {run.stage === "plan" && (
         <div className="flex flex-col gap-2 px-6 pt-6 sm:flex-row-reverse">
-          <Button size="lg" className="h-11" onClick={theseusActions.confirmPlan}>
+          <Button size="lg" className="h-11" onClick={() => void answer(run.actions.confirmPlan)}>
             <CheckIcon data-icon="inline-start" />
             Confirm plan
           </Button>

@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/input-group"
 import { MAX_ATTACHMENTS, prepareAttachment } from "@/lib/attachments"
 import type { Attachment, SessionMode } from "@/lib/db"
-import type { HermesConfig } from "@/lib/hermes"
+import type { HermesConfig, TheseusInfo } from "@/lib/hermes"
 import { joinText, useDictation } from "@/lib/speech"
 import { cn } from "@/lib/utils"
 import {
@@ -65,6 +65,8 @@ export function Composer({
     mode: SessionMode
     onMode: (mode: SessionMode) => void
     autoAvailable: boolean
+    /** What the bot's host says about Theseus: undefined while asking, null without the plugin's support. */
+    theseus?: TheseusInfo | null
     started?: boolean
   }
   /** Whether files can be attached (they need the Memento plugin); photos always can. */
@@ -336,6 +338,7 @@ export function Composer({
               onChange={session.onMode}
               disabled={disabled}
               autoAvailable={session.autoAvailable}
+              theseus={session.theseus}
               started={session.started}
             />
             <span className="flex-1" />
