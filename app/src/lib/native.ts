@@ -2,6 +2,8 @@ import { App } from "@capacitor/app"
 import { Capacitor } from "@capacitor/core"
 import { toast } from "sonner"
 
+import { placeToasts } from "@/lib/toast"
+
 /** True inside the Android app, where the page is served from `https://localhost`. */
 export const isNative = Capacitor.isNativePlatform()
 
@@ -46,22 +48,6 @@ const EXIT_WINDOW = 2000
 export const EXIT_TOASTER = "exit"
 
 /**
- * Sits the exit toast at the bottom, above whatever the screen keeps there (marked
- * `data-toast-above`: a chat's composer, the Code screen's New project button).
- */
-function placeExitToast() {
-  let bottom = 0
-  for (const el of document.querySelectorAll("[data-toast-above]")) {
-    const { top, height } = el.getBoundingClientRect()
-    if (height) bottom = Math.max(bottom, window.innerHeight - top)
-  }
-  document.documentElement.style.setProperty(
-    "--exit-toast-bottom",
-    bottom ? `${bottom + 8}px` : "max(1rem, env(safe-area-inset-bottom))",
-  )
-}
-
-/**
  * Android's back button goes up from a screen that sets a guard (a project, a session) and leaves
  * the app from a top-level one, whatever was opened before it, but only on a second press within
  * `EXIT_WINDOW`, so a stray press doesn't. Leaving minimizes rather than exits, as Android's own
@@ -82,10 +68,9 @@ export function handleBackButton() {
       return
     }
     armedAt = Date.now()
-    placeExitToast()
+    placeToasts()
     toast("Press back again to exit", {
       id: EXIT_TOASTER,
-      toasterId: EXIT_TOASTER,
       duration: EXIT_WINDOW,
     })
   })
