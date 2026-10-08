@@ -10,6 +10,7 @@ import {
 import { useState } from "react"
 
 import { TheseusIntro } from "@/components/chat/theseus-intro"
+import { ExperimentalBadge } from "@/components/experimental-badge"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -21,7 +22,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import type { SessionMode } from "@/lib/db"
 import type { TheseusInfo } from "@/lib/hermes"
-import { introSeen } from "@/lib/theseus"
+import { introSeen, useTheseusEnabled } from "@/lib/theseus"
 import { MODE_LABELS } from "@/lib/workspace"
 
 const MODES: { mode: SessionMode; icon: typeof ZapIcon }[] = [
@@ -50,6 +51,7 @@ export function ModeMenu({
   started?: boolean
 }) {
   const [intro, setIntro] = useState(false)
+  const theseusEnabled = useTheseusEnabled()
   const Icon =
     mode === "theseus" ? SailboatIcon : (MODES.find((m) => m.mode === mode)?.icon ?? PencilLineIcon)
   const locked = mode === "theseus" && started
@@ -77,7 +79,11 @@ export function ModeMenu({
     (option === "theseus" &&
       mode !== "theseus" &&
       (!autoAvailable || Boolean(started) || unavailable !== null))
-  const options = [...MODES, { mode: "theseus" as SessionMode, icon: SailboatIcon }]
+  // A session already in Theseus keeps showing it after the Developer switch goes off.
+  const options =
+    theseusEnabled || mode === "theseus"
+      ? [...MODES, { mode: "theseus" as SessionMode, icon: SailboatIcon }]
+      : MODES
   return (
     <>
       <TheseusIntro open={intro} onOpenChange={setIntro} onUse={() => onChange("theseus")} />
@@ -121,7 +127,14 @@ export function ModeMenu({
                 >
                   <OptionIcon />
                   <span className="flex flex-col">
-                    {MODE_LABELS[option]}
+                    {option === "theseus" ? (
+                      <span className="flex items-center gap-2">
+                        {MODE_LABELS[option]}
+                        <ExperimentalBadge />
+                      </span>
+                    ) : (
+                      MODE_LABELS[option]
+                    )}
                     {note(option) && (
                       <span className="text-xs text-muted-foreground">{note(option)}</span>
                     )}

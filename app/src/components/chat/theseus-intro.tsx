@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react"
 import { LockIcon, SailboatIcon } from "lucide-react"
 
+import { ExperimentalBadge } from "@/components/experimental-badge"
 import { Popup, PopupContent, PopupDescription, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import { GATE_ICONS, GATES, markIntroSeen } from "@/lib/theseus"
@@ -113,6 +114,7 @@ export function TheseusIntro({
             <SailboatIcon className="size-8" />
           </span>
           <PopupTitle className="text-xl">{STEPS[step].title}</PopupTitle>
+          <ExperimentalBadge />
           <PopupDescription className="sr-only">
             Step {step + 1} of {STEPS.length}
           </PopupDescription>
