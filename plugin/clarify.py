@@ -136,7 +136,10 @@ class Asker:
             return reply
         if questions:
             answers, outcome, notice = self.ask(questions)
-            reply = {"answers": answers, "timed_out": outcome != "submitted"}
+            # Carry the actual outcome alongside the legacy timed_out flag so the
+            # app can distinguish undelivered (no run) from a genuine timeout and
+            # from a user cancellation, instead of reading all three as "No answer".
+            reply = {"answers": answers, "timed_out": outcome == "timed_out", "outcome": outcome}
             if notice:
                 reply["notice"] = notice
             return reply
@@ -152,13 +155,20 @@ class Asker:
         return answers.get("q0") or ""
 
     def ask(self, entries: List[Dict[str, Any]]) -> Tuple[Answers, str, Optional[str]]:
-        """Shows the questions on the run's stream and waits for the app's answers."""
+        """Publishes the questions on the run's pollable status and waits for the app's answers.
+
+        When a run event stream is available, also pushes the question as a
+        ``clarify.request`` event so connected clients see it instantly. When no
+        stream exists (worker-thread agent, or a run whose stream was cleaned up),
+        the question is still published on the run's status, where polling clients
+        read it — the app does not need an SSE subscriber to receive questions.
+        """
         adapter, agent, loop = self.adapter, self.agent, self.loop
         run_id = _run_id(adapter, agent)
+        if not run_id:
+            return {}, "undelivered", UNDELIVERED
         streams = getattr(adapter, "_run_streams", None)
         stream = streams.get(run_id) if run_id and isinstance(streams, dict) else None
-        if stream is None or loop is None:
-            return {}, "undelivered", UNDELIVERED
         pending = Pending(uuid.uuid4().hex[:12], run_id, [_question(e) for e in entries])
         with _lock:
             _pending[run_id] = pending
@@ -166,7 +176,10 @@ class Asker:
             run_id, "clarify.request", clarify_id=pending.clarify_id, questions=pending.questions
         )
         _set_status(adapter, run_id, WAITING, last_event="clarify.request", clarify=asked)
-        _push(loop, stream, asked)
+        # Push to the SSE stream only when both stream and loop are available.
+        # The question is already pollable through run status; the push is an optimization.
+        if stream is not None and loop is not None:
+            _push(loop, stream, asked)
         try:
             outcome = _wait(pending, agent, adapter)
         finally:
@@ -179,7 +192,8 @@ class Asker:
                 answers=pending.answers,
             )
             _set_status(adapter, run_id, "running", last_event="clarify.responded", clarify=None)
-            _push(loop, stream, answered)
+            if stream is not None and loop is not None:
+                _push(loop, stream, answered)
         notice = None
         if outcome == "timed_out":
             notice = "The user didn't answer in time."
