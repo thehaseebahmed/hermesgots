@@ -29,6 +29,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
 
+from . import events
 from .store import connect
 
 logger = logging.getLogger(__name__)
@@ -531,6 +532,7 @@ def set_mode(path: Path, session_id: str, mode: Any) -> Optional[Dict[str, Any]]
         )
     finally:
         conn.close()
+    events.note("runs", session_id, path, True)
     return read(path, session_id)
 
 
@@ -543,6 +545,7 @@ def set_plan_pending(path: Path, session_id: str, pending: bool) -> None:
         )
     finally:
         conn.close()
+    events.note("runs", session_id, path, True)
 
 
 def _delete(path: Path, session_id: str) -> None:

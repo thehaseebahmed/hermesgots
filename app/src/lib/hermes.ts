@@ -525,6 +525,46 @@ export async function getPluginVersion(config: HermesConfig): Promise<string | n
   }
 }
 
+/** What the Memento plugin on the bot's server offers (`info`'s `features`). */
+export async function getPluginFeatures(config: HermesConfig): Promise<string[]> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/info`, { headers: headers(config) })
+  const features: unknown = (await response.json())?.features
+  return Array.isArray(features) ? features.filter((f): f is string => typeof f === "string") : []
+}
+
+/** The plugin pings its change stream every 20s, so one quiet for longer has died unnoticed. */
+const EVENTS_IDLE_MS = 50_000
+
+/**
+ * Follows the Memento plugin's change stream until it ends. `hello` and `reset` carry the cursor to
+ * resume from; `session`, `title`, `chats`, `cron`, `runs` and `projects` say what changed, never
+ * the content. A stream that goes quiet rejects with a `TimeoutError`.
+ */
+export async function followEvents(
+  config: HermesConfig,
+  options: { since?: number; signal?: AbortSignal },
+  onEvent: (event: string, data: Record<string, unknown>) => void,
+) {
+  const query = options.since !== undefined ? `?since=${options.since}` : ""
+  const response = await request(`${pluginRoot(config.baseUrl)}/events${query}`, {
+    headers: headers(config),
+    signal: options.signal,
+  })
+  if (!response.body) throw new HermesError("Hermes returned an empty response.")
+  for await (const { event, data } of readSse(response.body, EVENTS_IDLE_MS)) {
+    let payload: unknown
+    try {
+      payload = JSON.parse(data)
+    } catch {
+      continue
+    }
+    onEvent(
+      event,
+      payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {},
+    )
+  }
+}
+
 /** A fresh `API_SERVER_KEY`: 32 random bytes as 64 hex characters, like `openssl rand -hex 32`. */
 export function generateApiKey() {
   const bytes = crypto.getRandomValues(new Uint8Array(32))

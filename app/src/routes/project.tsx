@@ -42,6 +42,7 @@ import {
   type PullRequestRef,
 } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
+import { SAFETY_MS, useChanges, useLive } from "@/lib/live"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import {
@@ -82,6 +83,9 @@ function serverKey(baseUrl: string) {
 function useLiveRuns(profile: Profile | undefined) {
   const [live, setLive] = useState<Record<string, LiveRunStatus>>({})
   const connection = profile && `${profile.baseUrl}\n${profile.apiKey}`
+  // A server that streams its changes says when a run starts, ends or waits; the timer is a net.
+  const streaming = useLive(profile)
+  const changes = useChanges("runs", profile)
   useEffect(() => {
     if (!connection) return
     const [baseUrl, apiKey] = connection.split("\n")
@@ -93,14 +97,14 @@ function useLiveRuns(profile: Profile | undefined) {
         .catch(() => undefined)
     }
     poll()
-    const timer = window.setInterval(poll, LIVE_MS)
+    const timer = window.setInterval(poll, streaming ? SAFETY_MS : LIVE_MS)
     document.addEventListener("visibilitychange", poll)
     return () => {
       cancelled = true
       window.clearInterval(timer)
       document.removeEventListener("visibilitychange", poll)
     }
-  }, [connection])
+  }, [connection, streaming, changes])
   return live
 }
 
@@ -127,6 +131,8 @@ export function ProjectPage() {
   const [reads, setReads] = useState(0)
   const reload = () => setReads((n) => n + 1)
   const live = useLiveRuns(profile)
+  const streaming = useLive(profile)
+  const projectChanges = useChanges("projects", profile)
   const changing = project?.folders.some((f) => f.status === "cloning" || f.status === "removing")
 
   useEffect(() => {
@@ -141,15 +147,18 @@ export function ProjectPage() {
     return () => {
       cancelled = true
     }
-  }, [profile, projectId, reads])
+  }, [profile, projectId, reads, projectChanges])
 
   useEffect(() => {
     if (!changing) return
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") setReads((n) => n + 1)
-    }, CHANGING_MS)
+    const timer = window.setInterval(
+      () => {
+        if (document.visibilityState === "visible") setReads((n) => n + 1)
+      },
+      streaming ? SAFETY_MS : CHANGING_MS,
+    )
     return () => window.clearInterval(timer)
-  }, [changing])
+  }, [changing, streaming])
 
   // Bots on one server share its projects, so their sessions all belong here.
   const listed = useLiveQuery(async () => {

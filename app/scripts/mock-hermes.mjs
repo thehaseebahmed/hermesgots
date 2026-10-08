@@ -335,7 +335,10 @@ function titleChat(req, opener) {
   chatTitles.set(sessionId, line.length > 48 ? `${line.slice(0, 47).trimEnd()}…` : line)
   const words = line.replace(/[^\p{L}\p{N}\s-]/gu, "").split(/\s+/).filter(Boolean).slice(0, 4)
   const title = words.length > 1 ? words.join(" ").replace(/^./, (c) => c.toUpperCase()) : "Friendly greeting"
-  setTimeout(() => chatTitles.set(sessionId, title), 2000)
+  setTimeout(() => {
+    chatTitles.set(sessionId, title)
+    noteEvent("title", sessionId)
+  }, 2000)
 }
 
 /** Stores a transcript row the way Hermes's session DB does, for keyed sessions only. */
@@ -708,10 +711,54 @@ async function streamCompletion(req, res, body) {
 // MOCK_BLOCK_RUN_EVENTS=1 is Hermes v2026.9.24: the event stream has no CORS headers, and the run
 // forgets its events once that (blocked) subscriber leaves, so only GET /v1/runs/{id} is left.
 const runs = new Map()
+const PLUGIN_VERSION = "0.21.0"
+const EVENTS = process.env.MOCK_NO_EVENTS !== "1"
 const RUNS = process.env.MOCK_NO_RUNS !== "1"
 const RUN_BACKLOG = Number(process.env.MOCK_RUN_BACKLOG ?? 1000)
 const DROP_EVENTS_MS = Number(process.env.MOCK_DROP_EVENTS_MS ?? 0)
 const BLOCK_RUN_EVENTS = process.env.MOCK_BLOCK_RUN_EVENTS === "1"
+
+// The plugin's change stream: one log per profile (the "" key is the default one). Runs and sessions
+// belong to no profile here, so they go to every log.
+const eventLogs = new Map()
+const eventStreams = new Set()
+function logOf(profile) {
+  if (!eventLogs.has(profile)) eventLogs.set(profile, { rows: [], seq: 0 })
+  return eventLogs.get(profile)
+}
+function noteEvent(kind, sessionId, profile) {
+  for (const key of profile === undefined ? new Set([...eventLogs.keys(), ""]) : [profile]) {
+    const log = logOf(key)
+    log.rows.push({ id: ++log.seq, kind, session_id: sessionId })
+    if (log.rows.length > 2000) log.rows.shift()
+  }
+  for (const stream of eventStreams) stream()
+}
+
+function streamEvents(req, res, profile, since) {
+  const log = logOf(profile)
+  res.writeHead(200, { ...cors, "Content-Type": "text/event-stream", "Cache-Control": "no-cache" })
+  const send = (kind, data) => res.write(`event: ${kind}\ndata: ${JSON.stringify(data)}\n\n`)
+  let cursor = since ?? log.seq
+  send("hello", { cursor, version: PLUGIN_VERSION })
+  if (since !== undefined && (since > log.seq || (since < log.seq && (log.rows[0]?.id ?? 0) > since + 1))) {
+    cursor = log.seq
+    send("reset", { cursor })
+  }
+  const flush = () => {
+    for (const row of log.rows.filter((r) => r.id > cursor)) {
+      cursor = row.id
+      send(row.kind, { cursor, ...(row.session_id ? { session_id: row.session_id } : {}) })
+    }
+  }
+  eventStreams.add(flush)
+  const ping = setInterval(() => res.write(": ping\n\n"), 20_000)
+  req.on("close", () => {
+    clearInterval(ping)
+    eventStreams.delete(flush)
+  })
+  flush()
+}
 
 const sessionOf = (req, body) => req.headers["x-hermes-session-id"] ?? body?.session_id
 
@@ -722,6 +769,7 @@ function startRun(req, body) {
   const id = `run_${randomUUID().replace(/-/g, "")}`
   const run = { id, key, sessionId: body.session_id, status: "running", events: [], seq: 0, listeners: new Set(), stopped: false }
   runs.set(id, run)
+  noteEvent("runs", run.sessionId)
   const push = (name, fields = {}) => {
     const event = { event: name, run_id: id, timestamp: Date.now() / 1000, ...fields, seq: run.seq++ }
     run.events.push(event)
@@ -740,11 +788,13 @@ function startRun(req, body) {
       push(status === "running" ? "tool.started" : "tool.completed", status === "running" ? { tool, preview: label } : { tool, duration: 1.4, error: status === "failed", preview: result ?? "" }),
     approve(event) {
       run.status = "waiting_for_approval"
+      noteEvent("runs", run.sessionId)
       run.approval = { ...event, run_id: id, choices: ["once", "session", "always", "deny"] }
       push("approval.request", run.approval)
       return waitForApproval(id).finally(() => {
         run.status = "running"
         run.approval = undefined
+        noteEvent("runs", run.sessionId)
       })
     },
     async ask(questions) {
@@ -764,6 +814,8 @@ function startRun(req, body) {
     run.status = run.stopped ? "cancelled" : "completed"
     run.output = spoken
     run.usage = { input_tokens: prompt_tokens, output_tokens: completion_tokens, total_tokens: prompt_tokens + completion_tokens }
+    noteEvent("session", run.sessionId)
+    noteEvent("runs", run.sessionId)
     push(`run.${run.status}`, { completed: !run.stopped, interrupted: run.stopped, output: spoken, usage: run.usage })
     for (const listener of run.listeners) listener(null)
   })
@@ -842,6 +894,7 @@ http
     if (req.method === "POST" && jobAction) {
       const job = cronJobs(profile).find((j) => j.id === jobAction[1])
       if (!job) return json(res, 404, { error: "Job not found" })
+      noteEvent("cron", undefined, profile ?? "")
       if (jobAction[2] === "pause") job.paused = true
       if (jobAction[2] === "resume") job.paused = false
       if (jobAction[2] === "run") {
@@ -854,11 +907,15 @@ http
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/info") {
       return json(res, 200, {
         name: "memento",
-        version: "0.12.0",
-        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "profile_routes", "pr_tool", "close", "merge_resolve"],
+        version: PLUGIN_VERSION,
+        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "profile_routes", "pr_tool", "close", "merge_resolve", ...(EVENTS ? ["events"] : [])],
         clarify: true,
         hooks: true,
       })
+    }
+    if (PLUGIN && EVENTS && !profile && url.pathname === "/api/plugins/memento/events") {
+      const since = url.searchParams.get("since")
+      return streamEvents(req, res, pluginProfile ?? "", since === null ? undefined : Number(since))
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/cron/runs") {
       const perJob = Math.max(1, Math.min(Number(url.searchParams.get("per_job") ?? 24) || 24, 200))
@@ -879,6 +936,7 @@ http
       if (!String(name ?? "").trim()) return json(res, 400, { error: { message: "Name the project." } })
       const bad = repos.find((repo) => !/^[\w-]+\/[\w.-]+$/.test(repo))
       if (bad !== undefined) return json(res, 400, { error: { message: `${bad} isn't owner/name.` } })
+      setTimeout(() => noteEvent("projects", undefined, ""), 50)
       const all = mockProjects()
       const base = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "project"
       let slug = base
@@ -1022,12 +1080,17 @@ http
       const chatList = pluginChatLists.get(key)
       if (req.method === "POST") {
         const { chats } = await readBody(req)
+        let changed = false
         if (!chats || typeof chats !== "object") {
           return json(res, 400, { error: { message: "chats must be an object" } })
         }
         for (const [id, entry] of Object.entries(chats)) {
-          if (entry.at > (chatList.get(id)?.at ?? -1)) chatList.set(id, entry)
+          if (entry.at > (chatList.get(id)?.at ?? -1)) {
+            chatList.set(id, entry)
+            changed = true
+          }
         }
+        if (changed) noteEvent("chats", undefined, key)
       }
       return json(res, 200, { object: "memento.chats", chats: Object.fromEntries(chatList) })
     }

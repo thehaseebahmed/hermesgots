@@ -25,6 +25,7 @@ import { Toaster } from "@/components/ui/sonner"
 import { Spinner } from "@/components/ui/spinner"
 import { listEnabledProfiles, type Profile } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
+import { SAFETY_MS, useAllLive, useAnyChange } from "@/lib/live"
 import { useWide } from "@/lib/media"
 import {
   HermesError,
@@ -114,17 +115,23 @@ export function CodePage() {
     setTick((n) => n + 1)
   }, [])
 
+  const streaming = useAllLive(profiles)
+  const changes = useAnyChange("projects")
+
   useEffect(() => {
-    const timer = setInterval(() => {
-      if (document.visibilityState === "visible") refresh()
-    }, REFRESH_MS)
+    const timer = setInterval(
+      () => {
+        if (document.visibilityState === "visible") refresh()
+      },
+      streaming ? SAFETY_MS : REFRESH_MS,
+    )
     const onVisible = () => document.visibilityState === "visible" && refresh()
     document.addEventListener("visibilitychange", onVisible)
     return () => {
       clearInterval(timer)
       document.removeEventListener("visibilitychange", onVisible)
     }
-  }, [refresh])
+  }, [refresh, streaming])
 
   const cloning = results?.some(
     (result) =>
@@ -136,12 +143,12 @@ export function CodePage() {
       ),
   )
   useEffect(() => {
-    if (!cloning) return
+    if (!cloning || streaming) return
     const timer = setInterval(() => {
       if (document.visibilityState === "visible") setTick((n) => n + 1)
     }, CLONING_REFRESH_MS)
     return () => clearInterval(timer)
-  }, [cloning])
+  }, [cloning, streaming])
 
   // Sync rewrites profile rows often; only a change to what's fetched should fetch again.
   const targetsKey = JSON.stringify(
@@ -161,7 +168,7 @@ export function CodePage() {
     return () => {
       cancelled = true
     }
-  }, [targetsKey, tick])
+  }, [targetsKey, tick, changes])
 
   const byId = new Map(profiles?.map((profile) => [profile.id, profile]))
   const all = results ? toRows(results, byId) : []

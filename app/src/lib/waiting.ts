@@ -3,6 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 
 import { db } from "@/lib/db"
 import { listWaiting, type WaitingReason } from "@/lib/hermes"
+import { connectionKey, isLive, onChanges, SAFETY_MS } from "@/lib/live"
 
 export type { WaitingReason }
 
@@ -28,40 +29,63 @@ const POLL_MS = 10_000
 const TIMEOUT_MS = 15_000
 
 type Found = Record<string, WaitingReason & { project?: string }>
+type Server = { baseUrl: string; apiKey: string }
 
 /**
  * What every bot's server reports waiting, by Hermes session id. One poll for the whole app, shared
- * by every sidebar that's mounted, and only while one is.
+ * by every sidebar that's mounted, and only while one is. A server that streams its changes is asked
+ * when it says a run changed, and now and then anyway; the rest are asked every few seconds.
  */
+let answers = new Map<string, Found>()
 let found: Found = {}
-let servers: { baseUrl: string; apiKey: string }[] = []
+let servers: Server[] = []
 const listeners = new Set<() => void>()
 let timer: number | undefined
+let rounds = 0
 
-async function poll() {
+async function poll(only: Server[] = servers) {
   if (document.visibilityState !== "visible") return
-  const answers = await Promise.all(
-    servers.map((server) =>
-      listWaiting(server, AbortSignal.timeout(TIMEOUT_MS)).catch(() => ({}) as Found),
-    ),
+  await Promise.all(
+    only.map(async (server) => {
+      const next = await listWaiting(server, AbortSignal.timeout(TIMEOUT_MS)).catch(
+        () => ({}) as Found,
+      )
+      answers.set(connectionKey(server), next)
+    }),
   )
-  found = Object.assign({}, ...answers)
+  found = Object.assign({}, ...servers.map((server) => answers.get(connectionKey(server)) ?? {}))
   listeners.forEach((listener) => listener())
+}
+
+function pollDue() {
+  rounds += 1
+  const all = rounds % (SAFETY_MS / POLL_MS) === 0
+  void poll(all ? servers : servers.filter((server) => !isLive(server)))
+}
+
+function pollAll() {
+  void poll()
 }
 
 function subscribe(listener: () => void) {
   listeners.add(listener)
   if (listeners.size === 1) {
-    timer = window.setInterval(poll, POLL_MS)
-    document.addEventListener("visibilitychange", poll)
+    timer = window.setInterval(pollDue, POLL_MS)
+    document.addEventListener("visibilitychange", pollAll)
+    stopListening = onChanges("runs", (key) => {
+      void poll(servers.filter((server) => connectionKey(server) === key))
+    })
   }
   return () => {
     listeners.delete(listener)
     if (listeners.size) return
     window.clearInterval(timer)
-    document.removeEventListener("visibilitychange", poll)
+    document.removeEventListener("visibilitychange", pollAll)
+    stopListening?.()
   }
 }
+
+let stopListening: (() => void) | undefined
 
 /** Why each session, by Hermes session id, waits on the user, across every keyed bot's server. */
 export function useWaiting(): Found {
@@ -80,6 +104,7 @@ export function useWaiting(): Found {
   useEffect(() => {
     if (keyed === undefined) return
     servers = JSON.parse(keyed)
+    answers = new Map([...answers].filter(([key]) => servers.some((s) => connectionKey(s) === key)))
     void poll()
   }, [keyed])
   return waiting

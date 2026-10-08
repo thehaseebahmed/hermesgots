@@ -18,6 +18,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from . import events
+
 logger = logging.getLogger(__name__)
 
 TOOL = "clarify"
@@ -306,6 +308,8 @@ def _set_status(adapter: Any, run_id: str, status: str, **fields: Any) -> None:
             setter(run_id, status, **fields)
         except Exception:
             logger.debug("memento: couldn't set the run's status", exc_info=True)
+        # A run waiting on a question, or carrying on after one, is news to every device.
+        events.note("runs", None, None, True)
 
 
 def _event(run_id: str, name: str, **fields: Any) -> Dict[str, Any]:
