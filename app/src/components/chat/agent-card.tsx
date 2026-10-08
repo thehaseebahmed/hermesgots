@@ -23,6 +23,8 @@ const POLL_MS = 4000
 const RECENT_ROWS = 40
 const STEPS = 3
 
+const agentTitle = (goal: string) => `Sub-Agent: ${agentName(goal)}`
+
 /**
  * A `delegate_task` call: a card per agent it started, with the last few things that agent did,
  * opening everything it did. Without the plugin to name the agent, the call's goal and state.
@@ -65,18 +67,23 @@ function PendingCard({ tool }: { tool: ToolEvent }) {
     <CardShell>
       <span className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
         <BotIcon className="size-4" />
-        <span className="flex-1 truncate">{agentName(tool.label)}</span>
-        {running && <Spinner className="size-3.5" />}
+        <span className="flex-1 truncate">{agentTitle(tool.label)}</span>
       </span>
+      {running && (
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Spinner className="size-3" />
+          Working
+        </span>
+      )}
     </CardShell>
   )
 }
 
 function StatusIcon({ agent }: { agent: DelegatedAgent }) {
-  if (agent.status === "running") return <Spinner className="size-3.5" />
+  if (agent.status === "running") return <Spinner className="size-3" />
   if (agent.status === "stopped")
-    return <PauseIcon className="size-3.5 text-warning" aria-label="Stopped" />
-  return <CheckIcon className="size-3.5" aria-label="Done" />
+    return <PauseIcon className="size-3 text-warning" aria-label="Stopped" />
+  return <CheckIcon className="size-3" aria-label="Done" />
 }
 
 /** An agent's transcript as the chat shows a reply, read again while the agent works. */
@@ -116,8 +123,7 @@ function AgentCard({ agent, source }: { agent: DelegatedAgent; source: AgentsSou
       <CardShell onClick={() => setOpen(true)}>
         <span className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
           <BotIcon className="size-4" />
-          <span className="flex-1 truncate">{agentName(agent.goal)}</span>
-          <StatusIcon agent={agent} />
+          <span className="flex-1 truncate">{agentTitle(agent.goal)}</span>
           <ChevronRightIcon className="size-4" />
         </span>
         {steps.length ? (
@@ -138,7 +144,10 @@ function AgentCard({ agent, source }: { agent: DelegatedAgent; source: AgentsSou
             {agentName(agent.goal) === agent.goal.trim() ? "Starting…" : agent.goal}
           </p>
         )}
-        <span className="text-xs text-muted-foreground tabular-nums">{agentLine(agent)}</span>
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground tabular-nums">
+          <StatusIcon agent={agent} />
+          {agentLine(agent)}
+        </span>
       </CardShell>
       <Popup open={open} onOpenChange={setOpen}>
         <PopupContent className="sm:max-w-xl">
@@ -160,7 +169,7 @@ function AgentView({ agent, server }: { agent: DelegatedAgent; server: HermesCon
   return (
     <>
       <PopupHeader className="gap-1 pb-3">
-        <PopupTitle className="truncate pr-8">{agentName(agent.goal)}</PopupTitle>
+        <PopupTitle className="truncate pr-8">{agentTitle(agent.goal)}</PopupTitle>
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <StatusIcon agent={agent} />
           <span className="truncate">
