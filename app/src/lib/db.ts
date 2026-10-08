@@ -38,10 +38,11 @@ export interface Profile {
   model: string
   /** Which of the bot characters represents this profile. */
   botId: string
-  /** The model's context window in tokens, from models.dev or set by hand (Hermes doesn't report it). */
+  /** The model's context window in tokens, from models.dev (Hermes's API doesn't report it). */
   contextWindow?: number
   /** `provider/model` Hermes reported when the window was set; a different one resets it. */
   contextModel?: string
+  /** `manual` is a window set by hand on an older version; it is ignored and looked up again. */
   contextSource?: "models.dev" | "manual"
   /** Whether the model takes images, per models.dev; unset when it doesn't list the model. */
   imageInput?: boolean

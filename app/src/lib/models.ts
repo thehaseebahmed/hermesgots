@@ -115,7 +115,7 @@ export const findImageInput = (info: ModelRef) => lookUp(info, imageInputOf)
 
 /**
  * Fills in the profile's context window from models.dev whenever the model behind it changes,
- * clearing it when the new model isn't listed so the user is asked for it. When models.dev can't be
+ * clearing it when the new model isn't listed. When models.dev can't be
  * reached the profile is left alone, so the next sync looks again.
  */
 export async function syncContextWindow(profile: Profile) {
@@ -123,7 +123,8 @@ export async function syncContextWindow(profile: Profile) {
   const info = await getModelInfo(profile)
   if (!info?.model) return
   const key = info.provider ? `${info.provider}/${info.model}` : info.model
-  if (key === profile.contextModel) {
+  // A window set by hand (no longer offered) is looked up again.
+  if (key === profile.contextModel && profile.contextSource !== "manual") {
     // Bots from before image detection learn it once.
     if (profile.imageInput === undefined) {
       const imageInput = await findImageInput(info).catch(() => undefined)
@@ -145,12 +146,10 @@ export async function syncContextWindow(profile: Profile) {
     }
     return
   }
-  // Bots from before detection keep a hand-set window rather than losing it on the first sync.
-  const keep = !profile.contextModel && !found && profile.contextWindow
   await updateProfile(profile.id, {
     contextModel: key,
-    contextWindow: keep ? profile.contextWindow : found,
-    contextSource: keep ? "manual" : found ? "models.dev" : undefined,
+    contextWindow: found,
+    contextSource: found ? "models.dev" : undefined,
     imageInput,
   })
 }
