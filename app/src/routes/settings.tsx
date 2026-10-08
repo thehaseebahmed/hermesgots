@@ -10,10 +10,11 @@ import {
   TerminalIcon,
   ChevronRightIcon,
   DatabaseIcon,
-  GaugeIcon,
   MenuIcon,
+  MessageCircleIcon,
   MonitorIcon,
   MoonIcon,
+  PaletteIcon,
   SailboatIcon,
   SunIcon,
   UserIcon,
@@ -65,7 +66,7 @@ const THEMES = [
 const SECTIONS: Record<string, { title: string; render: () => ReactNode }> = {
   account: { title: "Account", render: () => <AccountSettings /> },
   bots: { title: "Bots", render: () => <BotSettings /> },
-  theme: { title: "Color mode", render: () => <ThemeSettings /> },
+  appearance: { title: "Appearance", render: () => <AppearanceSettings /> },
   data: { title: "Local data", render: () => <DataSettings /> },
   developer: { title: "Developer", render: () => <DeveloperSettings /> },
 }
@@ -150,18 +151,10 @@ function MenuScreen({ className }: { className?: string }) {
       </Group>
       <Group>
         <Row
-          to="theme"
-          icon={MoonIcon}
-          title="Color mode"
+          to="appearance"
+          icon={PaletteIcon}
+          title="Appearance"
           subtitle={THEMES.find((t) => t.value === (theme ?? "system"))?.label}
-        />
-        <SwitchRow
-          id="show-stats"
-          icon={GaugeIcon}
-          title="Reply stats"
-          subtitle="Tokens, speed and time under each reply"
-          checked={settings?.showStats ?? DEFAULT_SETTINGS.showStats}
-          onCheckedChange={(checked) => saveSettings({ showStats: checked })}
         />
         <NotificationsRow />
       </Group>
@@ -443,25 +436,41 @@ function AccountRow() {
   )
 }
 
-function ThemeSettings() {
+function AppearanceSettings() {
   const { theme, setTheme } = useTheme()
   const current = theme ?? "system"
+  const simplified = useLiveQuery(
+    async () => ({ ...DEFAULT_SETTINGS, ...(await db.settings.get("settings")) }).simplifiedChats,
+    [],
+  )
   return (
-    <Group>
-      {THEMES.map(({ value, label, icon: Icon }) => (
-        <button
-          key={value}
-          type="button"
-          className={cn(rowClass, "transition-colors hover:bg-muted")}
-          aria-pressed={current === value}
-          onClick={() => setTheme(value)}
-        >
-          <Icon className="size-5 shrink-0 text-muted-foreground" />
-          <RowText title={label} />
-          {current === value && <CheckIcon className="size-5 shrink-0" />}
-        </button>
-      ))}
-    </Group>
+    <>
+      <Group>
+        {THEMES.map(({ value, label, icon: Icon }) => (
+          <button
+            key={value}
+            type="button"
+            className={cn(rowClass, "transition-colors hover:bg-muted")}
+            aria-pressed={current === value}
+            onClick={() => setTheme(value)}
+          >
+            <Icon className="size-5 shrink-0 text-muted-foreground" />
+            <RowText title={label} />
+            {current === value && <CheckIcon className="size-5 shrink-0" />}
+          </button>
+        ))}
+      </Group>
+      <Group>
+        <SwitchRow
+          id="simplified-chats"
+          icon={MessageCircleIcon}
+          title="Simplified chats"
+          subtitle="Hide tool calls, stats and context use"
+          checked={simplified ?? DEFAULT_SETTINGS.simplifiedChats}
+          onCheckedChange={(checked) => saveSettings({ simplifiedChats: checked })}
+        />
+      </Group>
+    </>
   )
 }
 

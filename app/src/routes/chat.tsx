@@ -233,6 +233,8 @@ export function ChatPage() {
   const todos = (tracked && conversation?.todos?.items) || []
   // A session of a Hermes Project: works in its worktree, with a mode, a PR and a resolved state.
   const session = conversation?.projectId ? conversation : undefined
+  // Plain chats hide context use, stats and tool calls unless the user turned that off.
+  const simple = !session && resolved.simplifiedChats
   const modelChoice = conversation
     ? conversation.modelChoice
     : pendingModel?.profileId === profile?.id
@@ -454,7 +456,7 @@ export function ChatPage() {
         <EllipsisIcon />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-44">
-        {configured && (
+        {configured && !simple && (
           <>
             <DropdownMenuItem onClick={() => setUsageOpen(true)}>
               <ContextIcon usage={usage} />
@@ -509,7 +511,7 @@ export function ChatPage() {
     <div className="relative flex min-h-0 flex-1 flex-col">
       <ChatHeader
         title={conversation?.title ?? "New chat"}
-        subtitle={activity ?? session?.worktree?.branch}
+        subtitle={(!simple && activity) || session?.worktree?.branch}
         botId={profile?.botId}
         actions={actions}
         leading={
@@ -556,7 +558,8 @@ export function ChatPage() {
                     <MessageScrollerItem key={message.id} messageId={message.id}>
                       <MessageItem
                         message={message}
-                        showStats={resolved.showStats}
+                        showStats={!simple}
+                        simple={simple}
                         botId={profile?.botId}
                         busy={busy}
                         plain={Boolean(session)}

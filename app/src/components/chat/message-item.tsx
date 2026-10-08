@@ -134,9 +134,12 @@ export function MessageItem({
   botId,
   busy,
   plain,
+  simple,
 }: {
   message: Message
   showStats: boolean
+  /** A simplified chat: the agent's tool calls and its activity line are left out. */
+  simple?: boolean
   botId?: string
   /** Whether a reply is streaming in this chat, so queued messages know they'll go on their own. */
   busy?: boolean
@@ -183,7 +186,9 @@ export function MessageItem({
   const asking = awaitingClarify
     ? message.tools?.findLast((t) => t.tool === "clarify" && t.status === "running")
     : undefined
-  const tools = (message.tools ?? []).filter((t) => t !== asking)
+  const tools = (message.tools ?? []).filter(
+    (t) => t !== asking && (!simple || t.tool === "clarify"),
+  )
   // The tool group right above already names the running call, so repeating it here is noise.
   const runningTool = tools.some((t) => t.status === "running")
 
@@ -216,9 +221,14 @@ export function MessageItem({
         )
       ) : (
         <>
-          {streaming && content && message.statusText && !awaitingApproval && !awaitingClarify && (
-            <div className="px-1 text-xs text-muted-foreground">{message.statusText}</div>
-          )}
+          {streaming &&
+            !simple &&
+            content &&
+            message.statusText &&
+            !awaitingApproval &&
+            !awaitingClarify && (
+              <div className="px-1 text-xs text-muted-foreground">{message.statusText}</div>
+            )}
           {/* Last, so the avatar stays level with it however much the turn has said or run. */}
           {streaming && <TypingBubble />}
         </>
