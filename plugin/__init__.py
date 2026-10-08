@@ -742,6 +742,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     async def theseus_view(record: Dict[str, Any], fresh: bool = False) -> "web.Response":
         home = await asyncio.to_thread(theseus.run_home, record)
         snap = await asyncio.to_thread(theseus.state, home, fresh) if home else None
+        live, _ = sessions.live_runs(adapter)
+        # On the loop thread, like store_path: the profile scope isn't visible inside to_thread.
+        agents = await asyncio.to_thread(delegation.children, hermes_home(), record["session_id"], set(live))
         return web.json_response(
             {
                 "object": "memento.theseus",
@@ -749,6 +752,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 "state": snap,
                 "models": (record.get("theseus") or {}).get("models") or {"review": [], "visual": []},
                 "unavailable": await asyncio.to_thread(theseus.available),
+                "agents": agents,
             }
         )
 
