@@ -101,7 +101,7 @@ function ThreadItem({
         replace={beside}
         state={{ bot: profileId }}
         aria-current={open ? "page" : undefined}
-        className="ml-10 flex min-h-11 items-center gap-1 rounded-full px-2 text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="-mt-4 ml-10 flex min-h-11 items-center gap-1 rounded-full px-2 text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <span className="font-medium text-info">View thread</span>
         {thread.replies > 0 && (
