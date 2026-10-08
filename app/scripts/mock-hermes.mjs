@@ -370,6 +370,7 @@ function theseusView(id) {
     object: "memento.theseus",
     stage,
     models: run.models,
+    agents: theseusAgents(id, stage),
     unavailable: THESEUS_START === "unavailable" ? "Theseus needs Node 20 or newer on the Hermes host, and there is none." : null,
     state: {
       run: { key: "routine-editor", reference: "docs/routine-mock.html", testCmd: "pnpm test", status, planRequired: true, ...run.settings, plan },
@@ -382,6 +383,38 @@ function theseusView(id) {
       runs: [],
     },
   }
+}
+
+// The sessions a run's agent delegated to (the plugin reads them from state.db), each with a short
+// transcript at GET /api/sessions/{id}/messages. Past planning: the planner, then a builder per
+// checkpoint started; at `building`, CP3's first builder was stopped and a fixer is working.
+function theseusAgents(id, stage) {
+  if (["discovery", "plan"].includes(stage)) return []
+  const now = Date.now() / 1000
+  const agents = [["planner", "Act as theseus-planner (checkpoints.md): split the confirmed plan into checkpoints.", "done", 6, 9]]
+  if (!["planning", "checkpoints"].includes(stage)) {
+    agents.push(["cp1", "Act as theseus-builder (builder.md) for CP1: the routine list.", "done", 21, 14])
+    agents.push(["cp2", "Act as theseus-builder (builder.md) for CP2: the editor form.", "done", 18, 12])
+    agents.push(["cp3", "Act as theseus-builder (builder.md) for CP3: saving and validation.", stage === "building" ? "stopped" : "done", 39, 12])
+    if (stage === "building") agents.push(["cp3-fix", "Act as theseus-builder in fix mode for CP3 with reviewer A's findings.", "running", 7, 3])
+  }
+  let start = now - 3600
+  return agents.map(([key, goal, status, calls, minutes]) => {
+    const agentId = `${id}-agent-${key}`
+    const startedAt = (start += 600)
+    if (!transcripts.has(agentId)) {
+      const rows = [
+        { role: "user", content: goal },
+        { role: "assistant", content: "Reading the checkpoint and the learnings first.", tool_calls: [{ id: `${agentId}-1`, function: { name: "read_file", arguments: JSON.stringify({ path: "src/routes/routines.tsx" }) } }] },
+        { role: "tool", tool_call_id: `${agentId}-1`, tool_name: "read_file", content: JSON.stringify({ content: "export function Routines() {}" }) },
+        { role: "assistant", content: "", tool_calls: [{ id: `${agentId}-2`, function: { name: "terminal", arguments: JSON.stringify({ command: "node theseus.js record CP3 red" }) } }] },
+        { role: "tool", tool_call_id: `${agentId}-2`, tool_name: "terminal", content: JSON.stringify({ output: "CP3 red recorded: 2 failing tests", exit_code: 0 }) },
+        ...(status === "done" ? [{ role: "assistant", content: "Done: the planned tests failed first, then passed. `record CP3 tests` is green." }] : []),
+      ]
+      transcripts.set(agentId, rows.map((row, i) => ({ id: ++lastRowId, session_id: agentId, timestamp: startedAt + i * 30, ...row })))
+    }
+    return { id: agentId, goal, model: "claude-opus-5-5", started_at: startedAt, ended_at: status === "running" ? null : startedAt + minutes * 60, end_reason: status === "done" ? "agent_close" : status === "stopped" ? "interrupted" : null, tool_calls: calls, status }
+  })
 }
 
 // A wireframe for a gate 2 capture; the reference is dashed, the build is solid.
