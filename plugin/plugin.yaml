@@ -1,4 +1,4 @@
 name: memento
-version: "0.20.0"
+version: "0.21.0"
 description: Keeps the Memento app's chat list and context use, reads its chats' todo lists, serves it cron run history and Hermes Projects, creates projects with their GitHub repos cloned in, runs its project sessions in git worktrees with a permission mode, gives the agent a tool that pushes its work and opens the pull request, resolves a session once its pull request merges, closes its pull request and branch when it is discarded, lets the agent ask the user questions, and labels its chats in Hermes.
 author: Memento

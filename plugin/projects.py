@@ -222,9 +222,14 @@ def pins(hermes_home: Path) -> Dict[str, int]:
 USAGE_COLUMNS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")
 
 
+def _columns(conn: sqlite3.Connection) -> set:
+    return {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
+
+
 def usage(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
-    """What the sessions in the project's folders used, summed from Hermes's session store. None
-    when there's no such project; zeros when the store can't be read."""
+    """What the sessions in the project's folders used, summed from Hermes's session store, with
+    each session's own share split by model so the app can price it. None when there's no such
+    project; zeros when the store can't be read."""
     from hermes_cli import projects_db as pdb
 
     projects_db = hermes_home / "projects.db"
@@ -234,7 +239,12 @@ def usage(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
         project = pdb.get_project(conn, project_id)
     if project is None:
         return None
-    totals: Dict[str, Any] = {"sessions": 0, "cost_usd": None, **{c: 0 for c in USAGE_COLUMNS}}
+    totals: Dict[str, Any] = {
+        "sessions": 0,
+        "cost_usd": None,
+        **{c: 0 for c in USAGE_COLUMNS},
+        "threads": [],
+    }
     state = hermes_home / "state.db"
     if not state.exists():
         return totals
@@ -242,26 +252,72 @@ def usage(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
     try:
         # Read-only, so it can never lock the gateway out of its own store.
         with sqlite3.connect(f"{state.as_uri()}?mode=ro", uri=True, timeout=2) as conn:
+            have = _columns(conn)
+            optional = [c for c in ("model", "title", "started_at", "last_activity_at") if c in have]
             found = conn.execute(
-                "SELECT cwd, parent_session_id, "
+                "SELECT id, cwd, parent_session_id, "
                 + ", ".join(f"COALESCE({c}, 0)" for c in USAGE_COLUMNS)
-                + ", COALESCE(actual_cost_usd, estimated_cost_usd) FROM sessions"
-                " WHERE cwd IS NOT NULL AND TRIM(cwd) != ''"
+                + ", COALESCE(actual_cost_usd, estimated_cost_usd)"
+                + "".join(f", {c}" for c in optional)
+                + " FROM sessions"
             ).fetchall()
     except sqlite3.Error:
         logger.debug("memento: couldn't read usage for project %s", project_id, exc_info=True)
         return totals
-    for cwd, parent, *counts, cost in found:
-        cwd = os.path.abspath(os.path.expanduser(str(cwd).strip()))
-        if not any(_owns(folder, cwd) for folder in folders):
-            continue
+    rows = {}
+    for session_id, cwd, parent, *rest in found:
+        counts, cost, extra = rest[:4], rest[4], dict(zip(optional, rest[5:]))
+        rows[session_id] = (cwd, parent, counts, cost, extra)
+
+    def root(session_id: str) -> str:
         # A compressed session goes on in a child row; it's still one session.
-        if not parent:
-            totals["sessions"] += 1
+        seen = set()
+        while session_id not in seen:
+            seen.add(session_id)
+            parent = rows[session_id][1]
+            if not parent or parent not in rows:
+                return session_id
+            session_id = parent
+        return session_id
+
+    def inside(cwd: Any) -> bool:
+        if not cwd or not str(cwd).strip():
+            return False
+        path = os.path.abspath(os.path.expanduser(str(cwd).strip()))
+        return any(_owns(folder, path) for folder in folders)
+
+    threads: Dict[str, Dict[str, Any]] = {}
+    for session_id, (cwd, _parent, counts, cost, extra) in rows.items():
+        top = root(session_id)
+        if not (inside(cwd) or inside(rows[top][0])):
+            continue
+        thread = threads.get(top)
+        if thread is None:
+            top_extra = rows[top][4]
+            thread = threads[top] = {
+                "id": top,
+                "title": None,
+                "started_at": top_extra.get("started_at"),
+                "last_active": None,
+                "models": {},
+            }
+        if extra.get("title") and (thread["title"] is None or session_id == top):
+            thread["title"] = extra["title"]
+        active = extra.get("last_activity_at") or extra.get("started_at")
+        if active and (thread["last_active"] is None or active > thread["last_active"]):
+            thread["last_active"] = active
+        model = str(extra.get("model") or "")
+        bucket = thread["models"].setdefault(
+            model, {"model": model or None, "cost_usd": None, **{c: 0 for c in USAGE_COLUMNS}}
+        )
         for column, count in zip(USAGE_COLUMNS, counts):
+            bucket[column] += int(count or 0)
             totals[column] += int(count or 0)
         if cost is not None:
+            bucket["cost_usd"] = (bucket["cost_usd"] or 0.0) + float(cost)
             totals["cost_usd"] = (totals["cost_usd"] or 0.0) + float(cost)
+    totals["sessions"] = len(threads)
+    totals["threads"] = [{**t, "models": list(t["models"].values())} for t in threads.values()]
     return totals
 
 
