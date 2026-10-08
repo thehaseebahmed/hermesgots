@@ -61,7 +61,12 @@ export function Composer({
   /** Shown at the start of the input (in a session, on its bottom row), e.g. the context ring. */
   leading?: ReactNode
   /** A project session: two lines, with the `+` menu and its permission mode under the text. */
-  session?: { mode: SessionMode; onMode: (mode: SessionMode) => void; autoAvailable: boolean }
+  session?: {
+    mode: SessionMode
+    onMode: (mode: SessionMode) => void
+    autoAvailable: boolean
+    started?: boolean
+  }
   /** Whether files can be attached (they need the Memento plugin); photos always can. */
   filesAvailable: boolean
   /** False when the model doesn't take images. */
@@ -331,6 +336,7 @@ export function Composer({
               onChange={session.onMode}
               disabled={disabled}
               autoAvailable={session.autoAvailable}
+              started={session.started}
             />
             <span className="flex-1" />
             {leading}

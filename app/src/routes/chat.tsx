@@ -28,6 +28,7 @@ import {
   PlanReadyCard,
   ResolvedCard,
 } from "@/components/chat/session-cards"
+import { TheseusCard, TheseusPill, TheseusSheet, type SheetView } from "@/components/chat/theseus"
 import { TodosPill, TodosSheet } from "@/components/chat/todos"
 import { ContextRing, UsageSheet, type ContextUsage } from "@/components/chat/usage-sheet"
 import { Bot } from "@/components/bot"
@@ -88,6 +89,7 @@ import {
   setSessionMode,
   type RepoRef,
 } from "@/lib/workspace"
+import { useTheseusRun } from "@/lib/theseus"
 
 /** How often an open chat checks Hermes for turns sent from another device. */
 const CATCH_UP_MS = 30_000
@@ -205,6 +207,7 @@ export function ChatPage() {
   const [title, setTitle] = useState("")
   const [usageOpen, setUsageOpen] = useState(false)
   const [todosOpen, setTodosOpen] = useState(false)
+  const [theseusView, setTheseusView] = useState<SheetView | null>(null)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const [historyMissing, setHistoryMissing] = useState<string>()
 
@@ -267,6 +270,9 @@ export function ChatPage() {
   // A server that streams its changes says when this chat's session moves; the timer is a net.
   const streamOpen = useLive(profile)
   useEffect(() => (id ? watchChat(id) : undefined), [id])
+  // A Theseus session's run, once its first turn has started it.
+  const theseus = useTheseusRun(session?.mode === "theseus" && hasMessages)
+  const theseusWaits = theseus && !["discovery", "building"].includes(theseus.stage)
   useEffect(() => {
     if (!id || !hasMessages) return
     const catchUp = () => {
@@ -544,12 +550,16 @@ export function ChatPage() {
       )}
 
       <div data-toast-above className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
-        {(todos.length > 0 || (session?.prs?.length ?? 0) > 0) && (
+        {(todos.length > 0 || theseus || (session?.prs?.length ?? 0) > 0) && (
           // One line, centred; wider than the screen it scrolls, from the first pill.
           <div className="-mx-3 flex [scrollbar-width:none] overflow-x-auto px-3 pb-2 sm:-mx-4 sm:px-4 [&::-webkit-scrollbar]:hidden">
             <div className="mx-auto flex w-max max-w-none min-w-full shrink-0 justify-center gap-2">
-              {todos.length > 0 && (
-                <TodosPill items={todos} live={busy} onClick={() => setTodosOpen(true)} />
+              {theseus ? (
+                <TheseusPill run={theseus} onClick={() => setTheseusView({ kind: "run" })} />
+              ) : (
+                todos.length > 0 && (
+                  <TodosPill items={todos} live={busy} onClick={() => setTodosOpen(true)} />
+                )
               )}
               {session?.prs?.map((pr) => (
                 <PrPill
@@ -589,6 +599,10 @@ export function ChatPage() {
           <div className="mx-auto w-full max-w-3xl">
             <BlockedCard reason={session.blocked} />
           </div>
+        ) : theseusWaits && !busy ? (
+          <div className="mx-auto w-full max-w-3xl">
+            <TheseusCard run={theseus} onOpen={setTheseusView} />
+          </div>
         ) : session?.planPending && session.mode === "plan" && !busy ? (
           <div className="mx-auto w-full max-w-3xl">
             <PlanReadyCard
@@ -626,6 +640,7 @@ export function ChatPage() {
                     ? "accept_edits"
                     : (session.mode ?? "accept_edits"),
                 autoAvailable: tracked,
+                started: hasMessages,
                 onMode: (mode) =>
                   setSessionMode(session.id, mode).catch((error) =>
                     toast.error(
@@ -645,6 +660,7 @@ export function ChatPage() {
 
       <UsageSheet open={usageOpen} onOpenChange={setUsageOpen} usage={usage} profile={profile} />
       <TodosSheet open={todosOpen} onOpenChange={setTodosOpen} items={todos} live={busy} />
+      {theseus && <TheseusSheet run={theseus} view={theseusView} onView={setTheseusView} />}
 
       <AlertDialog open={renaming} onOpenChange={setRenaming}>
         <AlertDialogContent>

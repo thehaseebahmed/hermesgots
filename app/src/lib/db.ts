@@ -110,7 +110,7 @@ export interface Conversation {
 }
 
 /** How much a project session may do without asking. */
-export type SessionMode = "accept_edits" | "auto" | "plan"
+export type SessionMode = "accept_edits" | "auto" | "plan" | "theseus"
 
 export type PrState = "open" | "draft" | "merged" | "closed"
 

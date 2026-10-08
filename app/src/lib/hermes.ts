@@ -964,7 +964,7 @@ export interface SessionWorkspace {
   blocked: string | null
 }
 
-const MODES = new Set<string>(["accept_edits", "auto", "plan"])
+const MODES = new Set<string>(["accept_edits", "auto", "plan", "theseus"])
 
 function parseWorkspace(raw: unknown): SessionWorkspace | null {
   const body = raw as {
