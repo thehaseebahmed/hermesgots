@@ -12,7 +12,7 @@ import { toast } from "sonner"
 
 import { AttachMenu } from "@/components/chat/attach-menu"
 import { AttachmentTile } from "@/components/chat/attachments"
-import { ModeMenu } from "@/components/chat/mode-menu"
+import type { ModeSettings } from "@/components/chat/mode-menu"
 import { SlashMenu } from "@/components/chat/slash-menu"
 import { VoiceBar } from "@/components/chat/voice-bar"
 import {
@@ -22,10 +22,9 @@ import {
   InputGroupTextarea,
 } from "@/components/ui/input-group"
 import { MAX_ATTACHMENTS, prepareAttachment } from "@/lib/attachments"
-import type { Attachment, SessionMode } from "@/lib/db"
-import type { HermesConfig, TheseusInfo } from "@/lib/hermes"
+import type { Attachment } from "@/lib/db"
+import type { HermesConfig } from "@/lib/hermes"
 import { joinText, useDictation } from "@/lib/speech"
-import { cn } from "@/lib/utils"
 import {
   localCommand,
   optionId,
@@ -44,6 +43,7 @@ export function Composer({
   connection,
   botName = "Hermes",
   leading,
+  model,
   session,
   filesAvailable,
   imagesAvailable,
@@ -58,17 +58,12 @@ export function Composer({
   /** The chat's Hermes profile, for the skills in the `/` menu. */
   connection: HermesConfig
   botName?: string
-  /** Shown at the start of the input (in a session, on its bottom row), e.g. the context ring. */
+  /** Shown before the voice and send buttons on the bottom row, e.g. the context ring. */
   leading?: ReactNode
-  /** A project session: two lines, with the `+` menu and its permission mode under the text. */
-  session?: {
-    mode: SessionMode
-    onMode: (mode: SessionMode) => void
-    autoAvailable: boolean
-    /** What the bot's host says about Theseus: undefined while asking, null without the plugin's support. */
-    theseus?: TheseusInfo | null
-    started?: boolean
-  }
+  /** The model pill, beside the `+` button. */
+  model?: ReactNode
+  /** A project session: its permission mode, picked in the `+` menu. */
+  session?: ModeSettings
   /** Whether files can be attached (they need the Memento plugin); photos always can. */
   filesAvailable: boolean
   /** False when the model doesn't take images. */
@@ -148,6 +143,7 @@ export function Composer({
       filesAvailable={filesAvailable}
       imagesAvailable={imagesAvailable}
       onAdd={(files) => void addFiles(files)}
+      session={session}
     />
   )
 
@@ -281,18 +277,7 @@ export function Composer({
           ))}
         </div>
       )}
-      <InputGroup
-        className={cn(
-          "bg-background shadow-lg shadow-black/5 has-[textarea]:rounded-[1.75rem] dark:bg-input/30",
-          session && "has-data-[align=block-end]:rounded-[1.75rem]",
-        )}
-      >
-        {!session && (
-          <InputGroupAddon align="inline-start" className="gap-0 self-end py-1.5 pl-1.5">
-            {attach}
-            {leading}
-          </InputGroupAddon>
-        )}
+      <InputGroup className="bg-background shadow-lg shadow-black/5 has-data-[align=block-end]:rounded-[1.75rem] has-[textarea]:rounded-[1.75rem] dark:bg-input/30">
         <InputGroupTextarea
           ref={textarea}
           value={value}
@@ -319,37 +304,20 @@ export function Composer({
           }
           disabled={disabled}
           rows={1}
-          className={cn(
-            "max-h-48 text-base md:text-[15px]",
-            session ? "min-h-12 px-5 pt-4 pb-2" : "min-h-14 py-4",
-            !session && "pr-5 pl-1",
-          )}
+          className="max-h-48 min-h-12 px-5 pt-4 pb-2 text-base md:text-[15px]"
           aria-label="Message"
         />
-        {session ? (
-          <InputGroupAddon
-            align="block-end"
-            className="gap-1 px-2.5 pt-0 pb-1.5"
-            onClick={() => textarea.current?.focus()}
-          >
-            {attach}
-            <ModeMenu
-              mode={session.mode}
-              onChange={session.onMode}
-              disabled={disabled}
-              autoAvailable={session.autoAvailable}
-              theseus={session.theseus}
-              started={session.started}
-            />
-            <span className="flex-1" />
-            {leading}
-            {controls}
-          </InputGroupAddon>
-        ) : (
-          <InputGroupAddon align="inline-end" className="self-end py-1.5 pr-2.5">
-            {controls}
-          </InputGroupAddon>
-        )}
+        <InputGroupAddon
+          align="block-end"
+          className="gap-1 px-2.5 pt-0 pb-1.5"
+          onClick={() => textarea.current?.focus()}
+        >
+          {attach}
+          {model}
+          <span className="flex-1" />
+          {leading}
+          {controls}
+        </InputGroupAddon>
       </InputGroup>
     </form>
   )

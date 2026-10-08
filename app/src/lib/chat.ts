@@ -670,9 +670,11 @@ export async function sendMessage(
       )
       await db.messages.update(userMessage.id, { attachments: sent })
     }
+    // The chat's own pick, else the bot's default, else whatever the host runs.
+    const chosen = conversation.modelChoice ?? profile.modelChoice
     const turnOptions = {
-      model: conversation.modelChoice?.model ?? profile.model,
-      provider: conversation.modelChoice?.provider,
+      model: chosen?.model ?? profile.model,
+      provider: chosen?.provider,
       sessionId: conversation.hermesSessionId,
       messages: [
         ...transcript,

@@ -1,28 +1,10 @@
-import {
-  ChevronDownIcon,
-  LockIcon,
-  MapIcon,
-  PencilLineIcon,
-  SailboatIcon,
-  ZapIcon,
-} from "lucide-react"
+import { CheckIcon, LockIcon, MapIcon, PencilLineIcon, SailboatIcon, ZapIcon } from "lucide-react"
 
-import { useState } from "react"
-
-import { TheseusIntro } from "@/components/chat/theseus-intro"
 import { ExperimentalBadge } from "@/components/experimental-badge"
-import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import type { SessionMode } from "@/lib/db"
 import type { TheseusInfo } from "@/lib/hermes"
-import { introSeen, useTheseusEnabled } from "@/lib/theseus"
+import { useTheseusEnabled } from "@/lib/theseus"
+import { cn } from "@/lib/utils"
 import { MODE_LABELS } from "@/lib/workspace"
 
 const MODES: { mode: SessionMode; icon: typeof ZapIcon }[] = [
@@ -31,29 +13,34 @@ const MODES: { mode: SessionMode; icon: typeof ZapIcon }[] = [
   { mode: "plan", icon: MapIcon },
 ]
 
-/** The session's permission mode, as a pill that opens a menu of the three (four with Theseus). */
-export function ModeMenu({
-  mode,
-  onChange,
-  disabled,
-  autoAvailable,
-  theseus,
-  started,
-}: {
+/** A mode's icon, as the options list shows it. */
+export function ModeIcon({ mode, className }: { mode: SessionMode; className?: string }) {
+  const Icon =
+    mode === "theseus" ? SailboatIcon : (MODES.find((m) => m.mode === mode)?.icon ?? PencilLineIcon)
+  return <Icon className={className} aria-hidden />
+}
+
+export interface ModeSettings {
   mode: SessionMode
-  onChange: (mode: SessionMode) => void
-  disabled?: boolean
+  onMode: (mode: SessionMode) => void
   /** Auto is answered by the plugin on the server, so it needs the plugin. */
   autoAvailable: boolean
   /** Theseus runs on the host's Node and needs the plugin to have it; undefined while that's asked. */
   theseus?: TheseusInfo | null
   /** The session has had a turn: Theseus can't be picked any more, and can't be left. */
   started?: boolean
-}) {
-  const [intro, setIntro] = useState(false)
+}
+
+/** The session's permission modes, as rows in the Add context sheet (four with Theseus). */
+export function ModeOptions({
+  mode,
+  autoAvailable,
+  theseus,
+  started,
+  disabled,
+  onPick,
+}: Omit<ModeSettings, "onMode"> & { disabled?: boolean; onPick: (mode: SessionMode) => void }) {
   const theseusEnabled = useTheseusEnabled()
-  const Icon =
-    mode === "theseus" ? SailboatIcon : (MODES.find((m) => m.mode === mode)?.icon ?? PencilLineIcon)
   const locked = mode === "theseus" && started
   // Why Theseus can't be picked on this host, if it can't.
   const unavailable =
@@ -74,6 +61,7 @@ export function ModeMenu({
     }
   }
   const off = (option: SessionMode) =>
+    disabled ||
     (option === "auto" && !autoAvailable) ||
     (locked && option !== "theseus") ||
     (option === "theseus" &&
@@ -85,66 +73,45 @@ export function ModeMenu({
       ? [...MODES, { mode: "theseus" as SessionMode, icon: SailboatIcon }]
       : MODES
   return (
-    <>
-      <TheseusIntro open={intro} onOpenChange={setIntro} onUse={() => onChange("theseus")} />
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          disabled={disabled}
-          render={
-            <Button
-              type="button"
-              variant="secondary"
-              className="h-11 gap-1.5 rounded-full pr-2.5 pl-3"
-              aria-label={`Mode: ${MODE_LABELS[mode]}`}
-            />
-          }
-        >
-          <Icon />
-          {MODE_LABELS[mode]}
-          {locked ? (
-            <LockIcon className="size-3.5 text-muted-foreground" aria-label="Locked" />
-          ) : (
-            <ChevronDownIcon className="text-muted-foreground" />
-          )}
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="min-w-60">
-          <DropdownMenuRadioGroup
-            value={mode}
-            onValueChange={(value) => {
-              // The first time on this device, Theseus is explained before it's taken.
-              if (value === "theseus" && mode !== "theseus" && !introSeen()) setIntro(true)
-              else onChange(value as SessionMode)
-            }}
+    <div
+      role="radiogroup"
+      aria-label="Mode"
+      className="flex flex-col overflow-hidden rounded-2xl bg-muted/60 p-1"
+    >
+      {options.map(({ mode: option, icon: Icon }) => {
+        const selected = option === mode
+        return (
+          <button
+            key={option}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            disabled={off(option)}
+            onClick={() => onPick(option)}
+            className={cn(
+              "flex min-h-11 items-center gap-3 rounded-xl px-3 py-2 text-left text-[15px] transition-colors hover:bg-background/60 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-50 disabled:hover:bg-transparent",
+              selected && "bg-background",
+            )}
           >
-            {options.map(({ mode: option, icon: OptionIcon }) => (
-              <div key={option} className="contents">
-                {option === "theseus" && <DropdownMenuSeparator />}
-                <DropdownMenuRadioItem
-                  value={option}
-                  className="min-h-11"
-                  closeOnClick
-                  disabled={off(option)}
-                >
-                  <OptionIcon />
-                  <span className="flex flex-col">
-                    {option === "theseus" ? (
-                      <span className="flex items-center gap-2">
-                        {MODE_LABELS[option]}
-                        <ExperimentalBadge />
-                      </span>
-                    ) : (
-                      MODE_LABELS[option]
-                    )}
-                    {note(option) && (
-                      <span className="text-xs text-muted-foreground">{note(option)}</span>
-                    )}
-                  </span>
-                </DropdownMenuRadioItem>
-              </div>
-            ))}
-          </DropdownMenuRadioGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </>
+            <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="flex items-center gap-2">
+                {MODE_LABELS[option]}
+                {option === "theseus" && <ExperimentalBadge />}
+              </span>
+              {note(option) && (
+                <span className="text-sm text-muted-foreground">{note(option)}</span>
+              )}
+            </span>
+            {selected &&
+              (locked ? (
+                <LockIcon className="size-4 shrink-0 text-muted-foreground" aria-label="Locked" />
+              ) : (
+                <CheckIcon className="size-4 shrink-0 text-primary" aria-hidden />
+              ))}
+          </button>
+        )
+      })}
+    </div>
   )
 }
