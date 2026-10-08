@@ -43,7 +43,7 @@ IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
 # Fixed text, so the prompt cache holds across a session's turns.
 INSTRUCTIONS = """This session is a Theseus run: the user decides, you build in small checkpoints that each pass four gates. Follow the tha-theseus skill. Read {skill}/SKILL.md first (api.md, gates.md and checkpoints.md sit next to it) and run its CLI as `node {script} <command>`, called `theseus` in the skill.
 How it works on this host:
-- Work only in your worktree. Start the run there with `theseus init`. The user sees it in Memento and approves the plan, the checkpoints and each checkpoint there. Never run `theseus serve`: Memento serves it.
+- Work only in your worktree. Start the run with `theseus init` from the worktree's top folder, never a subfolder such as app/, and run every theseus command from there. The user sees it in Memento and approves the plan, the checkpoints and each checkpoint there. Never run `theseus serve`: Memento serves it.
 - Settle requirements with the user in chat, asking with the clarify tool. After that nobody answers for the user, so wait for them with `theseus wait --timeout 120` and run it again each time it times out.
 - Reviews are done by the theseus_review tool, which asks another model and records its verdict itself. Call it with gate `coverage` once the checkpoints are loaded (the user can't approve them until it is clean; on findings a fresh planner revises the list, you load it again and call it again), then once per reviewer a checkpoint needs (`a`, `b`; `look`, `behave` for visual). Never run `theseus coverage --verdict`, `theseus record ... review` or `visual --reviewer` yourself. `visual --skip` and `--carry` are still yours to record.
 - Everything runs in Auto: you are never asked to approve a command, and only the user approves checkpoints.
@@ -216,6 +216,86 @@ def light(cwd: str) -> Optional[Dict[str, Any]]:
     }
 
 
+_SKIP_DIRS = {"node_modules", ".git", ".worktrees", ".theseus", ".venv", "venv", "dist", "build", "__pycache__"}
+FIND_DEPTH = 3
+
+
+def _has_run(folder: Path) -> bool:
+    return (folder / ".theseus" / "current" / "run.json").is_file()
+
+
+def _below(root: Path, depth: int) -> List[Path]:
+    """Folders under ``root`` that hold a run, a few levels down, skipping dependencies and builds."""
+    found: List[Path] = []
+    level = [root]
+    for _ in range(depth):
+        nxt: List[Path] = []
+        for folder in level:
+            try:
+                children = [c for c in folder.iterdir() if c.is_dir() and not c.is_symlink()]
+            except OSError:
+                continue
+            for child in children:
+                if child.name in _SKIP_DIRS:
+                    continue
+                if _has_run(child):
+                    found.append(child)
+                nxt.append(child)
+        level = nxt
+    return found
+
+
+def run_home(record: Dict[str, Any]) -> Optional[str]:
+    """The folder the session's run lives in. ``theseus init`` makes ``.theseus/`` wherever the agent
+    runs it, which isn't always the worktree's top (a repo whose commands run from ``app/``, say), and
+    a run over several repos sits above them. So look in each worktree, then below it, then above it
+    for a run that lists the worktree; the newest wins. Falls back to the session's own worktree."""
+    primary = record.get("path")
+    trees = [Path(r["path"]) for r in record.get("repos") or [] if r.get("path")]
+    if primary and Path(primary) not in trees:
+        trees.insert(0, Path(primary))
+    found: List[Path] = []
+    for tree in trees:
+        if _has_run(tree):
+            found.append(tree)
+            continue
+        found.extend(_below(tree, FIND_DEPTH))
+        for parent in list(tree.parents)[:FIND_DEPTH]:
+            if _has_run(parent) and _lists(parent, tree):
+                found.append(parent)
+                break
+    if not found:
+        return primary or None
+
+    def mtime(folder: Path) -> float:
+        try:
+            return (folder / ".theseus" / "current" / "run.json").stat().st_mtime
+        except OSError:
+            return 0.0
+
+    return str(max(found, key=mtime))
+
+
+def _lists(folder: Path, tree: Path) -> bool:
+    """Whether the multi-repo run in ``folder`` covers ``tree`` (its run.json names the repos)."""
+    try:
+        run = json.loads((folder / ".theseus" / "current" / "run.json").read_text())
+    except (OSError, ValueError):
+        return False
+    repos = run.get("repos") if isinstance(run, dict) else None
+    if not isinstance(repos, list):
+        return False
+    for repo in repos:
+        where = repo.get("path") if isinstance(repo, dict) else None
+        if isinstance(where, str):
+            try:
+                if (folder / where).resolve() == tree.resolve():
+                    return True
+            except OSError:
+                continue
+    return False
+
+
 def _forget(cwd: str) -> None:
     with _cache_guard:
         _cache.pop(cwd, None)
@@ -272,7 +352,7 @@ def waiting_stage(record: Dict[str, Any]) -> Optional[str]:
     """Which stage of a Theseus session waits on the user, for the sidebar and the project screen."""
     if record.get("mode") != "theseus" or not record.get("path"):
         return None
-    found = stage(light(record["path"]))
+    found = stage(light(run_home(record)))
     return found if found in ("plan", "checkpoints", "approval", "closing") else None
 
 
@@ -613,7 +693,7 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
         return json.dumps({"error": "This isn't a Theseus session."})
     try:
         result = review(
-            record["path"],
+            run_home(record),
             str(args.get("gate")),
             str(args.get("checkpoint") or ""),
             str(args.get("reviewer") or ""),

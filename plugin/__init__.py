@@ -736,7 +736,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return record, None
 
     async def theseus_view(record: Dict[str, Any], fresh: bool = False) -> "web.Response":
-        snap = await asyncio.to_thread(theseus.state, record["path"], fresh) if record["path"] else None
+        home = await asyncio.to_thread(theseus.run_home, record)
+        snap = await asyncio.to_thread(theseus.state, home, fresh) if home else None
         return web.json_response(
             {
                 "object": "memento.theseus",
@@ -770,7 +771,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if problem is not None:
             return problem
         try:
-            result = await asyncio.to_thread(theseus.act, record["path"], str(body.get("action")), body)
+            home = await asyncio.to_thread(theseus.run_home, record)
+            result = await asyncio.to_thread(theseus.act, home, str(body.get("action")), body)
             events.note("runs", record["session_id"], store_path(), True)
             view = await theseus_view(record, True)
         except theseus.TheseusError as error:
@@ -803,7 +805,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         record, problem = await theseus_record(request)
         if problem is not None:
             return problem
-        file = theseus.evidence_file(record["path"], request.match_info["cp"], request.match_info["name"])
+        home = await asyncio.to_thread(theseus.run_home, record)
+        file = theseus.evidence_file(home, request.match_info["cp"], request.match_info["name"]) if home else None
         if file is None:
             return _error(web, "No such screenshot", 404)
         return web.FileResponse(file, headers={"content-type": theseus.media_type(file)})
