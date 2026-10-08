@@ -979,7 +979,29 @@ http
     if (url.pathname === "/api/model/options") {
       // Named profiles report a model models.dev doesn't know, to exercise manual entry.
       const model = profile ? `mock-model-${profile}` : "anthropic/claude-sonnet-4.5"
-      return json(res, 200, { model, provider: "openrouter", providers: [] })
+      // Hermes's picker inventory: a skeleton row without credentials is left out of the picker.
+      const providers = [
+        {
+          slug: "openrouter",
+          name: "OpenRouter",
+          is_current: true,
+          authenticated: true,
+          models: [
+            model,
+            "anthropic/claude-opus-4.1",
+            "anthropic/claude-haiku-4.5",
+            "openai/gpt-5",
+            "openai/gpt-5-mini",
+            "google/gemini-2.5-pro",
+            "google/gemini-2.5-flash",
+            "x-ai/grok-4",
+            "deepseek/deepseek-chat-v3.1",
+          ],
+        },
+        { slug: "anthropic", name: "Anthropic", is_current: false, authenticated: true, models: ["claude-sonnet-4-5", "claude-opus-4-1"] },
+        { slug: "nous", name: "Nous Portal", is_current: false, authenticated: false, models: [] },
+      ]
+      return json(res, 200, { model, provider: "openrouter", providers })
     }
     if (url.pathname === "/v1/skills") {
       return json(res, 200, {

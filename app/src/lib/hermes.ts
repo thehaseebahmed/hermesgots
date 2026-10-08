@@ -224,6 +224,8 @@ export async function streamChat(
   config: HermesConfig,
   options: {
     model: string
+    /** With a model chosen for the chat; Hermes honours an explicit provider on every endpoint. */
+    provider?: string
     messages: ChatMessage[]
     sessionId?: string
     signal?: AbortSignal
@@ -237,7 +239,12 @@ export async function streamChat(
   const response = await request(endpoint(config.baseUrl, "/chat/completions"), {
     method: "POST",
     headers: headers(config, sessionHeader),
-    body: JSON.stringify({ model: options.model, messages: options.messages, stream: true }),
+    body: JSON.stringify({
+      model: options.model,
+      ...(options.provider ? { provider: options.provider } : {}),
+      messages: options.messages,
+      stream: true,
+    }),
     signal: options.signal,
   })
   if (!response.body) throw new HermesError("Hermes returned an empty response.")
@@ -330,12 +337,40 @@ export async function listSkills(config: HermesConfig): Promise<Skill[]> {
     : []
 }
 
+/** A provider the host has credentials for, and the models Hermes offers on it. */
+export interface ModelProvider {
+  /** What Hermes takes as a run's `provider`. */
+  slug: string
+  name: string
+  models: string[]
+}
+
 export interface ModelInfo {
   model?: string
   provider?: string
+  /** The configured providers, the current one first; empty when the host lists none. */
+  providers: ModelProvider[]
 }
 
-/** The LLM and provider behind the profile. Newer Hermes only, so callers treat null as unknown. */
+/** Hermes's own model picker inventory, keeping only providers that have models to pick. */
+function modelProviders(raw: unknown, current?: string): ModelProvider[] {
+  if (!Array.isArray(raw)) return []
+  const providers = raw.flatMap((row): ModelProvider[] => {
+    if (!row || typeof row !== "object" || row.authenticated === false) return []
+    const slug = typeof row.slug === "string" ? row.slug : ""
+    const listed: unknown[] = Array.isArray(row.models) ? row.models : []
+    const models = [...new Set(listed.filter((m): m is string => typeof m === "string" && !!m))]
+    if (!slug || !models.length) return []
+    return [{ slug, name: typeof row.name === "string" && row.name ? row.name : slug, models }]
+  })
+  const first = providers.findIndex((p) => p.slug === current)
+  return first > 0 ? [providers[first], ...providers.filter((_, i) => i !== first)] : providers
+}
+
+/**
+ * The LLM and provider behind the profile, and the models its host is configured for. Newer
+ * Hermes only, so callers treat null as unknown.
+ */
 export async function getModelInfo(config: HermesConfig): Promise<ModelInfo | null> {
   try {
     const response = await request(`${serverRoot(config.baseUrl)}/api/model/options`, {
@@ -343,7 +378,12 @@ export async function getModelInfo(config: HermesConfig): Promise<ModelInfo | nu
     })
     const body = await response.json()
     const text = (value: unknown) => (typeof value === "string" && value ? value : undefined)
-    return { model: text(body?.model), provider: text(body?.provider) }
+    const provider = text(body?.provider)
+    return {
+      model: text(body?.model),
+      provider,
+      providers: modelProviders(body?.providers, provider),
+    }
   } catch {
     return null
   }
@@ -1495,6 +1535,8 @@ export async function startRun(
   config: HermesConfig,
   options: {
     model: string
+    /** With a model chosen for the chat; without it a model id names only a `model_routes` alias. */
+    provider?: string
     messages: ChatMessage[]
     sessionId?: string
     /** Makes a retried POST return the run it already started. */
@@ -1511,6 +1553,7 @@ export async function startRun(
     headers: headers(config, { "Idempotency-Key": options.idempotencyKey }),
     body: JSON.stringify({
       model: options.model,
+      ...(options.provider ? { provider: options.provider } : {}),
       input,
       instructions: [PLAN_HINT, options.workspaceInstructions].filter(Boolean).join("\n"),
       ...(keyed ? { session_id: options.sessionId } : {}),

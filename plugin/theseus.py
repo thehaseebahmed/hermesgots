@@ -651,8 +651,8 @@ def _ask(model: Dict[str, Optional[str]], parts: List[Any], system: str) -> Any:
         name = type(error).__name__
         if "Trust" in name or "Override" in name or "Denied" in name:
             raise TheseusError(
-                f"{error} Allow it in the Hermes config under plugins.entries.memento.llm "
-                "(allow_model_override, allow_provider_override), or leave the reviewer on your own model.",
+                f"{error} Grant it with `hermes plugins enable memento`, or leave the reviewer on "
+                "your own model.",
                 403,
             )
         raise TheseusError(f"The reviewer's model call failed: {error}", 502)

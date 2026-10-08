@@ -85,6 +85,8 @@ export interface Conversation {
    * every device reads it from the Memento plugin.
    */
   todos?: { revision: number; items: Todo[]; at: number }
+  /** A model the user picked for this chat from its host's configured ones; unset runs the bot's. */
+  modelChoice?: { provider: string; model: string }
   /** The Hermes Project this chat is a session of (works in its own worktree). */
   projectId?: string
   /** Unsent composer text a session was left with, kept on this device only. */
