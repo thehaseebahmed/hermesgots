@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTheme } from "next-themes"
 import { Link, Navigate, useParams } from "react-router"
@@ -6,6 +6,7 @@ import {
   ArrowLeftIcon,
   BotIcon,
   CheckIcon,
+  TerminalIcon,
   ChevronRightIcon,
   DatabaseIcon,
   GaugeIcon,
@@ -35,7 +36,15 @@ import {
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
-import { DEFAULT_SETTINGS, clearAllData, db, listProfiles, saveSettings } from "@/lib/db"
+import {
+  DEFAULT_SETTINGS,
+  clearAllData,
+  db,
+  listProfiles,
+  saveSettings,
+  type Profile,
+} from "@/lib/db"
+import { useLiveStatus, type LiveStatus } from "@/lib/live"
 import { useLarge } from "@/lib/media"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
@@ -53,6 +62,7 @@ const SECTIONS: Record<string, { title: string; render: () => ReactNode }> = {
   bots: { title: "Bots", render: () => <BotSettings /> },
   theme: { title: "Color mode", render: () => <ThemeSettings /> },
   data: { title: "Local data", render: () => <DataSettings /> },
+  developer: { title: "Developer", render: () => <DeveloperSettings /> },
 }
 
 /** Which section the menu shows as open, and whether picking one swaps it in place. */
@@ -151,13 +161,74 @@ function MenuScreen({ className }: { className?: string }) {
       </Group>
       <Group>
         <Row to="data" icon={DatabaseIcon} title="Local data" />
+        {settings?.developer && <Row to="developer" icon={TerminalIcon} title="Developer" />}
       </Group>
-      <p className="text-center text-xs text-muted-foreground">
-        Memento v{__APP_VERSION__}
-        <br />
-        Built {new Date(__BUILD_TIME__).toLocaleString()}
-      </p>
+      <VersionLabel developer={Boolean(settings?.developer)} />
     </Screen>
+  )
+}
+
+const TAPS_TO_UNLOCK = 5
+const TAP_WINDOW_MS = 2000
+
+function VersionLabel({ developer }: { developer: boolean }) {
+  const taps = useRef<number[]>([])
+  const tap = () => {
+    const now = Date.now()
+    taps.current = [...taps.current.filter((at) => now - at < TAP_WINDOW_MS), now]
+    if (developer || taps.current.length < TAPS_TO_UNLOCK) return
+    taps.current = []
+    void saveSettings({ developer: true })
+    toast("Developer settings on")
+  }
+  return (
+    <button
+      type="button"
+      onClick={tap}
+      className="min-h-11 text-center text-xs text-muted-foreground select-none"
+    >
+      Memento v{__APP_VERSION__}
+      <br />
+      Built {new Date(__BUILD_TIME__).toLocaleString()}
+    </button>
+  )
+}
+
+const LIVE_LABELS: Record<LiveStatus, { label: string; detail: string }> = {
+  push: { label: "Push", detail: "Stream open" },
+  connecting: { label: "Polling", detail: "Stream connecting" },
+  unsupported: { label: "Polling", detail: "Plugin has no stream" },
+  off: { label: "Polling", detail: "No stream open" },
+}
+
+function DeveloperSettings() {
+  const bots = useLiveQuery(listProfiles, [])
+  return (
+    <>
+      <Group>
+        {bots?.map((bot) => (
+          <LiveRow key={bot.id} bot={bot} />
+        ))}
+      </Group>
+      <Button variant="outline" onClick={() => saveSettings({ developer: false })}>
+        Hide developer settings
+      </Button>
+    </>
+  )
+}
+
+function LiveRow({ bot }: { bot: Profile }) {
+  const status = useLiveStatus(bot)
+  const { label, detail } = LIVE_LABELS[status]
+  return (
+    <div className={rowClass}>
+      <RowText title={bot.name} subtitle={detail} />
+      <span
+        className={cn("text-sm", status === "push" ? "text-foreground" : "text-muted-foreground")}
+      >
+        {label}
+      </span>
+    </div>
   )
 }
 

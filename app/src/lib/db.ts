@@ -8,6 +8,8 @@ export type ThemePreference = "system" | "light" | "dark"
 export interface Settings {
   id: "settings"
   showStats: boolean
+  /** Shows the Developer section in Settings (tapping the version five times). */
+  developer?: boolean
   activeProfileId?: string
   /** When sync last finished without an error. */
   syncedAt?: number
