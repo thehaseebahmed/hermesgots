@@ -45,6 +45,13 @@ class RunHomeTest(unittest.TestCase):
         self.assertEqual(theseus.run_home(self.record), str(self.tree / "app"))
         self.assertEqual(theseus.stage(theseus.light(theseus.run_home(self.record))), "discovery")
 
+    def test_finds_the_run_in_another_repo_of_the_session(self) -> None:
+        other = self.root / "other" / ".worktrees" / "slug"
+        other.mkdir(parents=True)
+        self.record["repos"].append({"path": str(other)})
+        make_run(other)
+        self.assertEqual(theseus.run_home(self.record), str(other))
+
     def test_skips_dependencies(self) -> None:
         make_run(self.tree / "node_modules" / "pkg")
         self.assertEqual(theseus.run_home(self.record), str(self.tree))
