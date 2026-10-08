@@ -29,7 +29,7 @@ jobs:
       # Fork PRs get no secrets; they fall back to a debug build.
       KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       FIREBASE_GOOGLE_SERVICES: ${{ secrets.FIREBASE_GOOGLE_SERVICES }}
-      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT || secrets.FIREBASE_DISTRIBUTION_KEY }}
+      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
       # Name the build after the PR's head, not the merge commit Actions checks out.
       COMMIT_REF: ${{ github.event.pull_request.head.sha || github.sha }}
     defaults:
