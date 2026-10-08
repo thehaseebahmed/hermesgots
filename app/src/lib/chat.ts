@@ -671,7 +671,8 @@ export async function sendMessage(
       await db.messages.update(userMessage.id, { attachments: sent })
     }
     const turnOptions = {
-      model: profile.model,
+      model: conversation.modelChoice?.model ?? profile.model,
+      provider: conversation.modelChoice?.provider,
       sessionId: conversation.hermesSessionId,
       messages: [
         ...transcript,

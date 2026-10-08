@@ -661,7 +661,18 @@ export function ChatPage() {
         )}
       </div>
 
-      <UsageSheet open={usageOpen} onOpenChange={setUsageOpen} usage={usage} profile={profile} />
+      <UsageSheet
+        open={usageOpen}
+        onOpenChange={setUsageOpen}
+        usage={usage}
+        profile={profile}
+        choice={conversation?.modelChoice}
+        onChoose={
+          conversation
+            ? (modelChoice) => void updateConversation(conversation.id, { modelChoice })
+            : undefined
+        }
+      />
       <TodosSheet open={todosOpen} onOpenChange={setTodosOpen} items={todos} live={busy} />
       {theseus && (
         <TheseusSheet run={theseus} info={theseusInfo} view={theseusView} onView={setTheseusView} />

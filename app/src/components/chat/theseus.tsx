@@ -902,10 +902,9 @@ function ModelsView({
       {blocked && (
         <div className="px-6 pt-2">
           <Banner>
-            This Hermes host only lets reviewers use your own model. Allow model choices for the
-            Memento plugin in its Hermes config (
-            <span className="break-all">plugins.entries.memento.llm.allow_model_override</span>) to
-            pick others.
+            This Hermes host only lets reviewers use your own model. Run{" "}
+            <code className="break-all">hermes plugins enable memento</code> on the host and grant
+            its model choices to pick others.
           </Banner>
         </div>
       )}

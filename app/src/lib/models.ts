@@ -88,9 +88,11 @@ function matchIn<T>(
   return undefined
 }
 
+type ModelRef = Pick<ModelInfo, "provider" | "model">
+
 /** What models.dev says about the model, or undefined if it isn't listed. Throws when unreachable. */
 async function lookUp<T>(
-  { provider, model }: ModelInfo,
+  { provider, model }: ModelRef,
   pick: (entry: CatalogModel | undefined) => T | undefined,
 ) {
   if (!model) return undefined
@@ -106,10 +108,10 @@ async function lookUp<T>(
 }
 
 /** The model's context window per models.dev. */
-export const findContextWindow = (info: ModelInfo) => lookUp(info, contextOf)
+export const findContextWindow = (info: ModelRef) => lookUp(info, contextOf)
 
 /** Whether the model takes images (`modalities.input`), unknown when models.dev doesn't say. */
-export const findImageInput = (info: ModelInfo) => lookUp(info, imageInputOf)
+export const findImageInput = (info: ModelRef) => lookUp(info, imageInputOf)
 
 /**
  * Fills in the profile's context window from models.dev whenever the model behind it changes,
