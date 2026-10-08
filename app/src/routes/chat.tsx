@@ -8,6 +8,7 @@ import {
   CheckIcon,
   EllipsisIcon,
   PencilIcon,
+  PlusIcon,
   RotateCcwIcon,
   SettingsIcon,
   Trash2Icon,
