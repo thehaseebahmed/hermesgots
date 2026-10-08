@@ -370,7 +370,6 @@ function theseusView(id) {
     object: "memento.theseus",
     stage,
     models: run.models,
-    agents: theseusAgents(id, stage),
     unavailable: THESEUS_START === "unavailable" ? "Theseus needs Node 20 or newer on the Hermes host, and there is none." : null,
     state: {
       run: { key: "routine-editor", reference: "docs/routine-mock.html", testCmd: "pnpm test", status, planRequired: true, ...run.settings, plan },
@@ -385,36 +384,39 @@ function theseusView(id) {
   }
 }
 
-// The sessions a run's agent delegated to (the plugin reads them from state.db), each with a short
-// transcript at GET /api/sessions/{id}/messages. Past planning: the planner, then a builder per
-// checkpoint started; at `building`, CP3's first builder was stopped and a fixer is working.
-function theseusAgents(id, stage) {
-  if (["discovery", "plan"].includes(stage)) return []
-  const now = Date.now() / 1000
-  const agents = [["planner", "Act as theseus-planner (checkpoints.md): split the confirmed plan into checkpoints.", "done", 6, 9]]
-  if (!["planning", "checkpoints"].includes(stage)) {
-    agents.push(["cp1", "Act as theseus-builder (builder.md) for CP1: the routine list.", "done", 21, 14])
-    agents.push(["cp2", "Act as theseus-builder (builder.md) for CP2: the editor form.", "done", 18, 12])
-    agents.push(["cp3", "Act as theseus-builder (builder.md) for CP3: saving and validation.", stage === "building" ? "stopped" : "done", 39, 12])
-    if (stage === "building") agents.push(["cp3-fix", "Act as theseus-builder in fix mode for CP3 with reviewer A's findings.", "running", 7, 3])
+// The sessions each session delegated to with delegate_task (the plugin reads them from state.db),
+// each a transcript of its own at GET /api/sessions/{id}/messages.
+const delegations = new Map()
+
+/** A delegated agent at work: its transcript grows a step every 1.2s, then it reports back. */
+async function runDelegation(parent, goal, out) {
+  const id = `${parent}-agent-${(delegations.get(parent)?.length ?? 0) + 1}`
+  const agent = { id, goal, model: "claude-opus-5-5", started_at: Date.now() / 1000, ended_at: null, end_reason: null, tool_calls: 0, status: "running" }
+  delegations.set(parent, [...(delegations.get(parent) ?? []), agent])
+  const rows = []
+  transcripts.set(id, rows)
+  const add = (row) => rows.push({ id: ++lastRowId, session_id: id, timestamp: Date.now() / 1000, ...row })
+  add({ role: "user", content: goal })
+  noteEvent("runs")
+  const steps = [
+    ["terminal", { command: "du -sh /var/log/* | sort -rh | head -5" }, JSON.stringify({ output: "2.1G\t/var/log/journal\n410M\t/var/log/nginx", exit_code: 0 })],
+    ["read_file", { path: "/etc/systemd/journald.conf" }, JSON.stringify({ content: "[Journal]\n#SystemMaxUse=" })],
+    ["search_files", { pattern: "SystemMaxUse", path: "/etc" }, JSON.stringify({ matches: ["/etc/systemd/journald.conf:3"] })],
+    ["terminal", { command: "journalctl --disk-usage" }, JSON.stringify({ output: "Archived and active journals take up 2.0G", exit_code: 0 })],
+  ]
+  for (const [i, [tool, args, result]] of steps.entries()) {
+    if (out.closed()) break
+    const call = `${id}-call-${i}`
+    add({ role: "assistant", content: i === 0 ? "Measuring the folders first." : null, tool_calls: [{ id: call, function: { name: tool, arguments: JSON.stringify(args) } }] })
+    await sleep(1200)
+    add({ role: "tool", tool_call_id: call, tool_name: tool, content: result })
+    agent.tool_calls += 1
   }
-  let start = now - 3600
-  return agents.map(([key, goal, status, calls, minutes]) => {
-    const agentId = `${id}-agent-${key}`
-    const startedAt = (start += 600)
-    if (!transcripts.has(agentId)) {
-      const rows = [
-        { role: "user", content: goal },
-        { role: "assistant", content: "Reading the checkpoint and the learnings first.", tool_calls: [{ id: `${agentId}-1`, function: { name: "read_file", arguments: JSON.stringify({ path: "src/routes/routines.tsx" }) } }] },
-        { role: "tool", tool_call_id: `${agentId}-1`, tool_name: "read_file", content: JSON.stringify({ content: "export function Routines() {}" }) },
-        { role: "assistant", content: "", tool_calls: [{ id: `${agentId}-2`, function: { name: "terminal", arguments: JSON.stringify({ command: "node theseus.js record CP3 red" }) } }] },
-        { role: "tool", tool_call_id: `${agentId}-2`, tool_name: "terminal", content: JSON.stringify({ output: "CP3 red recorded: 2 failing tests", exit_code: 0 }) },
-        ...(status === "done" ? [{ role: "assistant", content: "Done: the planned tests failed first, then passed. `record CP3 tests` is green." }] : []),
-      ]
-      transcripts.set(agentId, rows.map((row, i) => ({ id: ++lastRowId, session_id: agentId, timestamp: startedAt + i * 30, ...row })))
-    }
-    return { id: agentId, goal, model: "claude-opus-5-5", started_at: startedAt, ended_at: status === "running" ? null : startedAt + minutes * 60, end_reason: status === "done" ? "agent_close" : status === "stopped" ? "interrupted" : null, tool_calls: calls, status }
-  })
+  const report = "The journal takes 2.0G of the 2.5G: journald has no SystemMaxUse cap. nginx is next with 410M."
+  if (!out.closed()) add({ role: "assistant", content: report })
+  Object.assign(agent, { ended_at: Date.now() / 1000, end_reason: out.closed() ? "interrupted" : "agent_close", status: out.closed() ? "stopped" : "done" })
+  noteEvent("runs")
+  return report
 }
 
 // A wireframe for a gate 2 capture; the reference is dashed, the build is solid.
@@ -584,6 +586,22 @@ async function playTurn(req, body, last, out) {
     }
     record(req, { role: "assistant", content: spoken, finish_reason: "stop" })
     return { spoken, prompt_tokens: 6000, completion_tokens: pieces }
+  }
+
+  // "delegate": the agent hands the digging to a delegated agent (delegate_task), whose own session
+  // the plugin lists for the chat's agent card.
+  if (/delegat/i.test(last) && sessionOf(req, body)) {
+    const goal = "Find what fills /var/log on this host and say which setting would cap it."
+    const id = `call_${randomUUID().slice(0, 8)}`
+    out.tool({ tool: "delegate_task", emoji: "🔀", label: goal, toolCallId: id, status: "running" })
+    record(req, { role: "assistant", content: null, tool_calls: [{ id, type: "function", function: { name: "delegate_task", arguments: JSON.stringify({ goal }) } }] })
+    const report = await runDelegation(sessionOf(req, body), goal, out)
+    const result = JSON.stringify({ results: [{ status: "completed", summary: report }] })
+    out.tool({ tool: "delegate_task", toolCallId: id, status: "completed", result })
+    record(req, { role: "tool", tool_call_id: id, tool_name: "delegate_task", content: result })
+    await say(`The delegated agent looked into it. ${report} Setting \`SystemMaxUse=500M\` in journald.conf would cap it.`)
+    record(req, { role: "assistant", content: spoken, finish_reason: "stop" })
+    return { spoken, prompt_tokens: 5200, completion_tokens: pieces }
   }
 
   // Like Hermes's todo_list: every call returns the whole list, and the result is a transcript row.
@@ -1301,6 +1319,11 @@ http
       const row = (transcripts.get(id) ?? []).findLast((r) => r.role === "tool" && r.tool_name === "todo_list")
       const found = row ? JSON.parse(row.content) : null
       return json(res, 200, { object: "memento.todos", session_id: id, revision: found?.revision ?? null, todos: found?.todos ?? null })
+    }
+    const sessionAgents = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/agents$/.exec(url.pathname)
+    if (PLUGIN && !profile && req.method === "GET" && sessionAgents) {
+      const id = decodeURIComponent(sessionAgents[1])
+      return json(res, 200, { object: "memento.agents", session_id: id, agents: delegations.get(id) ?? [] })
     }
     const clarifyRoute = /^\/api\/plugins\/memento\/runs\/([^/]+)\/clarify$/.exec(url.pathname)
     if (PLUGIN && !profile && req.method === "POST" && clarifyRoute) {
