@@ -389,6 +389,18 @@ export async function getModelInfo(config: HermesConfig): Promise<ModelInfo | nu
   }
 }
 
+/** Makes a model the profile's main model in the host's config (the Memento plugin's `model`). */
+export async function setHostModel(
+  config: HermesConfig,
+  choice: { provider: string; model: string },
+) {
+  await request(`${pluginRoot(config.baseUrl)}/model`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify(choice),
+  })
+}
+
 export async function checkHealth(config: HermesConfig) {
   const response = await request(`${serverRoot(config.baseUrl)}/health`, {
     headers: headers(config),

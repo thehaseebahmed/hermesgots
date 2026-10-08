@@ -53,6 +53,7 @@ import {
 } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { checkHealth, getPluginVersion, listModels } from "@/lib/hermes"
+import { setDefaultModel } from "@/lib/model-info"
 import { syncContextWindow } from "@/lib/models"
 import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
 import { useSyncState } from "@/lib/sync"
@@ -426,7 +427,11 @@ export function BotEditor({
           <FieldLabel htmlFor="default-model">Default model</FieldLabel>
           <DefaultModelSetting
             profile={profile}
-            onChoose={(modelChoice) => save({ modelChoice })}
+            onChoose={(modelChoice) =>
+              setDefaultModel(profile, modelChoice).catch((error: unknown) => {
+                toast.error(error instanceof Error ? error.message : String(error))
+              })
+            }
           />
         </Field>
       )}

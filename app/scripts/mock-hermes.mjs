@@ -877,6 +877,8 @@ const BLOCK_RUN_EVENTS = process.env.MOCK_BLOCK_RUN_EVENTS === "1"
 // The plugin's change stream: one log per profile (the "" key is the default one). Runs and sessions
 // belong to no profile here, so they go to every log.
 const pushSubscriptions = new Map()
+// The main model the plugin's `model` route set, per profile ("" is the default one).
+const hostModels = new Map()
 const eventLogs = new Map()
 const eventStreams = new Set()
 function logOf(profile) {
@@ -1029,7 +1031,9 @@ http
     }
     if (url.pathname === "/api/model/options") {
       // Named profiles report a model models.dev doesn't know, to exercise manual entry.
-      const model = profile ? `mock-model-${profile}` : "anthropic/claude-sonnet-4.5"
+      const configured = profile ? `mock-model-${profile}` : "anthropic/claude-sonnet-4.5"
+      const set = hostModels.get(profile ?? "")
+      const model = set?.model ?? configured
       // Hermes's picker inventory: a skeleton row without credentials is left out of the picker.
       const providers = [
         {
@@ -1038,7 +1042,7 @@ http
           is_current: true,
           authenticated: true,
           models: [
-            model,
+            configured,
             "anthropic/claude-opus-4.1",
             "anthropic/claude-haiku-4.5",
             "openai/gpt-5",
@@ -1052,7 +1056,7 @@ http
         { slug: "anthropic", name: "Anthropic", is_current: false, authenticated: true, models: ["claude-sonnet-4-5", "claude-opus-4-1"] },
         { slug: "nous", name: "Nous Portal", is_current: false, authenticated: false, models: [] },
       ]
-      return json(res, 200, { model, provider: "openrouter", providers })
+      return json(res, 200, { model, provider: set?.provider ?? "openrouter", providers })
     }
     if (url.pathname === "/v1/skills") {
       return json(res, 200, {
@@ -1087,7 +1091,7 @@ http
       return json(res, 200, {
         name: "memento",
         version: PLUGIN_VERSION,
-        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "profile_routes", "pr_tool", "close", "merge_resolve", "theseus", ...(EVENTS ? ["events"] : []), "push"],
+        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "profile_routes", "pr_tool", "close", "merge_resolve", "theseus", ...(EVENTS ? ["events"] : []), "push", "host_model"],
         clarify: true,
         hooks: true,
         theseus: THESEUS_START === "unavailable"
@@ -1119,6 +1123,17 @@ http
         cronJobs().map((job) => [job.id, job.runs.slice(-perJob).reverse().map((run) => ledgerRow(job, run))]),
       )
       return json(res, 200, { object: "cron_runs", jobs })
+    }
+    if (PLUGIN && !profile && req.method === "POST" && url.pathname === "/api/plugins/memento/model") {
+      const { provider, model } = await readBody(req)
+      if (typeof provider !== "string" || !provider.trim() || typeof model !== "string" || !model.trim()) {
+        return json(res, 400, { error: { message: "provider and model are required" } })
+      }
+      if (!["openrouter", "anthropic"].includes(provider.trim())) {
+        return json(res, 400, { error: { message: `Unknown provider '${provider}'.` } })
+      }
+      hostModels.set(pluginProfile ?? "", { provider: provider.trim(), model: model.trim() })
+      return json(res, 200, { object: "memento.host_model", provider: provider.trim(), model: model.trim() })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/github") {
       return json(res, 200, GITHUB ? { connected: true, source: "gh", login: "mock-user" } : { connected: false })
