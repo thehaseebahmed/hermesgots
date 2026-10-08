@@ -21,6 +21,10 @@ export interface Settings {
   movedChats?: string[]
   /** Saw the notice that bots added by hand need linking. */
   linkNoticeSeen?: boolean
+  /** This device's Web Push identity, local only: its id, its VAPID key pair and whether it's on. */
+  push?: { device: string; vapidKey: string; vapidPublic: string; on: boolean }
+  /** The Android app's push identity, local only: Firebase gives the token, this is its device id. */
+  fcm?: { device: string; on: boolean }
 }
 
 /** A Hermes profile Memento can talk to. Its Memento plugin registers it (see `registry.ts`). */

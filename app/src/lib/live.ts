@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react"
 import { liveQuery } from "dexie"
 
-import { db, updateConversation, type Profile } from "@/lib/db"
+import { db, getSettings, updateConversation, type Profile } from "@/lib/db"
 import {
   followEvents,
   getPluginFeatures,
@@ -280,7 +280,9 @@ async function follow(config: HermesConfig, key: string, signal: AbortSignal) {
   let failures = 0
   while (!signal.aborted) {
     try {
-      await followEvents(config, { since: cursors.get(key), signal }, (event, data) => {
+      const settings = await getSettings()
+      const device = (settings.push ?? settings.fcm)?.device
+      await followEvents(config, { since: cursors.get(key), device, signal }, (event, data) => {
         failures = 0
         onEvent(key, event, data)
       })
@@ -326,6 +328,17 @@ function reconcileStreams() {
     notify()
     void follow({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }, key, controller.signal)
   }
+}
+
+/** Opens every stream again, say after this device starts to receive push, which the plugin skips
+ * for a device whose stream says it's looking at the app. */
+export function reconnectLive() {
+  for (const [key, stream] of streams) {
+    stream.controller.abort()
+    streams.delete(key)
+    setLive(key, false)
+  }
+  reconcileStreams()
 }
 
 let started = false
