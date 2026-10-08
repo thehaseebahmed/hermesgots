@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils"
 
 const POLL_MS = 4000
 const RECENT_ROWS = 40
-const STEPS = 3
+const STEPS = 2
 
 const agentTitle = (goal: string) => `Sub-Agent: ${agentName(goal)}`
 
