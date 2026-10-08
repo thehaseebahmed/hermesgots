@@ -47,6 +47,8 @@ export interface Profile {
   imageInput?: boolean
   /** The model new turns run on when a chat hasn't picked its own; unset runs the host's. */
   modelChoice?: ModelChoice
+  /** The last few models picked on this bot, newest first, for switching back quickly. */
+  recentModels?: ModelChoice[]
   /** The linked host that registered it; unset for a bot added by hand before linking. */
   hostId?: string
   /** Turned off in the app: hidden, and nothing checks on it. Local copy of the registry's flag. */
@@ -457,6 +459,19 @@ export async function addProfile(
 
 export async function updateProfile(id: string, patch: Partial<Omit<Profile, "id">>) {
   await db.profiles.update(id, { ...patch, updatedAt: Date.now() })
+}
+
+const RECENT_MODELS = 3
+
+/** Puts a model picked on this bot at the top of its recent ones. */
+export async function rememberModel(profileId: string, choice: ModelChoice) {
+  const profile = await db.profiles.get(profileId)
+  if (!profile) return
+  const same = (m: ModelChoice) => m.provider === choice.provider && m.model === choice.model
+  const recent = profile.recentModels ?? []
+  if (recent[0] && same(recent[0])) return
+  const recentModels = [choice, ...recent.filter((m) => !same(m))].slice(0, RECENT_MODELS)
+  await updateProfile(profileId, { recentModels })
 }
 
 /**
