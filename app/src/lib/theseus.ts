@@ -14,9 +14,12 @@ import {
   getTheseus,
   getTheseusCapture,
   getTheseusInfo,
+  listSessionMessages,
   postTheseus,
   setTheseusModels,
   type RawTheseus,
+  type SessionMessage,
+  type TheseusAgent,
   type TheseusInfo,
   type TheseusModels,
 } from "@/lib/hermes"
@@ -113,6 +116,8 @@ export interface TheseusActions {
     settings: Partial<Record<"autonomy" | "visual" | "reviewers", string | number>>,
   ) => Promise<void>
   models: (models: TheseusModels) => Promise<void>
+  /** A delegated agent's transcript, its newest rows. */
+  transcript: (agentId: string) => Promise<SessionMessage[]>
   /** A checkpoint's screenshot as an object URL. */
   capture: (checkpoint: string, file: string) => Promise<string>
 }
@@ -129,6 +134,8 @@ export interface TheseusRun {
   /** The skill's `next:` line: what happens next, and who acts. */
   next: string
   models: TheseusModels
+  /** The sessions the agent delegated to, oldest first. */
+  agents: TheseusAgent[]
   actions: TheseusActions
 }
 
@@ -410,6 +417,7 @@ export function toRun(raw: RawTheseus, sessionId: string, actions: TheseusAction
     ),
     next: text(state.next),
     models: raw.models,
+    agents: raw.agents,
     actions,
   }
 }
@@ -451,6 +459,7 @@ function actionsFor(session: Session, server: Server): TheseusActions {
         ...Object.fromEntries(Object.entries(settings).map(([k, v]) => [k, String(v)])),
       }),
     capture: (cp, file) => getTheseusCapture(server, session.hermesSessionId, cp, file),
+    transcript: (agentId) => listSessionMessages(server, agentId, { limit: 500, offset: 0 }),
     models: async (models) => {
       raws.set(session.id, await setTheseusModels(server, session.hermesSessionId, models))
       notify()

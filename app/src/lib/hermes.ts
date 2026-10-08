@@ -1185,12 +1185,40 @@ export async function getTheseusInfo(config: HermesConfig): Promise<TheseusInfo 
 }
 
 /** The plugin's view of a Theseus session: the skill's snapshot (`status --json --full`) as is. */
+/** A session the run's agent delegated to (a planner, builder or fixer), from Hermes's store. */
+export interface TheseusAgent {
+  id: string
+  goal: string
+  model: string | null
+  /** Unix seconds. */
+  startedAt: number | null
+  endedAt: number | null
+  toolCalls: number
+  status: "running" | "done" | "stopped"
+}
+
 export interface RawTheseus {
   stage: string
   state: Record<string, any> | null
   models: TheseusModels
   unavailable: string | null
   message?: string | null
+  agents: TheseusAgent[]
+}
+
+function parseAgents(raw: unknown): TheseusAgent[] {
+  const num = (value: unknown) => (typeof value === "number" ? value : null)
+  return (Array.isArray(raw) ? raw : [])
+    .filter((a) => typeof a?.id === "string" && a.id)
+    .map((a) => ({
+      id: a.id,
+      goal: typeof a.goal === "string" ? a.goal : "",
+      model: typeof a.model === "string" ? a.model : null,
+      startedAt: num(a.started_at),
+      endedAt: num(a.ended_at),
+      toolCalls: num(a.tool_calls) ?? 0,
+      status: a.status === "running" || a.status === "stopped" ? a.status : "done",
+    }))
 }
 
 function parseModels(raw: unknown): TheseusModels {
@@ -1210,6 +1238,7 @@ function parseTheseus(raw: any): RawTheseus {
     models: parseModels(raw?.models),
     unavailable: typeof raw?.unavailable === "string" ? raw.unavailable : null,
     message: typeof raw?.message === "string" ? raw.message : null,
+    agents: parseAgents(raw?.agents),
   }
 }
 

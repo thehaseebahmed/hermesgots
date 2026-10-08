@@ -1,17 +1,20 @@
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import {
   ArrowLeftIcon,
+  BotIcon,
   CheckIcon,
   ChevronRightIcon,
   CircleDotIcon,
   ListChecksIcon,
   MapIcon,
   MinusIcon,
+  PauseIcon,
   SailboatIcon,
   UserCheckIcon,
   XIcon,
 } from "lucide-react"
 
+import { MessageItem } from "@/components/chat/message-item"
 import { ChoiceRow } from "@/components/chat/question-card"
 import { Banner } from "@/components/banner"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
@@ -21,7 +24,9 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/componen
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
-import type { ReviewerModel, TheseusInfo, TheseusModels } from "@/lib/hermes"
+import type { Message } from "@/lib/db"
+import type { ReviewerModel, TheseusAgent, TheseusInfo, TheseusModels } from "@/lib/hermes"
+import { toMessages } from "@/lib/history"
 import {
   agentWorks,
   currentCheckpoint,
@@ -464,6 +469,7 @@ export type SheetView =
   | { kind: "checkpoint"; id: string }
   | { kind: "setting"; key: SettingKey }
   | { kind: "models" }
+  | { kind: "agent"; id: string }
 
 /** The run: its settings, checkpoints and learnings, with each checkpoint's evidence and the plan. */
 export function TheseusSheet({
@@ -479,6 +485,7 @@ export function TheseusSheet({
   onView: (view: SheetView | null) => void
 }) {
   const checkpoint = view?.kind === "checkpoint" && run.checkpoints.find((cp) => cp.id === view.id)
+  const agent = view?.kind === "agent" && run.agents.find((a) => a.id === view.id)
   return (
     <Popup open={view !== null} onOpenChange={(open) => !open && onView(null)}>
       <PopupContent className="sm:max-w-xl">
@@ -504,6 +511,8 @@ export function TheseusSheet({
           <ModelsView run={run} info={info} onBack={() => onView({ kind: "run" })} />
         ) : checkpoint ? (
           <CheckpointView run={run} cp={checkpoint} onBack={() => onView({ kind: "run" })} />
+        ) : agent ? (
+          <AgentView run={run} agent={agent} onBack={() => onView({ kind: "run" })} />
         ) : (
           <RunView run={run} onView={onView} />
         )}
@@ -650,6 +659,32 @@ function RunView({ run, onView }: { run: TheseusRun; onView: (view: SheetView) =
           </Section>
         </>
       )}
+      {run.agents.length > 0 && (
+        <Section title="Agents">
+          <ol className="-mx-2 flex flex-col">
+            {run.agents.map((agent) => (
+              <li key={agent.id}>
+                <button
+                  type="button"
+                  className="flex min-h-14 w-full items-center gap-3 rounded-2xl px-2 py-2 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={() => onView({ kind: "agent", id: agent.id })}
+                >
+                  <span className="flex size-5 shrink-0 items-center justify-center">
+                    <AgentIcon agent={agent} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[15px] leading-5">{agentName(agent)}</span>
+                    <span className="mt-0.5 block truncate text-sm text-muted-foreground">
+                      {agentLine(agent)}
+                    </span>
+                  </span>
+                  <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
+                </button>
+              </li>
+            ))}
+          </ol>
+        </Section>
+      )}
       {run.learnings.length > 0 && (
         <Section title="Learnings">
           <ul className="flex flex-col gap-2">
@@ -664,6 +699,118 @@ function RunView({ run, onView }: { run: TheseusRun; onView: (view: SheetView) =
           </ul>
         </Section>
       )}
+    </>
+  )
+}
+
+function AgentIcon({ agent }: { agent: TheseusAgent }) {
+  if (agent.status === "running") return <Working className="size-4" />
+  if (agent.status === "stopped")
+    return <PauseIcon className="size-4 text-warning" aria-label="Stopped" />
+  return <CheckIcon className="size-4 text-muted-foreground" aria-label="Done" />
+}
+
+const ROLES: [RegExp, string][] = [
+  [/\bfix mode\b/i, "Fixer"],
+  [/\b(theseus-)?planner\b|checkpoints\.md/i, "Planner"],
+  [/\b(theseus-)?builder\b|builder\.md/i, "Builder"],
+  [/\b(theseus-)?reviewer\b|reviewer\.md/i, "Reviewer"],
+]
+
+/**
+ * What the agent was asked to be, read from its brief: "Builder · CP3". A brief can mention other
+ * roles, so the one it names first wins, and fix mode wins over the builder it runs as.
+ */
+function agentName(agent: TheseusAgent) {
+  const named = ROLES.map(([pattern, role]) => ({ role, at: agent.goal.search(pattern) }))
+    .filter(({ at }) => at >= 0)
+    .sort((a, b) => (a.role === "Fixer" ? -1 : b.role === "Fixer" ? 1 : a.at - b.at))
+  const role = named[0]?.role ?? "Agent"
+  const cp = agent.goal.match(/\bCP\d+\b/)?.[0]
+  return cp ? `${role} · ${cp}` : role
+}
+
+function agentLine(agent: TheseusAgent) {
+  const calls = `${agent.toolCalls} tool call${agent.toolCalls === 1 ? "" : "s"}`
+  const minutes =
+    agent.startedAt &&
+    Math.max(1, Math.round(((agent.endedAt ?? Date.now() / 1000) - agent.startedAt) / 60))
+  const status = { running: "Working for", done: "Done after", stopped: "Stopped after" }[
+    agent.status
+  ]
+  const label = status.split(" ")[0]
+  return [minutes ? `${status} ${minutes} min` : label, calls].join(" · ")
+}
+
+const AGENT_POLL_MS = 4000
+
+/** One delegated agent's transcript, read from Hermes, and followed while it works. */
+function AgentView({
+  run,
+  agent,
+  onBack,
+}: {
+  run: TheseusRun
+  agent: TheseusAgent
+  onBack: () => void
+}) {
+  const [messages, setMessages] = useState<Message[]>()
+  const [failed, setFailed] = useState(false)
+  const end = useRef<HTMLDivElement>(null)
+  const { transcript } = run.actions
+  const running = agent.status === "running"
+  useEffect(() => {
+    let cancelled = false
+    const read = () =>
+      transcript(agent.id)
+        .then((rows) => {
+          if (cancelled) return
+          setMessages(toMessages(`agent-${agent.id}`, agent.id, rows, { live: running }))
+          setFailed(false)
+        })
+        .catch(() => !cancelled && setFailed(true))
+    void read()
+    const timer = running ? window.setInterval(read, AGENT_POLL_MS) : undefined
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [transcript, agent.id, running])
+  const loaded = messages !== undefined
+  useEffect(() => {
+    if (loaded) end.current?.scrollIntoView({ block: "end" })
+  }, [loaded])
+  return (
+    <>
+      <PopupHeader className="flex-row items-center gap-1 pb-2">
+        <Back onClick={onBack} label="Back to the run" />
+        <PopupTitle className="min-w-0 flex-1 truncate">{agentName(agent)}</PopupTitle>
+      </PopupHeader>
+      <div className="flex flex-col gap-1 px-6">
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <AgentIcon agent={agent} />
+          <span className="truncate">
+            {[agentLine(agent), agent.model].filter(Boolean).join(" · ")}
+          </span>
+        </p>
+      </div>
+      {failed && !loaded && (
+        <div className="px-6 pt-4">
+          <Banner tone="error">Couldn't load this agent's work.</Banner>
+        </div>
+      )}
+      <div className="flex flex-col gap-4 px-4 pt-4 pb-6">
+        {loaded && messages.length === 0 && (
+          <p className="flex items-center gap-2 px-2 text-sm text-muted-foreground">
+            <BotIcon className="size-4" />
+            Nothing yet.
+          </p>
+        )}
+        {messages?.map((message) => (
+          <MessageItem key={message.id} message={message} showStats={false} plain />
+        ))}
+        <div ref={end} />
+      </div>
     </>
   )
 }
