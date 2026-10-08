@@ -80,6 +80,22 @@ function bump(key: string, kind: Kind) {
   changeListeners.get(kind)?.forEach((listener) => listener(key))
 }
 
+/** How a bot hears about changes: `push` is an open stream, `connecting` one not yet answering,
+ * `unsupported` a plugin without it, `off` none wanted (hidden page, offline, disabled, no key). */
+export type LiveStatus = "push" | "connecting" | "unsupported" | "off"
+
+function statusOf(profile?: Connection | null): LiveStatus {
+  if (!profile) return "off"
+  const key = connectionKey(profile)
+  if (live.has(key)) return "push"
+  if (Date.now() - (unsupported.get(key) ?? -Infinity) < UNSUPPORTED_MS) return "unsupported"
+  return streams.has(key) ? "connecting" : "off"
+}
+
+export function useLiveStatus(profile?: Connection | null) {
+  return useSyncExternalStore(subscribe, () => statusOf(profile))
+}
+
 /** Whether the bot's server is telling this device about changes right now. */
 export function isLive(profile?: Connection | null) {
   return Boolean(profile && live.has(connectionKey(profile)))
@@ -271,6 +287,7 @@ async function follow(config: HermesConfig, key: string, signal: AbortSignal) {
     } catch (error) {
       if (!signal.aborted && (await lacksStream(config, error))) {
         unsupported.set(key, Date.now())
+        notify()
         window.setTimeout(reconcileStreams, UNSUPPORTED_MS)
         break
       }
@@ -280,6 +297,7 @@ async function follow(config: HermesConfig, key: string, signal: AbortSignal) {
   }
   setLive(key, false)
   if (streams.get(key)?.controller.signal === signal) streams.delete(key)
+  notify()
 }
 
 /** Opens a stream for each server that should have one, and closes the rest. */
@@ -299,11 +317,13 @@ function reconcileStreams() {
     stream.controller.abort()
     streams.delete(key)
     setLive(key, false)
+    notify()
   }
   for (const [key, profile] of wanted) {
     if (streams.has(key)) continue
     const controller = new AbortController()
     streams.set(key, { controller })
+    notify()
     void follow({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }, key, controller.signal)
   }
 }
