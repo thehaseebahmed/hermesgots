@@ -487,10 +487,15 @@ export function useTheseusRun(
         : undefined,
     [id, sessionId, baseUrl, apiKey],
   )
-  return useMemo(
-    () => (enabled && raw && actions && sessionId ? toRun(raw, sessionId, actions) : undefined),
-    [enabled, raw, actions, sessionId],
-  )
+  return useMemo(() => {
+    if (!enabled || !raw || !actions || !sessionId) return undefined
+    const run = toRun(raw, sessionId, actions)
+    // Hide the progress pill until a real plan is ready for approval or the run
+    // is past that point. A null/discovery state with no plan shouldn't show
+    // progress — the user hasn't been asked to approve anything yet.
+    const READY: TheseusStage[] = ["plan", "checkpoints", "building", "approval", "closing", "done"]
+    return READY.includes(run.stage) ? run : undefined
+  }, [enabled, raw, actions, sessionId])
 }
 
 /** Runs one of the user's answers, telling them why when the skill or the host refuses. */
