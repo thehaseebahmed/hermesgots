@@ -190,7 +190,9 @@ export interface ClarifyRequest {
   clarifyId: string
   questions: ClarifyQuestion[]
   /** Set once the user answers (or the turn ends without an answer). */
-  resolved?: { answers: ClarifyAnswers; outcome: "submitted" | "cancelled" } | "expired"
+  resolved?:
+    | { answers: ClarifyAnswers; outcome: "submitted" | "cancelled" | "timed_out" | "undelivered" }
+    | "expired"
 }
 
 export interface MessageStats {
