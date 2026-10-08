@@ -23,6 +23,7 @@ import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
 import type { ReviewerModel, TheseusInfo, TheseusModels } from "@/lib/hermes"
 import {
+  agentWorks,
   currentCheckpoint,
   GATE_ICONS,
   GATES,
@@ -59,7 +60,22 @@ export function TheseusPill({ run, onClick }: { run: TheseusRun; onClick: () => 
         <Segments done={done} total={total} active={currentCheckpoint(run) ? done : -1} />
       )}
       {runSummary(run)}
+      {agentWorks(run) && <Working className="size-4" />}
     </Button>
+  )
+}
+
+/** The app's ring spinner, for a run the agent is working on; still under reduced motion. */
+function Working({ className }: { className?: string }) {
+  return (
+    <span
+      role="img"
+      aria-label="Working"
+      className={cn(
+        "shrink-0 rounded-full border-2 border-muted-foreground/25 border-t-primary motion-safe:animate-spin",
+        className,
+      )}
+    />
   )
 }
 
@@ -529,7 +545,11 @@ function RunView({ run, onView }: { run: TheseusRun; onView: (view: SheetView) =
           Theseus
         </PopupTitle>
         <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
-          <CircleDotIcon className={cn("size-3.5", waitsOnUser(run) && "text-warning")} />
+          {agentWorks(run) ? (
+            <Working className="size-3.5" />
+          ) : (
+            <CircleDotIcon className={cn("size-3.5", waitsOnUser(run) && "text-warning")} />
+          )}
           {run.next}
         </p>
       </PopupHeader>
@@ -547,6 +567,11 @@ function RunView({ run, onView }: { run: TheseusRun; onView: (view: SheetView) =
             <span className="min-w-0 flex-1 truncate text-[15px]">{run.plan.task}</span>
             <ChevronRightIcon className="size-4 text-muted-foreground" />
           </button>
+        </Section>
+      )}
+      {run.stage === "planning" && run.checkpoints.length === 0 && (
+        <Section title="Checkpoints">
+          <Planning run={run} />
         </Section>
       )}
       {run.checkpoints.length > 0 && (
@@ -584,6 +609,7 @@ function RunView({ run, onView }: { run: TheseusRun; onView: (view: SheetView) =
             </ul>
           </Section>
           <Section title="Checkpoints">
+            {run.stage === "planning" && <Planning run={run} />}
             <ol className="-mx-2 flex flex-col">
               {run.checkpoints.map((cp) => (
                 <li key={cp.id}>
@@ -639,6 +665,18 @@ function RunView({ run, onView }: { run: TheseusRun; onView: (view: SheetView) =
         </Section>
       )}
     </>
+  )
+}
+
+/** The agent planning the checkpoints, or the coverage review checking them. */
+function Planning({ run }: { run: TheseusRun }) {
+  return (
+    <p className="flex min-h-11 items-center gap-3 text-[15px] text-muted-foreground">
+      <span className="flex size-5 items-center justify-center">
+        <Working className="size-5" />
+      </span>
+      {runSummary(run)}
+    </p>
   )
 }
 

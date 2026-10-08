@@ -134,6 +134,10 @@ export interface TheseusRun {
 /** Whether the run waits on the user, whose approvals only ever come from the app. */
 export const waitsOnUser = (run: Pick<TheseusRun, "stage">) => WAITING_STAGES.includes(run.stage)
 
+/** Whether the agent is at work on the run: planning or checking the checkpoints, or building. */
+export const agentWorks = (run: Pick<TheseusRun, "stage">) =>
+  run.stage === "planning" || run.stage === "building"
+
 export const GATES: { id: GateId; label: string }[] = [
   { id: "red", label: "Failing tests" },
   { id: "tests", label: "Tests pass" },
