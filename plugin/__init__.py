@@ -5,7 +5,7 @@ can read cron run history from Hermes's execution ledger instead of piecing it t
 device, keep its chat list on the server (``chats.py``), report each chat's context use
 (``context.py``) and the agent's todo list (``todos.py``), list and create Hermes Projects (``projects.py``) with GitHub repos cloned into
 them in the background (``clones.py``, ``github.py``), add and remove a project's repos (``repos.py``), run project sessions in their own worktrees with a permission mode and save their plans
-(``sessions.py``), let the agent push and open its pull requests, close them when a session is dropped (``ship.py``) and resolve a session once its pull request merges (``merges.py``), run a session end to end with the Theseus skill (``theseus.py``), let the agent ask the user questions with Hermes's ``clarify`` tool (``clarify.py``) and
+(``sessions.py``), let the agent push and open its pull requests, close them when a session is dropped (``ship.py``) and resolve a session once its pull request merges (``merges.py``), run a session end to end with the Theseus skill (``theseus.py``), let the agent ask the user questions with Hermes's ``clarify`` tool (``clarify.py``), keep its delegations in the turn that made them (``delegation.py``) and
 label its chats as Memento's, tell the app what changed as it happens (``events.py``, ``stream.py``), and links the profile to a Memento account (``link.py``). The dashboard half lives in ``dashboard/``.
 """
 
@@ -25,6 +25,7 @@ from . import (
     cleanup,
     clones,
     context,
+    delegation,
     events,
     github,
     link,
@@ -141,6 +142,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     ship.wire(adapter)
     # Theseus sessions review with another model; see theseus.py.
     theseus.wire(adapter)
+    # A background delegation's result would wait for the user's next message; see delegation.py.
+    delegation.wire(adapter)
 
     async def daily_cleanup(_app: Any):
         from hermes_constants import get_hermes_home
@@ -232,6 +235,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "events",
                     "theseus",
                     "push",
+                    "sync_delegation",
                 ],
                 "clarify": asks,
                 "todo_tool": todo_tool,
