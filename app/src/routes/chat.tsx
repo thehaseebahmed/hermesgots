@@ -12,6 +12,7 @@ import {
   RotateCcwIcon,
   SettingsIcon,
   Trash2Icon,
+  XIcon,
 } from "lucide-react"
 
 import { ApprovalCard } from "@/components/chat/approval-card"
@@ -75,6 +76,7 @@ import { describeActivity } from "@/lib/format"
 import { listProjects, type HermesProject } from "@/lib/hermes"
 import { loadEarlierHistory, reconcileHistory } from "@/lib/history"
 import { SAFETY_MS, useLive, watchChat } from "@/lib/live"
+import { useXLarge } from "@/lib/media"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { syncContextWindow } from "@/lib/models"
@@ -313,9 +315,15 @@ export function ChatPage() {
 
   // A session that was never sent anything isn't kept; typed text is the user's to keep or drop.
   const draftRef = useRef("")
-  const onDraft = useCallback((text: string) => {
-    draftRef.current = text
-  }, [])
+  // Each chat's own, since the chat can change under the composer.
+  const drafts = useRef(new Map<string, string>())
+  const onDraft = useCallback(
+    (text: string) => {
+      draftRef.current = text
+      if (id) drafts.current.set(id, text)
+    },
+    [id],
+  )
   const [leavingWithDraft, setLeavingWithDraft] = useState(false)
   const unsent =
     session !== undefined && messages?.length === 0 && !(session.updatedAt > session.createdAt)
@@ -331,6 +339,25 @@ export function ChatPage() {
   useEffect(() => {
     leaveRef.current = leave
   })
+  // Beside its project another session can be picked straight away, with no chance to ask, so a
+  // session left unsent goes, or is kept as a draft when something was typed.
+  const shown = useRef(id)
+  useEffect(() => {
+    const left = shown.current
+    shown.current = id
+    if (!left || left === id) return
+    const text = drafts.current.get(left)?.trim()
+    drafts.current.delete(left)
+    void (async () => {
+      const row = await db.conversations.get(left)
+      if (!row?.projectId || row.draftAt || row.updatedAt > row.createdAt) return
+      if (await db.messages.where("conversationId").equals(left).count()) return
+      if (text) await updateConversation(left, { draft: text, draftAt: Date.now() })
+      else await deleteConversation(left)
+    })()
+  }, [id])
+  // From `xl` a session opens beside its project, which it closes back to.
+  const beside = useXLarge() && Boolean(session)
   // A session sits under its project; a plain chat is top-level, so back leaves the app.
   useEffect(() => {
     if (!projectPath) return
@@ -452,9 +479,9 @@ export function ChatPage() {
               size="icon-lg"
               className="size-11 rounded-full bg-background/80 backdrop-blur"
               onClick={leave}
-              aria-label="Back to project"
+              aria-label={beside ? "Close session" : "Back to project"}
             >
-              <ArrowLeftIcon />
+              {beside ? <XIcon /> : <ArrowLeftIcon />}
             </Button>
           )
         }
@@ -575,6 +602,8 @@ export function ChatPage() {
           </div>
         ) : (
           <Composer
+            // Sessions are swapped in place beside their project; each keeps its own text.
+            key={session?.id}
             busy={busy}
             disabled={!configured}
             draft={session?.draft}

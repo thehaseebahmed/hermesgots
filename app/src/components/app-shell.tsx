@@ -6,25 +6,36 @@ import { DrawerContext } from "@/components/drawer-context"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { useLarge } from "@/lib/media"
 import { depth } from "@/lib/nav"
+import { useProjectPane, type ProjectPane } from "@/lib/pane"
+import { cn } from "@/lib/utils"
+import { ProjectPage } from "@/routes/project"
 
-/** From `lg` Settings' sections open beside its menu, so they count as one screen. */
-const screenOf = (path: string, large: boolean) =>
-  large && path.startsWith("/settings") ? "/settings" : path
+/**
+ * From `lg` Settings' sections open beside its menu, and from `xl` a project's sessions beside the
+ * project, so each counts as one screen.
+ */
+function screenOf(path: string, large: boolean, pane: ProjectPane | undefined) {
+  if (pane) return `/code/${pane.profileId}/${pane.projectId}`
+  return large && path.startsWith("/settings") ? "/settings" : path
+}
 
 /**
  * Animates the main pane in when the screen changes: from the right when it was opened on top of
  * the last one, from the left when going back to it, and a fade when it took the last one's place.
  */
-function usePageTransition(ref: RefObject<HTMLElement | null>) {
+function usePageTransition(ref: RefObject<HTMLElement | null>, pane: ProjectPane | undefined) {
   const location = useLocation()
   const type = useNavigationType()
   const large = useLarge()
-  const last = useRef({ screen: screenOf(location.pathname, large), idx: depth() })
+  const screen = screenOf(location.pathname, large, pane)
+  const last = useRef({ screen, idx: depth(), key: location.key })
 
   useLayoutEffect(() => {
     const previous = last.current
-    last.current = { screen: screenOf(location.pathname, large), idx: depth() }
+    last.current = { screen, idx: depth(), key: location.key }
     if (last.current.screen === previous.screen) return
+    // A session found to belong to a project once it loads: it was animated as it opened.
+    if (location.key === previous.key) return
     // A new chat taking its id once the first message is sent stays the same screen.
     if (type === "REPLACE" && (location.state as { quiet?: boolean } | null)?.quiet) return
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
@@ -38,13 +49,57 @@ function usePageTransition(ref: RefObject<HTMLElement | null>) {
         : [{ opacity: 0 }, { opacity: 1 }],
       { duration: step ? 260 : 200, easing: "cubic-bezier(0.2, 0, 0, 1)" },
     )
-  }, [location, type, large, ref])
+  }, [location, type, screen, ref])
+}
+
+/**
+ * From `xl`, a project and the session open beside it: the project narrows to a list pane and the
+ * session slides in to its right. Both stay mounted while sessions are swapped.
+ */
+function Panes({ pane, children }: { pane: ProjectPane | undefined; children: ReactNode }) {
+  const session = useRef<HTMLDivElement>(null)
+  const open = Boolean(pane?.session)
+  useLayoutEffect(() => {
+    if (!open || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
+    session.current?.animate(
+      [
+        { opacity: 0, transform: "translateX(48px)" },
+        { opacity: 1, transform: "none" },
+      ],
+      { duration: 300, easing: "cubic-bezier(0.2, 0, 0, 1)" },
+    )
+  }, [open])
+
+  return (
+    <div className="flex min-h-0 flex-1">
+      {pane && (
+        <div
+          className={cn(
+            "flex min-h-0 flex-none flex-col transition-[width] duration-300 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
+            // Material 3's list pane width, as in Settings.
+            open ? "w-103 border-r" : "w-full",
+          )}
+        >
+          <ProjectPage
+            key={`${pane.profileId}/${pane.projectId}`}
+            pane={pane}
+            session={pane.session}
+          />
+        </div>
+      )}
+      <div ref={session} className="flex min-w-0 flex-1 flex-col">
+        {/* The project's own route has nothing to add beside it. */}
+        {pane && !open ? null : children}
+      </div>
+    </div>
+  )
 }
 
 export function AppShell({ children }: { children?: ReactNode }) {
   const [open, setOpen] = useState(false)
   const main = useRef<HTMLElement>(null)
-  usePageTransition(main)
+  const pane = useProjectPane()
+  usePageTransition(main, pane)
 
   return (
     <DrawerContext.Provider value={() => setOpen(true)}>
@@ -59,7 +114,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
           </SheetContent>
         </Sheet>
         <main ref={main} className="flex min-w-0 flex-1 flex-col overflow-x-clip">
-          {children ?? <Outlet />}
+          <Panes pane={pane}>{children ?? <Outlet />}</Panes>
         </main>
       </div>
     </DrawerContext.Provider>

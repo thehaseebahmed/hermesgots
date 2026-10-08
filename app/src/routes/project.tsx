@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   ArchiveIcon,
@@ -45,6 +45,7 @@ import { formatRelative } from "@/lib/format"
 import { SAFETY_MS, useChanges, useLive } from "@/lib/live"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
+import { cn } from "@/lib/utils"
 import {
   deleteProject,
   listLiveRuns,
@@ -108,18 +109,32 @@ function useLiveRuns(profile: Profile | undefined) {
   return live
 }
 
-/** One Hermes Project: its sessions, library and PRs. */
-export function ProjectPage() {
-  const { profileId = "", projectId = "" } = useParams()
+/**
+ * One Hermes Project: its sessions, library and PRs. From `xl` the app shell keeps it beside the
+ * open session (`session`), so picking another one swaps it in place.
+ */
+export function ProjectPage({
+  pane,
+  session: openSession,
+}: {
+  pane?: { profileId: string; projectId: string }
+  session?: string
+}) {
+  const params = useParams()
+  const { profileId = "", projectId = "" } = pane ?? params
   const navigate = useNavigate()
-  const { up } = useNav()
-  // A project sits under Code.
+  const { root, up } = useNav()
+  // A project sits under Code, and a session open beside it under the project.
+  const back = useCallback(
+    () => (openSession ? root("/code") : up("/code")),
+    [openSession, root, up],
+  )
   useEffect(() => {
     return setBackGuard(() => {
-      up("/code")
+      back()
       return true
     })
-  }, [up])
+  }, [back])
   const passed = (useLocation().state as { project?: HermesProject } | null)?.project
   const profile = useLiveQuery(() => db.profiles.get(profileId), [profileId])
   const [fetched, setFetched] = useState<HermesProject>()
@@ -232,8 +247,11 @@ export function ProjectPage() {
   const start = async () => {
     if (!profile) return
     const conversation = await createConversation(profile.id, { title: "Draft session", projectId })
-    // So the new session can name its repos at once.
-    navigate(`/c/${conversation.id}`, { state: { project } })
+    // So the new session can name its repos at once. Beside a session, it takes that one's place.
+    navigate(`/c/${conversation.id}`, {
+      replace: Boolean(openSession),
+      state: { project, pane: { profileId, projectId } },
+    })
   }
 
   const remove = async () => {
@@ -245,7 +263,7 @@ export function ProjectPage() {
         stopMessage(c.id)
         await deleteConversation(c.id)
       }
-      up("/code")
+      back()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't delete the project.")
       setBusy(false)
@@ -261,7 +279,7 @@ export function ProjectPage() {
   })).filter((group) => group.sessions.length > 0)
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col">
       <ChatHeader
         className="relative pb-2"
         title={project?.name ?? ""}
@@ -272,7 +290,7 @@ export function ProjectPage() {
             variant="outline"
             size="icon-lg"
             className="size-11 rounded-full"
-            onClick={() => up("/code")}
+            onClick={back}
             aria-label="Back"
           >
             <ArrowLeftIcon />
@@ -322,6 +340,8 @@ export function ProjectPage() {
                       <li key={c.id}>
                         <SessionItem
                           session={c}
+                          open={c.id === openSession}
+                          pane={openSession ? { profileId, projectId } : undefined}
                           state={group.state}
                           now={now}
                           removed={removedRepos(c)}
@@ -396,7 +416,7 @@ export function ProjectPage() {
           profile={profile}
           project={project}
           onChanged={reload}
-          onArchived={() => up("/code")}
+          onArchived={back}
           onDelete={() => setDeleting(true)}
         />
       )}
@@ -470,11 +490,17 @@ function StateIcon({ state }: { state: SessionState }) {
 
 function SessionItem({
   session,
+  open,
+  pane,
   state,
   now,
   removed,
 }: {
   session: Conversation
+  /** Open beside the project. */
+  open?: boolean
+  /** The project, when a session is open beside it: another one takes its place. */
+  pane?: { profileId: string; projectId: string }
   state: SessionState
   now: number
   /** Repos the session works in that were removed from the project, which makes it read-only. */
@@ -486,7 +512,13 @@ function SessionItem({
   return (
     <Link
       to={`/c/${session.id}`}
-      className="-mx-2 flex min-h-14 items-center gap-3 rounded-2xl px-2 py-3 outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
+      replace={Boolean(pane)}
+      state={{ pane: pane ?? { profileId: session.profileId, projectId: session.projectId } }}
+      aria-current={open ? "page" : undefined}
+      className={cn(
+        "-mx-2 flex min-h-14 items-center gap-3 rounded-2xl px-2 py-3 outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring",
+        open && "bg-muted hover:bg-muted",
+      )}
     >
       <span className="flex w-5 shrink-0 items-center justify-center">
         {removed.length && state !== "working" ? (
