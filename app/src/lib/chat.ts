@@ -178,7 +178,7 @@ function clarifyResult(clarify: ClarifyRequest, answers: ClarifyAnswers, outcome
 function settledClarify(
   message: Pick<Message, "clarify" | "tools">,
   answers: ClarifyAnswers,
-  outcome: "submitted" | "cancelled",
+  outcome: "submitted" | "cancelled" | "timed_out" | "undelivered",
 ) {
   const clarify = { ...message.clarify!, resolved: { answers, outcome } }
   const tools = [...(message.tools ?? [])]
@@ -275,14 +275,13 @@ function streamHandlers(turn: Turn): StreamHandlers {
     onClarifyResolved(event) {
       if (!draft.clarify || draft.clarify.clarifyId !== event.clarify_id) return
       if (draft.clarify.resolved && draft.clarify.resolved !== "expired") return
-      Object.assign(
-        draft,
-        settledClarify(
-          draft,
-          event.answers ?? {},
-          event.outcome === "cancelled" ? "cancelled" : "submitted",
-        ),
-      )
+      // Preserve the actual outcome: timed_out and undelivered are not submitted.
+      const KNOWN = ["submitted", "cancelled", "timed_out", "undelivered"] as const
+      type Outcome = (typeof KNOWN)[number]
+      const outcome: Outcome = KNOWN.includes(event.outcome as Outcome)
+        ? (event.outcome as Outcome)
+        : "submitted"
+      Object.assign(draft, settledClarify(draft, event.answers ?? {}, outcome))
       touch()
     },
   }
