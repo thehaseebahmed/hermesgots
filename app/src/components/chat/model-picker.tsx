@@ -4,7 +4,7 @@ import { ArrowLeftIcon, CheckIcon, ChevronDownIcon, SearchIcon } from "lucide-re
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
-import type { ModelChoice, Profile } from "@/lib/db"
+import { rememberModel, type ModelChoice, type Profile } from "@/lib/db"
 import type { ModelProvider } from "@/lib/hermes"
 import { shortModel, useModelInfo } from "@/lib/model-info"
 import { cn } from "@/lib/utils"
@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils"
 export function ModelPicker({
   providers,
   fallback,
+  recent = [],
   choice,
   onChoose,
   onBack,
@@ -23,12 +24,19 @@ export function ModelPicker({
   providers: ModelProvider[]
   /** The row that clears the choice: its label and the model it runs. */
   fallback: { label: string; model?: string }
+  /** The bot's recently picked models, shown first as `provider/model`. */
+  recent?: ModelChoice[]
   choice?: ModelChoice
   onChoose: (choice: ModelChoice | undefined) => void
   onBack?: () => void
 }) {
   const [query, setQuery] = useState("")
   const total = providers.reduce((n, p) => n + p.models.length, 0)
+  // Only ones the host still offers, so a recent pick never sends a model it dropped.
+  const recentOffered = recent.filter((r) =>
+    providers.some((p) => p.slug === r.provider && p.models.includes(r.model)),
+  )
+  const isChosen = (m: ModelChoice) => choice?.provider === m.provider && choice.model === m.model
   const groups = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean)
     return providers
@@ -81,6 +89,21 @@ export function ModelPicker({
             />
           </ModelList>
         )}
+        {!query && recentOffered.length > 0 && (
+          <section className="flex flex-col gap-2">
+            <h3 className="px-1 text-sm text-muted-foreground">Recent</h3>
+            <ModelList>
+              {recentOffered.map((m) => (
+                <ModelOption
+                  key={`${m.provider}/${m.model}`}
+                  label={`${m.provider}/${m.model}`}
+                  selected={isChosen(m)}
+                  onClick={() => onChoose(m)}
+                />
+              ))}
+            </ModelList>
+          </section>
+        )}
         {groups.map((p) => (
           <section key={p.slug} className="flex flex-col gap-2">
             <h3 className="px-1 text-sm text-muted-foreground">{p.name}</h3>
@@ -89,7 +112,7 @@ export function ModelPicker({
                 <ModelOption
                   key={m}
                   label={m}
-                  selected={choice?.provider === p.slug && choice.model === m}
+                  selected={isChosen({ provider: p.slug, model: m })}
                   onClick={() => onChoose({ provider: p.slug, model: m })}
                 />
               ))}
@@ -178,9 +201,11 @@ export function ModelMenu({
           <ModelPicker
             providers={providers}
             fallback={{ label: "Bot's default", model: fallback }}
+            recent={profile?.recentModels}
             choice={choice}
             onChoose={(next) => {
               onChoose(next)
+              if (next && profile) void rememberModel(profile.id, next)
               setOpen(false)
             }}
           />
@@ -220,9 +245,11 @@ export function DefaultModelSetting({
           <ModelPicker
             providers={providers}
             fallback={{ label: "Host's model", model: info?.model }}
+            recent={profile.recentModels}
             choice={profile.modelChoice}
             onChoose={(next) => {
               onChoose(next)
+              if (next) void rememberModel(profile.id, next)
               setOpen(false)
             }}
           />
