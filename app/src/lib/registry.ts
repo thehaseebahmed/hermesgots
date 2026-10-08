@@ -159,9 +159,14 @@ async function pull() {
     let id = record.adopts ?? botId
     registryIds.set(id, botId)
     present.add(id)
-    if (record.keyId !== inbox.keyId) continue
+    // Not sealed: a bot this device already has keeps up with them while its record can't be opened.
+    const local = {
+      disabled: !record.enabled || undefined,
+      seenAt: record.seen?.at,
+    }
     let value: BotRecord
     try {
+      if (record.keyId !== inbox.keyId) throw new Error("Sealed to another key")
       value = await openFromInbox<BotRecord>(
         inbox.key,
         record.sealed,
@@ -169,11 +174,8 @@ async function pull() {
       )
     } catch {
       // Sealed to a key this device doesn't hold yet; the host re-seals on its next check-in.
+      await db.profiles.update(id, local)
       continue
-    }
-    const local = {
-      disabled: !record.enabled || undefined,
-      seenAt: record.seen?.at,
     }
     const profiles = await db.profiles.toArray()
     if (!record.adopts && !profiles.some((p) => p.id === botId)) {

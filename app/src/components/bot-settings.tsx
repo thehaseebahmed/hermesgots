@@ -54,7 +54,7 @@ import { formatRelative } from "@/lib/format"
 import { checkHealth, getPluginVersion, listModels } from "@/lib/hermes"
 import { syncContextWindow, useModelsDevUnreachable } from "@/lib/models"
 import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
-import { useSyncState } from "@/lib/sync"
+import { refreshBots, useSyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
 
 type Connection =
@@ -71,6 +71,9 @@ function handAdded(profile: Profile) {
   return !profile.hostId && (Boolean(profile.apiKey) || profile.updatedAt !== profile.createdAt)
 }
 
+/** How often the screen re-reads the registry, so "last seen" follows the hosts' check-ins. */
+const REFRESH_MS = 60_000
+
 /** Bots are Hermes profiles, linked from their hosts. Tap one to edit it. */
 export function BotSettings() {
   const profiles = useLiveQuery(listProfiles, [])
@@ -85,6 +88,14 @@ export function BotSettings() {
   const setLinking = (open: boolean) =>
     setParams(open ? { link: "1" } : {}, { replace: true, state: { quiet: true } })
   const unlinked = settings && !settings.linkNoticeSeen && profiles?.some(handAdded)
+
+  useEffect(() => {
+    void refreshBots()
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refreshBots()
+    }, REFRESH_MS)
+    return () => window.clearInterval(timer)
+  }, [])
 
   return (
     <Card className="rounded-3xl">
