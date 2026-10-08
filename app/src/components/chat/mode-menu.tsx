@@ -7,6 +7,9 @@ import {
   ZapIcon,
 } from "lucide-react"
 
+import { useState } from "react"
+
+import { TheseusIntro } from "@/components/chat/theseus-intro"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -17,7 +20,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import type { SessionMode } from "@/lib/db"
-import { THESEUS_PREVIEW } from "@/lib/theseus"
+import { introSeen, THESEUS_PREVIEW } from "@/lib/theseus"
 import { MODE_LABELS } from "@/lib/workspace"
 
 const MODES: { mode: SessionMode; icon: typeof ZapIcon }[] = [
@@ -42,6 +45,7 @@ export function ModeMenu({
   /** The session has had a turn: Theseus can't be picked any more, and can't be left. */
   started?: boolean
 }) {
+  const [intro, setIntro] = useState(false)
   const Icon =
     mode === "theseus" ? SailboatIcon : (MODES.find((m) => m.mode === mode)?.icon ?? PencilLineIcon)
   const locked = mode === "theseus" && started
@@ -62,52 +66,59 @@ export function ModeMenu({
       : []),
   ]
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        disabled={disabled}
-        render={
-          <Button
-            type="button"
-            variant="secondary"
-            className="h-11 gap-1.5 rounded-full pr-2.5 pl-3"
-            aria-label={`Mode: ${MODE_LABELS[mode]}`}
-          />
-        }
-      >
-        <Icon />
-        {MODE_LABELS[mode]}
-        {locked ? (
-          <LockIcon className="size-3.5 text-muted-foreground" aria-label="Locked" />
-        ) : (
-          <ChevronDownIcon className="text-muted-foreground" />
-        )}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-60">
-        <DropdownMenuRadioGroup
-          value={mode}
-          onValueChange={(value) => onChange(value as SessionMode)}
+    <>
+      <TheseusIntro open={intro} onOpenChange={setIntro} onUse={() => onChange("theseus")} />
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          disabled={disabled}
+          render={
+            <Button
+              type="button"
+              variant="secondary"
+              className="h-11 gap-1.5 rounded-full pr-2.5 pl-3"
+              aria-label={`Mode: ${MODE_LABELS[mode]}`}
+            />
+          }
         >
-          {options.map(({ mode: option, icon: OptionIcon }) => (
-            <div key={option} className="contents">
-              {option === "theseus" && <DropdownMenuSeparator />}
-              <DropdownMenuRadioItem
-                value={option}
-                className="min-h-11"
-                closeOnClick
-                disabled={off(option)}
-              >
-                <OptionIcon />
-                <span className="flex flex-col">
-                  {MODE_LABELS[option]}
-                  {note(option) && (
-                    <span className="text-xs text-muted-foreground">{note(option)}</span>
-                  )}
-                </span>
-              </DropdownMenuRadioItem>
-            </div>
-          ))}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
+          <Icon />
+          {MODE_LABELS[mode]}
+          {locked ? (
+            <LockIcon className="size-3.5 text-muted-foreground" aria-label="Locked" />
+          ) : (
+            <ChevronDownIcon className="text-muted-foreground" />
+          )}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="min-w-60">
+          <DropdownMenuRadioGroup
+            value={mode}
+            onValueChange={(value) => {
+              // The first time on this device, Theseus is explained before it's taken.
+              if (value === "theseus" && mode !== "theseus" && !introSeen()) setIntro(true)
+              else onChange(value as SessionMode)
+            }}
+          >
+            {options.map(({ mode: option, icon: OptionIcon }) => (
+              <div key={option} className="contents">
+                {option === "theseus" && <DropdownMenuSeparator />}
+                <DropdownMenuRadioItem
+                  value={option}
+                  className="min-h-11"
+                  closeOnClick
+                  disabled={off(option)}
+                >
+                  <OptionIcon />
+                  <span className="flex flex-col">
+                    {MODE_LABELS[option]}
+                    {note(option) && (
+                      <span className="text-xs text-muted-foreground">{note(option)}</span>
+                    )}
+                  </span>
+                </DropdownMenuRadioItem>
+              </div>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
   )
 }

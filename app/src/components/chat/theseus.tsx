@@ -1,40 +1,32 @@
-import type { ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import {
   ArrowLeftIcon,
   CheckIcon,
-  ChevronDownIcon,
   ChevronRightIcon,
   CircleDotIcon,
-  FlaskConicalIcon,
   ListChecksIcon,
   MapIcon,
   MinusIcon,
   SailboatIcon,
-  ScanEyeIcon,
-  ShieldCheckIcon,
   UserCheckIcon,
   XIcon,
 } from "lucide-react"
 
+import { ChoiceRow } from "@/components/chat/question-card"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Separator } from "@/components/ui/separator"
 import {
   currentCheckpoint,
+  GATE_ICONS,
   GATES,
   runSummary,
-  SETTING_OPTIONS,
+  SETTING_KEYS,
+  SETTING_QUESTIONS,
+  settingLabel,
+  type SettingKey,
   theseusActions,
   type GateId,
   type GateState,
@@ -45,14 +37,6 @@ import {
 import { cn } from "@/lib/utils"
 
 const CARD = "w-full rounded-3xl border shadow-xl ring-0 shadow-black/10 dark:shadow-black/40"
-
-const GATE_ICONS: Record<GateId, typeof CheckIcon> = {
-  red: FlaskConicalIcon,
-  tests: ListChecksIcon,
-  visual: ScanEyeIcon,
-  review: ShieldCheckIcon,
-  human: UserCheckIcon,
-}
 
 /** The run's progress, for the pill row above the composer; opens the run. */
 export function TheseusPill({ run, onClick }: { run: TheseusRun; onClick: () => void }) {
@@ -149,69 +133,35 @@ function GateStrip({ cp }: { cp: TheseusCheckpoint }) {
   )
 }
 
-const SETTING_LABELS: Record<keyof TheseusSettings, string> = {
-  autonomy: "Approve",
-  visual: "Visual review",
-  reviewers: "Code review",
-  granularity: "Checkpoint size",
-}
-
-/** The run's settings as chips; each opens its choices. Any of them can change mid-run. */
-function SettingsChips({
+/** One setting as a question, its choices as rows like the agent's own questions. */
+function SettingQuestion({
+  setting,
   settings,
-  keys = ["autonomy", "visual", "reviewers"],
-  className,
+  onPick,
 }: {
+  setting: SettingKey
   settings: TheseusSettings
-  keys?: (keyof TheseusSettings)[]
-  className?: string
+  onPick?: () => void
 }) {
+  const { question, options } = SETTING_QUESTIONS[setting]
   return (
-    <div className={cn("flex flex-wrap gap-2", className)}>
-      {keys.map((key) => {
-        const options = SETTING_OPTIONS[key] as readonly { value: unknown; label: string }[]
-        const current = options.find((o) => o.value === settings[key])
-        return (
-          <DropdownMenu key={key}>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-11 gap-1.5 rounded-full pr-2.5 pl-3.5 text-[13px]"
-                />
-              }
-            >
-              <span className="text-muted-foreground">{SETTING_LABELS[key]}</span>
-              {current?.label}
-              <ChevronDownIcon className="text-muted-foreground" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="min-w-52">
-              <DropdownMenuGroup>
-                <DropdownMenuLabel>{SETTING_LABELS[key]}</DropdownMenuLabel>
-              </DropdownMenuGroup>
-              <DropdownMenuRadioGroup
-                value={String(settings[key])}
-                onValueChange={(value) => {
-                  const option = options.find((o) => String(o.value) === value)
-                  if (option) theseusActions.settings({ [key]: option.value })
-                }}
-              >
-                {options.map((option) => (
-                  <DropdownMenuRadioItem
-                    key={String(option.value)}
-                    value={String(option.value)}
-                    className="min-h-11"
-                    closeOnClick
-                  >
-                    {option.label}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )
-      })}
+    <div className="space-y-2">
+      <p className="text-[15px] font-medium">{question}</p>
+      <div className="space-y-1.5">
+        {(options as readonly { value: unknown; label: string }[]).map((option, i) => (
+          <ChoiceRow
+            key={String(option.value)}
+            label={option.label}
+            selected={settings[setting] === option.value}
+            recommended={i === 0}
+            disabled={false}
+            onClick={() => {
+              theseusActions.settings({ [setting]: option.value })
+              onPick?.()
+            }}
+          />
+        ))}
+      </div>
     </div>
   )
 }
@@ -270,33 +220,7 @@ export function TheseusCard({
       </Card>
     )
 
-  if (run.stage === "checkpoints")
-    return (
-      <Card size="sm" className={CARD}>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <ListChecksIcon className="size-5 text-primary" />
-            {run.checkpoints.length} checkpoints ready
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          <p className="text-sm text-muted-foreground">
-            {run.checkpoints.filter((cp) => cp.ui).length} change the screen ·{" "}
-            {run.checkpoints.reduce((n, cp) => n + cp.tests.length, 0)} planned tests
-          </p>
-          <SettingsChips settings={run.settings} />
-        </CardContent>
-        {footer(
-          <Button variant="outline" {...button} onClick={() => onOpen({ kind: "run" })}>
-            See checkpoints
-          </Button>,
-          <Button {...button} onClick={theseusActions.approveCheckpoints}>
-            <SailboatIcon data-icon="inline-start" />
-            Approve and start
-          </Button>,
-        )}
-      </Card>
-    )
+  if (run.stage === "checkpoints") return <CheckpointsCard run={run} onOpen={onOpen} />
 
   const waiting = run.checkpoints.find((cp) => cp.status === "awaiting-approval")
   if (run.stage === "approval" && waiting)
@@ -358,7 +282,83 @@ export function TheseusCard({
   return null
 }
 
-export type SheetView = { kind: "run" } | { kind: "plan" } | { kind: "checkpoint"; id: string }
+/**
+ * The checkpoints wait for approval: a summary, then each setting as its own question (the run
+ * starts with whatever they say), then Approve and start.
+ */
+function CheckpointsCard({ run, onOpen }: { run: TheseusRun; onOpen: (view: SheetView) => void }) {
+  const [page, setPage] = useState(0)
+  const setting = SETTING_KEYS[page - 1]
+  const last = page === SETTING_KEYS.length
+  const button = { size: "lg" as const, className: "h-11 flex-1 sm:min-w-32 sm:flex-none" }
+  return (
+    <Card size="sm" className={CARD}>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <ListChecksIcon className="size-5 text-primary" />
+          {run.checkpoints.length} checkpoints ready
+          {page > 0 && (
+            <span
+              aria-live="polite"
+              className="ml-auto text-sm font-normal text-muted-foreground tabular-nums"
+            >
+              {page} of {SETTING_KEYS.length}
+            </span>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {setting ? (
+          <SettingQuestion setting={setting} settings={run.settings} />
+        ) : (
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-muted-foreground">
+              {run.checkpoints.filter((cp) => cp.ui).length} change the screen ·{" "}
+              {run.checkpoints.reduce((n, cp) => n + cp.tests.length, 0)} planned tests
+            </p>
+            <ol className="flex flex-col gap-1 text-[15px]">
+              {run.checkpoints.slice(0, 3).map((cp) => (
+                <li key={cp.id} className="flex gap-3">
+                  <span className="w-9 shrink-0 text-xs leading-6 text-muted-foreground">
+                    {cp.id}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{cp.title}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
+      </CardContent>
+      <CardFooter className="gap-2 sm:justify-end">
+        {page === 0 ? (
+          <Button variant="outline" {...button} onClick={() => onOpen({ kind: "run" })}>
+            See all
+          </Button>
+        ) : (
+          <Button variant="outline" {...button} onClick={() => setPage(page - 1)}>
+            Back
+          </Button>
+        )}
+        {last ? (
+          <Button {...button} onClick={theseusActions.approveCheckpoints}>
+            <SailboatIcon data-icon="inline-start" />
+            Approve and start
+          </Button>
+        ) : (
+          <Button {...button} onClick={() => setPage(page + 1)}>
+            Next
+          </Button>
+        )}
+      </CardFooter>
+    </Card>
+  )
+}
+
+export type SheetView =
+  | { kind: "run" }
+  | { kind: "plan" }
+  | { kind: "checkpoint"; id: string }
+  | { kind: "setting"; key: SettingKey }
 
 /** The run: its settings, checkpoints and learnings, with each checkpoint's evidence and the plan. */
 export function TheseusSheet({
@@ -376,6 +376,22 @@ export function TheseusSheet({
       <PopupContent className="sm:max-w-xl">
         {view?.kind === "plan" ? (
           <PlanView run={run} onBack={() => onView({ kind: "run" })} />
+        ) : view?.kind === "setting" ? (
+          <>
+            <PopupHeader className="flex-row items-center gap-1 pb-2">
+              <Back onClick={() => onView({ kind: "run" })} label="Back to the run" />
+              <PopupTitle className="min-w-0 flex-1 truncate">
+                {SETTING_QUESTIONS[view.key].label}
+              </PopupTitle>
+            </PopupHeader>
+            <div className="px-6 pt-2">
+              <SettingQuestion
+                setting={view.key}
+                settings={run.settings}
+                onPick={() => onView({ kind: "run" })}
+              />
+            </div>
+          </>
         ) : checkpoint ? (
           <CheckpointView cp={checkpoint} onBack={() => onView({ kind: "run" })} />
         ) : (
@@ -444,7 +460,23 @@ function RunView({ run, onView }: { run: TheseusRun; onView: (view: SheetView) =
       {run.checkpoints.length > 0 && (
         <>
           <Section title="Settings">
-            <SettingsChips settings={run.settings} />
+            <ul className="-mx-2 flex flex-col">
+              {SETTING_KEYS.map((key) => (
+                <li key={key}>
+                  <button
+                    type="button"
+                    className="flex min-h-11 w-full items-center gap-3 rounded-2xl px-2 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => onView({ kind: "setting", key })}
+                  >
+                    <span className="flex-1 text-[15px]">{SETTING_QUESTIONS[key].label}</span>
+                    <span className="truncate text-sm text-muted-foreground">
+                      {settingLabel(key, run.settings)}
+                    </span>
+                    <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
+                  </button>
+                </li>
+              ))}
+            </ul>
           </Section>
           <Section title="Checkpoints">
             <ol className="-mx-2 flex flex-col">
