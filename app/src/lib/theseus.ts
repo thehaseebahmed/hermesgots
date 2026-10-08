@@ -246,7 +246,8 @@ export function currentGate(cp: TheseusCheckpoint) {
 /** One line for the pill and the project's session list. */
 export function runSummary(run: TheseusRun) {
   if (run.stage === "discovery") return "Requirements"
-  if (run.stage === "planning") return "Planning the checkpoints"
+  if (run.stage === "planning")
+    return run.checkpoints.length ? "Checking the checkpoints" : "Planning the checkpoints"
   if (run.stage === "done") return "Run closed"
   if (run.stage === "plan") return "Plan ready"
   if (run.stage === "checkpoints") return `${run.checkpoints.length} checkpoints ready`
