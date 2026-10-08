@@ -118,6 +118,21 @@ One-time setup:
 
 Without the keystore secret (e.g. pull requests from forks), the workflow uploads a debug APK instead.
 
+### Testers (Firebase App Distribution)
+
+Pushes to `main`, and runs started by hand from the Actions tab (**Android → Run workflow**, on any branch), also send the signed APK to testers through [Firebase App Distribution](https://firebase.google.com/docs/app-distribution). Testers get an email for each build and install it with the App Tester app. Pull requests are never distributed. Until the secret below exists, the step is skipped.
+
+One-time setup, in the Firebase project that already holds the `app.memento` Android app (the one `FIREBASE_GOOGLE_SERVICES` comes from):
+
+1. In the Firebase console, open **App Distribution**, accept its terms, and under **Testers & Groups** create a group (e.g. `testers`) and add the testers' emails.
+2. In Google Cloud's **IAM & Admin → Service accounts** for the same project, create a service account with the **Firebase App Distribution Admin** role (`roles/firebaseappdistro.admin`) and download a JSON key for it.
+3. Add to the repo's Actions settings:
+   - secret: `FIREBASE_DISTRIBUTION_KEY`, that key's JSON (as is, or base64).
+   - variable (optional): `FIREBASE_TESTER_GROUPS`, the group aliases to send to, comma-separated (default `testers`).
+   - variable (optional): `FIREBASE_APP_ID`, the app's id (`1:…:android:…`). By default it's read from `FIREBASE_GOOGLE_SERVICES`.
+
+Each build's release notes are its version and the commit message. Distribution needs the keystore secrets too, since testers can only update over a build signed with the same key.
+
 In the app:
 
 - Plain-HTTP Hermes servers on other hosts work, since the app isn't bound by the browser's mixed-content rule.

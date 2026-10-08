@@ -11,6 +11,8 @@ on:
     paths:
       - "app/**"
       - ".github/workflows/android.yml"
+  # Builds any branch on demand; when Firebase is set up it also goes to the testers.
+  workflow_dispatch:
 
 concurrency:
   group: android-${{ github.ref }}
@@ -27,6 +29,7 @@ jobs:
       # Fork PRs get no secrets; they fall back to a debug build.
       KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       FIREBASE_GOOGLE_SERVICES: ${{ secrets.FIREBASE_GOOGLE_SERVICES }}
+      FIREBASE_DISTRIBUTION_KEY: ${{ secrets.FIREBASE_DISTRIBUTION_KEY }}
       # Name the build after the PR's head, not the merge commit Actions checks out.
       COMMIT_REF: ${{ github.event.pull_request.head.sha || github.sha }}
     defaults:
@@ -109,3 +112,39 @@ jobs:
           name: memento-${{ steps.version.outputs.sha }}
           path: app/android/app/build/outputs/apk/*/*.apk
           if-no-files-found: error
+
+      # Pull requests never reach testers, and an unsigned build would not update over a signed one.
+      - name: Distribute to testers with Firebase App Distribution
+        if: github.event_name != 'pull_request' && env.KEYSTORE_BASE64 != '' && env.FIREBASE_DISTRIBUTION_KEY != ''
+        env:
+          FIREBASE_APP_ID: ${{ vars.FIREBASE_APP_ID }}
+          FIREBASE_TESTER_GROUPS: ${{ vars.FIREBASE_TESTER_GROUPS || 'testers' }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          # Without an explicit id, take the app.memento app's id from google-services.json.
+          app_id="$FIREBASE_APP_ID"
+          if [ -z "$app_id" ] && [ -f android/app/google-services.json ]; then
+            app_id=$(jq -r '[.client[] | select(.client_info.android_client_info.package_name == "app.memento") | .client_info.mobilesdk_app_id][0] // empty' android/app/google-services.json)
+          fi
+          if [ -z "$app_id" ]; then
+            echo "::error::Set the FIREBASE_APP_ID variable, or the FIREBASE_GOOGLE_SERVICES secret with an app.memento client"
+            exit 1
+          fi
+          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/firebase-distribution.json"
+          printf '%s' "$FIREBASE_DISTRIBUTION_KEY" > "$GOOGLE_APPLICATION_CREDENTIALS"
+          if ! jq -e . "$GOOGLE_APPLICATION_CREDENTIALS" > /dev/null 2>&1; then
+            base64 --decode <<< "$FIREBASE_DISTRIBUTION_KEY" > "$GOOGLE_APPLICATION_CREDENTIALS" 2> /dev/null || true
+          fi
+          if ! jq -e .client_email "$GOOGLE_APPLICATION_CREDENTIALS" > /dev/null 2>&1; then
+            rm -f "$GOOGLE_APPLICATION_CREDENTIALS"
+            echo "::error::FIREBASE_DISTRIBUTION_KEY is not a service account key's JSON or its base64"
+            exit 1
+          fi
+          notes="$RUNNER_TEMP/release-notes.txt"
+          { echo "$ANDROID_VERSION_NAME ($REF_NAME)"; echo; git log -1 --format=%B "$GITHUB_SHA"; } > "$notes"
+          apk=$(ls android/app/build/outputs/apk/release/*.apk | head -n1)
+          status=0
+          npx --yes firebase-tools@15.31.0 appdistribution:distribute "$apk" \
+            --app "$app_id" --groups "$FIREBASE_TESTER_GROUPS" --release-notes-file "$notes" || status=$?
+          rm -f "$GOOGLE_APPLICATION_CREDENTIALS"
+          exit $status

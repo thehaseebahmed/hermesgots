@@ -66,7 +66,7 @@ PR titles follow the same format. Fill in `.github/pull_request_template.md` for
   - Use shadcn components wherever one fits before writing your own.
   - Add new ones with `pnpm dlx shadcn@latest add <name>`. Leave the generated files alone unless there's a reason to change them.
 - Dexie (IndexedDB) for all app data. `vite-plugin-pwa` handles the manifest and service worker. Deployed on Netlify (`netlify.toml`).
-- Capacitor 8 wraps the same build as an Android app (`capacitor.config.ts`, `android/`). `.github/workflows/android.yml` builds the APK on pushes to `main` and to PRs into `main`.
+- Capacitor 8 wraps the same build as an Android app (`capacitor.config.ts`, `android/`). `.github/workflows/android.yml` builds the APK on pushes to `main`, on PRs into `main` and by hand (`workflow_dispatch`); a signed build that isn't a PR's also goes to Firebase App Distribution's tester groups once the `FIREBASE_DISTRIBUTION_KEY` secret is set (app id from `vars.FIREBASE_APP_ID`, else `google-services.json`).
 
 ## Layout
 
