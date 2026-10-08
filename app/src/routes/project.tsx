@@ -60,6 +60,7 @@ import {
   sessionState,
   type SessionState,
 } from "@/lib/workspace"
+import { runSummary, useTheseusRun, type TheseusRun } from "@/lib/theseus"
 
 /** How often the plugin is asked which sessions have a run in flight, while the screen is on. */
 const LIVE_MS = 10_000
@@ -206,6 +207,8 @@ export function ProjectPage({
     }
     return signals
   }, [ids.join("\n")])
+  // MOCK: the one canned run, shown on every Theseus session.
+  const theseus = useTheseusRun(true)
 
   // A session nothing was sent in (or typed for) isn't one yet. Synced ones carry their activity in
   // `updatedAt`, since their messages load only when opened.
@@ -271,10 +274,17 @@ export function ProjectPage({
     }
   }
 
+  // A Theseus run that waits on the user (its plan, checkpoints or an approval) waits like a plan.
+  const theseusWaits = (c: Conversation) =>
+    c.mode === "theseus" && Boolean(theseus?.next.startsWith("Your turn"))
   const grouped = GROUPS.map((group) => ({
     ...group,
     sessions: (sessions ?? []).filter(
-      (c) => sessionState(c, live[c.hermesSessionId], local?.[c.id]) === group.state,
+      (c) =>
+        sessionState(c, live[c.hermesSessionId], {
+          ...local?.[c.id],
+          waiting: local?.[c.id]?.waiting || theseusWaits(c),
+        }) === group.state,
     ),
   })).filter((group) => group.sessions.length > 0)
 
@@ -345,6 +355,7 @@ export function ProjectPage({
                           state={group.state}
                           now={now}
                           removed={removedRepos(c)}
+                          theseus={c.mode === "theseus" ? theseus : undefined}
                         />
                       </li>
                     ))}
@@ -495,6 +506,7 @@ function SessionItem({
   state,
   now,
   removed,
+  theseus,
 }: {
   session: Conversation
   /** Open beside the project. */
@@ -503,12 +515,17 @@ function SessionItem({
   pane?: { profileId: string; projectId: string }
   state: SessionState
   now: number
+  /** The session's Theseus run, when it runs on Theseus. */
+  theseus?: TheseusRun
   /** Repos the session works in that were removed from the project, which makes it read-only. */
   removed: string[]
 }) {
   const line2 = removed.length
     ? `${names.format(removed)} removed`
-    : (prLine(session) ?? session.worktree?.branch ?? session.draft)
+    : ((theseus && `Theseus · ${runSummary(theseus)}`) ??
+      prLine(session) ??
+      session.worktree?.branch ??
+      session.draft)
   return (
     <Link
       to={`/c/${session.id}`}

@@ -33,6 +33,7 @@ export const MODE_LABELS: Record<SessionMode, string> = {
   accept_edits: "Accept edits",
   auto: "Auto",
   plan: "Plan",
+  theseus: "Theseus",
 }
 
 /** The session and its bot, when the bot's plugin can hold its workspace. */

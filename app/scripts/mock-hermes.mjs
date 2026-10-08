@@ -284,6 +284,9 @@ const PLUGIN = process.env.MOCK_NO_PLUGIN !== "1"
 const projectSessions = new Map()
 // The plugin's pull request instruction (sessions.PR_INSTRUCTIONS), word for word.
 const PR_INSTRUCTIONS = "When the work is done and you've checked it, ship it yourself with the open_pull_request tool: it commits what's left, pushes this branch and opens a pull request, or updates the open one. Don't ask first, and don't use git push or gh for it. Write the description from the repo's pull request template when it has one (named below), else with Summary, Changes and How to test sections."
+// Theseus (a mock, not in the plugin yet) runs in Auto with the skill's gates on top.
+const MODES = ["accept_edits", "auto", "plan", "theseus"]
+
 // The plugin's plan-mode instructions (sessions.PLAN_INSTRUCTIONS), word for word.
 const PLAN_INSTRUCTIONS = `You are in plan mode: change nothing. Read what you need. Then, before you write the plan, settle every choice the user would otherwise be left to make: ask with the clarify tool, every question in one call, your recommended answer first. If you can't ask (no clarify tool, or no answer came), decide it yourself and record the decision under Risks and assumptions. Then make your whole final reply the plan below and stop; the user approves it before you act. It is saved to a file as written, so write it for someone who hasn't read this chat, and a plan with an open question isn't finished. Use this Markdown shape exactly:
 
@@ -619,7 +622,7 @@ async function playTurn(req, body, last, out) {
     const cleanupId = `call_${randomUUID().slice(0, 8)}`
     out.tool({ tool: "terminal", emoji: "💻", label: "find /var/log -name '*.log.*' -mtime +90 -delete", toolCallId: cleanupId, status: "running" })
     // In Auto the plugin turns Hermes's own approval bypass on for the run, so nothing is asked.
-    const choice = projectSessions.get(sessionOf(req, body))?.mode === "auto" ? "once" : await out.approve({
+    const choice = ["auto", "theseus"].includes(projectSessions.get(sessionOf(req, body))?.mode) ? "once" : await out.approve({
       command: "find /var/log -name '*.log.*' -mtime +90 -delete",
       pattern_key: "recursive_delete",
       description: "Delete 34 rotated log files older than 90 days (4.2 GB) under /var/log",
@@ -1201,8 +1204,8 @@ http
           return json(res, 409, { error: { message: "A repository is still being added to this project." } })
         const gitFolders = project.folders.filter((f) => f.git)
         if (!gitFolders.length) return json(res, 400, { error: { message: "This project has no git repository." } })
-        if (mode !== undefined && !["accept_edits", "auto", "plan"].includes(mode))
-          return json(res, 400, { error: { message: "mode must be accept_edits, auto or plan." } })
+        if (mode !== undefined && !MODES.includes(mode))
+          return json(res, 400, { error: { message: "mode must be accept_edits, auto, plan or theseus." } })
         let record = workspace
         if (!record) {
           await sleep(800 * gitFolders.length)
@@ -1220,8 +1223,11 @@ http
       if (route === "workspace") return answer(workspace ?? null)
       if (route === "mode" && req.method === "POST") {
         const { mode } = await readBody(req)
-        if (!["accept_edits", "auto", "plan"].includes(mode)) return json(res, 400, { error: { message: "mode must be accept_edits, auto or plan." } })
+        if (!MODES.includes(mode)) return json(res, 400, { error: { message: "mode must be accept_edits, auto, plan or theseus." } })
         if (!workspace) return json(res, 404, { error: { message: "This session has no workspace yet" } })
+        // A Theseus session keeps its mode for good (mock of the planned plugin rule).
+        if (workspace.mode === "theseus" && mode !== "theseus")
+          return json(res, 409, { error: { message: "A Theseus session can't change its mode." } })
         workspace.mode = mode
         workspace.plan_pending = 0
         // Switching to Auto answers what a run of the session already waits on, like the plugin.
