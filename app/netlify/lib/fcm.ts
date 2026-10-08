@@ -1,7 +1,7 @@
 /**
  * Firebase Cloud Messaging from a Netlify function. The Android app can't use Web Push, and sending
  * through FCM takes a service account key, which can't live on every user's Hermes host. So a plugin
- * asks the registry to send (`push` in `registry.ts`) and the key stays here, in `FCM_SERVICE_ACCOUNT`.
+ * asks the registry to send (`push` in `registry.ts`) and the key stays here, in `FIREBASE_SERVICE_ACCOUNT` (the same key CI uses to reach App Distribution).
  * The message says that a session waits, never what it asked.
  */
 
@@ -30,7 +30,9 @@ const TOKEN_URL = "https://oauth2.googleapis.com/token"
 function parseServiceAccount(raw: string | undefined): ServiceAccount | null {
   if (!raw) return null
   try {
-    const value = JSON.parse(raw) as Partial<ServiceAccount>
+    // The key is stored as its JSON or as base64 of it, like the same secret in CI.
+    const text = raw.trim().startsWith("{") ? raw : atob(raw.replace(/\s+/g, ""))
+    const value = JSON.parse(text) as Partial<ServiceAccount>
     return typeof value.project_id === "string" &&
       typeof value.client_email === "string" &&
       typeof value.private_key === "string"

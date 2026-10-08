@@ -29,7 +29,7 @@ jobs:
       # Fork PRs get no secrets; they fall back to a debug build.
       KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       FIREBASE_GOOGLE_SERVICES: ${{ secrets.FIREBASE_GOOGLE_SERVICES }}
-      FIREBASE_DISTRIBUTION_KEY: ${{ secrets.FIREBASE_DISTRIBUTION_KEY }}
+      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT || secrets.FIREBASE_DISTRIBUTION_KEY }}
       # Name the build after the PR's head, not the merge commit Actions checks out.
       COMMIT_REF: ${{ github.event.pull_request.head.sha || github.sha }}
     defaults:
@@ -115,7 +115,7 @@ jobs:
 
       # Pull requests never reach testers, and an unsigned build would not update over a signed one.
       - name: Distribute to testers with Firebase App Distribution
-        if: github.event_name != 'pull_request' && env.KEYSTORE_BASE64 != '' && env.FIREBASE_DISTRIBUTION_KEY != ''
+        if: github.event_name != 'pull_request' && env.KEYSTORE_BASE64 != '' && env.FIREBASE_SERVICE_ACCOUNT != ''
         env:
           FIREBASE_APP_ID: ${{ vars.FIREBASE_APP_ID }}
           FIREBASE_TESTER_GROUPS: ${{ vars.FIREBASE_TESTER_GROUPS || 'testers' }}
@@ -131,13 +131,13 @@ jobs:
             exit 1
           fi
           export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/firebase-distribution.json"
-          printf '%s' "$FIREBASE_DISTRIBUTION_KEY" > "$GOOGLE_APPLICATION_CREDENTIALS"
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$GOOGLE_APPLICATION_CREDENTIALS"
           if ! jq -e . "$GOOGLE_APPLICATION_CREDENTIALS" > /dev/null 2>&1; then
-            base64 --decode <<< "$FIREBASE_DISTRIBUTION_KEY" > "$GOOGLE_APPLICATION_CREDENTIALS" 2> /dev/null || true
+            base64 --decode <<< "$FIREBASE_SERVICE_ACCOUNT" > "$GOOGLE_APPLICATION_CREDENTIALS" 2> /dev/null || true
           fi
           if ! jq -e .client_email "$GOOGLE_APPLICATION_CREDENTIALS" > /dev/null 2>&1; then
             rm -f "$GOOGLE_APPLICATION_CREDENTIALS"
-            echo "::error::FIREBASE_DISTRIBUTION_KEY is not a service account key's JSON or its base64"
+            echo "::error::FIREBASE_SERVICE_ACCOUNT is not a service account key's JSON or its base64"
             exit 1
           fi
           notes="$RUNNER_TEMP/release-notes.txt"
