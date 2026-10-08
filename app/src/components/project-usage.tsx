@@ -123,10 +123,6 @@ function UsageDetails({ usage, projectId }: { usage: ProjectUsage; projectId: st
               <dd className="tabular-nums">{formatTokens(usage[key])}</dd>
             </div>
           ))}
-          <div className="flex min-h-12 items-center gap-3 border-b border-border">
-            <dt className="flex-1">Sessions</dt>
-            <dd className="tabular-nums">{usage.sessions}</dd>
-          </div>
         </dl>
       </section>
       {usage.threads.length > 0 && (
