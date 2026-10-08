@@ -164,7 +164,7 @@ function ToolDetail({ tool, onBack }: { tool: ToolEvent; onBack: () => void }) {
   )
 }
 
-function ToolList({ tools, onSelect }: { tools: ToolEvent[]; onSelect: (id: string) => void }) {
+function ToolList({ tools, onSelect }: { tools: ToolEvent[]; onSelect: (index: number) => void }) {
   const parts = phrases(tools)
   const { row, text, ruler, shown } = useFittingPhrases<HTMLHeadingElement>(parts)
   return (
@@ -180,7 +180,7 @@ function ToolList({ tools, onSelect }: { tools: ToolEvent[]; onSelect: (id: stri
           const kind = kindOf(tool)
           const reason = whyFailed(tool)
           return (
-            <li key={tool.toolCallId} className="flex gap-3">
+            <li key={`${tool.toolCallId}-${index}`} className="flex gap-3">
               <div className="relative w-7 shrink-0">
                 <div className="flex h-11 items-center justify-center">
                   <StatusIcon tool={tool} icon={ICONS[kind.id]} />
@@ -193,7 +193,7 @@ function ToolList({ tools, onSelect }: { tools: ToolEvent[]; onSelect: (id: stri
               <button
                 type="button"
                 className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg text-left text-[15px] outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                onClick={() => onSelect(tool.toolCallId)}
+                onClick={() => onSelect(index)}
               >
                 <span className="flex min-w-0 flex-1 flex-col py-2">
                   <span className="truncate">
@@ -226,8 +226,8 @@ function ToolList({ tools, onSelect }: { tools: ToolEvent[]; onSelect: (id: stri
 /** Tool calls that ran back to back: one row, which opens the list, and each call opens its details. */
 export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
   const [open, setOpen] = useState(false)
-  const [selectedId, setSelectedId] = useState<string>()
-  const selected = tools.find((t) => t.toolCallId === selectedId)
+  const [selectedIndex, setSelectedIndex] = useState<number>()
+  const selected = selectedIndex !== undefined ? tools[selectedIndex] : undefined
   const running = tools.some((t) => t.status === "running")
   const failures = tools.filter((t) => t.status === "failed")
   const failed = failures.length > 0
@@ -261,14 +261,14 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
         open={open}
         onOpenChange={(next) => {
           setOpen(next)
-          if (!next) setSelectedId(undefined)
+          if (!next) setSelectedIndex(undefined)
         }}
       >
         <PopupContent>
           {selected ? (
-            <ToolDetail tool={selected} onBack={() => setSelectedId(undefined)} />
+            <ToolDetail tool={selected} onBack={() => setSelectedIndex(undefined)} />
           ) : (
-            <ToolList tools={tools} onSelect={setSelectedId} />
+            <ToolList tools={tools} onSelect={setSelectedIndex} />
           )}
         </PopupContent>
       </Popup>
