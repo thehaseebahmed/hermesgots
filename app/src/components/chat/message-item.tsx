@@ -4,6 +4,7 @@ import { AlertCircleIcon, ClockIcon, SendHorizontalIcon, XIcon } from "lucide-re
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { AttachmentTile } from "@/components/chat/attachments"
 import { Markdown } from "@/components/chat/markdown"
+import { AgentCards } from "@/components/chat/agent-card"
 import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
 import { ToolGroup } from "@/components/chat/tool-group"
 import { Bot } from "@/components/bot"
@@ -11,6 +12,7 @@ import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Button } from "@/components/ui/button"
 import { Message as MessageRow, MessageAvatar, MessageContent } from "@/components/ui/message"
 import { Spinner } from "@/components/ui/spinner"
+import { DELEGATE_TOOL } from "@/lib/agents"
 import { removeQueued, sendMessage } from "@/lib/chat"
 import type { Message, ToolEvent } from "@/lib/db"
 import { describeActivity, formatDuration } from "@/lib/format"
@@ -22,10 +24,12 @@ type Part =
   | { kind: "text"; at: number; text: string }
   | { kind: "tools"; tools: ToolEvent[] }
   | { kind: "clarify"; tool: ToolEvent }
+  | { kind: "agent"; tool: ToolEvent }
 
 /**
  * Interleaves a slice of the reply (starting at `start`) with the tools run during it. A clarify
- * call is a card of its own (its question and the answer) rather than a tool row.
+ * call is a card of its own (its question and the answer) rather than a tool row, and so is a
+ * delegation (the agent it started).
  */
 function toParts(content: string, tools: ToolEvent[], start: number): Part[] {
   const end = start + content.length
@@ -42,6 +46,7 @@ function toParts(content: string, tools: ToolEvent[], start: number): Part[] {
     if (at > cursor) pushText(at)
     const last = parts.at(-1)
     if (tool.tool === "clarify") parts.push({ kind: "clarify", tool })
+    else if (tool.tool === DELEGATE_TOOL) parts.push({ kind: "agent", tool })
     else if (last?.kind === "tools") last.tools.push(tool)
     else parts.push({ kind: "tools", tools: [tool] })
   }
@@ -284,6 +289,8 @@ function AssistantRow({
         {parts.map((part) =>
           part.kind === "clarify" ? (
             <ClarifyCard key={part.tool.toolCallId} tool={part.tool} />
+          ) : part.kind === "agent" ? (
+            <AgentCards key={part.tool.toolCallId} tool={part.tool} />
           ) : part.kind === "tools" ? (
             <div key={part.tools[0].toolCallId} className="w-full max-w-xl">
               <ToolGroup tools={part.tools} />

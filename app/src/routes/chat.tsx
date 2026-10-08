@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Link, useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
@@ -90,6 +90,7 @@ import {
   type RepoRef,
 } from "@/lib/workspace"
 import { useTheseusInfo, useTheseusRun, waitsOnUser } from "@/lib/theseus"
+import { AgentsContext, DELEGATE_TOOL, useSessionAgents } from "@/lib/agents"
 
 /** How often an open chat checks Hermes for turns sent from another device. */
 const CATCH_UP_MS = 30_000
@@ -269,6 +270,22 @@ export function ChatPage() {
   const hasMessages = (messages?.length ?? 0) > 0
   // A Theseus session's run, once its first turn has started it.
   const theseus = useTheseusRun(session, profile, session?.mode === "theseus" && hasMessages)
+  // The agents this chat's agent delegated to, for their cards in the thread.
+  const delegations = messages
+    ?.flatMap((m) => m.tools ?? [])
+    .filter((t) => t.tool === DELEGATE_TOOL)
+  const agents = useSessionAgents(
+    conversation ?? undefined,
+    profile,
+    Boolean(delegations?.length),
+    Boolean(delegations?.some((t) => t.status === "running")),
+  )
+  const baseUrl = profile?.baseUrl
+  const apiKey = profile?.apiKey
+  const agentsSource = useMemo(
+    () => (agents && baseUrl && apiKey ? { agents, server: { baseUrl, apiKey } } : null),
+    [agents, baseUrl, apiKey],
+  )
   const theseusInfo = useTheseusInfo(profile)
   // The agent sits in `theseus wait` while it waits, so the turn is still running: busy or not.
   const theseusWaits = theseus && waitsOnUser(theseus)
@@ -519,17 +536,19 @@ export function ChatPage() {
                     Load earlier messages
                   </Button>
                 )}
-                {messages!.map((message) => (
-                  <MessageScrollerItem key={message.id} messageId={message.id}>
-                    <MessageItem
-                      message={message}
-                      showStats={resolved.showStats}
-                      botId={profile?.botId}
-                      busy={busy}
-                      plain={Boolean(session)}
-                    />
-                  </MessageScrollerItem>
-                ))}
+                <AgentsContext.Provider value={agentsSource}>
+                  {messages!.map((message) => (
+                    <MessageScrollerItem key={message.id} messageId={message.id}>
+                      <MessageItem
+                        message={message}
+                        showStats={resolved.showStats}
+                        botId={profile?.botId}
+                        busy={busy}
+                        plain={Boolean(session)}
+                      />
+                    </MessageScrollerItem>
+                  ))}
+                </AgentsContext.Provider>
               </MessageScrollerContent>
             </MessageScrollerViewport>
             <MessageScrollerButton />
