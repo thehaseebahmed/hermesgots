@@ -227,6 +227,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "plans",
                     "clarify",
                     "todo_tool",
+                    "agents",
                     "attachments",
                     "profile_routes",
                     "pr_tool",
@@ -330,6 +331,18 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 **{field: found.get(field) for field in context.FIELDS},
             }
         )
+
+    async def session_agents(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        session_id = request.match_info["session_id"]
+        live, _ = sessions.live_runs(adapter)
+        # On the loop thread, like store_path: the profile scope isn't visible inside to_thread.
+        home = hermes_home()
+        found = await asyncio.to_thread(delegation.children, home, session_id, set(live))
+        # Never a 404 for an unknown session: the app reads a 404 as a missing plugin.
+        return web.json_response({"object": "memento.agents", "session_id": session_id, "agents": found})
 
     async def session_todos(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -742,9 +755,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     async def theseus_view(record: Dict[str, Any], fresh: bool = False) -> "web.Response":
         home = await asyncio.to_thread(theseus.run_home, record)
         snap = await asyncio.to_thread(theseus.state, home, fresh) if home else None
-        live, _ = sessions.live_runs(adapter)
-        # On the loop thread, like store_path: the profile scope isn't visible inside to_thread.
-        agents = await asyncio.to_thread(delegation.children, hermes_home(), record["session_id"], set(live))
         return web.json_response(
             {
                 "object": "memento.theseus",
@@ -752,7 +762,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 "state": snap,
                 "models": (record.get("theseus") or {}).get("models") or {"review": [], "visual": []},
                 "unavailable": await asyncio.to_thread(theseus.available),
-                "agents": agents,
             }
         )
 
@@ -860,6 +869,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/label", label_session)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/context", session_context)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/todos", session_todos)
+    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/agents", session_agents)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/workspace", post_workspace)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/workspace", get_workspace)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/workspace/remove", remove_workspace)
