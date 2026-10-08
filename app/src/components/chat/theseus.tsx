@@ -865,8 +865,9 @@ function ModelsView({
         <div className="px-6 pt-2">
           <Banner>
             This Hermes host only lets reviewers use your own model. Allow model choices for the
-            Memento plugin in its Hermes config (plugins.entries.memento.llm.allow_model_override)
-            to pick others.
+            Memento plugin in its Hermes config (
+            <span className="break-all">plugins.entries.memento.llm.allow_model_override</span>) to
+            pick others.
           </Banner>
         </div>
       )}
