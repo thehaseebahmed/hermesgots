@@ -7,6 +7,10 @@ subscription of the profile a small message, encrypted to that device (RFC 8291)
 VAPID key (RFC 8292), through the push service the browser named. The message says what kind of
 wait and which session, never what was asked; the push service can't read it either.
 
+The Android app has no Push API, so for it the plugin asks the Memento registry (``link.py``) to send
+through Firebase, since the service account key can't live on every host: the message is the same, and
+the registry only sees that a session waits.
+
 A device that has the app open (it holds an ``events`` stream) is skipped: it already knows.
 Everything here is best effort and runs on its own thread, so a slow push service never holds up
 Hermes.
@@ -34,6 +38,7 @@ from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
+from . import link
 from .store import connect, db_path
 
 logger = logging.getLogger(__name__)
@@ -243,6 +248,35 @@ def send(row: Dict[str, Any], payload: Dict[str, Any], topic: str) -> Optional[i
         return None
 
 
+def _on_screen_devices(path: Path) -> List[str]:
+    with _lock:
+        return [device for (db, device) in _open if db == str(path)]
+
+
+def _relay(path: Path, kind: str, session_id: str) -> None:
+    """Asks the registry to push to the account's Android installs, if this profile is linked."""
+    home = path.parent.parent
+    state = link.load_state(home)
+    if not state.get("token") or state.get("revoked") or not state.get("site"):
+        return
+    try:
+        link.call(
+            state["site"],
+            "POST",
+            "push",
+            token=state["token"],
+            body={"kind": kind, "session_id": session_id, "skip": _on_screen_devices(path)[:50]},
+        )
+    except link.LinkError as error:
+        # 503: the site has no Firebase key. 429: asked again too soon. Neither is worth a retry.
+        logger.debug("memento: the registry wouldn't push (%s)", error)
+
+
+def _linked(path: Path) -> bool:
+    state = link.load_state(path.parent.parent)
+    return bool(state.get("token") and not state.get("revoked") and state.get("site"))
+
+
 def _deliver(path: Path, kind: str, session_id: str) -> None:
     # At most 32 characters of base64url, and distinct per session however long its id is.
     topic = _b64(hashlib.sha256(session_id.encode()).digest()[:18])
@@ -256,6 +290,7 @@ def _deliver(path: Path, kind: str, session_id: str) -> None:
             unsubscribe(path, row["endpoint"])
         elif status is None or status >= 300:
             logger.debug("memento: push to %s answered %s", urllib.parse.urlsplit(row["endpoint"]).netloc, status)
+    _relay(path, kind, session_id)
 
 
 def notify(kind: str, session_id: Optional[str], path: Optional[Path] = None) -> None:
@@ -276,7 +311,7 @@ def notify(kind: str, session_id: Optional[str], path: Optional[Path] = None) ->
             _last[key] = now
             if len(_last) > 512:
                 _last.clear()
-        if not _rows(path):
+        if not _rows(path) and not _linked(path):
             return
         threading.Thread(
             target=_run, args=(path, kind, session_id), name="memento-push", daemon=True

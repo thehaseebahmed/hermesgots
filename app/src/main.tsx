@@ -4,6 +4,7 @@ import { ThemeProvider } from "next-themes"
 import { BrowserRouter } from "react-router"
 
 import App from "@/App"
+import { PushLinks } from "@/routes/open-session"
 import { Toaster } from "@/components/ui/sonner"
 import { recoverInterruptedMessages } from "@/lib/chat"
 import { EXIT_TOASTER, handBackNativeSignIn, handleBackButton } from "@/lib/native"
@@ -33,6 +34,7 @@ createRoot(document.getElementById("root")!).render(
     >
       <BrowserRouter>
         <App />
+        <PushLinks />
       </BrowserRouter>
       <Toaster position="top-center" />
       <Toaster

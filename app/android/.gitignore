@@ -103,3 +103,6 @@ app/src/main/res/xml/config.xml
 # Signing keys
 *.jks
 *.keystore
+
+# Written by CI from the FIREBASE_GOOGLE_SERVICES secret
+app/google-services.json

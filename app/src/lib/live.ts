@@ -280,7 +280,8 @@ async function follow(config: HermesConfig, key: string, signal: AbortSignal) {
   let failures = 0
   while (!signal.aborted) {
     try {
-      const device = (await getSettings()).push?.device
+      const settings = await getSettings()
+      const device = (settings.push ?? settings.fcm)?.device
       await followEvents(config, { since: cursors.get(key), device, signal }, (event, data) => {
         failures = 0
         onEvent(key, event, data)

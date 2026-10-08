@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { App } from "@capacitor/app"
 import { liveQuery } from "dexie"
 import { useLiveQuery } from "dexie-react-hooks"
 
@@ -13,6 +14,7 @@ import {
 import { registerPush, unregisterPush } from "@/lib/hermes"
 import { connectionKey, reconnectLive } from "@/lib/live"
 import { isNative } from "@/lib/native"
+import { callFunction, failure, functionUrl } from "@/lib/account"
 
 /**
  * Web Push, so a session that needs the user reaches an installed PWA while it's closed. The
@@ -24,8 +26,13 @@ import { isNative } from "@/lib/native"
 
 export type PushPermission = NotificationPermission | "unsupported"
 
-/** The Android app's WebView has no Push API; it will get Firebase messaging instead. */
-export function pushSupported() {
+/** Whether this device can get push: a browser with the Push API, or the Android app. */
+export function pushAvailable() {
+  return isNative || webSupported()
+}
+
+/** The Android app's WebView has no Push API; it gets Firebase messaging (see below) instead. */
+function webSupported() {
   return (
     !isNative &&
     typeof Notification !== "undefined" &&
@@ -89,7 +96,7 @@ const dropped = new Set<string>()
 
 /** Gives every bot this device's subscription. Quiet when push is off or a bot has no plugin. */
 export async function syncPush() {
-  if (!pushSupported() || Notification.permission !== "granted") return
+  if (!webSupported() || Notification.permission !== "granted") return
   const identity = (await getSettings()).push
   if (!identity?.on) return
   let sub: PushSubscription | null
@@ -131,8 +138,8 @@ export async function syncPush() {
 }
 
 /** Asks for permission and subscribes. Call it from a click: iOS refuses to ask otherwise. */
-export async function enablePush(): Promise<PushPermission> {
-  if (!pushSupported()) return "unsupported"
+async function enableWeb(): Promise<PushPermission> {
+  if (!webSupported()) return "unsupported"
   const permission = await Notification.requestPermission()
   if (permission !== "granted") return permission
   const settings = await getSettings()
@@ -145,7 +152,7 @@ export async function enablePush(): Promise<PushPermission> {
   return permission
 }
 
-export async function disablePush() {
+async function disableWeb() {
   const settings = await getSettings()
   if (!settings.push) return
   await saveSettings({ push: { ...settings.push, on: false } })
@@ -166,13 +173,13 @@ export async function disablePush() {
 }
 
 /** The toggle's state: whether push is available, allowed by the browser and turned on here. */
-export function usePush() {
+function useWebPush() {
   const settings = useLiveQuery(async () => (await getSettings()).push, [])
   const [permission, setPermission] = useState<PushPermission>(() =>
-    pushSupported() ? Notification.permission : "unsupported",
+    webSupported() ? Notification.permission : "unsupported",
   )
   useEffect(() => {
-    if (!pushSupported()) return
+    if (!webSupported()) return
     const refresh = () => setPermission(Notification.permission)
     window.addEventListener("focus", refresh)
     return () => window.removeEventListener("focus", refresh)
@@ -181,8 +188,8 @@ export function usePush() {
 }
 
 /** Keeps new bots and a restarted app in step with the subscription. */
-export function startPush() {
-  if (!pushSupported()) return
+function startWeb() {
+  if (!webSupported()) return
   let timer: number | undefined
   const soon = () => {
     window.clearTimeout(timer)
@@ -192,4 +199,155 @@ export function startPush() {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") soon()
   })
+}
+
+/**
+ * The Android app: no Push API in its WebView, so Firebase. The OS keeps the token; this device
+ * hands it to the registry (`push` in `netlify/lib/registry.ts`), and a plugin asks the registry to
+ * send, because the service account key can't live on every Hermes host. Android shows the
+ * notification itself while the app is closed.
+ */
+
+type Push = typeof import("@capacitor/push-notifications").PushNotifications
+
+let nativeListening = false
+let registeredToken: string | undefined
+
+async function plugin(): Promise<Push> {
+  return (await import("@capacitor/push-notifications")).PushNotifications
+}
+
+async function sendToken(device: string, token: string) {
+  const response = await callFunction(
+    "POST",
+    functionUrl("registry", { route: "devices", id: device }),
+    { token },
+  )
+  if (!response.ok) throw await failure(response)
+  registeredToken = token
+}
+
+const openers = new Set<(sessionId: string) => void>()
+let pendingOpen: string | undefined
+
+/** Calls back when a notification is tapped, now if one was tapped while the app was starting. */
+export function onOpenSession(callback: (sessionId: string) => void) {
+  openers.add(callback)
+  if (pendingOpen) {
+    callback(pendingOpen)
+    pendingOpen = undefined
+  }
+  return () => {
+    openers.delete(callback)
+  }
+}
+
+async function listen(push: Push) {
+  if (nativeListening) return
+  nativeListening = true
+  await push.addListener("registration", ({ value }) => {
+    void getSettings().then(({ fcm }) => {
+      if (fcm?.on && value !== registeredToken) void sendToken(fcm.device, value).catch(() => {})
+    })
+  })
+  await push.addListener("pushNotificationActionPerformed", ({ notification }) => {
+    const id = notification.data?.session_id
+    if (typeof id !== "string" || !id) return
+    if (openers.size) openers.forEach((open) => open(id))
+    else pendingOpen = id
+  })
+  await push
+    .createChannel({
+      id: "sessions",
+      name: "Sessions that need you",
+      importance: 4,
+    })
+    .catch(() => {})
+}
+
+async function enableNative(): Promise<PushPermission> {
+  const push = await plugin()
+  let status = await push.checkPermissions()
+  if (status.receive === "prompt" || status.receive === "prompt-with-rationale") {
+    status = await push.requestPermissions()
+  }
+  if (status.receive !== "granted") return "denied"
+  const settings = await getSettings()
+  await saveSettings({ fcm: { device: settings.fcm?.device ?? crypto.randomUUID(), on: true } })
+  await listen(push)
+  await push.register()
+  // The plugin skips a device that has the app open, which it learns from the stream.
+  reconnectLive()
+  return "granted"
+}
+
+async function disableNative() {
+  const { fcm } = await getSettings()
+  if (!fcm) return
+  await saveSettings({ fcm: { ...fcm, on: false } })
+  registeredToken = undefined
+  try {
+    await callFunction("DELETE", functionUrl("registry", { route: "devices", id: fcm.device }))
+    await (await plugin()).unregister()
+  } catch {
+    // Offline: the token is dropped when Firebase reports it gone.
+  }
+}
+
+/** On launch and whenever the app returns, a rotated token or a new sign-in is told to the registry. */
+function startNative() {
+  const sync = async () => {
+    const { fcm } = await getSettings()
+    if (!fcm?.on) return
+    const push = await plugin()
+    if ((await push.checkPermissions()).receive !== "granted") return
+    await listen(push)
+    await push.register()
+  }
+  void sync().catch(() => {})
+  void App.addListener("resume", () => void sync().catch(() => {}))
+}
+
+function useNativePermission(): PushPermission {
+  const [permission, setPermission] = useState<PushPermission>("default")
+  useEffect(() => {
+    if (!isNative) return
+    let cancelled = false
+    const check = async () => {
+      const { receive } = await (await plugin()).checkPermissions()
+      if (!cancelled)
+        setPermission(
+          receive === "granted" ? "granted" : receive === "denied" ? "denied" : "default",
+        )
+    }
+    void check().catch(() => {})
+    const handle = App.addListener("resume", () => void check().catch(() => {}))
+    return () => {
+      cancelled = true
+      void handle.then((h) => h.remove())
+    }
+  }, [])
+  return permission
+}
+
+export function enablePush() {
+  return isNative ? enableNative() : enableWeb()
+}
+
+export function disablePush() {
+  return isNative ? disableNative() : disableWeb()
+}
+
+export function startPush() {
+  if (isNative) startNative()
+  else startWeb()
+}
+
+/** The toggle's state: whether push is available, allowed by the OS or browser and turned on here. */
+export function usePush() {
+  const web = useWebPush()
+  const nativePermission = useNativePermission()
+  const fcm = useLiveQuery(async () => (await getSettings()).fcm, [])
+  if (!isNative) return web
+  return { permission: nativePermission, on: Boolean(fcm?.on) && nativePermission === "granted" }
 }
