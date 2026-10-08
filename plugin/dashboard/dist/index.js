@@ -103,7 +103,8 @@
     if (!link) {
       body = h("p", { className: "text-sm text-muted-foreground" }, errorState[0] || "Loading…")
     } else if (link.linked) {
-      var env = Object.keys(link.env || {})
+      // Hermes's install scan reads `env` then a pipe as dumping the environment, so no `||` here.
+      var env = link.env ? Object.keys(link.env) : []
       body = h(
         "div",
         { className: "flex flex-col" },
