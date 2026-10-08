@@ -11,7 +11,7 @@ import { ArrowUpIcon, MicIcon, SquareIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { AttachMenu } from "@/components/chat/attach-menu"
-import { AttachmentTile } from "@/components/chat/attachments"
+import { AttachmentTile, AttachmentViewer } from "@/components/chat/attachments"
 import type { ModeSettings } from "@/components/chat/mode-menu"
 import { SlashMenu } from "@/components/chat/slash-menu"
 import { VoiceBar } from "@/components/chat/voice-bar"
@@ -21,7 +21,13 @@ import {
   InputGroupButton,
   InputGroupTextarea,
 } from "@/components/ui/input-group"
-import { MAX_ATTACHMENTS, prepareAttachment } from "@/lib/attachments"
+import {
+  formatBytes,
+  inlineBytes,
+  MAX_ATTACHMENTS,
+  MAX_INLINE_BYTES,
+  prepareAttachment,
+} from "@/lib/attachments"
 import type { Attachment } from "@/lib/db"
 import type { HermesConfig } from "@/lib/hermes"
 import { joinText, useDictation } from "@/lib/speech"
@@ -32,6 +38,7 @@ import {
   type LocalCommand,
   type SlashItem,
 } from "@/lib/slash"
+import { randomId } from "@/lib/utils"
 
 export function Composer({
   busy,
@@ -74,6 +81,9 @@ export function Composer({
 }) {
   const [value, setValue] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
+  // Picked files still being read, shown as placeholders where they'll land.
+  const [preparing, setPreparing] = useState<{ id: string; name: string; image: boolean }[]>([])
+  const [viewing, setViewing] = useState<number | null>(null)
   const seeded = useRef(false)
   useEffect(() => {
     if (seeded.current || !draft) return
@@ -86,7 +96,8 @@ export function Composer({
   const textarea = useRef<HTMLTextAreaElement>(null)
   const listId = useId()
   const dictation = useDictation()
-  const canSend = (value.trim().length > 0 || attachments.length > 0) && !disabled
+  const canSend =
+    (value.trim().length > 0 || attachments.length > 0) && !disabled && preparing.length === 0
 
   const query = /^\/(\S*)$/.exec(value)?.[1]
   const slash = useSlashItems(query !== undefined && !disabled, query ?? "", connection)
@@ -120,19 +131,45 @@ export function Composer({
   }
 
   const addFiles = async (files: File[]) => {
-    const room = MAX_ATTACHMENTS - attachments.length
-    if (files.length > room) toast.error(`A message can carry ${MAX_ATTACHMENTS} attachments.`)
-    const added: Attachment[] = []
-    for (const file of files.slice(0, Math.max(room, 0))) {
+    const room = MAX_ATTACHMENTS - attachments.length - preparing.length
+    const taken = files.slice(0, Math.max(room, 0))
+    if (files.length > taken.length) {
+      const left = files.length - taken.length
+      toast.error(
+        `A message can carry ${MAX_ATTACHMENTS} attachments, so ${left === 1 ? "1 was" : `${left} were`} left out.`,
+      )
+    }
+    const placeholders = taken.map((file) => ({
+      id: randomId(),
+      name: file.name,
+      image: file.type.startsWith("image/"),
+    }))
+    setPreparing((current) => [...current, ...placeholders])
+    let inline = inlineBytes(attachments)
+    for (const [index, file] of taken.entries()) {
       try {
-        added.push(await prepareAttachment(file, imagesAvailable))
+        const attachment = await prepareAttachment(file, imagesAvailable)
+        const size = attachment.image ? attachment.blob!.size : 0
+        if (inline + size > MAX_INLINE_BYTES) {
+          toast.error(
+            `${attachment.name} doesn't fit: a message's photos can add up to ${formatBytes(MAX_INLINE_BYTES)}. Send it in the next one.`,
+          )
+        } else {
+          inline += size
+          setAttachments((current) => [...current, attachment].slice(0, MAX_ATTACHMENTS))
+        }
       } catch (error) {
         toast.error(error instanceof Error ? error.message : `Couldn't attach ${file.name}.`)
+      } finally {
+        const done = placeholders[index].id
+        setPreparing((current) => current.filter((p) => p.id !== done))
       }
     }
-    if (added.length) setAttachments((current) => [...current, ...added].slice(0, MAX_ATTACHMENTS))
     textarea.current?.focus()
   }
+
+  const removeAttachment = (attachment: Attachment) =>
+    setAttachments((current) => current.filter((a) => a.id !== attachment.id))
 
   const attach = (
     <AttachMenu
@@ -261,19 +298,28 @@ export function Composer({
           onActive={setActive}
         />
       )}
-      {attachments.length > 0 && (
-        <div className="-mt-3 mb-2 flex gap-2.5 overflow-x-auto px-1 pt-3">
-          {attachments.map((attachment) => (
+      {attachments.length + preparing.length > 0 && (
+        // Room on the right so the last tile's remove button isn't cut off.
+        <div className="-mt-3 mb-2 flex gap-2.5 overflow-x-auto pt-3 pr-4 pl-1">
+          {attachments.map((attachment, index) => (
             <AttachmentTile
               key={attachment.id}
               attachment={attachment}
-              onRemove={() =>
-                setAttachments((current) => current.filter((a) => a.id !== attachment.id))
-              }
+              onOpen={() => setViewing(index)}
+              onRemove={() => removeAttachment(attachment)}
             />
+          ))}
+          {preparing.map((item) => (
+            <AttachmentTile key={item.id} attachment={{ ...item, type: "", size: 0 }} preparing />
           ))}
         </div>
       )}
+      <AttachmentViewer
+        attachments={attachments}
+        index={viewing}
+        onIndex={setViewing}
+        onRemove={removeAttachment}
+      />
       <InputGroup className="bg-background shadow-lg shadow-black/5 has-data-[align=block-end]:rounded-[1.75rem] has-[textarea]:rounded-[1.75rem] dark:bg-input/30">
         <InputGroupTextarea
           ref={textarea}

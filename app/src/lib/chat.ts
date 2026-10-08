@@ -1,3 +1,5 @@
+import { toast } from "sonner"
+
 import {
   db,
   getActiveProfile,
@@ -32,7 +34,7 @@ import {
   type StreamHandlers,
   type TurnUsage,
 } from "@/lib/hermes"
-import { attachmentsText, wireContent } from "@/lib/attachments"
+import { attachmentsText, setUploading, wireContent } from "@/lib/attachments"
 import { refreshContext } from "@/lib/context"
 import { liveTurn, patchStats } from "@/lib/history"
 import { isLive } from "@/lib/live"
@@ -569,9 +571,15 @@ async function followTurnRun(turn: Turn, runId: string) {
   return settleRun(turn.draft, await trackRun(turn, runId))
 }
 
+/** A turn that never started because an attachment couldn't be saved on the host. */
+export class AttachmentError extends HermesError {}
+
+const UPLOADS_AT_ONCE = 3
+
 /**
- * Saves each attachment on the Hermes host through the plugin, so the agent can open it on later
- * turns too. An image still goes inline when that fails; a file has no other way to get there.
+ * Saves each attachment on the Hermes host through the plugin, a few at a time, so the agent can
+ * open it on later turns too. An image still goes inline when that fails; a file has no other way
+ * to get there.
  */
 async function uploadAttachments(
   config: HermesConfig,
@@ -579,23 +587,44 @@ async function uploadAttachments(
   attachments: Attachment[],
   plugin: boolean,
 ) {
-  const saved: Attachment[] = []
-  for (const attachment of attachments) {
-    if (attachment.path || !attachment.blob || (!plugin && attachment.image)) {
-      saved.push(attachment)
-      continue
+  const saved = [...attachments]
+  const pending = attachments
+    .map((attachment, index) => ({ attachment, index }))
+    .filter(({ attachment }) => !attachment.path && attachment.blob)
+    .filter(({ attachment }) => plugin || !attachment.image)
+  const missing = pending.find(({ attachment }) => !plugin && !attachment.image)
+  if (missing)
+    throw new AttachmentError(`Attaching ${missing.attachment.name} needs the Memento plugin.`)
+  for (const { attachment } of pending) setUploading(attachment.id, true)
+  try {
+    const upload = async ({ attachment, index }: (typeof pending)[number]) => {
+      try {
+        const path = await uploadAttachment(config, sessionId, {
+          name: attachment.name,
+          blob: attachment.blob!,
+        })
+        saved[index] = { ...attachment, path }
+      } catch (error) {
+        if (!attachment.image) {
+          const reason = error instanceof Error ? error.message : ""
+          throw new AttachmentError(
+            reason.includes(attachment.name)
+              ? reason
+              : `Couldn't attach ${attachment.name}${reason ? `: ${reason.replace(/\.$/, "")}` : ""}.`,
+          )
+        }
+      } finally {
+        setUploading(attachment.id, false)
+      }
     }
-    if (!plugin) throw new HermesError(`Attaching ${attachment.name} needs the Memento plugin.`)
-    try {
-      const path = await uploadAttachment(config, sessionId, {
-        name: attachment.name,
-        blob: attachment.blob,
-      })
-      saved.push({ ...attachment, path })
-    } catch (error) {
-      if (!attachment.image) throw error
-      saved.push(attachment)
-    }
+    const queue = [...pending]
+    await Promise.all(
+      Array.from({ length: Math.min(UPLOADS_AT_ONCE, queue.length) }, async () => {
+        for (let next = queue.shift(); next; next = queue.shift()) await upload(next)
+      }),
+    )
+  } finally {
+    for (const { attachment } of pending) setUploading(attachment.id, false)
   }
   return saved
 }
@@ -664,6 +693,7 @@ export async function sendMessage(
 
   const config = { baseUrl: profile.baseUrl, apiKey: profile.apiKey }
   const turn = openTurn(conversationId, config, reply, false, controller)
+  let uploadFailed: AttachmentError | undefined
   const status = await runTurn(turn, async () => {
     // Without a key Hermes keeps no session under our id, so nothing would sync or resume.
     if (!config.apiKey) throw new HermesError("This bot has no API key. Link it in Settings.")
@@ -671,12 +701,17 @@ export async function sendMessage(
     const workspace = await ensureSessionWorkspace(conversationId, content || attachments[0].name)
     let sent = attachments
     if (attachments.length) {
-      sent = await uploadAttachments(
-        config,
-        conversation.hermesSessionId,
-        attachments,
-        Boolean(profile.apiKey),
-      )
+      try {
+        sent = await uploadAttachments(
+          config,
+          conversation.hermesSessionId,
+          attachments,
+          Boolean(profile.apiKey),
+        )
+      } catch (error) {
+        if (error instanceof AttachmentError) uploadFailed = error
+        throw error
+      }
       await db.messages.update(userMessage.id, { attachments: sent })
     }
     // The chat's own pick, else the bot's default, else whatever the host runs.
@@ -711,6 +746,15 @@ export async function sendMessage(
     return followTurnRun(turn, runId)
   })
 
+  if (uploadFailed && status === "error") {
+    // Nothing reached Hermes, so the message goes back where it came from to be sent again.
+    await db.transaction("rw", db.messages, async () => {
+      await db.messages.delete(reply.id)
+      if (queuedId) await db.messages.update(queuedId, { status: "queued" })
+      else await db.messages.delete(userMessage.id)
+    })
+    throw uploadFailed
+  }
   if (status !== "done") return
   // Hermes only keys the session by our id when the profile has an API key.
   const turnNumber = history.filter((m) => m.role === "user" && m.status === "done").length + 1
@@ -795,11 +839,20 @@ export async function queueMessage(
 
 export async function sendNextQueued(conversationId: string) {
   const next = (await getMessages(conversationId)).find((m) => m.status === "queued")
-  if (next)
-    await sendMessage(conversationId, next.content, {
-      queuedId: next.id,
-      attachments: next.attachments,
+  if (next) await sendQueued(next)
+}
+
+/** Sends a queued message now; one whose attachments couldn't be saved stays queued. */
+export async function sendQueued(message: Message) {
+  try {
+    await sendMessage(message.conversationId, message.content, {
+      queuedId: message.id,
+      attachments: message.attachments,
     })
+  } catch (error) {
+    if (!(error instanceof AttachmentError)) throw error
+    toast.error(error.message)
+  }
 }
 
 export async function removeQueued(id: string) {
