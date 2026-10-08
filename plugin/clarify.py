@@ -18,7 +18,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import events
+from . import events, push
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +167,7 @@ class Asker:
         )
         _set_status(adapter, run_id, WAITING, last_event="clarify.request", clarify=asked)
         _push(loop, stream, asked)
+        push.notify("question", getattr(agent, "session_id", None))
         try:
             outcome = _wait(pending, agent, adapter)
         finally:

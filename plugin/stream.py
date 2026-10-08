@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import events
+from . import events, push
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +107,7 @@ async def serve(
     db: Any,
     cursor: Optional[int],
     version: str,
+    device: Optional[str] = None,
 ) -> Any:
     response = web.StreamResponse(status=200, headers=headers)
     await response.prepare(request)
@@ -138,6 +139,10 @@ async def serve(
         except Exception:
             return None
 
+    # A device with a stream open has the app on screen, so it isn't sent pushes.
+    presence = push.watching(path, device) if device else None
+    if presence:
+        presence.__enter__()
     try:
         if cursor is None:
             cursor = await asyncio.to_thread(events.latest, path)
@@ -148,6 +153,11 @@ async def serve(
             mark = None
         pinged = cron_checked = loop.time()
         while True:
+            # A client that hung up is found out here rather than at the next ping, so a device
+            # that closed the app is sent pushes again within a tick.
+            transport = request.transport
+            if transport is None or transport.is_closing():
+                break
             # Cleared before reading, so a change noted while this pass runs wakes the next.
             wake.clear()
             rows, gap = await asyncio.to_thread(events.read_since, path, cursor)
@@ -200,4 +210,6 @@ async def serve(
         pass
     finally:
         events.unsubscribe(loop, wake)
+        if presence:
+            presence.__exit__(None, None, None)
     return response

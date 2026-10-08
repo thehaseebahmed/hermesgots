@@ -8,6 +8,7 @@ import { Toaster } from "@/components/ui/sonner"
 import { recoverInterruptedMessages } from "@/lib/chat"
 import { EXIT_TOASTER, handBackNativeSignIn, handleBackButton } from "@/lib/native"
 import { startLive } from "@/lib/live"
+import { startPush } from "@/lib/push"
 import { startSync } from "@/lib/sync"
 import "@/index.css"
 
@@ -16,6 +17,7 @@ if (!handBackNativeSignIn()) {
   void recoverInterruptedMessages()
   void startSync()
   startLive()
+  startPush()
 }
 
 createRoot(document.getElementById("root")!).render(

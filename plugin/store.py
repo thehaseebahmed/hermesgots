@@ -2,14 +2,14 @@
 project sessions (``sessions.py``),
 projects still cloning (``clones.py``), repos being added to or removed from a project (``repos.py``),
 pinned projects (``projects.py``), merged pull requests (``merges.py``) and recent changes for the
-app's live stream (``events.py``)."""
+app's live stream (``events.py``) and devices' push subscriptions (``push.py``)."""
 
 from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -103,6 +103,18 @@ def connect(path: Path) -> sqlite3.Connection:
                    at INTEGER NOT NULL,
                    kind TEXT NOT NULL,
                    session_id TEXT
+               )"""
+        )
+        # v10: a device's Web Push subscription, with the VAPID key it was made with.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS push_subscriptions (
+                   endpoint TEXT PRIMARY KEY,
+                   device TEXT NOT NULL,
+                   p256dh TEXT NOT NULL,
+                   auth TEXT NOT NULL,
+                   vapid_key TEXT NOT NULL,
+                   subject TEXT NOT NULL,
+                   created_at INTEGER NOT NULL
                )"""
         )
         # v4: a session has a worktree in every repo of its project. v5: its newest plan file.

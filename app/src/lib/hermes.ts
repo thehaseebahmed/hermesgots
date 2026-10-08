@@ -542,10 +542,14 @@ const EVENTS_IDLE_MS = 50_000
  */
 export async function followEvents(
   config: HermesConfig,
-  options: { since?: number; signal?: AbortSignal },
+  options: { since?: number; device?: string; signal?: AbortSignal },
   onEvent: (event: string, data: Record<string, unknown>) => void,
 ) {
-  const query = options.since !== undefined ? `?since=${options.since}` : ""
+  const params = new URLSearchParams()
+  if (options.since !== undefined) params.set("since", String(options.since))
+  // Tells the plugin this device has the app on screen, so it sends it no push.
+  if (options.device) params.set("device", options.device)
+  const query = params.size ? `?${params}` : ""
   const response = await request(`${pluginRoot(config.baseUrl)}/events${query}`, {
     headers: headers(config),
     signal: options.signal,
@@ -563,6 +567,30 @@ export async function followEvents(
       payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {},
     )
   }
+}
+
+/** What a device gives the plugin to push to it: its browser subscription and the VAPID key made for it. */
+export interface PushRegistration {
+  device: string
+  subscription: PushSubscriptionJSON
+  vapid_key: string
+  subject: string
+}
+
+export async function registerPush(config: HermesConfig, registration: PushRegistration) {
+  await request(`${pluginRoot(config.baseUrl)}/push`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify(registration),
+  })
+}
+
+export async function unregisterPush(config: HermesConfig, endpoint: string) {
+  await request(`${pluginRoot(config.baseUrl)}/push/remove`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ endpoint }),
+  })
 }
 
 /** A fresh `API_SERVER_KEY`: 32 random bytes as 64 hex characters, like `openssl rand -hex 32`. */

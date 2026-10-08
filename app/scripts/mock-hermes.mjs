@@ -711,7 +711,7 @@ async function streamCompletion(req, res, body) {
 // MOCK_BLOCK_RUN_EVENTS=1 is Hermes v2026.9.24: the event stream has no CORS headers, and the run
 // forgets its events once that (blocked) subscriber leaves, so only GET /v1/runs/{id} is left.
 const runs = new Map()
-const PLUGIN_VERSION = "0.21.0"
+const PLUGIN_VERSION = "0.23.0"
 const EVENTS = process.env.MOCK_NO_EVENTS !== "1"
 const RUNS = process.env.MOCK_NO_RUNS !== "1"
 const RUN_BACKLOG = Number(process.env.MOCK_RUN_BACKLOG ?? 1000)
@@ -720,6 +720,7 @@ const BLOCK_RUN_EVENTS = process.env.MOCK_BLOCK_RUN_EVENTS === "1"
 
 // The plugin's change stream: one log per profile (the "" key is the default one). Runs and sessions
 // belong to no profile here, so they go to every log.
+const pushSubscriptions = new Map()
 const eventLogs = new Map()
 const eventStreams = new Set()
 function logOf(profile) {
@@ -908,10 +909,24 @@ http
       return json(res, 200, {
         name: "memento",
         version: PLUGIN_VERSION,
-        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "profile_routes", "pr_tool", "close", "merge_resolve", ...(EVENTS ? ["events"] : [])],
+        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "profile_routes", "pr_tool", "close", "merge_resolve", ...(EVENTS ? ["events"] : []), "push"],
         clarify: true,
         hooks: true,
       })
+    }
+    // Web Push: the mock keeps subscriptions but sends nothing.
+    if (PLUGIN && !profile && req.method === "POST" && url.pathname === "/api/plugins/memento/push") {
+      const { subscription, device, vapid_key, subject } = await readBody(req)
+      if (!subscription?.endpoint || !subscription.keys?.p256dh || !device || !vapid_key || !subject) {
+        return json(res, 400, { error: { message: "Missing subscription fields." } })
+      }
+      pushSubscriptions.set(subscription.endpoint, { device })
+      return json(res, 200, { object: "memento.push", subscribed: true })
+    }
+    if (PLUGIN && !profile && req.method === "POST" && url.pathname === "/api/plugins/memento/push/remove") {
+      const { endpoint } = await readBody(req)
+      pushSubscriptions.delete(endpoint)
+      return json(res, 200, { object: "memento.push", subscribed: false })
     }
     if (PLUGIN && EVENTS && !profile && url.pathname === "/api/plugins/memento/events") {
       const since = url.searchParams.get("since")

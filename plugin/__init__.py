@@ -31,6 +31,7 @@ from . import (
     projects,
     repos,
     sessions,
+    push,
     ship,
     stream,
     todos,
@@ -225,6 +226,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "close",
                     "merge_resolve",
                     "events",
+                    "push",
                 ],
                 "clarify": asks,
                 "todo_tool": todo_tool,
@@ -710,8 +712,33 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         open_db = getattr(adapter, "_ensure_session_db_async", None)
         db = await open_db() if callable(open_db) else None
         return await stream.serve(
-            web, request, stream.sse_headers(adapter, request), path, str(path), db, cursor, VERSION
+            web, request, stream.sse_headers(adapter, request), path, str(path), db, cursor, VERSION,
+            request.query.get("device") or None,
         )
+
+    async def push_subscribe(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        try:
+            await asyncio.to_thread(push.subscribe, store_path(), body)
+        except push.PushError as exc:
+            return _error(web, str(exc), 400)
+        return web.json_response({"object": "memento.push", "subscribed": True})
+
+    async def push_unsubscribe(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        endpoint = body.get("endpoint") if body else None
+        if not isinstance(endpoint, str) or not endpoint:
+            return _error(web, "Missing endpoint", 400)
+        await asyncio.to_thread(push.unsubscribe, store_path(), endpoint)
+        return web.json_response({"object": "memento.push", "subscribed": False})
 
     app.router.add_get(f"{PREFIX}/info", info)
     app.router.add_get(f"{PREFIX}/chats", list_chats)
@@ -780,6 +807,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/attachments", upload_attachment)
     app.router.add_get(f"{PREFIX}/runs/live", live_runs)
     app.router.add_get(f"{PREFIX}/events", stream_events)
+    app.router.add_post(f"{PREFIX}/push", push_subscribe)
+    app.router.add_post(f"{PREFIX}/push/remove", push_unsubscribe)
     app.router.add_post(f"{PREFIX}/runs/{{run_id}}/clarify", answer_clarify)
     mirror_for_profiles(app, web)
     logger.info("memento: serving %s on the API server", PREFIX)
@@ -799,7 +828,7 @@ def register(ctx) -> None:
         register_hook("post_api_request", events.on_model_call)
         register_hook("pre_tool_call", events.on_tool)
         register_hook("post_tool_call", events.on_tool)
-        register_hook("pre_approval_request", events.on_approval)
+        register_hook("pre_approval_request", events.on_approval_request)
         register_hook("post_approval_response", events.on_approval)
         register_hook("on_session_end", events.on_turn_end)
     register_cli = getattr(ctx, "register_cli_command", None)

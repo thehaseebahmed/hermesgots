@@ -55,6 +55,8 @@ export default defineConfig(({ mode }) => ({
         navigateFallbackDenylist: [/^\/\.netlify\//, /^\/auth\//],
         // Never let the service worker touch calls to the Hermes server.
         runtimeCaching: [],
+        // Shows the plugin's pushes; see public/push-sw.js.
+        importScripts: ["push-sw.js"],
       },
     }),
   ],
