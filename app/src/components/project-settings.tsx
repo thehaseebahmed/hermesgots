@@ -19,6 +19,7 @@ import {
 import { toast } from "sonner"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { ProjectUsageView } from "@/components/project-usage"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,11 +33,9 @@ import {
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import type { Profile } from "@/lib/db"
-import { formatTokens } from "@/lib/format"
 import {
   addProjectRepo,
   getGitHubStatus,
-  getProjectUsage,
   listGitHubRepos,
   removeProjectRepo,
   updateProject,
@@ -44,7 +43,6 @@ import {
   type GitHubStatus,
   type HermesProject,
   type HermesProjectFolder,
-  type ProjectUsage,
 } from "@/lib/hermes"
 import { cn } from "@/lib/utils"
 
@@ -113,7 +111,7 @@ export function ProjectSettings({
           <PopupTitle>{view === "usage" ? "Usage" : "Settings"}</PopupTitle>
         </PopupHeader>
         {view === "usage" ? (
-          <UsageView profile={profile} project={project} />
+          <ProjectUsageView profile={profile} project={project} />
         ) : (
           <SettingsForm
             // Fresh fields every time the sheet opens on the project as it now is.
@@ -625,49 +623,6 @@ function RepoPicker({
           ))
         )}
       </ul>
-    </div>
-  )
-}
-
-const usd = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" })
-
-function UsageView({ profile, project }: { profile: Profile; project: HermesProject }) {
-  const [usage, setUsage] = useState<ProjectUsage | null>()
-  useEffect(() => {
-    let cancelled = false
-    getProjectUsage(profile, project.id)
-      .then((value) => !cancelled && setUsage(value))
-      .catch(() => !cancelled && setUsage(null))
-    return () => {
-      cancelled = true
-    }
-  }, [profile, project.id])
-  if (usage === undefined)
-    return (
-      <div className="flex justify-center px-6 py-10">
-        <Spinner className="size-5" />
-      </div>
-    )
-  if (usage === null)
-    return <p className="px-6 pb-8 text-sm text-muted-foreground">Couldn't load usage.</p>
-  const rows: [string, string][] = [
-    ["Sessions", String(usage.sessions)],
-    ["Input tokens", formatTokens(usage.inputTokens)],
-    ["Output tokens", formatTokens(usage.outputTokens)],
-    ["Cache reads", formatTokens(usage.cacheReadTokens)],
-    ["Cache writes", formatTokens(usage.cacheWriteTokens)],
-    ["Cost", usage.costUsd === undefined ? "Unknown" : usd.format(usage.costUsd)],
-  ]
-  return (
-    <div className="px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-6">
-      <Group>
-        {rows.map(([label, value]) => (
-          <div key={label} className={cn(ROW, "justify-between")}>
-            <span className="text-base">{label}</span>
-            <span className="text-muted-foreground tabular-nums">{value}</span>
-          </div>
-        ))}
-      </Group>
     </div>
   )
 }

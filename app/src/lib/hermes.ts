@@ -8,6 +8,7 @@ import type {
   Todo,
 } from "@/lib/db"
 import type { Doc } from "@/lib/merge"
+import type { ModelUsage } from "@/lib/pricing"
 import { isNative } from "@/lib/native"
 import type { CronSchedule } from "@/lib/schedule"
 
@@ -740,6 +741,15 @@ export async function removeProjectRepo(config: HermesConfig, id: string, repo: 
   })
 }
 
+export interface ProjectSessionUsage {
+  id: string
+  title?: string
+  /** Epoch ms. */
+  lastActive?: number
+  /** The session's use per model (a session can change models when it's compressed). */
+  models: ModelUsage[]
+}
+
 export interface ProjectUsage {
   sessions: number
   inputTokens: number
@@ -748,6 +758,21 @@ export interface ProjectUsage {
   cacheWriteTokens: number
   /** Unset when Hermes priced none of the sessions. */
   costUsd?: number
+  /** Each session's own use; empty from a plugin older than 0.21. */
+  threads: ProjectSessionUsage[]
+}
+
+const positive = (value: unknown) => (typeof value === "number" && value > 0 ? value : 0)
+
+function modelUsage(body: Record<string, unknown>): ModelUsage {
+  return {
+    model: typeof body.model === "string" && body.model ? body.model : undefined,
+    inputTokens: positive(body.input_tokens),
+    outputTokens: positive(body.output_tokens),
+    cacheReadTokens: positive(body.cache_read_tokens),
+    cacheWriteTokens: positive(body.cache_write_tokens),
+    costUsd: typeof body.cost_usd === "number" ? body.cost_usd : undefined,
+  }
 }
 
 /** What the sessions that ran in a project's folders used, from Hermes's session store. */
@@ -757,14 +782,30 @@ export async function getProjectUsage(config: HermesConfig, id: string): Promise
     { headers: headers(config) },
   )
   const body = await response.json()
-  const count = (value: unknown) => (typeof value === "number" && value > 0 ? value : 0)
+  const threads: ProjectSessionUsage[] = Array.isArray(body?.threads)
+    ? body.threads
+        .filter((thread: unknown) => thread && typeof (thread as { id?: unknown }).id === "string")
+        .map((thread: Record<string, unknown>) => {
+          const active = thread.last_active ?? thread.started_at
+          return {
+            id: thread.id as string,
+            title: typeof thread.title === "string" && thread.title ? thread.title : undefined,
+            lastActive: typeof active === "number" ? active * 1000 : undefined,
+            models: Array.isArray(thread.models)
+              ? thread.models.filter((m) => m && typeof m === "object").map(modelUsage)
+              : [],
+          }
+        })
+    : []
+  const totals = modelUsage(body ?? {})
   return {
-    sessions: count(body?.sessions),
-    inputTokens: count(body?.input_tokens),
-    outputTokens: count(body?.output_tokens),
-    cacheReadTokens: count(body?.cache_read_tokens),
-    cacheWriteTokens: count(body?.cache_write_tokens),
-    costUsd: typeof body?.cost_usd === "number" ? body.cost_usd : undefined,
+    sessions: positive(body?.sessions),
+    inputTokens: totals.inputTokens,
+    outputTokens: totals.outputTokens,
+    cacheReadTokens: totals.cacheReadTokens,
+    cacheWriteTokens: totals.cacheWriteTokens,
+    costUsd: totals.costUsd,
+    threads,
   }
 }
 
