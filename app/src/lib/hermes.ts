@@ -1080,6 +1080,123 @@ export async function setWorkspaceMode(
   return parseWorkspace(await response.json())
 }
 
+/** A reviewer model: a model on a provider; either unset means the user's own. */
+export interface ReviewerModel {
+  provider: string | null
+  model: string | null
+}
+
+export interface TheseusModels {
+  review: ReviewerModel[]
+  visual: ReviewerModel[]
+}
+
+/** What the plugin says about running Theseus on this bot's host (`info`'s `theseus`). */
+export interface TheseusInfo {
+  ready: boolean
+  /** Why it can't run here: no Node 20, or a plugin without the skill. */
+  reason: string | null
+  /** Whether the host lets the plugin pick a reviewer's model and provider (Hermes config). */
+  reviewers: { llm: boolean; model: boolean; provider: boolean }
+}
+
+export async function getTheseusInfo(config: HermesConfig): Promise<TheseusInfo | null> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/info`, { headers: headers(config) })
+  const raw = (await response.json())?.theseus
+  if (!raw || typeof raw !== "object") return null
+  const reviewers = raw.reviewers ?? {}
+  return {
+    ready: Boolean(raw.ready),
+    reason: typeof raw.reason === "string" ? raw.reason : null,
+    reviewers: {
+      llm: Boolean(reviewers.llm),
+      model: Boolean(reviewers.model),
+      provider: Boolean(reviewers.provider),
+    },
+  }
+}
+
+/** The plugin's view of a Theseus session: the skill's snapshot (`status --json --full`) as is. */
+export interface RawTheseus {
+  stage: string
+  state: Record<string, any> | null
+  models: TheseusModels
+  unavailable: string | null
+  message?: string | null
+}
+
+function parseModels(raw: unknown): TheseusModels {
+  const pick = (list: unknown): ReviewerModel[] =>
+    (Array.isArray(list) ? list : []).slice(0, 2).map((entry) => ({
+      provider: typeof entry?.provider === "string" ? entry.provider : null,
+      model: typeof entry?.model === "string" ? entry.model : null,
+    }))
+  const body = (raw ?? {}) as Record<string, unknown>
+  return { review: pick(body.review), visual: pick(body.visual) }
+}
+
+function parseTheseus(raw: any): RawTheseus {
+  return {
+    stage: typeof raw?.stage === "string" ? raw.stage : "discovery",
+    state: raw?.state && typeof raw.state === "object" ? raw.state : null,
+    models: parseModels(raw?.models),
+    unavailable: typeof raw?.unavailable === "string" ? raw.unavailable : null,
+    message: typeof raw?.message === "string" ? raw.message : null,
+  }
+}
+
+export async function getTheseus(config: HermesConfig, sessionId: string): Promise<RawTheseus> {
+  const response = await request(pluginSession(config, sessionId, "/theseus"), {
+    headers: headers(config),
+  })
+  return parseTheseus(await response.json())
+}
+
+/** One of the user's answers to the run (`confirm_plan`, `approve`, `settings`, ...). */
+export async function postTheseus(
+  config: HermesConfig,
+  sessionId: string,
+  body: Record<string, unknown>,
+): Promise<RawTheseus> {
+  const response = await request(pluginSession(config, sessionId, "/theseus"), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify(body),
+  })
+  return parseTheseus(await response.json())
+}
+
+export async function setTheseusModels(
+  config: HermesConfig,
+  sessionId: string,
+  models: TheseusModels,
+): Promise<RawTheseus> {
+  const response = await request(pluginSession(config, sessionId, "/theseus/models"), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify(models),
+  })
+  return parseTheseus(await response.json())
+}
+
+/** A screenshot from a checkpoint's evidence, as an object URL for an <img>. */
+export async function getTheseusCapture(
+  config: HermesConfig,
+  sessionId: string,
+  checkpoint: string,
+  file: string,
+): Promise<string> {
+  const response = await request(
+    pluginSession(
+      config,
+      sessionId,
+      `/theseus/evidence/${encodeURIComponent(checkpoint)}/${encodeURIComponent(file)}`,
+    ),
+    { headers: headers(config) },
+  )
+  return URL.createObjectURL(await response.blob())
+}
+
 export interface KeptWorktree {
   /** `user/repo`. */
   name: string
@@ -1200,7 +1317,11 @@ export async function listLiveRuns(config: HermesConfig): Promise<Record<string,
 
 /** Why a session waits on the user. */
 export type WaitingReason =
-  { kind: "question"; count: number } | { kind: "approval"; command?: string } | { kind: "plan" }
+  | { kind: "question"; count: number }
+  | { kind: "approval"; command?: string }
+  | { kind: "plan" }
+  /** A Theseus run waiting on the user: its plan, its checkpoints, a checkpoint or its closing. */
+  | { kind: "theseus"; stage: "plan" | "checkpoints" | "approval" | "closing" }
 
 /**
  * Sessions waiting on the user (a question, an approval or a plan to review), by Hermes session id,
@@ -1232,6 +1353,11 @@ export async function listWaiting(
         project,
       }
     else if (raw?.kind === "plan") found[id] = { kind: "plan", project }
+    else if (
+      raw?.kind === "theseus" &&
+      ["plan", "checkpoints", "approval", "closing"].includes(String(raw.stage))
+    )
+      found[id] = { kind: "theseus", stage: raw.stage as "plan", project }
   }
   return found
 }

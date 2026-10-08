@@ -1,4 +1,5 @@
-import { useSyncExternalStore } from "react"
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react"
+import { toast } from "sonner"
 import {
   FlaskConicalIcon,
   ListChecksIcon,
@@ -7,33 +8,32 @@ import {
   UserCheckIcon,
 } from "lucide-react"
 
+import type { Conversation, Profile } from "@/lib/db"
+import {
+  getTheseus,
+  getTheseusCapture,
+  getTheseusInfo,
+  postTheseus,
+  setTheseusModels,
+  type RawTheseus,
+  type TheseusInfo,
+  type TheseusModels,
+} from "@/lib/hermes"
+import { useChanges } from "@/lib/live"
+
 /**
  * Theseus: a session mode that runs the THA Theseus skill end to end in Auto. The work is split
  * into checkpoints, and each passes four gates (tests, a visual match, code review, the user's
- * approval) before the next one starts. The skill's server on the Hermes host holds the run; the
- * plugin will relay it here.
- *
- * MOCK: nothing reads a real run yet. `useTheseusRun` serves a canned run at one of a few stages,
- * picked with `?theseus=<stage>` in dev, and the cards' actions move it along.
+ * approval) before the next one starts. The skill lives in the Memento plugin on the Hermes host,
+ * which keeps the run in the session's worktree and records the user's answers as the skill does;
+ * this reads the run from the plugin and sends those answers back.
  */
 
 export type TheseusStage =
-  "discovery" | "plan" | "checkpoints" | "building" | "approval" | "closing"
+  "discovery" | "planning" | "plan" | "checkpoints" | "building" | "approval" | "closing" | "done"
 
-export const THESEUS_STAGES: TheseusStage[] = [
-  "discovery",
-  "plan",
-  "checkpoints",
-  "building",
-  "approval",
-  "closing",
-]
-
-const asked =
-  typeof location === "undefined" ? null : new URLSearchParams(location.search).get("theseus")
-
-/** Theseus isn't in the plugin yet, so only dev builds, or a `?theseus` link, offer it. */
-export const THESEUS_PREVIEW = import.meta.env.DEV || asked !== null
+/** The stages where the run waits on the user. */
+export const WAITING_STAGES: TheseusStage[] = ["plan", "checkpoints", "approval", "closing"]
 
 /** A gate's state, as the skill's API reports it in `checkpoints[].gates`. */
 export type GateState = "pending" | "running" | "passed" | "failed" | "off" | "skipped"
@@ -48,9 +48,20 @@ export interface ReviewFinding {
 }
 
 export interface ReviewRound {
+  gate: "visual" | "review"
   reviewer: string
   round: number
+  /** The model that reviewed, when the plugin asked one. */
+  via?: string
+  summary?: string
   findings: ReviewFinding[]
+}
+
+export interface TheseusCapture {
+  /** The file in the checkpoint's evidence folder. */
+  file: string
+  label: string
+  tone: "reference" | "build"
 }
 
 export interface TheseusCheckpoint {
@@ -63,18 +74,18 @@ export interface TheseusCheckpoint {
   gates: Record<GateId, GateState>
   /** The last lines of the latest test run. */
   output?: string
-  /** Gate 2's paired captures, by label. */
-  screenshots?: { label: string; tone: "reference" | "build" }[]
+  /** Gate 2's captures. */
+  screenshots?: TheseusCapture[]
   reviews?: ReviewRound[]
   /** Why gate 2 was skipped, for a checkpoint nothing visible changed in. */
   skip?: string
 }
 
 export interface TheseusSettings {
-  autonomy: "step" | "batch:3" | "unattended"
+  autonomy: string
   visual: "on" | "off"
   reviewers: 0 | 1 | 2
-  granularity: "s-m" | "xs-s"
+  granularity: string
 }
 
 export interface TheseusPlan {
@@ -89,18 +100,39 @@ export interface TheseusPlan {
   verification: { kind: "automated" | "manual"; action: string; expected: string }[]
 }
 
+/** The user's answers to the run. Each throws the plugin's message when the skill refuses. */
+export interface TheseusActions {
+  confirmPlan: () => Promise<void>
+  revisePlan: (text: string) => Promise<void>
+  approveCheckpoints: () => Promise<void>
+  approve: (checkpoint: string) => Promise<void>
+  requestChanges: (checkpoint: string, text: string) => Promise<void>
+  close: (decision: "confirm" | "keep") => Promise<void>
+  settings: (
+    settings: Partial<Record<"autonomy" | "visual" | "reviewers", string | number>>,
+  ) => Promise<void>
+  models: (models: TheseusModels) => Promise<void>
+  /** A checkpoint's screenshot as an object URL. */
+  capture: (checkpoint: string, file: string) => Promise<string>
+}
+
 export interface TheseusRun {
+  /** The Hermes session this run belongs to, for reading its captures. */
+  sessionId: string
   key: string
   stage: TheseusStage
-  /** The skill's server on the Hermes host; it stops itself after six idle hours. */
-  server: "running" | "stopped"
   settings: TheseusSettings
   plan: TheseusPlan
   checkpoints: TheseusCheckpoint[]
-  learnings: { cp?: string; source: "reviewer" | "human"; text: string }[]
+  learnings: { cp?: string; source: string; text: string }[]
   /** The skill's `next:` line: what happens next, and who acts. */
   next: string
+  models: TheseusModels
+  actions: TheseusActions
 }
+
+/** Whether the run waits on the user, whose approvals only ever come from the app. */
+export const waitsOnUser = (run: Pick<TheseusRun, "stage">) => WAITING_STAGES.includes(run.stage)
 
 export const GATES: { id: GateId; label: string }[] = [
   { id: "red", label: "Failing tests" },
@@ -174,266 +206,28 @@ export function markIntroSeen() {
   }
 }
 
-const PLAN: TheseusPlan = {
-  task: "Create and edit routines from the Routines screen",
-  goal: "Routines can be made and changed in the app, not only on the Hermes host.",
-  acceptance: [
-    "A new routine with a name, prompt and schedule appears in the list and runs on time",
-    "Editing a routine keeps its run history",
-    "A schedule Hermes can't parse is refused with Hermes's own message",
-  ],
-  outOfScope: ["Delivery targets other than the chat", "Routine templates"],
-  proposed: "A form in a pop-up, posting to Hermes's jobs API.",
-  recommended:
-    "The same pop-up, with the schedule typed in words and shown back as Hermes reads it, through POST /api/jobs and PATCH /api/jobs/{id}.",
-  rationale:
-    "Hermes already validates schedules, so the app shows its answer rather than parsing cron itself.",
-  rejected: [
-    {
-      alternative: "A cron expression field",
-      reason: "Most routines are 'every weekday at 9', which words say better.",
-    },
-  ],
-  verification: [
-    { kind: "automated", action: "pnpm test routines", expected: "every case passes" },
-    {
-      kind: "manual",
-      action: "Make a routine for two minutes from now",
-      expected: "it runs, and its run shows in the list",
-    },
-  ],
+/** What the plugin's `info` says about Theseus on a bot's host, read once a minute at most. */
+const infos = new Map<string, { at: number; info: TheseusInfo | null }>()
+const INFO_MS = 60_000
+
+export async function readTheseusInfo(profile: Pick<Profile, "baseUrl" | "apiKey">) {
+  const key = `${profile.baseUrl}\n${profile.apiKey}`
+  const hit = infos.get(key)
+  if (hit && Date.now() - hit.at < INFO_MS) return hit.info
+  const info = await getTheseusInfo(profile).catch(() => null)
+  infos.set(key, { at: Date.now(), info })
+  return info
 }
 
-const pending = (): Record<GateId, GateState> => ({
-  red: "pending",
-  tests: "pending",
-  visual: "pending",
-  review: "pending",
-  human: "pending",
-})
-
-const passed = (): Record<GateId, GateState> => ({
-  red: "passed",
-  tests: "passed",
-  visual: "passed",
-  review: "passed",
-  human: "passed",
-})
-
-const CHECKPOINTS: TheseusCheckpoint[] = [
-  {
-    id: "CP1",
-    title: "Schedules in words become Hermes schedules",
-    done: "'weekdays at 9:30' and 'every 15 minutes' map to Hermes's cron and interval shapes",
-    ui: false,
-    tests: [
-      "weekdays at 9:30 becomes cron 30 9 * * 1-5",
-      "every 15 minutes becomes an interval of 15",
-      "an unknown phrase is refused with a message",
-    ],
-    status: "done",
-    gates: { ...passed(), visual: "skipped" },
-    skip: "No screen changed: a pure function.",
-    output: "✓ schedule.test.ts (3)\n\nTest Files  1 passed (1)\n     Tests  3 passed (3)",
-  },
-  {
-    id: "CP2",
-    title: "Creating a routine through Hermes",
-    done: "a valid routine is created, and Hermes's refusal comes back as its message",
-    ui: false,
-    tests: [
-      "a valid routine is posted and returned with its id",
-      "a 400 from Hermes surfaces its error text",
-      "a 501 reads as cron not available",
-    ],
-    status: "done",
-    gates: { ...passed(), visual: "skipped" },
-    skip: "No screen changed: the API client only.",
-    output: "✓ cron.test.ts (5)\n\nTest Files  1 passed (1)\n     Tests  5 passed (5)",
-  },
-  {
-    id: "CP3",
-    title: "Routine editor, empty and error states",
-    done: "the pop-up matches the mock when empty and when Hermes refuses the schedule",
-    ui: true,
-    tests: [
-      "the form opens empty, Save disabled",
-      "a refused schedule shows Hermes's message under the field",
-      "Save is enabled once name, prompt and schedule are filled",
-    ],
-    status: "building",
-    gates: {
-      red: "passed",
-      tests: "passed",
-      visual: "passed",
-      review: "running",
-      human: "pending",
-    },
-    output:
-      "✓ routine-editor.test.tsx (3)\n\nTest Files  1 passed (1)\n     Tests  3 passed (3)\n  Duration  1.84s",
-    screenshots: [
-      { label: "Reference", tone: "reference" },
-      { label: "Build", tone: "build" },
-    ],
-    reviews: [
-      {
-        reviewer: "a",
-        round: 1,
-        findings: [
-          {
-            where: "routine-editor.tsx:48",
-            what: "The schedule error is cleared on every keystroke, before Hermes answers.",
-            rule: "Keep the server's message until the next answer replaces it",
-            fix: "Clear it when the next validation returns.",
-          },
-        ],
-      },
-      { reviewer: "b", round: 1, findings: [] },
-    ],
-  },
-  {
-    id: "CP4",
-    title: "Editing an existing routine",
-    done: "a routine opens filled in, and saving keeps its run history",
-    ui: true,
-    tests: ["the form opens with the routine's values", "saving keeps last_run_at and runs"],
-    status: "pending",
-    gates: pending(),
-  },
-  {
-    id: "CP5",
-    title: "Pause, resume and delete in the editor",
-    done: "each action updates the list at once and survives a reload",
-    ui: true,
-    tests: ["pause shows Paused", "delete asks first, then removes the row"],
-    status: "pending",
-    gates: pending(),
-  },
-  {
-    id: "CP6",
-    title: "New routines in the Routines list",
-    done: "a new routine shows its schedule in words and its next run",
-    ui: true,
-    tests: ["the new row reads 'Weekdays at 9:30 AM'"],
-    status: "pending",
-    gates: pending(),
-  },
-]
-
-const LEARNINGS: TheseusRun["learnings"] = [
-  {
-    source: "human",
-    text: "Show Hermes's own error text; never rephrase a server refusal.",
-  },
-  {
-    cp: "CP3",
-    source: "reviewer",
-    text: "Keep a server's validation message until the next answer replaces it.",
-  },
-]
-
-function runAt(stage: TheseusStage, settings: TheseusSettings): TheseusRun {
-  const base = {
-    key: "routine-editor",
-    stage,
-    server: "running" as const,
-    settings,
-    plan: PLAN,
-    learnings: LEARNINGS,
-  }
-  if (stage === "discovery")
-    return {
-      ...base,
-      checkpoints: [],
-      learnings: [],
-      next: "Settling the requirements with you",
-    }
-  if (stage === "plan")
-    return { ...base, checkpoints: [], learnings: [], next: "Your turn: confirm the plan" }
-  if (stage === "checkpoints")
-    return {
-      ...base,
-      learnings: LEARNINGS.slice(0, 1),
-      checkpoints: CHECKPOINTS.map((cp) => ({
-        ...cp,
-        status: "pending",
-        gates: pending(),
-        output: undefined,
-        reviews: undefined,
-        skip: undefined,
-      })),
-      next: "Your turn: approve the checkpoints",
-    }
-  if (stage === "building")
-    return { ...base, checkpoints: CHECKPOINTS, next: "Reviewers are checking CP3 again" }
-  if (stage === "approval")
-    return {
-      ...base,
-      checkpoints: CHECKPOINTS.map((cp) =>
-        cp.id === "CP3"
-          ? {
-              ...cp,
-              status: "awaiting-approval",
-              gates: { ...passed(), human: "pending" },
-              reviews: [
-                ...cp.reviews!,
-                { reviewer: "a", round: 2, findings: [] },
-                { reviewer: "b", round: 2, findings: [] },
-              ],
-            }
-          : cp,
-      ),
-      next: "Your turn: approve CP3",
-    }
-  return {
-    ...base,
-    checkpoints: CHECKPOINTS.map((cp) => ({
-      ...cp,
-      status: "done",
-      gates: cp.ui ? passed() : { ...passed(), visual: "skipped" },
-    })),
-    next: "Your turn: close the run",
-  }
-}
-
-// The mock's one run, shared by every Theseus session on this device.
-const initial = () => {
-  return THESEUS_STAGES.includes(asked as TheseusStage) ? (asked as TheseusStage) : "building"
-}
-let state = {
-  stage: initial(),
-  settings: { autonomy: "step", visual: "on", reviewers: 2, granularity: "s-m" } as TheseusSettings,
-}
-let snapshot = runAt(state.stage, state.settings)
-const listeners = new Set<() => void>()
-
-function set(next: Partial<typeof state>) {
-  state = { ...state, ...next }
-  snapshot = runAt(state.stage, state.settings)
-  for (const listener of listeners) listener()
-}
-
-const subscribe = (listener: () => void) => {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
-}
-
-/** The session's Theseus run. MOCK: the canned run, whatever the session. */
-export function useTheseusRun(enabled: boolean): TheseusRun | undefined {
-  const run = useSyncExternalStore(subscribe, () => snapshot)
-  return enabled ? run : undefined
-}
-
-/** MOCK: the user's answers go to the plugin, which relays them to the skill's server. */
-export const theseusActions = {
-  confirmPlan: () => set({ stage: "checkpoints" }),
-  revisePlan: () => set({ stage: "discovery" }),
-  approveCheckpoints: () => set({ stage: "building" }),
-  approve: () => set({ stage: "closing" }),
-  requestChanges: () => set({ stage: "building" }),
-  close: () => set({ stage: "discovery" }),
-  settings: (settings: Partial<TheseusSettings>) =>
-    set({ settings: { ...state.settings, ...settings } }),
+/** Whether the bot's host can run Theseus, and if not, why. Null while it's being asked. */
+export function useTheseusInfo(profile?: Pick<Profile, "baseUrl" | "apiKey" | "disabled"> | null) {
+  const key = profile?.apiKey && !profile.disabled ? `${profile.baseUrl}\n${profile.apiKey}` : ""
+  const read = useSyncExternalStore(subscribe, () => infos.get(key)?.info)
+  useEffect(() => {
+    if (!key || !profile) return
+    void readTheseusInfo(profile).then(notify)
+  }, [key, profile])
+  return key ? read : null
 }
 
 /** The checkpoint being worked on or waiting, else the first not done. */
@@ -452,6 +246,8 @@ export function currentGate(cp: TheseusCheckpoint) {
 /** One line for the pill and the project's session list. */
 export function runSummary(run: TheseusRun) {
   if (run.stage === "discovery") return "Requirements"
+  if (run.stage === "planning") return "Planning the checkpoints"
+  if (run.stage === "done") return "Run closed"
   if (run.stage === "plan") return "Plan ready"
   if (run.stage === "checkpoints") return `${run.checkpoints.length} checkpoints ready`
   if (run.stage === "closing") return "All checkpoints done"
@@ -460,4 +256,251 @@ export function runSummary(run: TheseusRun) {
   const index = run.checkpoints.indexOf(cp) + 1
   const gate = cp.status === "awaiting-approval" ? "Needs your approval" : currentGate(cp)?.label
   return `${index} of ${run.checkpoints.length} · ${gate}`
+}
+
+// --- reading the plugin's view ---------------------------------------------------------------
+
+const GATE_STATES: Record<string, GateState> = {
+  pass: "passed",
+  carried: "passed",
+  skip: "skipped",
+  off: "off",
+  findings: "failed",
+  fail: "failed",
+}
+
+const text = (value: unknown) => (typeof value === "string" ? value : "")
+const list = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : []
+
+function toPlan(raw: Record<string, any> | undefined): TheseusPlan {
+  const plan = raw ?? {}
+  const checks = (kind: "automated" | "manual") =>
+    (Array.isArray(plan.verification?.[kind]) ? plan.verification[kind] : []).map(
+      (check: Record<string, unknown>) => ({
+        kind,
+        action: text(check.action),
+        expected: text(check.expected),
+      }),
+    )
+  return {
+    task: text(plan.task),
+    goal: text(plan.goal),
+    acceptance: list(plan.acceptance_criteria),
+    outOfScope: list(plan.scope_boundaries),
+    proposed: text(plan.user_proposed_approach),
+    recommended: text(plan.recommended_approach),
+    rationale: text(plan.approach_rationale),
+    rejected: (Array.isArray(plan.rejected_alternatives) ? plan.rejected_alternatives : []).map(
+      (r: Record<string, unknown>) => ({
+        alternative: text(r.alternative),
+        reason: text(r.reason),
+      }),
+    ),
+    verification: [...checks("automated"), ...checks("manual")],
+  }
+}
+
+function toCheckpoint(raw: Record<string, any>): TheseusCheckpoint {
+  const status = raw.status as TheseusCheckpoint["status"]
+  const evidence = raw.evidence ?? {}
+  const skip = text(evidence.visual?.skip?.reason) || undefined
+  const gates: Record<GateId, GateState> =
+    status === "done"
+      ? {
+          red: "passed",
+          tests: "passed",
+          visual: skip ? "skipped" : "passed",
+          review: "passed",
+          human: "passed",
+        }
+      : {
+          red: "pending",
+          tests: "pending",
+          visual: "pending",
+          review: "pending",
+          human: "pending",
+        }
+  if (status !== "done" && raw.gates)
+    for (const id of ["red", "tests", "visual", "review"] as const)
+      gates[id] = GATE_STATES[raw.gates[id]] ?? "pending"
+  if (status === "building") {
+    // The first gate not through is the one being worked on.
+    const next = GATES.find(({ id }) => id !== "human" && gates[id] === "pending")
+    if (next) gates[next.id] = "running"
+  }
+  const rounds = (gate: "visual" | "review"): ReviewRound[] =>
+    (Array.isArray(evidence[gate]?.history) ? evidence[gate].history : []).map(
+      (h: Record<string, any>) => ({
+        gate,
+        reviewer: text(h.reviewer),
+        round: Number(h.round) || 1,
+        via: text(h.via) || undefined,
+        summary: text(h.summary) || undefined,
+        findings: (Array.isArray(h.items) ? h.items : []).map((item: Record<string, unknown>) => ({
+          where: text(item.where),
+          what: text(item.what) || text(item.text),
+          rule: text(item.rule),
+          fix: text(item.fix),
+        })),
+      }),
+    )
+  const reviews = [...rounds("visual"), ...rounds("review")]
+  const output = text(evidence.tests?.tail) || text(evidence.red?.tail)
+  const screenshots = list(raw.screenshots).map((file) => ({
+    file,
+    label: file.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " "),
+    tone: /ref/i.test(file) ? ("reference" as const) : ("build" as const),
+  }))
+  return {
+    id: text(raw.id),
+    title: text(raw.title),
+    done: text(raw.done),
+    ui: Boolean(raw.ui),
+    tests: list(raw.tests),
+    status,
+    gates,
+    output: output || undefined,
+    screenshots: screenshots.length ? screenshots : undefined,
+    reviews: reviews.length ? reviews : undefined,
+    skip,
+  }
+}
+
+export function toRun(raw: RawTheseus, sessionId: string, actions: TheseusActions): TheseusRun {
+  const state = raw.state ?? {}
+  const run = state.run ?? {}
+  return {
+    sessionId,
+    key: text(run.key),
+    stage: raw.stage as TheseusStage,
+    settings: {
+      autonomy: text(state.settings?.autonomy ?? run.autonomy) || "step",
+      visual: (state.settings?.visual ?? run.visual) === "off" ? "off" : "on",
+      reviewers: Math.min(
+        2,
+        Math.max(0, Number(state.settings?.reviewers ?? run.reviewers) || 0),
+      ) as 0 | 1 | 2,
+      granularity: text(state.settings?.granularity ?? run.granularity) || "s-m",
+    },
+    plan: toPlan(run.plan),
+    checkpoints: (Array.isArray(state.checkpoints) ? state.checkpoints : []).map(toCheckpoint),
+    learnings: (Array.isArray(state.learnings) ? state.learnings : []).map(
+      (l: Record<string, unknown>) => ({
+        cp: text(l.cp) || undefined,
+        source: text(l.source) || "other",
+        text: text(l.text),
+      }),
+    ),
+    next: text(state.next),
+    models: raw.models,
+    actions,
+  }
+}
+
+// --- the store ---------------------------------------------------------------------------------
+
+const raws = new Map<string, RawTheseus>()
+const listeners = new Set<() => void>()
+const notify = () => listeners.forEach((listener) => listener())
+
+function subscribe(listener: () => void) {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+const POLL_MS = 4000
+
+type Session = Pick<Conversation, "id" | "hermesSessionId">
+type Server = Pick<Profile, "baseUrl" | "apiKey">
+
+function actionsFor(session: Session, server: Server): TheseusActions {
+  const send = async (body: Record<string, unknown>) => {
+    const next = await postTheseus(server, session.hermesSessionId, body)
+    raws.set(session.id, next)
+    notify()
+  }
+  return {
+    confirmPlan: () => send({ action: "confirm_plan" }),
+    revisePlan: (text) => send({ action: "revise_plan", text }),
+    approveCheckpoints: () => send({ action: "approve_checkpoints" }),
+    approve: (cp) => send({ action: "approve", cp }),
+    requestChanges: (cp, text) => send({ action: "request_changes", cp, text }),
+    close: (decision) => send({ action: "close", decision }),
+    settings: (settings) =>
+      send({
+        action: "settings",
+        ...Object.fromEntries(Object.entries(settings).map(([k, v]) => [k, String(v)])),
+      }),
+    capture: (cp, file) => getTheseusCapture(server, session.hermesSessionId, cp, file),
+    models: async (models) => {
+      raws.set(session.id, await setTheseusModels(server, session.hermesSessionId, models))
+      notify()
+    },
+  }
+}
+
+/**
+ * The session's Theseus run, read from the plugin while the chat is open and again whenever the
+ * server says a run moved. `enabled` is false until the first turn has started it.
+ */
+export function useTheseusRun(
+  session: Session | undefined,
+  profile: Server | null | undefined,
+  enabled: boolean,
+): TheseusRun | undefined {
+  const raw = useSyncExternalStore(subscribe, () => (session ? raws.get(session.id) : undefined))
+  const changes = useChanges("runs", profile)
+  const id = session?.id
+  const sessionId = session?.hermesSessionId
+  const baseUrl = profile?.baseUrl
+  const apiKey = profile?.apiKey
+  useEffect(() => {
+    if (!enabled || !id || !sessionId || !baseUrl || !apiKey) return
+    let cancelled = false
+    const read = () => {
+      if (document.visibilityState !== "visible") return
+      getTheseus({ baseUrl, apiKey }, sessionId)
+        .then((next) => {
+          if (cancelled) return
+          raws.set(id, next)
+          notify()
+        })
+        .catch(() => undefined)
+    }
+    read()
+    const timer = window.setInterval(read, POLL_MS)
+    document.addEventListener("visibilitychange", read)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+      document.removeEventListener("visibilitychange", read)
+    }
+  }, [enabled, id, sessionId, baseUrl, apiKey, changes])
+  const actions = useMemo(
+    () =>
+      id && sessionId && baseUrl && apiKey
+        ? actionsFor({ id, hermesSessionId: sessionId }, { baseUrl, apiKey })
+        : undefined,
+    [id, sessionId, baseUrl, apiKey],
+  )
+  return useMemo(
+    () => (enabled && raw && actions && sessionId ? toRun(raw, sessionId, actions) : undefined),
+    [enabled, raw, actions, sessionId],
+  )
+}
+
+/** Runs one of the user's answers, telling them why when the skill or the host refuses. */
+export function useAnswer() {
+  return useCallback(async (answer: () => Promise<void>) => {
+    try {
+      await answer()
+      return true
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Theseus didn't take that.")
+      return false
+    }
+  }, [])
 }

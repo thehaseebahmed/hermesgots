@@ -46,6 +46,7 @@ import { SAFETY_MS, useChanges, useLive } from "@/lib/live"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { cn } from "@/lib/utils"
+import { reasonText, useWaiting, type WaitingReason } from "@/lib/waiting"
 import {
   deleteProject,
   listLiveRuns,
@@ -60,7 +61,6 @@ import {
   sessionState,
   type SessionState,
 } from "@/lib/workspace"
-import { runSummary, useTheseusRun, type TheseusRun } from "@/lib/theseus"
 
 /** How often the plugin is asked which sessions have a run in flight, while the screen is on. */
 const LIVE_MS = 10_000
@@ -207,8 +207,8 @@ export function ProjectPage({
     }
     return signals
   }, [ids.join("\n")])
-  // MOCK: the one canned run, shown on every Theseus session.
-  const theseus = useTheseusRun(true)
+  // What the server says waits on the user, including a Theseus run's plan, checkpoints or approval.
+  const waits = useWaiting()
 
   // A session nothing was sent in (or typed for) isn't one yet. Synced ones carry their activity in
   // `updatedAt`, since their messages load only when opened.
@@ -274,9 +274,8 @@ export function ProjectPage({
     }
   }
 
-  // A Theseus run that waits on the user (its plan, checkpoints or an approval) waits like a plan.
-  const theseusWaits = (c: Conversation) =>
-    c.mode === "theseus" && Boolean(theseus?.next.startsWith("Your turn"))
+  // A Theseus run sits in `theseus wait` (a running turn) while it waits on the user.
+  const theseusWaits = (c: Conversation) => waits[c.hermesSessionId]?.kind === "theseus"
   const grouped = GROUPS.map((group) => ({
     ...group,
     sessions: (sessions ?? []).filter(
@@ -355,7 +354,7 @@ export function ProjectPage({
                           state={group.state}
                           now={now}
                           removed={removedRepos(c)}
-                          theseus={c.mode === "theseus" ? theseus : undefined}
+                          waiting={waits[c.hermesSessionId]}
                         />
                       </li>
                     ))}
@@ -506,7 +505,7 @@ function SessionItem({
   state,
   now,
   removed,
-  theseus,
+  waiting,
 }: {
   session: Conversation
   /** Open beside the project. */
@@ -515,17 +514,18 @@ function SessionItem({
   pane?: { profileId: string; projectId: string }
   state: SessionState
   now: number
-  /** The session's Theseus run, when it runs on Theseus. */
-  theseus?: TheseusRun
+  /** Why the server says the session waits on the user, if it does. */
+  waiting?: WaitingReason
   /** Repos the session works in that were removed from the project, which makes it read-only. */
   removed: string[]
 }) {
+  const theseusLine =
+    session.mode === "theseus"
+      ? `Theseus · ${waiting?.kind === "theseus" ? reasonText(waiting) : "Run in progress"}`
+      : undefined
   const line2 = removed.length
     ? `${names.format(removed)} removed`
-    : ((theseus && `Theseus · ${runSummary(theseus)}`) ??
-      prLine(session) ??
-      session.worktree?.branch ??
-      session.draft)
+    : (theseusLine ?? prLine(session) ?? session.worktree?.branch ?? session.draft)
   return (
     <Link
       to={`/c/${session.id}`}
