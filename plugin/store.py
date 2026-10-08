@@ -9,7 +9,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -105,9 +105,10 @@ def connect(path: Path) -> sqlite3.Connection:
                    session_id TEXT
                )"""
         )
-        # v4: a session has a worktree in every repo of its project. v5: its newest plan file.
+        # v4: a session has a worktree in every repo of its project. v5: its newest plan file. v10: its
+        # Theseus settings (the reviewer models), as JSON.
         columns = {row[1] for row in conn.execute("PRAGMA table_info(project_sessions)")}
-        for column in ("repos", "plan_file"):
+        for column in ("repos", "plan_file", "theseus"):
             if column not in columns:
                 conn.execute(f"ALTER TABLE project_sessions ADD COLUMN {column} TEXT")
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

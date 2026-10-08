@@ -12,7 +12,8 @@
     "lint": "oxlint",
     "typecheck": "tsc -b",
     "format": "prettier --write src",
-    "mock": "node scripts/mock-hermes.mjs"
+    "mock": "node scripts/mock-hermes.mjs",
+    "sync:theseus": "node scripts/sync-theseus.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
