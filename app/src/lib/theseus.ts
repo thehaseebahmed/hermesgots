@@ -489,12 +489,11 @@ export function useTheseusRun(
   )
   return useMemo(() => {
     if (!enabled || !raw || !actions || !sessionId) return undefined
-    const run = toRun(raw, sessionId, actions)
-    // Hide the progress pill until a real plan is ready for approval or the run
-    // is past that point. A null/discovery state with no plan shouldn't show
-    // progress — the user hasn't been asked to approve anything yet.
-    const READY: TheseusStage[] = ["plan", "checkpoints", "building", "approval", "closing", "done"]
-    return READY.includes(run.stage) ? run : undefined
+    // Nothing to show until the agent has submitted a plan. From then on the run stays on screen,
+    // "planning" included: that's where it sits between the plan's approval and a clean coverage
+    // review of the checkpoints.
+    if (raw.stage === "discovery" && !raw.state?.run?.plan) return undefined
+    return toRun(raw, sessionId, actions)
   }, [enabled, raw, actions, sessionId])
 }
 
