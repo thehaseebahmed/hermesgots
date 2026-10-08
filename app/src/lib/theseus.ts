@@ -1,3 +1,4 @@
+import { useLiveQuery } from "dexie-react-hooks"
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react"
 import { toast } from "sonner"
 import {
@@ -8,7 +9,7 @@ import {
   UserCheckIcon,
 } from "lucide-react"
 
-import type { Conversation, Profile } from "@/lib/db"
+import { getSettings, type Conversation, type Profile } from "@/lib/db"
 import {
   getTheseus,
   getTheseusCapture,
@@ -192,6 +193,16 @@ export const settingLabel = (key: SettingKey, settings: TheseusSettings) =>
   (SETTING_QUESTIONS[key].options as readonly { value: unknown; short: string }[]).find(
     (o) => o.value === settings[key],
   )?.short
+
+/** Whether Theseus is offered as a mode: it's experimental, so only behind the Developer switch. */
+export function useTheseusEnabled() {
+  return (
+    useLiveQuery(async () => {
+      const settings = await getSettings()
+      return Boolean(settings.developer && settings.theseus)
+    }, []) ?? false
+  )
+}
 
 /** Whether this device has shown the intro, which comes up the first time Theseus is picked. */
 const INTRO_KEY = "memento.theseusIntro"

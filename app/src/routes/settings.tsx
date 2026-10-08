@@ -14,6 +14,7 @@ import {
   MenuIcon,
   MonitorIcon,
   MoonIcon,
+  SailboatIcon,
   SunIcon,
   UserIcon,
   type LucideIcon,
@@ -23,6 +24,7 @@ import { toast } from "sonner"
 import { AccountSettings } from "@/components/account-settings"
 import { BotSettings } from "@/components/bot-settings"
 import { useOpenDrawer } from "@/components/drawer-context"
+import { ExperimentalBadge } from "@/components/experimental-badge"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -41,6 +43,7 @@ import {
   DEFAULT_SETTINGS,
   clearAllData,
   db,
+  getSettings,
   listProfiles,
   saveSettings,
   type Profile,
@@ -240,8 +243,24 @@ const LIVE_LABELS: Record<LiveStatus, { label: string; detail: string }> = {
 
 function DeveloperSettings() {
   const bots = useLiveQuery(listProfiles, [])
+  const settings = useLiveQuery(getSettings, [])
   return (
     <>
+      <Group>
+        <SwitchRow
+          id="theseus"
+          icon={SailboatIcon}
+          title={
+            <span className="flex items-center gap-2">
+              Theseus mode
+              <ExperimentalBadge />
+            </span>
+          }
+          subtitle="Very unstable"
+          checked={Boolean(settings?.theseus)}
+          onCheckedChange={(checked) => saveSettings({ theseus: checked })}
+        />
+      </Group>
       <Group>
         {bots?.map((bot) => (
           <LiveRow key={bot.id} bot={bot} />
@@ -384,7 +403,7 @@ function SwitchRow({
 }: {
   id: string
   icon: LucideIcon
-  title: string
+  title: ReactNode
   subtitle?: string
   checked: boolean
   onCheckedChange: (checked: boolean) => void

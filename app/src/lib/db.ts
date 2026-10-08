@@ -10,6 +10,8 @@ export interface Settings {
   showStats: boolean
   /** Shows the Developer section in Settings (tapping the version five times). */
   developer?: boolean
+  /** Offers Theseus among a project session's modes; a Developer setting, off by default. Local. */
+  theseus?: boolean
   activeProfileId?: string
   /** When sync last finished without an error. */
   syncedAt?: number
