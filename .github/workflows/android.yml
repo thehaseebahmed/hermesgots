@@ -65,11 +65,18 @@ jobs:
         if: env.FIREBASE_GOOGLE_SERVICES != ''
         run: |
           # The secret is the file's JSON, either as is or base64-encoded.
-          if [[ "$FIREBASE_GOOGLE_SERVICES" == \{* ]]; then
-            printf '%s' "$FIREBASE_GOOGLE_SERVICES" > android/app/google-services.json
+          out=android/app/google-services.json
+          printf '%s' "$FIREBASE_GOOGLE_SERVICES" | tr -d '\r' > "$RUNNER_TEMP/firebase.raw"
+          if jq -e . "$RUNNER_TEMP/firebase.raw" > /dev/null 2>&1; then
+            cp "$RUNNER_TEMP/firebase.raw" "$out"
+          elif tr -d ' \n' < "$RUNNER_TEMP/firebase.raw" | base64 --decode > "$out" 2> /dev/null && jq -e . "$out" > /dev/null 2>&1; then
+            :
           else
-            echo "$FIREBASE_GOOGLE_SERVICES" | base64 --decode > android/app/google-services.json
+            rm -f "$out"
+            echo "::error::FIREBASE_GOOGLE_SERVICES is neither the JSON of google-services.json nor its base64 ($(wc -c < "$RUNNER_TEMP/firebase.raw") bytes, first byte $(head -c1 "$RUNNER_TEMP/firebase.raw" | od -An -tx1 | tr -d ' '))"
+            exit 1
           fi
+          rm -f "$RUNNER_TEMP/firebase.raw"
 
       - name: Version
         id: version
