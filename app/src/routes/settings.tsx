@@ -5,6 +5,7 @@ import { Link, Navigate, useParams } from "react-router"
 import {
   ArrowLeftIcon,
   BotIcon,
+  BellIcon,
   CheckIcon,
   TerminalIcon,
   ChevronRightIcon,
@@ -46,8 +47,9 @@ import {
 } from "@/lib/db"
 import { useLiveStatus, type LiveStatus } from "@/lib/live"
 import { useLarge } from "@/lib/media"
-import { setBackGuard } from "@/lib/native"
+import { isNative, setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
+import { disablePush, enablePush, pushAvailable, usePush } from "@/lib/push"
 import { forgetLocalKey, useSyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
 
@@ -158,6 +160,7 @@ function MenuScreen({ className }: { className?: string }) {
           checked={settings?.showStats ?? DEFAULT_SETTINGS.showStats}
           onCheckedChange={(checked) => saveSettings({ showStats: checked })}
         />
+        <NotificationsRow />
       </Group>
       <Group>
         <Row to="data" icon={DatabaseIcon} title="Local data" />
@@ -165,6 +168,40 @@ function MenuScreen({ className }: { className?: string }) {
       </Group>
       <VersionLabel developer={Boolean(settings?.developer)} />
     </Screen>
+  )
+}
+
+function NotificationsRow() {
+  const { permission, on } = usePush()
+  if (!pushAvailable()) return null
+  const toggle = async (checked: boolean) => {
+    try {
+      if (!checked) return await disablePush()
+      if ((await enablePush()) === "denied")
+        toast(
+          isNative
+            ? "Notifications are blocked in system settings"
+            : "Notifications are blocked in your browser",
+        )
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Couldn't turn on notifications")
+    }
+  }
+  return (
+    <SwitchRow
+      id="notifications"
+      icon={BellIcon}
+      title="Notifications"
+      subtitle={
+        permission === "denied"
+          ? isNative
+            ? "Blocked in system settings"
+            : "Blocked in browser settings"
+          : "A session needs you"
+      }
+      checked={on}
+      onCheckedChange={toggle}
+    />
   )
 }
 

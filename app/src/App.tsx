@@ -6,6 +6,7 @@ import { AppShell } from "@/components/app-shell"
 import { useLaunchRestore, useRecordLastChat } from "@/lib/launch"
 import { BotsPage } from "@/routes/bots"
 import { ChatPage } from "@/routes/chat"
+import { OpenSessionPage } from "@/routes/open-session"
 import { CodePage } from "@/routes/code"
 import { ProjectPage } from "@/routes/project"
 import { RoutinesPage } from "@/routes/routines"
@@ -42,6 +43,7 @@ function AppRoutes() {
       <Route element={<AppShell />}>
         <Route index element={<ChatPage />} />
         <Route path="c/:id" element={<ChatPage />} />
+        <Route path="s/:sessionId" element={<OpenSessionPage />} />
         <Route path="code" element={<CodePage />} />
         <Route path="code/:profileId/:projectId" element={<ProjectPage />} />
         <Route path="routines" element={<RoutinesPage />} />
