@@ -11,8 +11,6 @@ on:
     paths:
       - "app/**"
       - ".github/workflows/android.yml"
-  # Builds any branch on demand; when Firebase is set up it also goes to the testers.
-  workflow_dispatch:
 
 concurrency:
   group: android-${{ github.ref }}
@@ -26,7 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      # Fork PRs get no secrets; they fall back to a debug build.
+      # Debug builds are signed with the release key when there is one, so each tester build
+      # updates over the last. Fork PRs get no secrets and use the runner's own debug key.
       KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       FIREBASE_GOOGLE_SERVICES: ${{ secrets.FIREBASE_GOOGLE_SERVICES }}
       FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
@@ -89,23 +88,21 @@ jobs:
           echo "ANDROID_VERSION_CODE=${{ github.run_number }}" >> "$GITHUB_ENV"
           echo "ANDROID_VERSION_NAME=$(node -p 'require("./package.json").version')-$sha" >> "$GITHUB_ENV"
 
-      - name: Build signed release APK
-        if: env.KEYSTORE_BASE64 != ''
+      - name: Build debug APK
         working-directory: app/android
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/release.keystore"
-          echo "$KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
-          ./gradlew assembleRelease --no-daemon
-          rm -f "$ANDROID_KEYSTORE_PATH"
-
-      - name: Build debug APK
-        if: env.KEYSTORE_BASE64 == ''
-        working-directory: app/android
-        run: ./gradlew assembleDebug --no-daemon
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/release.keystore"
+            echo "$KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+          fi
+          status=0
+          ./gradlew assembleDebug --no-daemon || status=$?
+          rm -f "$RUNNER_TEMP/release.keystore"
+          exit $status
 
       - uses: actions/upload-artifact@v7
         with:
@@ -113,9 +110,10 @@ jobs:
           path: app/android/app/build/outputs/apk/*/*.apk
           if-no-files-found: error
 
-      # Pull requests never reach testers, and an unsigned build would not update over a signed one.
+      # Only what lands on main reaches testers, and only with a stable key, or each build
+      # would refuse to install over the last.
       - name: Distribute to testers with Firebase App Distribution
-        if: github.event_name != 'pull_request' && env.KEYSTORE_BASE64 != '' && env.FIREBASE_SERVICE_ACCOUNT != ''
+        if: github.event_name == 'push' && env.KEYSTORE_BASE64 != '' && env.FIREBASE_SERVICE_ACCOUNT != ''
         env:
           FIREBASE_APP_ID: ${{ vars.FIREBASE_APP_ID }}
           FIREBASE_TESTER_GROUPS: ${{ vars.FIREBASE_TESTER_GROUPS || 'testers' }}
@@ -142,7 +140,7 @@ jobs:
           fi
           notes="$RUNNER_TEMP/release-notes.txt"
           { echo "$ANDROID_VERSION_NAME ($REF_NAME)"; echo; git log -1 --format=%B "$GITHUB_SHA"; } > "$notes"
-          apk=$(ls android/app/build/outputs/apk/release/*.apk | head -n1)
+          apk=$(ls android/app/build/outputs/apk/debug/*.apk | head -n1)
           status=0
           npx --yes firebase-tools@15.31.0 appdistribution:distribute "$apk" \
             --app "$app_id" --groups "$FIREBASE_TESTER_GROUPS" --release-notes-file "$notes" || status=$?

@@ -1,0 +1,163 @@
+name: Android release
+
+# Run by hand from the Actions tab, on a tag or on a branch whose head carries one. The tag is
+# the app's version (v1.2.3 or 1.2.3-beta.1).
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: android-release-${{ github.ref }}
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      FIREBASE_GOOGLE_SERVICES: ${{ secrets.FIREBASE_GOOGLE_SERVICES }}
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Version from the tag
+        id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          semver='^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+          if [ "$REF_TYPE" = tag ]; then
+            tag="$REF_NAME"
+          else
+            git fetch --quiet --depth=1 origin '+refs/tags/*:refs/tags/*'
+            tag=$(git tag --points-at HEAD | grep -E "$semver" | sort -V | tail -n1 || true)
+          fi
+          if [ -z "$tag" ]; then
+            echo "::error::$REF_NAME has no version tag on its head commit. Tag it (git tag v1.2.3 && git push origin v1.2.3) or run this on the tag."
+            exit 1
+          fi
+          if ! grep -Eq "$semver" <<< "$tag"; then
+            echo "::error::$tag isn't a version like v1.2.3 or v1.2.3-beta.1"
+            exit 1
+          fi
+          name="${tag#v}"
+          core="${name%%-*}"
+          IFS=. read -r major minor patch <<< "$core"
+          if [ "$minor" -gt 99 ] || [ "$patch" -gt 99 ]; then
+            echo "::error::minor and patch must be 99 or less to fit the version code"
+            exit 1
+          fi
+          # Each release must have a higher version code than the last. A prerelease takes its
+          # trailing number (beta.3 is 3, up to 98) and the release itself 99, so 1.2.3-beta.1 <
+          # 1.2.3-beta.2 < 1.2.3 < 1.2.4-beta.1.
+          if [ "$name" = "$core" ]; then
+            stage=99
+          else
+            stage=$(grep -Eo '[0-9]+$' <<< "${name#*-}" || echo 0)
+            stage=$((10#$stage > 98 ? 98 : 10#$stage))
+          fi
+          code=$((10#$major * 1000000 + 10#$minor * 10000 + 10#$patch * 100 + stage))
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$([ "$name" = "$core" ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
+          echo "ANDROID_VERSION_NAME=$name" >> "$GITHUB_ENV"
+          echo "ANDROID_VERSION_CODE=$code" >> "$GITHUB_ENV"
+          echo "Building $name (version code $code) from $tag"
+
+      - name: Signing key
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::A release needs the ANDROID_KEYSTORE_BASE64 secret (see the README's Android app section)"
+            exit 1
+          fi
+
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm lint
+
+      - name: Build web assets and sync them into the Android project
+        run: pnpm build:android
+        env:
+          VITE_SITE_URL: ${{ vars.MEMENTO_SITE_URL }}
+
+      - name: Firebase config
+        if: env.FIREBASE_GOOGLE_SERVICES != ''
+        run: |
+          # The secret is the file's JSON, either as is or base64-encoded.
+          out=android/app/google-services.json
+          printf '%s' "$FIREBASE_GOOGLE_SERVICES" | tr -d '\r' > "$RUNNER_TEMP/firebase.raw"
+          if jq -e . "$RUNNER_TEMP/firebase.raw" > /dev/null 2>&1; then
+            cp "$RUNNER_TEMP/firebase.raw" "$out"
+          elif tr -d ' \n' < "$RUNNER_TEMP/firebase.raw" | base64 --decode > "$out" 2> /dev/null && jq -e . "$out" > /dev/null 2>&1; then
+            :
+          else
+            rm -f "$out"
+            echo "::error::FIREBASE_GOOGLE_SERVICES is neither the JSON of google-services.json nor its base64 ($(wc -c < "$RUNNER_TEMP/firebase.raw") bytes, first byte $(head -c1 "$RUNNER_TEMP/firebase.raw" | od -An -tx1 | tr -d ' '))"
+            exit 1
+          fi
+          rm -f "$RUNNER_TEMP/firebase.raw"
+
+      - name: Build signed release APK
+        working-directory: app/android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/release.keystore"
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+          status=0
+          ./gradlew assembleRelease --no-daemon || status=$?
+          rm -f "$ANDROID_KEYSTORE_PATH"
+          exit $status
+
+      - name: Name the APK
+        id: apk
+        run: |
+          out="$RUNNER_TEMP/memento-${{ steps.version.outputs.name }}.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "$out"
+          echo "path=$out" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: memento-${{ steps.version.outputs.name }}
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
+
+      - name: Attach to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+          APK: ${{ steps.apk.outputs.path }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" "$APK" --clobber
+          else
+            flags=(--generate-notes --verify-tag)
+            [ "$PRERELEASE" = true ] && flags+=(--prerelease)
+            gh release create "$TAG" "$APK" --title "$TAG" "${flags[@]}"
+          fi

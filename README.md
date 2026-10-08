@@ -100,7 +100,10 @@ The function stores data in Netlify Blobs (store `memento-sync`), which needs no
 
 ## Android app
 
-`android/` wraps this same app with [Capacitor](https://capacitorjs.com). The **Android** workflow (`.github/workflows/android.yml`) builds a signed release APK on every push to `main` and every push to a pull request into `main`, and attaches it to the run as an artifact (`memento-<commit>`).
+`android/` wraps this same app with [Capacitor](https://capacitorjs.com). Two workflows build it:
+
+- **Android** (`.github/workflows/android.yml`) builds a debug APK on every push to `main` and every push to a pull request into `main`, and attaches it to the run as an artifact (`memento-<commit>`). Builds from `main` also go to testers (below).
+- **Android release** (`.github/workflows/android-release.yml`) builds the signed release APK. It only runs by hand, and only on a version tag, which becomes the app's version: tag a commit (`git tag v0.1.0-beta && git push origin v0.1.0-beta`), then pick the tag (or a branch whose head carries it) under **Actions → Android release → Run workflow**. The APK is attached to the run and to the tag's GitHub release, which is created as a prerelease when the version has a suffix like `-beta`.
 
 One-time setup:
 
@@ -116,11 +119,11 @@ One-time setup:
    - variable: `MEMENTO_SITE_URL`, your Netlify deploy (e.g. `https://<your-site>.netlify.app`). The app signs in and syncs through it. Leave it unset to build without sync.
 3. Add `https://localhost` (the app's origin) to `API_SERVER_CORS_ORIGINS` on each Hermes server.
 
-Without the keystore secret (e.g. pull requests from forks), the workflow uploads a debug APK instead.
+Debug builds are signed with the same key when the secret is there, so each one installs over the last; without it (e.g. pull requests from forks) they use a throwaway debug key. A release won't build without the key. A release's version code comes from its tag and is always higher than a debug build's, so a release installs over a debug build but not the other way round.
 
 ### Testers (Firebase App Distribution)
 
-Pushes to `main`, and runs started by hand from the Actions tab (**Android → Run workflow**, on any branch), also send the signed APK to testers through [Firebase App Distribution](https://firebase.google.com/docs/app-distribution). Testers get an email for each build and install it with the App Tester app. Pull requests are never distributed. Until the secret below exists, the step is skipped.
+Pushes to `main` also send the debug APK to testers through [Firebase App Distribution](https://firebase.google.com/docs/app-distribution). Testers get an email for each build and install it with the App Tester app. Pull requests are never distributed. Until the secret below exists, the step is skipped.
 
 One-time setup, in the Firebase project that already holds the `app.memento` Android app (the one `FIREBASE_GOOGLE_SERVICES` comes from):
 
@@ -131,7 +134,7 @@ One-time setup, in the Firebase project that already holds the `app.memento` And
    - variable (optional): `FIREBASE_TESTER_GROUPS`, the group aliases to send to, comma-separated (default `testers`).
    - variable (optional): `FIREBASE_APP_ID`, the app's id (`1:…:android:…`). By default it's read from `FIREBASE_GOOGLE_SERVICES`.
 
-Each build's release notes are its version and the commit message. Distribution needs the keystore secrets too, since testers can only update over a build signed with the same key.
+Each build's release notes are its version and the commit message. Distribution needs the keystore secrets too, since testers can only update over a build signed with the same key. Releases aren't distributed this way; they're on GitHub.
 
 In the app:
 

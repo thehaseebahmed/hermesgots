@@ -29,6 +29,10 @@ android {
         }
     }
     buildTypes {
+        debug {
+            // CI signs tester builds with the release key so each one installs over the last.
+            if (System.getenv("ANDROID_KEYSTORE_PATH")) signingConfig signingConfigs.release
+        }
         release {
             if (System.getenv("ANDROID_KEYSTORE_PATH")) signingConfig signingConfigs.release
             minifyEnabled false
