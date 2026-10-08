@@ -212,9 +212,28 @@ type Push = typeof import("@capacitor/push-notifications").PushNotifications
 
 let nativeListening = false
 let registeredToken: string | undefined
+let pendingToken: { resolve: (token: string) => void; reject: (error: Error) => void } | undefined
 
 async function plugin(): Promise<Push> {
   return (await import("@capacitor/push-notifications")).PushNotifications
+}
+
+/** A native call that never answers (or fails) becomes an error that names the step, for a toast. */
+function step<T>(what: string, promise: Promise<T>, ms = 15_000): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${what} didn't answer`)), ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        const reason = error instanceof Error ? error.message : String(error ?? "")
+        reject(new Error(reason ? `${what}: ${reason}` : `${what} failed`))
+      },
+    )
+  })
 }
 
 async function sendToken(device: string, token: string) {
@@ -246,9 +265,14 @@ async function listen(push: Push) {
   if (nativeListening) return
   nativeListening = true
   await push.addListener("registration", ({ value }) => {
+    // Turning the switch on waits for this and sends the token itself, so a failure reaches a toast.
+    if (pendingToken) return pendingToken.resolve(value)
     void getSettings().then(({ fcm }) => {
       if (fcm?.on && value !== registeredToken) void sendToken(fcm.device, value).catch(() => {})
     })
+  })
+  await push.addListener("registrationError", ({ error }) => {
+    pendingToken?.reject(new Error(`Firebase: ${error || "registration failed"}`))
   })
   await push.addListener("pushNotificationActionPerformed", ({ notification }) => {
     const id = notification.data?.session_id
@@ -266,10 +290,10 @@ async function listen(push: Push) {
 }
 
 async function enableNative(): Promise<PushPermission> {
-  const push = await plugin()
-  let status = await push.checkPermissions()
+  const push = await step("Loading notifications", plugin())
+  let status = await step("Checking the permission", push.checkPermissions())
   if (status.receive === "prompt" || status.receive === "prompt-with-rationale") {
-    status = await push.requestPermissions()
+    status = await step("The permission dialog", push.requestPermissions(), 60_000)
   }
   if (status.receive !== "granted") return "denied"
   const settings = await getSettings()
@@ -277,9 +301,21 @@ async function enableNative(): Promise<PushPermission> {
   await saveSettings({ fcm: { device, on: true } })
   try {
     await listen(push)
-    await push.register()
+    const token = new Promise<string>((resolve, reject) => {
+      pendingToken = { resolve, reject }
+    })
+    // Rejected later by a timeout or a failed register(), and read below only when it gets there.
+    token.catch(() => {})
+    await step("Registering with Firebase", push.register())
+    await sendToken(
+      device,
+      await step("Firebase's token", token).finally(() => {
+        pendingToken = undefined
+      }),
+    )
   } catch (error) {
-    // Without Firebase in this build the switch would otherwise read on while nothing can arrive.
+    pendingToken = undefined
+    // Otherwise the switch would read on while nothing can arrive.
     await saveSettings({ fcm: { device, on: false } })
     throw error
   }

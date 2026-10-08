@@ -169,18 +169,26 @@ function MenuScreen({ className }: { className?: string }) {
 
 function NotificationsRow() {
   const { permission, on } = usePush()
+  const [busy, setBusy] = useState(false)
   if (!pushAvailable()) return null
   const toggle = async (checked: boolean) => {
+    setBusy(true)
     try {
       if (!checked) return await disablePush()
       if ((await enablePush()) === "denied")
-        toast(
+        toast.error(
           isNative
             ? "Notifications are blocked in system settings"
             : "Notifications are blocked in your browser",
         )
     } catch (error) {
-      toast(error instanceof Error ? error.message : "Couldn't turn on notifications")
+      toast.error(
+        error instanceof Error && error.message
+          ? `Couldn't turn on notifications. ${error.message}`
+          : "Couldn't turn on notifications",
+      )
+    } finally {
+      setBusy(false)
     }
   }
   return (
@@ -196,6 +204,7 @@ function NotificationsRow() {
           : "A session needs you"
       }
       checked={on}
+      disabled={busy}
       onCheckedChange={toggle}
     />
   )
@@ -392,6 +401,7 @@ function SwitchRow({
   title,
   subtitle,
   checked,
+  disabled,
   onCheckedChange,
 }: {
   id: string
@@ -399,13 +409,14 @@ function SwitchRow({
   title: ReactNode
   subtitle?: string
   checked: boolean
+  disabled?: boolean
   onCheckedChange: (checked: boolean) => void
 }) {
   return (
     <label htmlFor={id} className={cn(rowClass, "cursor-pointer")}>
       <Icon className="size-5 shrink-0 text-muted-foreground" />
       <RowText title={title} subtitle={subtitle} />
-      <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} />
+      <Switch id={id} checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} />
     </label>
   )
 }
