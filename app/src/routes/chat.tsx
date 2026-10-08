@@ -74,6 +74,7 @@ import {
 import { describeActivity } from "@/lib/format"
 import { listProjects, type HermesProject } from "@/lib/hermes"
 import { loadEarlierHistory, reconcileHistory } from "@/lib/history"
+import { SAFETY_MS, useLive, watchChat } from "@/lib/live"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { syncContextWindow } from "@/lib/models"
@@ -261,6 +262,9 @@ export function ChatPage() {
   // when this tab comes back, and now and then while it's on screen.
   const updatedAt = conversation?.updatedAt
   const hasMessages = (messages?.length ?? 0) > 0
+  // A server that streams its changes says when this chat's session moves; the timer is a net.
+  const streamOpen = useLive(profile)
+  useEffect(() => (id ? watchChat(id) : undefined), [id])
   useEffect(() => {
     if (!id || !hasMessages) return
     const catchUp = () => {
@@ -269,7 +273,7 @@ export function ChatPage() {
       reconcileHistory(id).catch(() => undefined)
     }
     catchUp()
-    const timer = window.setInterval(catchUp, CATCH_UP_MS)
+    const timer = window.setInterval(catchUp, streamOpen ? SAFETY_MS : CATCH_UP_MS)
     document.addEventListener("visibilitychange", catchUp)
     window.addEventListener("online", catchUp)
     return () => {
@@ -277,7 +281,7 @@ export function ChatPage() {
       document.removeEventListener("visibilitychange", catchUp)
       window.removeEventListener("online", catchUp)
     }
-  }, [id, hasMessages, updatedAt])
+  }, [id, hasMessages, updatedAt, streamOpen])
 
   // A session not started yet names the repos it will work in; the project screen hands its project
   // over, and it's read again here regardless.

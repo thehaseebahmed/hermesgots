@@ -6,7 +6,7 @@ device, keep its chat list on the server (``chats.py``), report each chat's cont
 (``context.py``) and the agent's todo list (``todos.py``), list and create Hermes Projects (``projects.py``) with GitHub repos cloned into
 them in the background (``clones.py``, ``github.py``), add and remove a project's repos (``repos.py``), run project sessions in their own worktrees with a permission mode and save their plans
 (``sessions.py``), let the agent push and open its pull requests, close them when a session is dropped (``ship.py``) and resolve a session once its pull request merges (``merges.py``), let the agent ask the user questions with Hermes's ``clarify`` tool (``clarify.py``) and
-label its chats as Memento's, and links the profile to a Memento account (``link.py``). The dashboard half lives in ``dashboard/``.
+label its chats as Memento's, tell the app what changed as it happens (``events.py``, ``stream.py``), and links the profile to a Memento account (``link.py``). The dashboard half lives in ``dashboard/``.
 """
 
 from __future__ import annotations
@@ -17,7 +17,24 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-from . import attachments, chats, clarify, cleanup, clones, context, github, link, merges, projects, repos, sessions, ship, todos
+from . import (
+    attachments,
+    chats,
+    clarify,
+    cleanup,
+    clones,
+    context,
+    events,
+    github,
+    link,
+    merges,
+    projects,
+    repos,
+    sessions,
+    ship,
+    stream,
+    todos,
+)
 from .store import db_path
 
 logger = logging.getLogger(__name__)
@@ -207,6 +224,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "pr_tool",
                     "close",
                     "merge_resolve",
+                    "events",
                 ],
                 "clarify": asks,
                 "todo_tool": todo_tool,
@@ -422,6 +440,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), 400)
         if not found:
             return _error(web, "No such project.", 404)
+        events.note("projects", None, store_path(), True)
         return web.json_response({"object": "memento.project", "id": request.match_info["project_id"]})
 
     async def delete_project(request: "web.Request") -> "web.Response":
@@ -442,6 +461,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "This Hermes version has no Projects.", 501)
         if not found:
             return _error(web, "No such project.", 404)
+        events.note("projects", None, store_path(), True)
         return web.json_response({"object": "memento.project", "removed": True})
 
     async def retry_project(request: "web.Request") -> "web.Response":
@@ -677,6 +697,22 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             {"object": "memento.runs", "sessions": live, "run_ids": run_ids, "waiting": waiting}
         )
 
+    async def stream_events(request: "web.Request") -> "web.StreamResponse":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        since = request.query.get("since")
+        try:
+            cursor = int(since) if since else None
+        except ValueError:
+            return _error(web, "since must be a number", 400)
+        path = store_path()
+        open_db = getattr(adapter, "_ensure_session_db_async", None)
+        db = await open_db() if callable(open_db) else None
+        return await stream.serve(
+            web, request, stream.sse_headers(adapter, request), path, str(path), db, cursor, VERSION
+        )
+
     app.router.add_get(f"{PREFIX}/info", info)
     app.router.add_get(f"{PREFIX}/chats", list_chats)
     app.router.add_post(f"{PREFIX}/chats", merge_chats)
@@ -743,6 +779,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/attachments", upload_attachment)
     app.router.add_get(f"{PREFIX}/runs/live", live_runs)
+    app.router.add_get(f"{PREFIX}/events", stream_events)
     app.router.add_post(f"{PREFIX}/runs/{{run_id}}/clarify", answer_clarify)
     mirror_for_profiles(app, web)
     logger.info("memento: serving %s on the API server", PREFIX)
@@ -757,6 +794,14 @@ def register(ctx) -> None:
         register_hook("on_session_start", sessions.started)
         register_hook("post_llm_call", sessions.after_llm)
         register_hook("on_session_end", sessions.after_run)
+        # After the hooks above, so a turn's plan is pending by the time its end is announced.
+        register_hook("pre_llm_call", events.on_turn_start)
+        register_hook("post_api_request", events.on_model_call)
+        register_hook("pre_tool_call", events.on_tool)
+        register_hook("post_tool_call", events.on_tool)
+        register_hook("pre_approval_request", events.on_approval)
+        register_hook("post_approval_response", events.on_approval)
+        register_hook("on_session_end", events.on_turn_end)
     register_cli = getattr(ctx, "register_cli_command", None)
     if register_cli is not None:
         register_cli(

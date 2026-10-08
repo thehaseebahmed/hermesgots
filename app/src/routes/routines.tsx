@@ -35,6 +35,7 @@ import {
   type CronState,
 } from "@/lib/cron"
 import { listEnabledProfiles, type Profile } from "@/lib/db"
+import { SAFETY_MS, useChanges, useLive } from "@/lib/live"
 import { formatDuration, formatRelative } from "@/lib/format"
 import { describeSchedule } from "@/lib/schedule"
 import { HermesError, INSTALL_PLUGIN, controlCronJob, type CronJob } from "@/lib/hermes"
@@ -47,12 +48,13 @@ export function RoutinesPage() {
   const openDrawer = useOpenDrawer()
   const profiles = useLiveQuery(listEnabledProfiles, [])
   const [tick, setTick] = useState(0)
+  const [pollTick, setPollTick] = useState(0)
   const [collapsed, setOpen] = useCollapsedBots()
   const refresh = useCallback(() => setTick((n) => n + 1), [])
 
   useEffect(() => {
     const timer = setInterval(() => {
-      if (document.visibilityState === "visible") refresh()
+      if (document.visibilityState === "visible") setPollTick((n) => n + 1)
     }, REFRESH_MS)
     const onVisible = () => document.visibilityState === "visible" && refresh()
     document.addEventListener("visibilitychange", onVisible)
@@ -94,6 +96,7 @@ export function RoutinesPage() {
             key={profile.id}
             profile={profile}
             tick={tick}
+            pollTick={pollTick}
             open={!collapsed.has(profile.id)}
             onOpenChange={(open) => setOpen(profile.id, open)}
           />
@@ -165,11 +168,14 @@ function PluginMissing() {
 function BotRoutines({
   profile,
   tick,
+  pollTick,
   open,
   onOpenChange,
 }: {
   profile: Profile
   tick: number
+  /** Timed refreshes, which a bot whose server streams its changes needs far less of. */
+  pollTick: number
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
@@ -178,6 +184,9 @@ function BotRoutines({
   const [error, setError] = useState<string | null>(null)
   const [pluginMissing, setPluginMissing] = useState(false)
   const [ownTick, setOwnTick] = useState(0)
+  const live = useLive(profile)
+  const cronTick = useChanges("cron", profile)
+  const timedTick = live ? Math.floor(pollTick / (SAFETY_MS / REFRESH_MS)) : pollTick
   const jobs = cron?.jobs
   const failing = cron && !error ? failingCount(cron) : 0
 
@@ -199,7 +208,7 @@ function BotRoutines({
     return () => {
       cancelled = true
     }
-  }, [profile, tick, ownTick])
+  }, [profile, tick, ownTick, timedTick, cronTick])
 
   const resync = useCallback(() => setOwnTick((n) => n + 1), [])
 

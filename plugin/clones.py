@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import github, projects
+from . import events, github, projects
 from .store import connect, db_path
 
 logger = logging.getLogger(__name__)
@@ -84,14 +84,18 @@ def _update(hermes_home: Path, slug: str, **fields: Any) -> None:
         conn.execute(f"UPDATE project_clones SET {assignments} WHERE slug = ?", (*fields.values(), slug))
     finally:
         conn.close()
+    events.note("projects", None, db_path(hermes_home), True)
 
 
 def _delete(hermes_home: Path, slug: str) -> bool:
     conn = connect(db_path(hermes_home))
     try:
-        return conn.execute("DELETE FROM project_clones WHERE slug = ?", (slug,)).rowcount > 0
+        gone = conn.execute("DELETE FROM project_clones WHERE slug = ?", (slug,)).rowcount > 0
     finally:
         conn.close()
+    if gone:
+        events.note("projects", None, db_path(hermes_home), True)
+    return gone
 
 
 def view(hermes_home: Path, clone: Dict[str, Any]) -> Dict[str, Any]:
@@ -156,6 +160,7 @@ def start(hermes_home: Path, name: Any, description: Any, repos: Any) -> Dict[st
         raise
     finally:
         conn.close()
+    events.note("projects", None, db_path(hermes_home), True)
     return view(hermes_home, _get(hermes_home, slug))
 
 

@@ -1,14 +1,15 @@
 """``$HERMES_HOME/memento/memento.db``: the chat list (``chats.py``), context use (``context.py``) and
 project sessions (``sessions.py``),
 projects still cloning (``clones.py``), repos being added to or removed from a project (``repos.py``),
-pinned projects (``projects.py``) and merged pull requests (``merges.py``)."""
+pinned projects (``projects.py``), merged pull requests (``merges.py``) and recent changes for the
+app's live stream (``events.py``)."""
 
 from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -93,6 +94,15 @@ def connect(path: Path) -> sqlite3.Connection:
                    repo TEXT NOT NULL,
                    number INTEGER NOT NULL,
                    PRIMARY KEY (session_id, repo, number)
+               )"""
+        )
+        # v9: what changed lately, for the app's live stream.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS events (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   at INTEGER NOT NULL,
+                   kind TEXT NOT NULL,
+                   session_id TEXT
                )"""
         )
         # v4: a session has a worktree in every repo of its project. v5: its newest plan file.

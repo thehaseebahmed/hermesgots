@@ -35,6 +35,7 @@ import {
 import { attachmentsText, wireContent } from "@/lib/attachments"
 import { refreshContext } from "@/lib/context"
 import { liveTurn, patchStats } from "@/lib/history"
+import { isLive } from "@/lib/live"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { randomId } from "@/lib/utils"
 import { ensureSessionWorkspace, refreshPrs, refreshWorkspace } from "@/lib/workspace"
@@ -75,7 +76,11 @@ function titleFrom(text: string) {
 /** Swaps the first-line title for the one Hermes generated, unless the user renamed the chat. */
 async function syncTitle(conversationId: string, config: HermesConfig, sessionId: string) {
   for (const delay of TITLE_CHECKS_MS) {
-    if (delay) await new Promise((resolve) => window.setTimeout(resolve, delay))
+    if (delay) {
+      // A server that streams its changes says when the title lands.
+      if (isLive(config)) return
+      await new Promise((resolve) => window.setTimeout(resolve, delay))
+    }
     const title = await getSessionTitle(config, sessionId)
     const conversation = await db.conversations.get(conversationId)
     if (!conversation || conversation.titleEdited) return

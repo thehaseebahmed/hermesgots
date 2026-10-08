@@ -12,6 +12,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict
 
+from . import events
 from .store import connect
 
 MAX_ID_LENGTH = 256
@@ -70,6 +71,7 @@ def merge(path: Path, chats: Any) -> Dict[str, Dict[str, Any]]:
     conn = connect(path)
     try:
         conn.execute("BEGIN IMMEDIATE")
+        before = conn.total_changes
         conn.executemany(
             """INSERT INTO chats (id, at, deleted, value) VALUES (?, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET
@@ -77,8 +79,13 @@ def merge(path: Path, chats: Any) -> Dict[str, Dict[str, Any]]:
                WHERE excluded.at > chats.at""",
             rows,
         )
+        changed = conn.total_changes > before
         records = _records(conn)
         conn.execute("COMMIT")
+        # Only a merge that changed something is news: two devices merging the same list would
+        # otherwise wake each other forever.
+        if changed:
+            events.note("chats", None, path, True)
         return records
     except BaseException:
         if conn.in_transaction:

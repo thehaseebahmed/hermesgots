@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import github
+from . import events, github
 from .store import connect, db_path
 
 logger = logging.getLogger(__name__)
@@ -64,6 +64,7 @@ def _put(hermes_home: Path, project_id: str, repo: str, path: str, action: str, 
         )
     finally:
         conn.close()
+    events.note("projects", None, db_path(hermes_home), True)
 
 
 def _set(hermes_home: Path, project_id: str, repo: str, status: str, error: Optional[str]) -> None:
@@ -75,6 +76,7 @@ def _set(hermes_home: Path, project_id: str, repo: str, status: str, error: Opti
         )
     finally:
         conn.close()
+    events.note("projects", None, db_path(hermes_home), True)
 
 
 def _drop(hermes_home: Path, project_id: str, repo: Optional[str] = None) -> None:
@@ -86,6 +88,7 @@ def _drop(hermes_home: Path, project_id: str, repo: Optional[str] = None) -> Non
             conn.execute("DELETE FROM project_repos WHERE project_id = ? AND repo = ?", (project_id, repo))
     finally:
         conn.close()
+    events.note("projects", None, db_path(hermes_home), True)
 
 
 def pending(hermes_home: Path) -> Dict[str, List[Dict[str, Any]]]:
