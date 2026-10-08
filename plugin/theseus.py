@@ -45,7 +45,7 @@ INSTRUCTIONS = """This session is a Theseus run: the user decides, you build in 
 How it works on this host:
 - Work only in your worktree. Start the run there with `theseus init`. The user sees it in Memento and approves the plan, the checkpoints and each checkpoint there. Never run `theseus serve`: Memento serves it.
 - Settle requirements with the user in chat, asking with the clarify tool. After that nobody answers for the user, so wait for them with `theseus wait --timeout 120` and run it again each time it times out.
-- Gates 2 and 3 are done by the theseus_review tool, which asks another model and records its verdict itself. Call it once per reviewer the run needs (`a`, `b`; `look`, `behave` for visual), and never run `theseus record ... review` or `visual --reviewer` yourself. `visual --skip` and `--carry` are still yours to record.
+- Reviews are done by the theseus_review tool, which asks another model and records its verdict itself. Call it with gate `coverage` once the checkpoints are loaded (the user can't approve them until it is clean; on findings a fresh planner revises the list, you load it again and call it again), then once per reviewer a checkpoint needs (`a`, `b`; `look`, `behave` for visual). Never run `theseus coverage --verdict`, `theseus record ... review` or `visual --reviewer` yourself. `visual --skip` and `--carry` are still yours to record.
 - Everything runs in Auto: you are never asked to approve a command, and only the user approves checkpoints.
 - When the user confirms the run is complete, ship it with open_pull_request."""
 
@@ -54,6 +54,7 @@ THESEUS_BLOCK = (
     "Call it for the gate and reviewer instead."
 )
 _MANUAL_RECORD = re.compile(r"theseus(?:\.js)?\s+record\s+\S+\s+(?:review|visual)\b")
+_MANUAL_COVERAGE = re.compile(r"theseus(?:\.js)?\s+coverage\b[^|;&]*--(?:verdict|findings)\b")
 
 ACTIONS = {
     "confirm_plan": "/api/approve-implementation-plan",
@@ -197,7 +198,9 @@ def light(cwd: str) -> Optional[Dict[str, Any]]:
     base = _run_dir(cwd) / "current"
     try:
         run = json.loads((base / "run.json").read_text())
-        checkpoints = json.loads((base / "checkpoints.json").read_text()).get("checkpoints") or []
+        saved = json.loads((base / "checkpoints.json").read_text())
+        checkpoints = saved.get("checkpoints") or []
+        coverage = saved.get("coverage")
     except (OSError, ValueError, AttributeError):
         return None
     if not isinstance(run, dict):
@@ -206,7 +209,11 @@ def light(cwd: str) -> Optional[Dict[str, Any]]:
         run["plan"] = run["brief"]
     if run.get("planRequired") is None and run.get("briefRequired") is not None:
         run["planRequired"] = run["briefRequired"]
-    return {"run": run, "checkpoints": checkpoints if isinstance(checkpoints, list) else []}
+    return {
+        "run": run,
+        "checkpoints": checkpoints if isinstance(checkpoints, list) else [],
+        "review": coverage,
+    }
 
 
 def _forget(cwd: str) -> None:
@@ -238,8 +245,27 @@ def stage(snap: Optional[Dict[str, Any]]) -> str:
     if any(c.get("status") == "awaiting-approval" for c in active):
         return "approval"
     if not active and any(c.get("status") == "pending" and not c.get("approved") for c in checkpoints):
-        return "checkpoints"
+        # The user can't approve the list until the coverage review is clean, so until then the
+        # agent is still planning (a reviewer checks it, a planner revises it).
+        return "checkpoints" if _coverage_clean(snap) else "planning"
     return "building"
+
+
+def _coverage_clean(snap: Dict[str, Any]) -> bool:
+    """Whether the planned checkpoints may be approved. The full snapshot says so itself; from the
+    files alone (no process) it's the review's newest verdict, which can't tell a list reloaded
+    after a pass from a current one (the skill still refuses that approval, with its own reason)."""
+    full = snap.get("coverage")
+    if isinstance(full, dict) and full.get("state"):
+        return full["state"] in ("pass", "off")
+    run = snap.get("run") or {}
+    planned = [c for c in snap.get("checkpoints") or [] if c.get("origin") == "plan"]
+    if (run.get("plan") or {}).get("status") != "confirmed" or not planned:
+        return True
+    if not any(not c.get("approved") for c in planned):
+        return True
+    verdict = ((snap.get("review") or {}).get("reviewers") or {}).get("coverage")
+    return isinstance(verdict, dict) and verdict.get("findings") == 0
 
 
 def waiting_stage(record: Dict[str, Any]) -> Optional[str]:
@@ -437,6 +463,22 @@ def _gather(cwd: str, snap: Dict[str, Any], cp: str, gate: str, reviewer: str, s
     return parts
 
 
+def _coverage_parts(cwd: str, snap: Dict[str, Any]) -> List[Any]:
+    """What the coverage reviewer is given: the confirmed plan and the planned checkpoints, as the
+    skill prints them, and the findings of its earlier rounds."""
+    given = _cli(cwd, "coverage")
+    if given.returncode != 0:
+        raise TheseusError((given.stderr or given.stdout).strip() or "Theseus has nothing to review yet.", 409)
+    parts = ["Coverage review of the planned checkpoints against the confirmed plan.\n\n" + given.stdout[:MAX_CONTEXT_CHARS]]
+    history = ((snap.get("coverage") or {}).get("evidence") or {}).get("history") or []
+    if history and history[-1].get("items"):
+        parts.append(
+            "## Your previous findings\n"
+            + "\n".join(f"{i + 1}. {item}" for i, item in enumerate(history[-1]["items"]))
+        )
+    return parts
+
+
 def _previous_findings(snap: Dict[str, Any], cp: str, reviewer: str) -> str:
     for entry in snap.get("checkpoints") or []:
         if entry.get("id") != cp:
@@ -489,16 +531,20 @@ def _ask(model: Dict[str, Optional[str]], parts: List[Any], system: str) -> Any:
 
 def review(cwd: str, gate: str, cp: str, reviewer: str, models: Dict[str, Any], since: bool = False) -> Dict[str, Any]:
     """Runs one reviewer: asks its model, saves the reply and records it as a model review."""
-    if gate not in GATES or reviewer not in GATES[gate]:
+    coverage = gate == "coverage"
+    if coverage:
+        reviewer = "coverage"
+    elif gate not in GATES or reviewer not in GATES[gate]:
         raise TheseusError(f"{gate} reviewers are {', '.join(GATES[gate]) if gate in GATES else 'unknown'}.", 400)
     snap = state(cwd, fresh=True)
     if not snap:
         raise TheseusError("This session has no Theseus run yet. Start it with theseus init.", 409)
     brief = (SKILL / "reviewer.md").read_text()
-    chosen = (models.get(gate) or [])
-    slot = _slot(gate, reviewer)
+    # The coverage review is one reviewer; it runs on the first code reviewer's model.
+    chosen = models.get("review" if coverage else gate) or []
+    slot = 0 if coverage else _slot(gate, reviewer)
     model = chosen[slot] if slot < len(chosen) else {}
-    parts = _gather(cwd, snap, cp, gate, reviewer, since)
+    parts = _coverage_parts(cwd, snap) if coverage else _gather(cwd, snap, cp, gate, reviewer, since)
     folder = _run_dir(cwd)
     reply = ""
     for attempt in range(2):
@@ -509,12 +555,12 @@ def review(cwd: str, gate: str, cp: str, reviewer: str, models: Dict[str, Any], 
         result = _ask(model, [*parts, *retry], brief)
         reply = (getattr(result, "text", "") or "").strip()
         via = "/".join(x for x in (getattr(result, "provider", None), getattr(result, "model", None)) if x) or "model"
-        file = folder / f"review-{cp}-{reviewer}.txt"
+        file = folder / ("review-coverage.txt" if coverage else f"review-{cp}-{reviewer}.txt")
         file.write_text(reply)
-        done = _cli(
-            cwd, "record", cp, gate, "--reviewer", reviewer, "--verdict", str(file),
-            "--isolation", "model", "--via", via,
-        )
+        command = (
+            ["coverage"] if coverage else ["record", cp, gate, "--reviewer", reviewer]
+        ) + ["--verdict", str(file), "--isolation", "model", "--via", via]
+        done = _cli(cwd, *command)
         if done.returncode == 0:
             _forget(cwd)
             return {"recorded": True, "via": via, "reply": reply, "output": done.stdout.strip()}
@@ -529,22 +575,24 @@ def review(cwd: str, gate: str, cp: str, reviewer: str, models: Dict[str, Any], 
 SCHEMA = {
     "name": TOOL,
     "description": (
-        "Theseus gates 2 and 3: asks another model to review a checkpoint, saves its reply and "
-        "records the verdict. Code review (gate 3) takes reviewer a or b; visual review (gate 2) "
-        "takes look (appearance) or behave (interaction). Returns the reviewer's verdict and findings."
+        "Theseus reviews: asks another model, saves its reply and records the verdict. Gate "
+        "coverage checks the planned checkpoints against the confirmed plan (no checkpoint or "
+        "reviewer needed; the user can't approve the list until it is clean). Code review (gate 3) "
+        "takes reviewer a or b; visual review (gate 2) takes look (appearance) or behave "
+        "(interaction). Returns the reviewer's verdict and findings."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "checkpoint": {"type": "string", "description": "The checkpoint id, e.g. CP1."},
-            "gate": {"type": "string", "enum": ["review", "visual"]},
+            "gate": {"type": "string", "enum": ["coverage", "review", "visual"]},
             "reviewer": {"type": "string", "enum": ["a", "b", "look", "behave"]},
             "since_review": {
                 "type": "boolean",
                 "description": "Re-review: give the reviewer only the changes since the last review.",
             },
         },
-        "required": ["checkpoint", "gate", "reviewer"],
+        "required": ["gate"],
     },
 }
 
@@ -567,8 +615,8 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
         result = review(
             record["path"],
             str(args.get("gate")),
-            str(args.get("checkpoint")),
-            str(args.get("reviewer")),
+            str(args.get("checkpoint") or ""),
+            str(args.get("reviewer") or ""),
             record.get("theseus", {}).get("models") or {},
             bool(args.get("since_review")),
         )
@@ -629,9 +677,8 @@ def wire(adapter: Any) -> bool:
 def blocks_record(tool: Any, args: Dict[str, Any]) -> bool:
     """Whether a terminal call records a reviewer's verdict by hand, which only the tool may do."""
     command = args.get("command") if isinstance(args, dict) else None
-    return (
-        tool == "terminal"
-        and isinstance(command, str)
-        and bool(_MANUAL_RECORD.search(command))
-        and "--reviewer" in command
-    )
+    if tool != "terminal" or not isinstance(command, str):
+        return False
+    if _MANUAL_COVERAGE.search(command):
+        return True
+    return bool(_MANUAL_RECORD.search(command)) and "--reviewer" in command

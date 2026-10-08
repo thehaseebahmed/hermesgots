@@ -287,7 +287,7 @@ const PR_INSTRUCTIONS = "When the work is done and you've checked it, ship it yo
 // Theseus runs in Auto with the skill's gates on top, and keeps its mode for the whole session.
 const MODES = ["accept_edits", "auto", "plan", "theseus"]
 // The plugin's Theseus instructions (theseus.INSTRUCTIONS), shortened: the paths are the host's.
-const THESEUS_INSTRUCTIONS = "This session is a Theseus run: the user decides, you build in small checkpoints that each pass four gates. Follow the tha-theseus skill. Gates 2 and 3 are done by the theseus_review tool, which asks another model and records its verdict itself."
+const THESEUS_INSTRUCTIONS = "This session is a Theseus run: the user decides, you build in small checkpoints that each pass four gates. Follow the tha-theseus skill. Reviews (coverage, gates 2 and 3) are done by the theseus_review tool, which asks another model and records its verdict itself."
 // MOCK_THESEUS=<stage> starts every Theseus run there; MOCK_THESEUS=unavailable says the host has no Node.
 let THESEUS_START = process.env.MOCK_THESEUS ?? "discovery"
 const theseusRuns = new Map()
