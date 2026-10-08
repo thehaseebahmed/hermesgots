@@ -34,7 +34,7 @@ from .store import connect
 
 logger = logging.getLogger(__name__)
 
-MODES = ("accept_edits", "auto", "plan")
+MODES = ("accept_edits", "auto", "plan", "theseus")
 FIELDS = (
     "session_id",
     "project_id",
@@ -46,6 +46,7 @@ FIELDS = (
     "created_at",
     "repos",
     "plan_file",
+    "theseus",
 )
 REPO_FIELDS = ("name", "repo_root", "path", "branch")
 MAX_PARENT_HOPS = 5
@@ -130,6 +131,11 @@ class WorkspaceError(Exception):
 def _record(row: Any) -> Dict[str, Any]:
     record = dict(zip(FIELDS, row))
     record["plan_pending"] = bool(record["plan_pending"])
+    try:
+        settings = json.loads(record["theseus"]) if record["theseus"] else {}
+    except ValueError:
+        settings = {}
+    record["theseus"] = settings if isinstance(settings, dict) else {}
     try:
         repos = json.loads(record["repos"]) if record["repos"] else []
     except ValueError:
@@ -321,7 +327,7 @@ def ensure(
     if not isinstance(project_id, (str, int)) or isinstance(project_id, bool) or not str(project_id).strip():
         raise ValueError("project_id is required.")
     if mode is not None and mode not in MODES:
-        raise ValueError("mode must be accept_edits, auto or plan.")
+        raise ValueError("mode must be accept_edits, auto, plan or theseus.")
     if task is not None and not isinstance(task, str):
         raise ValueError("task must be a string.")
     project_id = str(project_id).strip()
@@ -376,6 +382,10 @@ def instructions(record: Dict[str, Any]) -> str:
     lines = [worktrees, PR_INSTRUCTIONS if worktrees else "", _template_line(record)]
     if record.get("mode") == "plan":
         lines.append(PLAN_INSTRUCTIONS)
+    if record.get("mode") == "theseus":
+        from . import theseus
+
+        lines.append(theseus.instructions())
     return "\n".join(line for line in lines if line)
 
 
@@ -521,9 +531,17 @@ def stamp(db: Any, record: Dict[str, Any]) -> bool:
 def set_mode(path: Path, session_id: str, mode: Any) -> Optional[Dict[str, Any]]:
     """Sets the mode and clears a pending plan, which the app does to dismiss it everywhere."""
     if mode not in MODES:
-        raise ValueError("mode must be accept_edits, auto or plan.")
-    if not read(path, session_id):
+        raise ValueError("mode must be accept_edits, auto, plan or theseus.")
+    record = read(path, session_id)
+    if not record:
         return None
+    if mode != record["mode"] and "theseus" in (mode, record["mode"]):
+        # A Theseus run is the whole session, from its first turn to its last.
+        raise WorkspaceError(
+            "A Theseus session keeps its mode." if record["mode"] == "theseus"
+            else "Theseus can only start a new session.",
+            409,
+        )
     conn = connect(path)
     try:
         conn.execute(
@@ -533,6 +551,22 @@ def set_mode(path: Path, session_id: str, mode: Any) -> Optional[Dict[str, Any]]
     finally:
         conn.close()
     events.note("runs", session_id, path, True)
+    return read(path, session_id)
+
+
+def set_theseus(path: Path, session_id: str, models: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Keeps a Theseus session's reviewer models (see ``theseus.clean_models``)."""
+    record = read(path, session_id)
+    if not record or record["mode"] != "theseus":
+        return None
+    conn = connect(path)
+    try:
+        conn.execute(
+            "UPDATE project_sessions SET theseus = ? WHERE session_id = ?",
+            (json.dumps({**record["theseus"], "models": models}, separators=(",", ":")), session_id),
+        )
+    finally:
+        conn.close()
     return read(path, session_id)
 
 
@@ -714,6 +748,13 @@ def waiting(
     for session_id, record in records.items():
         if record["plan_pending"]:
             found.setdefault(session_id, {"kind": "plan"})
+        elif session_id not in found and record["mode"] == "theseus":
+            from . import theseus
+
+            # Its run is in `theseus wait` (so the turn is still running); the user is who it waits on.
+            at = theseus.waiting_stage(record)
+            if at:
+                found[session_id] = {"kind": "theseus", "stage": at}
     names = _project_names(hermes_home) if any(s in records for s in found) else {}
     for session_id, reason in found.items():
         record = records.get(session_id)
@@ -792,7 +833,15 @@ def _before_tool(kwargs: Dict[str, Any]) -> Optional[Dict[str, str]]:
     if record["path"] and task_id and not _has_cwd(task_id):
         # The gateway restarted since the app last posted the workspace.
         apply_cwd(task_id, record["path"])
-    follow_auto(record["mode"] == "auto")
+    # A Theseus session runs in Auto: the user's say is on the run's checkpoints, not on commands.
+    follow_auto(record["mode"] in ("auto", "theseus"))
+    if record["mode"] == "theseus":
+        from . import theseus
+
+        args = kwargs.get("args") if isinstance(kwargs.get("args"), dict) else {}
+        if theseus.blocks_record(kwargs.get("tool_name"), args):
+            return {"action": "block", "message": theseus.THESEUS_BLOCK}
+        return None
     if record["mode"] != "plan":
         return None
     tool = kwargs.get("tool_name")

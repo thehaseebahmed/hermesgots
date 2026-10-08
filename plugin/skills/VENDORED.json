@@ -1,0 +1,18 @@
+{
+  "repo": "thehaseebahmed/agent-skills",
+  "ref": "6479ff0ec66865c8be578203ab969ca48615cb9d",
+  "commit": "6479ff0ec66865c8be578203ab969ca48615cb9d",
+  "api": 1,
+  "files": {
+    "SKILL.md": "7ef605f70e118ad6866f926e3b38de51c37a1e69ef18db9db7f76c14d76235fa",
+    "api.md": "053017a9d78d8d742a855bff145a3e5d90cda95a82663ee7cb5c5d97be15672b",
+    "builder.md": "bd7248394117648d1d7eb4bc098c0f10ad9ce0e1344a05aaf0833e3118fc92b4",
+    "checkpoints.md": "fdef3da493460eee4978475b514a903261d9f358aef0114365d5245b03fe5d12",
+    "gates.md": "6d1e78dae6135afbd8eda90c7b6523800edb4d7d61223b8eb4d56afeca7a9544",
+    "reviewer.md": "13928e0476a4a54247e7ce02a19224b05a360b38b7374b6995fe92ec789443ab",
+    "scripts/server.js": "1177ef1051955d1cf6b9b36dec7092bc37cf51494d9ded53ba32e3498b451939",
+    "scripts/theseus.js": "7cdc14f7d88df65f8405a8e6bc6e9d2451d0ec8a21fc23b6c844e5f12350510f",
+    "scripts/viewer/viewer.html": "2fd81a93cfa880b88b005a0b3e56a6d0e459fec03a11e2f6a1a4476e757a7d0b",
+    "scripts/viewer/viewer.js": "987659f494f9c94854541d589507ac2d6af409f5f25286ef29c22ed1d518b951"
+  }
+}

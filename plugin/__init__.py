@@ -5,13 +5,14 @@ can read cron run history from Hermes's execution ledger instead of piecing it t
 device, keep its chat list on the server (``chats.py``), report each chat's context use
 (``context.py``) and the agent's todo list (``todos.py``), list and create Hermes Projects (``projects.py``) with GitHub repos cloned into
 them in the background (``clones.py``, ``github.py``), add and remove a project's repos (``repos.py``), run project sessions in their own worktrees with a permission mode and save their plans
-(``sessions.py``), let the agent push and open its pull requests, close them when a session is dropped (``ship.py``) and resolve a session once its pull request merges (``merges.py``), let the agent ask the user questions with Hermes's ``clarify`` tool (``clarify.py``) and
+(``sessions.py``), let the agent push and open its pull requests, close them when a session is dropped (``ship.py``) and resolve a session once its pull request merges (``merges.py``), run a session end to end with the Theseus skill (``theseus.py``), let the agent ask the user questions with Hermes's ``clarify`` tool (``clarify.py``) and
 label its chats as Memento's, tell the app what changed as it happens (``events.py``, ``stream.py``), and links the profile to a Memento account (``link.py``). The dashboard half lives in ``dashboard/``.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from pathlib import Path
@@ -33,6 +34,7 @@ from . import (
     sessions,
     ship,
     stream,
+    theseus,
     todos,
 )
 from .store import db_path
@@ -136,6 +138,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     todo_tool = todos.wire(adapter)
     # The agent ships its own work; see ship.py.
     ship.wire(adapter)
+    # Theseus sessions review with another model; see theseus.py.
+    theseus.wire(adapter)
 
     async def daily_cleanup(_app: Any):
         from hermes_constants import get_hermes_home
@@ -225,10 +229,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "close",
                     "merge_resolve",
                     "events",
+                    "theseus",
                 ],
                 "clarify": asks,
                 "todo_tool": todo_tool,
                 "hooks": hooks_live(),
+                "theseus": await asyncio.to_thread(theseus.info),
             }
         )
 
@@ -567,6 +573,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "Body must be a JSON object", 400)
         session_id = request.match_info["session_id"]
         path, home = store_path(), hermes_home()
+        if body.get("mode") == "theseus":
+            reason = await asyncio.to_thread(theseus.available)
+            if reason and not await asyncio.to_thread(sessions.read, path, session_id):
+                return _error(web, reason, 409)
         try:
             record = await asyncio.to_thread(
                 sessions.ensure,
@@ -613,6 +623,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             )
         except ValueError as error:
             return _error(web, str(error), 400)
+        except sessions.WorkspaceError as error:
+            return _error(web, str(error), error.status)
         if record is None:
             return _error(web, "This session has no workspace yet", 404)
         if record["mode"] == "auto":
@@ -713,6 +725,86 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             web, request, stream.sse_headers(adapter, request), path, str(path), db, cursor, VERSION
         )
 
+    async def theseus_record(request: "web.Request"):
+        session_id = request.match_info["session_id"]
+        record = await asyncio.to_thread(sessions.record_for, store_path(), hermes_home(), session_id)
+        if not record or record["mode"] != "theseus":
+            return None, _error(web, "This isn't a Theseus session.", 404)
+        return record, None
+
+    async def theseus_view(record: Dict[str, Any], fresh: bool = False) -> "web.Response":
+        snap = await asyncio.to_thread(theseus.state, record["path"], fresh) if record["path"] else None
+        return web.json_response(
+            {
+                "object": "memento.theseus",
+                "stage": theseus.stage(snap),
+                "state": snap,
+                "models": (record.get("theseus") or {}).get("models") or {"review": [], "visual": []},
+                "unavailable": await asyncio.to_thread(theseus.available),
+            }
+        )
+
+    async def get_theseus(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        record, problem = await theseus_record(request)
+        if problem is not None:
+            return problem
+        try:
+            return await theseus_view(record)
+        except theseus.TheseusError as error:
+            return _error(web, str(error), error.status)
+
+    async def post_theseus(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        record, problem = await theseus_record(request)
+        if problem is not None:
+            return problem
+        try:
+            result = await asyncio.to_thread(theseus.act, record["path"], str(body.get("action")), body)
+            events.note("runs", record["session_id"], store_path(), True)
+            view = await theseus_view(record, True)
+        except theseus.TheseusError as error:
+            return _error(web, str(error), error.status)
+        payload = json.loads(view.text)
+        payload["message"] = result.get("message")
+        return web.json_response(payload)
+
+    async def post_theseus_models(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        record, problem = await theseus_record(request)
+        if problem is not None:
+            return problem
+        try:
+            models = theseus.clean_models(body)
+        except ValueError as error:
+            return _error(web, str(error), 400)
+        updated = await asyncio.to_thread(sessions.set_theseus, store_path(), record["session_id"], models)
+        return await theseus_view(updated or record)
+
+    async def theseus_evidence(request: "web.Request") -> "web.StreamResponse":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        record, problem = await theseus_record(request)
+        if problem is not None:
+            return problem
+        file = theseus.evidence_file(record["path"], request.match_info["cp"], request.match_info["name"])
+        if file is None:
+            return _error(web, "No such screenshot", 404)
+        return web.FileResponse(file, headers={"content-type": theseus.media_type(file)})
+
     app.router.add_get(f"{PREFIX}/info", info)
     app.router.add_get(f"{PREFIX}/chats", list_chats)
     app.router.add_post(f"{PREFIX}/chats", merge_chats)
@@ -778,6 +870,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         )
 
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/attachments", upload_attachment)
+    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/theseus", get_theseus)
+    app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/theseus", post_theseus)
+    app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/theseus/models", post_theseus_models)
+    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/theseus/evidence/{{cp}}/{{name}}", theseus_evidence)
     app.router.add_get(f"{PREFIX}/runs/live", live_runs)
     app.router.add_get(f"{PREFIX}/events", stream_events)
     app.router.add_post(f"{PREFIX}/runs/{{run_id}}/clarify", answer_clarify)
@@ -811,6 +907,7 @@ def register(ctx) -> None:
             description="hermes memento link <code> --site <url>, unlink or status",
         )
     ship.register(ctx)
+    theseus.register(ctx)
     register_handler = getattr(ctx, "register_platform_handler", None)
     if register_handler is None:
         logger.warning("memento: this Hermes version can't add API server routes; update Hermes")
