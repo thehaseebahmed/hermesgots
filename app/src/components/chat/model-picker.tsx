@@ -200,7 +200,7 @@ export function ModelMenu({
         <PopupContent>
           <ModelPicker
             providers={providers}
-            fallback={{ label: "Bot's default", model: fallback }}
+            fallback={{ label: "Default", model: fallback }}
             recent={profile?.recentModels}
             choice={choice}
             onChoose={(next) => {
@@ -244,7 +244,7 @@ export function DefaultModelSetting({
         <PopupContent>
           <ModelPicker
             providers={providers}
-            fallback={{ label: "Host's model", model: info?.model }}
+            fallback={{ label: "Default", model: info?.model }}
             recent={profile.recentModels}
             choice={profile.modelChoice}
             onChoose={(next) => {
