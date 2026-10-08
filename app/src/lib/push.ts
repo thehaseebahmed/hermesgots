@@ -273,9 +273,16 @@ async function enableNative(): Promise<PushPermission> {
   }
   if (status.receive !== "granted") return "denied"
   const settings = await getSettings()
-  await saveSettings({ fcm: { device: settings.fcm?.device ?? crypto.randomUUID(), on: true } })
-  await listen(push)
-  await push.register()
+  const device = settings.fcm?.device ?? crypto.randomUUID()
+  await saveSettings({ fcm: { device, on: true } })
+  try {
+    await listen(push)
+    await push.register()
+  } catch (error) {
+    // Without Firebase in this build the switch would otherwise read on while nothing can arrive.
+    await saveSettings({ fcm: { device, on: false } })
+    throw error
+  }
   // The plugin skips a device that has the app open, which it learns from the stream.
   reconnectLive()
   return "granted"
@@ -349,5 +356,5 @@ export function usePush() {
   const nativePermission = useNativePermission()
   const fcm = useLiveQuery(async () => (await getSettings()).fcm, [])
   if (!isNative) return web
-  return { permission: nativePermission, on: Boolean(fcm?.on) && nativePermission === "granted" }
+  return { permission: nativePermission, on: Boolean(fcm?.on) && nativePermission !== "denied" }
 }
