@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react"
+
 import type { Attachment } from "@/lib/db"
 import type { ContentPart } from "@/lib/hermes"
 import { randomId } from "@/lib/utils"
@@ -5,6 +7,8 @@ import { randomId } from "@/lib/utils"
 /** Under the API server's 10 MB request cap, which the plugin's upload shares. */
 export const MAX_FILE_BYTES = 9 * 1024 * 1024
 export const MAX_ATTACHMENTS = 10
+/** Photos go inline as base64 (a third bigger), so together they must leave the request room. */
+export const MAX_INLINE_BYTES = 6.5 * 1024 * 1024
 /** Long edge models are given; bigger images are scaled down before they go, to keep the body small. */
 const MAX_EDGE = 1600
 const KEEP_AS_IS_BYTES = 1024 * 1024
@@ -59,7 +63,8 @@ export async function prepareAttachment(file: File, inline = true): Promise<Atta
       }
     }
   }
-  if (file.size > MAX_FILE_BYTES) throw new Error(`${name} is too large to attach.`)
+  if (file.size > MAX_FILE_BYTES)
+    throw new Error(`${name} is over the ${formatBytes(MAX_FILE_BYTES)} limit.`)
   return {
     id: randomId(),
     name,
@@ -68,6 +73,39 @@ export async function prepareAttachment(file: File, inline = true): Promise<Atta
     image: false,
     blob: file,
   }
+}
+
+export function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`
+}
+
+/** Whether there's anything on this device to show for it. */
+export const openable = (attachment: Attachment) => Boolean(attachment.blob)
+
+/** The bytes a message's photos add to its request. */
+export const inlineBytes = (attachments: Attachment[]) =>
+  attachments.reduce((sum, a) => sum + (a.image && a.blob ? a.blob.size : 0), 0)
+
+// Attachments being saved on the Hermes host right now, so their tiles can say so.
+const uploading = new Set<string>()
+const listeners = new Set<() => void>()
+
+export function setUploading(id: string, busy: boolean) {
+  if (busy) uploading.add(id)
+  else uploading.delete(id)
+  for (const listener of listeners) listener()
+}
+
+export function useUploading(id: string) {
+  return useSyncExternalStore(
+    (listener) => {
+      listeners.add(listener)
+      return () => void listeners.delete(listener)
+    },
+    () => uploading.has(id),
+  )
 }
 
 function blobToDataUrl(blob: Blob) {

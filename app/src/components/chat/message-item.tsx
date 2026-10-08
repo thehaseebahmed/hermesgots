@@ -1,8 +1,9 @@
-import type { ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import { AlertCircleIcon, ClockIcon, SendHorizontalIcon, XIcon } from "lucide-react"
+import { toast } from "sonner"
 
 import { ApprovalCard } from "@/components/chat/approval-card"
-import { AttachmentTile } from "@/components/chat/attachments"
+import { AttachmentTile, AttachmentViewer } from "@/components/chat/attachments"
 import { Markdown } from "@/components/chat/markdown"
 import { AgentCards } from "@/components/chat/agent-card"
 import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
@@ -13,8 +14,9 @@ import { Button } from "@/components/ui/button"
 import { Message as MessageRow, MessageAvatar, MessageContent } from "@/components/ui/message"
 import { Spinner } from "@/components/ui/spinner"
 import { DELEGATE_TOOL } from "@/lib/agents"
-import { removeQueued, sendMessage } from "@/lib/chat"
-import type { Message, ToolEvent } from "@/lib/db"
+import { openable } from "@/lib/attachments"
+import { removeQueued, sendQueued } from "@/lib/chat"
+import type { Attachment, Message, ToolEvent } from "@/lib/db"
 import { describeActivity, formatDuration } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useReveal } from "@/lib/reveal"
@@ -68,6 +70,28 @@ function Stats({ message }: { message: Message }) {
   )
 }
 
+/** A sent message's attachments; the ones this device still has open in a viewer. */
+function SentAttachments({ attachments, queued }: { attachments: Attachment[]; queued: boolean }) {
+  const [viewing, setViewing] = useState<number | null>(null)
+  const viewable = attachments.filter(openable)
+  return (
+    <div className={cn("flex max-w-full flex-wrap justify-end gap-2", queued && "opacity-60")}>
+      {attachments.map((attachment) => (
+        <AttachmentTile
+          key={attachment.id}
+          attachment={attachment}
+          onOpen={
+            openable(attachment)
+              ? () => setViewing(viewable.findIndex((a) => a.id === attachment.id))
+              : undefined
+          }
+        />
+      ))}
+      <AttachmentViewer attachments={viewable} index={viewing} onIndex={setViewing} />
+    </div>
+  )
+}
+
 function QueuedActions({ message, paused }: { message: Message; paused: boolean }) {
   return (
     <div className="-my-2 flex items-center gap-1 text-xs text-muted-foreground">
@@ -79,10 +103,9 @@ function QueuedActions({ message, paused }: { message: Message; paused: boolean 
           size="sm"
           className="min-h-11 text-xs"
           onClick={() =>
-            void sendMessage(message.conversationId, message.content, {
-              queuedId: message.id,
-              attachments: message.attachments,
-            })
+            void sendQueued(message).catch((error) =>
+              toast.error(error instanceof Error ? error.message : "Couldn't send your message."),
+            )
           }
         >
           <SendHorizontalIcon data-icon="inline-start" />
@@ -157,13 +180,7 @@ export function MessageItem({
       <MessageRow align="end">
         <MessageContent className="items-end gap-1">
           {message.attachments?.length ? (
-            <div
-              className={cn("flex max-w-full flex-wrap justify-end gap-2", queued && "opacity-60")}
-            >
-              {message.attachments.map((attachment) => (
-                <AttachmentTile key={attachment.id} attachment={attachment} />
-              ))}
-            </div>
+            <SentAttachments attachments={message.attachments} queued={queued} />
           ) : null}
           {message.content && (
             <Bubble variant="default" align="end" className={queued ? "opacity-60" : undefined}>
