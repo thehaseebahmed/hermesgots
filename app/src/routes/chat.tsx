@@ -8,7 +8,6 @@ import {
   CheckIcon,
   EllipsisIcon,
   PencilIcon,
-  PlusIcon,
   RotateCcwIcon,
   SettingsIcon,
   Trash2Icon,
@@ -31,7 +30,12 @@ import {
 import { TheseusCard, TheseusPill, TheseusSheet, type SheetView } from "@/components/chat/theseus"
 import { TodosPill, TodosSheet } from "@/components/chat/todos"
 import { ModelMenu } from "@/components/chat/model-picker"
-import { ContextRing, UsageSheet, type ContextUsage } from "@/components/chat/usage-sheet"
+import {
+  ContextIcon,
+  ContextPercent,
+  UsageSheet,
+  type ContextUsage,
+} from "@/components/chat/usage-sheet"
 import { Bot } from "@/components/bot"
 import { RepoChips } from "@/components/repos"
 import {
@@ -242,9 +246,7 @@ export function ChatPage() {
     tracked,
     tokens: tracked ? live?.tokens : undefined,
     window:
-      profile?.contextSource === "manual"
-        ? profile.contextWindow
-        : (live?.window ?? profile?.contextWindow),
+      live?.window ?? (profile?.contextSource === "models.dev" ? profile.contextWindow : undefined),
   }
 
   // Picks up a model changed on the server (only when the connection does, not on every write);
@@ -437,7 +439,7 @@ export function ChatPage() {
     }
   }
 
-  const actions = (
+  const actions = conversation && (
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
@@ -452,53 +454,53 @@ export function ChatPage() {
         <EllipsisIcon />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-44">
-        {!session && (
-          <DropdownMenuItem onClick={() => root("/")}>
-            <PlusIcon />
-            New chat
-          </DropdownMenuItem>
-        )}
-        {conversation && (
+        {configured && (
           <>
-            <DropdownMenuItem
-              onClick={() => {
-                setTitle(conversation.title)
-                setRenaming(true)
-              }}
-            >
-              <PencilIcon />
-              {session ? "Edit" : "Rename"}
+            <DropdownMenuItem onClick={() => setUsageOpen(true)}>
+              <ContextIcon usage={usage} />
+              Context
+              <ContextPercent usage={usage} />
             </DropdownMenuItem>
-            {session &&
-              !session.discardedAt &&
-              (session.resolvedAt ? (
-                <DropdownMenuItem
-                  onClick={() => updateConversation(session.id, { resolvedAt: undefined })}
-                >
-                  <RotateCcwIcon />
-                  Reopen
-                </DropdownMenuItem>
-              ) : (
-                <DropdownMenuItem
-                  onClick={() => updateConversation(session.id, { resolvedAt: Date.now() })}
-                >
-                  <CheckIcon />
-                  Resolve
-                </DropdownMenuItem>
-              ))}
             <DropdownMenuSeparator />
-            {session && !session.discardedAt && (
-              <DropdownMenuItem onClick={() => setDiscarding(true)}>
-                <ArchiveXIcon />
-                Discard
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuItem variant="destructive" onClick={() => setDeleting(true)}>
-              <Trash2Icon />
-              Delete
-            </DropdownMenuItem>
           </>
         )}
+        <DropdownMenuItem
+          onClick={() => {
+            setTitle(conversation.title)
+            setRenaming(true)
+          }}
+        >
+          <PencilIcon />
+          {session ? "Edit" : "Rename"}
+        </DropdownMenuItem>
+        {session &&
+          !session.discardedAt &&
+          (session.resolvedAt ? (
+            <DropdownMenuItem
+              onClick={() => updateConversation(session.id, { resolvedAt: undefined })}
+            >
+              <RotateCcwIcon />
+              Reopen
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem
+              onClick={() => updateConversation(session.id, { resolvedAt: Date.now() })}
+            >
+              <CheckIcon />
+              Resolve
+            </DropdownMenuItem>
+          ))}
+        <DropdownMenuSeparator />
+        {session && !session.discardedAt && (
+          <DropdownMenuItem onClick={() => setDiscarding(true)}>
+            <ArchiveXIcon />
+            Discard
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuItem variant="destructive" onClick={() => setDeleting(true)}>
+          <Trash2Icon />
+          Delete
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -693,11 +695,6 @@ export function ChatPage() {
                   disabled={busy}
                 />
               )
-            }
-            leading={
-              hasMessages && configured && !(tracked && !live?.tokens) ? (
-                <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />
-              ) : undefined
             }
           />
         )}

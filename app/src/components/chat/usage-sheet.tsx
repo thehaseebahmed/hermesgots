@@ -2,10 +2,8 @@ import { Meter } from "@base-ui/react/meter"
 
 import { Banner } from "@/components/banner"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
-import { Button } from "@/components/ui/button"
 import { formatTokens } from "@/lib/format"
 import { useModelsDevUnreachable } from "@/lib/models"
-import { useNav } from "@/lib/nav"
 
 export interface ContextUsage {
   /** The bot's server has the Memento plugin, which is what records context use. */
@@ -19,54 +17,41 @@ function fraction({ tokens, window }: ContextUsage) {
   return tokens && window ? Math.min(1, tokens / window) : 0
 }
 
-/** Fill ring for the composer, the size of the send button; opens the usage sheet. */
-export function ContextRing({ usage, onClick }: { usage: ContextUsage; onClick: () => void }) {
+/** A small fill ring for the chat's options menu, where it opens the usage sheet. */
+export function ContextIcon({ usage }: { usage: ContextUsage }) {
   const filled = fraction(usage)
-  const percent = Math.round(filled * 100)
-  const radius = 20
+  const radius = 6.5
   const circumference = 2 * Math.PI * radius
-  const label = usage.window ? `Context ${percent}% used` : "Context usage"
 
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon-lg"
-      className="size-11 rounded-full text-muted-foreground"
-      onClick={onClick}
-      aria-label={label}
-    >
-      {/* Ring and label share one SVG so they share one centre. */}
-      <svg viewBox="0 0 44 44" className="size-11" aria-hidden>
-        <g transform="rotate(-90 22 22)">
-          <circle cx="22" cy="22" r={radius} fill="none" strokeWidth="3" className="stroke-muted" />
-          {filled > 0 && (
-            <circle
-              cx="22"
-              cy="22"
-              r={radius}
-              fill="none"
-              strokeWidth="3"
-              strokeLinecap="round"
-              strokeDasharray={circumference}
-              strokeDashoffset={circumference * (1 - filled)}
-              className={filled >= 0.9 ? "stroke-destructive" : "stroke-primary"}
-            />
-          )}
-        </g>
-        {usage.window && (
-          <text
-            x="22"
-            y="22"
-            textAnchor="middle"
-            dominantBaseline="central"
-            className="fill-current text-[11px] font-medium tabular-nums"
-          >
-            {percent}%
-          </text>
+    <svg viewBox="0 0 16 16" aria-hidden>
+      <g transform="rotate(-90 8 8)">
+        <circle cx="8" cy="8" r={radius} fill="none" strokeWidth="2" className="stroke-muted" />
+        {filled > 0 && (
+          <circle
+            cx="8"
+            cy="8"
+            r={radius}
+            fill="none"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={circumference * (1 - filled)}
+            className={filled >= 0.9 ? "stroke-destructive" : "stroke-primary"}
+          />
         )}
-      </svg>
-    </Button>
+      </g>
+    </svg>
+  )
+}
+
+/** How full the context is, e.g. "42%", or nothing while the window is unknown. */
+export function ContextPercent({ usage }: { usage: ContextUsage }) {
+  if (!usage.window) return null
+  return (
+    <span className="ml-auto text-muted-foreground tabular-nums">
+      {Math.round(fraction(usage) * 100)}%
+    </span>
   )
 }
 
@@ -88,7 +73,6 @@ export function UsageSheet({
   onOpenChange: (open: boolean) => void
   usage: ContextUsage
 }) {
-  const { root } = useNav()
   const unreachable = useModelsDevUnreachable()
   const filled = fraction(usage)
 
@@ -124,27 +108,14 @@ export function UsageSheet({
                 </span>
               </Meter.Root>
             ) : (
-              <div className="flex flex-col items-start gap-3">
-                <p className="text-sm text-muted-foreground">
-                  {usage.tokens
-                    ? `The last model call used ${formatTokens(usage.tokens)} prompt tokens. `
-                    : ""}
-                  {unreachable
-                    ? "Couldn't reach models.dev for this model's context size."
-                    : "This model's context size isn't on models.dev."}{" "}
-                  Set it on this bot to see how full the chat is.
-                </p>
-                <Button
-                  variant="outline"
-                  className="min-h-11"
-                  onClick={() => {
-                    onOpenChange(false)
-                    root("/settings/bots")
-                  }}
-                >
-                  Set context window
-                </Button>
-              </div>
+              <p className="text-sm text-muted-foreground">
+                {usage.tokens
+                  ? `The last model call used ${formatTokens(usage.tokens)} prompt tokens. `
+                  : ""}
+                {unreachable
+                  ? "Couldn't reach models.dev for this model's context size."
+                  : "This model's context size isn't on models.dev."}
+              </p>
             )}
           </Section>
         </div>

@@ -42,7 +42,6 @@ export function Composer({
   onCommand,
   connection,
   botName = "Hermes",
-  leading,
   model,
   session,
   filesAvailable,
@@ -58,8 +57,6 @@ export function Composer({
   /** The chat's Hermes profile, for the skills in the `/` menu. */
   connection: HermesConfig
   botName?: string
-  /** Shown before the voice and send buttons on the bottom row, e.g. the context ring. */
-  leading?: ReactNode
   /** The model pill, beside the `+` button. */
   model?: ReactNode
   /** A project session: its permission mode, picked in the `+` menu. */
@@ -315,7 +312,6 @@ export function Composer({
           {attach}
           {model}
           <span className="flex-1" />
-          {leading}
           {controls}
         </InputGroupAddon>
       </InputGroup>

@@ -53,7 +53,7 @@ import {
 } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { checkHealth, getPluginVersion, listModels } from "@/lib/hermes"
-import { syncContextWindow, useModelsDevUnreachable } from "@/lib/models"
+import { syncContextWindow } from "@/lib/models"
 import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
 import { useSyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
@@ -271,7 +271,6 @@ export function BotEditor({
   const [name, setName] = useState(profile.name)
   const [baseUrl, setBaseUrl] = useState(profile.baseUrl)
   const [apiKey, setApiKey] = useState(profile.apiKey)
-  const [contextWindow, setContextWindow] = useState(profile.contextWindow?.toString() ?? "")
   const [nameTouched, setNameTouched] = useState(false)
 
   const save = (patch: Partial<Omit<Profile, "id">>) => void updateProfile(profile.id, patch)
@@ -293,8 +292,6 @@ export function BotEditor({
       setConnection({ state: "ok", plugin: await getPluginVersion(config) })
       const saved = await db.profiles.get(profile.id)
       if (saved) await syncContextWindow(saved)
-      const synced = await db.profiles.get(profile.id)
-      setContextWindow(synced?.contextWindow?.toString() ?? "")
     } catch (error) {
       setConnection({
         state: "error",
@@ -434,28 +431,6 @@ export function BotEditor({
         </Field>
       )}
 
-      <Field>
-        <FieldLabel htmlFor="context-window">Context window</FieldLabel>
-        <InputGroup>
-          <InputGroupInput
-            id="context-window"
-            inputMode="numeric"
-            autoComplete="off"
-            placeholder="200000"
-            value={contextWindow}
-            onChange={(e) => {
-              const digits = e.target.value.replace(/\D/g, "")
-              setContextWindow(digits)
-              save({ contextWindow: Number(digits) || undefined, contextSource: "manual" })
-            }}
-          />
-          <InputGroupAddon align="inline-end">tokens</InputGroupAddon>
-        </InputGroup>
-        <FieldDescription>
-          <ContextWindowHint profile={profile} />
-        </FieldDescription>
-      </Field>
-
       <div className="flex flex-wrap items-center gap-3">
         <Button onClick={test} disabled={connection.state === "testing" || profile.disabled}>
           <PlugZapIcon data-icon="inline-start" />
@@ -516,34 +491,4 @@ export function BotEditor({
       )}
     </FieldGroup>
   )
-}
-
-function ContextWindowHint({ profile }: { profile: Profile }) {
-  const unreachable = useModelsDevUnreachable()
-  const model = profile.contextModel && (
-    <code className="font-mono break-all">{profile.contextModel}</code>
-  )
-  if (profile.contextSource === "models.dev" && profile.contextWindow && model) {
-    return <>Found on models.dev for {model}. It resets when the bot's model changes.</>
-  }
-  if (profile.contextSource === "manual" && profile.contextWindow && model) {
-    return <>Set by hand for {model}. It resets when the bot's model changes.</>
-  }
-  if (unreachable && !model && !profile.contextWindow) {
-    return (
-      <>
-        Couldn't reach models.dev to look up the model's context size. Test the connection to try
-        again, or set it by hand.
-      </>
-    )
-  }
-  if (!model) {
-    return (
-      <>
-        The model's context size, to see how full a chat is. Test the connection to look it up on
-        models.dev.
-      </>
-    )
-  }
-  return <>{model} isn't on models.dev, so set its context size by hand.</>
 }
