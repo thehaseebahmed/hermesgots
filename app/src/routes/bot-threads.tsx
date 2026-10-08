@@ -3,11 +3,11 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { Link, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
 import {
-  CheckIcon,
   ChevronRightIcon,
   CircleAlertIcon,
   CircleXIcon,
   EllipsisIcon,
+  MessageCircleIcon,
   SettingsIcon,
 } from "lucide-react"
 
@@ -49,11 +49,7 @@ function StateIcon({ state }: { state: Thread["state"] }) {
   if (state === "waiting") return <CircleAlertIcon className="size-5 text-warning" />
   if (state === "failed") return <CircleXIcon className="size-5 text-destructive" />
   if (state === "working") return <Spinner className="size-5" />
-  return (
-    <span className="flex size-5 items-center justify-center rounded-full bg-success text-background">
-      <CheckIcon className="size-3.5" strokeWidth={3} />
-    </span>
-  )
+  return <MessageCircleIcon className="size-5 text-muted-foreground" />
 }
 
 /**
@@ -101,7 +97,7 @@ function ThreadItem({
         replace={beside}
         state={{ bot: profileId }}
         aria-current={open ? "page" : undefined}
-        className="-mt-4 ml-10 flex min-h-11 items-center gap-1 rounded-full px-2 text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="-mt-3.5 ml-10 flex min-h-11 items-center gap-1 rounded-full px-2 text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <span className="font-medium text-info">View thread</span>
         {thread.replies > 0 && (
