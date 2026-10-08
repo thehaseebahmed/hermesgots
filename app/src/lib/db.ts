@@ -13,6 +13,8 @@ export interface Settings {
   developer?: boolean
   /** Offers Theseus among a project session's modes; a Developer setting, off by default. Local. */
   theseus?: boolean
+  /** The bot-first layout: bots in the sidebar, each chat a thread in its bot. Developer, local. */
+  botThreads?: boolean
   activeProfileId?: string
   /** When sync last finished without an error. */
   syncedAt?: number
