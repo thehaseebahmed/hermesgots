@@ -167,7 +167,7 @@ function Waiting({ onNavigate }: { onNavigate?: () => void }) {
           })}
         </ul>
       </nav>
-      <Separator className="mx-1 my-3 w-auto" />
+      <Separator className="mx-1 my-3 data-horizontal:w-auto" />
     </>
   )
 }
@@ -221,7 +221,7 @@ export function ConversationList({ onNavigate }: { onNavigate?: () => void }) {
             Routines
           </RootLink>
         </nav>
-        <Separator className="mx-1 my-3 w-auto" />
+        <Separator className="mx-1 my-3 data-horizontal:w-auto" />
         <Waiting onNavigate={onNavigate} />
         <Recents onNavigate={onNavigate} />
       </div>
