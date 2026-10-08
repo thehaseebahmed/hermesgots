@@ -1185,8 +1185,8 @@ export async function getTheseusInfo(config: HermesConfig): Promise<TheseusInfo 
 }
 
 /** The plugin's view of a Theseus session: the skill's snapshot (`status --json --full`) as is. */
-/** A session the run's agent delegated to (a planner, builder or fixer), from Hermes's store. */
-export interface TheseusAgent {
+/** A session the agent delegated to with `delegate_task`, from Hermes's store via the plugin. */
+export interface DelegatedAgent {
   id: string
   goal: string
   model: string | null
@@ -1203,10 +1203,9 @@ export interface RawTheseus {
   models: TheseusModels
   unavailable: string | null
   message?: string | null
-  agents: TheseusAgent[]
 }
 
-function parseAgents(raw: unknown): TheseusAgent[] {
+function parseAgents(raw: unknown): DelegatedAgent[] {
   const num = (value: unknown) => (typeof value === "number" ? value : null)
   return (Array.isArray(raw) ? raw : [])
     .filter((a) => typeof a?.id === "string" && a.id)
@@ -1238,8 +1237,19 @@ function parseTheseus(raw: any): RawTheseus {
     models: parseModels(raw?.models),
     unavailable: typeof raw?.unavailable === "string" ? raw.unavailable : null,
     message: typeof raw?.message === "string" ? raw.message : null,
-    agents: parseAgents(raw?.agents),
   }
+}
+
+/** The sessions a session delegated to, oldest first. A 404 means the plugin is missing. */
+export async function getSessionAgents(
+  config: HermesConfig,
+  sessionId: string,
+): Promise<DelegatedAgent[]> {
+  const response = await request(
+    `${pluginRoot(config.baseUrl)}/sessions/${encodeURIComponent(sessionId)}/agents`,
+    { headers: headers(config) },
+  )
+  return parseAgents((await response.json())?.agents)
 }
 
 export async function getTheseus(config: HermesConfig, sessionId: string): Promise<RawTheseus> {
