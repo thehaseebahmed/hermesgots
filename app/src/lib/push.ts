@@ -214,8 +214,13 @@ let nativeListening = false
 let registeredToken: string | undefined
 let pendingToken: { resolve: (token: string) => void; reject: (error: Error) => void } | undefined
 
-async function plugin(): Promise<Push> {
-  return (await import("@capacitor/push-notifications")).PushNotifications
+/**
+ * Capacitor's plugin object answers every property with a method, `then` included, so returning
+ * it (or resolving a promise with it) from an async function calls a native `then` that never
+ * answers. It travels in a plain object instead.
+ */
+async function plugin(): Promise<{ push: Push }> {
+  return { push: (await import("@capacitor/push-notifications")).PushNotifications }
 }
 
 /** A native call that never answers (or fails) becomes an error that names the step, for a toast. */
@@ -290,7 +295,7 @@ async function listen(push: Push) {
 }
 
 async function enableNative(): Promise<PushPermission> {
-  const push = await step("Loading notifications", plugin())
+  const { push } = await step("Loading notifications", plugin())
   let status = await step("Checking the permission", push.checkPermissions())
   if (status.receive === "prompt" || status.receive === "prompt-with-rationale") {
     status = await step("The permission dialog", push.requestPermissions(), 60_000)
@@ -331,7 +336,7 @@ async function disableNative() {
   registeredToken = undefined
   try {
     await callFunction("DELETE", functionUrl("registry", { route: "devices", id: fcm.device }))
-    await (await plugin()).unregister()
+    await (await plugin()).push.unregister()
   } catch {
     // Offline: the token is dropped when Firebase reports it gone.
   }
@@ -342,7 +347,7 @@ function startNative() {
   const sync = async () => {
     const { fcm } = await getSettings()
     if (!fcm?.on) return
-    const push = await plugin()
+    const { push } = await plugin()
     if ((await push.checkPermissions()).receive !== "granted") return
     await listen(push)
     await push.register()
@@ -357,7 +362,7 @@ function useNativePermission(): PushPermission {
     if (!isNative) return
     let cancelled = false
     const check = async () => {
-      const { receive } = await (await plugin()).checkPermissions()
+      const { receive } = await (await plugin()).push.checkPermissions()
       if (!cancelled)
         setPermission(
           receive === "granted" ? "granted" : receive === "denied" ? "denied" : "default",
