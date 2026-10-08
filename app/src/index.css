@@ -40,6 +40,12 @@
   --success: oklch(0.65 0.17 152);
   --merged: oklch(0.55 0.2 300);
 
+  /* A project's token use by kind. */
+  --usage-input: oklch(0.6 0.17 255);
+  --usage-output: oklch(0.64 0.19 40);
+  --usage-cache-write: oklch(0.62 0.14 165);
+  --usage-cache-read: oklch(0.7 0.15 75);
+
   /* Syntax highlighting in tool cards. */
   --syntax-keyword: oklch(0.55 0.2 15);
   --syntax-string: oklch(0.5 0.13 150);
@@ -81,6 +87,11 @@
   --success: oklch(0.72 0.17 152);
   --merged: oklch(0.74 0.17 300);
 
+  --usage-input: oklch(0.66 0.16 255);
+  --usage-output: oklch(0.68 0.18 40);
+  --usage-cache-write: oklch(0.68 0.14 165);
+  --usage-cache-read: oklch(0.74 0.15 75);
+
   --syntax-keyword: oklch(0.72 0.16 15);
   --syntax-string: oklch(0.78 0.13 150);
   --syntax-number: oklch(0.75 0.12 250);
@@ -121,6 +132,10 @@
   --color-warning: var(--warning);
   --color-success: var(--success);
   --color-merged: var(--merged);
+  --color-usage-input: var(--usage-input);
+  --color-usage-output: var(--usage-output);
+  --color-usage-cache-write: var(--usage-cache-write);
+  --color-usage-cache-read: var(--usage-cache-read);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);

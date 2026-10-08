@@ -912,15 +912,37 @@ http
       const found = mockProjects().find((p) => p.id === decodeURIComponent(projectRoute[1]))
       if (!found || found.status === "cloning" || found.status === "failed")
         return json(res, 404, { error: { message: "No such project." } })
-      const sessions = [...projectSessions.values()].filter((r) => r.project_id === found.id).length
+      const own = [...projectSessions.entries()].filter(([, r]) => r.project_id === found.id)
+      const titles = ["Restore tool call details", "Design bot self-registration", "Roadmap item 23", "How context window usage is counted", "Take over earlier session", "Fix the exit toast", "Add usage breakdown"]
+      // Made-up use: the project's own sessions plus a few older ones, mostly cache reads.
+      const threads = [...own.map(([id]) => id), ...titles.map((_, i) => `memento-old-${i}`)].map((id, i) => {
+        const scale = 1 / (i + 1)
+        const model = i === 2 ? "anthropic/claude-sonnet-5.5" : i === 5 ? "gpt-5.5" : "claude-opus-5-5"
+        return {
+          id,
+          title: id.startsWith("memento-old-") ? titles[i - own.length] ?? null : null,
+          started_at: Date.now() / 1000 - i * 86_400,
+          last_active: Date.now() / 1000 - i * 43_200,
+          models: [{
+            model,
+            input_tokens: Math.round(48_000 * scale),
+            output_tokens: Math.round(310_000 * scale),
+            cache_read_tokens: Math.round(98_000_000 * scale),
+            cache_write_tokens: Math.round(1_900_000 * scale),
+            cost_usd: model === "gpt-5.5" ? 3.2 * scale : null,
+          }],
+        }
+      })
+      const sum = (key) => threads.reduce((all, t) => all + t.models[0][key], 0)
       return json(res, 200, {
         object: "memento.project.usage",
-        sessions: sessions + 3,
-        input_tokens: 1_284_000 + sessions * 42_000,
-        output_tokens: 86_400 + sessions * 3_100,
-        cache_read_tokens: 3_920_000,
-        cache_write_tokens: 214_000,
-        cost_usd: 18.42 + sessions * 0.61,
+        sessions: threads.length,
+        input_tokens: sum("input_tokens"),
+        output_tokens: sum("output_tokens"),
+        cache_read_tokens: sum("cache_read_tokens"),
+        cache_write_tokens: sum("cache_write_tokens"),
+        cost_usd: 3.2 / 6,
+        threads,
       })
     }
     if (PLUGIN && !profile && req.method === "POST" && projectRoute) {
