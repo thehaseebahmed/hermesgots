@@ -506,6 +506,17 @@ def apply_cwd(session_id: str, cwd: str) -> None:
     register_task_env_overrides(session_id, {"cwd": cwd})
 
 
+def _record_cwd(session_id: str, cwd: Optional[str]) -> None:
+    """Moves the session's current folder, as a ``cd`` would; its registered worktree stays."""
+    if not cwd:
+        return
+    try:
+        from tools.terminal_tool import record_session_cwd
+    except ImportError:
+        return
+    record_session_cwd(session_id, cwd)
+
+
 def _has_cwd(session_id: str) -> bool:
     try:
         from tools.terminal_tool import get_session_cwd
@@ -857,6 +868,10 @@ def _before_tool(kwargs: Dict[str, Any]) -> Optional[Dict[str, str]]:
         args = kwargs.get("args") if isinstance(kwargs.get("args"), dict) else {}
         if theseus.blocks_record(kwargs.get("tool_name"), args):
             return {"action": "block", "message": theseus.THESEUS_BLOCK}
+        if kwargs.get("tool_name") == "delegate_task" and task_id:
+            # A child starts in the parent's current folder, and the run may live in another repo
+            # of the session (or above them), where the planner has to work.
+            _record_cwd(task_id, theseus.run_home(record))
         return None
     if record["mode"] != "plan":
         return None
