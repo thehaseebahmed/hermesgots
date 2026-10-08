@@ -63,7 +63,13 @@ jobs:
 
       - name: Firebase config
         if: env.FIREBASE_GOOGLE_SERVICES != ''
-        run: echo "$FIREBASE_GOOGLE_SERVICES" | base64 --decode > android/app/google-services.json
+        run: |
+          # The secret is the file's JSON, either as is or base64-encoded.
+          if [[ "$FIREBASE_GOOGLE_SERVICES" == \{* ]]; then
+            printf '%s' "$FIREBASE_GOOGLE_SERVICES" > android/app/google-services.json
+          else
+            echo "$FIREBASE_GOOGLE_SERVICES" | base64 --decode > android/app/google-services.json
+          fi
 
       - name: Version
         id: version
