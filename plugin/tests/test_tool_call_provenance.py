@@ -180,13 +180,13 @@ class TestToolCallProvenance(unittest.TestCase):
 
 
 class TestClarifyDeliveryProvenance(unittest.TestCase):
-    """Verify that clarify delivery failure is not caused by Memento's submission path."""
+    """Verify that clarify delivery works through pollable status, not just SSE."""
 
-    def test_undelivered_when_no_stream(self) -> None:
-        """When there's no run stream, clarify returns undelivered — this is expected."""
+    def test_undelivered_when_no_run_id(self) -> None:
+        """When the agent isn't in a run (no run_id), clarify returns undelivered."""
         adapter = FakeAdapter(has_streams=False)
         agent = FakeAgent()
-        adapter._active_run_agents["run_abc"] = agent
+        # Don't register the agent in _active_run_agents, so _run_id returns None
 
         from plugin.clarify import Asker
 
@@ -197,42 +197,97 @@ class TestClarifyDeliveryProvenance(unittest.TestCase):
         self.assertEqual(answers, {})
         self.assertIsNotNone(notice, "Undelivered must carry a notice")
 
-    def test_undelivered_when_no_loop(self) -> None:
-        """When there's a stream but no loop (worker thread), still undelivered."""
-        adapter = FakeAdapter(has_streams=True)
-        agent = FakeAgent()
-        adapter._active_run_agents["run_abc"] = agent
-
-        from plugin.clarify import Asker
-
-        asker = Asker(adapter, agent, loop=None)
-        answers, outcome, notice = asker.ask([{"qid": "q0", "question": "Test?"}])
-
-        self.assertEqual(outcome, "undelivered")
-        self.assertIsNotNone(notice, "Undelivered must carry a notice even with a stream")
-
-    def test_legacy_callback_converts_undelivered_to_timeout(self) -> None:
-        """The legacy callback contract sets timed_out=True for non-submitted outcomes.
-
-        This is the bug: undelivered becomes timed_out in the legacy shape, which
-        the app renders as 'No Answer'. The fix should distinguish these.
-        """
+    def test_publishes_to_status_without_stream(self) -> None:
+        """With a valid run_id but no stream, the question is published to run status."""
         adapter = FakeAdapter(has_streams=False)
         agent = FakeAgent()
         adapter._active_run_agents["run_abc"] = agent
 
-        from plugin.clarify import Asker
+        from plugin.clarify import Asker, _pending, resolve
 
         asker = Asker(adapter, agent, loop=None)
 
-        # Legacy contract: callback(questions=[...]) -> {"answers", "timed_out", "notice"?}
+        # Start ask in a thread so we can resolve it
+        import threading
+
+        result_holder: Dict[str, Any] = {}
+
+        def ask_thread() -> None:
+            result_holder["result"] = asker.ask([{"qid": "q0", "question": "Test?"}])
+
+        t = threading.Thread(target=ask_thread, daemon=True)
+        t.start()
+        t.join(timeout=0.5)  # Give it time to publish
+
+        # The question should be published in _pending and in run status
+        self.assertIn("run_abc", _pending, "Question must be pending even without a stream")
+        run_status = adapter._run_statuses.get("run_abc")
+        self.assertIsNotNone(run_status, "Run status must be set")
+        self.assertEqual(run_status.get("status"), "waiting_for_approval")
+        self.assertIsNotNone(run_status.get("clarify"), "Clarify must be on run status")
+
+        # Resolve the question to unblock the thread
+        resolve("run_abc", _pending["run_abc"].clarify_id, {"q0": "answer"}, "submitted")
+        t.join(timeout=2.0)
+
+        self.assertFalse(t.is_alive(), "Ask thread must complete after resolve")
+        answers, outcome, _ = result_holder.get("result", ({}, "unknown", None))
+        self.assertEqual(outcome, "submitted", "Question must be answered after resolve")
+        self.assertEqual(answers.get("q0"), "answer")
+
+    def test_publishes_to_status_without_loop(self) -> None:
+        """With a stream but no loop (worker thread), still publishes to status."""
+        adapter = FakeAdapter(has_streams=True)
+        agent = FakeAgent()
+        adapter._active_run_agents["run_abc"] = agent
+
+        from plugin.clarify import Asker, _pending, resolve
+
+        asker = Asker(adapter, agent, loop=None)
+
+        import threading
+
+        result_holder: Dict[str, Any] = {}
+
+        def ask_thread() -> None:
+            result_holder["result"] = asker.ask([{"qid": "q0", "question": "Test?"}])
+
+        t = threading.Thread(target=ask_thread, daemon=True)
+        t.start()
+        t.join(timeout=0.5)
+
+        self.assertIn("run_abc", _pending, "Question must be pending even without a loop")
+        run_status = adapter._run_statuses.get("run_abc")
+        self.assertEqual(run_status.get("status"), "waiting_for_approval")
+
+        resolve("run_abc", _pending["run_abc"].clarify_id, {"q0": "yes"}, "submitted")
+        t.join(timeout=2.0)
+
+        self.assertFalse(t.is_alive())
+        answers, outcome, _ = result_holder.get("result", ({}, "unknown", None))
+        self.assertEqual(outcome, "submitted")
+
+    def test_legacy_callback_distinguishes_undelivered_from_timeout(self) -> None:
+        """The legacy callback must not convert undelivered to timed_out.
+
+        With the fix, undelivered carries outcome="undelivered" and
+        timed_out=False, so the app can distinguish it from a genuine timeout.
+        """
+        adapter = FakeAdapter(has_streams=False)
+        agent = FakeAgent()
+        # No run_id — genuinely undelivered
+
+        from plugin.clarify import Asker
+
+        asker = Asker(adapter, agent, loop=None)
         result = asker(questions=[{"qid": "q0", "question": "Test?"}])
 
         self.assertIn("timed_out", result)
-        self.assertTrue(
+        self.assertFalse(
             result["timed_out"],
-            "Legacy contract marks undelivered as timed_out=True — this is the bug to fix",
+            "Undelivered must not be marked as timed_out",
         )
+        self.assertEqual(result.get("outcome"), "undelivered")
         self.assertIn("notice", result, "Notice must be present even in legacy shape")
 
 
