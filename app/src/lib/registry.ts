@@ -174,6 +174,7 @@ async function pull() {
     const local = {
       disabled: !record.enabled || undefined,
       seenAt: record.seen?.at,
+      pluginVersion: record.seen?.pluginVersion ?? value.pluginVersion,
     }
     const profiles = await db.profiles.toArray()
     if (!record.adopts && !profiles.some((p) => p.id === botId)) {

@@ -61,6 +61,7 @@ import { useNav } from "@/lib/nav"
 import { disablePush, enablePush, pushAvailable, sendTestPush, usePush } from "@/lib/push"
 import { forgetLocalKey, useSyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
+import { APP_VERSION, pluginOutdated } from "@/lib/version"
 
 const THEMES = [
   { value: "system", label: "System", icon: MonitorIcon },
@@ -126,7 +127,11 @@ function MenuScreen({ className }: { className?: string }) {
     async () => ({ ...DEFAULT_SETTINGS, ...(await db.settings.get("settings")) }),
     [],
   )
-  const bots = useLiveQuery(async () => (await listProfiles()).length, [])
+  const bots = useLiveQuery(async () => {
+    const profiles = await listProfiles()
+    const outdated = profiles.filter((p) => !p.disabled && pluginOutdated(p.pluginVersion)).length
+    return { count: profiles.length, outdated }
+  }, [])
   const { theme } = useTheme()
 
   return (
@@ -151,7 +156,13 @@ function MenuScreen({ className }: { className?: string }) {
           to="bots"
           icon={BotIcon}
           title="Bots"
-          subtitle={bots === undefined ? undefined : `${bots} ${bots === 1 ? "bot" : "bots"}`}
+          subtitle={
+            bots === undefined
+              ? undefined
+              : bots.outdated
+                ? `${bots.outdated} ${bots.outdated === 1 ? "needs" : "need"} a plugin update`
+                : `${bots.count} ${bots.count === 1 ? "bot" : "bots"}`
+          }
         />
       </Group>
       <Group>
@@ -237,7 +248,7 @@ function VersionLabel({ developer }: { developer: boolean }) {
       onClick={tap}
       className="min-h-11 text-center text-xs text-muted-foreground select-none"
     >
-      Memento v{__APP_VERSION__}
+      Memento v{APP_VERSION}
       <br />
       Built {new Date(__BUILD_TIME__).toLocaleString()}
     </button>

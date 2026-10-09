@@ -8,6 +8,7 @@ import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BotCard } from "@/components/bot-card"
 import { BOTS } from "@/components/bots"
+import { CopyBlock } from "@/components/copy-block"
 import { DefaultModelSetting } from "@/components/chat/model-picker"
 import { LinkSheet } from "@/components/link-bots"
 import {
@@ -58,6 +59,7 @@ import { syncContextWindow } from "@/lib/models"
 import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
 import { useSyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
+import { MIN_PLUGIN_VERSION, UPDATE_PLUGIN, pluginOutdated } from "@/lib/version"
 
 type Connection =
   | { state: "idle" }
@@ -129,7 +131,9 @@ export function BotSettings() {
                     ? "Not linked"
                     : chatStores[profile.id] === "unreachable"
                       ? "Can't reach its Memento plugin"
-                      : undefined
+                      : pluginOutdated(profile.pluginVersion)
+                        ? "Plugin out of date"
+                        : undefined
               }
               onClick={() => setEditingId(profile.id)}
             />
@@ -290,7 +294,9 @@ export function BotEditor({
         setName(advertised)
         save({ name: advertised })
       }
-      setConnection({ state: "ok", plugin: await getPluginVersion(config) })
+      const plugin = await getPluginVersion(config)
+      setConnection({ state: "ok", plugin })
+      if (plugin) await db.profiles.update(profile.id, { pluginVersion: plugin })
       const saved = await db.profiles.get(profile.id)
       if (saved) await syncContextWindow(saved)
     } catch (error) {
@@ -303,6 +309,15 @@ export function BotEditor({
 
   return (
     <FieldGroup>
+      {!profile.disabled && pluginOutdated(profile.pluginVersion) && (
+        <div className="flex flex-col gap-2">
+          <Banner tone="warning">
+            Its Memento plugin is {profile.pluginVersion}, and Memento needs {MIN_PLUGIN_VERSION} or
+            newer. Update it on its host:
+          </Banner>
+          <CopyBlock label="Copy update commands" text={UPDATE_PLUGIN} />
+        </div>
+      )}
       {linked && <EnabledSetting profile={profile} />}
 
       <Field>

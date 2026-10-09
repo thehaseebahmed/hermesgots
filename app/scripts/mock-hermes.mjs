@@ -893,7 +893,7 @@ async function streamCompletion(req, res, body) {
 // MOCK_BLOCK_RUN_EVENTS=1 is Hermes v2026.9.24: the event stream has no CORS headers, and the run
 // forgets its events once that (blocked) subscriber leaves, so only GET /v1/runs/{id} is left.
 const runs = new Map()
-const PLUGIN_VERSION = "0.25.0"
+const PLUGIN_VERSION = process.env.MOCK_PLUGIN_VERSION || "0.29.1"
 const EVENTS = process.env.MOCK_NO_EVENTS !== "1"
 const RUNS = process.env.MOCK_NO_RUNS !== "1"
 const RUN_BACKLOG = Number(process.env.MOCK_RUN_BACKLOG ?? 1000)
