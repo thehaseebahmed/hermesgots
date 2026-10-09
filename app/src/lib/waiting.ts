@@ -55,10 +55,10 @@ async function poll(only: Server[] = servers) {
   if (document.visibilityState !== "visible") return
   await Promise.all(
     only.map(async (server) => {
-      const next = await listWaiting(server, AbortSignal.timeout(TIMEOUT_MS)).catch(
-        () => ({}) as Found,
-      )
-      answers.set(connectionKey(server), next)
+      // A failed read (a busy host starting another bot's run, a dropped connection) says nothing
+      // about what waits, so the last answer stands instead of clearing every mark of that server.
+      const next = await listWaiting(server, AbortSignal.timeout(TIMEOUT_MS)).catch(() => undefined)
+      if (next) answers.set(connectionKey(server), next)
     }),
   )
   found = Object.assign({}, ...servers.map((server) => answers.get(connectionKey(server)) ?? {}))
