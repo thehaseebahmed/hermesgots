@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } fro
 import { Outlet, useLocation, useNavigationType } from "react-router"
 
 import { ConversationList } from "@/components/conversation-list"
+import { CrashBoundary } from "@/components/crash-screen"
 import { DrawerContext } from "@/components/drawer-context"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { useLarge } from "@/lib/media"
@@ -105,6 +106,7 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
 
 export function AppShell({ children }: { children?: ReactNode }) {
   const [open, setOpen] = useState(false)
+  const { pathname } = useLocation()
   const main = useRef<HTMLElement>(null)
   const project = useProjectPane()
   const bot = useBotPane(useBotThreads())
@@ -140,7 +142,9 @@ export function AppShell({ children }: { children?: ReactNode }) {
           </SheetContent>
         </Sheet>
         <main ref={main} className="flex min-w-0 flex-1 flex-col overflow-x-clip">
-          <Panes pane={pane}>{children ?? <Outlet />}</Panes>
+          <CrashBoundary resetKey={pathname} menu>
+            <Panes pane={pane}>{children ?? <Outlet />}</Panes>
+          </CrashBoundary>
         </main>
       </div>
     </DrawerContext.Provider>

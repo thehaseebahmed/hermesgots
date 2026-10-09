@@ -5,6 +5,7 @@ import { BrowserRouter } from "react-router"
 
 import App from "@/App"
 import { PushLinks } from "@/routes/open-session"
+import { CrashBoundary } from "@/components/crash-screen"
 import { Toaster } from "@/components/ui/sonner"
 import { recoverInterruptedMessages } from "@/lib/chat"
 import { handBackNativeSignIn, handleBackButton } from "@/lib/native"
@@ -34,10 +35,12 @@ createRoot(document.getElementById("root")!).render(
       // doesn't warn about it.
       scriptProps={{ type: "application/json" }}
     >
-      <BrowserRouter>
-        <App />
-        <PushLinks />
-      </BrowserRouter>
+      <CrashBoundary>
+        <BrowserRouter>
+          <App />
+          <PushLinks />
+        </BrowserRouter>
+      </CrashBoundary>
       <Toaster
         position="bottom-center"
         offset={{ bottom: "var(--toast-bottom)" }}
