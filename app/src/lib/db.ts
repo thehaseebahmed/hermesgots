@@ -17,6 +17,8 @@ export interface Settings {
   theseus?: boolean
   /** The bot-first layout: bots in the sidebar, each chat a thread in its bot. Developer, local. */
   botThreads?: boolean
+  /** Research missions in the sidebar; a mock so far. Developer, local. */
+  research?: boolean
   activeProfileId?: string
   /** When sync last finished without an error. */
   syncedAt?: number

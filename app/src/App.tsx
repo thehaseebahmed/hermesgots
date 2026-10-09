@@ -14,6 +14,7 @@ import { ChatPage } from "@/routes/chat"
 import { OpenSessionPage } from "@/routes/open-session"
 import { CodePage } from "@/routes/code"
 import { ProjectPage } from "@/routes/project"
+import { MissionPage, ResearchPage } from "@/routes/research"
 import { RoutinesPage } from "@/routes/routines"
 import { SharePage } from "@/routes/share"
 import { SettingsPage } from "@/routes/settings"
@@ -66,6 +67,8 @@ function AppRoutes() {
         <Route path="code" element={<CodePage />} />
         <Route path="code/:profileId/:projectId" element={<ProjectPage />} />
         <Route path="routines" element={<RoutinesPage />} />
+        <Route path="research" element={<ResearchPage />} />
+        <Route path="research/:id" element={<MissionPage />} />
         <Route path="settings/:section?" element={<SettingsPage />} />
         <Route path="bots" element={<BotsPage />} />
         <Route path="share" element={<SharePage />} />
