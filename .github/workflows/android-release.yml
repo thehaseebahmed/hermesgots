@@ -1,8 +1,11 @@
 name: Android release
 
-# Run by hand from the Actions tab, on a tag or on a branch whose head carries one. The tag is
-# the app's version (v1.2.3 or 1.2.3-beta.1).
+# Runs when a version tag is pushed, or by hand from the Actions tab on a tag or on a branch whose
+# head carries one. The tag is the app's version (v1.2.3 or 1.2.3-beta.1) and must match
+# app/package.json.
 on:
+  push:
+    tags: ["v*"]
   workflow_dispatch:
 
 concurrency:
@@ -61,6 +64,11 @@ jobs:
             stage=$(grep -Eo '[0-9]+$' <<< "${name#*-}" || echo 0)
             stage=$((10#$stage > 98 ? 98 : 10#$stage))
           fi
+          pkg=$(node -p "require('./package.json').version")
+          if [ "$pkg" != "$name" ]; then
+            echo "::error::$tag doesn't match app/package.json's version ($pkg). Set the version there to $name, commit, and tag that commit."
+            exit 1
+          fi
           code=$((10#$major * 1000000 + 10#$minor * 10000 + 10#$patch * 100 + stage))
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "name=$name" >> "$GITHUB_OUTPUT"
@@ -70,12 +78,20 @@ jobs:
           echo "Building $name (version code $code) from $tag"
 
       - name: Signing key
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::error::A release needs the ANDROID_KEYSTORE_BASE64 secret (see the README's Android app section)"
+          missing=()
+          [ -z "$KEYSTORE_BASE64" ] && missing+=(ANDROID_KEYSTORE_BASE64)
+          [ -z "$ANDROID_KEYSTORE_PASSWORD" ] && missing+=(ANDROID_KEYSTORE_PASSWORD)
+          [ -z "$ANDROID_KEY_ALIAS" ] && missing+=(ANDROID_KEY_ALIAS)
+          [ -z "$ANDROID_KEY_PASSWORD" ] && missing+=(ANDROID_KEY_PASSWORD)
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::A release needs these secrets, which aren't set: ${missing[*]} (see the README's Android app section)"
             exit 1
           fi
-
 
       - uses: pnpm/action-setup@v6
         with:
