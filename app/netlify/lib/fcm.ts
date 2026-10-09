@@ -53,12 +53,11 @@ export function categoryOf(kind: PushKind): PushCategory | "test" {
   return `code_${kind}`
 }
 
-/** What the plugin tells about a push beyond its kind (0.33): the chat's title, a Theseus run's
- * stage and the bot character to show. */
+/** What the plugin tells about a push beyond its kind (0.33): the chat's title and a Theseus run's
+ * stage. */
 export interface PushDetail {
   title?: string
   stage?: string
-  bot?: string
 }
 
 export interface FcmSender {
@@ -68,7 +67,6 @@ export interface FcmSender {
     category: string,
     sessionId: string,
     detail?: PushDetail,
-    site?: string,
   ): Promise<SendResult>
   /** A test message to one device: null when Firebase took it, else Google's own reason. */
   test(token: string): Promise<string | null>
@@ -108,18 +106,11 @@ const UNTITLED: Partial<Record<PushKind, string>> = {
   clone_failed: "A project",
 }
 
-const BOT = /^[a-z0-9-]{1,32}$/
-
 /** The notification's title and body. */
 export function pushText(kind: PushKind, detail: PushDetail = {}) {
   const title = detail.title?.trim() || UNTITLED[kind] || "Memento"
   const body = (kind === "theseus" && detail.stage && THESEUS_WORDS[detail.stage]) || WORDS[kind]
   return { title, body }
-}
-
-/** The bot's picture on the site, which Android shows beside the text. */
-export function botImage(site: string | undefined, bot: string | undefined) {
-  return site && bot && BOT.test(bot) ? `${site}/bots/${bot}.png` : undefined
 }
 
 const SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
@@ -207,16 +198,13 @@ export function message(
   category: string,
   sessionId: string,
   detail: PushDetail = {},
-  site?: string,
 ) {
-  const image = botImage(site, detail.bot)
   return {
     message: {
       token,
       // A notification message: Android shows it itself while the app is closed, with no code of
-      // ours running. The data rides along for the tap. An image is shown as the large icon (and
-      // enlarged when the notification is expanded): Firebase has no field for the large icon alone.
-      notification: { ...pushText(kind, detail), ...(image ? { image } : {}) },
+      // ours running. The data rides along for the tap.
+      notification: pushText(kind, detail),
       data: { kind, session_id: sessionId },
       android: {
         priority: "HIGH",
@@ -245,7 +233,6 @@ export function createFcm(raw: string | undefined): FcmSender | null {
     category: string,
     sessionId: string,
     about?: PushDetail,
-    site?: string,
   ): Promise<{ result: SendResult; reason?: string }> {
     try {
       const response = await fetch(
@@ -256,7 +243,7 @@ export function createFcm(raw: string | undefined): FcmSender | null {
             Authorization: `Bearer ${await accessToken(account!, cache)}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify(message(token, kind, category, sessionId, about, site)),
+          body: JSON.stringify(message(token, kind, category, sessionId, about)),
         },
       )
       if (response.ok) return { result: "ok" }
@@ -287,8 +274,8 @@ export function createFcm(raw: string | undefined): FcmSender | null {
   }
 
   return {
-    async send(token, kind, category, sessionId, detail, site) {
-      return (await deliver(token, kind, category, sessionId, detail, site)).result
+    async send(token, kind, category, sessionId, detail) {
+      return (await deliver(token, kind, category, sessionId, detail)).result
     },
     async test(token) {
       const { result, reason } = await deliver(token, "test", "test", "")

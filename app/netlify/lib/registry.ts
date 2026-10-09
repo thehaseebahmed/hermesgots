@@ -344,7 +344,6 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
       const detail = {
         title: text(input?.title, 120),
         stage: text(input?.stage, 32),
-        bot: text(input?.bot, 32),
       }
       const gapKey = `users/${userId}/pushed/${hostId}`
       const last = await read<{ at: number }>(store, gapKey)
@@ -372,7 +371,6 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
           category,
           sessionId,
           detail,
-          url.origin,
         )
         if (result === "ok") sent++
         else {

@@ -352,7 +352,8 @@ def _relay(path: Path, kind: str, category: str, session_id: str, extra: Dict[st
                     "category": category,
                     "session_id": session_id,
                     "skip": _on_screen_devices(path)[:50],
-                    **extra,
+                    # Android shows no bot picture, so the registry isn't told which bot it is.
+                    **{k: v for k, v in extra.items() if k != "bot"},
                 },
             )
             break
