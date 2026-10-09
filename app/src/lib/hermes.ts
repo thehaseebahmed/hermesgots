@@ -350,6 +350,8 @@ export interface ModelInfo {
   provider?: string
   /** The configured providers, the current one first; empty when the host lists none. */
   providers: ModelProvider[]
+  /** A custom endpoint came back without models: Hermes lists them only once it has probed it. */
+  unprobed: boolean
 }
 
 /** Hermes's own model picker inventory, keeping only providers that have models to pick. */
@@ -369,11 +371,16 @@ function modelProviders(raw: unknown, current?: string): ModelProvider[] {
 
 /**
  * The LLM and provider behind the profile, and the models its host is configured for. Newer
- * Hermes only, so callers treat null as unknown.
+ * Hermes only, so callers treat null as unknown. `refresh` has Hermes probe every custom endpoint
+ * (the dashboard's Refresh Models), which a plain read only does for the current one.
  */
-export async function getModelInfo(config: HermesConfig): Promise<ModelInfo | null> {
+export async function getModelInfo(
+  config: HermesConfig,
+  { refresh = false } = {},
+): Promise<ModelInfo | null> {
   try {
-    const response = await request(`${serverRoot(config.baseUrl)}/api/model/options`, {
+    const query = refresh ? "?refresh=true" : ""
+    const response = await request(`${serverRoot(config.baseUrl)}/api/model/options${query}`, {
       headers: headers(config),
     })
     const body = await response.json()
@@ -383,6 +390,15 @@ export async function getModelInfo(config: HermesConfig): Promise<ModelInfo | nu
       model: text(body?.model),
       provider,
       providers: modelProviders(body?.providers, provider),
+      unprobed:
+        Array.isArray(body?.providers) &&
+        body.providers.some(
+          (row: { authenticated?: unknown; api_url?: unknown; models?: unknown }) =>
+            row?.authenticated !== false &&
+            typeof row?.api_url === "string" &&
+            !!row.api_url &&
+            !(Array.isArray(row.models) && row.models.length),
+        ),
     }
   } catch {
     return null
