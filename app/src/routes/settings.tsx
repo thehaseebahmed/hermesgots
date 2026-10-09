@@ -15,6 +15,7 @@ import {
   MenuIcon,
   MessageCircleIcon,
   MessagesSquareIcon,
+  MessageSquareTextIcon,
   MonitorIcon,
   MoonIcon,
   PaletteIcon,
@@ -29,6 +30,7 @@ import { AccountSettings } from "@/components/account-settings"
 import { BotSettings } from "@/components/bot-settings"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { ExperimentalBadge } from "@/components/experimental-badge"
+import { FeedbackSheet } from "@/components/feedback"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -160,6 +162,9 @@ function MenuScreen({ className }: { className?: string }) {
           subtitle={THEMES.find((t) => t.value === (theme ?? "system"))?.label}
         />
         <NotificationsRow />
+      </Group>
+      <Group>
+        <FeedbackRow />
       </Group>
       <Group>
         <Row to="data" icon={DatabaseIcon} title="Local data" />
@@ -466,6 +471,23 @@ function SwitchRow({
       <RowText title={title} subtitle={subtitle} />
       <Switch id={id} checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} />
     </label>
+  )
+}
+
+function FeedbackRow() {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className={cn(rowClass, "transition-colors hover:bg-muted")}
+      >
+        <MessageSquareTextIcon className="size-5 shrink-0 text-muted-foreground" />
+        <RowText title="Send feedback" />
+      </button>
+      <FeedbackSheet open={open} onOpenChange={setOpen} />
+    </>
   )
 }
 

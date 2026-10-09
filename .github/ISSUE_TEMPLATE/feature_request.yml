@@ -1,0 +1,24 @@
+name: Feature request
+description: An idea for Memento or its Hermes plugin
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: The problem or the moment you wished Memento did something else.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help
+      description: How you picture it working.
+    validations:
+      required: false
+  - type: input
+    id: app-version
+    attributes:
+      label: App version
+    validations:
+      required: false
