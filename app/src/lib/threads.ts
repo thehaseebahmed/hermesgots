@@ -2,7 +2,15 @@ import { useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { matchPath, useLocation } from "react-router"
 
-import { db, getSettings, listEnabledProfiles, type Conversation, type Profile } from "@/lib/db"
+import {
+  db,
+  getSettings,
+  listEnabledProfiles,
+  saveSettings,
+  type BotSort,
+  type Conversation,
+  type Profile,
+} from "@/lib/db"
 import { useXLarge } from "@/lib/media"
 import { useWaiting, type WaitingReason } from "@/lib/waiting"
 
@@ -108,7 +116,38 @@ export interface BotSummary {
   waiting: number
 }
 
-/** Every bot that's turned on, with its newest thread, for the sidebar. */
+export const BOT_SORTS: Record<BotSort, string> = {
+  recent: "Recent",
+  waiting: "Waiting",
+  name: "Name",
+  added: "Added",
+}
+
+/** The sidebar's bot order, kept on this device. */
+export function useBotSort(): [BotSort, (sort: BotSort) => void] {
+  const sort = useLiveQuery(async () => (await getSettings()).botSort, []) ?? "recent"
+  return [sort, (botSort) => void saveSettings({ botSort })]
+}
+
+const active = (summary: BotSummary) => summary.latest?.updatedAt ?? -Infinity
+const byRecent = (a: BotSummary, b: BotSummary) => active(b) - active(a)
+const byName = (a: BotSummary, b: BotSummary) =>
+  a.bot.name.localeCompare(b.bot.name, undefined, { sensitivity: "base", numeric: true })
+
+/**
+ * `recent`: the newest thread first, bots without one last. `waiting`: the most threads waiting on
+ * the user first, then recent. `name`: A to Z. `added`: the order the bots were linked in.
+ */
+export function sortBots(bots: BotSummary[], sort: BotSort): BotSummary[] {
+  const sorted = [...bots]
+  if (sort === "recent") sorted.sort((a, b) => byRecent(a, b) || byName(a, b))
+  if (sort === "waiting")
+    sorted.sort((a, b) => b.waiting - a.waiting || byRecent(a, b) || byName(a, b))
+  if (sort === "name") sorted.sort(byName)
+  return sorted
+}
+
+/** Every bot that's turned on, with its newest thread, for the sidebar, in the order linked. */
 export function useBotSummaries(): BotSummary[] | undefined {
   const live = useWaiting()
   const rows = useLiveQuery(async () => {

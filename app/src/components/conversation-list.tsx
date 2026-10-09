@@ -1,6 +1,7 @@
 import { useLiveQuery } from "dexie-react-hooks"
 import { matchPath, NavLink, useLocation, type NavLinkProps } from "react-router"
 import {
+  ArrowDownUpIcon,
   BellOffIcon,
   ChevronRightIcon,
   CodeXmlIcon,
@@ -17,13 +18,30 @@ import {
 
 import { Bot } from "@/components/bot"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Separator } from "@/components/ui/separator"
+import type { BotSort } from "@/lib/db"
 import { db } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useNav } from "@/lib/nav"
 import { useResearchEnabled } from "@/lib/research"
 import { useSyncState } from "@/lib/sync"
-import { useBotSummaries, useBotThreads, useNow } from "@/lib/threads"
+import {
+  BOT_SORTS,
+  sortBots,
+  useBotSort,
+  useBotSummaries,
+  useBotThreads,
+  useNow,
+} from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { reasonText, useWaiting, useWaitingSessions, type WaitingReason } from "@/lib/waiting"
 
@@ -138,7 +156,9 @@ function Recents({ onNavigate }: { onNavigate?: () => void }) {
  * and a count of the threads waiting on the user. A bot opens as one chat holding its threads.
  */
 function Bots({ onNavigate }: { onNavigate?: () => void }) {
-  const bots = useBotSummaries()
+  const summaries = useBotSummaries()
+  const [sort, setSort] = useBotSort()
+  const bots = summaries && sortBots(summaries, sort)
   const { pathname } = useLocation()
   const chat = matchPath("/c/:id", pathname)?.params.id
   const owner = useLiveQuery(
@@ -149,9 +169,45 @@ function Bots({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <nav className="flex flex-col gap-0.5" aria-labelledby="bots-heading">
-      <h2 id="bots-heading" className="px-3 pt-1 pb-2 text-sm font-medium text-muted-foreground">
-        Bots
-      </h2>
+      <div className="-mt-2 flex items-center justify-between gap-2 pl-3">
+        <h2 id="bots-heading" className="text-sm font-medium text-muted-foreground">
+          Bots
+        </h2>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                className="h-11 gap-1.5 rounded-full px-3 text-xs text-muted-foreground"
+                aria-label={`Sort bots by ${BOT_SORTS[sort]}`}
+              />
+            }
+          >
+            <ArrowDownUpIcon />
+            {BOT_SORTS[sort]}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-40">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Sort bots by</DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={sort}
+                onValueChange={(value) => setSort(value as BotSort)}
+              >
+                {(Object.keys(BOT_SORTS) as BotSort[]).map((option) => (
+                  <DropdownMenuRadioItem
+                    key={option}
+                    value={option}
+                    className="min-h-11"
+                    closeOnClick
+                  >
+                    {BOT_SORTS[option]}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
       <ul className="flex flex-col gap-0.5">
         {bots?.map(({ bot, latest, waiting }) => (
           <li key={bot.id}>

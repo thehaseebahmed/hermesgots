@@ -5,6 +5,8 @@ import { randomId } from "@/lib/utils"
 
 export type ThemePreference = "system" | "light" | "dark"
 
+export type BotSort = "recent" | "waiting" | "name" | "added"
+
 export interface Settings {
   id: "settings"
   /** Plain chats leave out context use, reply stats and tool calls; project sessions show them. */
@@ -17,6 +19,8 @@ export interface Settings {
   theseus?: boolean
   /** The bot-first layout: bots in the sidebar, each chat a thread in its bot. Developer, local. */
   botThreads?: boolean
+  /** How the bot-threads sidebar orders the bots; unset is `recent`. Local. */
+  botSort?: BotSort
   /** Research missions in the sidebar; a mock so far. Developer, local. */
   research?: boolean
   activeProfileId?: string
