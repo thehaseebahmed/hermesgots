@@ -204,7 +204,7 @@ def _fail(hermes_home: Path, slug: str, message: str) -> None:
     for entry in clone["repos"]:
         entry["status"] = "failed" if entry["status"] == "cloning" else "queued"
     _update(hermes_home, slug, status="failed", error=message, repos=clone["repos"])
-    push.notify("clone_failed", slug, db_path(hermes_home))
+    push.notify("clone_failed", slug, db_path(hermes_home), title=clone["name"])
 
 
 def run(hermes_home: Path, slug: str) -> None:

@@ -5,11 +5,12 @@ that device (one browser subscription is tied to one key, so a device can't have
 When a run starts waiting (an approval, a question) or a plan is ready, ``notify`` sends every
 subscription of the profile a small message, encrypted to that device (RFC 8291) and signed with its
 VAPID key (RFC 8292), through the push service the browser named. The message says what kind of
-wait and which session, never what was asked; the push service can't read it either.
+news, which session, its title (the chat's, the routine's or the project's name) and which bot
+character to show, never what was asked; the push service can't read it either.
 
 The Android app has no Push API, so for it the plugin asks the Memento registry (``link.py``) to send
-through Firebase, since the service account key can't live on every host: the message is the same, and
-the registry only sees that a session waits.
+through Firebase, since the service account key can't live on every host: the message is the same, so
+the registry and Firebase see the title, never what was asked.
 
 A device that has the app open (it holds an ``events`` stream) is skipped: it already knows.
 Everything here is best effort and runs on its own thread, so a slow push service never holds up
@@ -24,6 +25,8 @@ import ipaddress
 import json
 import logging
 import os
+import re
+import sqlite3
 import threading
 import time
 import urllib.error
@@ -50,6 +53,8 @@ RELAY_TRIES = 4
 RELAY_RETRY_SECONDS = 1.1
 # One notification per kind and session in this window.
 THROTTLE_SECONDS = 5
+# A notification's title is cut here; the push services accept 4096 bytes in all.
+TITLE_MAX = 80
 # The push services accept 4096 bytes; ours are far smaller.
 RECORD_SIZE = 4096
 MAX_SUBSCRIPTIONS = 20
@@ -328,7 +333,7 @@ def _on_screen_devices(path: Path) -> List[str]:
         return [device for (db, device) in _open if db == str(path)]
 
 
-def _relay(path: Path, kind: str, category: str, session_id: str) -> None:
+def _relay(path: Path, kind: str, category: str, session_id: str, extra: Dict[str, str]) -> None:
     """Asks the registry to push to the account's Android installs, if this profile is linked."""
     home = path.parent.parent
     state = link.load_state(home)
@@ -342,7 +347,13 @@ def _relay(path: Path, kind: str, category: str, session_id: str) -> None:
                 "POST",
                 "push",
                 token=state["token"],
-                body={"kind": kind, "category": category, "session_id": session_id, "skip": _on_screen_devices(path)[:50]},
+                body={
+                    "kind": kind,
+                    "category": category,
+                    "session_id": session_id,
+                    "skip": _on_screen_devices(path)[:50],
+                    **extra,
+                },
             )
             break
         except link.LinkError as error:
@@ -367,10 +378,11 @@ def _linked(path: Path) -> bool:
     return bool(state.get("token") and not state.get("revoked") and state.get("site"))
 
 
-def _deliver(path: Path, kind: str, category: str, session_id: str) -> None:
+def _deliver(path: Path, kind: str, category: str, session_id: str, extra: Optional[Dict[str, str]] = None) -> None:
+    extra = extra or {}
     # At most 32 characters of base64url, and distinct per session however long its id is.
     topic = _b64(hashlib.sha256(f"{kind}:{session_id}".encode()).digest()[:18])
-    payload = {"kind": kind, "session_id": session_id}
+    payload = {"kind": kind, "session_id": session_id, **extra}
     for row in _rows(path):
         if _on_screen(path, row["device"]) or not wants(row, category):
             continue
@@ -380,7 +392,7 @@ def _deliver(path: Path, kind: str, category: str, session_id: str) -> None:
             unsubscribe(path, row["endpoint"])
         elif status is None or status >= 300:
             logger.debug("memento: push to %s answered %s", urllib.parse.urlsplit(row["endpoint"]).netloc, status)
-    _relay(path, kind, category, session_id)
+    _relay(path, kind, category, session_id, extra)
 
 
 SEEN_KEEP_MS = 30 * 24 * 3600 * 1000
@@ -408,10 +420,18 @@ def clear(path: Path, key: str) -> None:
         conn.close()
 
 
-def notify(kind: str, session_id: Optional[str], path: Optional[Path] = None) -> None:
+def notify(
+    kind: str,
+    session_id: Optional[str],
+    path: Optional[Path] = None,
+    title: Optional[str] = None,
+    stage: Optional[str] = None,
+) -> None:
     """Something a device should hear about. ``session_id`` is the session it is about, or for the
     kinds that aren't about one the routine's job id (``routine_failed``) or the project's id
-    (``clone_failed``); it only picks what a tap opens. Never raises: it runs inside Hermes's hooks."""
+    (``clone_failed``); it only picks what a tap opens. ``title`` names what it is about when that
+    isn't a session (whose chat title is looked up), and ``stage`` is a Theseus run's. Never raises:
+    it runs inside Hermes's hooks."""
     try:
         if kind not in KINDS or not session_id:
             return
@@ -431,10 +451,35 @@ def notify(kind: str, session_id: Optional[str], path: Optional[Path] = None) ->
         if not reachable(path):
             return
         threading.Thread(
-            target=_run, args=(path, kind, session_id), name="memento-push", daemon=True
+            target=_run, args=(path, kind, session_id, title, stage), name="memento-push", daemon=True
         ).start()
     except Exception:
         logger.debug("memento: couldn't send a push", exc_info=True)
+
+
+BOT_ID = re.compile(r"^[a-z0-9-]{1,32}$")
+
+
+def set_bot(path: Path, bot: str) -> None:
+    """Which of the app's bot characters this profile is, so a notification shows its picture."""
+    if not BOT_ID.match(bot):
+        raise PushError("Not a bot.")
+    conn = connect(path)
+    try:
+        conn.execute("INSERT OR REPLACE INTO push_prefs (key, value) VALUES ('bot', ?)", (bot,))
+    finally:
+        conn.close()
+
+
+def bot(path: Path) -> Optional[str]:
+    if not path.exists():
+        return None
+    conn = connect(path)
+    try:
+        row = conn.execute("SELECT value FROM push_prefs WHERE key = 'bot'").fetchone()
+    finally:
+        conn.close()
+    return row[0] if row and isinstance(row[0], str) and BOT_ID.match(row[0]) else None
 
 
 def set_bot_muted(path: Path, muted: bool) -> None:
@@ -473,8 +518,8 @@ def _lineage(path: Path, session_id: str) -> List[str]:
     return found
 
 
-def thread_muted(path: Path, session_id: str) -> bool:
-    """Whether the chat of this session was muted in the app (``muted`` in its chat list record)."""
+def _chat(path: Path, session_id: str) -> Optional[Dict[str, Any]]:
+    """The chat list record of this session's chat, as the app last synced it."""
     from . import chats
 
     ids = set(_lineage(path, session_id))
@@ -483,8 +528,48 @@ def thread_muted(path: Path, session_id: str) -> bool:
         if entry.get("deleted") or not isinstance(value, dict):
             continue
         if value.get("hermesSessionId") in ids:
-            return bool(value.get("muted"))
-    return False
+            return value
+    return None
+
+
+def thread_muted(path: Path, session_id: str) -> bool:
+    """Whether the chat of this session was muted in the app (``muted`` in its chat list record)."""
+    chat = _chat(path, session_id)
+    return bool(chat and chat.get("muted"))
+
+
+def _hermes_title(path: Path, session_id: str) -> Optional[str]:
+    """The title Hermes gave the session or its nearest ancestor, for a chat the app hasn't synced."""
+    state = path.parent.parent / "state.db"
+    if not state.exists():
+        return None
+    try:
+        with sqlite3.connect(f"{state.as_uri()}?mode=ro", uri=True, timeout=2) as conn:
+            for current in _lineage(path, session_id):
+                row = conn.execute("SELECT title FROM sessions WHERE id = ?", (current,)).fetchone()
+                if row and isinstance(row[0], str) and row[0].strip():
+                    return row[0]
+    except sqlite3.Error:
+        return None
+    return None
+
+
+def session_title(path: Path, session_id: str) -> Optional[str]:
+    """What the user calls the session's chat: the app's title (renames included), else Hermes's."""
+    chat = _chat(path, session_id)
+    title = chat.get("title") if chat else None
+    if isinstance(title, str) and title.strip():
+        return title
+    return _hermes_title(path, session_id)
+
+
+def _short(text: Optional[str]) -> Optional[str]:
+    if not isinstance(text, str):
+        return None
+    text = " ".join(text.split())
+    if len(text) > TITLE_MAX:
+        text = text[: TITLE_MAX - 1].rstrip() + "…"
+    return text or None
 
 
 def muted(path: Path, kind: str, session_id: str) -> bool:
@@ -497,11 +582,14 @@ def _project_session(path: Path, session_id: str) -> bool:
     return bool(sessions.record_for(path, path.parent.parent, session_id))
 
 
-def _run(path: Path, kind: str, session_id: str) -> None:
+def _run(path: Path, kind: str, session_id: str, title: Optional[str] = None, stage: Optional[str] = None) -> None:
     try:
         if muted(path, kind, session_id):
             return
         project = kind in SESSION_KINDS and _project_session(path, session_id)
-        _deliver(path, kind, category_of(kind, project), session_id)
+        if kind in SESSION_KINDS and not title:
+            title = session_title(path, session_id)
+        message = {"title": _short(title), "stage": stage, "bot": bot(path)}
+        _deliver(path, kind, category_of(kind, project), session_id, {k: v for k, v in message.items() if v})
     except Exception:
         logger.debug("memento: a push failed", exc_info=True)

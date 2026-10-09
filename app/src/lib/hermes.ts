@@ -738,11 +738,12 @@ export async function registerPush(config: HermesConfig, registration: PushRegis
 }
 
 /** Mutes or unmutes every push this bot's plugin would send, to every device. */
-export async function setPushMuted(config: HermesConfig, muted: boolean) {
+/** Mutes the bot's pushes, and says which character it is so they show its picture. */
+export async function setPushMuted(config: HermesConfig, muted: boolean, bot?: string) {
   await request(`${pluginRoot(config.baseUrl)}/push/mute`, {
     method: "POST",
     headers: headers(config),
-    body: JSON.stringify({ muted }),
+    body: JSON.stringify({ muted, bot }),
   })
 }
 

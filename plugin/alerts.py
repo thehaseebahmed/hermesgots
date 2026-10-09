@@ -102,7 +102,7 @@ def theseus_tool(path: Path, record: Dict[str, Any], tool: Optional[str], args: 
             if _waits.get(key) == stage:
                 return
             _waits[key] = stage
-        push.notify("theseus", record["session_id"], path)
+        push.notify("theseus", record["session_id"], path, stage=stage)
     except Exception:
         logger.debug("memento: couldn't tell a Theseus wait", exc_info=True)
 
@@ -138,7 +138,7 @@ def check_routines(path: Path, now: Optional[float] = None) -> int:
             if not failed or not _finished_recently(row, now):
                 continue
             if push.once(path, f"routine_failed:{job_id}:{row.get('id')}"):
-                push.notify("routine_failed", job_id, path)
+                push.notify("routine_failed", job_id, path, title=_text(job.get("name")))
                 told += 1
     return told
 

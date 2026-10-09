@@ -2,7 +2,7 @@
  * Firebase Cloud Messaging from a Netlify function. The Android app can't use Web Push, and sending
  * through FCM takes a service account key, which can't live on every user's Hermes host. So a plugin
  * asks the registry to send (`push` in `registry.ts`) and the key stays here, in `FIREBASE_SERVICE_ACCOUNT` (the same key CI uses to reach App Distribution).
- * The message says that a session waits, never what it asked.
+ * The message names the chat (or routine, or project) and says what happened, never what was asked.
  */
 
 /**
@@ -53,8 +53,23 @@ export function categoryOf(kind: PushKind): PushCategory | "test" {
   return `code_${kind}`
 }
 
+/** What the plugin tells about a push beyond its kind (0.33): the chat's title, a Theseus run's
+ * stage and the bot character to show. */
+export interface PushDetail {
+  title?: string
+  stage?: string
+  bot?: string
+}
+
 export interface FcmSender {
-  send(token: string, kind: PushKind, category: string, sessionId: string): Promise<SendResult>
+  send(
+    token: string,
+    kind: PushKind,
+    category: string,
+    sessionId: string,
+    detail?: PushDetail,
+    site?: string,
+  ): Promise<SendResult>
   /** A test message to one device: null when Firebase took it, else Google's own reason. */
   test(token: string): Promise<string | null>
 }
@@ -65,18 +80,46 @@ interface ServiceAccount {
   private_key: string
 }
 
+// What happened, under the title of what it happened in. `public/push-sw.js` says the same.
 const WORDS: Record<PushKind, string> = {
-  approval: "Needs your approval",
-  question: "Has a question for you",
-  plan: "Plan ready for review",
-  theseus: "Theseus is waiting for you",
-  run_done: "Finished its work",
-  run_failed: "Stopped with an error",
-  pr_checks: "Pull request checks are failing",
-  pr_merged: "Pull request merged",
-  clone_failed: "A project couldn't be set up",
-  routine_failed: "A routine failed",
-  test: "Test notification",
+  approval: "Waiting for your approval",
+  question: "You have a question waiting",
+  plan: "The plan is ready for your review",
+  theseus: "Waiting for you",
+  run_done: "You have a new reply",
+  run_failed: "The run stopped with an error",
+  pr_checks: "Checks are failing on the pull request",
+  pr_merged: "Your pull request was merged",
+  clone_failed: "This project couldn't be set up",
+  routine_failed: "The last run failed",
+  test: "This is a test notification",
+}
+
+const THESEUS_WORDS: Record<string, string> = {
+  plan: "The plan is ready for your review",
+  checkpoints: "The checkpoints are ready for your review",
+  approval: "A checkpoint is waiting for your approval",
+  closing: "All checkpoints are done, choose how to wrap up",
+}
+
+// When the plugin is older or couldn't find a name.
+const UNTITLED: Partial<Record<PushKind, string>> = {
+  routine_failed: "A routine",
+  clone_failed: "A project",
+}
+
+const BOT = /^[a-z0-9-]{1,32}$/
+
+/** The notification's title and body. */
+export function pushText(kind: PushKind, detail: PushDetail = {}) {
+  const title = detail.title?.trim() || UNTITLED[kind] || "Memento"
+  const body = (kind === "theseus" && detail.stage && THESEUS_WORDS[detail.stage]) || WORDS[kind]
+  return { title, body }
+}
+
+/** The bot's picture on the site, which Android shows beside the text. */
+export function botImage(site: string | undefined, bot: string | undefined) {
+  return site && bot && BOT.test(bot) ? `${site}/bots/${bot}.png` : undefined
 }
 
 const SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
@@ -158,13 +201,22 @@ async function accessToken(account: ServiceAccount, cache: { token?: string; exp
   return cache.token
 }
 
-export function message(token: string, kind: PushKind, category: string, sessionId: string) {
+export function message(
+  token: string,
+  kind: PushKind,
+  category: string,
+  sessionId: string,
+  detail: PushDetail = {},
+  site?: string,
+) {
+  const image = botImage(site, detail.bot)
   return {
     message: {
       token,
       // A notification message: Android shows it itself while the app is closed, with no code of
-      // ours running. The data rides along for the tap.
-      notification: { title: "Memento", body: WORDS[kind] },
+      // ours running. The data rides along for the tap. An image is shown as the large icon (and
+      // enlarged when the notification is expanded): Firebase has no field for the large icon alone.
+      notification: { ...pushText(kind, detail), ...(image ? { image } : {}) },
       data: { kind, session_id: sessionId },
       android: {
         priority: "HIGH",
@@ -192,6 +244,8 @@ export function createFcm(raw: string | undefined): FcmSender | null {
     kind: PushKind,
     category: string,
     sessionId: string,
+    about?: PushDetail,
+    site?: string,
   ): Promise<{ result: SendResult; reason?: string }> {
     try {
       const response = await fetch(
@@ -202,7 +256,7 @@ export function createFcm(raw: string | undefined): FcmSender | null {
             Authorization: `Bearer ${await accessToken(account!, cache)}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify(message(token, kind, category, sessionId)),
+          body: JSON.stringify(message(token, kind, category, sessionId, about, site)),
         },
       )
       if (response.ok) return { result: "ok" }
@@ -233,8 +287,8 @@ export function createFcm(raw: string | undefined): FcmSender | null {
   }
 
   return {
-    async send(token, kind, category, sessionId) {
-      return (await deliver(token, kind, category, sessionId)).result
+    async send(token, kind, category, sessionId, detail, site) {
+      return (await deliver(token, kind, category, sessionId, detail, site)).result
     },
     async test(token) {
       const { result, reason } = await deliver(token, "test", "test", "")

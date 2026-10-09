@@ -134,12 +134,72 @@ class Mutes(unittest.TestCase):
         self.assertFalse(push.muted(self.path, "question", "memento-a"))
 
 
+class Messages(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = db_path(Path(self.tmp.name))
+        self.parents = {}
+        patch = mock.patch("plugin.sessions._parent_of", lambda home, sid: self.parents.get(sid))
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.addCleanup(self.tmp.cleanup)
+        self.sent = []
+        deliver = mock.patch.object(
+            push, "_deliver", lambda path, kind, category, sid, extra=None: self.sent.append(extra)
+        )
+        deliver.start()
+        self.addCleanup(deliver.stop)
+
+    def state(self, rows):
+        conn = sqlite3.connect(Path(self.tmp.name) / "state.db")
+        conn.execute("CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT, parent_session_id TEXT)")
+        conn.executemany("INSERT INTO sessions (id, title) VALUES (?, ?)", rows)
+        conn.commit()
+        conn.close()
+
+    def test_a_session_push_carries_its_chats_title(self):
+        chats.merge(self.path, {"a": {"at": 1, "value": {"hermesSessionId": "memento-a", "title": "Trip to Lahore"}}})
+        push._run(self.path, "question", "memento-a")
+        self.assertEqual(self.sent, [{"title": "Trip to Lahore"}])
+
+    def test_a_compressed_session_carries_its_chats_title(self):
+        chats.merge(self.path, {"a": {"at": 1, "value": {"hermesSessionId": "memento-a", "title": "Trip"}}})
+        self.parents["child"] = "memento-a"
+        push._run(self.path, "run_done", "child")
+        self.assertEqual(self.sent[0]["title"], "Trip")
+
+    def test_a_chat_the_app_hasnt_synced_takes_hermess_title(self):
+        self.state([("memento-b", "Fix the login bug")])
+        push._run(self.path, "approval", "memento-b")
+        self.assertEqual(self.sent, [{"title": "Fix the login bug"}])
+
+    def test_without_any_title_none_is_sent(self):
+        push._run(self.path, "approval", "memento-c")
+        self.assertEqual(self.sent, [{}])
+
+    def test_a_long_title_is_cut(self):
+        push._run(self.path, "routine_failed", "job", title="word " * 40)
+        title = self.sent[0]["title"]
+        self.assertLessEqual(len(title), push.TITLE_MAX)
+        self.assertTrue(title.endswith("…"))
+
+    def test_the_bot_and_stage_ride_along(self):
+        push.set_bot(self.path, "penny")
+        push._run(self.path, "theseus", "memento-d", stage="checkpoints")
+        self.assertEqual(self.sent, [{"stage": "checkpoints", "bot": "penny"}])
+
+    def test_only_a_bot_id_is_kept(self):
+        with self.assertRaises(push.PushError):
+            push.set_bot(self.path, "../etc")
+        self.assertIsNone(push.bot(self.path))
+
+
 class Turns(unittest.TestCase):
     def setUp(self):
         alerts._started.clear()
         self.told = []
         self.patches = [
-            mock.patch.object(push, "notify", lambda kind, sid, path=None: self.told.append((kind, sid))),
+            mock.patch.object(push, "notify", lambda kind, sid, path=None, **_: self.told.append((kind, sid))),
             mock.patch.object(alerts.sessions, "_paths", lambda: (Path("/nonexistent/m.db"), Path("/x"))),
         ]
         for patch in self.patches:
@@ -187,7 +247,7 @@ class Theseus(unittest.TestCase):
         theseus.waiting_stage = lambda record: next(stages)
         record = {"session_id": "s1"}
         wait = {"command": "node theseus wait --timeout 120"}
-        with mock.patch.object(push, "notify", lambda kind, sid, path=None: told.append((kind, sid))):
+        with mock.patch.object(push, "notify", lambda kind, sid, path=None, **_: told.append((kind, sid))):
             with mock.patch.dict(sys.modules, {"plugin.theseus": theseus}):
                 with mock.patch("plugin.theseus", theseus, create=True):
                     for _ in range(3):
@@ -211,7 +271,7 @@ class Routines(unittest.TestCase):
             with mock.patch.dict(
                 sys.modules, {"cron": cron, "cron.executions": executions, "cron.jobs": jobs}
             ):
-                with mock.patch.object(push, "notify", lambda kind, sid, path=None: told.append((kind, sid))):
+                with mock.patch.object(push, "notify", lambda kind, sid, path=None, **_: told.append((kind, sid))):
                     first = alerts.check_routines(path, now)
                     second = alerts.check_routines(path, now)
         return first, second, told

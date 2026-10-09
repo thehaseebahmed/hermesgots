@@ -339,6 +339,13 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
         ? new Set(input.skip.filter((d): d is string => typeof d === "string").slice(0, 50))
         : new Set<string>()
       if (!ctx.fcm) return error("Push isn't set up on this site", 503)
+      const text = (value: unknown, max: number) =>
+        typeof value === "string" && value.trim() ? value.trim().slice(0, max) : undefined
+      const detail = {
+        title: text(input?.title, 120),
+        stage: text(input?.stage, 32),
+        bot: text(input?.bot, 32),
+      }
       const gapKey = `users/${userId}/pushed/${hostId}`
       const last = await read<{ at: number }>(store, gapKey)
       if (last && now - last.data.at < PUSH_GAP_MS) return error("Slow down", 429)
@@ -359,7 +366,14 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
           muted++
           continue
         }
-        const result = await ctx.fcm.send(device.data.token, kind as PushKind, category, sessionId)
+        const result = await ctx.fcm.send(
+          device.data.token,
+          kind as PushKind,
+          category,
+          sessionId,
+          detail,
+          url.origin,
+        )
         if (result === "ok") sent++
         else {
           failed++
