@@ -905,6 +905,8 @@ const BLOCK_RUN_EVENTS = process.env.MOCK_BLOCK_RUN_EVENTS === "1"
 const pushSubscriptions = new Map()
 // The main model the plugin's `model` route set, per profile ("" is the default one).
 const hostModels = new Map()
+// Whether a refresh has probed the custom endpoint in /api/model/options.
+let customProbed = false
 const eventLogs = new Map()
 const eventStreams = new Set()
 function logOf(profile) {
@@ -1145,7 +1147,18 @@ http
         },
         { slug: "anthropic", name: "Anthropic", is_current: false, authenticated: true, models: ["claude-sonnet-4-5", "claude-opus-4-1"] },
         { slug: "nous", name: "Nous Portal", is_current: false, authenticated: false, models: [] },
+        // A custom endpoint lists its models only once a refresh has probed it.
+        {
+          slug: "custom:my-router",
+          name: "My Router",
+          is_current: false,
+          is_user_defined: true,
+          authenticated: true,
+          api_url: "https://router.example/v1",
+          models: customProbed || url.searchParams.get("refresh") === "true" ? ["meta/llama-4"] : [],
+        },
       ]
+      if (url.searchParams.get("refresh") === "true") customProbed = true
       return json(res, 200, { model, provider: set?.provider ?? "openrouter", providers })
     }
     if (url.pathname === "/v1/skills") {
