@@ -8,7 +8,6 @@ import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BotCard } from "@/components/bot-card"
 import { BOTS } from "@/components/bots"
-import { CopyBlock } from "@/components/copy-block"
 import { DefaultModelSetting } from "@/components/chat/model-picker"
 import { LinkSheet } from "@/components/link-bots"
 import {
@@ -59,7 +58,7 @@ import { syncContextWindow } from "@/lib/models"
 import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
 import { useSyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
-import { MIN_PLUGIN_VERSION, UPDATE_PLUGIN, pluginOutdated } from "@/lib/version"
+import { MIN_PLUGIN_VERSION, pluginOutdated } from "@/lib/version"
 
 type Connection =
   | { state: "idle" }
@@ -310,13 +309,10 @@ export function BotEditor({
   return (
     <FieldGroup>
       {!profile.disabled && pluginOutdated(profile.pluginVersion) && (
-        <div className="flex flex-col gap-2">
-          <Banner tone="warning">
-            Its Memento plugin is {profile.pluginVersion}, and Memento needs {MIN_PLUGIN_VERSION} or
-            newer. Update it on its host:
-          </Banner>
-          <CopyBlock label="Copy update commands" text={UPDATE_PLUGIN} />
-        </div>
+        <Banner tone="warning">
+          Its Memento plugin is {profile.pluginVersion}, and Memento needs {MIN_PLUGIN_VERSION} or
+          newer.
+        </Banner>
       )}
       {linked && <EnabledSetting profile={profile} />}
 
