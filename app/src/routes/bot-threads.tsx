@@ -29,6 +29,7 @@ import { useNav } from "@/lib/nav"
 import { useNow, useThreads, type Thread } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { reasonText } from "@/lib/waiting"
+import { draftKey } from "@/lib/drafts"
 import { SUGGESTIONS } from "@/lib/suggestions"
 
 const dayFormat = new Intl.DateTimeFormat(undefined, {
@@ -259,6 +260,7 @@ export function BotThreadsPage({
       <div data-toast-above className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
         <Composer
           key={profileId}
+          draftKey={draftKey(undefined, profileId)}
           busy={false}
           disabled={!configured}
           onSend={start}

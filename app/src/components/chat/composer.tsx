@@ -29,6 +29,7 @@ import {
   prepareAttachment,
 } from "@/lib/attachments"
 import type { Attachment } from "@/lib/db"
+import { flushDrafts, loadDraft, saveDraft } from "@/lib/drafts"
 import type { HermesConfig } from "@/lib/hermes"
 import { joinText, useDictation } from "@/lib/speech"
 import {
@@ -55,7 +56,7 @@ export function Composer({
   session,
   filesAvailable,
   imagesAvailable,
-  draft,
+  draftKey,
   onDraft,
   steerByDefault = false,
   canSteer = false,
@@ -68,8 +69,8 @@ export function Composer({
   canSteer?: boolean
   /** Sends text to the running reply now (`/steer`). */
   onSteer?: (text: string) => Promise<void> | void
-  /** Text to start with, e.g. a session's saved draft. */
-  draft?: string
+  /** Where the unsent text is kept (`draftKey` in `lib/drafts.ts`), so it's there on return. */
+  draftKey?: string
   /** Called with the text as it changes. */
   onDraft?: (text: string) => void
   /** The chat's Hermes profile, for the skills in the `/` menu. */
@@ -95,12 +96,36 @@ export function Composer({
   // Picked files still being read, shown as placeholders where they'll land.
   const [preparing, setPreparing] = useState<{ id: string; name: string; image: boolean }[]>([])
   const [viewing, setViewing] = useState<number | null>(null)
-  const seeded = useRef(false)
+  // The key whose draft the text is; until it has loaded nothing is saved over it.
+  const [loaded, setLoaded] = useState<string>()
+  const stored = useRef("")
+  // Another chat in the same composer starts from its own text, not this one's.
+  const [shownKey, setShownKey] = useState(draftKey)
+  if (shownKey !== draftKey) {
+    setShownKey(draftKey)
+    setLoaded(undefined)
+    setValue("")
+    setAttachments([])
+  }
   useEffect(() => {
-    if (seeded.current || !draft) return
-    seeded.current = true
-    setValue((current) => current || draft)
-  }, [draft])
+    if (!draftKey) return
+    let live = true
+    void loadDraft(draftKey).then((text) => {
+      if (!live) return
+      stored.current = text
+      setValue((current) => current || text)
+      setLoaded(draftKey)
+    })
+    return () => {
+      live = false
+      void flushDrafts()
+    }
+  }, [draftKey])
+  useEffect(() => {
+    if (!draftKey || loaded !== draftKey || value === stored.current) return
+    stored.current = value
+    saveDraft(draftKey, value)
+  }, [value, draftKey, loaded])
   useEffect(() => onDraft?.(value), [value, onDraft])
   const [dismissed, setDismissed] = useState(false)
   const [active, setActive] = useState(0)
