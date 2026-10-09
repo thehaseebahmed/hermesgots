@@ -310,7 +310,7 @@ export function BotEditor({
     <FieldGroup>
       {!profile.disabled && pluginOutdated(profile.pluginVersion) && (
         <Banner tone="warning">
-          Its Memento plugin is {profile.pluginVersion}, and Memento needs {MIN_PLUGIN_VERSION} or
+          {profile.name}'s Memento plugin is out of date! Update it to {MIN_PLUGIN_VERSION} or
           newer.
         </Banner>
       )}
