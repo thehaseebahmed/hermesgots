@@ -417,7 +417,10 @@ export function Composer({
         <InputGroupAddon
           align="block-end"
           className="gap-1 px-2.5 pt-0 pb-1.5"
-          onClick={() => textarea.current?.focus()}
+          onClick={(event) => {
+            // Clicks in a pop-up its buttons open (the model list) bubble up the React tree too.
+            if (event.currentTarget.contains(event.target as Node)) textarea.current?.focus()
+          }}
         >
           {attach}
           {model}
