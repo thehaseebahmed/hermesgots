@@ -68,7 +68,14 @@ import {
   useMessageScroller,
 } from "@/components/ui/message-scroller"
 import { Spinner } from "@/components/ui/spinner"
-import { queueMessage, reattachRun, sendMessage, stopMessage } from "@/lib/chat"
+import {
+  queueMessage,
+  refreshQueue,
+  reattachRun,
+  sendMessage,
+  steerText,
+  stopMessage,
+} from "@/lib/chat"
 import {
   DEFAULT_SETTINGS,
   type Attachment,
@@ -81,7 +88,7 @@ import {
   updateConversation,
 } from "@/lib/db"
 import { describeActivity } from "@/lib/format"
-import { listProjects, type HermesProject } from "@/lib/hermes"
+import { listProjects, supportsSteer, type HermesProject } from "@/lib/hermes"
 import { loadEarlierHistory, reconcileHistory } from "@/lib/history"
 import { SAFETY_MS, useLive, watchChat } from "@/lib/live"
 import { useXLarge } from "@/lib/media"
@@ -103,6 +110,8 @@ import { AgentsContext, DELEGATE_TOOL, useSessionAgents } from "@/lib/agents"
 
 /** How often an open chat checks Hermes for turns sent from another device. */
 const CATCH_UP_MS = 30_000
+/** How often an open chat looks for a turn the plugin started from its queue. */
+const HOST_QUEUE_POLL_MS = 3000
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
@@ -216,6 +225,32 @@ export function ChatPage() {
   const configured = Boolean(profile?.baseUrl.trim())
   const streaming = messages?.find((m) => m.status === "streaming")
   const busy = Boolean(streaming)
+  // Queued messages sit faded at the end of the thread until their turn.
+  const thread = messages
+  // Only a run can be steered, and only on a Hermes that has the route.
+  const [steerRoute, setSteerRoute] = useState<{ baseUrl: string; ok: boolean }>()
+  const runId = streaming?.runId
+  const baseUrl = profile?.baseUrl
+  const apiKey = profile?.apiKey
+  useEffect(() => {
+    if (!runId || baseUrl === undefined) return
+    let current = true
+    void supportsSteer({ baseUrl, apiKey: apiKey ?? "" }).then(
+      (ok) => current && setSteerRoute({ baseUrl, ok }),
+    )
+    return () => {
+      current = false
+    }
+  }, [runId, baseUrl, apiKey])
+  const steerable = Boolean(runId && steerRoute?.baseUrl === baseUrl && steerRoute?.ok)
+  // The plugin starts what it holds once nothing runs: follow it in as soon as it does.
+  const hostWaiting =
+    !busy && Boolean(messages?.some((m) => m.hostQueued && m.status === "queued" && !m.queuePaused))
+  useEffect(() => {
+    if (!id || !hostWaiting) return
+    const timer = window.setInterval(() => void refreshQueue(id), HOST_QUEUE_POLL_MS)
+    return () => window.clearInterval(timer)
+  }, [id, hostWaiting])
   const awaitingApproval = messages?.find((m) => m.approval && !m.approval.resolved)
   const awaitingClarify = messages?.find((m) => m.clarify && !m.clarify.resolved)
   const activity = streaming && describeActivity(streaming)
@@ -289,8 +324,6 @@ export function ChatPage() {
     Boolean(delegations?.length),
     Boolean(delegations?.some((t) => t.status === "running")),
   )
-  const baseUrl = profile?.baseUrl
-  const apiKey = profile?.apiKey
   const agentsSource = useMemo(
     () => (agents && baseUrl && apiKey ? { agents, server: { baseUrl, apiKey } } : null),
     [agents, baseUrl, apiKey],
@@ -576,7 +609,7 @@ export function ChatPage() {
                   </Button>
                 )}
                 <AgentsContext.Provider value={agentsSource}>
-                  {messages!.map((message) => (
+                  {thread!.map((message) => (
                     <MessageScrollerItem key={message.id} messageId={message.id}>
                       <MessageItem
                         message={message}
@@ -593,7 +626,7 @@ export function ChatPage() {
             </MessageScrollerViewport>
             <MessageScrollerButton />
             <FollowAfterApproval pending={Boolean(awaitingApproval || awaitingClarify)} />
-            <FollowOnSend lastUserId={messages!.findLast((m) => m.role === "user")?.id} />
+            <FollowOnSend lastUserId={thread!.findLast((m) => m.role === "user")?.id} />
           </MessageScroller>
         </MessageScrollerProvider>
       ) : loadingHistory ? (
@@ -687,6 +720,9 @@ export function ChatPage() {
             onQueue={(text, attachments) =>
               id ? queueMessage(id, text, attachments) : send(text, attachments)
             }
+            steerByDefault={resolved.steerByDefault}
+            canSteer={steerable}
+            onSteer={(text) => (id ? steerText(id, text) : send(text))}
             filesAvailable={Boolean(profile?.apiKey)}
             imagesAvailable={profile?.imageInput !== false}
             onStop={() => id && stopMessage(id)}

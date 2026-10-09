@@ -9,6 +9,8 @@ export interface Settings {
   id: "settings"
   /** Plain chats leave out context use, reply stats and tool calls; project sessions show them. */
   simplifiedChats: boolean
+  /** A message sent while a reply runs steers it, instead of waiting in the queue. */
+  steerByDefault?: boolean
   /** Shows the Developer section in Settings (tapping the version five times). */
   developer?: boolean
   /** Offers Theseus among a project session's modes; a Developer setting, off by default. Local. */
@@ -245,6 +247,15 @@ export interface Attachment {
   path?: string
 }
 
+/** Something the user added to a reply while it ran, which Hermes handed the agent mid-turn. */
+export interface Steer {
+  id: string
+  text: string
+  /** Where in the reply's text it was sent, so it sits there in the thread. */
+  contentOffset: number
+  at: number
+}
+
 /** `queued` is a user message waiting for the current reply to finish. */
 export type MessageStatus = "queued" | "streaming" | "done" | "error" | "stopped"
 
@@ -258,6 +269,8 @@ export interface Message {
   tools?: ToolEvent[]
   approval?: ApprovalRequest
   clarify?: ClarifyRequest
+  /** A reply's steers, in order. */
+  steers?: Steer[]
   status: MessageStatus
   /** Latest `hermes.status` text while streaming, or the error text. */
   statusText?: string
@@ -268,6 +281,10 @@ export interface Message {
   /** The run behind a reply and its last event seen, so a dropped stream can pick up again. */
   runId?: string
   runSeq?: number
+  /** A queued message the Memento plugin holds, which starts it on the host when the run ends. */
+  hostQueued?: boolean
+  /** The plugin holds the queue until the user sends: a stopped or refused run came before it. */
+  queuePaused?: boolean
 }
 
 /** A local deletion sync hasn't pushed yet: `bot:<profileId>` or `chat:<conversationId>`. */

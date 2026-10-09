@@ -7,7 +7,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react"
-import { ArrowUpIcon, MicIcon, SquareIcon } from "lucide-react"
+import { ArrowUpIcon, CornerDownRightIcon, ListPlusIcon, MicIcon, SquareIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { AttachMenu } from "@/components/chat/attach-menu"
@@ -32,8 +32,10 @@ import type { Attachment } from "@/lib/db"
 import type { HermesConfig } from "@/lib/hermes"
 import { joinText, useDictation } from "@/lib/speech"
 import {
+  isSendMode,
   localCommand,
   optionId,
+  sendMode,
   useSlashItems,
   type LocalCommand,
   type SlashItem,
@@ -55,8 +57,17 @@ export function Composer({
   imagesAvailable,
   draft,
   onDraft,
+  steerByDefault = false,
+  canSteer = false,
+  onSteer,
 }: {
   busy: boolean
+  /** Whether a message sent while a reply runs steers it unless it starts with `/queue`. */
+  steerByDefault?: boolean
+  /** Whether the running reply can be steered. */
+  canSteer?: boolean
+  /** Sends text to the running reply now (`/steer`). */
+  onSteer?: (text: string) => Promise<void> | void
   /** Text to start with, e.g. a session's saved draft. */
   draft?: string
   /** Called with the text as it changes. */
@@ -96,11 +107,22 @@ export function Composer({
   const textarea = useRef<HTMLTextAreaElement>(null)
   const listId = useId()
   const dictation = useDictation()
+  // `/steer` or `/queue` picks how a message sent mid-reply goes; the setting is the default. Only
+  // text can steer, so a message with files waits in the queue. An explicit `/steer` asks the
+  // host even when the reply looks unsteerable, and falls back to the queue with a toast.
+  const steersNow = (text: string, files: number) => {
+    const chosen = sendMode(text)
+    const mode = chosen?.mode ?? (steerByDefault ? "steer" : "queue")
+    return busy && Boolean(onSteer) && !files && mode === "steer" && (Boolean(chosen) || canSteer)
+  }
+
   const canSend =
     (value.trim().length > 0 || attachments.length > 0) && !disabled && preparing.length === 0
+  // What Enter does now, so the button says so.
+  const steering = steersNow(value, attachments.length)
 
   const query = /^\/(\S*)$/.exec(value)?.[1]
-  const slash = useSlashItems(query !== undefined && !disabled, query ?? "", connection)
+  const slash = useSlashItems(query !== undefined && !disabled, query ?? "", connection, busy)
   const menuOpen =
     query !== undefined &&
     !dismissed &&
@@ -114,18 +136,22 @@ export function Composer({
   }
 
   const pick = (item: SlashItem) => {
-    if (item.kind === "command") return runCommand(item.name)
+    if (item.kind === "command" && !isSendMode(item.name)) return runCommand(item.name)
     setValue(`/${item.name} `)
     textarea.current?.focus()
   }
 
-  const submitText = (text: string) => {
+  const submitText = (raw: string) => {
+    const text = sendMode(raw)?.text ?? raw
+    if (!text.trim() && !attachments.length) return
     const sent = attachments
+    const steer = steersNow(raw, sent.length)
     setValue("")
     setAttachments([])
+    const go = () => (steer ? onSteer!(text) : (busy ? onQueue : onSend)(text, sent))
     // Hand the message back if it never made it into the chat, unless something new was added.
-    void Promise.resolve((busy ? onQueue : onSend)(text, sent)).catch(() => {
-      setValue((current) => current || text)
+    void Promise.resolve(go()).catch(() => {
+      setValue((current) => current || raw)
       setAttachments((current) => (current.length ? current : sent))
     })
   }
@@ -261,16 +287,29 @@ export function Composer({
         </InputGroupButton>
       )}
       {busy ? (
-        <InputGroupButton
-          type="button"
-          variant="secondary"
-          size="icon-sm"
-          className="size-11 rounded-full"
-          onClick={onStop}
-          aria-label="Stop"
-        >
-          <SquareIcon className="fill-current" />
-        </InputGroupButton>
+        <>
+          {canSend && (
+            <InputGroupButton
+              type="submit"
+              variant="ghost"
+              size="icon-sm"
+              className="size-11 rounded-full"
+              aria-label={steering ? "Steer" : "Queue"}
+            >
+              {steering ? <CornerDownRightIcon /> : <ListPlusIcon />}
+            </InputGroupButton>
+          )}
+          <InputGroupButton
+            type="button"
+            variant="secondary"
+            size="icon-sm"
+            className="size-11 rounded-full"
+            onClick={onStop}
+            aria-label="Stop"
+          >
+            <SquareIcon className="fill-current" />
+          </InputGroupButton>
+        </>
       ) : (
         <InputGroupButton
           type="submit"

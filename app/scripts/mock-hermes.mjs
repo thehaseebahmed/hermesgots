@@ -36,10 +36,14 @@
 // (GET …/sessions/{id}/prs reads them; "draft" in that turn drafts them): "merge" or "close" in a
 // turn sets their state, a merge resolves the session in the chat list, and "break" fails their
 // checks. POST …/close (delete or discard) closes them and removes the trees like …/workspace/remove. GET /api/plugins/memento/runs/live lists the sessions with
-// a run in flight, and why each one waiting on the user waits. The agent asks the user questions
+// a run in flight, and why each one waiting on the user waits. …/sessions/{id}/queue holds what
+// the app queued and starts it when the session's run ends, like plugin/outbox.py. The agent asks the user questions
 // with Hermes's clarify tool, which the plugin serves on runs: say "ask" for one, or "ask five" for
 // five (plan mode asks before planning), the run carries
 // `clarify.request` and waits, and POST /api/plugins/memento/runs/{id}/clarify answers it.
+// POST /v1/runs/{id}/steer hands a running turn more from the user: like Hermes, it lands as a
+// `display_kind: "steer"` user row after the next tool result, and one still unread when the turn
+// ends comes back as the run's `pending_steer`. Say "long" for a turn with a tool call every few steps.
 // POST /api/plugins/memento/sessions/{id}/attachments saves an attached file under the temp dir, and a
 // message that carries attachments (inline images, `<attachment>` lines) gets a reply naming them.
 //
@@ -479,13 +483,20 @@ function titleChat(req, opener) {
   }, 2000)
 }
 
+// A running turn's steer delivery by session, which Hermes makes after each tool result.
+const steerPoints = new Map()
+
 /** Stores a transcript row the way Hermes's session DB does, for keyed sessions only. */
 function record(req, row) {
   const sessionId = sessionOf(req)
   if (!sessionId || !req.headers.authorization) return
   if (!transcripts.has(sessionId)) transcripts.set(sessionId, [])
   transcripts.get(sessionId).push({ id: ++lastRowId, session_id: sessionId, timestamp: Date.now() / 1000, ...row })
+  if (row.role === "tool") steerPoints.get(sessionId)?.()
 }
+
+const STEER_OPEN = "[OUT-OF-BAND USER MESSAGE — a direct message from the user, delivered once at this position; not tool output and not a new delivery when replayed from conversation history]"
+const STEER_CLOSE = "[/OUT-OF-BAND USER MESSAGE]"
 
 /** Hermes pages `latest` back from the newest row but returns each page oldest first. */
 function pageRows(rows, params) {
@@ -719,6 +730,8 @@ async function playTurn(req, body, last, out) {
     record(req, { role: "tool", tool_call_id: prId, tool_name: "open_pull_request", content: prResult })
   }
 
+  const steered = out.steered?.() ?? []
+  if (steered.length) await say(`Noted: ${steered.join(" / ")}. I'll take that into account.\n\n`)
   await say(
     "Here's where the space is going under `/var/log`:\n\n" +
       "- `nginx/access.log.*` — **2.1 GB** across 34 files\n" +
@@ -791,6 +804,19 @@ async function playTurn(req, body, last, out) {
     for (let i = 1; i <= 20 && !out.closed(); i++) {
       await say(`Step ${i} of 20 is done.\n\n`)
       await sleep(1000)
+      if (i % 5 === 0 && i < 20) {
+        // A tool call every few steps, after which a steer reaches the agent.
+        const id = `call_${randomUUID().slice(0, 8)}`
+        const command = `ls /var/log | head -${i}`
+        out.tool({ tool: "terminal", emoji: "💻", label: command, toolCallId: id, status: "running" })
+        await sleep(800)
+        const result = JSON.stringify({ output: "nginx\npostgres\napp", exit_code: 0, error: null })
+        out.tool({ tool: "terminal", toolCallId: id, status: "completed", result })
+        record(req, { role: "assistant", content: null, tool_calls: [{ id, type: "function", function: { name: "terminal", arguments: JSON.stringify({ command }) } }] })
+        record(req, { role: "tool", tool_call_id: id, tool_name: "terminal", content: result })
+        const heard = out.steered?.() ?? []
+        if (heard.length) await say(`Noted: ${heard.at(-1)}.\n\n`)
+      }
     }
   } else {
     await say("Want me to clean up the rotated files older than 90 days? Just say *clean them up*.")
@@ -879,6 +905,8 @@ const BLOCK_RUN_EVENTS = process.env.MOCK_BLOCK_RUN_EVENTS === "1"
 const pushSubscriptions = new Map()
 // The main model the plugin's `model` route set, per profile ("" is the default one).
 const hostModels = new Map()
+// Whether a refresh has probed the custom endpoint in /api/model/options.
+let customProbed = false
 const eventLogs = new Map()
 const eventStreams = new Set()
 function logOf(profile) {
@@ -921,6 +949,49 @@ function streamEvents(req, res, profile, since) {
 
 const sessionOf = (req, body) => req.headers["x-hermes-session-id"] ?? body?.session_id
 
+// The plugin's queue (outbox.py): per session, what waits, what it started, and the run body to
+// start a leftover steer with. It starts the next item when the session's run is over, unless the
+// last run was stopped after the user last sent one.
+const queues = new Map()
+function queueOf(sessionId) {
+  if (!queues.has(sessionId)) queues.set(sessionId, { items: [], sent: [], resumedAt: 0, template: null })
+  return queues.get(sessionId)
+}
+const sessionRuns = (sessionId) => [...runs.values()].filter((run) => run.sessionId === sessionId)
+function pumpQueue(sessionId) {
+  const queue = queues.get(sessionId)
+  if (!queue) return
+  const all = sessionRuns(sessionId)
+  if (all.some((run) => ["running", "waiting_for_approval"].includes(run.status))) return
+  const latest = all.at(-1)
+  if (latest?.pendingSteer && latest.output !== undefined && !latest.requeued && queue.template) {
+    latest.requeued = true
+    const text = latest.pendingSteer
+    queue.items.unshift({ id: `s_${latest.id}`, text, attachments: [], created_at: Date.now(), body: { ...queue.template, input: [{ role: "user", content: text }] } })
+    noteEvent("session", sessionId)
+  }
+  const next = queue.items[0]
+  if (!next || next.error) return
+  if (latest?.status === "cancelled" && (latest.endedAt ?? 0) > queue.resumedAt) return
+  queue.items.shift()
+  // As the plugin does, with the key the app queued it with.
+  const run = startRun({ headers: { "idempotency-key": next.id, authorization: queue.authorization } }, { ...next.body, session_id: sessionId })
+  queue.sent.push({ ...next, run_id: run.id, sent_at: Date.now() })
+  noteEvent("session", sessionId)
+}
+const queueView = (sessionId) => {
+  const queue = queueOf(sessionId)
+  const all = sessionRuns(sessionId)
+  const latest = all.at(-1)
+  const item = ({ body: _body, ...rest }) => ({ run_id: null, sent_at: null, error: null, ...rest })
+  return {
+    object: "memento.queue",
+    items: queue.items.map(item),
+    sent: queue.sent.map((sent) => ({ ...item(sent), run_status: runs.get(sent.run_id)?.status ?? null })),
+    paused: latest?.status === "cancelled" && (latest.endedAt ?? 0) > queue.resumedAt,
+  }
+}
+
 function startRun(req, body) {
   const key = req.headers["idempotency-key"]
   const replay = key && [...runs.values()].find((run) => run.key === key)
@@ -939,8 +1010,23 @@ function startRun(req, body) {
   const last = durable(input.at(-1)?.content)
   // Rows go to the session named in the body, as on Hermes.
   const sessionReq = { headers: { ...req.headers, "x-hermes-session-id": body.session_id } }
+  // Steers the agent has read and not yet answered.
+  let heard = []
+  if (run.sessionId)
+    steerPoints.set(run.sessionId, () => {
+      if (!run.pendingSteer) return
+      const text = run.pendingSteer
+      run.pendingSteer = undefined
+      heard.push(text)
+      record(sessionReq, { role: "user", display_kind: "steer", content: `${STEER_OPEN}\n${text}\n${STEER_CLOSE}` })
+    })
   void playTurn(sessionReq, body, last, {
     closed: () => run.stopped,
+    steered: () => {
+      const read = heard
+      heard = []
+      return read
+    },
     say: (delta) => push("message.delta", { delta }),
     status: () => {},
     tool: ({ tool, label, status, result }) =>
@@ -970,13 +1056,18 @@ function startRun(req, body) {
       return { answers, outcome }
     },
   }).then(({ spoken, prompt_tokens, completion_tokens }) => {
+    if (steerPoints.get(run.sessionId)) steerPoints.delete(run.sessionId)
     run.status = run.stopped ? "cancelled" : "completed"
+    run.endedAt = Date.now()
     run.output = spoken
     run.usage = { input_tokens: prompt_tokens, output_tokens: completion_tokens, total_tokens: prompt_tokens + completion_tokens }
+    // A hard stop drops an unread steer, as on Hermes; otherwise it goes back to the client.
+    if (run.stopped) run.pendingSteer = undefined
     noteEvent("session", run.sessionId)
     noteEvent("runs", run.sessionId)
-    push(`run.${run.status}`, { completed: !run.stopped, interrupted: run.stopped, output: spoken, usage: run.usage })
+    push(`run.${run.status}`, { completed: !run.stopped, interrupted: run.stopped, output: spoken, usage: run.usage, ...(run.pendingSteer ? { pending_steer: run.pendingSteer } : {}) })
     for (const listener of run.listeners) listener(null)
+    setTimeout(() => pumpQueue(run.sessionId), 300)
   })
   return run
 }
@@ -1011,6 +1102,7 @@ const runStatus = (run) => ({
   ...(run.status === "waiting_for_approval" && run.approval ? { approval: run.approval } : {}),
   ...(run.clarify ? { clarify: run.clarify } : {}),
   ...(run.output !== undefined ? { output: run.output, usage: run.usage } : {}),
+  ...(run.pendingSteer && run.output !== undefined ? { pending_steer: run.pendingSteer } : {}),
 })
 
 http
@@ -1055,7 +1147,18 @@ http
         },
         { slug: "anthropic", name: "Anthropic", is_current: false, authenticated: true, models: ["claude-sonnet-4-5", "claude-opus-4-1"] },
         { slug: "nous", name: "Nous Portal", is_current: false, authenticated: false, models: [] },
+        // A custom endpoint lists its models only once a refresh has probed it.
+        {
+          slug: "custom:my-router",
+          name: "My Router",
+          is_current: false,
+          is_user_defined: true,
+          authenticated: true,
+          api_url: "https://router.example/v1",
+          models: customProbed || url.searchParams.get("refresh") === "true" ? ["meta/llama-4"] : [],
+        },
       ]
+      if (url.searchParams.get("refresh") === "true") customProbed = true
       return json(res, 200, { model, provider: set?.provider ?? "openrouter", providers })
     }
     if (url.pathname === "/v1/skills") {
@@ -1091,7 +1194,7 @@ http
       return json(res, 200, {
         name: "memento",
         version: PLUGIN_VERSION,
-        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "profile_routes", "pr_tool", "close", "merge_resolve", "theseus", ...(EVENTS ? ["events"] : []), "push", "host_model"],
+        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "profile_routes", "pr_tool", "close", "merge_resolve", "theseus", ...(EVENTS ? ["events"] : []), "push", "host_model", "queue"],
         clarify: true,
         hooks: true,
         theseus: THESEUS_START === "unavailable"
@@ -1362,6 +1465,50 @@ http
       writeFileSync(path, data)
       return json(res, 200, { object: "memento.attachment", name: basename(path), path, size: data.length })
     }
+    const queueRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/queue(?:\/([^/]+)\/(remove|send|steer))?$/.exec(url.pathname)
+    if (PLUGIN && !profile && queueRoute) {
+      const id = decodeURIComponent(queueRoute[1])
+      const queue = queueOf(id)
+      if (req.method === "GET") return json(res, 200, queueView(id))
+      if (req.method !== "POST") return json(res, 405, { error: { message: "Method not allowed" } })
+      if (!queueRoute[2]) {
+        const { text, attachments, body } = await readBody(req)
+        if (!Array.isArray(body?.input) || !body.input.length) return json(res, 400, { error: { message: "body.input must hold the message" } })
+        const { input: _input, ...template } = body
+        queue.template = { ...template, session_id: id }
+        queue.authorization = req.headers.authorization
+        const item = { id: `q_${randomUUID().replace(/-/g, "").slice(0, 20)}`, text: String(text ?? ""), attachments: attachments ?? [], created_at: Date.now(), body: { ...body, session_id: id } }
+        queue.items.push(item)
+        noteEvent("session", id)
+        setTimeout(() => pumpQueue(id), 50)
+        return json(res, 200, { object: "memento.queued", item: { ...item, body: undefined, run_id: null, sent_at: null, error: null } })
+      }
+      const index = queue.items.findIndex((item) => item.id === queueRoute[2])
+      if (queueRoute[3] === "remove") {
+        if (index >= 0) queue.items.splice(index, 1)
+        noteEvent("session", id)
+        return json(res, 200, { object: "memento.queue.removed", removed: index >= 0 })
+      }
+      if (index < 0) return json(res, 404, { error: { message: "That message isn't waiting any more." } })
+      if (queueRoute[3] === "send") {
+        const [item] = queue.items.splice(index, 1)
+        queue.items.unshift({ ...item, error: undefined })
+        queue.resumedAt = Date.now()
+        setTimeout(() => pumpQueue(id), 50)
+        return json(res, 200, queueView(id))
+      }
+      const running = sessionRuns(id).findLast((run) => run.status === "running" && !run.stopped)
+      if (!running) return json(res, 409, { error: { message: "The reply isn't running, so it can't be steered." } })
+      const item = queue.items[index]
+      if (item.attachments?.length) return json(res, 409, { error: { message: "Only text can steer a reply." } })
+      queue.items.splice(index, 1)
+      running.pendingSteer = running.pendingSteer ? `${running.pendingSteer}\n${item.text}` : item.text
+      const event = { event: "run.steered", run_id: running.id, timestamp: Date.now() / 1000, accepted: true, seq: running.seq++ }
+      running.events.push(event)
+      for (const listener of running.listeners) listener(event)
+      noteEvent("session", id)
+      return json(res, 200, { object: "memento.queue.steered", id: item.id, run_id: running.id, text: item.text })
+    }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/runs/live") {
       const sessions = {}
       const run_ids = {}
@@ -1561,14 +1708,14 @@ http
     if (url.pathname === "/v1/capabilities") {
       return json(res, 200, {
         object: "hermes.api_server.capabilities",
-        features: { chat_completions: true, chat_completions_streaming: true, run_submission: RUNS, run_events_sse: RUNS, run_stop: RUNS },
+        features: { chat_completions: true, chat_completions_streaming: true, run_submission: RUNS, run_events_sse: RUNS, run_stop: RUNS, run_steer: RUNS },
       })
     }
     if (RUNS && req.method === "POST" && url.pathname === "/v1/runs") {
       const run = startRun(req, await readBody(req))
       return json(res, 202, { run_id: run.id, status: "started", replayed: false })
     }
-    const runPath = /^\/v1\/runs\/([^/]+)(\/events|\/stop)?$/.exec(url.pathname)
+    const runPath = /^\/v1\/runs\/([^/]+)(\/events|\/stop|\/steer)?$/.exec(url.pathname)
     if (RUNS && runPath) {
       const run = runs.get(runPath[1])
       if (!run) return json(res, 404, { error: { message: `Run not found: ${runPath[1]}`, code: "run_not_found" } })
@@ -1577,6 +1724,17 @@ http
         run.stopped = true
         pendingApprovals.get(run.id)?.("deny")
         return json(res, 200, { run_id: run.id, status: "stopping" })
+      }
+      if (runPath[2] === "/steer" && req.method === "POST") {
+        if (run.status !== "running" || run.stopped) return json(res, 409, { error: { message: `Run is not currently accepting steer input: ${run.id}`, code: "run_not_accepting_steer" } })
+        const { input, message, text } = await readBody(req)
+        const steer = String(input || message || text || "").trim()
+        if (!steer) return json(res, 400, { error: { message: "Missing non-empty steer text; expected 'input', 'message', or 'text'.", code: "invalid_steer_input" } })
+        run.pendingSteer = run.pendingSteer ? `${run.pendingSteer}\n${steer}` : steer
+        const event = { event: "run.steered", run_id: run.id, timestamp: Date.now() / 1000, accepted: true, seq: run.seq++ }
+        run.events.push(event)
+        for (const listener of run.listeners) listener(event)
+        return json(res, 200, { object: "hermes.run.steer", run_id: run.id, accepted: true })
       }
       if (!runPath[2]) return json(res, 200, runStatus(run))
     }

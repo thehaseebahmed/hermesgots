@@ -10,10 +10,12 @@ import {
   CheckIcon,
   TerminalIcon,
   ChevronRightIcon,
+  CornerDownRightIcon,
   DatabaseIcon,
   MenuIcon,
   MessageCircleIcon,
   MessagesSquareIcon,
+  MessageSquareTextIcon,
   MonitorIcon,
   MoonIcon,
   PaletteIcon,
@@ -28,6 +30,7 @@ import { AccountSettings } from "@/components/account-settings"
 import { BotSettings } from "@/components/bot-settings"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { ExperimentalBadge } from "@/components/experimental-badge"
+import { FeedbackSheet } from "@/components/feedback"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -170,6 +173,9 @@ function MenuScreen({ className }: { className?: string }) {
           subtitle={THEMES.find((t) => t.value === (theme ?? "system"))?.label}
         />
         <NotificationsRow />
+      </Group>
+      <Group>
+        <FeedbackRow />
       </Group>
       <Group>
         <Row to="data" icon={DatabaseIcon} title="Local data" />
@@ -479,6 +485,23 @@ function SwitchRow({
   )
 }
 
+function FeedbackRow() {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className={cn(rowClass, "transition-colors hover:bg-muted")}
+      >
+        <MessageSquareTextIcon className="size-5 shrink-0 text-muted-foreground" />
+        <RowText title="Send feedback" />
+      </button>
+      <FeedbackSheet open={open} onOpenChange={setOpen} />
+    </>
+  )
+}
+
 /** The signed-in account on top, like the Claude app; hidden where there's no sign-in at all. */
 function AccountRow() {
   const sync = useSyncState()
@@ -508,10 +531,11 @@ function AccountRow() {
 function AppearanceSettings() {
   const { theme, setTheme } = useTheme()
   const current = theme ?? "system"
-  const simplified = useLiveQuery(
-    async () => ({ ...DEFAULT_SETTINGS, ...(await db.settings.get("settings")) }).simplifiedChats,
+  const chatSettings = useLiveQuery(
+    async () => ({ ...DEFAULT_SETTINGS, ...(await db.settings.get("settings")) }),
     [],
   )
+  const simplified = chatSettings?.simplifiedChats
   return (
     <>
       <Group>
@@ -537,6 +561,14 @@ function AppearanceSettings() {
           subtitle="Hide tool calls, stats and context use"
           checked={simplified ?? DEFAULT_SETTINGS.simplifiedChats}
           onCheckedChange={(checked) => saveSettings({ simplifiedChats: checked })}
+        />
+        <SwitchRow
+          id="steer-by-default"
+          icon={CornerDownRightIcon}
+          title="Steer by default"
+          subtitle="Messages sent mid-reply go straight to it"
+          checked={chatSettings?.steerByDefault ?? false}
+          onCheckedChange={(checked) => saveSettings({ steerByDefault: checked })}
         />
       </Group>
     </>

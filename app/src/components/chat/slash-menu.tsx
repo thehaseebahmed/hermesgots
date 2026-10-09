@@ -1,12 +1,23 @@
 import { useEffect } from "react"
-import { PlusIcon, SettingsIcon, SparklesIcon } from "lucide-react"
+import {
+  CornerDownRightIcon,
+  ListPlusIcon,
+  PlusIcon,
+  SettingsIcon,
+  SparklesIcon,
+} from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { optionId, type SkillsState, type SlashItem } from "@/lib/slash"
 import { cn } from "@/lib/utils"
 
-const COMMAND_ICONS = { new: PlusIcon, settings: SettingsIcon }
+const COMMAND_ICONS = {
+  new: PlusIcon,
+  settings: SettingsIcon,
+  steer: CornerDownRightIcon,
+  queue: ListPlusIcon,
+}
 
 export function SlashMenu({
   id,

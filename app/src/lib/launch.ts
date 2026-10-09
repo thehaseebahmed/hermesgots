@@ -20,13 +20,23 @@ function read() {
   }
 }
 
+/** A chat that crashed this time isn't reopened on the next launch. */
+let crashed: string | undefined
+
 function write(id: string | undefined) {
+  if (id && id === crashed) return
   try {
     if (id) localStorage.setItem(LAST_KEY, JSON.stringify({ id, at: Date.now() }))
     else localStorage.removeItem(LAST_KEY)
   } catch {
     // Storage can be blocked; launching on a new chat is the fallback.
   }
+}
+
+/** Forgets the open chat, so a launch doesn't reopen one that crashes. */
+export function forgetLastChat() {
+  crashed = matchPath("/c/:id", window.location.pathname)?.params.id
+  write(undefined)
 }
 
 // Read before anything records the screen the app opens on, and used once.

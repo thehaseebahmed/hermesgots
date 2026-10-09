@@ -4,6 +4,10 @@ import { updateProfile, type ModelChoice, type Profile } from "@/lib/db"
 import { getModelInfo, getPluginFeatures, setHostModel, type ModelInfo } from "@/lib/hermes"
 
 const FRESH_MS = 60_000
+// A refresh probes every endpoint on the host, so a server whose endpoint stays empty isn't asked
+// again on every open.
+const REFRESH_MS = 10 * 60_000
+const refreshed = new Map<string, number>()
 const cache = new Map<string, { at: number; info: Promise<ModelInfo | null> }>()
 const listeners = new Set<() => void>()
 
@@ -31,6 +35,18 @@ export async function setDefaultModel(profile: Profile, choice: ModelChoice | un
   await updateProfile(profile.id, { modelChoice: choice })
 }
 
+/**
+ * Hermes lists a custom endpoint's models (an OpenRouter added under `custom_providers`, say) only
+ * once it has probed that endpoint, which a plain read does just for the current provider. So an
+ * endpoint that came back empty gets one refresh, after which Hermes's cache serves it.
+ */
+async function loadModelInfo(server: Server, key: string) {
+  const info = await getModelInfo(server)
+  if (!info?.unprobed || Date.now() - (refreshed.get(key) ?? 0) < REFRESH_MS) return info
+  refreshed.set(key, Date.now())
+  return (await getModelInfo(server, { refresh: true })) ?? info
+}
+
 /** The host's model and the models it's configured for, shared by every picker on its server. */
 export function useModelInfo(profile?: Server | null) {
   const baseUrl = profile?.baseUrl ?? ""
@@ -50,7 +66,7 @@ export function useModelInfo(profile?: Server | null) {
     let cancelled = false
     let entry = cache.get(key)
     if (!entry || Date.now() - entry.at > FRESH_MS) {
-      entry = { at: Date.now(), info: getModelInfo({ baseUrl, apiKey }) }
+      entry = { at: Date.now(), info: loadModelInfo({ baseUrl, apiKey }, key) }
       cache.set(key, entry)
     }
     void entry.info.then((info) => {

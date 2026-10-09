@@ -350,6 +350,8 @@ export interface ModelInfo {
   provider?: string
   /** The configured providers, the current one first; empty when the host lists none. */
   providers: ModelProvider[]
+  /** A custom endpoint came back without models: Hermes lists them only once it has probed it. */
+  unprobed: boolean
 }
 
 /** Hermes's own model picker inventory, keeping only providers that have models to pick. */
@@ -369,11 +371,16 @@ function modelProviders(raw: unknown, current?: string): ModelProvider[] {
 
 /**
  * The LLM and provider behind the profile, and the models its host is configured for. Newer
- * Hermes only, so callers treat null as unknown.
+ * Hermes only, so callers treat null as unknown. `refresh` has Hermes probe every custom endpoint
+ * (the dashboard's Refresh Models), which a plain read only does for the current one.
  */
-export async function getModelInfo(config: HermesConfig): Promise<ModelInfo | null> {
+export async function getModelInfo(
+  config: HermesConfig,
+  { refresh = false } = {},
+): Promise<ModelInfo | null> {
   try {
-    const response = await request(`${serverRoot(config.baseUrl)}/api/model/options`, {
+    const query = refresh ? "?refresh=true" : ""
+    const response = await request(`${serverRoot(config.baseUrl)}/api/model/options${query}`, {
       headers: headers(config),
     })
     const body = await response.json()
@@ -383,6 +390,15 @@ export async function getModelInfo(config: HermesConfig): Promise<ModelInfo | nu
       model: text(body?.model),
       provider,
       providers: modelProviders(body?.providers, provider),
+      unprobed:
+        Array.isArray(body?.providers) &&
+        body.providers.some(
+          (row: { authenticated?: unknown; api_url?: unknown; models?: unknown }) =>
+            row?.authenticated !== false &&
+            typeof row?.api_url === "string" &&
+            !!row.api_url &&
+            !(Array.isArray(row.models) && row.models.length),
+        ),
     }
   } catch {
     return null
@@ -582,6 +598,88 @@ export async function getPluginFeatures(config: HermesConfig): Promise<string[]>
   const response = await request(`${pluginRoot(config.baseUrl)}/info`, { headers: headers(config) })
   const features: unknown = (await response.json())?.features
   return Array.isArray(features) ? features.filter((f): f is string => typeof f === "string") : []
+}
+
+const pluginFeatures = new Map<string, Promise<string[] | null>>()
+
+/** `getPluginFeatures`, asked once per server and key; a failed ask is tried again next time. */
+export async function hasPluginFeature(config: HermesConfig, feature: string) {
+  const key = `${config.baseUrl}\n${config.apiKey}`
+  let pending = pluginFeatures.get(key)
+  if (!pending) {
+    pending = getPluginFeatures(config).catch(() => null)
+    pluginFeatures.set(key, pending)
+    void pending.then((found) => found || pluginFeatures.delete(key))
+  }
+  return Boolean((await pending)?.includes(feature))
+}
+
+/** A message waiting on the Hermes host for the session's run to finish. */
+export interface QueueItem {
+  id: string
+  text: string
+  attachments: { name: string; type?: string; size?: number; path?: string }[]
+  createdAt: number
+  /** The run the plugin started with it, once sent. */
+  runId?: string
+  runStatus?: string
+  /** Why the plugin couldn't start it; the queue waits until it's sent again. */
+  error?: string
+}
+
+function queueItem(raw: Record<string, unknown>): QueueItem {
+  return {
+    id: String(raw.id),
+    text: typeof raw.text === "string" ? raw.text : "",
+    attachments: Array.isArray(raw.attachments) ? raw.attachments : [],
+    createdAt: Number(raw.created_at) || Date.now(),
+    runId: typeof raw.run_id === "string" ? raw.run_id : undefined,
+    runStatus: typeof raw.run_status === "string" ? raw.run_status : undefined,
+    error: typeof raw.error === "string" ? raw.error : undefined,
+  }
+}
+
+function queueRoot(config: HermesConfig, sessionId: string) {
+  return `${pluginRoot(config.baseUrl)}/sessions/${encodeURIComponent(sessionId)}/queue`
+}
+
+/** The session's queue on the plugin: what waits, and what it sent in the last hour. */
+export async function getQueue(config: HermesConfig, sessionId: string) {
+  const response = await request(queueRoot(config, sessionId), { headers: headers(config) })
+  const body = await response.json()
+  const list = (value: unknown) =>
+    Array.isArray(value)
+      ? value.filter((item) => item && typeof item === "object").map(queueItem)
+      : []
+  return { items: list(body?.items), sent: list(body?.sent), paused: Boolean(body?.paused) }
+}
+
+/** Queues a turn on the plugin, which starts it with `run` once the session's run is over. */
+export async function addToQueue(
+  config: HermesConfig,
+  sessionId: string,
+  item: { text: string; attachments: QueueItem["attachments"]; run: Record<string, unknown> },
+) {
+  const response = await request(queueRoot(config, sessionId), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ text: item.text, attachments: item.attachments, body: item.run }),
+  })
+  return queueItem((await response.json())?.item ?? {})
+}
+
+/** `remove` drops a queued message, `send` puts it first and lets a paused queue go, `steer` hands it to the running reply. */
+export async function queueAction(
+  config: HermesConfig,
+  sessionId: string,
+  itemId: string,
+  action: "remove" | "send" | "steer",
+) {
+  const response = await request(
+    `${queueRoot(config, sessionId)}/${encodeURIComponent(itemId)}/${action}`,
+    { method: "POST", headers: headers(config) },
+  )
+  return (await response.json()) as Record<string, unknown>
 }
 
 /** The plugin pings its change stream every 20s, so one quiet for longer has died unnoticed. */
@@ -1522,22 +1620,32 @@ export async function labelSession(config: HermesConfig, sessionId: string) {
   }
 }
 
-const runSupport = new Map<string, Promise<boolean>>()
+const runFeatures = new Map<string, Promise<Record<string, unknown> | null>>()
 
-/** Whether the server takes `/v1/runs`, which keep going when the client drops off. */
-export function supportsRuns(config: HermesConfig) {
+function features(config: HermesConfig) {
   const key = `${config.baseUrl}\n${config.apiKey}`
-  let pending = runSupport.get(key)
+  let pending = runFeatures.get(key)
   if (!pending) {
     pending = request(endpoint(config.baseUrl, "/capabilities"), { headers: headers(config) })
       .then((response) => response.json())
-      .then((body) => Boolean(body?.features?.run_submission && body?.features?.run_events_sse))
-      .catch(() => false)
-    runSupport.set(key, pending)
+      .then((body) => (body?.features && typeof body.features === "object" ? body.features : {}))
+      .catch(() => null)
+    runFeatures.set(key, pending)
     // A failed probe (server down, older version) gets another chance on a later turn.
-    void pending.then((ok) => ok || runSupport.delete(key))
+    void pending.then((found) => found || runFeatures.delete(key))
   }
   return pending
+}
+
+/** Whether the server takes `/v1/runs`, which keep going when the client drops off. */
+export async function supportsRuns(config: HermesConfig) {
+  const found = await features(config)
+  return Boolean(found?.run_submission && found?.run_events_sse)
+}
+
+/** Whether a running turn takes more from the user (`POST /v1/runs/{id}/steer`). */
+export async function supportsSteer(config: HermesConfig) {
+  return Boolean((await features(config))?.run_steer)
 }
 
 export type RunStatus = "completed" | "failed" | "cancelled" | "interrupted"
@@ -1549,6 +1657,8 @@ export interface RunOutcome {
   usage?: TurnUsage
   /** Events were lost on the way, so `output` should replace what streamed. */
   replaceContent?: boolean
+  /** What the user steered with that the agent never read: it finished first. */
+  pendingSteer?: string
 }
 
 const TERMINAL_RUN_STATUSES = new Set<string>(["completed", "failed", "cancelled", "interrupted"])
@@ -1565,6 +1675,10 @@ function runOutcome(payload: any): RunOutcome {
           completionTokens: Number(usage.output_tokens) || 0,
         }
       : undefined,
+    pendingSteer:
+      typeof payload?.pending_steer === "string" && payload.pending_steer.trim()
+        ? payload.pending_steer
+        : undefined,
   }
 }
 
@@ -1582,33 +1696,38 @@ const PLAN_HINT =
  * Starts a turn on `/v1/runs`. Unlike a chat completion, Hermes doesn't interrupt a run when its
  * event stream drops, so a phone that sleeps mid-reply can pick it up again.
  */
-export async function startRun(
-  config: HermesConfig,
-  options: {
-    model: string
-    /** With a model chosen for the chat; without it a model id names only a `model_routes` alias. */
-    provider?: string
-    messages: ChatMessage[]
-    sessionId?: string
-    /** Makes a retried POST return the run it already started. */
-    idempotencyKey: string
-    /** The plugin's line for a project session: its worktrees and, in plan mode, the plan's shape. */
-    workspaceInstructions?: string
-  },
-) {
+interface RunOptions {
+  model: string
+  /** With a model chosen for the chat; without it a model id names only a `model_routes` alias. */
+  provider?: string
+  messages: ChatMessage[]
+  sessionId?: string
+  /** The plugin's line for a project session: its worktrees and, in plan mode, the plan's shape. */
+  workspaceInstructions?: string
+}
+
+/** The `POST /v1/runs` body for a turn. */
+export function runRequest(config: HermesConfig, options: RunOptions) {
   // Like X-Hermes-Session-Id, a keyed session holds the history, so only the new message goes.
   const keyed = Boolean(options.sessionId && config.apiKey)
-  const input = keyed ? options.messages.slice(-1) : options.messages
+  return {
+    model: options.model,
+    ...(options.provider ? { provider: options.provider } : {}),
+    input: keyed ? options.messages.slice(-1) : options.messages,
+    instructions: [PLAN_HINT, options.workspaceInstructions].filter(Boolean).join("\n"),
+    ...(keyed ? { session_id: options.sessionId } : {}),
+  }
+}
+
+export async function startRun(
+  config: HermesConfig,
+  /** `idempotencyKey` makes a retried POST return the run it already started. */
+  options: RunOptions & { idempotencyKey: string },
+) {
   const response = await request(endpoint(config.baseUrl, "/runs"), {
     method: "POST",
     headers: headers(config, { "Idempotency-Key": options.idempotencyKey }),
-    body: JSON.stringify({
-      model: options.model,
-      ...(options.provider ? { provider: options.provider } : {}),
-      input,
-      instructions: [PLAN_HINT, options.workspaceInstructions].filter(Boolean).join("\n"),
-      ...(keyed ? { session_id: options.sessionId } : {}),
-    }),
+    body: JSON.stringify(runRequest(config, options)),
   })
   const body = await response.json()
   if (typeof body?.run_id !== "string") throw new HermesError("Hermes didn't start the run.")
@@ -1725,6 +1844,19 @@ export async function getRun(config: HermesConfig, runId: string, signal?: Abort
         ? (clarify as ClarifyRequestEvent)
         : undefined,
   }
+}
+
+/**
+ * Hands the running agent more from the user without stopping it. Hermes adds it as a user message
+ * after the current tool calls; one sent while the agent writes its last reply comes back on the
+ * finished run as `pending_steer`. A run waiting on an approval or question turns it down (409).
+ */
+export async function steerRun(config: HermesConfig, runId: string, text: string) {
+  await request(endpoint(config.baseUrl, `/runs/${encodeURIComponent(runId)}/steer`), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ input: text }),
+  })
 }
 
 export async function stopRun(config: HermesConfig, runId: string) {
