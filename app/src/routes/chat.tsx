@@ -72,10 +72,8 @@ import {
   queueMessage,
   refreshQueue,
   reattachRun,
-  removeQueued,
   sendMessage,
-  sendQueued,
-  steerQueued,
+  steerText,
   stopMessage,
 } from "@/lib/chat"
 import {
@@ -227,9 +225,8 @@ export function ChatPage() {
   const configured = Boolean(profile?.baseUrl.trim())
   const streaming = messages?.find((m) => m.status === "streaming")
   const busy = Boolean(streaming)
-  // Queued messages wait above the composer, not in the thread.
-  const thread = messages?.filter((m) => m.status !== "queued")
-  const queue = useMemo(() => messages?.filter((m) => m.status === "queued") ?? [], [messages])
+  // Queued messages sit faded at the end of the thread until their turn.
+  const thread = messages
   // Only a run can be steered, and only on a Hermes that has the route.
   const [steerRoute, setSteerRoute] = useState<{ baseUrl: string; ok: boolean }>()
   const runId = streaming?.runId
@@ -247,7 +244,8 @@ export function ChatPage() {
   }, [runId, baseUrl, apiKey])
   const steerable = Boolean(runId && steerRoute?.baseUrl === baseUrl && steerRoute?.ok)
   // The plugin starts what it holds once nothing runs: follow it in as soon as it does.
-  const hostWaiting = !busy && queue.some((m) => m.hostQueued && !m.statusText)
+  const hostWaiting =
+    !busy && Boolean(messages?.some((m) => m.hostQueued && m.status === "queued" && !m.queuePaused))
   useEffect(() => {
     if (!id || !hostWaiting) return
     const timer = window.setInterval(() => void refreshQueue(id), HOST_QUEUE_POLL_MS)
@@ -618,6 +616,7 @@ export function ChatPage() {
                         showStats={!simple}
                         simple={simple}
                         botId={profile?.botId}
+                        busy={busy}
                         plain={Boolean(session)}
                       />
                     </MessageScrollerItem>
@@ -721,11 +720,9 @@ export function ChatPage() {
             onQueue={(text, attachments) =>
               id ? queueMessage(id, text, attachments) : send(text, attachments)
             }
-            queue={queue}
+            steerByDefault={resolved.steerByDefault}
             canSteer={steerable}
-            onSteer={steerQueued}
-            onSendQueued={sendQueued}
-            onRemoveQueued={removeQueued}
+            onSteer={(text) => (id ? steerText(id, text) : send(text))}
             filesAvailable={Boolean(profile?.apiKey)}
             imagesAvailable={profile?.imageInput !== false}
             onStop={() => id && stopMessage(id)}

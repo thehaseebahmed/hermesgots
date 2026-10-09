@@ -3,15 +3,31 @@ import { useEffect, useState } from "react"
 import { listSkills, type HermesConfig, type Skill } from "@/lib/hermes"
 
 export type LocalCommand = "new" | "settings"
+/** Commands that carry the message after them, while a reply runs. */
+export type SendMode = "steer" | "queue"
 
 export type SlashItem =
-  | { kind: "command"; name: LocalCommand; description: string }
+  | { kind: "command"; name: LocalCommand | SendMode; description: string }
   | { kind: "skill"; name: string; description?: string | null; category?: string | null }
 
 export const LOCAL_COMMANDS: SlashItem[] = [
   { kind: "command", name: "new", description: "Start a new chat" },
   { kind: "command", name: "settings", description: "Open settings" },
 ]
+
+/** Offered only while a reply runs, when there is something to steer or wait for. */
+export const SEND_COMMANDS: SlashItem[] = [
+  { kind: "command", name: "steer", description: "Send to the running reply now" },
+  { kind: "command", name: "queue", description: "Send after the reply" },
+]
+
+export const isSendMode = (name: string): name is SendMode => name === "steer" || name === "queue"
+
+/** `/steer text` or `/queue text`: how to send the text, and the text. */
+export function sendMode(text: string): { mode: SendMode; text: string } | null {
+  const match = /^\/(steer|queue)(?:\s+([\s\S]*))?$/.exec(text.trimStart())
+  return match ? { mode: match[1] as SendMode, text: (match[2] ?? "").trim() } : null
+}
 
 export function localCommand(text: string): LocalCommand | null {
   const name = text.trim().slice(1)
@@ -56,7 +72,7 @@ function matches(items: SlashItem[], query: string) {
 }
 
 /** Local commands plus Hermes's skills, filtered by `query`. Skills load the first time it opens. */
-export function useSlashItems(open: boolean, query: string, config: HermesConfig) {
+export function useSlashItems(open: boolean, query: string, config: HermesConfig, busy = false) {
   const key = cacheKey(config)
   const [result, setResult] = useState<{ key: string; state: SkillsState } | null>(null)
   const cached = loaded.get(key)
@@ -86,7 +102,10 @@ export function useSlashItems(open: boolean, query: string, config: HermesConfig
 
   const skills: SlashItem[] =
     state.status === "ok" ? state.skills.map((skill) => ({ kind: "skill", ...skill })) : []
-  return { items: matches([...LOCAL_COMMANDS, ...skills], query), status: state.status }
+  return {
+    items: matches([...LOCAL_COMMANDS, ...(busy ? SEND_COMMANDS : []), ...skills], query),
+    status: state.status,
+  }
 }
 
 export function optionId(listId: string, index: number) {
