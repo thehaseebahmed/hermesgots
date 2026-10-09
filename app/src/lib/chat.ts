@@ -24,6 +24,7 @@ import {
   respondToApproval,
   respondToClarify,
   startRun,
+  steerRun,
   stopRun,
   streamChat,
   supportsRuns,
@@ -507,12 +508,47 @@ async function finishTurn(turn: Turn, usage: TurnUsage | undefined) {
   }
 }
 
+/**
+ * Takes the steers Hermes handed back unread off the reply: `pending` is their text joined by
+ * newlines, the newest last.
+ */
+function dropUnread(draft: Draft, pending: string) {
+  const steers = draft.steers ?? []
+  for (let from = 0; from < steers.length; from++) {
+    const tail = steers.slice(from)
+    if (tail.map((steer) => steer.text).join("\n") === pending.trim()) {
+      draft.steers = steers.slice(0, from)
+      return
+    }
+  }
+}
+
+/** Puts a steer the agent never read at the front of the queue, to go as the next turn. */
+async function requeueSteer(conversationId: string, text: string) {
+  const queued = (await getMessages(conversationId)).find((m) => m.status === "queued")
+  await db.messages.add({
+    id: randomId(),
+    conversationId,
+    role: "user",
+    content: text.trim(),
+    status: "queued",
+    createdAt: queued ? queued.createdAt - 1 : Date.now(),
+  })
+}
+
 /** Runs a turn on `/v1/runs` when Hermes has it, else streams a chat completion. */
-async function runTurn(turn: Turn, start: () => Promise<{ usage?: TurnUsage }>) {
+async function runTurn(
+  turn: Turn,
+  start: () => Promise<{ usage?: TurnUsage; pendingSteer?: string }>,
+) {
   const { draft, controller } = turn
   let usage: TurnUsage | undefined
+  let pendingSteer: string | undefined
   try {
-    usage = (await start()).usage
+    const result = await start()
+    usage = result.usage
+    pendingSteer = result.pendingSteer
+    if (pendingSteer) dropUnread(draft, pendingSteer)
     if (draft.status === "streaming") draft.status = "done"
   } catch (error) {
     if (controller.signal.aborted) {
@@ -529,6 +565,7 @@ async function runTurn(turn: Turn, start: () => Promise<{ usage?: TurnUsage }>) 
     }
   }
   await finishTurn(turn, usage)
+  if (pendingSteer) await requeueSteer(turn.conversationId, pendingSteer)
   return draft.status
 }
 
@@ -564,7 +601,7 @@ function settleRun(draft: Draft, outcome: RunOutcome) {
     draft.status = "error"
     draft.statusText = outcome.error || "Hermes couldn't finish this reply."
   }
-  return { usage: outcome.usage }
+  return { usage: outcome.usage, pendingSteer: outcome.pendingSteer }
 }
 
 async function followTurnRun(turn: Turn, runId: string) {
@@ -857,6 +894,25 @@ export async function sendQueued(message: Message) {
 
 export async function removeQueued(id: string) {
   await db.messages.delete(id)
+}
+
+/**
+ * Hands a queued message to the reply that's running, which reads it after its current tool calls
+ * instead of after it finishes. It then sits in the reply where it was sent.
+ */
+export async function steerQueued(message: Message) {
+  const turn = turns.get(message.conversationId)
+  const runId = turn?.draft.runId
+  if (!turn || !runId || message.attachments?.length)
+    throw new HermesError("This reply can't be steered.")
+  await steerRun(turn.config, runId, message.content)
+  await db.messages.delete(message.id)
+  const { draft, touch } = turn
+  draft.steers = [
+    ...(draft.steers ?? []),
+    { id: message.id, text: message.content, contentOffset: draft.content.length, at: Date.now() },
+  ]
+  touch()
 }
 
 export function stopMessage(conversationId: string) {

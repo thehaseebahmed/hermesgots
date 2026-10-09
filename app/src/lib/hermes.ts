@@ -1522,22 +1522,32 @@ export async function labelSession(config: HermesConfig, sessionId: string) {
   }
 }
 
-const runSupport = new Map<string, Promise<boolean>>()
+const runFeatures = new Map<string, Promise<Record<string, unknown> | null>>()
 
-/** Whether the server takes `/v1/runs`, which keep going when the client drops off. */
-export function supportsRuns(config: HermesConfig) {
+function features(config: HermesConfig) {
   const key = `${config.baseUrl}\n${config.apiKey}`
-  let pending = runSupport.get(key)
+  let pending = runFeatures.get(key)
   if (!pending) {
     pending = request(endpoint(config.baseUrl, "/capabilities"), { headers: headers(config) })
       .then((response) => response.json())
-      .then((body) => Boolean(body?.features?.run_submission && body?.features?.run_events_sse))
-      .catch(() => false)
-    runSupport.set(key, pending)
+      .then((body) => (body?.features && typeof body.features === "object" ? body.features : {}))
+      .catch(() => null)
+    runFeatures.set(key, pending)
     // A failed probe (server down, older version) gets another chance on a later turn.
-    void pending.then((ok) => ok || runSupport.delete(key))
+    void pending.then((found) => found || runFeatures.delete(key))
   }
   return pending
+}
+
+/** Whether the server takes `/v1/runs`, which keep going when the client drops off. */
+export async function supportsRuns(config: HermesConfig) {
+  const found = await features(config)
+  return Boolean(found?.run_submission && found?.run_events_sse)
+}
+
+/** Whether a running turn takes more from the user (`POST /v1/runs/{id}/steer`). */
+export async function supportsSteer(config: HermesConfig) {
+  return Boolean((await features(config))?.run_steer)
 }
 
 export type RunStatus = "completed" | "failed" | "cancelled" | "interrupted"
@@ -1549,6 +1559,8 @@ export interface RunOutcome {
   usage?: TurnUsage
   /** Events were lost on the way, so `output` should replace what streamed. */
   replaceContent?: boolean
+  /** What the user steered with that the agent never read: it finished first. */
+  pendingSteer?: string
 }
 
 const TERMINAL_RUN_STATUSES = new Set<string>(["completed", "failed", "cancelled", "interrupted"])
@@ -1565,6 +1577,10 @@ function runOutcome(payload: any): RunOutcome {
           completionTokens: Number(usage.output_tokens) || 0,
         }
       : undefined,
+    pendingSteer:
+      typeof payload?.pending_steer === "string" && payload.pending_steer.trim()
+        ? payload.pending_steer
+        : undefined,
   }
 }
 
@@ -1725,6 +1741,19 @@ export async function getRun(config: HermesConfig, runId: string, signal?: Abort
         ? (clarify as ClarifyRequestEvent)
         : undefined,
   }
+}
+
+/**
+ * Hands the running agent more from the user without stopping it. Hermes adds it as a user message
+ * after the current tool calls; one sent while the agent writes its last reply comes back on the
+ * finished run as `pending_steer`. A run waiting on an approval or question turns it down (409).
+ */
+export async function steerRun(config: HermesConfig, runId: string, text: string) {
+  await request(endpoint(config.baseUrl, `/runs/${encodeURIComponent(runId)}/steer`), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ input: text }),
+  })
 }
 
 export async function stopRun(config: HermesConfig, runId: string) {

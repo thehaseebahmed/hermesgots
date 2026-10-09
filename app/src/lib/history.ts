@@ -167,6 +167,18 @@ function toolCalls(row: SessionMessage) {
     : []
 }
 
+/** A user message Hermes handed the agent mid-turn (a steer); it belongs to the reply. */
+const isSteer = (row: SessionMessage) => row.role === "user" && row.display_kind === "steer"
+
+/** A steer's own text, without the marker Hermes wraps it in for the model. */
+function steerText(content: string) {
+  return content
+    .trim()
+    .replace(/^\[OUT-OF-BAND USER MESSAGE[^\n]*\]\n?/, "")
+    .replace(/\n?\[\/OUT-OF-BAND USER MESSAGE\]$/, "")
+    .trim()
+}
+
 /**
  * Folds each turn's assistant, tool-call and tool rows into one reply, as streaming shows it. With
  * `live` (a turn still running), a call without its result row stays `running`.
@@ -179,10 +191,36 @@ export function toMessages(
 ) {
   const messages: Message[] = []
   let reply: Message | undefined
+  const newReply = (id: string, createdAt: number) => {
+    const message: Message = {
+      id,
+      conversationId,
+      role: "assistant",
+      content: "",
+      tools: [],
+      status: "done",
+      createdAt,
+    }
+    messages.push(message)
+    return message
+  }
   for (const row of rows) {
     if (row.display_kind === "hidden" || row.role === "system") continue
     const createdAt = Math.round((row.timestamp ?? 0) * 1000) || Date.now()
     const id = `h-${sessionId}-${row.id}`
+    if (isSteer(row)) {
+      reply ??= newReply(id, createdAt)
+      reply.steers = [
+        ...(reply.steers ?? []),
+        {
+          id,
+          text: steerText(row.content ?? ""),
+          contentOffset: reply.content.length,
+          at: createdAt,
+        },
+      ]
+      continue
+    }
     if (row.role === "user") {
       reply = undefined
       const { text, attachments } = splitAttachments(row.content ?? "")
@@ -198,18 +236,7 @@ export function toMessages(
       })
       continue
     }
-    if (!reply) {
-      reply = {
-        id,
-        conversationId,
-        role: "assistant",
-        content: "",
-        tools: [],
-        status: "done",
-        createdAt,
-      }
-      messages.push(reply)
-    }
+    reply ??= newReply(id, createdAt)
     if (row.role === "tool") {
       // Match the result to the first unresolved call with this ID. A duplicate
       // call ID (server-side assembly issue) creates two tool events; finding the
@@ -369,7 +396,8 @@ export function reconcileHistory(conversationId: string) {
   return pending
 }
 
-const isTurnStart = (row: SessionMessage) => row.role === "user" && row.display_kind !== "hidden"
+const isTurnStart = (row: SessionMessage) =>
+  row.role === "user" && row.display_kind !== "hidden" && !isSteer(row)
 
 const isStreaming = (messages: Message[]) => messages.some((m) => m.status === "streaming")
 
@@ -478,6 +506,7 @@ async function reconcile(conversationId: string) {
               ...local,
               tools: reply.tools,
               reasoning: local.reasoning ?? reply.reasoning,
+              steers: local.steers ?? reply.steers,
             })
           else if (local?.role === "assistant" && local.tools?.length && reply?.tools?.length) {
             const tools = withTranscriptDetails(local.tools, reply.tools)

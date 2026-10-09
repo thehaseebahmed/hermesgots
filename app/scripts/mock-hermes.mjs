@@ -40,6 +40,9 @@
 // with Hermes's clarify tool, which the plugin serves on runs: say "ask" for one, or "ask five" for
 // five (plan mode asks before planning), the run carries
 // `clarify.request` and waits, and POST /api/plugins/memento/runs/{id}/clarify answers it.
+// POST /v1/runs/{id}/steer hands a running turn more from the user: like Hermes, it lands as a
+// `display_kind: "steer"` user row after the next tool result, and one still unread when the turn
+// ends comes back as the run's `pending_steer`. Say "long" for a turn with a tool call every few steps.
 // POST /api/plugins/memento/sessions/{id}/attachments saves an attached file under the temp dir, and a
 // message that carries attachments (inline images, `<attachment>` lines) gets a reply naming them.
 //
@@ -479,13 +482,20 @@ function titleChat(req, opener) {
   }, 2000)
 }
 
+// A running turn's steer delivery by session, which Hermes makes after each tool result.
+const steerPoints = new Map()
+
 /** Stores a transcript row the way Hermes's session DB does, for keyed sessions only. */
 function record(req, row) {
   const sessionId = sessionOf(req)
   if (!sessionId || !req.headers.authorization) return
   if (!transcripts.has(sessionId)) transcripts.set(sessionId, [])
   transcripts.get(sessionId).push({ id: ++lastRowId, session_id: sessionId, timestamp: Date.now() / 1000, ...row })
+  if (row.role === "tool") steerPoints.get(sessionId)?.()
 }
+
+const STEER_OPEN = "[OUT-OF-BAND USER MESSAGE — a direct message from the user, delivered once at this position; not tool output and not a new delivery when replayed from conversation history]"
+const STEER_CLOSE = "[/OUT-OF-BAND USER MESSAGE]"
 
 /** Hermes pages `latest` back from the newest row but returns each page oldest first. */
 function pageRows(rows, params) {
@@ -719,6 +729,8 @@ async function playTurn(req, body, last, out) {
     record(req, { role: "tool", tool_call_id: prId, tool_name: "open_pull_request", content: prResult })
   }
 
+  const steered = out.steered?.() ?? []
+  if (steered.length) await say(`Noted: ${steered.join(" / ")}. I'll take that into account.\n\n`)
   await say(
     "Here's where the space is going under `/var/log`:\n\n" +
       "- `nginx/access.log.*` — **2.1 GB** across 34 files\n" +
@@ -791,6 +803,19 @@ async function playTurn(req, body, last, out) {
     for (let i = 1; i <= 20 && !out.closed(); i++) {
       await say(`Step ${i} of 20 is done.\n\n`)
       await sleep(1000)
+      if (i % 5 === 0 && i < 20) {
+        // A tool call every few steps, after which a steer reaches the agent.
+        const id = `call_${randomUUID().slice(0, 8)}`
+        const command = `ls /var/log | head -${i}`
+        out.tool({ tool: "terminal", emoji: "💻", label: command, toolCallId: id, status: "running" })
+        await sleep(800)
+        const result = JSON.stringify({ output: "nginx\npostgres\napp", exit_code: 0, error: null })
+        out.tool({ tool: "terminal", toolCallId: id, status: "completed", result })
+        record(req, { role: "assistant", content: null, tool_calls: [{ id, type: "function", function: { name: "terminal", arguments: JSON.stringify({ command }) } }] })
+        record(req, { role: "tool", tool_call_id: id, tool_name: "terminal", content: result })
+        const heard = out.steered?.() ?? []
+        if (heard.length) await say(`Noted: ${heard.at(-1)}.\n\n`)
+      }
     }
   } else {
     await say("Want me to clean up the rotated files older than 90 days? Just say *clean them up*.")
@@ -939,8 +964,23 @@ function startRun(req, body) {
   const last = durable(input.at(-1)?.content)
   // Rows go to the session named in the body, as on Hermes.
   const sessionReq = { headers: { ...req.headers, "x-hermes-session-id": body.session_id } }
+  // Steers the agent has read and not yet answered.
+  let heard = []
+  if (run.sessionId)
+    steerPoints.set(run.sessionId, () => {
+      if (!run.pendingSteer) return
+      const text = run.pendingSteer
+      run.pendingSteer = undefined
+      heard.push(text)
+      record(sessionReq, { role: "user", display_kind: "steer", content: `${STEER_OPEN}\n${text}\n${STEER_CLOSE}` })
+    })
   void playTurn(sessionReq, body, last, {
     closed: () => run.stopped,
+    steered: () => {
+      const read = heard
+      heard = []
+      return read
+    },
     say: (delta) => push("message.delta", { delta }),
     status: () => {},
     tool: ({ tool, label, status, result }) =>
@@ -970,12 +1010,15 @@ function startRun(req, body) {
       return { answers, outcome }
     },
   }).then(({ spoken, prompt_tokens, completion_tokens }) => {
+    if (steerPoints.get(run.sessionId)) steerPoints.delete(run.sessionId)
     run.status = run.stopped ? "cancelled" : "completed"
     run.output = spoken
     run.usage = { input_tokens: prompt_tokens, output_tokens: completion_tokens, total_tokens: prompt_tokens + completion_tokens }
+    // A hard stop drops an unread steer, as on Hermes; otherwise it goes back to the client.
+    if (run.stopped) run.pendingSteer = undefined
     noteEvent("session", run.sessionId)
     noteEvent("runs", run.sessionId)
-    push(`run.${run.status}`, { completed: !run.stopped, interrupted: run.stopped, output: spoken, usage: run.usage })
+    push(`run.${run.status}`, { completed: !run.stopped, interrupted: run.stopped, output: spoken, usage: run.usage, ...(run.pendingSteer ? { pending_steer: run.pendingSteer } : {}) })
     for (const listener of run.listeners) listener(null)
   })
   return run
@@ -1011,6 +1054,7 @@ const runStatus = (run) => ({
   ...(run.status === "waiting_for_approval" && run.approval ? { approval: run.approval } : {}),
   ...(run.clarify ? { clarify: run.clarify } : {}),
   ...(run.output !== undefined ? { output: run.output, usage: run.usage } : {}),
+  ...(run.pendingSteer && run.output !== undefined ? { pending_steer: run.pendingSteer } : {}),
 })
 
 http
@@ -1561,14 +1605,14 @@ http
     if (url.pathname === "/v1/capabilities") {
       return json(res, 200, {
         object: "hermes.api_server.capabilities",
-        features: { chat_completions: true, chat_completions_streaming: true, run_submission: RUNS, run_events_sse: RUNS, run_stop: RUNS },
+        features: { chat_completions: true, chat_completions_streaming: true, run_submission: RUNS, run_events_sse: RUNS, run_stop: RUNS, run_steer: RUNS },
       })
     }
     if (RUNS && req.method === "POST" && url.pathname === "/v1/runs") {
       const run = startRun(req, await readBody(req))
       return json(res, 202, { run_id: run.id, status: "started", replayed: false })
     }
-    const runPath = /^\/v1\/runs\/([^/]+)(\/events|\/stop)?$/.exec(url.pathname)
+    const runPath = /^\/v1\/runs\/([^/]+)(\/events|\/stop|\/steer)?$/.exec(url.pathname)
     if (RUNS && runPath) {
       const run = runs.get(runPath[1])
       if (!run) return json(res, 404, { error: { message: `Run not found: ${runPath[1]}`, code: "run_not_found" } })
@@ -1577,6 +1621,17 @@ http
         run.stopped = true
         pendingApprovals.get(run.id)?.("deny")
         return json(res, 200, { run_id: run.id, status: "stopping" })
+      }
+      if (runPath[2] === "/steer" && req.method === "POST") {
+        if (run.status !== "running" || run.stopped) return json(res, 409, { error: { message: `Run is not currently accepting steer input: ${run.id}`, code: "run_not_accepting_steer" } })
+        const { input, message, text } = await readBody(req)
+        const steer = String(input || message || text || "").trim()
+        if (!steer) return json(res, 400, { error: { message: "Missing non-empty steer text; expected 'input', 'message', or 'text'.", code: "invalid_steer_input" } })
+        run.pendingSteer = run.pendingSteer ? `${run.pendingSteer}\n${steer}` : steer
+        const event = { event: "run.steered", run_id: run.id, timestamp: Date.now() / 1000, accepted: true, seq: run.seq++ }
+        run.events.push(event)
+        for (const listener of run.listeners) listener(event)
+        return json(res, 200, { object: "hermes.run.steer", run_id: run.id, accepted: true })
       }
       if (!runPath[2]) return json(res, 200, runStatus(run))
     }

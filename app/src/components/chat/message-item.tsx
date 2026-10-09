@@ -1,6 +1,5 @@
-import { useState, type ReactNode } from "react"
-import { AlertCircleIcon, ClockIcon, SendHorizontalIcon, XIcon } from "lucide-react"
-import { toast } from "sonner"
+import { Fragment, useState, type ReactNode } from "react"
+import { AlertCircleIcon, CornerDownRightIcon } from "lucide-react"
 
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { AttachmentTile, AttachmentViewer } from "@/components/chat/attachments"
@@ -10,12 +9,10 @@ import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
 import { ToolGroup } from "@/components/chat/tool-group"
 import { Bot } from "@/components/bot"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
-import { Button } from "@/components/ui/button"
 import { Message as MessageRow, MessageAvatar, MessageContent } from "@/components/ui/message"
 import { Spinner } from "@/components/ui/spinner"
 import { DELEGATE_TOOL } from "@/lib/agents"
 import { openable } from "@/lib/attachments"
-import { removeQueued, sendQueued } from "@/lib/chat"
 import type { Attachment, Message, ToolEvent } from "@/lib/db"
 import { describeActivity, formatDuration } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -71,11 +68,11 @@ function Stats({ message }: { message: Message }) {
 }
 
 /** A sent message's attachments; the ones this device still has open in a viewer. */
-function SentAttachments({ attachments, queued }: { attachments: Attachment[]; queued: boolean }) {
+function SentAttachments({ attachments }: { attachments: Attachment[] }) {
   const [viewing, setViewing] = useState<number | null>(null)
   const viewable = attachments.filter(openable)
   return (
-    <div className={cn("flex max-w-full flex-wrap justify-end gap-2", queued && "opacity-60")}>
+    <div className="flex max-w-full flex-wrap justify-end gap-2">
       {attachments.map((attachment) => (
         <AttachmentTile
           key={attachment.id}
@@ -92,36 +89,22 @@ function SentAttachments({ attachments, queued }: { attachments: Attachment[]; q
   )
 }
 
-function QueuedActions({ message, paused }: { message: Message; paused: boolean }) {
+/** Something the user steered the reply with, where it reached the agent. */
+function SteerBubble({ text }: { text: string }) {
   return (
-    <div className="-my-2 flex items-center gap-1 text-xs text-muted-foreground">
-      <ClockIcon className="size-3.5" />
-      <span className="pr-1">{paused ? "Queued, paused" : "Queued"}</span>
-      {paused && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="min-h-11 text-xs"
-          onClick={() =>
-            void sendQueued(message).catch((error) =>
-              toast.error(error instanceof Error ? error.message : "Couldn't send your message."),
-            )
-          }
-        >
-          <SendHorizontalIcon data-icon="inline-start" />
-          Send now
-        </Button>
-      )}
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        className="size-11"
-        aria-label="Remove queued message"
-        onClick={() => void removeQueued(message.id)}
-      >
-        <XIcon />
-      </Button>
-    </div>
+    <MessageRow align="end">
+      <MessageContent className="items-end gap-1">
+        <Bubble variant="default" align="end">
+          <BubbleContent className="px-4 py-2.5 text-[15px] whitespace-pre-wrap">
+            {text}
+          </BubbleContent>
+        </Bubble>
+        <div className="flex items-center gap-1 px-1 text-xs text-muted-foreground">
+          <CornerDownRightIcon className="size-3.5" />
+          Steered
+        </div>
+      </MessageContent>
+    </MessageRow>
   )
 }
 
@@ -155,7 +138,6 @@ export function MessageItem({
   message,
   showStats,
   botId,
-  busy,
   plain,
   simple,
 }: {
@@ -164,8 +146,6 @@ export function MessageItem({
   /** A simplified chat: the agent's tool calls and its activity line are left out. */
   simple?: boolean
   botId?: string
-  /** Whether a reply is streaming in this chat, so queued messages know they'll go on their own. */
-  busy?: boolean
   /** A project session's thread: no avatars, and the agent's replies sit on the page, not in bubbles. */
   plain?: boolean
 }) {
@@ -175,21 +155,19 @@ export function MessageItem({
 
   if (message.role === "user") {
     if (plain && isPlanApproval(message.content)) return <PlanApprovedCard />
-    const queued = message.status === "queued"
     return (
       <MessageRow align="end">
         <MessageContent className="items-end gap-1">
           {message.attachments?.length ? (
-            <SentAttachments attachments={message.attachments} queued={queued} />
+            <SentAttachments attachments={message.attachments} />
           ) : null}
           {message.content && (
-            <Bubble variant="default" align="end" className={queued ? "opacity-60" : undefined}>
+            <Bubble variant="default" align="end">
               <BubbleContent className="px-4 py-2.5 text-[15px] whitespace-pre-wrap">
                 {message.content}
               </BubbleContent>
             </Bubble>
           )}
-          {queued && <QueuedActions message={message} paused={!busy} />}
         </MessageContent>
       </MessageRow>
     )
@@ -209,15 +187,37 @@ export function MessageItem({
   // The tool group right above already names the running call, so repeating it here is noise.
   const runningTool = tools.some((t) => t.status === "running")
 
-  // An answered approval splits the reply in two so the card sits where it happened:
-  // everything Hermes said and ran before asking, the card, then everything after.
-  const split = approval?.resolved && approval.contentOffset !== undefined
-  const offset = split ? approval.contentOffset! : message.content.length
-  const before = content.slice(0, offset)
-  const after = content.slice(offset)
-  const askedAt = approval?.requestedAt ?? Infinity
-  const toolsBefore = split ? tools.filter((t) => t.startedAt <= askedAt) : tools
-  const toolsAfter = split ? tools.filter((t) => t.startedAt > askedAt) : []
+  // An answered approval and each steer split the reply so they sit where they happened: what
+  // Hermes said and ran before, the card or the user's message, then what came after.
+  const breaks: { key: string; offset: number; time: number; node: ReactNode }[] = []
+  if (approval?.resolved && approval.contentOffset !== undefined)
+    breaks.push({
+      key: "approval",
+      offset: approval.contentOffset,
+      time: approval.requestedAt ?? Infinity,
+      node: <ApprovalCard message={message} />,
+    })
+  for (const steer of message.steers ?? [])
+    breaks.push({
+      key: steer.id,
+      offset: steer.contentOffset,
+      time: steer.at,
+      node: <SteerBubble text={steer.text} />,
+    })
+  breaks.sort((a, b) => a.time - b.time)
+  const segments: { start: number; end: number; tools: ToolEvent[] }[] = []
+  let start = 0
+  let since = -Infinity
+  for (const b of [...breaks, { offset: content.length, time: Infinity }]) {
+    const end = Math.min(Math.max(b.offset, start), content.length)
+    segments.push({
+      start,
+      end,
+      tools: tools.filter((t) => t.startedAt > since && t.startedAt <= b.time),
+    })
+    start = end
+    since = b.time
+  }
 
   const error = (
     <>
@@ -265,27 +265,34 @@ export function MessageItem({
     </>
   )
 
+  const footerShown =
+    streaming ||
+    message.status === "error" ||
+    (message.status === "stopped" && !message.content) ||
+    statsShown
   return (
     <div className="flex flex-col gap-3">
-      <AssistantRow
-        botId={botId}
-        plain={plain}
-        lift={!split && statsShown}
-        parts={toParts(before, toolsBefore, 0)}
-      >
-        {!split && footer}
-      </AssistantRow>
-      {/* A pending approval lives in the composer slot; once answered it sits in the thread, unattributed. */}
-      {approval?.resolved && <ApprovalCard message={message} />}
-      {split && (
-        <AssistantRow
-          botId={botId}
-          plain={plain}
-          lift={statsShown}
-          parts={toParts(after, toolsAfter, offset)}
-        >
-          {footer}
-        </AssistantRow>
+      {segments.map((segment, i) => {
+        const last = i === segments.length - 1
+        const parts = toParts(
+          content.slice(segment.start, segment.end),
+          segment.tools,
+          segment.start,
+        )
+        return (
+          <Fragment key={breaks[i - 1]?.key ?? "start"}>
+            {i > 0 && breaks[i - 1].node}
+            {(parts.length > 0 || (last && footerShown)) && (
+              <AssistantRow botId={botId} plain={plain} lift={last && statsShown} parts={parts}>
+                {last && footer}
+              </AssistantRow>
+            )}
+          </Fragment>
+        )
+      })}
+      {/* A pending approval lives in the composer slot; one answered with no place in the text follows the reply. */}
+      {approval?.resolved && approval.contentOffset === undefined && (
+        <ApprovalCard message={message} />
       )}
     </div>
   )
