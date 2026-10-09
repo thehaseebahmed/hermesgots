@@ -59,6 +59,8 @@ export interface Profile {
   disabled?: boolean
   /** When its host last checked in with the registry. Local only. */
   seenAt?: number
+  /** The Memento plugin version its host last reported. Local only. */
+  pluginVersion?: string
   createdAt: number
   /** Last change to the config, the clock sync merges on. */
   updatedAt: number
