@@ -117,7 +117,7 @@ One-time setup:
 2. In the repo's **Settings → Secrets and variables → Actions**, add:
    - secrets: `ANDROID_KEYSTORE_BASE64` (the output above), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`.
    - variable: `MEMENTO_SITE_URL`, your Netlify deploy (e.g. `https://<your-site>.netlify.app`). The app signs in and syncs through it. Leave it unset to build without sync.
-3. Add `https://localhost` (the app's origin) to `API_SERVER_CORS_ORIGINS` on each Hermes server.
+3. Add `https://localhost` (the Android app's origin) to `API_SERVER_CORS_ORIGINS` on each Hermes server.
 
 Debug builds are signed with the same key when the secret is there, so each one installs over the last; without it (e.g. pull requests from forks) they use a throwaway debug key. A release won't build without the key. A release's version code comes from its tag and is always higher than a debug build's, so a release installs over a debug build but not the other way round.
 
@@ -151,6 +151,36 @@ VITE_SITE_URL=https://<your-site>.netlify.app pnpm build:android
 pnpm exec cap open android   # or: cd android && ./gradlew assembleDebug
 ```
 
+## iOS app
+
+`ios/` wraps the same app for iPhone and iPad with Capacitor (Swift Package Manager, no CocoaPods). The **iOS** workflow (`.github/workflows/ios.yml`) runs on a macOS runner on every push to `main` and every pull request into `main`, builds the app for the simulator and attaches it to the run (`memento-ios-simulator-<commit>`, a zipped `App.app` you can drag onto a running simulator). That proves the iOS app compiles; it can't go on a phone.
+
+Builds for phones need an Apple Developer Program membership. Once the secrets below exist, pushes to `main` (and runs started by hand) also archive a signed IPA, attach it to the run, and upload it to TestFlight, which is how testers install it. Pull requests never sign.
+
+One-time setup:
+
+1. In the Apple Developer portal, register the App ID `app.memento` (if it's taken, pick another and set it as the App target's bundle identifier in `ios/App/App.xcodeproj`), create an **Apple Distribution** certificate and export it from Keychain Access as a `.p12` with a password, and create an **App Store Connect** provisioning profile for the App ID with that certificate.
+2. In App Store Connect, create the app for that bundle ID, and under **Users and Access → Integrations → App Store Connect API** create a team key with the **App Manager** role and download its `.p8` (it can only be downloaded once).
+3. Add to the repo's Actions settings:
+   - secrets: `IOS_CERTIFICATE_BASE64` (`base64 -i distribution.p12`), `IOS_CERTIFICATE_PASSWORD`, `IOS_PROVISIONING_PROFILE_BASE64` (`base64 -i Memento.mobileprovision`).
+   - secrets for TestFlight: `APP_STORE_CONNECT_KEY` (the `.p8`'s text, or its base64), `APP_STORE_CONNECT_KEY_ID` and `APP_STORE_CONNECT_ISSUER_ID`.
+   - variable (optional): `IOS_MARKETING_VERSION`, the version testers see (default: `package.json`'s). The build number is the run number.
+4. Add `capacitor://localhost` (the iOS app's origin) to `API_SERVER_CORS_ORIGINS` on each Hermes server. Hosts linked after this change get it from the link command.
+
+In the app:
+
+- Sign-in opens GitHub in a Safari sheet and returns to the app through `memento://auth`.
+- Voice input uses iOS's own speech recognizer, and asks for the microphone and speech recognition the first time.
+- Push notifications aren't wired up yet: the registry sends through Firebase, and the iOS app has no Firebase messaging or APNs key.
+
+To build locally (needs a Mac with Xcode 26 or later):
+
+```bash
+cd app
+VITE_SITE_URL=https://<your-site>.netlify.app pnpm build:ios
+pnpm exec cap open ios
+```
+
 ## Roadmap
 
-A native iOS build from the same Capacitor project.
+Push notifications and an App Store release for the iOS app.
