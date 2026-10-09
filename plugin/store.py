@@ -2,14 +2,15 @@
 project sessions (``sessions.py``),
 projects still cloning (``clones.py``), repos being added to or removed from a project (``repos.py``),
 pinned projects (``projects.py``), merged pull requests (``merges.py``) and recent changes for the
-app's live stream (``events.py``) and devices' push subscriptions (``push.py``)."""
+app's live stream (``events.py``), devices' push subscriptions (``push.py``) and messages waiting
+for a session's run (``outbox.py``)."""
 
 from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -115,6 +116,31 @@ def connect(path: Path) -> sqlite3.Connection:
                    vapid_key TEXT NOT NULL,
                    subject TEXT NOT NULL,
                    created_at INTEGER NOT NULL
+               )"""
+        )
+        # v12: messages waiting for a session's run to finish, and what each such session needs to
+        # start the next one.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS outbox (
+                   id TEXT PRIMARY KEY,
+                   session_id TEXT NOT NULL,
+                   position REAL NOT NULL,
+                   text TEXT NOT NULL,
+                   attachments TEXT,
+                   body TEXT NOT NULL,
+                   created_at INTEGER NOT NULL,
+                   run_id TEXT,
+                   sent_at INTEGER,
+                   error TEXT
+               )"""
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS outbox_session ON outbox (session_id, position)")
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS outbox_sessions (
+                   session_id TEXT PRIMARY KEY,
+                   profile TEXT,
+                   body TEXT,
+                   resumed_at INTEGER NOT NULL DEFAULT 0
                )"""
         )
         # v4: a session has a worktree in every repo of its project. v5: its newest plan file. v10: its
