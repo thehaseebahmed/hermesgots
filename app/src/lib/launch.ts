@@ -31,6 +31,12 @@ function write(id: string | undefined) {
 
 // Read before anything records the screen the app opens on, and used once.
 let launched = window.location.pathname === "/" ? read() : null
+let skipped = false
+
+/** A share that opened the app goes to the share screen instead. */
+export function skipLaunchRestore() {
+  skipped = true
+}
 
 /**
  * Reopens the chat or session that was open when the app was last left, within the hour, when it
@@ -46,7 +52,7 @@ export function useLaunchRestore() {
     launched = null
     void db.conversations
       .get(id)
-      .then((chat) => chat && navigate(`/c/${chat.id}`, { replace: true }))
+      .then((chat) => chat && !skipped && navigate(`/c/${chat.id}`, { replace: true }))
       .catch(() => {})
       .finally(() => setReady(true))
   }, [navigate])
