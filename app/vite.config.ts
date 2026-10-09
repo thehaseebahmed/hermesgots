@@ -47,6 +47,18 @@ export default defineConfig(({ mode }) => ({
           { src: "pwa-512x512.png", sizes: "512x512", type: "image/png" },
           { src: "maskable-512x512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
         ],
+        // Android's share sheet (Chrome, once installed) sends links and images here; see share-sw.js.
+        share_target: {
+          action: "/share-target",
+          method: "POST",
+          enctype: "multipart/form-data",
+          params: {
+            title: "title",
+            text: "text",
+            url: "url",
+            files: [{ name: "media", accept: ["image/*"] }],
+          },
+        },
       },
       workbox: {
         globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
@@ -55,8 +67,8 @@ export default defineConfig(({ mode }) => ({
         navigateFallbackDenylist: [/^\/\.netlify\//, /^\/auth\//],
         // Never let the service worker touch calls to the Hermes server.
         runtimeCaching: [],
-        // Shows the plugin's pushes; see public/push-sw.js.
-        importScripts: ["push-sw.js"],
+        // Shows the plugin's pushes and takes shares; see public/push-sw.js and share-sw.js.
+        importScripts: ["push-sw.js", "share-sw.js"],
       },
     }),
   ],

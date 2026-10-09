@@ -6,6 +6,7 @@ import { Navigate, Route, Routes } from "react-router"
 import { AppShell } from "@/components/app-shell"
 import { getActiveProfile } from "@/lib/db"
 import { useLaunchRestore, useRecordLastChat } from "@/lib/launch"
+import { useShareReceiver } from "@/lib/share"
 import { useBotThreads } from "@/lib/threads"
 import { BotThreadsPage } from "@/routes/bot-threads"
 import { BotsPage } from "@/routes/bots"
@@ -14,6 +15,7 @@ import { OpenSessionPage } from "@/routes/open-session"
 import { CodePage } from "@/routes/code"
 import { ProjectPage } from "@/routes/project"
 import { RoutinesPage } from "@/routes/routines"
+import { SharePage } from "@/routes/share"
 import { SettingsPage } from "@/routes/settings"
 import { SetupGate } from "@/routes/setup"
 
@@ -52,6 +54,7 @@ function Home() {
 
 function AppRoutes() {
   useRecordLastChat()
+  useShareReceiver()
   if (!useLaunchRestore()) return null
   return (
     <Routes>
@@ -65,6 +68,7 @@ function AppRoutes() {
         <Route path="routines" element={<RoutinesPage />} />
         <Route path="settings/:section?" element={<SettingsPage />} />
         <Route path="bots" element={<BotsPage />} />
+        <Route path="share" element={<SharePage />} />
         <Route path="*" element={<ChatPage />} />
       </Route>
     </Routes>
