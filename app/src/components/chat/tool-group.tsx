@@ -258,6 +258,7 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
         </p>
       )}
       <Popup
+        side
         open={open}
         onOpenChange={(next) => {
           setOpen(next)
