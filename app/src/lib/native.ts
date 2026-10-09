@@ -4,10 +4,13 @@ import { toast } from "sonner"
 
 import { placeToasts } from "@/lib/toast"
 
-/** True inside the Android app, where the page is served from `https://localhost`. */
+/**
+ * True inside the Android or iOS app, where the page is served from `https://localhost` or
+ * `capacitor://localhost`.
+ */
 export const isNative = Capacitor.isNativePlatform()
 
-/** The Netlify deploy the app signs in and syncs through, baked in by `pnpm build:android`. */
+/** The Netlify deploy the app signs in and syncs through, baked in by the native builds. */
 export const SITE_URL = (import.meta.env.VITE_SITE_URL ?? "").replace(/\/+$/, "")
 
 const NATIVE_AUTH = "memento-native-auth"

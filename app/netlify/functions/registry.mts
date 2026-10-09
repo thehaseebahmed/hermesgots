@@ -33,7 +33,7 @@ export default async (req: Request) => {
     caller,
     inbox,
     fcm: createFcm(process.env.FIREBASE_SERVICE_ACCOUNT),
-    // The Android app's WebView runs on https://localhost.
-    origins: [new URL(site).origin, "https://localhost"],
+    // The Android app's WebView runs on https://localhost, the iOS app's on capacitor://localhost.
+    origins: [new URL(site).origin, "https://localhost", "capacitor://localhost"],
   })
 }

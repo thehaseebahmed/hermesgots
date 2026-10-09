@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { App } from "@capacitor/app"
+import { Capacitor } from "@capacitor/core"
 import { liveQuery } from "dexie"
 import { useLiveQuery } from "dexie-react-hooks"
 
@@ -212,9 +213,11 @@ type Push = typeof import("@capacitor/push-notifications").PushNotifications
 
 /**
  * Whether this APK was built with a google-services.json. Without one Firebase never starts, and
- * the plugin's `register()` throws on the native side, which ends the app.
+ * the plugin's `register()` throws on the native side, which ends the app. The iOS app has no
+ * Firebase, and an APNs token is no use to the registry, so it gets no push yet.
  */
-const nativeConfigured = import.meta.env.VITE_FIREBASE === "1"
+const nativeConfigured =
+  import.meta.env.VITE_FIREBASE === "1" && Capacitor.getPlatform() === "android"
 
 /** `fcm.trying` is set across a native `register()`: if the app died in it, it is not tried again. */
 async function guarded<T>(device: string, run: () => Promise<T>): Promise<T> {
