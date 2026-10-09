@@ -63,8 +63,11 @@ export function ModelPicker({
     setOpenSlug(slug)
     setQuery("")
   }
-  // The popup's scroller, so a list doesn't open where the last one was left.
-  useEffect(() => root.current?.parentElement?.scrollTo({ top: 0 }), [openSlug])
+  // The popup's scroller, so a list doesn't open where the last one was left. Braced: Chrome 150+
+  // returns a Promise from scrollTo, which React would call as the effect's cleanup.
+  useEffect(() => {
+    root.current?.parentElement?.scrollTo({ top: 0 })
+  }, [openSlug])
   const drilled = open && sorted.length > 1
   const back = drilled ? () => show(undefined) : onBack
   const top = !query && !drilled
