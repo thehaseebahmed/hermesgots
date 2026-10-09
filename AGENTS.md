@@ -6,7 +6,7 @@ Guidance for AI coding agents (and humans) working on Memento: a playful, minima
 
 - `app/` is the web and Android app. Run every command below from `app/`; paths in the rest of this file are relative to it unless they start with `plugin/`.
 - `plugin/` is the Memento Hermes plugin (Python, no build step). See **Plugin** below. `plugin/skills/` holds the vendored Theseus skill (JavaScript, run by the host's Node 20+); don't edit it by hand.
-- `docs/` holds the guides the README links to: reaching Hermes over HTTPS, and self-hosting and development.
+- `docs/` holds everything the README leaves out: quickstart, reaching Hermes over HTTPS, troubleshooting, and self-hosting and development. The README is a short pitch; keep setup steps out of it.
 - `netlify.toml` stays at the root and sets `base = "app"`.
 
 ## Plugin first
