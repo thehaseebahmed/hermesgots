@@ -32,6 +32,17 @@ export function handBackNativeSignIn() {
 
 let backGuard: (() => boolean) | undefined
 
+/** Closes the frontmost open pop-up or dialog as Escape would. Returns whether there was one. */
+function closeTopPopup() {
+  const open = document.querySelectorAll<HTMLElement>(
+    '[role="dialog"][data-open], [role="alertdialog"][data-open]',
+  )
+  const top = open[open.length - 1]
+  if (!top) return false
+  top.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
+  return true
+}
+
 /**
  * A screen's say over the back button: return true when it handled the press itself. Returns the
  * cleanup, which leaves a guard the next screen already set alone.
@@ -48,16 +59,17 @@ const EXIT_WINDOW = 2000
 export const EXIT_TOASTER = "exit"
 
 /**
- * Android's back button goes up from a screen that sets a guard (a project, a session) and leaves
- * the app from a top-level one, whatever was opened before it, but only on a second press within
- * `EXIT_WINDOW`, so a stray press doesn't. Leaving minimizes rather than exits, as Android's own
+ * Android's back button closes an open pop-up first, as Material's modal sheets and dialogs do. Then
+ * it goes up from a screen that sets a guard (a project, a session) and leaves the app from a
+ * top-level one, whatever was opened before it, but only on a second press within `EXIT_WINDOW`, so
+ * a stray press doesn't. Leaving minimizes rather than exits, as Android's own
  * back does from 12 on, so a reply keeps streaming and the screen stays.
  */
 export function handleBackButton() {
   if (!isNative) return
   let armedAt = 0
   void App.addListener("backButton", () => {
-    if (backGuard?.()) {
+    if (closeTopPopup() || backGuard?.()) {
       armedAt = 0
       return
     }
