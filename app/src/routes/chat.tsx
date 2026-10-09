@@ -8,7 +8,6 @@ import {
   CheckIcon,
   EllipsisIcon,
   PencilIcon,
-  PlusIcon,
   RotateCcwIcon,
   SettingsIcon,
   Trash2Icon,
@@ -493,12 +492,6 @@ export function ChatPage() {
         <EllipsisIcon />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-44">
-        {botPath && (
-          <DropdownMenuItem onClick={() => root(botPath)}>
-            <PlusIcon />
-            New thread
-          </DropdownMenuItem>
-        )}
         {configured && !simple && (
           <>
             <DropdownMenuItem onClick={() => setUsageOpen(true)}>
@@ -556,6 +549,8 @@ export function ChatPage() {
         title={conversation?.title ?? "New chat"}
         subtitle={(!simple && activity) || session?.worktree?.branch}
         botId={profile?.botId}
+        // Beside its bot, which already shows the bot's picture.
+        showBot={!(botPath && xl)}
         actions={actions}
         leading={
           botPath ? (
