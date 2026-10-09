@@ -32,6 +32,7 @@ from . import (
     host_model,
     link,
     merges,
+    outbox,
     projects,
     repos,
     sessions,
@@ -162,6 +163,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             # Linked profiles keep their bot record current in the Memento registry; see link.py.
             asyncio.ensure_future(link.run(adapter)),
             asyncio.ensure_future(merges.run(home)),
+            # Queued messages start their turn once the session's run is over; see outbox.py.
+            asyncio.ensure_future(outbox.run(adapter, home)),
         ]
         yield
         for task in tasks:
@@ -240,6 +243,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "push",
                     "sync_delegation",
                     "host_model",
+                    "queue",
                 ],
                 "clarify": asks,
                 "todo_tool": todo_tool,
@@ -972,6 +976,126 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/push", push_subscribe)
     app.router.add_post(f"{PREFIX}/push/remove", push_unsubscribe)
     app.router.add_post(f"{PREFIX}/runs/{{run_id}}/clarify", answer_clarify)
+    def request_profile():
+        try:
+            from gateway.platforms.api_server import _api_request_profile
+
+            return _api_request_profile.get()
+        except Exception:
+            return None
+
+    async def queue_response(session_id: str, path: Path) -> "web.Response":
+        found = await asyncio.to_thread(outbox.read, path, session_id)
+        runs = outbox.session_runs(adapter, await outbox.session_ids(adapter, session_id))
+        statuses = {run.get("run_id"): run.get("status") for run in runs}
+        for item in found["sent"]:
+            item["run_status"] = statuses.get(item["run_id"])
+        state = outbox.state(runs, found["resumed_at"])
+        return web.json_response(
+            {
+                "object": "memento.queue",
+                "items": found["items"],
+                "sent": found["sent"],
+                "paused": state == "paused",
+            }
+        )
+
+    def follow_queue(request: "web.Request", session_id: str, path: Path) -> None:
+        outbox.watch(session_id, request_profile(), path, request.headers.get("Authorization"))
+        events.note("session", session_id, path, True)
+
+    async def get_queue(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        return await queue_response(request.match_info["session_id"], store_path())
+
+    async def add_queued(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        session_id = request.match_info["session_id"]
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        files = body.get("attachments") or []
+        if not isinstance(files, list) or not all(isinstance(file, dict) for file in files):
+            return _error(web, "attachments must be a list", 400)
+        files = [
+            {key: file[key] for key in ("name", "type", "size", "path") if key in file}
+            for file in files[:20]
+        ]
+        path = store_path()
+        try:
+            run = outbox.clean_body(session_id, body.get("body"))
+            item = await asyncio.to_thread(
+                outbox.add, path, session_id, request_profile(), body.get("text", ""), files, run
+            )
+        except ValueError as error:
+            return _error(web, str(error), 400)
+        follow_queue(request, session_id, path)
+        return web.json_response({"object": "memento.queued", "item": item})
+
+    async def remove_queued(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        session_id = request.match_info["session_id"]
+        path = store_path()
+        removed = await asyncio.to_thread(outbox.remove, path, session_id, request.match_info["item_id"])
+        events.note("session", session_id, path, True)
+        return web.json_response({"object": "memento.queue.removed", "removed": removed})
+
+    async def send_queued(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        session_id = request.match_info["session_id"]
+        path = store_path()
+        if not await asyncio.to_thread(outbox.promote, path, session_id, request.match_info["item_id"]):
+            return _error(web, "That message isn't waiting any more.", 404)
+        follow_queue(request, session_id, path)
+        return await queue_response(session_id, path)
+
+    async def steer_queued(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        session_id = request.match_info["session_id"]
+        path = store_path()
+        runs = outbox.session_runs(adapter, await outbox.session_ids(adapter, session_id))
+        running = [run for run in runs if run.get("status") == "running" and run.get("run_id")]
+        if not running:
+            return _error(web, "The reply isn't running, so it can't be steered.", 409)
+        run_id = max(running, key=lambda run: float(run.get("created_at") or 0))["run_id"]
+        row = await asyncio.to_thread(outbox.take, path, session_id, request.match_info["item_id"])
+        if row is None:
+            return _error(web, "That message isn't waiting any more.", 404)
+        if row["attachments"] or not row["text"].strip():
+            await asyncio.to_thread(outbox.put_back, path, row)
+            return _error(web, "Only text can steer a reply.", 409)
+        try:
+            await outbox.post(
+                adapter,
+                request_profile(),
+                f"/v1/runs/{run_id}/steer",
+                {"input": row["text"]},
+                authorization=request.headers.get("Authorization"),
+            )
+        except outbox.StartError as error:
+            await asyncio.to_thread(outbox.put_back, path, row)
+            return _error(web, str(error), 409 if error.permanent else 502)
+        # A steer the agent never reads comes back when the run ends; see outbox.tick.
+        follow_queue(request, session_id, path)
+        return web.json_response(
+            {"object": "memento.queue.steered", "id": row["id"], "run_id": run_id, "text": row["text"]}
+        )
+
+    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/queue", get_queue)
+    app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue", add_queued)
+    app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue/{{item_id}}/remove", remove_queued)
+    app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue/{{item_id}}/send", send_queued)
+    app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue/{{item_id}}/steer", steer_queued)
     mirror_for_profiles(app, web)
     logger.info("memento: serving %s on the API server", PREFIX)
 
@@ -993,6 +1117,8 @@ def register(ctx) -> None:
         register_hook("pre_approval_request", events.on_approval_request)
         register_hook("post_approval_response", events.on_approval)
         register_hook("on_session_end", events.on_turn_end)
+        # The run is over, so a queued message can go now rather than at the next tick.
+        register_hook("on_session_end", lambda **_kwargs: outbox.wake())
     register_cli = getattr(ctx, "register_cli_command", None)
     if register_cli is not None:
         register_cli(

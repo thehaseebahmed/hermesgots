@@ -30,6 +30,7 @@ It has two parts:
   - `POST /api/plugins/memento/sessions/{id}/label` marks a Memento chat's session with the `memento` source, so the dashboard's Sessions page labels it **Memento**. It only relabels sessions the API server created.
 - **A change stream** (`events.py`, `stream.py`). `GET events` tells an open app that a chat, a run's status, the chat list, a project or a routine changed, without any message text, so the app fetches only then. Everything works without it; the app falls back to polling.
 - **Push to a closed app** (`push.py`). A device that turned on Notifications in Memento's PWA gives the plugin its browser push subscription (`POST push`); when a session starts waiting on you (an approval, a question, a plan) the plugin sends the device a small encrypted message through the browser's push service. The message names the kind of wait and the session, never what was asked. Needs nothing beyond what Hermes already installs.
+- **A message queue** (`outbox.py`). What you send while the agent is busy waits on the host, not on your phone, and the plugin starts each message as its own turn when the run before it ends, so a queue you leave behind still goes with the app closed. A queued message can also steer the running reply; one the agent never got to read comes back first in the queue. A stopped reply pauses the queue until you send again.
 - **A dashboard tab** (`dashboard/`). **Memento** in `hermes dashboard` shows the plugin's version, whether it's enabled, how many runs the ledger holds and how many chats it stores.
 
 ## Install
@@ -68,3 +69,4 @@ Memento needs this plugin on every profile it uses: chat lists, context use, tod
 - On a multiplexed gateway, a profile's routes are at `/api/plugins/memento/p/<profile>/...`, not `/p/<profile>/api/plugins/...`: Hermes's own catch-all for `/p/<profile>/` is registered before plugin routes. Memento handles that itself. The routes answer with the profile's own `API_SERVER_KEY`, home and chat list, but the hooks (context use, todos, plan files, labels) run only in profiles that have the plugin installed and enabled too; `info` reports `hooks: false` otherwise.
 - The daily cleanup only covers the profile home the plugin was loaded in.
 - The ledger keeps the newest 1,000 finished runs across all jobs.
+- The queue starts a turn with the bot's own API key, which the plugin learns from the app's requests. After a gateway restart, a queue on a `/p/<profile>` bot waits until the app next talks to that bot; the default profile's carries on by itself.
