@@ -107,8 +107,6 @@ export interface Conversation {
   modelChoice?: ModelChoice
   /** The Hermes Project this chat is a session of (works in its own worktree). */
   projectId?: string
-  /** Unsent composer text a session was left with, kept on this device only. */
-  draft?: string
   /** When the user saved the session as a draft. Synced, so the plugin's cleanup spares it. */
   draftAt?: number
   /** Marked done by the user, or by the plugin once its pull request merged; the composer gives way until it's reopened. */
@@ -306,6 +304,16 @@ export interface VaultKey {
   keyId?: string
 }
 
+/**
+ * Unsent composer text, kept on this device only: `c:<conversation id>` for a chat or session,
+ * `new` for the new chat screen and `new:<profile id>` for a bot's new thread.
+ */
+export interface Draft {
+  id: string
+  text: string
+  at: number
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   id: "settings",
   simplifiedChats: true,
@@ -325,6 +333,7 @@ export const db = new Dexie("memento") as Dexie & {
   messages: EntityTable<Message, "id">
   tombstones: EntityTable<Tombstone, "id">
   vault: EntityTable<VaultKey, "id">
+  drafts: EntityTable<Draft, "id">
 }
 
 db.version(1).stores({
@@ -437,6 +446,26 @@ db.version(8).upgrade((tx) =>
       delete profile.pluginChats
     }),
 )
+
+// v9: every composer keeps its unsent text, so drafts get their own table.
+db.version(9)
+  .stores({ drafts: "id" })
+  .upgrade(async (tx) => {
+    const conversations = tx.table("conversations")
+    const left = await conversations.filter((c) => typeof c.draft === "string").toArray()
+    await tx
+      .table("drafts")
+      .bulkPut(
+        left
+          .filter((c) => c.draft.trim())
+          .map((c) => ({ id: `c:${c.id}`, text: c.draft, at: Date.now() })),
+      )
+    await conversations
+      .filter((c) => "draft" in c)
+      .modify((conversation: Record<string, unknown>) => {
+        delete conversation.draft
+      })
+  })
 
 db.on("populate", (tx) => seedProfile(tx))
 
@@ -552,9 +581,11 @@ export async function updateConversation(
 }
 
 export async function deleteConversation(id: string, { remote = false } = {}) {
-  await db.transaction("rw", db.conversations, db.messages, db.tombstones, async () => {
+  const tables = [db.conversations, db.messages, db.tombstones, db.drafts]
+  await db.transaction("rw", tables, async () => {
     const conversation = await db.conversations.get(id)
     await db.messages.where("conversationId").equals(id).delete()
+    await db.drafts.delete(`c:${id}`)
     await db.conversations.delete(id)
     if (conversation && !remote) {
       await db.tombstones.put({
@@ -574,7 +605,15 @@ export async function getMessages(conversationId: string) {
 }
 
 export async function clearAllData() {
-  const tables = [db.conversations, db.messages, db.settings, db.profiles, db.tombstones, db.vault]
+  const tables = [
+    db.conversations,
+    db.messages,
+    db.settings,
+    db.profiles,
+    db.tombstones,
+    db.vault,
+    db.drafts,
+  ]
   await db.transaction("rw", tables, async () => {
     await Promise.all(tables.map((table) => table.clear()))
     await db.profiles.add(newProfile({}, []))

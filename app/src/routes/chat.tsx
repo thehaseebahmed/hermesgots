@@ -105,6 +105,7 @@ import {
 } from "@/lib/workspace"
 import { SESSION_SUGGESTIONS, SUGGESTIONS } from "@/lib/suggestions"
 import { useBotThreads } from "@/lib/threads"
+import { draftKey } from "@/lib/drafts"
 import { useTheseusInfo, useTheseusRun, waitsOnUser } from "@/lib/theseus"
 import { AgentsContext, DELEGATE_TOOL, useSessionAgents } from "@/lib/agents"
 
@@ -419,7 +420,7 @@ export function ChatPage() {
       const row = await db.conversations.get(left)
       if (!row?.projectId || row.draftAt || row.updatedAt > row.createdAt) return
       if (await db.messages.where("conversationId").equals(left).count()) return
-      if (text) await updateConversation(left, { draft: text, draftAt: Date.now() })
+      if (text) await updateConversation(left, { draftAt: Date.now() })
       else await deleteConversation(left)
     })()
   }, [id])
@@ -469,8 +470,7 @@ export function ChatPage() {
         conversationId = (await createConversation(profile.id, { modelChoice: modelChoice })).id
         navigate(`/c/${conversationId}`, { replace: true, state: { quiet: true } })
       }
-      if (session?.draftAt)
-        void updateConversation(conversationId, { draft: undefined, draftAt: undefined })
+      if (session?.draftAt) void updateConversation(conversationId, { draftAt: undefined })
       await sendMessage(conversationId, text, { attachments })
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't send your message.")
@@ -714,7 +714,7 @@ export function ChatPage() {
             key={session?.id}
             busy={busy}
             disabled={!configured}
-            draft={session?.draft}
+            draftKey={draftKey(id)}
             onDraft={onDraft}
             onSend={send}
             onQueue={(text, attachments) =>
@@ -818,10 +818,7 @@ export function ChatPage() {
             <AlertDialogAction
               onClick={async () => {
                 if (!session || !projectPath) return
-                await updateConversation(session.id, {
-                  draft: draftRef.current.trim(),
-                  draftAt: Date.now(),
-                })
+                await updateConversation(session.id, { draftAt: Date.now() })
                 up(projectPath)
               }}
             >

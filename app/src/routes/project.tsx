@@ -42,6 +42,7 @@ import {
   type PullRequestRef,
 } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
+import { useDraft } from "@/lib/drafts"
 import { SAFETY_MS, useChanges, useLive } from "@/lib/live"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
@@ -523,9 +524,10 @@ function SessionItem({
     session.mode === "theseus"
       ? `Theseus · ${waiting?.kind === "theseus" ? reasonText(waiting) : "Run in progress"}`
       : undefined
+  const draft = useDraft(session.id)
   const line2 = removed.length
     ? `${names.format(removed)} removed`
-    : (theseusLine ?? prLine(session) ?? session.worktree?.branch ?? session.draft)
+    : (theseusLine ?? prLine(session) ?? session.worktree?.branch ?? draft)
   return (
     <Link
       to={`/c/${session.id}`}
