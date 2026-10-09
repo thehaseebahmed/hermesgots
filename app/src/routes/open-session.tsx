@@ -2,7 +2,7 @@ import { useEffect } from "react"
 import { Navigate, useNavigate, useParams } from "react-router"
 
 import { db } from "@/lib/db"
-import { onOpenSession } from "@/lib/push"
+import { onOpenPush } from "@/lib/push"
 
 /** Where a push notification lands: the chat of the Hermes session that needs the user. */
 export function OpenSessionPage() {
@@ -23,12 +23,9 @@ export function OpenSessionPage() {
   return sessionId ? null : <Navigate to="/" replace />
 }
 
-/** Opens the session of a tapped Android notification. Renders nothing. */
+/** Opens what a tapped Android notification is about. Renders nothing. */
 export function PushLinks() {
   const navigate = useNavigate()
-  useEffect(
-    () => onOpenSession((sessionId) => navigate(`/s/${encodeURIComponent(sessionId)}`)),
-    [navigate],
-  )
+  useEffect(() => onOpenPush((path) => navigate(path)), [navigate])
   return null
 }

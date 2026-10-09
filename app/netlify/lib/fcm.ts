@@ -5,7 +5,25 @@
  * The message says that a session waits, never what it asked.
  */
 
-export type PushKind = "approval" | "question" | "plan" | "test"
+/**
+ * What a push is about. The plugin (`plugin/push.py`) and the app (`src/lib/push-kinds.ts`) keep the
+ * same list. The first three wait on the user; the rest are news. `test` is the Developer button's.
+ */
+export const PUSH_KINDS = [
+  "approval",
+  "question",
+  "plan",
+  "theseus",
+  "run_done",
+  "run_failed",
+  "pr_checks",
+  "pr_merged",
+  "clone_failed",
+  "routine_failed",
+] as const
+export type PushKind = (typeof PUSH_KINDS)[number] | "test"
+/** What a device that never said which kinds it wants gets: what pushed before there were more. */
+export const LEGACY_KINDS: readonly string[] = ["approval", "question", "plan"]
 export type SendResult = "ok" | "gone" | "error"
 
 export interface FcmSender {
@@ -24,7 +42,33 @@ const WORDS: Record<PushKind, string> = {
   approval: "Needs your approval",
   question: "Has a question for you",
   plan: "Plan ready for review",
+  theseus: "Theseus is waiting for you",
+  run_done: "Finished its work",
+  run_failed: "Stopped with an error",
+  pr_checks: "Pull request checks are failing",
+  pr_merged: "Pull request merged",
+  clone_failed: "A project couldn't be set up",
+  routine_failed: "A routine failed",
   test: "Test notification",
+}
+
+/**
+ * The Android notification channel of each kind, which the app creates (`src/lib/push.ts`): a
+ * channel is what the user turns off in Android's own settings. The three that wait on the user
+ * share the one the app has always had.
+ */
+const CHANNELS: Record<PushKind, string> = {
+  approval: "sessions",
+  question: "sessions",
+  plan: "sessions",
+  theseus: "theseus",
+  run_done: "run_done",
+  run_failed: "run_failed",
+  pr_checks: "pr_checks",
+  pr_merged: "pr_merged",
+  clone_failed: "clone_failed",
+  routine_failed: "routine_failed",
+  test: "sessions",
 }
 
 const SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
@@ -117,8 +161,11 @@ export function message(token: string, kind: PushKind, sessionId: string) {
       android: {
         priority: "HIGH",
         ttl: "600s",
-        // A newer message about the same session replaces one still showing.
-        notification: { tag: `session:${sessionId}`.slice(0, 200), channel_id: "sessions" },
+        // A newer message of the same channel about the same thing replaces one still showing.
+        notification: {
+          tag: `${CHANNELS[kind]}:${sessionId}`.slice(0, 200),
+          channel_id: CHANNELS[kind],
+        },
       },
     },
   }

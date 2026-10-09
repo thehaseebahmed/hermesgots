@@ -32,6 +32,8 @@ export interface Settings {
   push?: { device: string; vapidKey: string; vapidPublic: string; on: boolean }
   /** The Android app's push identity, local only: Firebase gives the token, this is its device id. */
   fcm?: { device: string; on: boolean; trying?: boolean }
+  /** Which kinds of push this device wants, by category; unset ones follow `PUSH_CATEGORIES`. Local only. */
+  pushKinds?: Partial<Record<string, boolean>>
 }
 
 /** A Hermes profile Memento can talk to. Its Memento plugin registers it (see `registry.ts`). */

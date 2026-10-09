@@ -877,9 +877,10 @@ def _before_tool(kwargs: Dict[str, Any]) -> Optional[Dict[str, str]]:
     # A Theseus session runs in Auto: the user's say is on the run's checkpoints, not on commands.
     follow_auto(record["mode"] in ("auto", "theseus"))
     if record["mode"] == "theseus":
-        from . import theseus
+        from . import alerts, theseus
 
         args = kwargs.get("args") if isinstance(kwargs.get("args"), dict) else {}
+        alerts.theseus_tool(path, record, kwargs.get("tool_name"), args)
         if theseus.blocks_record(kwargs.get("tool_name"), args):
             return {"action": "block", "message": theseus.THESEUS_BLOCK}
         misplaced = theseus.misplaced_init(kwargs.get("tool_name"), args, record, _cwd(task_id))
