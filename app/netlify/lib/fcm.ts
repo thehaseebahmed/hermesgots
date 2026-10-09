@@ -5,11 +5,13 @@
  * The message says that a session waits, never what it asked.
  */
 
-export type PushKind = "approval" | "question" | "plan"
+export type PushKind = "approval" | "question" | "plan" | "test"
 export type SendResult = "ok" | "gone" | "error"
 
 export interface FcmSender {
   send(token: string, kind: PushKind, sessionId: string): Promise<SendResult>
+  /** A test message to one device: null when Firebase took it, else Google's own reason. */
+  test(token: string): Promise<string | null>
 }
 
 interface ServiceAccount {
@@ -22,6 +24,7 @@ const WORDS: Record<PushKind, string> = {
   approval: "Needs your approval",
   question: "Has a question for you",
   plan: "Plan ready for review",
+  test: "Test notification",
 }
 
 const SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
@@ -126,44 +129,58 @@ export function createFcm(raw: string | undefined): FcmSender | null {
   const account = parseServiceAccount(raw)
   if (!account) return null
   const cache = { token: undefined as string | undefined, expires: 0 }
+
+  async function deliver(
+    token: string,
+    kind: PushKind,
+    sessionId: string,
+  ): Promise<{ result: SendResult; reason?: string }> {
+    try {
+      const response = await fetch(
+        `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(account!.project_id)}/messages:send`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${await accessToken(account!, cache)}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(message(token, kind, sessionId)),
+        },
+      )
+      if (response.ok) return { result: "ok" }
+      const detail = (await response.json().catch(() => null)) as {
+        error?: { status?: string; message?: string; details?: { errorCode?: string }[] }
+      } | null
+      // The app was uninstalled or the token rotated: only then is the token dropped.
+      const unregistered =
+        detail?.error?.status === "NOT_FOUND" ||
+        detail?.error?.details?.some((d) => d.errorCode === "UNREGISTERED")
+      const reason = detail?.error?.message ?? `Firebase answered ${response.status}`
+      if (!unregistered) {
+        // Google's own wording names the missing permission, the disabled API or the mismatched sender.
+        const codes = detail?.error?.details?.map((d) => d.errorCode).filter(Boolean)
+        console.error(
+          "FCM refused a push",
+          response.status,
+          detail?.error?.status,
+          codes?.join(","),
+          detail?.error?.message,
+        )
+      }
+      return { result: unregistered ? "gone" : "error", reason }
+    } catch (error) {
+      console.error("FCM push failed", error instanceof Error ? error.message : error)
+      return { result: "error", reason: error instanceof Error ? error.message : "Push failed" }
+    }
+  }
+
   return {
     async send(token, kind, sessionId) {
-      try {
-        const response = await fetch(
-          `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(account.project_id)}/messages:send`,
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${await accessToken(account, cache)}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(message(token, kind, sessionId)),
-          },
-        )
-        if (response.ok) return "ok"
-        const detail = (await response.json().catch(() => null)) as {
-          error?: { status?: string; message?: string; details?: { errorCode?: string }[] }
-        } | null
-        // The app was uninstalled or the token rotated: only then is the token dropped.
-        const unregistered =
-          detail?.error?.status === "NOT_FOUND" ||
-          detail?.error?.details?.some((d) => d.errorCode === "UNREGISTERED")
-        if (!unregistered) {
-          // Google's own wording names the missing permission, the disabled API or the mismatched sender.
-          const codes = detail?.error?.details?.map((d) => d.errorCode).filter(Boolean)
-          console.error(
-            "FCM refused a push",
-            response.status,
-            detail?.error?.status,
-            codes?.join(","),
-            detail?.error?.message,
-          )
-        }
-        return unregistered ? "gone" : "error"
-      } catch (error) {
-        console.error("FCM push failed", error instanceof Error ? error.message : error)
-        return "error"
-      }
+      return (await deliver(token, kind, sessionId)).result
+    },
+    async test(token) {
+      const { result, reason } = await deliver(token, "test", "")
+      return result === "ok" ? null : (reason ?? "Push failed")
     },
   }
 }

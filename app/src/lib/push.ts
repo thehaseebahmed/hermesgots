@@ -379,6 +379,17 @@ function startNative() {
   void App.addListener("resume", () => void sync().catch(() => {}))
 }
 
+/** Asks the registry to push to this phone now, with the app open or not. */
+export async function sendTestPush() {
+  const { fcm } = await getSettings()
+  if (!isNative || !fcm?.on) throw new Error("Notifications are off")
+  const response = await callFunction(
+    "POST",
+    functionUrl("registry", { route: "push-test", id: fcm.device }),
+  )
+  if (!response.ok) throw await failure(response)
+}
+
 function useNativePermission(): PushPermission {
   const [permission, setPermission] = useState<PushPermission>("default")
   useEffect(() => {
