@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { useNavigate } from "react-router"
+import { Link, useNavigate } from "react-router"
 import { FingerprintIcon, LogInIcon } from "lucide-react"
 import { toast } from "sonner"
 
@@ -116,13 +116,19 @@ function SetupPage({
               <LogInIcon data-icon="inline-start" />
               Sign in with GitHub
             </Button>
+            <Link
+              to="/privacy"
+              className="flex min-h-11 items-center self-center text-sm text-muted-foreground underline underline-offset-4"
+            >
+              Privacy
+            </Link>
           </Section>
         )}
 
         {step === "sync" && (
           <Section
             title={sync.vault === "locked" ? "Unlock sync" : "Turn on sync"}
-            description="Your bots, API keys and chat titles are encrypted on this device before they're stored."
+            description="Your bots and their API keys are encrypted on this device before they're stored."
           >
             {sync.vault === "unknown" && !sync.error && <Spinner className="self-center" />}
             {sync.vault === "missing" && (

@@ -30,6 +30,7 @@ import {
   MonitorIcon,
   MoonIcon,
   PaletteIcon,
+  ShieldIcon,
   SailboatIcon,
   SunIcon,
   TelescopeIcon,
@@ -44,6 +45,7 @@ import { BotSettings } from "@/components/bot-settings"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { ExperimentalBadge } from "@/components/experimental-badge"
 import { FeedbackSheet } from "@/components/feedback"
+import { PrivacyPolicy } from "@/components/privacy"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -98,6 +100,7 @@ const SECTIONS: Record<string, { title: string; render: () => ReactNode }> = {
   appearance: { title: "Appearance", render: () => <AppearanceSettings /> },
   notifications: { title: "Notification types", render: () => <NotificationTypes /> },
   data: { title: "Local data", render: () => <DataSettings /> },
+  privacy: { title: "Privacy", render: () => <PrivacyPolicy /> },
   developer: { title: "Developer", render: () => <DeveloperSettings /> },
 }
 
@@ -204,6 +207,7 @@ function MenuScreen({ className }: { className?: string }) {
       </Group>
       <Group>
         <Row to="data" icon={DatabaseIcon} title="Local data" />
+        <Row to="privacy" icon={ShieldIcon} title="Privacy" />
         {settings?.developer && <Row to="developer" icon={TerminalIcon} title="Developer" />}
       </Group>
       <VersionLabel developer={Boolean(settings?.developer)} />
