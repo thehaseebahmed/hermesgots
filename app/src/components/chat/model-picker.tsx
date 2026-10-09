@@ -39,10 +39,11 @@ export function ModelPicker({
 }) {
   const [query, setQuery] = useState("")
   const [openSlug, setOpenSlug] = useState<string>()
+  const sorted = useMemo(() => sortProviders(providers), [providers])
   const root = useRef<HTMLDivElement>(null)
   // A host with one provider has nothing to choose between, so its models show at once.
-  const open = providers.length === 1 ? providers[0] : providers.find((p) => p.slug === openSlug)
-  const total = (open ? [open] : providers).reduce((n, p) => n + p.models.length, 0)
+  const open = sorted.length === 1 ? sorted[0] : sorted.find((p) => p.slug === openSlug)
+  const total = (open ? [open] : sorted).reduce((n, p) => n + p.models.length, 0)
   // Only ones the host still offers, so a recent pick never sends a model it dropped.
   const recentOffered = recent.filter((r) =>
     providers.some((p) => p.slug === r.provider && p.models.includes(r.model)),
@@ -50,13 +51,13 @@ export function ModelPicker({
   const isChosen = (m: ModelChoice) => choice?.provider === m.provider && choice.model === m.model
   const groups = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean)
-    return (open ? [open] : providers)
+    return (open ? [open] : sorted)
       .map((p) => {
         const haystack = (m: string) => `${p.name} ${p.slug} ${m}`.toLowerCase()
         return { ...p, models: p.models.filter((m) => words.every((w) => haystack(m).includes(w))) }
       })
       .filter((p) => p.models.length)
-  }, [providers, open, query])
+  }, [sorted, open, query])
 
   const show = (slug: string | undefined) => {
     setOpenSlug(slug)
@@ -64,7 +65,7 @@ export function ModelPicker({
   }
   // The popup's scroller, so a list doesn't open where the last one was left.
   useEffect(() => root.current?.parentElement?.scrollTo({ top: 0 }), [openSlug])
-  const drilled = open && providers.length > 1
+  const drilled = open && sorted.length > 1
   const back = drilled ? () => show(undefined) : onBack
   const top = !query && !drilled
 
@@ -129,15 +130,12 @@ export function ModelPicker({
           <section className="flex flex-col gap-2">
             <h3 className="px-1 text-sm text-muted-foreground">Providers</h3>
             <ModelList>
-              {providers.map((p) => {
-                const chosen = choice?.provider === p.slug ? choice.model : undefined
+              {sorted.map((p) => {
                 return (
                   <ModelOption
                     key={p.slug}
                     label={p.name}
-                    detail={
-                      chosen ?? `${p.models.length} ${p.models.length === 1 ? "model" : "models"}`
-                    }
+                    detail={`${p.models.length} ${p.models.length === 1 ? "model" : "models"}`}
                     selected={false}
                     opens
                     onClick={() => show(p.slug)}
@@ -173,6 +171,18 @@ export function ModelPicker({
 
 function hostChoice(info: ModelInfo | null | undefined): ModelChoice | undefined {
   return info?.model ? { provider: info.provider ?? "", model: info.model } : undefined
+}
+
+// A fixed height, so the sheet doesn't grow and shrink between the lists.
+const PICKER_HEIGHT = "h-[min(36rem,85dvh)]"
+
+const byName = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" })
+
+/** Providers and each one's models, A to Z, so a list never reorders itself. */
+function sortProviders(providers: ModelProvider[]) {
+  return providers
+    .map((p) => ({ ...p, models: [...p.models].sort(byName.compare) }))
+    .sort((a, b) => byName.compare(a.name, b.name))
 }
 
 /** `provider/model`, or the model alone when the host didn't name its provider. */
@@ -254,7 +264,7 @@ export function ModelMenu({
         {providers.length > 0 && <ChevronDownIcon className="text-muted-foreground" />}
       </Button>
       <Popup open={open} onOpenChange={setOpen}>
-        <PopupContent initialFocus={false}>
+        <PopupContent initialFocus={false} className={PICKER_HEIGHT}>
           <ModelPicker
             providers={providers}
             fallback={{ label: "Default", model: fallback }}
@@ -315,7 +325,7 @@ export function DefaultModelSetting({
         <ChevronDownIcon className="text-muted-foreground" />
       </Button>
       <Popup open={open} onOpenChange={setOpen}>
-        <PopupContent initialFocus={false}>
+        <PopupContent initialFocus={false} className={PICKER_HEIGHT}>
           <ModelPicker
             providers={providers}
             fallback={{ label: "Default", model: info?.model }}
