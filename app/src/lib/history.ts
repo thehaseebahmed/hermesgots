@@ -181,6 +181,43 @@ function steerText(content: string) {
 }
 
 /**
+ * A note Hermes writes as a user row to keep a turn going: after a reply was cut off by the network
+ * or the output limit, or ended on a fragment. It's for the model, never the user's.
+ */
+const isNotice = (row: SessionMessage) =>
+  row.role === "user" &&
+  typeof row.content === "string" &&
+  row.content.trimStart().startsWith("[System:")
+
+/** Hermes's `_MIN_CONTINUATION_OVERLAP`: a shorter repeat at a seam is left alone. */
+const MIN_OVERLAP = 32
+
+/** How much of `next` repeats the end of `previous` (`_continuation_overlap_length`). */
+function overlapLength(previous: string, next: string) {
+  if (previous.length < MIN_OVERLAP || next.length < MIN_OVERLAP) return 0
+  for (let length = Math.min(previous.length, next.length); length >= MIN_OVERLAP; length--)
+    if (previous.endsWith(next.slice(0, length))) return length
+  return 0
+}
+
+/**
+ * The text a notice's answer leaves: the cut-off text and its continuation joined as Hermes joins
+ * them for the run's output (`_join_truncated_parts`), or only the new text when the model started
+ * over or was asked to send its answer again.
+ */
+function afterNotice(fragment: string, next: string, notice: string) {
+  const head = fragment.trim().slice(0, 64)
+  if (!/where you left off|^\[System: Your previous tool call/.test(notice.trimStart())) return next
+  if (head && next.trimStart().startsWith(head)) return next
+  // Only a stream that was cut mid-way repeats itself at the seam.
+  const part = notice.includes("output length limit")
+    ? next
+    : next.slice(overlapLength(fragment.slice(-next.length), next))
+  const gap = fragment && part && !/\s$/.test(fragment) && !/^\s/.test(part) ? "\n" : ""
+  return fragment + gap + part
+}
+
+/**
  * Folds each turn's assistant, tool-call and tool rows into one reply, as streaming shows it. With
  * `live` (a turn still running), a call without its result row stays `running`.
  */
@@ -192,7 +229,12 @@ export function toMessages(
 ) {
   const messages: Message[] = []
   let reply: Message | undefined
+  // Where the reply's text since its last tool call starts, and the notice that text was cut by.
+  let segment = 0
+  let notice: string | undefined
   const newReply = (id: string, createdAt: number) => {
+    segment = 0
+    notice = undefined
     const message: Message = {
       id,
       conversationId,
@@ -207,6 +249,10 @@ export function toMessages(
   }
   for (const row of rows) {
     if (row.display_kind === "hidden" || row.role === "system") continue
+    if (isNotice(row)) {
+      if (reply) notice = row.content ?? ""
+      continue
+    }
     const createdAt = Math.round((row.timestamp ?? 0) * 1000) || Date.now()
     const id = `h-${sessionId}-${row.id}`
     if (isSteer(row)) {
@@ -266,9 +312,15 @@ export function toMessages(
       reply.status = "error"
       reply.statusText = row.content || "Hermes couldn't finish this reply."
     } else if (row.content) {
-      reply.content = reply.content ? `${reply.content}\n\n${row.content}` : row.content
+      const before = reply.content.slice(0, segment)
+      const fragment = reply.content.slice(segment).replace(/^\n\n/, "")
+      const text = notice && fragment ? afterNotice(fragment, row.content, notice) : undefined
+      if (text !== undefined) reply.content = before ? `${before}\n\n${text}` : text
+      else reply.content = reply.content ? `${reply.content}\n\n${row.content}` : row.content
     }
-    for (const call of toolCalls(row)) {
+    const calls = toolCalls(row)
+    if (row.content || calls.length) notice = undefined
+    for (const call of calls) {
       const event: ToolEvent = {
         toolCallId: call.id,
         tool: call.name,
@@ -280,6 +332,7 @@ export function toMessages(
         ...(call.stats ? { created: true } : {}),
       }
       reply.tools = [...(reply.tools ?? []), event]
+      segment = reply.content.length
     }
   }
   if (!options.live) {
@@ -400,7 +453,7 @@ export function reconcileHistory(conversationId: string) {
 }
 
 const isTurnStart = (row: SessionMessage) =>
-  row.role === "user" && row.display_kind !== "hidden" && !isSteer(row)
+  row.role === "user" && row.display_kind !== "hidden" && !isSteer(row) && !isNotice(row)
 
 const isStreaming = (messages: Message[]) => messages.some((m) => m.status === "streaming")
 

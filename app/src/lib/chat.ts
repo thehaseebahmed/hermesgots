@@ -600,11 +600,25 @@ function anchorOffsets(draft: Draft, next: string) {
     draft.approval = { ...draft.approval, contentOffset: anchor(draft.approval.contentOffset) }
 }
 
+/**
+ * Puts the run's final answer in place of the text streamed since the last tool call. They differ
+ * when Hermes asked the model to go on after a cut-off or a fragment (a `[System: …]` note the
+ * stream never shows): what streamed holds every attempt, the output only the answer.
+ */
+function settleFinalText(draft: Draft, output: string) {
+  const start = Math.max(0, ...draft.tools.map((t) => t.contentOffset ?? 0))
+  const streamed = draft.content.slice(start)
+  if (!streamed.trim() || streamed.trim() === output.trim()) return
+  draft.content = draft.content.slice(0, start) + /^\s*/.exec(streamed)![0] + output.trim()
+}
+
 /** Folds a run's outcome into the reply; a run whose events were lost takes its final text. */
 function settleRun(draft: Draft, outcome: RunOutcome) {
   if (outcome.output && (outcome.replaceContent || !draft.content)) {
     anchorOffsets(draft, outcome.output)
     draft.content = outcome.output
+  } else if (outcome.output && outcome.status === "completed") {
+    settleFinalText(draft, outcome.output)
   }
   if (outcome.status === "cancelled") draft.status = "stopped"
   else if (outcome.status !== "completed") {
