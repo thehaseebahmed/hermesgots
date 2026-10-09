@@ -148,8 +148,10 @@ export function createFcm(raw: string | undefined): FcmSender | null {
         const unregistered =
           detail?.error?.status === "NOT_FOUND" ||
           detail?.error?.details?.some((d) => d.errorCode === "UNREGISTERED")
+        if (!unregistered) console.error("FCM refused a push", response.status, detail?.error?.status)
         return unregistered ? "gone" : "error"
-      } catch {
+      } catch (error) {
+        console.error("FCM push failed", error instanceof Error ? error.message : error)
         return "error"
       }
     },
