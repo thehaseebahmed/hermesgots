@@ -254,7 +254,7 @@ export function ModelMenu({
         {providers.length > 0 && <ChevronDownIcon className="text-muted-foreground" />}
       </Button>
       <Popup open={open} onOpenChange={setOpen}>
-        <PopupContent>
+        <PopupContent initialFocus={false}>
           <ModelPicker
             providers={providers}
             fallback={{ label: "Default", model: fallback }}
@@ -271,6 +271,9 @@ export function ModelMenu({
     </>
   )
 }
+
+// How long a just-saved default stays on show while the host's model is read again.
+const SETTLE_MS = 4000
 
 /** A bot's default model, in its settings: what its chats run on unless they pick another. */
 export function DefaultModelSetting({
@@ -312,7 +315,7 @@ export function DefaultModelSetting({
         <ChevronDownIcon className="text-muted-foreground" />
       </Button>
       <Popup open={open} onOpenChange={setOpen}>
-        <PopupContent>
+        <PopupContent initialFocus={false}>
           <ModelPicker
             providers={providers}
             fallback={{ label: "Default", model: info?.model }}
@@ -320,7 +323,8 @@ export function DefaultModelSetting({
             choice={profile.modelChoice}
             onChoose={(next) => {
               setSaving(next)
-              void onChoose(next).finally(() => setSaving(undefined))
+              // The host's answer lags the write, so the pick stays on show until it's read again.
+              void onChoose(next).finally(() => setTimeout(() => setSaving(undefined), SETTLE_MS))
               if (next) void rememberModel(profile.id, next)
               setOpen(false)
             }}
