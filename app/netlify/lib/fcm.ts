@@ -142,13 +142,23 @@ export function createFcm(raw: string | undefined): FcmSender | null {
         )
         if (response.ok) return "ok"
         const detail = (await response.json().catch(() => null)) as {
-          error?: { status?: string; details?: { errorCode?: string }[] }
+          error?: { status?: string; message?: string; details?: { errorCode?: string }[] }
         } | null
         // The app was uninstalled or the token rotated: only then is the token dropped.
         const unregistered =
           detail?.error?.status === "NOT_FOUND" ||
           detail?.error?.details?.some((d) => d.errorCode === "UNREGISTERED")
-        if (!unregistered) console.error("FCM refused a push", response.status, detail?.error?.status)
+        if (!unregistered) {
+          // Google's own wording names the missing permission, the disabled API or the mismatched sender.
+          const codes = detail?.error?.details?.map((d) => d.errorCode).filter(Boolean)
+          console.error(
+            "FCM refused a push",
+            response.status,
+            detail?.error?.status,
+            codes?.join(","),
+            detail?.error?.message,
+          )
+        }
         return unregistered ? "gone" : "error"
       } catch (error) {
         console.error("FCM push failed", error instanceof Error ? error.message : error)
