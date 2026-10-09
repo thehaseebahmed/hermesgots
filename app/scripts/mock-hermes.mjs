@@ -1212,8 +1212,11 @@ http
       return json(res, 200, { object: "memento.push", subscribed: true })
     }
     if (PLUGIN && !profile && req.method === "POST" && url.pathname === "/api/plugins/memento/push/mute") {
-      const { muted } = await readBody(req)
+      const { muted, bot } = await readBody(req)
       if (typeof muted !== "boolean") return json(res, 400, { error: { message: "Missing muted" } })
+      if (bot !== undefined && !/^[a-z0-9-]{1,32}$/.test(String(bot))) {
+        return json(res, 400, { error: { message: "Not a bot" } })
+      }
       return json(res, 200, { object: "memento.push.mute", muted })
     }
     if (PLUGIN && !profile && req.method === "POST" && url.pathname === "/api/plugins/memento/push/remove") {

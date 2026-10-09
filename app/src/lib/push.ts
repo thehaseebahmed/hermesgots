@@ -503,21 +503,23 @@ export function disablePush() {
 
 /**
  * Muting a bot or a chat is for every device, so the plugin that sends the pushes holds it: a chat's
- * `muted` travels with its chat list, a bot's is told to its plugin here.
+ * `muted` travels with its chat list, a bot's is told to its plugin here, with the bot's character so
+ * its pushes show its picture.
  */
 
 /** What each server was last told, by its address and key. */
-const toldMuted = new Map<string, boolean>()
+const toldMuted = new Map<string, string>()
 
 async function syncMutes() {
   for (const bot of await listEnabledProfiles()) {
     if (!bot.apiKey || !bot.baseUrl.trim()) continue
     const id = connectionKey(bot)
     const muted = Boolean(bot.muted)
-    if (toldMuted.get(id) === muted) continue
+    const told = `${muted}:${bot.botId}`
+    if (toldMuted.get(id) === told) continue
     try {
-      await setPushMuted(bot, muted)
-      toldMuted.set(id, muted)
+      await setPushMuted(bot, muted, bot.botId)
+      toldMuted.set(id, told)
     } catch {
       // No plugin, or the server is away: asked again on the next change.
     }
@@ -531,7 +533,7 @@ function startMutes() {
     timer = window.setTimeout(() => void syncMutes(), 1000)
   }
   liveQuery(async () =>
-    (await listProfiles()).map((bot) => `${bot.id}:${bot.muted}`).join(),
+    (await listProfiles()).map((bot) => `${bot.id}:${bot.muted}:${bot.botId}`).join(),
   ).subscribe(soon)
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") soon()

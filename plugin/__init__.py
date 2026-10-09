@@ -899,7 +899,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         muted = body.get("muted") if body else None
         if not isinstance(muted, bool):
             return _error(web, "Missing muted", 400)
+        # Which bot character the profile is, for the notification's picture (0.33).
+        character = body.get("bot")
+        if character is not None and not (isinstance(character, str) and push.BOT_ID.match(character)):
+            return _error(web, "Not a bot", 400)
         await asyncio.to_thread(push.set_bot_muted, store_path(), muted)
+        if character:
+            await asyncio.to_thread(push.set_bot, store_path(), character)
         return web.json_response({"object": "memento.push", "muted": muted})
 
     async def push_unsubscribe(request: "web.Request") -> "web.Response":

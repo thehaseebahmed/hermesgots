@@ -1,19 +1,30 @@
-// Imported by the generated service worker (vite.config.ts). A push says that a session waits on
-// the user, or has news, never what it asked; the page it opens reads the rest from Hermes as usual.
-// The kinds are the plugin's (plugin/push.py); src/lib/push-kinds.ts keeps where each one leads.
+// Imported by the generated service worker (vite.config.ts). A push names the chat (or routine, or
+// project) and says what happened in it, never what was asked; the page it opens reads the rest from
+// Hermes as usual. The kinds are the plugin's (plugin/push.py); src/lib/push-kinds.ts keeps where
+// each one leads, and netlify/lib/fcm.ts says the same words on Android.
 
 const WORDS = {
-  approval: "Needs your approval",
-  question: "Has a question for you",
-  plan: "Plan ready for review",
-  theseus: "Theseus is waiting for you",
-  run_done: "Finished its work",
-  run_failed: "Stopped with an error",
-  pr_checks: "Pull request checks are failing",
-  pr_merged: "Pull request merged",
-  clone_failed: "A project couldn't be set up",
-  routine_failed: "A routine failed",
+  approval: "Waiting for your approval",
+  question: "You have a question waiting",
+  plan: "The plan is ready for your review",
+  theseus: "Waiting for you",
+  run_done: "You have a new reply",
+  run_failed: "The run stopped with an error",
+  pr_checks: "Checks are failing on the pull request",
+  pr_merged: "Your pull request was merged",
+  clone_failed: "This project couldn't be set up",
+  routine_failed: "The last run failed",
 }
+
+const THESEUS_WORDS = {
+  plan: "The plan is ready for your review",
+  checkpoints: "The checkpoints are ready for your review",
+  approval: "A checkpoint is waiting for your approval",
+  closing: "All checkpoints are done, choose how to wrap up",
+}
+
+// When the plugin is older or couldn't find a name.
+const UNTITLED = { routine_failed: "A routine", clone_failed: "A project" }
 
 // What the push is about when it isn't a session.
 const SCREENS = { routine_failed: "/routines", clone_failed: "/code" }
@@ -37,10 +48,16 @@ async function show(data) {
   const tag = sessionId ? `${group || "session"}:${sessionId}` : "memento"
   const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true })
   const looking = windows.some((client) => client.visibilityState === "visible")
-  await self.registration.showNotification("Memento", {
-    body: WORDS[data.kind] || "Needs your input",
+  const title =
+    (typeof data.title === "string" && data.title.trim()) || UNTITLED[data.kind] || "Memento"
+  const body =
+    (data.kind === "theseus" && THESEUS_WORDS[data.stage]) || WORDS[data.kind] || "Waiting for you"
+  // The bot's own picture, so it's plain which bot it is.
+  const bot = typeof data.bot === "string" && /^[a-z0-9-]{1,32}$/.test(data.bot) ? data.bot : ""
+  await self.registration.showNotification(title, {
+    body,
     tag,
-    icon: "/pwa-192x192.png",
+    icon: bot ? `/bots/${bot}.png` : "/pwa-192x192.png",
     // Safari revokes a subscription that gets pushes without notifications, so a visible app still
     // shows one, silently and only for a moment.
     silent: looking,
@@ -48,7 +65,8 @@ async function show(data) {
   })
   if (looking) {
     await new Promise((resolve) => setTimeout(resolve, 3000))
-    for (const notification of await self.registration.getNotifications({ tag })) notification.close()
+    for (const notification of await self.registration.getNotifications({ tag }))
+      notification.close()
   }
 }
 
