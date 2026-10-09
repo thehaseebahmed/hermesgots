@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -143,11 +143,17 @@ def connect(path: Path) -> sqlite3.Connection:
                    resumed_at INTEGER NOT NULL DEFAULT 0
                )"""
         )
-        # v13: the kinds of push a subscription wants (JSON; null is the three that needed the user
-        # before there were more), and what has already been pushed about a thing that can repeat.
+        # v13: what has already been pushed about a thing that can repeat. v14: the categories of push
+        # a subscription wants (JSON; null is what pushed before there were more), and a bot-wide mute.
         subscription_columns = {row[1] for row in conn.execute("PRAGMA table_info(push_subscriptions)")}
-        if "kinds" not in subscription_columns:
-            conn.execute("ALTER TABLE push_subscriptions ADD COLUMN kinds TEXT")
+        if "categories" not in subscription_columns:
+            conn.execute("ALTER TABLE push_subscriptions ADD COLUMN categories TEXT")
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS push_prefs (
+                   key TEXT PRIMARY KEY,
+                   value TEXT NOT NULL
+               )"""
+        )
         conn.execute(
             """CREATE TABLE IF NOT EXISTS push_seen (
                    key TEXT PRIMARY KEY,

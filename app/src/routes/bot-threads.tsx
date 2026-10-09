@@ -3,6 +3,8 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { Link, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
 import {
+  BellIcon,
+  BellOffIcon,
   ChevronRightIcon,
   CircleAlertIcon,
   CircleXIcon,
@@ -33,6 +35,7 @@ import {
   type ModelChoice,
 } from "@/lib/db"
 import { useNav } from "@/lib/nav"
+import { setBotMuted } from "@/lib/push"
 import { useNow, useThreads, type Thread } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { reasonText } from "@/lib/waiting"
@@ -98,6 +101,9 @@ function ThreadItem({
             <span className="block truncate">{thread.chat.title}</span>
             {label && <span className="block truncate text-xs text-warning">{label}</span>}
           </span>
+          {thread.chat.muted && (
+            <BellOffIcon className="size-4 shrink-0 text-muted-foreground" aria-label="Muted" />
+          )}
         </div>
       </div>
       <Link
@@ -188,6 +194,12 @@ export function BotThreadsPage({
         <EllipsisIcon />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-44">
+        {profile && (
+          <DropdownMenuItem onClick={() => void setBotMuted(profile.id, !profile.muted)}>
+            {profile.muted ? <BellIcon /> : <BellOffIcon />}
+            {profile.muted ? "Unmute notifications" : "Mute notifications"}
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem onClick={() => root("/settings/bots")}>
           <SettingsIcon />
           Bot settings
@@ -202,6 +214,7 @@ export function BotThreadsPage({
         title={profile?.name ?? "Bot"}
         subtitle={count ? `${count} ${count === 1 ? "thread" : "threads"}` : undefined}
         botId={profile?.botId}
+        muted={profile?.muted}
         actions={actions}
       />
 

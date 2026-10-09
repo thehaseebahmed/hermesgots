@@ -725,8 +725,8 @@ export interface PushRegistration {
   subscription: PushSubscriptionJSON
   vapid_key: string
   subject: string
-  /** The kinds of push this device wants (see `push-kinds.ts`). */
-  kinds: string[]
+  /** The categories of push this device wants (see `push-kinds.ts`). */
+  categories: string[]
 }
 
 export async function registerPush(config: HermesConfig, registration: PushRegistration) {
@@ -734,6 +734,15 @@ export async function registerPush(config: HermesConfig, registration: PushRegis
     method: "POST",
     headers: headers(config),
     body: JSON.stringify(registration),
+  })
+}
+
+/** Mutes or unmutes every push this bot's plugin would send, to every device. */
+export async function setPushMuted(config: HermesConfig, muted: boolean) {
+  await request(`${pluginRoot(config.baseUrl)}/push/mute`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ muted }),
   })
 }
 

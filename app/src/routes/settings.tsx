@@ -11,6 +11,7 @@ import {
   CheckIcon,
   CircleAlertIcon,
   CircleCheckIcon,
+  CodeXmlIcon,
   FolderXIcon,
   GitMergeIcon,
   GitPullRequestIcon,
@@ -29,6 +30,7 @@ import {
   PaletteIcon,
   SailboatIcon,
   SunIcon,
+  TimerIcon,
   UserIcon,
   type LucideIcon,
 } from "lucide-react"
@@ -72,10 +74,11 @@ import {
   pushAvailable,
   sendTestPush,
   setPushCategory,
+  setPushFeature,
   usePush,
-  usePushCategories,
+  usePushFeatures,
 } from "@/lib/push"
-import type { PushCategory } from "@/lib/push-kinds"
+import type { PushCategory, PushFeature } from "@/lib/push-kinds"
 import { forgetLocalKey, useSyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
 import { APP_VERSION, pluginOutdated } from "@/lib/version"
@@ -255,40 +258,76 @@ function NotificationTypesRow() {
 }
 
 const CATEGORY_ICONS: Record<PushCategory, LucideIcon> = {
-  sessions: MessageCircleQuestionIcon,
-  theseus: SailboatIcon,
-  run_failed: CircleAlertIcon,
-  run_done: CircleCheckIcon,
-  pr_checks: GitPullRequestIcon,
-  pr_merged: GitMergeIcon,
-  clone_failed: FolderXIcon,
+  chat_input: MessageCircleQuestionIcon,
+  chat_run_failed: CircleAlertIcon,
+  chat_run_done: CircleCheckIcon,
+  code_input: MessageCircleQuestionIcon,
+  code_theseus: SailboatIcon,
+  code_run_failed: CircleAlertIcon,
+  code_run_done: CircleCheckIcon,
+  code_pr_checks: GitPullRequestIcon,
+  code_pr_merged: GitMergeIcon,
+  code_setup_failed: FolderXIcon,
   routine_failed: CalendarXIcon,
 }
 
-/** Which kinds of push this device gets; each is a channel of its own in Android's settings too. */
+const FEATURE_ICONS: Record<PushFeature, LucideIcon> = {
+  chats: MessagesSquareIcon,
+  code: CodeXmlIcon,
+  routines: TimerIcon,
+}
+
+/**
+ * Which pushes this device gets, by feature: a switch for the whole feature and one for each kind
+ * in it. Each kind is a channel of its own in Android's settings too.
+ */
 function NotificationTypes() {
-  const categories = usePushCategories()
-  const change = (id: PushCategory, checked: boolean) =>
-    void setPushCategory(id, checked).catch((error) =>
-      toast.error(
-        error instanceof Error && error.message
-          ? `Couldn't change that. ${error.message}`
-          : "Couldn't change that",
-      ),
+  const features = usePushFeatures()
+  const failed = (error: unknown) =>
+    toast.error(
+      error instanceof Error && error.message
+        ? `Couldn't change that. ${error.message}`
+        : "Couldn't change that",
     )
   return (
-    <Group>
-      {categories.map((category) => (
-        <SwitchRow
-          key={category.id}
-          id={`push-${category.id}`}
-          icon={CATEGORY_ICONS[category.id]}
-          title={category.title}
-          checked={category.checked}
-          onCheckedChange={(checked) => change(category.id, checked)}
-        />
-      ))}
-    </Group>
+    <div className="flex flex-col gap-4">
+      {features.map((feature) => {
+        const [only] = feature.categories
+        const single = feature.categories.length === 1
+        return (
+          <section key={feature.id} className="flex flex-col gap-1.5">
+            <Group>
+              <SwitchRow
+                id={`push-${feature.id}`}
+                icon={FEATURE_ICONS[feature.id]}
+                title={feature.title}
+                subtitle={single ? only.title : `${feature.on} of ${feature.categories.length} on`}
+                checked={feature.on > 0}
+                onCheckedChange={(checked) =>
+                  void setPushFeature(feature.id, checked).catch(failed)
+                }
+              />
+            </Group>
+            {!single && (
+              <Group>
+                {feature.categories.map((category) => (
+                  <SwitchRow
+                    key={category.id}
+                    id={`push-${category.id}`}
+                    icon={CATEGORY_ICONS[category.id]}
+                    title={category.title}
+                    checked={category.checked}
+                    onCheckedChange={(checked) =>
+                      void setPushCategory(category.id, checked).catch(failed)
+                    }
+                  />
+                ))}
+              </Group>
+            )}
+          </section>
+        )
+      })}
+    </div>
   )
 }
 

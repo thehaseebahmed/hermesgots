@@ -55,6 +55,7 @@ import { formatRelative } from "@/lib/format"
 import { checkHealth, getPluginVersion, listModels } from "@/lib/hermes"
 import { setDefaultModel } from "@/lib/model-info"
 import { syncContextWindow } from "@/lib/models"
+import { setBotMuted } from "@/lib/push"
 import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
 import { useSyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
@@ -207,6 +208,22 @@ function EnabledSetting({ profile }: { profile: Profile }) {
   )
 }
 
+/** Mutes every push from the bot, on every device. */
+function MutedSetting({ profile }: { profile: Profile }) {
+  return (
+    <Field orientation="horizontal">
+      <FieldLabel htmlFor="muted" className="flex-1">
+        Mute notifications
+      </FieldLabel>
+      <Switch
+        id="muted"
+        checked={Boolean(profile.muted)}
+        onCheckedChange={(checked) => void setBotMuted(profile.id, checked)}
+      />
+    </Field>
+  )
+}
+
 /** Unlinks the bot's host, which takes every bot it linked with it. */
 function RemoveBot({ profile, onDeleted }: { profile: Profile; onDeleted?: () => void }) {
   const siblings = useLiveQuery(
@@ -315,6 +332,7 @@ export function BotEditor({
         </Banner>
       )}
       {linked && <EnabledSetting profile={profile} />}
+      <MutedSetting profile={profile} />
 
       <Field>
         <FieldLabel htmlFor="bot-name">Name</FieldLabel>

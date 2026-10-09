@@ -5,6 +5,8 @@ import { toast } from "sonner"
 import {
   ArchiveXIcon,
   ArrowLeftIcon,
+  BellIcon,
+  BellOffIcon,
   CheckIcon,
   EllipsisIcon,
   PencilIcon,
@@ -93,6 +95,7 @@ import { SAFETY_MS, useLive, watchChat } from "@/lib/live"
 import { useXLarge } from "@/lib/media"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
+import { setThreadMuted } from "@/lib/push"
 import { syncContextWindow } from "@/lib/models"
 import {
   planApprovalMessage,
@@ -517,6 +520,10 @@ export function ChatPage() {
           <PencilIcon />
           {session ? "Edit" : "Rename"}
         </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => void setThreadMuted(conversation.id, !conversation.muted)}>
+          {conversation.muted ? <BellIcon /> : <BellOffIcon />}
+          {conversation.muted ? "Unmute notifications" : "Mute notifications"}
+        </DropdownMenuItem>
         {session &&
           !session.discardedAt &&
           (session.resolvedAt ? (
@@ -555,6 +562,7 @@ export function ChatPage() {
         title={conversation?.title ?? "New chat"}
         subtitle={(!simple && activity) || repliesLine || session?.worktree?.branch}
         botId={profile?.botId}
+        muted={Boolean(conversation?.muted || profile?.muted)}
         // Beside its bot, which already shows the bot's picture.
         showBot={!(botPath && xl)}
         actions={actions}
