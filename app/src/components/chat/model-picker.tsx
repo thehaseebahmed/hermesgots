@@ -1,17 +1,24 @@
-import { useMemo, useState, type ReactNode } from "react"
-import { ArrowLeftIcon, CheckIcon, ChevronDownIcon, SearchIcon } from "lucide-react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import {
+  ArrowLeftIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  SearchIcon,
+} from "lucide-react"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
-import { rememberModel, type ModelChoice, type Profile } from "@/lib/db"
-import type { ModelProvider } from "@/lib/hermes"
+import { db, rememberModel, type ModelChoice, type Profile } from "@/lib/db"
+import type { ModelInfo, ModelProvider } from "@/lib/hermes"
 import { shortModel, useModelInfo } from "@/lib/model-info"
 import { cn } from "@/lib/utils"
 
 /**
  * The list of the host's models. The first row clears the choice and names what that runs on:
- * the bot's own default in a chat, the host's model in a bot's settings.
+ * the bot's own default in a chat, the host's model in a bot's settings. Below the recent picks
+ * each provider opens its own models; a search looks through every provider's.
  */
 export function ModelPicker({
   providers,
@@ -31,7 +38,11 @@ export function ModelPicker({
   onBack?: () => void
 }) {
   const [query, setQuery] = useState("")
-  const total = providers.reduce((n, p) => n + p.models.length, 0)
+  const [openSlug, setOpenSlug] = useState<string>()
+  const root = useRef<HTMLDivElement>(null)
+  // A host with one provider has nothing to choose between, so its models show at once.
+  const open = providers.length === 1 ? providers[0] : providers.find((p) => p.slug === openSlug)
+  const total = (open ? [open] : providers).reduce((n, p) => n + p.models.length, 0)
   // Only ones the host still offers, so a recent pick never sends a model it dropped.
   const recentOffered = recent.filter((r) =>
     providers.some((p) => p.slug === r.provider && p.models.includes(r.model)),
@@ -39,33 +50,43 @@ export function ModelPicker({
   const isChosen = (m: ModelChoice) => choice?.provider === m.provider && choice.model === m.model
   const groups = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean)
-    return providers
+    return (open ? [open] : providers)
       .map((p) => {
         const haystack = (m: string) => `${p.name} ${p.slug} ${m}`.toLowerCase()
         return { ...p, models: p.models.filter((m) => words.every((w) => haystack(m).includes(w))) }
       })
       .filter((p) => p.models.length)
-  }, [providers, query])
+  }, [providers, open, query])
+
+  const show = (slug: string | undefined) => {
+    setOpenSlug(slug)
+    setQuery("")
+  }
+  // The popup's scroller, so a list doesn't open where the last one was left.
+  useEffect(() => root.current?.parentElement?.scrollTo({ top: 0 }), [openSlug])
+  const drilled = open && providers.length > 1
+  const back = drilled ? () => show(undefined) : onBack
+  const top = !query && !drilled
 
   return (
     <>
       <PopupHeader className="flex-row items-center gap-1 pb-2">
-        {onBack && (
+        {back && (
           <Button
             variant="ghost"
             size="icon-lg"
             className="-ml-2 size-11 rounded-full"
-            onClick={onBack}
+            onClick={back}
             aria-label="Back"
           >
             <ArrowLeftIcon />
           </Button>
         )}
-        <PopupTitle className={cn("min-w-0 flex-1 truncate", !onBack && "text-center")}>
-          Model
+        <PopupTitle className={cn("min-w-0 flex-1 truncate", !back && "text-center")}>
+          {drilled ? open.name : "Model"}
         </PopupTitle>
       </PopupHeader>
-      <div className="flex flex-col gap-5 px-6 text-[15px]">
+      <div ref={root} className="flex flex-col gap-5 px-6 text-[15px]">
         {total > 8 && (
           <InputGroup className="h-11">
             <InputGroupAddon>
@@ -74,12 +95,12 @@ export function ModelPicker({
             <InputGroupInput
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search models"
+              placeholder={drilled ? `Search ${open.name}` : "Search models"}
               aria-label="Search models"
             />
           </InputGroup>
         )}
-        {!query && (
+        {top && (
           <ModelList>
             <ModelOption
               label={fallback.label}
@@ -89,7 +110,7 @@ export function ModelPicker({
             />
           </ModelList>
         )}
-        {!query && recentOffered.length > 0 && (
+        {top && recentOffered.length > 0 && (
           <section className="flex flex-col gap-2">
             <h3 className="px-1 text-sm text-muted-foreground">Recent</h3>
             <ModelList>
@@ -104,27 +125,59 @@ export function ModelPicker({
             </ModelList>
           </section>
         )}
-        {groups.map((p) => (
-          <section key={p.slug} className="flex flex-col gap-2">
-            <h3 className="px-1 text-sm text-muted-foreground">{p.name}</h3>
+        {top && !open ? (
+          <section className="flex flex-col gap-2">
+            <h3 className="px-1 text-sm text-muted-foreground">Providers</h3>
             <ModelList>
-              {p.models.map((m) => (
-                <ModelOption
-                  key={m}
-                  label={m}
-                  selected={isChosen({ provider: p.slug, model: m })}
-                  onClick={() => onChoose({ provider: p.slug, model: m })}
-                />
-              ))}
+              {providers.map((p) => {
+                const chosen = choice?.provider === p.slug ? choice.model : undefined
+                return (
+                  <ModelOption
+                    key={p.slug}
+                    label={p.name}
+                    detail={
+                      chosen ?? `${p.models.length} ${p.models.length === 1 ? "model" : "models"}`
+                    }
+                    selected={false}
+                    opens
+                    onClick={() => show(p.slug)}
+                  />
+                )
+              })}
             </ModelList>
           </section>
-        ))}
+        ) : (
+          groups.map((p) => (
+            <section key={p.slug} className="flex flex-col gap-2">
+              {!drilled && <h3 className="px-1 text-sm text-muted-foreground">{p.name}</h3>}
+              <ModelList>
+                {p.models.map((m) => (
+                  <ModelOption
+                    key={m}
+                    label={m}
+                    selected={isChosen({ provider: p.slug, model: m })}
+                    onClick={() => onChoose({ provider: p.slug, model: m })}
+                  />
+                ))}
+              </ModelList>
+            </section>
+          ))
+        )}
         {query && !groups.length && (
           <p className="px-1 text-sm text-muted-foreground">No models match.</p>
         )}
       </div>
     </>
   )
+}
+
+function hostChoice(info: ModelInfo | null | undefined): ModelChoice | undefined {
+  return info?.model ? { provider: info.provider ?? "", model: info.model } : undefined
+}
+
+/** `provider/model`, or the model alone when the host didn't name its provider. */
+function fullModel({ provider, model }: ModelChoice) {
+  return provider ? `${provider}/${model}` : model
 }
 
 function ModelList({ children }: { children: ReactNode }) {
@@ -135,17 +188,20 @@ function ModelOption({
   label,
   detail,
   selected,
+  opens,
   onClick,
 }: {
   label: string
   detail?: string
   selected: boolean
+  /** Opens a list of its own rather than picking. */
+  opens?: boolean
   onClick: () => void
 }) {
   return (
     <button
       type="button"
-      aria-pressed={selected}
+      aria-pressed={opens ? undefined : selected}
       className={cn(
         "flex min-h-11 items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-background/60 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
         selected && "bg-background",
@@ -157,6 +213,7 @@ function ModelOption({
         {detail && <span className="truncate text-sm text-muted-foreground">{detail}</span>}
       </span>
       {selected && <CheckIcon className="size-4 shrink-0 text-primary" aria-hidden />}
+      {opens && <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
     </button>
   )
 }
@@ -228,7 +285,17 @@ export function DefaultModelSetting({
   const [saving, setSaving] = useState<ModelChoice>()
   const info = useModelInfo(profile)
   const providers = info?.providers ?? []
-  const current = saving?.model ?? profile.modelChoice?.model ?? info?.model
+  const host = hostChoice(info)
+  const hostModel = profile.hostModel
+  useEffect(() => {
+    const seen = hostChoice(info)
+    if (seen && (seen.provider !== hostModel?.provider || seen.model !== hostModel.model)) {
+      void db.profiles.update(profile.id, { hostModel: seen })
+    }
+  }, [profile.id, info, hostModel])
+  // Until the host answers, the model it last had, greyed out.
+  const loading = info === undefined && !saving
+  const current = saving ?? profile.modelChoice ?? (loading ? hostModel : host)
   return (
     <>
       <Button
@@ -239,7 +306,9 @@ export function DefaultModelSetting({
         disabled={!providers.length}
         onClick={() => setOpen(true)}
       >
-        <span className="truncate">{current ?? (info === undefined ? "…" : "Unknown")}</span>
+        <span className={cn("truncate", loading && "text-muted-foreground")}>
+          {current ? fullModel(current) : loading ? "…" : "Unknown"}
+        </span>
         <ChevronDownIcon className="text-muted-foreground" />
       </Button>
       <Popup open={open} onOpenChange={setOpen}>
