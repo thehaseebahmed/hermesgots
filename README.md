@@ -5,152 +5,109 @@
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-black.svg"></a>
 </p>
 
-A playful, minimal companion app for [Hermes Agent](https://github.com/NousResearch/hermes-agent). It's an installable PWA for phones and tablets, with light and dark themes.
+A playful, minimal companion app for [Hermes Agent](https://github.com/NousResearch/hermes-agent). Chat with your Hermes bots from your phone or tablet, answer their questions and approvals, watch your routines, and run coding sessions that end in a pull request. Ask for something, close the app, and come back to find it done.
 
-- **Chat** streams replies from Hermes's OpenAI-compatible API, with live tool cards. When Hermes asks to run a dangerous command, an **approval** card (Once / Session / Always / Deny) takes the place of the message bar. Once you answer, the card moves into the thread at the point where Hermes asked.
-- **Todos**: when the agent plans multi-step work, a "2/5 todos" pill above the message bar shows its progress, and tapping it opens the list. The agent keeps the list; it needs the [Memento plugin](plugin/README.md).
-- **Voice**: the mic button dictates with the browser's speech recognition and shows the words live. Cancel discards them, Stop drops them into the message bar to edit, and Send sends them straight away. The button only appears in browsers that support it (Chrome, Edge, Safari).
-- **Bots**: each bot is a Hermes profile with its own API URL, key and model. Bots sit in a horizontal strip at the top of the sidebar. Tap one to open its latest chat (or a new one if it has none), and new chats go to it. A new bot gets a random image from the 8 glassy SVG characters (soft shapes with an accessory each; see `/bots`), unique until all 8 are taken, and you can change it in Settings. The header bot is animated, and the bots next to messages stay still.
-- **Routines** (`/routines`): every Hermes cron job, grouped by bot, with its last 24 runs as status bars and Run now / Pause / Resume. Run history comes from the [Memento plugin](plugin/README.md) on your Hermes server, so every device sees the same runs. Bots fold away, and the header flags failing and recently failed routines.
-- **Settings**: sync, bots (name, image, API URL and key, model picker, whether its Memento plugin is in use), theme, reply stats, and clearing local data.
-- **Sync**: each bot's chat list (titles, Hermes session ids and context use) is saved on its Hermes server by the [Memento plugin](plugin/README.md). On a deploy with Netlify Identity, you sign in with GitHub and turn on (or unlock) sync before the app opens. It syncs bots across devices, and the chat list of any bot whose server doesn't have the plugin (Settings flags those bots). It's end-to-end encrypted, so Netlify only ever stores ciphertext. Messages come from Hermes: an open chat picks up turns sent from your other devices, and older messages load on request.
-- **First-run setup** walks through signing in, turning on sync, enabling Hermes's API server (from its `.env` file or the Hermes Dashboard) and connecting the first bot. A device whose bots arrive through sync skips the Hermes steps.
-- Bots, chats and settings are stored on the device in **IndexedDB** (via Dexie). Theme preference lives in `localStorage` so the first paint doesn't flash.
+> **Public beta.** Memento works, but expect rough edges. Please [open an issue](https://github.com/thehaseebahmed/memento/issues) when something breaks or confuses you.
 
-Built with Vite, React 19, Tailwind v4 and [shadcn/ui](https://ui.shadcn.com) on **Base UI** (the `base-maia` style, plus shadcn's `Message`, `Bubble` and `MessageScroller` chat components).
+## What you need
 
-## Connect Hermes
+- **Hermes Agent v2026.9.24 or newer**, already set up with a model you can chat with (`hermes` works in a terminal).
+- **A way for your phone to reach Hermes over HTTPS.** The web app runs on `https://`, and browsers block it from calling a plain `http://` server on another machine. [Reaching Hermes over HTTPS](docs/https.md) shows two ways to set this up in a few minutes. The Android app can also reach a plain-HTTP server on your home network.
+- **A GitHub account** to sign in to Memento.
+- **For coding sessions:** `git` on the Hermes host, and a GitHub login there (`gh auth login`) to clone private repos and open pull requests.
 
-Add the following to `~/.hermes/.env` and restart the gateway:
+## Get started
 
-```bash
-API_SERVER_ENABLED=true
-API_SERVER_KEY=<your 64-character key>    # required; generate one with `openssl rand -hex 32`
-API_SERVER_CORS_ORIGINS=https://<your-site>.netlify.app
-```
+### 1. Open Memento
 
-Or, in the Hermes Dashboard (`hermes dashboard`): **Channels → API server → Configure**, turn it on, set the auth key, and **Restart gateway**. The dashboard has no CORS field, so `API_SERVER_CORS_ORIGINS` still goes in `~/.hermes/.env`.
+- **Phone or tablet browser:** go to [hermes-companion.netlify.app](https://hermes-companion.netlify.app) and add it to your home screen (Chrome's **Install app** or Safari's **Share → Add to Home Screen**).
+- **Android app:** download the APK from the [latest release](https://github.com/thehaseebahmed/memento/releases) and install it.
 
-Memento's first-run setup shows both routes, with this site's origin filled in, then connects your first bot (`http://localhost:8642/v1` or your server's URL) with **Test connection**. Add more bots later in **Settings**.
+### 2. Sign in and turn on sync
 
-Also install the [Memento plugin](plugin/README.md). It keeps each bot's chat list on its Hermes server, serves **Routines**, and labels your chats **Memento** in the Hermes dashboard:
+Sign in with GitHub, then turn on sync. Memento creates an encryption key on your device and asks you to save a **recovery code** (and, where your browser supports it, a passkey). Keep the recovery code somewhere safe: it is the only way to unlock sync on a new device if you have no passkey there.
+
+Everything Memento syncs through its server is end-to-end encrypted. The server stores ciphertext only, and never sees your Hermes API keys or your messages.
+
+### 3. Link your Hermes bot
+
+The **Link your bots** screen shows two commands with a one-time link code. Run them on your Hermes host:
 
 ```bash
 hermes plugins install thehaseebahmed/memento/plugin --enable
+hermes memento link <code> --site https://hermes-companion.netlify.app
+```
+
+The first installs the [Memento plugin](plugin/README.md), which Memento needs on every bot. The second links this Hermes profile to your account. It asks:
+
+1. **The URL your phone reaches this profile at.** Enter the HTTPS address from [the HTTPS guide](docs/https.md), for example `https://hermes.example.com`.
+2. **Whether to add the lines Memento needs to `~/.hermes/.env`**: an `API_SERVER_KEY` if there is none, `API_SERVER_ENABLED=true`, and Memento's addresses in `API_SERVER_CORS_ORIGINS`. Say yes.
+
+Then restart the gateway so it loads the plugin and the new settings:
+
+```bash
 hermes gateway restart
 ```
 
-**Profiles:** Hermes's API can't list its profiles, so add one bot per profile. Point it at the profile's own gateway, or at `/p/<profile>/v1` on a gateway running with `gateway.multiplex_profiles`. Each profile has its own `API_SERVER_KEY`. A named profile advertises its name on `/v1/models`, so **Test connection** fills in the bot's name. The plugin reaches a `/p/<profile>` bot too, but it has to be installed and enabled in that profile as well (`hermes -p <profile> plugins install thehaseebahmed/memento/plugin --enable`), then `hermes gateway restart`.
+The bot appears in the app within a few seconds, marked **Ready** once your device can reach it. The code lasts 30 minutes. If it expires, the screen shows a new one.
 
-**HTTPS:** a page served over HTTPS (Netlify) can call `http://localhost`, but browsers block plain-HTTP servers on any other host. To use Hermes from your phone, expose it over HTTPS, for example with Tailscale Serve or a Cloudflare Tunnel, and add that origin to `API_SERVER_CORS_ORIGINS`.
+**More than one profile?** Each Hermes profile is its own bot. Run `hermes -p <name> memento link <code> --site …` for each one, as the screen shows.
 
-### How it uses the API
+### 4. Your first chat
 
-- `POST /v1/chat/completions` with `stream: true`. Memento parses Hermes's extra SSE events (`hermes.tool.progress`, `hermes.status`, `approval.request`) alongside the normal chunks.
-- Each chat mints its own `X-Hermes-Session-Id` (`memento-<uuid>`), so Hermes keeps one session per chat. Hermes only honours this header when `API_SERVER_KEY` is set. Without a key, Memento sends the full transcript on every turn.
-- Approvals are answered with `POST /v1/runs/{completion_id}/approval`.
-- Routines use `GET /api/jobs` and `POST /api/jobs/{id}/pause | resume | run`. The API server only reports each job's latest run, so the run history comes from the Memento plugin's `GET /api/plugins/memento/cron/runs`, which reads Hermes's cron execution ledger.
-- With the plugin, Memento marks each chat's session as `memento` (`POST /api/plugins/memento/sessions/{id}/label`) after its first turns, so the Hermes dashboard labels it **Memento** instead of **API server**.
-- Hermes's tool events carry the tool name and a preview of its arguments, but not its output. Tool cards show what ran and for how long.
-- Chats load and catch up from `GET /api/sessions/{id}/messages?order=latest`, 50 rows at a time, so turns sent from another device appear on this one.
-- The reply stats line is an estimate (about 4 characters per token, measured over the visible reply).
+Tap **New chat**, pick a bot above the message bar, and send a message. The reply streams in with the tools the agent uses. When the agent wants to run a risky command it asks for your **approval**, and when it needs a decision it asks a **question**. Both appear in place of the message bar.
 
-## Develop
+The model pill in the message bar switches this chat to another of the models your Hermes host has set up. The **+** button adds photos and files.
 
-The app lives in `app/`.
+### 5. Your first coding session
 
-```bash
-cd app
-pnpm install
-pnpm mock      # fake Hermes on :8642 (say "clean up" to trigger an approval)
-pnpm dev
-```
+1. Open **Code** and tap **New project**. Name it and pick one or more GitHub repos. Hermes clones them on its host, so you can close the app while it works.
+2. Open the project and tap **New session**. Describe the task and send it.
+3. The agent works in its own git branch and worktree, so sessions never step on each other. The **+** button sets the session's mode:
+   - **Accept edits** (default): the agent edits freely and asks before risky commands.
+   - **Auto**: risky commands run without asking. Hermes's hard blocklist still applies, and questions still wait for you.
+   - **Plan**: the agent only reads, then presents a plan for you to approve.
+4. When the work is done and checked, the agent opens a pull request itself. The pill above the message bar shows its state and checks. Merging it marks the session resolved.
 
-`pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm format`.
+## Updating the plugin
 
-Sync needs Netlify Identity and the `netlify/functions/sync.mts` function, which only run under the Netlify CLI. Use `pnpm dev:netlify` against a linked site to work on it. Under plain `pnpm dev`, the Sync card stays hidden and sign-in isn't required.
-
-UI primitives in `src/components/ui` are shadcn `base-maia` components. Add more with `pnpm dlx shadcn@latest add <name>`.
-
-## Deploy to Netlify
-
-`netlify.toml` is included (base `app`, build `pnpm build`, publish `dist`, SPA fallback, service-worker cache headers). In Netlify, choose **Add new site → Import an existing project**, pick this repo, and deploy. Then add the site's URL to `API_SERVER_CORS_ORIGINS`.
-
-To turn on sync:
-
-1. **Project configuration → Identity**: enable Identity.
-2. **Registration → External providers**: add GitHub.
-3. **Registration preferences**: set **Invite only**, then invite yourself, so nobody else can sign in to your deploy.
-
-The function stores data in Netlify Blobs (store `memento-sync`), which needs no setup.
-
-### How sync is encrypted
-
-- One random AES-256-GCM key per account encrypts everything sync uploads: bots (API keys included) and the chat list of each bot without the Memento plugin. Messages, and the chat lists the plugin keeps, stay on your Hermes server.
-- The server only keeps that key wrapped by secrets it never sees:
-  - a passkey's WebAuthn PRF output, through HKDF
-  - a 25-character recovery code, through PBKDF2
-- Signing in with GitHub proves who owns the documents but can't decrypt them, and neither can anyone with access to the Netlify project.
-- Each document is bound to its account and slot (AES-GCM associated data), so documents can't be swapped around.
-- A device keeps a non-extractable copy of the key in IndexedDB, until you sign out or clear local data.
-- Passkeys need a browser and authenticator with PRF support (Safari 18+, Chrome, Firefox 139+). Without it, sync uses the recovery code alone.
-- Limits:
-  - A compromised deploy could ship code that reads the key once you unlock, which is inherent to encryption in a web app.
-  - Lose every passkey and the recovery code, and the synced copy can't be recovered. Each device's local copy remains.
-
-## Android app
-
-`android/` wraps this same app with [Capacitor](https://capacitorjs.com). Two workflows build it:
-
-- **Android** (`.github/workflows/android.yml`) builds a debug APK on every push to `main` and every push to a pull request into `main`, and attaches it to the run as an artifact (`memento-<commit>`). Builds from `main` also go to testers (below).
-- **Android release** (`.github/workflows/android-release.yml`) builds the signed release APK. It only runs by hand, and only on a version tag, which becomes the app's version: tag a commit (`git tag v0.1.0-beta && git push origin v0.1.0-beta`), then pick the tag (or a branch whose head carries it) under **Actions → Android release → Run workflow**. The APK is attached to the run and to the tag's GitHub release, which is created as a prerelease when the version has a suffix like `-beta`.
-
-One-time setup:
-
-1. Create a signing key and keep it safe. Updates only install over a build signed with the same key.
-
-   ```bash
-   keytool -genkeypair -v -keystore memento.keystore -alias memento -keyalg RSA -keysize 4096 -validity 10000
-   base64 -w0 memento.keystore   # macOS: base64 -i memento.keystore
-   ```
-
-2. In the repo's **Settings → Secrets and variables → Actions**, add:
-   - secrets: `ANDROID_KEYSTORE_BASE64` (the output above), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`.
-   - variable: `MEMENTO_SITE_URL`, your Netlify deploy (e.g. `https://<your-site>.netlify.app`). The app signs in and syncs through it. Leave it unset to build without sync.
-3. Add `https://localhost` (the app's origin) to `API_SERVER_CORS_ORIGINS` on each Hermes server.
-
-Debug builds are signed with the same key when the secret is there, so each one installs over the last; without it (e.g. pull requests from forks) they use a throwaway debug key. A release won't build without the key. A release's version code comes from its tag and is always higher than a debug build's, so a release installs over a debug build but not the other way round.
-
-### Testers (Firebase App Distribution)
-
-Pushes to `main` also send the debug APK to testers through [Firebase App Distribution](https://firebase.google.com/docs/app-distribution). Testers get an email for each build and install it with the App Tester app. Pull requests are never distributed. Until the secret below exists, the step is skipped.
-
-One-time setup, in the Firebase project that already holds the `app.memento` Android app (the one `FIREBASE_GOOGLE_SERVICES` comes from):
-
-1. In the Firebase console, open **App Distribution**, accept its terms, and under **Testers & Groups** create a group (e.g. `testers`) and add the testers' emails.
-2. In Google Cloud's **IAM & Admin → Service accounts** for the same project, create a service account with the **Firebase App Distribution Admin** role (`roles/firebaseappdistro.admin`) and download a JSON key for it.
-3. Add to the repo's Actions settings:
-   - secret: `FIREBASE_SERVICE_ACCOUNT`, that key's JSON (as is, or base64). The same key goes in Netlify's `FIREBASE_SERVICE_ACCOUNT` so the registry can send push notifications with it; for that the account also needs **Firebase Cloud Messaging API Admin**.
-   - variable (optional): `FIREBASE_TESTER_GROUPS`, the group aliases to send to, comma-separated (default `testers`).
-   - variable (optional): `FIREBASE_APP_ID`, the app's id (`1:…:android:…`). By default it's read from `FIREBASE_GOOGLE_SERVICES`.
-
-Each build's release notes are its version and the commit message. Distribution needs the keystore secrets too, since testers can only update over a build signed with the same key. Releases aren't distributed this way; they're on GitHub.
-
-In the app:
-
-- Plain-HTTP Hermes servers on other hosts work, since the app isn't bound by the browser's mixed-content rule.
-- Sign-in opens GitHub in a browser tab and returns to the app.
-- Passkeys belong to the website's domain, so the app unlocks sync with the recovery code.
-- Voice input isn't available, because Android's WebView has no Web Speech API.
-
-To build locally (needs JDK 21 and the Android SDK):
+The web app updates itself, and the Android app when you install a newer APK. When the plugin falls behind, update it on the Hermes host. Stop the gateway first: newer Hermes versions refuse to update a plugin while the gateway runs.
 
 ```bash
-cd app
-VITE_SITE_URL=https://<your-site>.netlify.app pnpm build:android
-pnpm exec cap open android   # or: cd android && ./gradlew assembleDebug
+hermes gateway stop
+hermes plugins update memento
+hermes gateway start
 ```
 
-## Roadmap
+## Known limitations
 
-A native iOS build from the same Capacitor project.
+- **No live text on Hermes v2026.9.24.** That release doesn't let browsers read a reply's live event stream. Memento falls back to checking every few seconds: tool calls show with a short delay and the reply appears when it's finished. Hermes's `main` branch already has the fix.
+- **iPhone and iPad:** there's no iOS app yet. Use the web app from your Home Screen; notifications only work there.
+- **Voice input** needs a browser with speech recognition (Chrome, Edge, Safari) or the Android app.
+- **Profiles under `/p/<name>`** need the plugin installed and enabled in that profile too: `hermes -p <name> plugins install thehaseebahmed/memento/plugin --enable`.
+
+## Troubleshooting
+
+**The bot says "Can't reach it from this device".**
+Open `https://<your bot's address>/health` in your phone's browser. You should see `{"status": "ok", …}`.
+- If the page doesn't load, the HTTPS address isn't working: check your tunnel or Tailscale ([HTTPS guide](docs/https.md)).
+- If it loads but the bot still can't be reached, Hermes is refusing the app's origin. Check that `API_SERVER_CORS_ORIGINS` in `~/.hermes/.env` includes `https://hermes-companion.netlify.app` (and `https://localhost` for the Android app), then run `hermes gateway restart`.
+- If the address changed, run `hermes memento link --url https://<new address>` on the host.
+
+**The bot says "Can't reach its Memento plugin".**
+The plugin isn't loaded in that profile. Run `hermes plugins list` to check it's installed and enabled, then `hermes gateway restart`.
+
+**The link command fails.**
+"That isn't a Memento link code" or an expired code: copy a fresh command from the app. "The account's key doesn't match": the code was copied from another account's screen; copy it again from yours. `hermes memento status` shows whether a profile is linked and checks in.
+
+**Replies appear all at once.**
+See [Known limitations](#known-limitations). Behind Cloudflare, also make sure you're using a named tunnel: quick tunnels (`trycloudflare.com`) don't carry live updates.
+
+**Code says "No GitHub account".**
+Run `gh auth login` on the Hermes host (or set `GITHUB_TOKEN` in `~/.hermes/.env`), then try again. Public repos still clone without it.
+
+**Something else?** `hermes logs` on the host usually says why. [Open an issue](https://github.com/thehaseebahmed/memento/issues) with what you tried.
+
+## Running your own copy
+
+Memento is open source (MIT). To deploy your own copy, build the Android app, or work on the code, see [Self-hosting and development](docs/self-hosting.md). [AGENTS.md](AGENTS.md) describes the codebase and how Memento uses Hermes's API.
