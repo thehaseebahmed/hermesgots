@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useRef } from "react"
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Link, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
@@ -13,6 +13,7 @@ import {
 
 import { ChatHeader } from "@/components/chat/chat-header"
 import { Composer } from "@/components/chat/composer"
+import { ModelMenu } from "@/components/chat/model-picker"
 import { Bot } from "@/components/bot"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Button } from "@/components/ui/button"
@@ -24,7 +25,13 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Spinner } from "@/components/ui/spinner"
 import { sendMessage } from "@/lib/chat"
-import { createConversation, db, setActiveProfile, type Attachment } from "@/lib/db"
+import {
+  createConversation,
+  db,
+  setActiveProfile,
+  type Attachment,
+  type ModelChoice,
+} from "@/lib/db"
 import { useNav } from "@/lib/nav"
 import { useNow, useThreads, type Thread } from "@/lib/threads"
 import { cn } from "@/lib/utils"
@@ -132,6 +139,9 @@ export function BotThreadsPage({
   const threads = useThreads(profileId)
   const now = useNow()
   const scroller = useRef<HTMLDivElement>(null)
+  // The next thread's model, held until it's created, like a new chat's.
+  const [pendingModel, setPendingModel] = useState<{ profileId: string; choice?: ModelChoice }>()
+  const modelChoice = pendingModel?.profileId === profileId ? pendingModel.choice : undefined
 
   // Where a new chat goes, and where the app comes back to.
   useEffect(() => {
@@ -154,7 +164,7 @@ export function BotThreadsPage({
   const start = async (text: string, attachments: Attachment[] = []) => {
     if (!profile) return
     try {
-      const { id } = await createConversation(profile.id)
+      const { id } = await createConversation(profile.id, { modelChoice })
       navigate(`/c/${id}`, { replace: Boolean(openThread), state: { bot: profile.id } })
       await sendMessage(id, text, { attachments })
     } catch (error) {
@@ -271,6 +281,15 @@ export function BotThreadsPage({
           imagesAvailable={profile?.imageInput !== false}
           connection={{ baseUrl: profile?.baseUrl ?? "", apiKey: profile?.apiKey ?? "" }}
           botName={profile?.name}
+          model={
+            configured && (
+              <ModelMenu
+                profile={profile}
+                choice={modelChoice}
+                onChoose={(choice) => setPendingModel({ profileId, choice })}
+              />
+            )
+          }
         />
       </div>
     </div>
