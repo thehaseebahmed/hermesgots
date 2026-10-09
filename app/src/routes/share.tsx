@@ -2,15 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useNavigate, useSearchParams } from "react-router"
 import { toast } from "sonner"
-import {
-  ArrowUpIcon,
-  CheckIcon,
-  ChevronDownIcon,
-  LinkIcon,
-  MessageCircleIcon,
-  PlusIcon,
-  XIcon,
-} from "lucide-react"
+import { ChevronDownIcon, LinkIcon, MessageCircleIcon, PlusIcon, XIcon } from "lucide-react"
 
 import { Banner } from "@/components/banner"
 import { BotCard } from "@/components/bot-card"
@@ -32,7 +24,6 @@ import { reconcileHistory } from "@/lib/history"
 import { useNav } from "@/lib/nav"
 import { clearShare, readWebShare, shareText, useIncomingShare } from "@/lib/share"
 import { useBotThreads, useNow } from "@/lib/threads"
-import { cn } from "@/lib/utils"
 
 /** How many of a bot's newest chats are offered before Show more. */
 const FIRST = 5
@@ -135,7 +126,6 @@ export function SharePage() {
   const active = useLiveQuery(async () => (await getActiveProfile())?.id ?? null, [])
   const [picked, setPicked] = useState<string>()
   const profile = bots?.find((bot) => bot.id === (picked ?? active)) ?? bots?.[0]
-  const [target, setTarget] = useState<string>("new")
   const [showAll, setShowAll] = useState(false)
   const [note, setNote] = useState("")
   const [removed, setRemoved] = useState<File[]>([])
@@ -143,7 +133,7 @@ export function SharePage() {
     () => share?.images.filter((image) => !removed.includes(image)) ?? [],
     [share, removed],
   )
-  const [sending, setSending] = useState(false)
+  const [sending, setSending] = useState<string | false>(false)
 
   // Another share can arrive while this one is open; it starts afresh.
   const [shareId, setShareId] = useState(share?.id)
@@ -151,7 +141,6 @@ export function SharePage() {
     setShareId(share.id)
     setNote("")
     setRemoved([])
-    setTarget("new")
     setShowAll(false)
     setSending(false)
   }
@@ -170,7 +159,6 @@ export function SharePage() {
 
   const pickBot = (id: string) => {
     setPicked(id)
-    setTarget("new")
     setShowAll(false)
   }
 
@@ -188,9 +176,9 @@ export function SharePage() {
   const empty = !note.trim() && !share.text && !share.links.length && !images.length
   const canSend = Boolean(profile) && configured && !imagesBlocked && !empty && !sending
 
-  const send = async () => {
+  const send = async (target: string) => {
     if (!profile || !canSend) return
-    setSending(true)
+    setSending(target)
     try {
       const attachments = await Promise.all(
         images.map((image) => prepareAttachment(image, profile.imageInput !== false)),
@@ -223,29 +211,22 @@ export function SharePage() {
     }
   }
 
-  const option = (id: string, icon: React.ReactNode, title: string, subtitle?: string) => {
-    const selected = target === id
-    return (
-      <button
-        key={id}
-        type="button"
-        role="radio"
-        aria-checked={selected}
-        onClick={() => setTarget(id)}
-        className={cn(
-          "flex min-h-14 w-full items-center gap-4 bg-card px-5 py-3 text-left text-card-foreground outline-none focus-visible:bg-muted",
-          selected && "bg-muted",
-        )}
-      >
-        {icon}
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate">{title}</span>
-          {subtitle && <span className="truncate text-sm text-muted-foreground">{subtitle}</span>}
-        </span>
-        <CheckIcon className={cn("size-5 shrink-0 text-primary", !selected && "invisible")} />
-      </button>
-    )
-  }
+  const option = (id: string, icon: React.ReactNode, title: string, subtitle?: string) => (
+    <button
+      key={id}
+      type="button"
+      disabled={!canSend}
+      onClick={() => void send(id)}
+      className="flex min-h-14 w-full items-center gap-4 bg-card px-5 py-3 text-left text-card-foreground outline-none hover:bg-muted focus-visible:bg-muted disabled:opacity-60"
+    >
+      {icon}
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate">{title}</span>
+        {subtitle && <span className="truncate text-sm text-muted-foreground">{subtitle}</span>}
+      </span>
+      {sending === id && <Spinner className="size-5 shrink-0" />}
+    </button>
+  )
 
   return (
     <Popup open onOpenChange={(open) => !open && close()}>
@@ -253,13 +234,7 @@ export function SharePage() {
         <PopupHeader className="items-center pb-2">
           <PopupTitle>Share</PopupTitle>
         </PopupHeader>
-        <form
-          className="flex flex-col gap-6 px-6 pt-2"
-          onSubmit={(event) => {
-            event.preventDefault()
-            void send()
-          }}
-        >
+        <div className="flex flex-col gap-6 px-6 pt-2">
           <section className="flex flex-col gap-3">
             {images.length > 0 && (
               <SharedImages
@@ -321,7 +296,6 @@ export function SharePage() {
           <section className="flex flex-col gap-2">
             <SectionLabel>{botThreads ? "Thread" : "Chat"}</SectionLabel>
             <div
-              role="radiogroup"
               aria-label={noun}
               className="flex flex-col gap-px overflow-hidden rounded-3xl bg-border ring-1 ring-foreground/10"
             >
@@ -354,19 +328,7 @@ export function SharePage() {
               )}
             </div>
           </section>
-
-          <div className="sticky bottom-0 -mx-6 bg-popover px-6 pt-2 pb-1">
-            <Button
-              type="submit"
-              size="lg"
-              className="h-12 w-full rounded-2xl text-base"
-              disabled={!canSend}
-            >
-              {sending ? <Spinner /> : <ArrowUpIcon />}
-              {target === "new" ? `Send to ${profile?.name ?? "bot"}` : `Add to ${noun}`}
-            </Button>
-          </div>
-        </form>
+        </div>
       </PopupContent>
     </Popup>
   )
