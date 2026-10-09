@@ -1,4 +1,4 @@
-import { createContext, useContext, type ComponentProps, type ReactNode } from "react"
+import { createContext, useContext, useRef, type ComponentProps, type ReactNode } from "react"
 import { Dialog } from "@base-ui/react/dialog"
 import { Drawer } from "@base-ui/react/drawer"
 import { XIcon } from "lucide-react"
@@ -66,7 +66,18 @@ const CLOSE = (
   </Dialog.Close>
 )
 
-export function PopupContent({ className, children }: { className?: string; children: ReactNode }) {
+export function PopupContent({
+  className,
+  children,
+  initialFocus,
+}: {
+  className?: string
+  children: ReactNode
+  /** `false` focuses the pop-up itself, so a search field doesn't take focus (and the keyboard) on open. */
+  initialFocus?: boolean
+}) {
+  const popup = useRef<HTMLDivElement>(null)
+  const focus = initialFocus === false ? popup : undefined
   const wide = useWide()
   const side = useContext(SideSheet)
   if (side)
@@ -80,6 +91,8 @@ export function PopupContent({ className, children }: { className?: string; chil
         />
         <Drawer.Viewport className="fixed inset-0 z-50 flex justify-end">
           <Drawer.Popup
+            ref={popup}
+            initialFocus={focus}
             className={cn(
               "relative flex h-full w-[400px] max-w-[calc(100vw-3.5rem)] flex-col overflow-hidden rounded-l-2xl bg-popover pb-6 text-sm text-popover-foreground shadow-lg outline-none",
               "[transform:translateX(var(--drawer-swipe-movement-x))] transition-transform duration-300 ease-[cubic-bezier(0.2,0,0,1)] data-ending-style:[transform:translateX(100%)] data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] data-starting-style:[transform:translateX(100%)] data-swiping:duration-0 data-swiping:select-none motion-reduce:duration-0",
@@ -105,6 +118,8 @@ export function PopupContent({ className, children }: { className?: string; chil
         />
         <Drawer.Viewport className="fixed inset-0 z-50 flex items-end justify-center">
           <Drawer.Popup
+            ref={popup}
+            initialFocus={focus}
             className={cn(
               "relative flex max-h-[85dvh] w-full max-w-[640px] flex-col overflow-hidden rounded-t-[28px] bg-popover pb-[max(1.5rem,env(safe-area-inset-bottom))] text-sm text-popover-foreground shadow-lg outline-none",
               "[transform:translateY(var(--drawer-swipe-movement-y))] transition-transform duration-300 ease-[cubic-bezier(0.2,0,0,1)] data-ending-style:[transform:translateY(100%)] data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] data-starting-style:[transform:translateY(100%)] data-swiping:duration-0 data-swiping:select-none motion-reduce:duration-0",
@@ -130,6 +145,8 @@ export function PopupContent({ className, children }: { className?: string; chil
     <Dialog.Portal>
       <Dialog.Backdrop className={cn(SCRIM, "duration-150")} />
       <Dialog.Popup
+        ref={popup}
+        initialFocus={focus}
         className={cn(
           "fixed top-1/2 left-1/2 z-50 flex max-h-[85dvh] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-3xl bg-popover pb-6 text-sm text-popover-foreground shadow-lg transition duration-150 outline-none data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0",
           className,
