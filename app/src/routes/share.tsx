@@ -13,15 +13,11 @@ import {
 } from "lucide-react"
 
 import { Banner } from "@/components/banner"
-import { Bot } from "@/components/bot"
+import { BotCard } from "@/components/bot-card"
+import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupTextarea,
-} from "@/components/ui/input-group"
+import { Textarea } from "@/components/ui/textarea"
 import { prepareAttachment } from "@/lib/attachments"
 import { queueMessage, sendMessage } from "@/lib/chat"
 import {
@@ -33,7 +29,6 @@ import {
 } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { reconcileHistory } from "@/lib/history"
-import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { clearShare, readWebShare, shareText, useIncomingShare } from "@/lib/share"
 import { useBotThreads, useNow } from "@/lib/threads"
@@ -70,13 +65,13 @@ function objectUrl(file: File) {
 /** Thumbnails of the shared images, each with a button that leaves it out. */
 function SharedImages({ images, onRemove }: { images: File[]; onRemove: (index: number) => void }) {
   return (
-    <ul className="-mx-4 flex gap-2 overflow-x-auto px-4 pt-2 pb-1">
+    <ul className="-mx-6 flex gap-2 overflow-x-auto px-6 pt-2 pb-1">
       {images.map((image, index) => (
         <li key={objectUrl(image)} className="relative shrink-0">
           <img
             src={objectUrl(image)}
             alt={images[index].name}
-            className="size-28 rounded-2xl border object-cover"
+            className="size-28 rounded-2xl object-cover ring-1 ring-foreground/10"
             draggable={false}
           />
           <Button
@@ -135,7 +130,6 @@ export function SharePage() {
     clearShare()
     up("/")
   }
-  useEffect(() => setBackGuard(() => (close(), true)))
 
   const bots = useLiveQuery(listEnabledProfiles, [])
   const active = useLiveQuery(async () => (await getActiveProfile())?.id ?? null, [])
@@ -150,7 +144,6 @@ export function SharePage() {
     [share, removed],
   )
   const [sending, setSending] = useState(false)
-  const noteRef = useRef<HTMLTextAreaElement>(null)
 
   // Another share can arrive while this one is open; it starts afresh.
   const [shareId, setShareId] = useState(share?.id)
@@ -193,8 +186,6 @@ export function SharePage() {
   // Without the plugin a model that can't see images has no way to take them as files either.
   const imagesBlocked = images.length > 0 && profile?.imageInput === false && !profile.apiKey
   const empty = !note.trim() && !share.text && !share.links.length && !images.length
-  const destination =
-    target === "new" ? `New ${noun}` : (chats?.find((c) => c.id === target)?.title ?? noun)
   const canSend = Boolean(profile) && configured && !imagesBlocked && !empty && !sending
 
   const send = async () => {
@@ -257,24 +248,18 @@ export function SharePage() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <header className="bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
-        <div className="mx-auto flex min-h-11 max-w-2xl items-center gap-3">
-          <Button
-            variant="outline"
-            size="icon-lg"
-            className="size-11 rounded-full"
-            onClick={close}
-            aria-label="Cancel"
-          >
-            <XIcon />
-          </Button>
-          <h1 className="text-xl font-semibold tracking-tight">Share</h1>
-        </div>
-      </header>
-
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-1 pb-6">
+    <Popup open onOpenChange={(open) => !open && close()}>
+      <PopupContent className="max-h-[90dvh]">
+        <PopupHeader className="items-center pb-2">
+          <PopupTitle>Share</PopupTitle>
+        </PopupHeader>
+        <form
+          className="flex flex-col gap-6 px-6 pt-2"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void send()
+          }}
+        >
           <section className="flex flex-col gap-3">
             {images.length > 0 && (
               <SharedImages
@@ -285,7 +270,7 @@ export function SharePage() {
             {share.links.map((link) => (
               <div
                 key={link}
-                className="flex min-h-16 items-center gap-3 rounded-2xl border bg-card px-4 py-3"
+                className="flex min-h-16 items-center gap-3 rounded-2xl bg-card px-4 py-3 ring-1 ring-foreground/10"
               >
                 <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted">
                   <LinkIcon className="size-5 text-muted-foreground" />
@@ -303,6 +288,13 @@ export function SharePage() {
                 {share.text}
               </blockquote>
             )}
+            <Textarea
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+              placeholder="Add a note"
+              aria-label="Note"
+              className="min-h-20"
+            />
           </section>
 
           <section className="flex flex-col gap-2">
@@ -310,39 +302,17 @@ export function SharePage() {
             <div
               role="radiogroup"
               aria-label="Bot"
-              className="-mx-4 flex gap-1 overflow-x-auto px-3 pb-1"
+              className="-mx-6 flex [scrollbar-width:none] gap-2 overflow-x-auto px-6 py-1 [&::-webkit-scrollbar]:hidden"
             >
-              {bots.map((bot) => {
-                const selected = bot.id === profile?.id
-                return (
-                  <button
-                    key={bot.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    aria-label={bot.name}
-                    onClick={() => pickBot(bot.id)}
-                    className="flex w-20 shrink-0 flex-col items-center gap-1.5 rounded-2xl px-1 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <span
-                      className={cn(
-                        "rounded-full p-1 ring-2 ring-transparent",
-                        selected && "bg-muted ring-primary",
-                      )}
-                    >
-                      <Bot id={bot.botId} className="size-12" />
-                    </span>
-                    <span
-                      className={cn(
-                        "max-w-full truncate text-xs",
-                        selected ? "font-semibold" : "text-muted-foreground",
-                      )}
-                    >
-                      {bot.name}
-                    </span>
-                  </button>
-                )
-              })}
+              {bots.map((bot) => (
+                <BotCard
+                  key={bot.id}
+                  botId={bot.botId}
+                  name={bot.name}
+                  selected={bot.id === profile?.id}
+                  onClick={() => pickBot(bot.id)}
+                />
+              ))}
             </div>
             {imagesBlocked && <Banner>{profile?.name}'s model can't take images.</Banner>}
             {!configured && profile && <Banner>{profile.name} isn't set up yet.</Banner>}
@@ -357,7 +327,7 @@ export function SharePage() {
             >
               {option(
                 "new",
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
                   <PlusIcon className="size-5" />
                 </span>,
                 `New ${noun}`,
@@ -365,7 +335,7 @@ export function SharePage() {
               {shown?.map((chat) =>
                 option(
                   chat.id,
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-muted">
                     <MessageCircleIcon className="size-5 text-muted-foreground" />
                   </span>,
                   chat.title,
@@ -384,52 +354,20 @@ export function SharePage() {
               )}
             </div>
           </section>
-        </div>
-      </div>
 
-      <div data-toast-above className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
-        <form
-          className="mx-auto w-full max-w-2xl"
-          onSubmit={(event) => {
-            event.preventDefault()
-            void send()
-          }}
-        >
-          <InputGroup className="bg-background shadow-lg shadow-black/5 has-[textarea]:rounded-[1.75rem] dark:bg-input/30">
-            <InputGroupTextarea
-              ref={noteRef}
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-              placeholder="Add a note…"
-              aria-label="Note"
-              rows={1}
-              className="max-h-40 min-h-12 px-5 pt-4 pb-2 text-base md:text-[15px]"
-            />
-            <InputGroupAddon
-              align="block-end"
-              className="gap-1 pt-0 pr-2.5 pb-1.5 pl-5"
-              onClick={() => noteRef.current?.focus()}
+          <div className="sticky bottom-0 -mx-6 bg-popover px-6 pt-2 pb-1">
+            <Button
+              type="submit"
+              size="lg"
+              className="h-12 w-full rounded-2xl text-base"
+              disabled={!canSend}
             >
-              <span className="min-w-0 flex-1 truncate text-left text-sm text-muted-foreground">
-                To <span className="font-medium text-foreground">{profile?.name}</span> ·{" "}
-                {destination}
-              </span>
-              <InputGroupButton
-                type="submit"
-                variant="default"
-                size="icon-sm"
-                className="size-11 rounded-full"
-                disabled={!canSend}
-                aria-label={
-                  target === "new" ? `Send to ${profile?.name ?? "bot"}` : `Add to ${noun}`
-                }
-              >
-                {sending ? <Spinner /> : <ArrowUpIcon />}
-              </InputGroupButton>
-            </InputGroupAddon>
-          </InputGroup>
+              {sending ? <Spinner /> : <ArrowUpIcon />}
+              {target === "new" ? `Send to ${profile?.name ?? "bot"}` : `Add to ${noun}`}
+            </Button>
+          </div>
         </form>
-      </div>
-    </div>
+      </PopupContent>
+    </Popup>
   )
 }
