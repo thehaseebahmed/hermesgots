@@ -1,0 +1,202 @@
+name: iOS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "app/**"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # Capacitor 8 needs Xcode 26, which is macos-26's default.
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+      APP_STORE_CONNECT_KEY: ${{ secrets.APP_STORE_CONNECT_KEY }}
+      # Name the build after the PR's head, not the merge commit Actions checks out.
+      COMMIT_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build web assets and sync them into the iOS project
+        run: pnpm build:ios
+        env:
+          VITE_SITE_URL: ${{ vars.MEMENTO_SITE_URL }}
+
+      - name: Version
+        id: version
+        env:
+          IOS_MARKETING_VERSION: ${{ vars.IOS_MARKETING_VERSION }}
+        run: |
+          sha="${COMMIT_REF::7}"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          # iOS versions are plain numbers, so the commit can't go in them as on Android.
+          echo "MARKETING_VERSION=${IOS_MARKETING_VERSION:-$(node -p 'require("./package.json").version')}" >> "$GITHUB_ENV"
+          echo "CURRENT_PROJECT_VERSION=${{ github.run_number }}" >> "$GITHUB_ENV"
+          xcodebuild -version
+
+      - name: Build for the simulator
+        run: |
+          xcodebuild build \
+            -project ios/App/App.xcodeproj -scheme App -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/simulator" \
+            CODE_SIGNING_ALLOWED=NO \
+            MARKETING_VERSION="$MARKETING_VERSION" CURRENT_PROJECT_VERSION="$CURRENT_PROJECT_VERSION"
+          ditto -c -k --keepParent "$RUNNER_TEMP/simulator/Build/Products/Debug-iphonesimulator/App.app" \
+            "$RUNNER_TEMP/memento-simulator.zip"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: memento-ios-simulator-${{ steps.version.outputs.sha }}
+          path: ${{ runner.temp }}/memento-simulator.zip
+          if-no-files-found: error
+
+      # Signed builds need an Apple Distribution certificate and an App Store provisioning profile
+      # for app.memento. Pull requests never sign; until the secrets exist this is skipped.
+      - name: Install the signing certificate and provisioning profile
+        if: github.event_name != 'pull_request' && env.IOS_CERTIFICATE_BASE64 != ''
+        env:
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          if [ -z "$IOS_PROVISIONING_PROFILE_BASE64" ]; then
+            echo "::error::IOS_CERTIFICATE_BASE64 is set but IOS_PROVISIONING_PROFILE_BASE64 isn't"
+            exit 1
+          fi
+          cert="$RUNNER_TEMP/distribution.p12"
+          profile="$RUNNER_TEMP/memento.mobileprovision"
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password=$(openssl rand -hex 24)
+          echo "::add-mask::$keychain_password"
+          printf '%s' "$IOS_CERTIFICATE_BASE64" | base64 --decode > "$cert"
+          printf '%s' "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$profile"
+
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$cert" -P "$IOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$keychain"
+          security list-keychain -d user -s "$keychain"
+          rm -f "$cert"
+
+          security cms -D -i "$profile" > "$RUNNER_TEMP/profile.plist"
+          uuid=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$RUNNER_TEMP/profile.plist")
+          team=$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$RUNNER_TEMP/profile.plist")
+          # Xcode 16 moved the profiles folder; older tools still read the first.
+          for dir in "$HOME/Library/MobileDevice/Provisioning Profiles" \
+                     "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+            mkdir -p "$dir"
+            cp "$profile" "$dir/$uuid.mobileprovision"
+          done
+          echo "IOS_PROFILE_UUID=$uuid" >> "$GITHUB_ENV"
+          echo "IOS_TEAM_ID=$team" >> "$GITHUB_ENV"
+
+      - name: Archive and export the signed IPA
+        if: env.IOS_PROFILE_UUID != ''
+        run: |
+          # The profile goes on the App target only: Swift package targets refuse one.
+          cat > "$RUNNER_TEMP/signing.xcconfig" <<EOF
+          CODE_SIGN_STYLE = Manual
+          DEVELOPMENT_TEAM = $IOS_TEAM_ID
+          CODE_SIGN_IDENTITY = Apple Distribution
+          PROFILE_FOR_App = $IOS_PROFILE_UUID
+          PROVISIONING_PROFILE_SPECIFIER = \$(PROFILE_FOR_\$(TARGET_NAME))
+          MARKETING_VERSION = $MARKETING_VERSION
+          CURRENT_PROJECT_VERSION = $CURRENT_PROJECT_VERSION
+          EOF
+          xcodebuild archive \
+            -project ios/App/App.xcodeproj -scheme App -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Memento.xcarchive" \
+            -xcconfig "$RUNNER_TEMP/signing.xcconfig"
+
+          for destination in export upload; do
+            cat > "$RUNNER_TEMP/export-$destination.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>$destination</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>teamID</key><string>$IOS_TEAM_ID</string>
+            <key>provisioningProfiles</key>
+            <dict><key>app.memento</key><string>$IOS_PROFILE_UUID</string></dict>
+          </dict>
+          </plist>
+          EOF
+          done
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/Memento.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/export-export.plist" \
+            -exportPath "$RUNNER_TEMP/ipa"
+          mv "$RUNNER_TEMP"/ipa/*.ipa "$RUNNER_TEMP/memento-$MARKETING_VERSION-$CURRENT_PROJECT_VERSION.ipa"
+
+      - uses: actions/upload-artifact@v7
+        if: env.IOS_PROFILE_UUID != ''
+        with:
+          name: memento-ios-${{ steps.version.outputs.sha }}
+          path: ${{ runner.temp }}/memento-*.ipa
+          if-no-files-found: error
+
+      # TestFlight is iOS's tester channel, as Firebase App Distribution is Android's. Only what
+      # lands on main goes, and only with an App Store Connect API key.
+      - name: Upload to TestFlight
+        if: env.IOS_PROFILE_UUID != '' && github.event_name == 'push' && env.APP_STORE_CONNECT_KEY != ''
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          if [ -z "$APP_STORE_CONNECT_KEY_ID" ] || [ -z "$APP_STORE_CONNECT_ISSUER_ID" ]; then
+            echo "::error::APP_STORE_CONNECT_KEY needs APP_STORE_CONNECT_KEY_ID and APP_STORE_CONNECT_ISSUER_ID too"
+            exit 1
+          fi
+          # The secret is the .p8 file's text, either as is or base64-encoded.
+          key="$RUNNER_TEMP/AuthKey_$APP_STORE_CONNECT_KEY_ID.p8"
+          if grep -q 'BEGIN PRIVATE KEY' <<< "$APP_STORE_CONNECT_KEY"; then
+            printf '%s\n' "$APP_STORE_CONNECT_KEY" > "$key"
+          else
+            printf '%s' "$APP_STORE_CONNECT_KEY" | base64 --decode > "$key"
+          fi
+          status=0
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/Memento.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/export-upload.plist" \
+            -exportPath "$RUNNER_TEMP/upload" \
+            -authenticationKeyPath "$key" \
+            -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
+            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" || status=$?
+          rm -f "$key"
+          exit $status
