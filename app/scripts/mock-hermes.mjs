@@ -783,6 +783,17 @@ async function playTurn(req, body, last, out) {
     record(req, { role: "assistant", content: null, tool_calls: [{ id: readFailId, type: "function", function: { name: "read_file", arguments: JSON.stringify({ path: missing }) } }] })
     record(req, { role: "tool", tool_call_id: readFailId, tool_name: "read_file", content: readFail })
     await say("I tried to trim the journal too, but I don't have permission to, and there's no rotation config for it.")
+  } else if (/dockerfile/i.test(last)) {
+    // A long command, to check that the approval card stays within the screen.
+    const lines = ["FROM nousresearch/hermes-agent:v2026.9.24", ""]
+    for (const pkg of ["jq", "gpg", "curl", "wget", "git", "ripgrep", "fd-find", "htop", "tmux", "unzip"])
+      lines.push(`RUN apt-get update && apt-get install -y --no-install-recommends ${pkg} \\`, "    && rm -rf /var/lib/apt/lists/*", "")
+    const command = `cat > /home/hermes/Dockerfile << 'EOF'\n${lines.join("\n")}EOF`
+    const dockerId = `call_${randomUUID().slice(0, 8)}`
+    out.tool({ tool: "terminal", emoji: "💻", label: "cat > /home/hermes/Dockerfile", toolCallId: dockerId, status: "running" })
+    const choice = await out.approve({ command, pattern_key: "heredoc_write", description: "Write the Dockerfile", allow_permanent: true, allow_session: true })
+    out.tool({ tool: "terminal", toolCallId: dockerId, status: "completed" })
+    await say(choice === "deny" || choice === "timeout" ? "\nOkay, I left it alone." : "\nWrote the Dockerfile.")
   } else if (/clean|delete/i.test(last)) {
     await say("The live logs and anything written in the last 90 days stay untouched. Here is the command I want to run:\n\n```bash\nfind /var/log -name '*.log.*' -mtime +90 -delete\n```\n")
     const cleanupId = `call_${randomUUID().slice(0, 8)}`

@@ -60,7 +60,12 @@ export function ApprovalCard({ message }: { message: Message }) {
       <CardContent className="space-y-3">
         {approval.description && <p className="text-[15px]">{approval.description}</p>}
         {approval.command && (
-          <pre className="rounded-2xl bg-muted px-4 py-3 font-mono text-[13px] wrap-anywhere whitespace-pre-wrap">
+          // A long command (a heredoc, a script) scrolls inside the card, so the card never pushes
+          // the thread and its own buttons off the screen.
+          <pre
+            tabIndex={0}
+            className="max-h-[30dvh] overflow-y-auto overscroll-contain rounded-2xl bg-muted px-4 py-3 font-mono text-[13px] wrap-anywhere whitespace-pre-wrap"
+          >
             {approval.command}
           </pre>
         )}
