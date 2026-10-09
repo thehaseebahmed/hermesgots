@@ -50,7 +50,10 @@ import {
  * document for another.
  */
 
-type BotValue = Omit<Profile, "id" | "updatedAt" | "disabled" | "seenAt" | "pluginVersion">
+type BotValue = Omit<
+  Profile,
+  "id" | "updatedAt" | "disabled" | "seenAt" | "pluginVersion" | "hostModel"
+>
 const CHAT_FIELDS = [
   "title",
   "titleEdited",
@@ -300,6 +303,7 @@ function botValue({
   disabled: _disabled,
   seenAt: _seenAt,
   pluginVersion: _pluginVersion,
+  hostModel: _hostModel,
   ...value
 }: Profile): BotValue {
   return value
@@ -354,7 +358,7 @@ async function syncBots(key: CryptoKey) {
           if (await db.profiles.get(id)) await deleteProfile(id, { remote: true })
         } else if (entry.value) {
           await db.transaction("rw", db.profiles, db.tombstones, async () => {
-            const { disabled, seenAt, pluginVersion } = (await db.profiles.get(id)) ?? {}
+            const { disabled, seenAt, pluginVersion, hostModel } = (await db.profiles.get(id)) ?? {}
             await db.profiles.put({
               ...entry.value!,
               id,
@@ -362,6 +366,7 @@ async function syncBots(key: CryptoKey) {
               disabled,
               seenAt,
               pluginVersion,
+              hostModel,
             })
             await db.tombstones.delete(`bot:${id}`)
           })
