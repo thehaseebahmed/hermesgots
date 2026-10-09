@@ -10,6 +10,7 @@ import {
   CheckIcon,
   TerminalIcon,
   ChevronRightIcon,
+  CornerDownRightIcon,
   DatabaseIcon,
   MenuIcon,
   MessageCircleIcon,
@@ -497,10 +498,11 @@ function AccountRow() {
 function AppearanceSettings() {
   const { theme, setTheme } = useTheme()
   const current = theme ?? "system"
-  const simplified = useLiveQuery(
-    async () => ({ ...DEFAULT_SETTINGS, ...(await db.settings.get("settings")) }).simplifiedChats,
+  const chatSettings = useLiveQuery(
+    async () => ({ ...DEFAULT_SETTINGS, ...(await db.settings.get("settings")) }),
     [],
   )
+  const simplified = chatSettings?.simplifiedChats
   return (
     <>
       <Group>
@@ -526,6 +528,14 @@ function AppearanceSettings() {
           subtitle="Hide tool calls, stats and context use"
           checked={simplified ?? DEFAULT_SETTINGS.simplifiedChats}
           onCheckedChange={(checked) => saveSettings({ simplifiedChats: checked })}
+        />
+        <SwitchRow
+          id="steer-by-default"
+          icon={CornerDownRightIcon}
+          title="Steer by default"
+          subtitle="Messages sent mid-reply go straight to it"
+          checked={chatSettings?.steerByDefault ?? false}
+          onCheckedChange={(checked) => saveSettings({ steerByDefault: checked })}
         />
       </Group>
     </>

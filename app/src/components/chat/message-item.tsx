@@ -1,5 +1,12 @@
 import { Fragment, useState, type ReactNode } from "react"
-import { AlertCircleIcon, CornerDownRightIcon } from "lucide-react"
+import {
+  AlertCircleIcon,
+  ClockIcon,
+  CornerDownRightIcon,
+  SendHorizontalIcon,
+  XIcon,
+} from "lucide-react"
+import { toast } from "sonner"
 
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { AttachmentTile, AttachmentViewer } from "@/components/chat/attachments"
@@ -9,10 +16,12 @@ import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
 import { ToolGroup } from "@/components/chat/tool-group"
 import { Bot } from "@/components/bot"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
+import { Button } from "@/components/ui/button"
 import { Message as MessageRow, MessageAvatar, MessageContent } from "@/components/ui/message"
 import { Spinner } from "@/components/ui/spinner"
 import { DELEGATE_TOOL } from "@/lib/agents"
 import { openable } from "@/lib/attachments"
+import { removeQueued, sendQueued } from "@/lib/chat"
 import type { Attachment, Message, ToolEvent } from "@/lib/db"
 import { describeActivity, formatDuration } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -68,11 +77,11 @@ function Stats({ message }: { message: Message }) {
 }
 
 /** A sent message's attachments; the ones this device still has open in a viewer. */
-function SentAttachments({ attachments }: { attachments: Attachment[] }) {
+function SentAttachments({ attachments, queued }: { attachments: Attachment[]; queued: boolean }) {
   const [viewing, setViewing] = useState<number | null>(null)
   const viewable = attachments.filter(openable)
   return (
-    <div className="flex max-w-full flex-wrap justify-end gap-2">
+    <div className={cn("flex max-w-full flex-wrap justify-end gap-2", queued && "opacity-60")}>
       {attachments.map((attachment) => (
         <AttachmentTile
           key={attachment.id}
@@ -108,6 +117,40 @@ function SteerBubble({ text }: { text: string }) {
   )
 }
 
+/** Under a queued message: it goes on its own, or waits for a Send once the queue is paused. */
+function QueuedActions({ message, paused }: { message: Message; paused: boolean }) {
+  return (
+    <div className="-my-2 flex items-center gap-1 text-xs text-muted-foreground">
+      <ClockIcon className="size-3.5" />
+      <span className="pr-1">{message.statusText ?? (paused ? "Queued, paused" : "Queued")}</span>
+      {paused && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="min-h-11 text-xs"
+          onClick={() =>
+            void sendQueued(message).catch((error) =>
+              toast.error(error instanceof Error ? error.message : "Couldn't send your message."),
+            )
+          }
+        >
+          <SendHorizontalIcon data-icon="inline-start" />
+          Send now
+        </Button>
+      )}
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="size-11"
+        aria-label="Remove queued message"
+        onClick={() => void removeQueued(message)}
+      >
+        <XIcon />
+      </Button>
+    </div>
+  )
+}
+
 export function TypingBubble() {
   return (
     <Bubble variant="muted">
@@ -138,6 +181,7 @@ export function MessageItem({
   message,
   showStats,
   botId,
+  busy,
   plain,
   simple,
 }: {
@@ -146,6 +190,8 @@ export function MessageItem({
   /** A simplified chat: the agent's tool calls and its activity line are left out. */
   simple?: boolean
   botId?: string
+  /** Whether a reply is streaming in this chat, so queued messages know they'll go on their own. */
+  busy?: boolean
   /** A project session's thread: no avatars, and the agent's replies sit on the page, not in bubbles. */
   plain?: boolean
 }) {
@@ -155,19 +201,23 @@ export function MessageItem({
 
   if (message.role === "user") {
     if (plain && isPlanApproval(message.content)) return <PlanApprovedCard />
+    const queued = message.status === "queued"
+    // The plugin starts a host-queued message itself, so it only waits for a Send when paused.
+    const paused = message.hostQueued ? Boolean(message.queuePaused) : !busy
     return (
       <MessageRow align="end">
         <MessageContent className="items-end gap-1">
           {message.attachments?.length ? (
-            <SentAttachments attachments={message.attachments} />
+            <SentAttachments attachments={message.attachments} queued={queued} />
           ) : null}
           {message.content && (
-            <Bubble variant="default" align="end">
+            <Bubble variant="default" align="end" className={queued ? "opacity-60" : undefined}>
               <BubbleContent className="px-4 py-2.5 text-[15px] whitespace-pre-wrap">
                 {message.content}
               </BubbleContent>
             </Bubble>
           )}
+          {queued && <QueuedActions message={message} paused={paused} />}
         </MessageContent>
       </MessageRow>
     )

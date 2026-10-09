@@ -983,7 +983,7 @@ function attachmentsOf(item: QueueItem): Attachment[] | undefined {
 async function syncQueue(conversationId: string) {
   const host = await hostOf(conversationId)
   if (!host || !(await hostQueue(host.config))) return
-  const { items, sent } = await getQueue(host.config, host.conversation.hermesSessionId)
+  const { items, sent, paused } = await getQueue(host.config, host.conversation.hermesSessionId)
   const local = await getMessages(conversationId)
   const byId = new Map(local.map((m) => [m.id, m]))
   const waiting = new Set(items.map((item) => item.id))
@@ -1005,6 +1005,7 @@ async function syncQueue(conversationId: string) {
         attachments: mine?.attachments ?? attachmentsOf(item),
         status: "queued",
         statusText: item.error,
+        queuePaused: paused || Boolean(item.error),
         createdAt: mine?.createdAt ?? item.createdAt,
         hostQueued: true,
       })
@@ -1151,6 +1152,25 @@ export async function steerQueued(message: Message) {
     { id: message.id, text: message.content, contentOffset: draft.content.length, at: Date.now() },
   ]
   touch()
+}
+
+/**
+ * Sends text straight to the running reply, as a steer. When it can't (the run waits on the user,
+ * or the host has no steer route) it queues instead and says so.
+ */
+export async function steerText(conversationId: string, text: string) {
+  const content = text.trim()
+  if (!content) return
+  await queueMessage(conversationId, content)
+  const queued = (await getMessages(conversationId)).findLast(
+    (m) => m.status === "queued" && m.content === content,
+  )
+  if (!queued) return
+  try {
+    await steerQueued(queued)
+  } catch {
+    toast.error("Couldn't steer this reply, so it's queued.")
+  }
 }
 
 export function stopMessage(conversationId: string) {
