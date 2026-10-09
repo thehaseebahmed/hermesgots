@@ -1,36 +1,18 @@
 # Memento plugin for Hermes
 
-The [Memento](../README.md) app uses this plugin to keep each bot's chat list on its Hermes server, to show how full each chat's context is, to show the agent's todo list in each chat, to show routine (cron) history, to list Hermes Projects and create them with their GitHub repos cloned in, to run project sessions in their own git worktrees with a permission mode, and to label its chats in the Hermes dashboard. It reads Hermes's cron execution ledger (`cron/executions.db`), so every device sees the same runs, including the ones that happened while no device was looking.
+The [Memento](../README.md) app needs this plugin on every Hermes profile it uses. It runs on your Hermes host, so the work you start from your phone keeps going, and stays correct, while the app is closed.
 
-It has two parts:
+What it adds to Hermes:
 
-- **API server routes** (`__init__.py`). Memento calls these with the bot's API key, and they follow the API server's `API_SERVER_CORS_ORIGINS`.
-  - `GET /api/plugins/memento/info` returns the plugin's name, version and features.
-  - `GET /api/plugins/memento/cron/runs?per_job=24[&job_id=…]` returns each job's newest runs from the ledger, newest first.
-  - `GET /api/plugins/memento/chats` returns the chat list Memento keeps here: titles, Hermes session ids and deletions, keyed by chat id. `POST` it `{ "chats": { … } }` to merge a device's list in (the newer record wins) and get the merged list back. It's stored in `$HERMES_HOME/memento/memento.db`, outside the plugin's folder, so updates leave it alone.
-  - `GET /api/plugins/memento/sessions/{id}/context` returns the prompt tokens of the session's latest model call and the context window Hermes runs it with, recorded by a `post_api_request` hook. It follows compression to the session that continues the chat.
-  - `GET /api/plugins/memento/sessions/{id}/todos` returns `{ revision, todos }`: the list the agent's `todo_list` tool last wrote in the session (or the sessions it was compressed from), read from the transcript. Both are null when it has none.
-  - `GET /api/plugins/memento/projects` returns the profile's Hermes Projects (`hermes project create`) with their folders, whether each folder is a git repo, its GitHub `user/repo` and the branch a session's worktree starts from, and when a session last ran in one of them. Memento's Code screen lists them.
-  - `GET /api/plugins/memento/github` says whether the server has a GitHub account (`GITHUB_TOKEN` or `GH_TOKEN` in the environment or `$HERMES_HOME/.env`, else the gh CLI's login), and `GET /api/plugins/memento/github/repos` lists its repos. The token stays on the server.
-  - `POST /api/plugins/memento/projects` with `{ "name": …, "description": …, "repos": ["owner/name", …] }` creates a project in `$HERMES_HOME/projects/<slug>/` and clones each repo from GitHub into it, so a repo used by two projects has a clone in each. It needs `git` on the server.
-  - `POST /api/plugins/memento/projects/{id}` with any of `{ "name", "description", "archived", "pinned" }` edits a project, archives or restores it, or pins it; `GET /api/plugins/memento/projects` lists archived projects too, with `archived` and `pinned_at`. `GET …/projects/{id}/usage` sums the tokens and cost of the sessions that ran in the project's folders, from Hermes's session store.
-  - `POST /api/plugins/memento/projects/{id}/repos` with `{ "repo": "owner/name" }` clones another repo into the project in the background (202) and adds it to the project once it's in; `POST …/repos/remove` takes one out at once and deletes the plugin's clone of it in the background (a folder the plugin didn't make stays on disk). The projects list shows each such repo with `status: "cloning" | "failed" | "removing"`. While a repo is being added, no new session can start in the project, and a session that worked in a removed repo can't take another turn (the workspace reports why as `blocked`).
-  - `POST /api/plugins/memento/sessions/{id}/workspace` with `{ "project_id": …, "task": …, "mode": … }` gives a Memento project session a git worktree in every repo of the project (`<repo>/.worktrees/<task-slug>`, branch `hermes/<task-slug>`, made with Hermes's own worktree code) and points the session's terminal and file tools into the primary repo's. The answer carries the workspace (each repo as `user/repo` from its GitHub `origin`) and an `instructions` line that tells the agent where its worktrees are, which Memento adds to every run. Memento posts it before every run, because that pointer only lives in the gateway's memory; the `pre_tool_call` hook restores it after a restart. `GET` returns the workspace (null without one), `POST …/mode` with `{ "mode": "accept_edits" | "auto" | "plan" }` changes the permission mode, and `POST …/workspace/remove` removes each worktree that has no uncommitted changes and no commits a remote lacks, keeps the others and says which (`kept: [{ name, reason }]`).
-  - In `auto` mode the same hook turns on Hermes's per-run approval bypass (`enable_session_yolo`, keyed by the run id), so dangerous commands run without a prompt and nothing needs the app open; the hardline blocklist still blocks. It switches the bypass off again when the mode isn't `auto`. `POST …/mode` to `auto` also approves, once, anything a run of the session is already waiting on (a guardian's DENY is left for the user).
-  - In `plan` mode the plugin's `pre_tool_call` hook blocks `write_file`, `patch`, `execute_code`, `delegate_task` and any `terminal` command that isn't a plain read (`ls`, `cat`, `grep`, read-only `git`, …), so the agent can only investigate and present a plan, and the run's `instructions` carry the plan's shape (overview, approach, changes, checkpoints that each name their commit message, verification, risks and assumptions) and ask the agent to settle every open choice first, with the `clarify` tool where it can, so the plan leaves nothing for the user to decide. A reply that is a plan (it has a `# Plan:` heading) is saved by the `post_llm_call` hook as `plans/<branch slug>-<YYYYMMDD-HHMMSS>.md` under the project's primary folder, with a YAML front matter naming the session, branch, project and time; every iteration gets its own file, and when that folder is itself a git repo `plans/` goes into its `.git/info/exclude`. The workspace reports the newest one as `plan_file`. When such a turn finishes, the workspace also reports `plan_pending`, which Memento shows as a plan waiting for approval, until the user changes the mode or sends the next message.
-  - `GET /api/plugins/memento/sessions/{id}/prs` returns the newest pull request from the session's branch in each of its repos (`{ repo, number, title, state, checks, url }`, where `state` is `open`, `draft`, `merged` or `closed` and `checks` is `success`, `failure`, `pending` or null from the head commit's check runs and statuses). Looked up with the server's GitHub token when it has one.
-  - `POST /api/plugins/memento/sessions/{id}/close` is what the app sends when a session is deleted or discarded: it removes the session's worktrees that hold nothing unpushed or uncommitted (the others are kept and named, as with `workspace/remove`), then closes the open pull request from its branch in each repo and deletes the branch on GitHub when it was pushed. It answers `{ removed, kept, results: [{ name, closed, branch_deleted, error? }] }`; one repo failing doesn't stop the others.
-  - The agent gets an `open_pull_request` tool (`title`, `body`, `commit_message?`, `draft?`) and is told to call it once the work is done and checked: it commits what's left in each worktree, pushes the branch with the server's GitHub token and opens a pull request into the branch the session started from, or updates the open one. The session's instructions name each repo's pull request template so the description follows it, else Summary, Changes and How to test; the Memento Code footer is added. A commit without a git identity on the server uses the GitHub account's no-reply address. Plan mode blocks the tool.
-  - Every 5 minutes, and whenever the app asks for a session's pull requests, a project session whose pull requests are all settled with at least one merged is marked resolved in the chat list, so it resolves on every device with the app closed. A merged pull request does it once: a session reopened afterwards stays open.
-  - `POST /api/plugins/memento/sessions/{id}/attachments?name=…` with a file as the body (up to 9 MB) saves a photo or file the user attached in Memento as `$HERMES_HOME/memento/attachments/<session>/<name>` (a second file of the same name gets `-2`, and so on) and answers `{ name, path, size }`. Memento names the path in the message, so the agent can open the file with its own tools on that turn and later ones; the API server itself only takes images, inline, and keeps them in the transcript as a `[screenshot]` line. The daily cleanup removes the folder with the session.
-  - `GET /api/plugins/memento/runs/live` lists the sessions with a run in flight on this API server, each `running` or `waiting_for_approval`, with its run id in `run_ids`, so every device can tell which project sessions are working or waiting.
-  - **The agent always has `todo_list`.** Hermes defers it behind `tool_search` by default, and a `platform_toolsets.api_server` list without `todo` hides it entirely, so the plugin adds the tool to every agent the API server builds, whatever the tool config says. `GET /api/plugins/memento/info` reports `todo_tool: true` when the wiring took.
-  - **The agent can ask the user questions.** Hermes's `clarify` tool isn't in the API server's toolset and its agents get no way to show a question, so the plugin adds the tool to every agent the API server builds and answers it from Memento: a call puts `clarify.request` on the run's event stream (`{ clarify_id, questions: [{ id, question, choices?, multi_select? }] }`, the first choice being the recommended one) and `clarify` on the run's status while the run waits as `waiting_for_approval`; Memento shows the questions in place of the composer and posts the answers to `POST /api/plugins/memento/runs/{run_id}/clarify` with `{ "clarify_id", "answers": { "q0": "a choice or typed text" | ["several"] | null }, "outcome": "submitted" | "cancelled" }`; the run then carries `clarify.responded` and the agent carries on in the same turn with the answers. An unanswered question times out after Hermes's `agent.clarify_timeout` (an hour by default). `GET /api/plugins/memento/info` reports `clarify: true` when the wiring took on this Hermes version.
-  - `POST /api/plugins/memento/model` with `{ "provider": …, "model": … }` makes that the profile's main model in its `config.yaml`, which is what a bot's Default model in Memento sets. It goes through Hermes's own `switch_model` and `persist_model_selection`, as `/model --global` does in a messaging chat, so Hermes checks the pick (a refusal is a 400 with its reason), only the `model.*` keys it changes are written and the file's comments stay. The next turn on every surface of the profile runs it, without a restart.
-  - `POST /api/plugins/memento/sessions/{id}/label` marks a Memento chat's session with the `memento` source, so the dashboard's Sessions page labels it **Memento**. It only relabels sessions the API server created.
-- **A change stream** (`events.py`, `stream.py`). `GET events` tells an open app that a chat, a run's status, the chat list, a project or a routine changed, without any message text, so the app fetches only then. Everything works without it; the app falls back to polling.
-- **Push to a closed app** (`push.py`). A device that turned on Notifications in Memento's PWA gives the plugin its browser push subscription (`POST push`); when a session starts waiting on you (an approval, a question, a plan) the plugin sends the device a small encrypted message through the browser's push service. The message names the kind of wait and the session, never what was asked. Needs nothing beyond what Hermes already installs.
-- **A dashboard tab** (`dashboard/`). **Memento** in `hermes dashboard` shows the plugin's version, whether it's enabled, how many runs the ledger holds and how many chats it stores.
+- **Chat lists** for each bot, kept on the host so every device sees the same chats.
+- **Questions and todos**: the agent can ask you questions in the app, and always has its todo list.
+- **Context use**, so the app can show how full each chat's context window is.
+- **Routines history** from Hermes's cron ledger, including runs that happened while no device was looking.
+- **Code**: Hermes Projects with their GitHub repos cloned in, sessions that each work in their own git worktree with a permission mode (Accept edits, Auto or Plan), an `open_pull_request` tool the agent uses to ship its work, and sessions that resolve themselves when their pull request merges.
+- **Live updates and notifications**: a change stream for an open app, and a push to a closed one when a session needs you (never what it asks).
+- **A Memento tab** in the Hermes dashboard, and the `hermes memento` command that links a profile to your account.
+
+[API.md](API.md) lists every route and hook, for people working on Memento.
 
 ## Install
 
@@ -39,9 +21,21 @@ hermes plugins install thehaseebahmed/memento/plugin --enable
 hermes gateway restart
 ```
 
-Restart `hermes dashboard` too if it's running, so it picks up the new tab.
+Memento's **Link your bots** screen gives you the install command together with the link command, so you rarely need this on its own. Restart `hermes dashboard` too if it's running, so it picks up the Memento tab.
 
-To update, run `hermes plugins update memento`, then restart the gateway.
+Hermes asks whether to let the plugin pick the model for its own model calls (`llm.model_override` and `llm.provider_override`). Only the experimental Theseus mode uses these, to have its reviews done by a different model than the one that wrote the code. Saying no is fine; `hermes plugins enable memento` asks again.
+
+For another profile, add `-p <name>`: `hermes -p <name> plugins install thehaseebahmed/memento/plugin --enable`.
+
+## Update
+
+Stop the gateway first: newer Hermes versions refuse to update a plugin while the gateway runs.
+
+```bash
+hermes gateway stop
+hermes plugins update memento
+hermes gateway start
+```
 
 ## Linking to Memento
 
@@ -60,8 +54,22 @@ Memento needs this plugin on every profile it uses: chat lists, context use, tod
 
 ## Requirements
 
-- A Hermes version with the cron execution ledger and `ctx.register_platform_handler` (and `ctx.register_cli_command` for `hermes memento`).
-- The API server enabled with an `API_SERVER_KEY`, the same setup Memento needs anyway.
+- Hermes Agent v2026.9.24 or newer.
+- The API server enabled with an `API_SERVER_KEY`. `hermes memento link` offers to set both up.
+- An HTTPS address the app can reach the API server at. See [Reaching Hermes over HTTPS](../docs/https.md).
+- For Code: `git` on the host. For private repos and pull requests, a GitHub login on the host: `gh auth login`, or `GITHUB_TOKEN` (or `GH_TOKEN`) in the environment or `~/.hermes/.env`.
+- For the experimental Theseus mode only: Node 20 or newer on the host.
+
+## What it does with your GitHub token
+
+The token stays on the host and never reaches the app. The plugin uses it to list your repos, clone them into `~/.hermes/projects/<project>/`, push a session's branch and open its pull request (when the agent calls `open_pull_request`), read a pull request's state and checks, and close a session's pull request and delete its branch when you delete or discard the session in the app. It passes the token to git as a header for each command, so it isn't saved in any repo's `.git/config`.
+
+## Troubleshooting
+
+- **The app says it can't reach the plugin.** Check `hermes plugins list` shows memento enabled in that profile, then `hermes gateway restart`. With the API key, `curl -H "Authorization: Bearer <key>" https://<address>/api/plugins/memento/info` should answer with the plugin's version.
+- **A profile under `/p/<name>` has no context use, todos or plan files.** The plugin must be installed and enabled in that profile too (see **Install**).
+- **`hermes memento link` can't find the code.** Codes last 30 minutes. Copy a fresh command from the app.
+- **The Memento tab is missing from the dashboard.** Restart `hermes dashboard`.
 
 ## Limitations
 
