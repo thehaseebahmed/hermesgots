@@ -77,7 +77,7 @@ export function UsageSheet({
   const filled = fraction(usage)
 
   return (
-    <Popup open={open} onOpenChange={onOpenChange}>
+    <Popup side open={open} onOpenChange={onOpenChange}>
       <PopupContent>
         <PopupHeader className="items-center pb-2">
           <PopupTitle>Usage</PopupTitle>

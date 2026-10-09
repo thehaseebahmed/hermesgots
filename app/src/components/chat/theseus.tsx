@@ -480,7 +480,7 @@ export function TheseusSheet({
 }) {
   const checkpoint = view?.kind === "checkpoint" && run.checkpoints.find((cp) => cp.id === view.id)
   return (
-    <Popup open={view !== null} onOpenChange={(open) => !open && onView(null)}>
+    <Popup side open={view !== null} onOpenChange={(open) => !open && onView(null)}>
       <PopupContent className="sm:max-w-xl">
         {view?.kind === "plan" ? (
           <PlanView run={run} onBack={() => onView({ kind: "run" })} />

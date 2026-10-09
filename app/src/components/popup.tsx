@@ -5,7 +5,7 @@ import { XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
-import { useWide } from "@/lib/media"
+import { useWide, useXLarge } from "@/lib/media"
 import { cn } from "@/lib/utils"
 
 /**
@@ -16,12 +16,24 @@ import { cn } from "@/lib/utils"
  * The sheet follows Material 3's modal bottom sheet: a 32×4 drag handle in a 48px target, 28px top
  * corners, a 32% scrim, at most 640px wide, sized to its content, and dismissed by swiping it down,
  * tapping the scrim or the handle, Escape, or Android's back button (`handleBackButton`).
+ *
+ * A pop-up you read beside the chat rather than act in (`side`: tool details, an agent's transcript)
+ * is a modal side sheet from 1280px instead, Material's place for supporting content: full height on
+ * the right, swiped off to the right.
  */
-export const Popup = Drawer.Root
+export function Popup({ side, ...props }: ComponentProps<typeof Drawer.Root> & { side?: boolean }) {
+  const sideSheet = useXLarge() && Boolean(side)
+  return (
+    <SideSheet.Provider value={sideSheet}>
+      <Drawer.Root swipeDirection={sideSheet ? "right" : "down"} {...props} />
+    </SideSheet.Provider>
+  )
+}
 export const PopupTitle = SheetTitle
 export const PopupDescription = SheetDescription
 
 const InSheet = createContext(false)
+const SideSheet = createContext(false)
 
 export function PopupHeader({ className, ...props }: ComponentProps<typeof SheetHeader>) {
   const sheet = useContext(InSheet)
@@ -45,8 +57,43 @@ function Scroll({ children }: { children: ReactNode }) {
 const SCRIM =
   "fixed inset-0 z-50 bg-black/32 transition-opacity data-ending-style:opacity-0 data-starting-style:opacity-0"
 
+const CLOSE = (
+  <Dialog.Close
+    render={<Button variant="ghost" className="absolute top-4 right-4 z-20" size="icon-sm" />}
+  >
+    <XIcon />
+    <span className="sr-only">Close</span>
+  </Dialog.Close>
+)
+
 export function PopupContent({ className, children }: { className?: string; children: ReactNode }) {
   const wide = useWide()
+  const side = useContext(SideSheet)
+  if (side)
+    return (
+      <Drawer.Portal>
+        <Drawer.Backdrop
+          className={cn(
+            SCRIM,
+            "opacity-[calc(1-var(--drawer-swipe-progress))] duration-300 data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] data-swiping:duration-0 motion-reduce:duration-0",
+          )}
+        />
+        <Drawer.Viewport className="fixed inset-0 z-50 flex justify-end">
+          <Drawer.Popup
+            className={cn(
+              "relative flex h-full w-[400px] max-w-[calc(100vw-3.5rem)] flex-col overflow-hidden rounded-l-2xl bg-popover pb-6 text-sm text-popover-foreground shadow-lg outline-none",
+              "[transform:translateX(var(--drawer-swipe-movement-x))] transition-transform duration-300 ease-[cubic-bezier(0.2,0,0,1)] data-ending-style:[transform:translateX(100%)] data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] data-starting-style:[transform:translateX(100%)] data-swiping:duration-0 data-swiping:select-none motion-reduce:duration-0",
+              className,
+            )}
+          >
+            <Drawer.Content className="flex min-h-0 flex-1 flex-col">
+              <Scroll>{children}</Scroll>
+            </Drawer.Content>
+            {CLOSE}
+          </Drawer.Popup>
+        </Drawer.Viewport>
+      </Drawer.Portal>
+    )
   if (!wide)
     return (
       <Drawer.Portal>
@@ -89,12 +136,7 @@ export function PopupContent({ className, children }: { className?: string; chil
         )}
       >
         <Scroll>{children}</Scroll>
-        <Dialog.Close
-          render={<Button variant="ghost" className="absolute top-4 right-4 z-20" size="icon-sm" />}
-        >
-          <XIcon />
-          <span className="sr-only">Close</span>
-        </Dialog.Close>
+        {CLOSE}
       </Dialog.Popup>
     </Dialog.Portal>
   )
