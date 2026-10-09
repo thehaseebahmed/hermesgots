@@ -243,6 +243,15 @@ export interface Attachment {
   path?: string
 }
 
+/** Something the user added to a reply while it ran, which Hermes handed the agent mid-turn. */
+export interface Steer {
+  id: string
+  text: string
+  /** Where in the reply's text it was sent, so it sits there in the thread. */
+  contentOffset: number
+  at: number
+}
+
 /** `queued` is a user message waiting for the current reply to finish. */
 export type MessageStatus = "queued" | "streaming" | "done" | "error" | "stopped"
 
@@ -256,6 +265,8 @@ export interface Message {
   tools?: ToolEvent[]
   approval?: ApprovalRequest
   clarify?: ClarifyRequest
+  /** A reply's steers, in order. */
+  steers?: Steer[]
   status: MessageStatus
   /** Latest `hermes.status` text while streaming, or the error text. */
   statusText?: string

@@ -7,11 +7,12 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react"
-import { ArrowUpIcon, MicIcon, SquareIcon } from "lucide-react"
+import { ArrowUpIcon, ListPlusIcon, MicIcon, SquareIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { AttachMenu } from "@/components/chat/attach-menu"
 import { AttachmentTile, AttachmentViewer } from "@/components/chat/attachments"
+import { QueueTray } from "@/components/chat/queue-tray"
 import type { ModeSettings } from "@/components/chat/mode-menu"
 import { SlashMenu } from "@/components/chat/slash-menu"
 import { VoiceBar } from "@/components/chat/voice-bar"
@@ -28,7 +29,7 @@ import {
   MAX_INLINE_BYTES,
   prepareAttachment,
 } from "@/lib/attachments"
-import type { Attachment } from "@/lib/db"
+import type { Attachment, Message } from "@/lib/db"
 import type { HermesConfig } from "@/lib/hermes"
 import { joinText, useDictation } from "@/lib/speech"
 import {
@@ -55,8 +56,20 @@ export function Composer({
   imagesAvailable,
   draft,
   onDraft,
+  queue = [],
+  canSteer = false,
+  onSteer,
+  onSendQueued,
+  onRemoveQueued,
 }: {
   busy: boolean
+  /** Messages waiting for the running reply, shown above the text. */
+  queue?: Message[]
+  /** Whether the running reply can be steered. */
+  canSteer?: boolean
+  onSteer?: (message: Message) => Promise<void>
+  onSendQueued?: (message: Message) => Promise<void>
+  onRemoveQueued?: (message: Message) => Promise<void> | void
   /** Text to start with, e.g. a session's saved draft. */
   draft?: string
   /** Called with the text as it changes. */
@@ -168,6 +181,17 @@ export function Composer({
     textarea.current?.focus()
   }
 
+  // Back into the text, after anything typed meanwhile, and out of the queue.
+  const editQueued = (message: Message) => {
+    setValue((current) =>
+      current.trim() ? `${current.trimEnd()}\n${message.content}` : message.content,
+    )
+    if (message.attachments?.length)
+      setAttachments((current) => [...current, ...message.attachments!].slice(0, MAX_ATTACHMENTS))
+    void onRemoveQueued?.(message)
+    textarea.current?.focus()
+  }
+
   const removeAttachment = (attachment: Attachment) =>
     setAttachments((current) => current.filter((a) => a.id !== attachment.id))
 
@@ -261,16 +285,29 @@ export function Composer({
         </InputGroupButton>
       )}
       {busy ? (
-        <InputGroupButton
-          type="button"
-          variant="secondary"
-          size="icon-sm"
-          className="size-11 rounded-full"
-          onClick={onStop}
-          aria-label="Stop"
-        >
-          <SquareIcon className="fill-current" />
-        </InputGroupButton>
+        <>
+          {canSend && (
+            <InputGroupButton
+              type="submit"
+              variant="ghost"
+              size="icon-sm"
+              className="size-11 rounded-full"
+              aria-label="Queue"
+            >
+              <ListPlusIcon />
+            </InputGroupButton>
+          )}
+          <InputGroupButton
+            type="button"
+            variant="secondary"
+            size="icon-sm"
+            className="size-11 rounded-full"
+            onClick={onStop}
+            aria-label="Stop"
+          >
+            <SquareIcon className="fill-current" />
+          </InputGroupButton>
+        </>
       ) : (
         <InputGroupButton
           type="submit"
@@ -296,6 +333,17 @@ export function Composer({
           status={slash.status}
           onPick={pick}
           onActive={setActive}
+        />
+      )}
+      {onSteer && onSendQueued && onRemoveQueued && (
+        <QueueTray
+          queue={queue}
+          busy={busy}
+          canSteer={canSteer}
+          onSteer={onSteer}
+          onSend={onSendQueued}
+          onEdit={editQueued}
+          onRemove={(message) => void onRemoveQueued(message)}
         />
       )}
       {attachments.length + preparing.length > 0 && (

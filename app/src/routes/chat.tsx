@@ -68,7 +68,15 @@ import {
   useMessageScroller,
 } from "@/components/ui/message-scroller"
 import { Spinner } from "@/components/ui/spinner"
-import { queueMessage, reattachRun, sendMessage, stopMessage } from "@/lib/chat"
+import {
+  queueMessage,
+  reattachRun,
+  removeQueued,
+  sendMessage,
+  sendQueued,
+  steerQueued,
+  stopMessage,
+} from "@/lib/chat"
 import {
   DEFAULT_SETTINGS,
   type Attachment,
@@ -81,7 +89,7 @@ import {
   updateConversation,
 } from "@/lib/db"
 import { describeActivity } from "@/lib/format"
-import { listProjects, type HermesProject } from "@/lib/hermes"
+import { listProjects, supportsSteer, type HermesProject } from "@/lib/hermes"
 import { loadEarlierHistory, reconcileHistory } from "@/lib/history"
 import { SAFETY_MS, useLive, watchChat } from "@/lib/live"
 import { useXLarge } from "@/lib/media"
@@ -216,6 +224,25 @@ export function ChatPage() {
   const configured = Boolean(profile?.baseUrl.trim())
   const streaming = messages?.find((m) => m.status === "streaming")
   const busy = Boolean(streaming)
+  // Queued messages wait above the composer, not in the thread.
+  const thread = messages?.filter((m) => m.status !== "queued")
+  const queue = useMemo(() => messages?.filter((m) => m.status === "queued") ?? [], [messages])
+  // Only a run can be steered, and only on a Hermes that has the route.
+  const [steerRoute, setSteerRoute] = useState<{ baseUrl: string; ok: boolean }>()
+  const runId = streaming?.runId
+  const baseUrl = profile?.baseUrl
+  const apiKey = profile?.apiKey
+  useEffect(() => {
+    if (!runId || baseUrl === undefined) return
+    let current = true
+    void supportsSteer({ baseUrl, apiKey: apiKey ?? "" }).then(
+      (ok) => current && setSteerRoute({ baseUrl, ok }),
+    )
+    return () => {
+      current = false
+    }
+  }, [runId, baseUrl, apiKey])
+  const steerable = Boolean(runId && steerRoute?.baseUrl === baseUrl && steerRoute?.ok)
   const awaitingApproval = messages?.find((m) => m.approval && !m.approval.resolved)
   const awaitingClarify = messages?.find((m) => m.clarify && !m.clarify.resolved)
   const activity = streaming && describeActivity(streaming)
@@ -289,8 +316,6 @@ export function ChatPage() {
     Boolean(delegations?.length),
     Boolean(delegations?.some((t) => t.status === "running")),
   )
-  const baseUrl = profile?.baseUrl
-  const apiKey = profile?.apiKey
   const agentsSource = useMemo(
     () => (agents && baseUrl && apiKey ? { agents, server: { baseUrl, apiKey } } : null),
     [agents, baseUrl, apiKey],
@@ -576,14 +601,13 @@ export function ChatPage() {
                   </Button>
                 )}
                 <AgentsContext.Provider value={agentsSource}>
-                  {messages!.map((message) => (
+                  {thread!.map((message) => (
                     <MessageScrollerItem key={message.id} messageId={message.id}>
                       <MessageItem
                         message={message}
                         showStats={!simple}
                         simple={simple}
                         botId={profile?.botId}
-                        busy={busy}
                         plain={Boolean(session)}
                       />
                     </MessageScrollerItem>
@@ -593,7 +617,7 @@ export function ChatPage() {
             </MessageScrollerViewport>
             <MessageScrollerButton />
             <FollowAfterApproval pending={Boolean(awaitingApproval || awaitingClarify)} />
-            <FollowOnSend lastUserId={messages!.findLast((m) => m.role === "user")?.id} />
+            <FollowOnSend lastUserId={thread!.findLast((m) => m.role === "user")?.id} />
           </MessageScroller>
         </MessageScrollerProvider>
       ) : loadingHistory ? (
@@ -687,6 +711,11 @@ export function ChatPage() {
             onQueue={(text, attachments) =>
               id ? queueMessage(id, text, attachments) : send(text, attachments)
             }
+            queue={queue}
+            canSteer={steerable}
+            onSteer={steerQueued}
+            onSendQueued={sendQueued}
+            onRemoveQueued={(message) => removeQueued(message.id)}
             filesAvailable={Boolean(profile?.apiKey)}
             imagesAvailable={profile?.imageInput !== false}
             onStop={() => id && stopMessage(id)}
