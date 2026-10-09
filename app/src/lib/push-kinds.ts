@@ -45,18 +45,18 @@ export const PUSH_CATEGORIES: PushCategoryInfo[] = [
     on: true,
     importance: 4,
   },
-  { id: "chat_run_failed", feature: "chats", title: "A run failed", on: true, importance: 4 },
-  { id: "chat_run_done", feature: "chats", title: "A run finished", on: false, importance: 3 },
+  { id: "chat_run_failed", feature: "chats", title: "Run failed", on: true, importance: 4 },
+  { id: "chat_run_done", feature: "chats", title: "Run finished", on: false, importance: 3 },
   {
     id: "code_input",
     feature: "code",
-    title: "Questions, approvals and plans",
+    title: "Questions, approvals, plans",
     on: true,
     importance: 4,
   },
   { id: "code_theseus", feature: "code", title: "Theseus needs you", on: true, importance: 4 },
-  { id: "code_run_failed", feature: "code", title: "A run failed", on: true, importance: 4 },
-  { id: "code_run_done", feature: "code", title: "A run finished", on: false, importance: 3 },
+  { id: "code_run_failed", feature: "code", title: "Run failed", on: true, importance: 4 },
+  { id: "code_run_done", feature: "code", title: "Run finished", on: false, importance: 3 },
   {
     id: "code_pr_checks",
     feature: "code",
@@ -78,7 +78,7 @@ export const PUSH_CATEGORIES: PushCategoryInfo[] = [
     on: true,
     importance: 3,
   },
-  { id: "routine_failed", feature: "routines", title: "A routine failed", on: true, importance: 3 },
+  { id: "routine_failed", feature: "routines", title: "Routine failed", on: true, importance: 3 },
 ]
 
 export type PushPrefs = Partial<Record<string, boolean>>

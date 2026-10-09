@@ -295,36 +295,31 @@ function NotificationTypes() {
         const [only] = feature.categories
         const single = feature.categories.length === 1
         return (
-          <section key={feature.id} className="flex flex-col gap-1.5">
-            <Group>
-              <SwitchRow
-                id={`push-${feature.id}`}
-                icon={FEATURE_ICONS[feature.id]}
-                title={feature.title}
-                subtitle={single ? only.title : `${feature.on} of ${feature.categories.length} on`}
-                checked={feature.on > 0}
-                onCheckedChange={(checked) =>
-                  void setPushFeature(feature.id, checked).catch(failed)
-                }
-              />
-            </Group>
-            {!single && (
-              <Group>
-                {feature.categories.map((category) => (
-                  <SwitchRow
-                    key={category.id}
-                    id={`push-${category.id}`}
-                    icon={CATEGORY_ICONS[category.id]}
-                    title={category.title}
-                    checked={category.checked}
-                    onCheckedChange={(checked) =>
-                      void setPushCategory(category.id, checked).catch(failed)
-                    }
-                  />
-                ))}
-              </Group>
-            )}
-          </section>
+          <Group key={feature.id}>
+            <SwitchRow
+              id={`push-${feature.id}`}
+              variant="header"
+              icon={FEATURE_ICONS[feature.id]}
+              title={feature.title}
+              subtitle={single ? only.title : `${feature.on} of ${feature.categories.length} on`}
+              checked={feature.on > 0}
+              onCheckedChange={(checked) => void setPushFeature(feature.id, checked).catch(failed)}
+            />
+            {!single &&
+              feature.categories.map((category) => (
+                <SwitchRow
+                  key={category.id}
+                  id={`push-${category.id}`}
+                  variant="nested"
+                  icon={CATEGORY_ICONS[category.id]}
+                  title={category.title}
+                  checked={category.checked}
+                  onCheckedChange={(checked) =>
+                    void setPushCategory(category.id, checked).catch(failed)
+                  }
+                />
+              ))}
+          </Group>
         )
       })}
     </div>
@@ -568,6 +563,7 @@ function SwitchRow({
   subtitle,
   checked,
   disabled,
+  variant,
   onCheckedChange,
 }: {
   id: string
@@ -576,12 +572,27 @@ function SwitchRow({
   subtitle?: string
   checked: boolean
   disabled?: boolean
+  /** `header` tops a group of switches it controls; `nested` is one of them. */
+  variant?: "header" | "nested"
   onCheckedChange: (checked: boolean) => void
 }) {
   return (
-    <label htmlFor={id} className={cn(rowClass, "cursor-pointer")}>
+    <label
+      htmlFor={id}
+      className={cn(
+        rowClass,
+        "cursor-pointer",
+        variant === "header" && "bg-muted py-4",
+        variant === "nested" && "pl-9",
+      )}
+    >
       <Icon className="size-5 shrink-0 text-muted-foreground" />
-      <RowText title={title} subtitle={subtitle} />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className={cn("truncate text-base", variant === "header" && "font-semibold")}>
+          {title}
+        </span>
+        {subtitle && <span className="line-clamp-2 text-sm text-muted-foreground">{subtitle}</span>}
+      </span>
       <Switch id={id} checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} />
     </label>
   )
