@@ -6,6 +6,7 @@ import {
   type Message,
   type ToolEvent,
 } from "@/lib/db"
+import { refreshQueue } from "@/lib/chat"
 import { refreshContext } from "@/lib/context"
 import { refreshTodos } from "@/lib/todos"
 import { refreshPrs, refreshWorkspace } from "@/lib/workspace"
@@ -379,7 +380,9 @@ async function refreshTitle(conversationId: string) {
 export function reconcileHistory(conversationId: string) {
   let pending = reconciling.get(conversationId)
   if (!pending) {
-    pending = reconcile(conversationId)
+    // The queue first: a turn the plugin started from it is followed live, not loaded half done.
+    pending = refreshQueue(conversationId)
+      .then(() => reconcile(conversationId))
       .then(async (added) => {
         await Promise.all([
           refreshTitle(conversationId),

@@ -36,7 +36,8 @@
 // (GET …/sessions/{id}/prs reads them; "draft" in that turn drafts them): "merge" or "close" in a
 // turn sets their state, a merge resolves the session in the chat list, and "break" fails their
 // checks. POST …/close (delete or discard) closes them and removes the trees like …/workspace/remove. GET /api/plugins/memento/runs/live lists the sessions with
-// a run in flight, and why each one waiting on the user waits. The agent asks the user questions
+// a run in flight, and why each one waiting on the user waits. …/sessions/{id}/queue holds what
+// the app queued and starts it when the session's run ends, like plugin/outbox.py. The agent asks the user questions
 // with Hermes's clarify tool, which the plugin serves on runs: say "ask" for one, or "ask five" for
 // five (plan mode asks before planning), the run carries
 // `clarify.request` and waits, and POST /api/plugins/memento/runs/{id}/clarify answers it.
@@ -946,6 +947,49 @@ function streamEvents(req, res, profile, since) {
 
 const sessionOf = (req, body) => req.headers["x-hermes-session-id"] ?? body?.session_id
 
+// The plugin's queue (outbox.py): per session, what waits, what it started, and the run body to
+// start a leftover steer with. It starts the next item when the session's run is over, unless the
+// last run was stopped after the user last sent one.
+const queues = new Map()
+function queueOf(sessionId) {
+  if (!queues.has(sessionId)) queues.set(sessionId, { items: [], sent: [], resumedAt: 0, template: null })
+  return queues.get(sessionId)
+}
+const sessionRuns = (sessionId) => [...runs.values()].filter((run) => run.sessionId === sessionId)
+function pumpQueue(sessionId) {
+  const queue = queues.get(sessionId)
+  if (!queue) return
+  const all = sessionRuns(sessionId)
+  if (all.some((run) => ["running", "waiting_for_approval"].includes(run.status))) return
+  const latest = all.at(-1)
+  if (latest?.pendingSteer && latest.output !== undefined && !latest.requeued && queue.template) {
+    latest.requeued = true
+    const text = latest.pendingSteer
+    queue.items.unshift({ id: `s_${latest.id}`, text, attachments: [], created_at: Date.now(), body: { ...queue.template, input: [{ role: "user", content: text }] } })
+    noteEvent("session", sessionId)
+  }
+  const next = queue.items[0]
+  if (!next || next.error) return
+  if (latest?.status === "cancelled" && (latest.endedAt ?? 0) > queue.resumedAt) return
+  queue.items.shift()
+  // As the plugin does, with the key the app queued it with.
+  const run = startRun({ headers: { "idempotency-key": next.id, authorization: queue.authorization } }, { ...next.body, session_id: sessionId })
+  queue.sent.push({ ...next, run_id: run.id, sent_at: Date.now() })
+  noteEvent("session", sessionId)
+}
+const queueView = (sessionId) => {
+  const queue = queueOf(sessionId)
+  const all = sessionRuns(sessionId)
+  const latest = all.at(-1)
+  const item = ({ body: _body, ...rest }) => ({ run_id: null, sent_at: null, error: null, ...rest })
+  return {
+    object: "memento.queue",
+    items: queue.items.map(item),
+    sent: queue.sent.map((sent) => ({ ...item(sent), run_status: runs.get(sent.run_id)?.status ?? null })),
+    paused: latest?.status === "cancelled" && (latest.endedAt ?? 0) > queue.resumedAt,
+  }
+}
+
 function startRun(req, body) {
   const key = req.headers["idempotency-key"]
   const replay = key && [...runs.values()].find((run) => run.key === key)
@@ -1012,6 +1056,7 @@ function startRun(req, body) {
   }).then(({ spoken, prompt_tokens, completion_tokens }) => {
     if (steerPoints.get(run.sessionId)) steerPoints.delete(run.sessionId)
     run.status = run.stopped ? "cancelled" : "completed"
+    run.endedAt = Date.now()
     run.output = spoken
     run.usage = { input_tokens: prompt_tokens, output_tokens: completion_tokens, total_tokens: prompt_tokens + completion_tokens }
     // A hard stop drops an unread steer, as on Hermes; otherwise it goes back to the client.
@@ -1020,6 +1065,7 @@ function startRun(req, body) {
     noteEvent("runs", run.sessionId)
     push(`run.${run.status}`, { completed: !run.stopped, interrupted: run.stopped, output: spoken, usage: run.usage, ...(run.pendingSteer ? { pending_steer: run.pendingSteer } : {}) })
     for (const listener of run.listeners) listener(null)
+    setTimeout(() => pumpQueue(run.sessionId), 300)
   })
   return run
 }
@@ -1135,7 +1181,7 @@ http
       return json(res, 200, {
         name: "memento",
         version: PLUGIN_VERSION,
-        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "profile_routes", "pr_tool", "close", "merge_resolve", "theseus", ...(EVENTS ? ["events"] : []), "push", "host_model"],
+        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "profile_routes", "pr_tool", "close", "merge_resolve", "theseus", ...(EVENTS ? ["events"] : []), "push", "host_model", "queue"],
         clarify: true,
         hooks: true,
         theseus: THESEUS_START === "unavailable"
@@ -1405,6 +1451,50 @@ http
       for (let n = 2; existsSync(path); n++) path = join(dir, name.replace(/(\.[^.]*)?$/, `-${n}$1`))
       writeFileSync(path, data)
       return json(res, 200, { object: "memento.attachment", name: basename(path), path, size: data.length })
+    }
+    const queueRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/queue(?:\/([^/]+)\/(remove|send|steer))?$/.exec(url.pathname)
+    if (PLUGIN && !profile && queueRoute) {
+      const id = decodeURIComponent(queueRoute[1])
+      const queue = queueOf(id)
+      if (req.method === "GET") return json(res, 200, queueView(id))
+      if (req.method !== "POST") return json(res, 405, { error: { message: "Method not allowed" } })
+      if (!queueRoute[2]) {
+        const { text, attachments, body } = await readBody(req)
+        if (!Array.isArray(body?.input) || !body.input.length) return json(res, 400, { error: { message: "body.input must hold the message" } })
+        const { input: _input, ...template } = body
+        queue.template = { ...template, session_id: id }
+        queue.authorization = req.headers.authorization
+        const item = { id: `q_${randomUUID().replace(/-/g, "").slice(0, 20)}`, text: String(text ?? ""), attachments: attachments ?? [], created_at: Date.now(), body: { ...body, session_id: id } }
+        queue.items.push(item)
+        noteEvent("session", id)
+        setTimeout(() => pumpQueue(id), 50)
+        return json(res, 200, { object: "memento.queued", item: { ...item, body: undefined, run_id: null, sent_at: null, error: null } })
+      }
+      const index = queue.items.findIndex((item) => item.id === queueRoute[2])
+      if (queueRoute[3] === "remove") {
+        if (index >= 0) queue.items.splice(index, 1)
+        noteEvent("session", id)
+        return json(res, 200, { object: "memento.queue.removed", removed: index >= 0 })
+      }
+      if (index < 0) return json(res, 404, { error: { message: "That message isn't waiting any more." } })
+      if (queueRoute[3] === "send") {
+        const [item] = queue.items.splice(index, 1)
+        queue.items.unshift({ ...item, error: undefined })
+        queue.resumedAt = Date.now()
+        setTimeout(() => pumpQueue(id), 50)
+        return json(res, 200, queueView(id))
+      }
+      const running = sessionRuns(id).findLast((run) => run.status === "running" && !run.stopped)
+      if (!running) return json(res, 409, { error: { message: "The reply isn't running, so it can't be steered." } })
+      const item = queue.items[index]
+      if (item.attachments?.length) return json(res, 409, { error: { message: "Only text can steer a reply." } })
+      queue.items.splice(index, 1)
+      running.pendingSteer = running.pendingSteer ? `${running.pendingSteer}\n${item.text}` : item.text
+      const event = { event: "run.steered", run_id: running.id, timestamp: Date.now() / 1000, accepted: true, seq: running.seq++ }
+      running.events.push(event)
+      for (const listener of running.listeners) listener(event)
+      noteEvent("session", id)
+      return json(res, 200, { object: "memento.queue.steered", id: item.id, run_id: running.id, text: item.text })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/runs/live") {
       const sessions = {}

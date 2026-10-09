@@ -584,6 +584,88 @@ export async function getPluginFeatures(config: HermesConfig): Promise<string[]>
   return Array.isArray(features) ? features.filter((f): f is string => typeof f === "string") : []
 }
 
+const pluginFeatures = new Map<string, Promise<string[] | null>>()
+
+/** `getPluginFeatures`, asked once per server and key; a failed ask is tried again next time. */
+export async function hasPluginFeature(config: HermesConfig, feature: string) {
+  const key = `${config.baseUrl}\n${config.apiKey}`
+  let pending = pluginFeatures.get(key)
+  if (!pending) {
+    pending = getPluginFeatures(config).catch(() => null)
+    pluginFeatures.set(key, pending)
+    void pending.then((found) => found || pluginFeatures.delete(key))
+  }
+  return Boolean((await pending)?.includes(feature))
+}
+
+/** A message waiting on the Hermes host for the session's run to finish. */
+export interface QueueItem {
+  id: string
+  text: string
+  attachments: { name: string; type?: string; size?: number; path?: string }[]
+  createdAt: number
+  /** The run the plugin started with it, once sent. */
+  runId?: string
+  runStatus?: string
+  /** Why the plugin couldn't start it; the queue waits until it's sent again. */
+  error?: string
+}
+
+function queueItem(raw: Record<string, unknown>): QueueItem {
+  return {
+    id: String(raw.id),
+    text: typeof raw.text === "string" ? raw.text : "",
+    attachments: Array.isArray(raw.attachments) ? raw.attachments : [],
+    createdAt: Number(raw.created_at) || Date.now(),
+    runId: typeof raw.run_id === "string" ? raw.run_id : undefined,
+    runStatus: typeof raw.run_status === "string" ? raw.run_status : undefined,
+    error: typeof raw.error === "string" ? raw.error : undefined,
+  }
+}
+
+function queueRoot(config: HermesConfig, sessionId: string) {
+  return `${pluginRoot(config.baseUrl)}/sessions/${encodeURIComponent(sessionId)}/queue`
+}
+
+/** The session's queue on the plugin: what waits, and what it sent in the last hour. */
+export async function getQueue(config: HermesConfig, sessionId: string) {
+  const response = await request(queueRoot(config, sessionId), { headers: headers(config) })
+  const body = await response.json()
+  const list = (value: unknown) =>
+    Array.isArray(value)
+      ? value.filter((item) => item && typeof item === "object").map(queueItem)
+      : []
+  return { items: list(body?.items), sent: list(body?.sent), paused: Boolean(body?.paused) }
+}
+
+/** Queues a turn on the plugin, which starts it with `run` once the session's run is over. */
+export async function addToQueue(
+  config: HermesConfig,
+  sessionId: string,
+  item: { text: string; attachments: QueueItem["attachments"]; run: Record<string, unknown> },
+) {
+  const response = await request(queueRoot(config, sessionId), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ text: item.text, attachments: item.attachments, body: item.run }),
+  })
+  return queueItem((await response.json())?.item ?? {})
+}
+
+/** `remove` drops a queued message, `send` puts it first and lets a paused queue go, `steer` hands it to the running reply. */
+export async function queueAction(
+  config: HermesConfig,
+  sessionId: string,
+  itemId: string,
+  action: "remove" | "send" | "steer",
+) {
+  const response = await request(
+    `${queueRoot(config, sessionId)}/${encodeURIComponent(itemId)}/${action}`,
+    { method: "POST", headers: headers(config) },
+  )
+  return (await response.json()) as Record<string, unknown>
+}
+
 /** The plugin pings its change stream every 20s, so one quiet for longer has died unnoticed. */
 const EVENTS_IDLE_MS = 50_000
 
@@ -1598,33 +1680,38 @@ const PLAN_HINT =
  * Starts a turn on `/v1/runs`. Unlike a chat completion, Hermes doesn't interrupt a run when its
  * event stream drops, so a phone that sleeps mid-reply can pick it up again.
  */
-export async function startRun(
-  config: HermesConfig,
-  options: {
-    model: string
-    /** With a model chosen for the chat; without it a model id names only a `model_routes` alias. */
-    provider?: string
-    messages: ChatMessage[]
-    sessionId?: string
-    /** Makes a retried POST return the run it already started. */
-    idempotencyKey: string
-    /** The plugin's line for a project session: its worktrees and, in plan mode, the plan's shape. */
-    workspaceInstructions?: string
-  },
-) {
+interface RunOptions {
+  model: string
+  /** With a model chosen for the chat; without it a model id names only a `model_routes` alias. */
+  provider?: string
+  messages: ChatMessage[]
+  sessionId?: string
+  /** The plugin's line for a project session: its worktrees and, in plan mode, the plan's shape. */
+  workspaceInstructions?: string
+}
+
+/** The `POST /v1/runs` body for a turn. */
+export function runRequest(config: HermesConfig, options: RunOptions) {
   // Like X-Hermes-Session-Id, a keyed session holds the history, so only the new message goes.
   const keyed = Boolean(options.sessionId && config.apiKey)
-  const input = keyed ? options.messages.slice(-1) : options.messages
+  return {
+    model: options.model,
+    ...(options.provider ? { provider: options.provider } : {}),
+    input: keyed ? options.messages.slice(-1) : options.messages,
+    instructions: [PLAN_HINT, options.workspaceInstructions].filter(Boolean).join("\n"),
+    ...(keyed ? { session_id: options.sessionId } : {}),
+  }
+}
+
+export async function startRun(
+  config: HermesConfig,
+  /** `idempotencyKey` makes a retried POST return the run it already started. */
+  options: RunOptions & { idempotencyKey: string },
+) {
   const response = await request(endpoint(config.baseUrl, "/runs"), {
     method: "POST",
     headers: headers(config, { "Idempotency-Key": options.idempotencyKey }),
-    body: JSON.stringify({
-      model: options.model,
-      ...(options.provider ? { provider: options.provider } : {}),
-      input,
-      instructions: [PLAN_HINT, options.workspaceInstructions].filter(Boolean).join("\n"),
-      ...(keyed ? { session_id: options.sessionId } : {}),
-    }),
+    body: JSON.stringify(runRequest(config, options)),
   })
   const body = await response.json()
   if (typeof body?.run_id !== "string") throw new HermesError("Hermes didn't start the run.")

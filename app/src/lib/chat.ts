@@ -8,21 +8,28 @@ import {
   type Attachment,
   type ClarifyAnswers,
   type ClarifyRequest,
+  type Conversation,
   type Message,
   type MessageStats,
+  type Profile,
   type ToolEvent,
   updateConversation,
 } from "@/lib/db"
 import {
+  addToQueue,
   clarifyQuestions,
   followRun,
   getRun,
+  getQueue,
   getSessionTitle,
+  hasPluginFeature,
   HermesError,
   labelSession,
   liveRunOf,
+  queueAction,
   respondToApproval,
   respondToClarify,
+  runRequest,
   startRun,
   steerRun,
   stopRun,
@@ -31,13 +38,14 @@ import {
   uploadAttachment,
   type ChatMessage,
   type HermesConfig,
+  type QueueItem,
   type RunOutcome,
   type StreamHandlers,
   type TurnUsage,
 } from "@/lib/hermes"
 import { attachmentsText, setUploading, wireContent } from "@/lib/attachments"
 import { refreshContext } from "@/lib/context"
-import { liveTurn, patchStats } from "@/lib/history"
+import { liveTurn, patchStats, reconcileHistory } from "@/lib/history"
 import { isLive } from "@/lib/live"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { randomId } from "@/lib/utils"
@@ -565,7 +573,9 @@ async function runTurn(
     }
   }
   await finishTurn(turn, usage)
-  if (pendingSteer) await requeueSteer(turn.conversationId, pendingSteer)
+  // The plugin puts a leftover steer first in its own queue, and starts what waits there.
+  if (await hostQueue(turn.config)) followHostQueue(turn.conversationId)
+  else if (pendingSteer) await requeueSteer(turn.conversationId, pendingSteer)
   return draft.status
 }
 
@@ -666,6 +676,12 @@ async function uploadAttachments(
   return saved
 }
 
+/** The chat's own pick, else the bot's default, else whatever the host runs. */
+function modelOf(conversation: Conversation, profile: Profile) {
+  const chosen = conversation.modelChoice ?? profile.modelChoice
+  return { model: chosen?.model ?? profile.model, provider: chosen?.provider }
+}
+
 /** `queuedId` sends a queued message, keeping its id so the bubble doesn't remount. */
 export async function sendMessage(
   conversationId: string,
@@ -751,11 +767,8 @@ export async function sendMessage(
       }
       await db.messages.update(userMessage.id, { attachments: sent })
     }
-    // The chat's own pick, else the bot's default, else whatever the host runs.
-    const chosen = conversation.modelChoice ?? profile.modelChoice
     const turnOptions = {
-      model: chosen?.model ?? profile.model,
-      provider: chosen?.provider,
+      ...modelOf(conversation, profile),
       sessionId: conversation.hermesSessionId,
       messages: [
         ...transcript,
@@ -855,6 +868,53 @@ async function resumeReply(reply: Message) {
   if (status === "done") await sendNextQueued(conversationId)
 }
 
+/**
+ * Whether queued messages wait on the Hermes host, where the Memento plugin starts each once the
+ * run before it is over, with the app closed too. Without it they wait here.
+ */
+async function hostQueue(config: HermesConfig) {
+  return (
+    Boolean(config.apiKey) &&
+    (await supportsRuns(config)) &&
+    (await hasPluginFeature(config, "queue"))
+  )
+}
+
+async function hostOf(conversationId: string) {
+  const conversation = await db.conversations.get(conversationId)
+  const profile = await profileFor(conversation?.profileId)
+  if (!conversation || !profile) return undefined
+  const config = { baseUrl: profile.baseUrl, apiKey: profile.apiKey }
+  return { conversation, profile, config }
+}
+
+/** Saves the attachments on the host and hands the plugin the turn it will start. */
+async function queueOnHost(
+  conversation: Conversation,
+  profile: Profile,
+  config: HermesConfig,
+  content: string,
+  attachments: Attachment[],
+) {
+  const sessionId = conversation.hermesSessionId
+  const workspace = await ensureSessionWorkspace(conversation.id, content || attachments[0].name)
+  const sent = attachments.length
+    ? await uploadAttachments(config, sessionId, attachments, true)
+    : attachments
+  const run = runRequest(config, {
+    ...modelOf(conversation, profile),
+    sessionId,
+    messages: [{ role: "user", content: await wireContent(content, sent) }],
+    workspaceInstructions: workspace?.instructions,
+  })
+  const item = await addToQueue(config, sessionId, {
+    text: content,
+    attachments: sent.map(({ name, type, size, path }) => ({ name, type, size, path })),
+    run,
+  })
+  return { item, sent }
+}
+
 /** Holds a message until the current reply finishes. */
 export async function queueMessage(
   conversationId: string,
@@ -863,7 +923,7 @@ export async function queueMessage(
 ) {
   const content = text.trim()
   if (!content && !attachments.length) return
-  await db.messages.add({
+  const message: Message = {
     id: randomId(),
     conversationId,
     role: "user",
@@ -871,16 +931,171 @@ export async function queueMessage(
     ...(attachments.length ? { attachments } : {}),
     status: "queued",
     createdAt: Date.now(),
-  })
+  }
+  const host = await hostOf(conversationId)
+  if (host && (await hostQueue(host.config))) {
+    try {
+      const { item, sent } = await queueOnHost(
+        host.conversation,
+        host.profile,
+        host.config,
+        content,
+        attachments,
+      )
+      await db.messages.add({
+        ...message,
+        id: item.id,
+        ...(sent.length ? { attachments: sent } : {}),
+        hostQueued: true,
+      })
+      // The run may have ended while it was being queued, and the plugin started it at once.
+      followHostQueue(conversationId)
+      return
+    } catch {
+      // It waits here instead, and goes from this device.
+    }
+  }
+  await db.messages.add(message)
 }
 
+/** Hermes's transcript times are its own clock's, in whole seconds. */
+const CLOCK_SLACK_MS = 5000
+
+const ACTIVE_RUN = new Set(["queued", "running", "waiting_for_approval", "stopping"])
+
+function attachmentsOf(item: QueueItem): Attachment[] | undefined {
+  if (!item.attachments.length) return undefined
+  return item.attachments.map((file, index) => ({
+    id: `${item.id}-${index}`,
+    name: file.name,
+    type: file.type ?? "application/octet-stream",
+    size: file.size ?? 0,
+    image: Boolean(file.type?.startsWith("image/")),
+    path: file.path,
+  }))
+}
+
+/**
+ * Brings the plugin's queue for a chat here: what still waits shows above the composer, and a turn
+ * the plugin started is followed live like one sent from this device. One that already finished is
+ * left to the transcript.
+ */
+async function syncQueue(conversationId: string) {
+  const host = await hostOf(conversationId)
+  if (!host || !(await hostQueue(host.config))) return
+  const { items, sent } = await getQueue(host.config, host.conversation.hermesSessionId)
+  const local = await getMessages(conversationId)
+  const byId = new Map(local.map((m) => [m.id, m]))
+  const waiting = new Set(items.map((item) => item.id))
+  const startedIds = new Set(sent.map((item) => item.id))
+  let finished = false
+  const follow: Message[] = []
+  await db.transaction("rw", db.messages, async () => {
+    for (const m of local) {
+      if (m.hostQueued && m.status === "queued" && !waiting.has(m.id) && !startedIds.has(m.id))
+        await db.messages.delete(m.id)
+    }
+    for (const item of items) {
+      const mine = byId.get(item.id)
+      await db.messages.put({
+        id: item.id,
+        conversationId,
+        role: "user",
+        content: item.text,
+        attachments: mine?.attachments ?? attachmentsOf(item),
+        status: "queued",
+        statusText: item.error,
+        createdAt: mine?.createdAt ?? item.createdAt,
+        hostQueued: true,
+      })
+    }
+    for (const item of sent) {
+      const mine = byId.get(item.id)
+      if (mine && mine.status !== "queued") continue
+      const running = ACTIVE_RUN.has(item.runStatus ?? "")
+      const inThread = local.some(
+        (m) =>
+          m.runId === item.runId ||
+          (m.status === "done" &&
+            m.role === "user" &&
+            m.content === item.text &&
+            m.createdAt >= item.createdAt - CLOCK_SLACK_MS),
+      )
+      if (inThread) continue
+      if (running && item.runId) {
+        if (controllers.has(conversationId)) continue
+        const now = Date.now()
+        await db.messages.put({
+          id: item.id,
+          conversationId,
+          role: "user",
+          content: item.text,
+          attachments: mine?.attachments ?? attachmentsOf(item),
+          status: "done",
+          createdAt: now,
+        })
+        const reply: Message = {
+          id: randomId(),
+          conversationId,
+          role: "assistant",
+          content: "",
+          tools: [],
+          status: "streaming",
+          runId: item.runId,
+          createdAt: now + 1,
+        }
+        await db.messages.add(reply)
+        follow.push(reply)
+      } else if (!running) {
+        // The transcript has it now.
+        if (mine) await db.messages.delete(mine.id)
+        finished = true
+      }
+    }
+  })
+  if (follow.length) await updateConversation(conversationId, { updatedAt: Date.now() })
+  for (const reply of follow) void resumeReply(reply)
+  if (finished) void reconcileHistory(conversationId)
+}
+
+const syncingQueue = new Map<string, Promise<void>>()
+
+export function refreshQueue(conversationId: string) {
+  let pending = syncingQueue.get(conversationId)
+  if (!pending) {
+    pending = syncQueue(conversationId)
+      .catch(() => undefined)
+      .finally(() => syncingQueue.delete(conversationId))
+    syncingQueue.set(conversationId, pending)
+  }
+  return pending
+}
+
+/** The plugin starts the next turn within a second or so of the last one ending. */
+const HOST_QUEUE_CHECKS_MS = [400, 1500, 4000]
+
+function followHostQueue(conversationId: string) {
+  for (const ms of HOST_QUEUE_CHECKS_MS) setTimeout(() => void refreshQueue(conversationId), ms)
+}
+
+/** The first message this device holds; the plugin sends its own. */
 export async function sendNextQueued(conversationId: string) {
-  const next = (await getMessages(conversationId)).find((m) => m.status === "queued")
+  const next = (await getMessages(conversationId)).find(
+    (m) => m.status === "queued" && !m.hostQueued,
+  )
   if (next) await sendQueued(next)
 }
 
 /** Sends a queued message now; one whose attachments couldn't be saved stays queued. */
 export async function sendQueued(message: Message) {
+  if (message.hostQueued) {
+    const host = await hostOf(message.conversationId)
+    if (!host) return
+    await queueAction(host.config, host.conversation.hermesSessionId, message.id, "send")
+    await refreshQueue(message.conversationId)
+    followHostQueue(message.conversationId)
+    return
+  }
   try {
     await sendMessage(message.conversationId, message.content, {
       queuedId: message.id,
@@ -892,8 +1107,18 @@ export async function sendQueued(message: Message) {
   }
 }
 
-export async function removeQueued(id: string) {
-  await db.messages.delete(id)
+export async function removeQueued(message: Message) {
+  if (message.hostQueued) {
+    const host = await hostOf(message.conversationId)
+    try {
+      if (host)
+        await queueAction(host.config, host.conversation.hermesSessionId, message.id, "remove")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't remove the message.")
+      return
+    }
+  }
+  await db.messages.delete(message.id)
 }
 
 /**
@@ -902,11 +1127,24 @@ export async function removeQueued(id: string) {
  */
 export async function steerQueued(message: Message) {
   const turn = turns.get(message.conversationId)
-  const runId = turn?.draft.runId
-  if (!turn || !runId || message.attachments?.length)
-    throw new HermesError("This reply can't be steered.")
-  await steerRun(turn.config, runId, message.content)
+  let runId = turn?.draft.runId
+  if (message.hostQueued) {
+    const host = await hostOf(message.conversationId)
+    if (!host) throw new HermesError("This reply can't be steered.")
+    const steered = await queueAction(
+      host.config,
+      host.conversation.hermesSessionId,
+      message.id,
+      "steer",
+    )
+    if (typeof steered.run_id === "string") runId = steered.run_id
+  } else {
+    if (!turn || !runId || message.attachments?.length)
+      throw new HermesError("This reply can't be steered.")
+    await steerRun(turn.config, runId, message.content)
+  }
   await db.messages.delete(message.id)
+  if (!turn || turn.draft.runId !== runId) return
   const { draft, touch } = turn
   draft.steers = [
     ...(draft.steers ?? []),
