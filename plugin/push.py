@@ -1,4 +1,4 @@
-"""Web Push: tells a device that a session is waiting on the user while the app is closed.
+"""Web Push: tells a device that a session is waiting on the user, or has news, while the app is closed.
 
 The app hands each device's push subscription to the plugin, together with a VAPID key it made for
 that device (one browser subscription is tied to one key, so a device can't have a key per bot).
@@ -46,12 +46,25 @@ logger = logging.getLogger(__name__)
 # A message waits this long at the push service for an offline device.
 TTL_SECONDS = 600
 SEND_TIMEOUT = 10
+RELAY_TRIES = 4
+RELAY_RETRY_SECONDS = 1.1
 # One notification per kind and session in this window.
 THROTTLE_SECONDS = 5
 # The push services accept 4096 bytes; ours are far smaller.
 RECORD_SIZE = 4096
 MAX_SUBSCRIPTIONS = 20
-KINDS = ("approval", "question", "plan")
+# What a push is about. The first three wait on the user; the rest are news. The registry
+# (`app/netlify/lib/fcm.ts`) and the app (`app/src/lib/push-kinds.ts`) keep the same list.
+LEGACY_KINDS = ("approval", "question", "plan")
+KINDS = LEGACY_KINDS + (
+    "theseus",
+    "run_done",
+    "run_failed",
+    "pr_checks",
+    "pr_merged",
+    "clone_failed",
+    "routine_failed",
+)
 
 _lock = threading.Lock()
 _last: Dict[Tuple[str, str, str], float] = {}
@@ -134,6 +147,23 @@ def _public_endpoint(endpoint: str) -> bool:
     return address.is_global
 
 
+def clean_kinds(value: Any) -> Optional[List[str]]:
+    """The kinds a device asked for, without any this plugin doesn't know. None means it didn't say,
+    which an older app doesn't."""
+    if not isinstance(value, list):
+        return None
+    return [kind for kind in KINDS if kind in value]
+
+
+def wants(row: Dict[str, Any], kind: str) -> bool:
+    """Whether a subscription asked for this kind of push."""
+    try:
+        kinds = json.loads(row["kinds"]) if row.get("kinds") else None
+    except ValueError:
+        kinds = None
+    return kind in (kinds if isinstance(kinds, list) else LEGACY_KINDS)
+
+
 def subscribe(path: Path, body: Dict[str, Any]) -> None:
     """Keeps a device's subscription. Raises ``PushError`` with a message for the app."""
     sub = body.get("subscription")
@@ -153,17 +183,28 @@ def subscribe(path: Path, body: Dict[str, Any]) -> None:
         vapid_headers(endpoint, vapid_key, subject)
     except Exception as exc:
         raise PushError("Not a usable subscription.") from exc
+    kinds = clean_kinds(body.get("kinds"))
     conn = connect(path)
     try:
         conn.execute("BEGIN IMMEDIATE")
         # A device has one subscription: a new one replaces the old.
         conn.execute("DELETE FROM push_subscriptions WHERE device = ? AND endpoint != ?", (device, endpoint))
         conn.execute(
-            """INSERT INTO push_subscriptions (endpoint, device, p256dh, auth, vapid_key, subject, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)
+            """INSERT INTO push_subscriptions (endpoint, device, p256dh, auth, vapid_key, subject, created_at, kinds)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(endpoint) DO UPDATE SET device = excluded.device, p256dh = excluded.p256dh,
-                 auth = excluded.auth, vapid_key = excluded.vapid_key, subject = excluded.subject""",
-            (endpoint, device, p256dh, auth, vapid_key, subject, int(time.time() * 1000)),
+                 auth = excluded.auth, vapid_key = excluded.vapid_key, subject = excluded.subject,
+                 kinds = excluded.kinds""",
+            (
+                endpoint,
+                device,
+                p256dh,
+                auth,
+                vapid_key,
+                subject,
+                int(time.time() * 1000),
+                json.dumps(kinds) if kinds is not None else None,
+            ),
         )
         count = conn.execute("SELECT COUNT(*) FROM push_subscriptions").fetchone()[0]
         if count > MAX_SUBSCRIPTIONS:
@@ -191,7 +232,7 @@ def _rows(path: Path) -> List[Dict[str, Any]]:
     conn = connect(path)
     try:
         cursor = conn.execute(
-            "SELECT endpoint, device, p256dh, auth, vapid_key, subject FROM push_subscriptions"
+            "SELECT endpoint, device, p256dh, auth, vapid_key, subject, kinds FROM push_subscriptions"
         )
         names = [c[0] for c in cursor.description]
         return [dict(zip(names, row)) for row in cursor.fetchall()]
@@ -259,20 +300,32 @@ def _relay(path: Path, kind: str, session_id: str) -> None:
     state = link.load_state(home)
     if not state.get("token") or state.get("revoked") or not state.get("site"):
         return
-    try:
-        answer = link.call(
-            state["site"],
-            "POST",
-            "push",
-            token=state["token"],
-            body={"kind": kind, "session_id": session_id, "skip": _on_screen_devices(path)[:50]},
-        )
-    except link.LinkError as error:
-        # 503: the site has no Firebase key. 429: asked again too soon. Neither is worth a retry.
-        logger.warning("memento: the registry wouldn't push (%s)", error)
-        return
+    answer = None
+    for attempt in range(RELAY_TRIES):
+        try:
+            answer = link.call(
+                state["site"],
+                "POST",
+                "push",
+                token=state["token"],
+                body={"kind": kind, "session_id": session_id, "skip": _on_screen_devices(path)[:50]},
+            )
+            break
+        except link.LinkError as error:
+            if error.status == 429 and attempt + 1 < RELAY_TRIES:
+                # The registry takes one push a second from a host, and news can come in bunches.
+                time.sleep(RELAY_RETRY_SECONDS)
+                continue
+            # 503: the site has no Firebase key. Not worth a retry.
+            logger.warning("memento: the registry wouldn't push (%s)", error)
+            return
     if isinstance(answer, dict) and not answer.get("sent") and answer.get("failed"):
         logger.warning("memento: the registry couldn't deliver the push (%s)", answer)
+
+
+def reachable(path: Path) -> bool:
+    """Whether any device could be told: a browser subscription, or a link to the registry."""
+    return bool(_rows(path)) or _linked(path)
 
 
 def _linked(path: Path) -> bool:
@@ -282,10 +335,10 @@ def _linked(path: Path) -> bool:
 
 def _deliver(path: Path, kind: str, session_id: str) -> None:
     # At most 32 characters of base64url, and distinct per session however long its id is.
-    topic = _b64(hashlib.sha256(session_id.encode()).digest()[:18])
+    topic = _b64(hashlib.sha256(f"{kind}:{session_id}".encode()).digest()[:18])
     payload = {"kind": kind, "session_id": session_id}
     for row in _rows(path):
-        if _on_screen(path, row["device"]):
+        if _on_screen(path, row["device"]) or not wants(row, kind):
             continue
         status = send(row, payload, topic)
         if status in (404, 410):
@@ -296,8 +349,35 @@ def _deliver(path: Path, kind: str, session_id: str) -> None:
     _relay(path, kind, session_id)
 
 
+SEEN_KEEP_MS = 30 * 24 * 3600 * 1000
+
+
+def once(path: Path, key: str) -> bool:
+    """True the first time a key is seen (and remembers it), so a thing that can show up again on
+    every pass, like a failed routine run, is pushed once."""
+    now = int(time.time() * 1000)
+    conn = connect(path)
+    try:
+        conn.execute("DELETE FROM push_seen WHERE at < ?", (now - SEEN_KEEP_MS,))
+        cursor = conn.execute("INSERT OR IGNORE INTO push_seen (key, at) VALUES (?, ?)", (key, now))
+        return cursor.rowcount == 1
+    finally:
+        conn.close()
+
+
+def clear(path: Path, key: str) -> None:
+    """Forgets a key, so the next time it comes up it is pushed again."""
+    conn = connect(path)
+    try:
+        conn.execute("DELETE FROM push_seen WHERE key = ?", (key,))
+    finally:
+        conn.close()
+
+
 def notify(kind: str, session_id: Optional[str], path: Optional[Path] = None) -> None:
-    """A session started waiting on the user. Never raises: it runs inside Hermes's hooks."""
+    """Something a device should hear about. ``session_id`` is the session it is about, or for the
+    kinds that aren't about one the routine's job id (``routine_failed``) or the project's id
+    (``clone_failed``); it only picks what a tap opens. Never raises: it runs inside Hermes's hooks."""
     try:
         if kind not in KINDS or not session_id:
             return
@@ -314,7 +394,7 @@ def notify(kind: str, session_id: Optional[str], path: Optional[Path] = None) ->
             _last[key] = now
             if len(_last) > 512:
                 _last.clear()
-        if not _rows(path) and not _linked(path):
+        if not reachable(path):
             return
         threading.Thread(
             target=_run, args=(path, kind, session_id), name="memento-push", daemon=True

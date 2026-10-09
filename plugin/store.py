@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -141,6 +141,17 @@ def connect(path: Path) -> sqlite3.Connection:
                    profile TEXT,
                    body TEXT,
                    resumed_at INTEGER NOT NULL DEFAULT 0
+               )"""
+        )
+        # v13: the kinds of push a subscription wants (JSON; null is the three that needed the user
+        # before there were more), and what has already been pushed about a thing that can repeat.
+        subscription_columns = {row[1] for row in conn.execute("PRAGMA table_info(push_subscriptions)")}
+        if "kinds" not in subscription_columns:
+            conn.execute("ALTER TABLE push_subscriptions ADD COLUMN kinds TEXT")
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS push_seen (
+                   key TEXT PRIMARY KEY,
+                   at INTEGER NOT NULL
                )"""
         )
         # v4: a session has a worktree in every repo of its project. v5: its newest plan file. v10: its

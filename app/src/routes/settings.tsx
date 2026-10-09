@@ -7,7 +7,15 @@ import {
   BotIcon,
   BellIcon,
   BellRingIcon,
+  CalendarXIcon,
   CheckIcon,
+  CircleAlertIcon,
+  CircleCheckIcon,
+  FolderXIcon,
+  GitMergeIcon,
+  GitPullRequestIcon,
+  MessageCircleQuestionIcon,
+  SlidersHorizontalIcon,
   TerminalIcon,
   ChevronRightIcon,
   CornerDownRightIcon,
@@ -58,7 +66,16 @@ import { useLiveStatus, type LiveStatus } from "@/lib/live"
 import { useLarge } from "@/lib/media"
 import { isNative, setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
-import { disablePush, enablePush, pushAvailable, sendTestPush, usePush } from "@/lib/push"
+import {
+  disablePush,
+  enablePush,
+  pushAvailable,
+  sendTestPush,
+  setPushCategory,
+  usePush,
+  usePushCategories,
+} from "@/lib/push"
+import type { PushCategory } from "@/lib/push-kinds"
 import { forgetLocalKey, useSyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
 import { APP_VERSION, pluginOutdated } from "@/lib/version"
@@ -73,6 +90,7 @@ const SECTIONS: Record<string, { title: string; render: () => ReactNode }> = {
   account: { title: "Account", render: () => <AccountSettings /> },
   bots: { title: "Bots", render: () => <BotSettings /> },
   appearance: { title: "Appearance", render: () => <AppearanceSettings /> },
+  notifications: { title: "Notification types", render: () => <NotificationTypes /> },
   data: { title: "Local data", render: () => <DataSettings /> },
   developer: { title: "Developer", render: () => <DeveloperSettings /> },
 }
@@ -173,6 +191,7 @@ function MenuScreen({ className }: { className?: string }) {
           subtitle={THEMES.find((t) => t.value === (theme ?? "system"))?.label}
         />
         <NotificationsRow />
+        <NotificationTypesRow />
       </Group>
       <Group>
         <FeedbackRow />
@@ -226,6 +245,50 @@ function NotificationsRow() {
       disabled={busy}
       onCheckedChange={toggle}
     />
+  )
+}
+
+function NotificationTypesRow() {
+  const { on } = usePush()
+  if (!pushAvailable() || !on) return null
+  return <Row to="notifications" icon={SlidersHorizontalIcon} title="Notification types" />
+}
+
+const CATEGORY_ICONS: Record<PushCategory, LucideIcon> = {
+  sessions: MessageCircleQuestionIcon,
+  theseus: SailboatIcon,
+  run_failed: CircleAlertIcon,
+  run_done: CircleCheckIcon,
+  pr_checks: GitPullRequestIcon,
+  pr_merged: GitMergeIcon,
+  clone_failed: FolderXIcon,
+  routine_failed: CalendarXIcon,
+}
+
+/** Which kinds of push this device gets; each is a channel of its own in Android's settings too. */
+function NotificationTypes() {
+  const categories = usePushCategories()
+  const change = (id: PushCategory, checked: boolean) =>
+    void setPushCategory(id, checked).catch((error) =>
+      toast.error(
+        error instanceof Error && error.message
+          ? `Couldn't change that. ${error.message}`
+          : "Couldn't change that",
+      ),
+    )
+  return (
+    <Group>
+      {categories.map((category) => (
+        <SwitchRow
+          key={category.id}
+          id={`push-${category.id}`}
+          icon={CATEGORY_ICONS[category.id]}
+          title={category.title}
+          checked={category.checked}
+          onCheckedChange={(checked) => change(category.id, checked)}
+        />
+      ))}
+    </Group>
   )
 }
 

@@ -3,7 +3,8 @@
 Every few minutes the plugin looks up the pull requests of the open project sessions in its chat
 list. When every repo's newest one is settled and at least one was merged, it sets the chat's
 ``resolvedAt`` with a newer change clock, so every device picks it up on its next sync. A merged
-pull request resolves its session once: a session the user reopens stays open until another merges.
+pull request resolves its session once: a session the user reopens stays open until another merges, and
+says so with a push.
 """
 
 from __future__ import annotations
@@ -12,9 +13,9 @@ import asyncio
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, Iterator, Optional, Set, Tuple
 
-from . import chats, github, sessions
+from . import chats, github, push, sessions
 from .store import connect, db_path
 
 logger = logging.getLogger(__name__)
@@ -46,14 +47,12 @@ def _mark(path: Path, session_id: str, merged: Iterable[Tuple[str, int]]) -> Non
         conn.close()
 
 
-def check(hermes_home: Path, only: Optional[Set[str]] = None, now: Optional[int] = None) -> int:
-    """One pass over the open project sessions (or the Hermes session ids in ``only``). Returns how
-    many it resolved."""
-    now = int(time.time() * 1000) if now is None else now
-    path = db_path(hermes_home)
-    if not path.exists():
-        return 0
-    resolved: Dict[str, Dict[str, Any]] = {}
+def open_sessions(
+    path: Path, hermes_home: Path, now: int, only: Optional[Set[str]] = None, window: int = ACTIVE_MS
+) -> Iterator[Tuple[str, Dict[str, Any], Dict[str, Any], str, Dict[str, Any]]]:
+    """The open project sessions in the chat list that have a workspace, as ``(chat id, entry, value,
+    Hermes session id, workspace record)``. Sessions untouched for ``window`` are left out, unless
+    ``only`` names the ones to look at."""
     for chat_id, entry in chats.read(path).items():
         value = entry.get("value")
         if entry.get("deleted") or not isinstance(value, dict) or not value.get("projectId"):
@@ -64,11 +63,22 @@ def check(hermes_home: Path, only: Optional[Set[str]] = None, now: Optional[int]
         if not isinstance(session_id, str) or (only is not None and session_id not in only):
             continue
         updated = value.get("updatedAt")
-        if only is None and isinstance(updated, (int, float)) and now - updated > ACTIVE_MS:
+        if only is None and isinstance(updated, (int, float)) and now - updated > window:
             continue
         record = sessions.record_for(path, hermes_home, session_id)
-        if not record:
-            continue
+        if record:
+            yield chat_id, entry, value, session_id, record
+
+
+def check(hermes_home: Path, only: Optional[Set[str]] = None, now: Optional[int] = None) -> int:
+    """One pass over the open project sessions (or the Hermes session ids in ``only``). Returns how
+    many it resolved."""
+    now = int(time.time() * 1000) if now is None else now
+    path = db_path(hermes_home)
+    if not path.exists():
+        return 0
+    resolved: Dict[str, Dict[str, Any]] = {}
+    for chat_id, entry, value, session_id, record in open_sessions(path, hermes_home, now, only):
         prs = [
             github.pull_request(hermes_home, repo["repo_root"], repo["branch"], checks=False)
             for repo in record["repos"]
@@ -83,6 +93,7 @@ def check(hermes_home: Path, only: Optional[Set[str]] = None, now: Optional[int]
             continue
         _mark(path, session_id, new)
         resolved[chat_id] = {"at": max(now, entry["at"] + 1), "value": {**value, "resolvedAt": now}}
+        push.notify("pr_merged", session_id, path)
     if resolved:
         chats.merge(path, resolved)
     return len(resolved)

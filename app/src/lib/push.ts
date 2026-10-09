@@ -15,6 +15,13 @@ import { registerPush, unregisterPush } from "@/lib/hermes"
 import { connectionKey, reconnectLive } from "@/lib/live"
 import { isNative } from "@/lib/native"
 import { callFunction, failure, functionUrl } from "@/lib/account"
+import {
+  PUSH_CATEGORIES,
+  categoryOn,
+  pushPath,
+  wantedKinds,
+  type PushCategory,
+} from "@/lib/push-kinds"
 
 /**
  * Web Push, so a session that needs the user reaches an installed PWA while it's closed. The
@@ -129,6 +136,7 @@ export async function syncPush() {
         subscription: json,
         vapid_key: identity.vapidKey,
         subject,
+        kinds: wantedKinds((await getSettings()).pushKinds),
       })
       given.add(id)
     } catch {
@@ -259,20 +267,40 @@ function step<T>(what: string, promise: Promise<T>, ms = 15_000): Promise<T> {
 }
 
 async function sendToken(device: string, token: string) {
+  const kinds = wantedKinds((await getSettings()).pushKinds)
   const response = await callFunction(
     "POST",
     functionUrl("registry", { route: "devices", id: device }),
-    { token },
+    { token, kinds },
   )
   if (!response.ok) throw await failure(response)
   registeredToken = token
+  sentKinds = kinds.join()
 }
 
-const openers = new Set<(sessionId: string) => void>()
+/** The kinds the registry last heard for this device, so only a change is sent again. */
+let sentKinds: string | undefined
+
+/** Tells the registry which kinds this phone wants. An older app's registration has none. */
+async function syncKinds() {
+  const { fcm, pushKinds } = await getSettings()
+  if (!fcm?.on || !registeredToken) return
+  const kinds = wantedKinds(pushKinds)
+  if (kinds.join() === sentKinds) return
+  const response = await callFunction(
+    "PATCH",
+    functionUrl("registry", { route: "devices", id: fcm.device }),
+    { kinds },
+  )
+  if (!response.ok) throw await failure(response)
+  sentKinds = kinds.join()
+}
+
+const openers = new Set<(path: string) => void>()
 let pendingOpen: string | undefined
 
-/** Calls back when a notification is tapped, now if one was tapped while the app was starting. */
-export function onOpenSession(callback: (sessionId: string) => void) {
+/** Calls back with where a tapped notification goes, now if one was tapped while the app was starting. */
+export function onOpenPush(callback: (path: string) => void) {
   openers.add(callback)
   if (pendingOpen) {
     callback(pendingOpen)
@@ -297,18 +325,17 @@ async function listen(push: Push) {
     pendingToken?.reject(new Error(`Firebase: ${error || "registration failed"}`))
   })
   await push.addListener("pushNotificationActionPerformed", ({ notification }) => {
-    const id = notification.data?.session_id
-    if (typeof id !== "string" || !id) return
-    if (openers.size) openers.forEach((open) => open(id))
-    else pendingOpen = id
+    const path = pushPath(notification.data?.kind, notification.data?.session_id)
+    if (!path) return
+    if (openers.size) openers.forEach((open) => open(path))
+    else pendingOpen = path
   })
-  await push
-    .createChannel({
-      id: "sessions",
-      name: "Sessions that need you",
-      importance: 4,
-    })
-    .catch(() => {})
+  // One channel per category: Android lets the user turn each off in its own settings too.
+  for (const category of PUSH_CATEGORIES) {
+    await push
+      .createChannel({ id: category.id, name: category.title, importance: category.importance })
+      .catch(() => {})
+  }
 }
 
 async function enableNative(): Promise<PushPermission> {
@@ -352,6 +379,7 @@ async function disableNative() {
   if (!fcm) return
   await saveSettings({ fcm: { ...fcm, on: false } })
   registeredToken = undefined
+  sentKinds = undefined
   try {
     await callFunction("DELETE", functionUrl("registry", { route: "devices", id: fcm.device }))
     await (await plugin()).push.unregister()
@@ -374,6 +402,8 @@ function startNative() {
     if ((await push.checkPermissions()).receive !== "granted") return
     await listen(push)
     await guarded(fcm.device, () => push.register())
+    // The registration event brings the token; an install from before kinds says them now.
+    setTimeout(() => void syncKinds().catch(() => {}), 3000)
   }
   void sync().catch(() => {})
   void App.addListener("resume", () => void sync().catch(() => {}))
@@ -388,6 +418,24 @@ export async function sendTestPush() {
     functionUrl("registry", { route: "push-test", id: fcm.device }),
   )
   if (!response.ok) throw await failure(response)
+}
+
+/** Turns one category of push on or off on this device, and tells whoever sends them. */
+export async function setPushCategory(category: PushCategory, on: boolean) {
+  const { pushKinds } = await getSettings()
+  await saveSettings({ pushKinds: { ...pushKinds, [category]: on } })
+  if (isNative) await syncKinds()
+  else {
+    // Every bot's plugin keeps what this device asked for with its subscription.
+    given.clear()
+    await syncPush()
+  }
+}
+
+/** Each category's switch state on this device. */
+export function usePushCategories() {
+  const prefs = useLiveQuery(async () => (await getSettings()).pushKinds, [])
+  return PUSH_CATEGORIES.map((category) => ({ ...category, checked: categoryOn(category, prefs) }))
 }
 
 function useNativePermission(): PushPermission {

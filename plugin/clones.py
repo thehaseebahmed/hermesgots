@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import events, github, projects
+from . import events, github, projects, push
 from .store import connect, db_path
 
 logger = logging.getLogger(__name__)
@@ -204,6 +204,7 @@ def _fail(hermes_home: Path, slug: str, message: str) -> None:
     for entry in clone["repos"]:
         entry["status"] = "failed" if entry["status"] == "cloning" else "queued"
     _update(hermes_home, slug, status="failed", error=message, repos=clone["repos"])
+    push.notify("clone_failed", slug, db_path(hermes_home))
 
 
 def run(hermes_home: Path, slug: str) -> None:

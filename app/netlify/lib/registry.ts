@@ -5,7 +5,7 @@
  * and times; chats never pass through here.
  */
 
-import type { FcmSender, PushKind } from "./fcm.ts"
+import { LEGACY_KINDS, PUSH_KINDS, type FcmSender, type PushKind } from "./fcm.ts"
 
 export interface RegistryStore {
   getWithMetadata(
@@ -60,6 +60,8 @@ export interface BotRecord {
 /** An Android install that wants pushes, as its app registered it. */
 interface Device {
   token: string
+  /** The kinds of push it wants; absent for an app from before there were more than three. */
+  kinds?: string[]
   updatedAt: number
 }
 
@@ -79,7 +81,6 @@ const MAX_DEVICES = 10
 const PUSH_GAP_MS = 1000
 /** A person tapping a test button. */
 const TEST_GAP_MS = 3000
-const PUSH_KINDS: readonly string[] = ["approval", "question", "plan"]
 const DEVICE_TOKEN = /^\S{20,4096}$/
 
 const CODE_ID = /^[0-9A-HJKMNP-TV-Z]{8}$/
@@ -88,6 +89,12 @@ const HASH = /^[0-9a-f]{64}$/
 const ID = /^[A-Za-z0-9_-]{1,64}$/
 const KEY_ID = /^[0-9a-f]{16}$/
 const B64 = /^[A-Za-z0-9+/]+={0,2}$/
+
+/** The kinds a device asked for, as a list of the ones this site sends; null if it isn't a list. */
+function cleanKinds(value: unknown): PushKind[] | null {
+  if (!Array.isArray(value)) return null
+  return PUSH_KINDS.filter((kind) => value.includes(kind))
+}
 
 function json(body: unknown, status = 200) {
   return Response.json(body, { status, headers: { "Cache-Control": "no-store" } })
@@ -307,7 +314,9 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
       const input = await body(req)
       const kind = input?.kind
       const sessionId = input?.session_id
-      if (typeof kind !== "string" || !PUSH_KINDS.includes(kind)) return error("Invalid kind", 400)
+      if (typeof kind !== "string" || !(PUSH_KINDS as readonly string[]).includes(kind)) {
+        return error("Invalid kind", 400)
+      }
       if (typeof sessionId !== "string" || !sessionId || sessionId.length > 200) {
         return error("Invalid session", 400)
       }
@@ -323,6 +332,7 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
       let sent = 0
       let failed = 0
       let skipped = 0
+      let muted = 0
       for (const { key } of (await store.list({ prefix: `users/${userId}/devices/` })).blobs) {
         const deviceId = key.slice(key.lastIndexOf("/") + 1)
         if (skip.has(deviceId)) {
@@ -331,6 +341,10 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
         }
         const device = await read<Device>(store, key)
         if (!device) continue
+        if (!(device.data.kinds ?? LEGACY_KINDS).includes(kind)) {
+          muted++
+          continue
+        }
         const result = await ctx.fcm.send(device.data.token, kind as PushKind, sessionId)
         if (result === "ok") sent++
         else {
@@ -338,7 +352,7 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
           if (result === "gone") await store.delete(key)
         }
       }
-      return json({ sent, failed, skipped })
+      return json({ sent, failed, skipped, muted })
     }
 
     if (op === "DELETE host") {
@@ -424,7 +438,28 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
     if (!known.includes(`${prefix}${id}`) && known.length >= MAX_DEVICES) {
       return error("Too many devices", 409)
     }
-    await store.setJSON(`${prefix}${id}`, { token, updatedAt: now } satisfies Device)
+    const kinds = cleanKinds(input?.kinds)
+    if (input?.kinds !== undefined && !kinds) return error("Invalid kinds", 400)
+    // A token that rotates keeps what the device asked for.
+    const previous = await read<Device>(store, `${prefix}${id}`)
+    const keep = kinds ?? previous?.data.kinds
+    await store.setJSON(`${prefix}${id}`, {
+      token,
+      ...(keep ? { kinds: keep } : {}),
+      updatedAt: now,
+    } satisfies Device)
+    return json({ ok: true })
+  }
+
+  if (op === "PATCH devices") {
+    const input = await body(req)
+    if (!ID.test(id)) return error("Invalid device id", 400)
+    const kinds = cleanKinds(input?.kinds)
+    if (!kinds) return error("Invalid kinds", 400)
+    const key = `users/${userId}/devices/${id}`
+    const device = await read<Device>(store, key)
+    if (!device) return error("This device isn't registered for push", 404)
+    await store.setJSON(key, { ...device.data, kinds, updatedAt: now } satisfies Device)
     return json({ ok: true })
   }
 

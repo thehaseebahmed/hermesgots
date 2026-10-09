@@ -725,6 +725,8 @@ export interface PushRegistration {
   subscription: PushSubscriptionJSON
   vapid_key: string
   subject: string
+  /** The kinds of push this device wants (see `push-kinds.ts`). */
+  kinds: string[]
 }
 
 export async function registerPush(config: HermesConfig, registration: PushRegistration) {

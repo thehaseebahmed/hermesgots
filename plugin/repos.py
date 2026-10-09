@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import events, github
+from . import events, github, push
 from .store import connect, db_path
 
 logger = logging.getLogger(__name__)
@@ -77,6 +77,8 @@ def _set(hermes_home: Path, project_id: str, repo: str, status: str, error: Opti
     finally:
         conn.close()
     events.note("projects", None, db_path(hermes_home), True)
+    if status == "failed":
+        push.notify("clone_failed", project_id, db_path(hermes_home))
 
 
 def _drop(hermes_home: Path, project_id: str, repo: Optional[str] = None) -> None:

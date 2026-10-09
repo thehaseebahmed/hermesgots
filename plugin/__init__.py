@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from . import (
+    alerts,
     attachments,
     chats,
     clarify,
@@ -165,6 +166,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             asyncio.ensure_future(merges.run(home)),
             # Queued messages start their turn once the session's run is over; see outbox.py.
             asyncio.ensure_future(outbox.run(adapter, home)),
+            asyncio.ensure_future(alerts.run(home)),
         ]
         yield
         for task in tasks:
@@ -1110,6 +1112,8 @@ def register(ctx) -> None:
         register_hook("post_llm_call", sessions.after_llm)
         register_hook("on_session_end", sessions.after_run)
         # After the hooks above, so a turn's plan is pending by the time its end is announced.
+        register_hook("pre_llm_call", alerts.turn_started)
+        register_hook("on_session_end", alerts.turn_finished)
         register_hook("pre_llm_call", events.on_turn_start)
         register_hook("post_api_request", events.on_model_call)
         register_hook("pre_tool_call", events.on_tool)
