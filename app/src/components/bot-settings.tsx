@@ -254,8 +254,8 @@ function RemoveBot({ profile, onDeleted }: { profile: Profile; onDeleted?: () =>
 }
 
 /**
- * A bot's settings. A linked bot's address and key come from its host; a bot added by hand before
- * linking keeps its own.
+ * A bot's settings. A linked bot's address and key come from its host and aren't shown; a bot
+ * added by hand before linking keeps its own.
  */
 export function BotEditor({
   profile,
@@ -360,12 +360,7 @@ export function BotEditor({
         </div>
       </Field>
 
-      {linked ? (
-        <Field>
-          <FieldLabel htmlFor="base-url">Address</FieldLabel>
-          <Input id="base-url" readOnly value={profile.baseUrl.replace(/\/v1\/?$/, "")} />
-        </Field>
-      ) : (
+      {!linked && (
         <>
           <Field>
             <FieldLabel htmlFor="base-url">API base URL</FieldLabel>
