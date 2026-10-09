@@ -236,6 +236,13 @@ export function MessageItem({
   )
   // The tool group right above already names the running call, so repeating it here is noise.
   const runningTool = tools.some((t) => t.status === "running")
+  // Like a person's "typing…", the dots show only while the model thinks or writes: not while a
+  // tool runs (hidden ones included) or the turn waits on the user.
+  const typing =
+    streaming &&
+    !awaitingApproval &&
+    !awaitingClarify &&
+    !message.tools?.some((t) => t.status === "running")
 
   // An answered approval and each steer split the reply so they sit where they happened: what
   // Hermes said and ran before, the card or the user's message, then what came after.
@@ -277,6 +284,13 @@ export function MessageItem({
   )
   // The avatar lines up with the bubble, which has the stats line under it only once the reply is done.
   const statsShown = showStats && !streaming && !revealing && Boolean(message.stats)
+  const statusShown =
+    streaming &&
+    !simple &&
+    Boolean(content) &&
+    Boolean(message.statusText) &&
+    !awaitingApproval &&
+    !awaitingClarify
   const footer = (
     <>
       {plain ? (
@@ -288,16 +302,11 @@ export function MessageItem({
         )
       ) : (
         <>
-          {streaming &&
-            !simple &&
-            content &&
-            message.statusText &&
-            !awaitingApproval &&
-            !awaitingClarify && (
-              <div className="px-1 text-xs text-muted-foreground">{message.statusText}</div>
-            )}
+          {statusShown && (
+            <div className="px-1 text-xs text-muted-foreground">{message.statusText}</div>
+          )}
           {/* Last, so the avatar stays level with it however much the turn has said or run. */}
-          {streaming && <TypingBubble />}
+          {typing && <TypingBubble />}
         </>
       )}
       {message.status === "error" &&
@@ -316,7 +325,7 @@ export function MessageItem({
   )
 
   const footerShown =
-    streaming ||
+    (plain ? streaming : typing || statusShown) ||
     message.status === "error" ||
     (message.status === "stopped" && !message.content) ||
     statsShown
