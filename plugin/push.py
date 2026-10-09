@@ -260,7 +260,7 @@ def _relay(path: Path, kind: str, session_id: str) -> None:
     if not state.get("token") or state.get("revoked") or not state.get("site"):
         return
     try:
-        link.call(
+        answer = link.call(
             state["site"],
             "POST",
             "push",
@@ -269,7 +269,10 @@ def _relay(path: Path, kind: str, session_id: str) -> None:
         )
     except link.LinkError as error:
         # 503: the site has no Firebase key. 429: asked again too soon. Neither is worth a retry.
-        logger.debug("memento: the registry wouldn't push (%s)", error)
+        logger.warning("memento: the registry wouldn't push (%s)", error)
+        return
+    if isinstance(answer, dict) and not answer.get("sent") and answer.get("failed"):
+        logger.warning("memento: the registry couldn't deliver the push (%s)", answer)
 
 
 def _linked(path: Path) -> bool:

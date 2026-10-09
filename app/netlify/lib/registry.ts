@@ -319,16 +319,24 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
       if (last && now - last.data.at < PUSH_GAP_MS) return error("Slow down", 429)
       await store.setJSON(gapKey, { at: now })
       let sent = 0
+      let failed = 0
+      let skipped = 0
       for (const { key } of (await store.list({ prefix: `users/${userId}/devices/` })).blobs) {
         const deviceId = key.slice(key.lastIndexOf("/") + 1)
-        if (skip.has(deviceId)) continue
+        if (skip.has(deviceId)) {
+          skipped++
+          continue
+        }
         const device = await read<Device>(store, key)
         if (!device) continue
         const result = await ctx.fcm.send(device.data.token, kind as PushKind, sessionId)
         if (result === "ok") sent++
-        else if (result === "gone") await store.delete(key)
+        else {
+          failed++
+          if (result === "gone") await store.delete(key)
+        }
       }
-      return json({ sent })
+      return json({ sent, failed, skipped })
     }
 
     if (op === "DELETE host") {
