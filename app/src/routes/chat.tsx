@@ -70,6 +70,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import {
   queueMessage,
+  refreshQueue,
   reattachRun,
   removeQueued,
   sendMessage,
@@ -111,6 +112,8 @@ import { AgentsContext, DELEGATE_TOOL, useSessionAgents } from "@/lib/agents"
 
 /** How often an open chat checks Hermes for turns sent from another device. */
 const CATCH_UP_MS = 30_000
+/** How often an open chat looks for a turn the plugin started from its queue. */
+const HOST_QUEUE_POLL_MS = 3000
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
@@ -243,6 +246,13 @@ export function ChatPage() {
     }
   }, [runId, baseUrl, apiKey])
   const steerable = Boolean(runId && steerRoute?.baseUrl === baseUrl && steerRoute?.ok)
+  // The plugin starts what it holds once nothing runs: follow it in as soon as it does.
+  const hostWaiting = !busy && queue.some((m) => m.hostQueued && !m.statusText)
+  useEffect(() => {
+    if (!id || !hostWaiting) return
+    const timer = window.setInterval(() => void refreshQueue(id), HOST_QUEUE_POLL_MS)
+    return () => window.clearInterval(timer)
+  }, [id, hostWaiting])
   const awaitingApproval = messages?.find((m) => m.approval && !m.approval.resolved)
   const awaitingClarify = messages?.find((m) => m.clarify && !m.clarify.resolved)
   const activity = streaming && describeActivity(streaming)
@@ -715,7 +725,7 @@ export function ChatPage() {
             canSteer={steerable}
             onSteer={steerQueued}
             onSendQueued={sendQueued}
-            onRemoveQueued={(message) => removeQueued(message.id)}
+            onRemoveQueued={removeQueued}
             filesAvailable={Boolean(profile?.apiKey)}
             imagesAvailable={profile?.imageInput !== false}
             onStop={() => id && stopMessage(id)}

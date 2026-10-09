@@ -277,6 +277,8 @@ export interface Message {
   /** The run behind a reply and its last event seen, so a dropped stream can pick up again. */
   runId?: string
   runSeq?: number
+  /** A queued message the Memento plugin holds, which starts it on the host when the run ends. */
+  hostQueued?: boolean
 }
 
 /** A local deletion sync hasn't pushed yet: `bot:<profileId>` or `chat:<conversationId>`. */
