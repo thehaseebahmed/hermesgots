@@ -77,6 +77,8 @@ const MAX_BYTES = 16 * 1024
 const MAX_DEVICES = 10
 /** A host may ask for one push a second; the plugin throttles harder, this bounds a misbehaving one. */
 const PUSH_GAP_MS = 1000
+/** A person tapping a test button. */
+const TEST_GAP_MS = 3000
 const PUSH_KINDS: readonly string[] = ["approval", "question", "plan"]
 const DEVICE_TOKEN = /^\S{20,4096}$/
 
@@ -424,6 +426,19 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
     }
     await store.setJSON(`${prefix}${id}`, { token, updatedAt: now } satisfies Device)
     return json({ ok: true })
+  }
+
+  if (op === "POST push-test") {
+    if (!ID.test(id)) return error("Invalid device id", 400)
+    if (!ctx.fcm) return error("Push isn't set up on this site", 503)
+    const device = await read<Device>(store, `users/${userId}/devices/${id}`)
+    if (!device) return error("This device isn't registered for push", 404)
+    const gapKey = `users/${userId}/tested`
+    const last = await read<{ at: number }>(store, gapKey)
+    if (last && now - last.data.at < TEST_GAP_MS) return error("Slow down", 429)
+    await store.setJSON(gapKey, { at: now })
+    const reason = await ctx.fcm.test(device.data.token)
+    return reason ? error(reason, 502) : json({ ok: true })
   }
 
   if (op === "DELETE devices") {

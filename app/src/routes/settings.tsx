@@ -6,6 +6,7 @@ import {
   ArrowLeftIcon,
   BotIcon,
   BellIcon,
+  BellRingIcon,
   CheckIcon,
   TerminalIcon,
   ChevronRightIcon,
@@ -54,7 +55,7 @@ import { useLiveStatus, type LiveStatus } from "@/lib/live"
 import { useLarge } from "@/lib/media"
 import { isNative, setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
-import { disablePush, enablePush, pushAvailable, usePush } from "@/lib/push"
+import { disablePush, enablePush, pushAvailable, sendTestPush, usePush } from "@/lib/push"
 import { forgetLocalKey, useSyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
 
@@ -277,6 +278,7 @@ function DeveloperSettings() {
           onCheckedChange={(checked) => saveSettings({ botThreads: checked })}
         />
       </Group>
+      {isNative && pushAvailable() && <TestPushRow />}
       <Group>
         {bots?.map((bot) => (
           <LiveRow key={bot.id} bot={bot} />
@@ -286,6 +288,37 @@ function DeveloperSettings() {
         Hide developer settings
       </Button>
     </>
+  )
+}
+
+function TestPushRow() {
+  const { on } = usePush()
+  const [busy, setBusy] = useState(false)
+  const send = async () => {
+    setBusy(true)
+    try {
+      await sendTestPush()
+      toast("Test notification sent")
+    } catch (error) {
+      toast.error(
+        error instanceof Error && error.message
+          ? `Couldn't send. ${error.message}`
+          : "Couldn't send the test notification",
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Group>
+      <button type="button" className={rowClass} disabled={!on || busy} onClick={send}>
+        <BellRingIcon className="size-5 shrink-0 text-muted-foreground" />
+        <RowText
+          title="Send test notification"
+          subtitle={on ? undefined : "Turn on Notifications"}
+        />
+      </button>
+    </Group>
   )
 }
 
