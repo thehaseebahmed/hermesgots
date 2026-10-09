@@ -6,8 +6,10 @@
  */
 
 /**
- * What a push is about. The plugin (`plugin/push.py`) and the app (`src/lib/push-kinds.ts`) keep the
- * same list. The first three wait on the user; the rest are news. `test` is the Developer button's.
+ * What a push is about, and what a device switches. The plugin (`plugin/push.py`) and the app
+ * (`src/lib/push-kinds.ts`) keep the same lists. The first three kinds wait on the user; the rest are
+ * news. A category is a kind within a feature: a session's kinds belong to Code when it is a project
+ * session, else to Chats. `test` is the Developer button's.
  */
 export const PUSH_KINDS = [
   "approval",
@@ -22,12 +24,37 @@ export const PUSH_KINDS = [
   "routine_failed",
 ] as const
 export type PushKind = (typeof PUSH_KINDS)[number] | "test"
-/** What a device that never said which kinds it wants gets: what pushed before there were more. */
-export const LEGACY_KINDS: readonly string[] = ["approval", "question", "plan"]
 export type SendResult = "ok" | "gone" | "error"
 
+export const PUSH_CATEGORIES = [
+  "chat_input",
+  "chat_run_failed",
+  "chat_run_done",
+  "code_input",
+  "code_theseus",
+  "code_run_failed",
+  "code_run_done",
+  "code_pr_checks",
+  "code_pr_merged",
+  "code_setup_failed",
+  "routine_failed",
+] as const
+export type PushCategory = (typeof PUSH_CATEGORIES)[number]
+/** What a device that never said which it wants gets: what pushed before there were more. */
+export const LEGACY_CATEGORIES: readonly string[] = ["chat_input", "code_input"]
+
+/** The category of a push from a plugin that predates them, which only sent the first three kinds. */
+export function categoryOf(kind: PushKind): PushCategory | "test" {
+  if (kind === "test") return "test"
+  if (kind === "approval" || kind === "question") return "chat_input"
+  if (kind === "plan") return "code_input"
+  if (kind === "clone_failed") return "code_setup_failed"
+  if (kind === "routine_failed") return "routine_failed"
+  return `code_${kind}`
+}
+
 export interface FcmSender {
-  send(token: string, kind: PushKind, sessionId: string): Promise<SendResult>
+  send(token: string, kind: PushKind, category: string, sessionId: string): Promise<SendResult>
   /** A test message to one device: null when Firebase took it, else Google's own reason. */
   test(token: string): Promise<string | null>
 }
@@ -50,25 +77,6 @@ const WORDS: Record<PushKind, string> = {
   clone_failed: "A project couldn't be set up",
   routine_failed: "A routine failed",
   test: "Test notification",
-}
-
-/**
- * The Android notification channel of each kind, which the app creates (`src/lib/push.ts`): a
- * channel is what the user turns off in Android's own settings. The three that wait on the user
- * share the one the app has always had.
- */
-const CHANNELS: Record<PushKind, string> = {
-  approval: "sessions",
-  question: "sessions",
-  plan: "sessions",
-  theseus: "theseus",
-  run_done: "run_done",
-  run_failed: "run_failed",
-  pr_checks: "pr_checks",
-  pr_merged: "pr_merged",
-  clone_failed: "clone_failed",
-  routine_failed: "routine_failed",
-  test: "sessions",
 }
 
 const SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
@@ -150,7 +158,7 @@ async function accessToken(account: ServiceAccount, cache: { token?: string; exp
   return cache.token
 }
 
-export function message(token: string, kind: PushKind, sessionId: string) {
+export function message(token: string, kind: PushKind, category: string, sessionId: string) {
   return {
     message: {
       token,
@@ -161,10 +169,12 @@ export function message(token: string, kind: PushKind, sessionId: string) {
       android: {
         priority: "HIGH",
         ttl: "600s",
-        // A newer message of the same channel about the same thing replaces one still showing.
+        // A newer message of the same category about the same thing replaces one still showing. The
+        // app makes a channel for each category (`src/lib/push.ts`), which Android's settings turn
+        // off one by one; the test has the one the app has always had.
         notification: {
-          tag: `${CHANNELS[kind]}:${sessionId}`.slice(0, 200),
-          channel_id: CHANNELS[kind],
+          tag: `${category}:${sessionId}`.slice(0, 200),
+          channel_id: kind === "test" ? "sessions" : category,
         },
       },
     },
@@ -180,6 +190,7 @@ export function createFcm(raw: string | undefined): FcmSender | null {
   async function deliver(
     token: string,
     kind: PushKind,
+    category: string,
     sessionId: string,
   ): Promise<{ result: SendResult; reason?: string }> {
     try {
@@ -191,7 +202,7 @@ export function createFcm(raw: string | undefined): FcmSender | null {
             Authorization: `Bearer ${await accessToken(account!, cache)}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify(message(token, kind, sessionId)),
+          body: JSON.stringify(message(token, kind, category, sessionId)),
         },
       )
       if (response.ok) return { result: "ok" }
@@ -222,11 +233,11 @@ export function createFcm(raw: string | undefined): FcmSender | null {
   }
 
   return {
-    async send(token, kind, sessionId) {
-      return (await deliver(token, kind, sessionId)).result
+    async send(token, kind, category, sessionId) {
+      return (await deliver(token, kind, category, sessionId)).result
     },
     async test(token) {
-      const { result, reason } = await deliver(token, "test", "")
+      const { result, reason } = await deliver(token, "test", "test", "")
       return result === "ok" ? null : (reason ?? "Push failed")
     },
   }

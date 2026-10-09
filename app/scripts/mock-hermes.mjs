@@ -1204,12 +1204,17 @@ http
     }
     // Web Push: the mock keeps subscriptions but sends nothing.
     if (PLUGIN && !profile && req.method === "POST" && url.pathname === "/api/plugins/memento/push") {
-      const { subscription, device, vapid_key, subject, kinds } = await readBody(req)
+      const { subscription, device, vapid_key, subject, categories } = await readBody(req)
       if (!subscription?.endpoint || !subscription.keys?.p256dh || !device || !vapid_key || !subject) {
         return json(res, 400, { error: { message: "Missing subscription fields." } })
       }
-      pushSubscriptions.set(subscription.endpoint, { device, kinds })
+      pushSubscriptions.set(subscription.endpoint, { device, categories })
       return json(res, 200, { object: "memento.push", subscribed: true })
+    }
+    if (PLUGIN && !profile && req.method === "POST" && url.pathname === "/api/plugins/memento/push/mute") {
+      const { muted } = await readBody(req)
+      if (typeof muted !== "boolean") return json(res, 400, { error: { message: "Missing muted" } })
+      return json(res, 200, { object: "memento.push.mute", muted })
     }
     if (PLUGIN && !profile && req.method === "POST" && url.pathname === "/api/plugins/memento/push/remove") {
       const { endpoint } = await readBody(req)

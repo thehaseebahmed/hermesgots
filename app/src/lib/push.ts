@@ -9,18 +9,23 @@ import {
   listEnabledProfiles,
   listProfiles,
   saveSettings,
+  updateConversation,
+  updateProfile,
   type Settings,
 } from "@/lib/db"
-import { registerPush, unregisterPush } from "@/lib/hermes"
+import { registerPush, setPushMuted, unregisterPush } from "@/lib/hermes"
 import { connectionKey, reconnectLive } from "@/lib/live"
 import { isNative } from "@/lib/native"
 import { callFunction, failure, functionUrl } from "@/lib/account"
 import {
   PUSH_CATEGORIES,
+  PUSH_FEATURES,
   categoryOn,
+  channelName,
   pushPath,
-  wantedKinds,
+  wantedCategories,
   type PushCategory,
+  type PushFeature,
 } from "@/lib/push-kinds"
 
 /**
@@ -136,7 +141,7 @@ export async function syncPush() {
         subscription: json,
         vapid_key: identity.vapidKey,
         subject,
-        kinds: wantedKinds((await getSettings()).pushKinds),
+        categories: wantedCategories((await getSettings()).pushCategories),
       })
       given.add(id)
     } catch {
@@ -267,33 +272,33 @@ function step<T>(what: string, promise: Promise<T>, ms = 15_000): Promise<T> {
 }
 
 async function sendToken(device: string, token: string) {
-  const kinds = wantedKinds((await getSettings()).pushKinds)
+  const categories = wantedCategories((await getSettings()).pushCategories)
   const response = await callFunction(
     "POST",
     functionUrl("registry", { route: "devices", id: device }),
-    { token, kinds },
+    { token, categories },
   )
   if (!response.ok) throw await failure(response)
   registeredToken = token
-  sentKinds = kinds.join()
+  sentCategories = categories.join()
 }
 
-/** The kinds the registry last heard for this device, so only a change is sent again. */
-let sentKinds: string | undefined
+/** The categories the registry last heard for this device, so only a change is sent again. */
+let sentCategories: string | undefined
 
-/** Tells the registry which kinds this phone wants. An older app's registration has none. */
-async function syncKinds() {
-  const { fcm, pushKinds } = await getSettings()
+/** Tells the registry which categories this phone wants. An older app's registration has none. */
+async function syncCategories() {
+  const { fcm, pushCategories } = await getSettings()
   if (!fcm?.on || !registeredToken) return
-  const kinds = wantedKinds(pushKinds)
-  if (kinds.join() === sentKinds) return
+  const categories = wantedCategories(pushCategories)
+  if (categories.join() === sentCategories) return
   const response = await callFunction(
     "PATCH",
     functionUrl("registry", { route: "devices", id: fcm.device }),
-    { kinds },
+    { categories },
   )
   if (!response.ok) throw await failure(response)
-  sentKinds = kinds.join()
+  sentCategories = categories.join()
 }
 
 const openers = new Set<(path: string) => void>()
@@ -330,10 +335,18 @@ async function listen(push: Push) {
     if (openers.size) openers.forEach((open) => open(path))
     else pendingOpen = path
   })
-  // One channel per category: Android lets the user turn each off in its own settings too.
+  // One channel per category: Android lets the user turn each off in its own settings too. The
+  // test notification has the one the app made before there were categories.
+  await push
+    .createChannel({ id: "sessions", name: "Test notification", importance: 4 })
+    .catch(() => {})
   for (const category of PUSH_CATEGORIES) {
     await push
-      .createChannel({ id: category.id, name: category.title, importance: category.importance })
+      .createChannel({
+        id: category.id,
+        name: channelName(category),
+        importance: category.importance,
+      })
       .catch(() => {})
   }
 }
@@ -379,7 +392,7 @@ async function disableNative() {
   if (!fcm) return
   await saveSettings({ fcm: { ...fcm, on: false } })
   registeredToken = undefined
-  sentKinds = undefined
+  sentCategories = undefined
   try {
     await callFunction("DELETE", functionUrl("registry", { route: "devices", id: fcm.device }))
     await (await plugin()).push.unregister()
@@ -402,8 +415,8 @@ function startNative() {
     if ((await push.checkPermissions()).receive !== "granted") return
     await listen(push)
     await guarded(fcm.device, () => push.register())
-    // The registration event brings the token; an install from before kinds says them now.
-    setTimeout(() => void syncKinds().catch(() => {}), 3000)
+    // The registration event brings the token; an install from before categories says them now.
+    setTimeout(() => void syncCategories().catch(() => {}), 3000)
   }
   void sync().catch(() => {})
   void App.addListener("resume", () => void sync().catch(() => {}))
@@ -420,11 +433,13 @@ export async function sendTestPush() {
   if (!response.ok) throw await failure(response)
 }
 
-/** Turns one category of push on or off on this device, and tells whoever sends them. */
-export async function setPushCategory(category: PushCategory, on: boolean) {
-  const { pushKinds } = await getSettings()
-  await saveSettings({ pushKinds: { ...pushKinds, [category]: on } })
-  if (isNative) await syncKinds()
+/** Turns some categories of push on or off on this device, and tells whoever sends them. */
+async function setCategories(ids: PushCategory[], on: boolean) {
+  const { pushCategories } = await getSettings()
+  await saveSettings({
+    pushCategories: { ...pushCategories, ...Object.fromEntries(ids.map((id) => [id, on])) },
+  })
+  if (isNative) await syncCategories()
   else {
     // Every bot's plugin keeps what this device asked for with its subscription.
     given.clear()
@@ -432,10 +447,28 @@ export async function setPushCategory(category: PushCategory, on: boolean) {
   }
 }
 
-/** Each category's switch state on this device. */
-export function usePushCategories() {
-  const prefs = useLiveQuery(async () => (await getSettings()).pushKinds, [])
-  return PUSH_CATEGORIES.map((category) => ({ ...category, checked: categoryOn(category, prefs) }))
+export function setPushCategory(category: PushCategory, on: boolean) {
+  return setCategories([category], on)
+}
+
+/** A whole feature at once: every category of Chats, of Code or of Routines. */
+export function setPushFeature(feature: PushFeature, on: boolean) {
+  return setCategories(
+    PUSH_CATEGORIES.filter((category) => category.feature === feature).map((c) => c.id),
+    on,
+  )
+}
+
+/** Each feature's categories with their switch state on this device. */
+export function usePushFeatures() {
+  const prefs = useLiveQuery(async () => (await getSettings()).pushCategories, [])
+  return PUSH_FEATURES.map((feature) => {
+    const categories = PUSH_CATEGORIES.filter((c) => c.feature === feature.id).map((category) => ({
+      ...category,
+      checked: categoryOn(category, prefs),
+    }))
+    return { ...feature, categories, on: categories.filter((c) => c.checked).length }
+  })
 }
 
 function useNativePermission(): PushPermission {
@@ -468,7 +501,53 @@ export function disablePush() {
   return isNative ? disableNative() : disableWeb()
 }
 
+/**
+ * Muting a bot or a chat is for every device, so the plugin that sends the pushes holds it: a chat's
+ * `muted` travels with its chat list, a bot's is told to its plugin here.
+ */
+
+/** What each server was last told, by its address and key. */
+const toldMuted = new Map<string, boolean>()
+
+async function syncMutes() {
+  for (const bot of await listEnabledProfiles()) {
+    if (!bot.apiKey || !bot.baseUrl.trim()) continue
+    const id = connectionKey(bot)
+    const muted = Boolean(bot.muted)
+    if (toldMuted.get(id) === muted) continue
+    try {
+      await setPushMuted(bot, muted)
+      toldMuted.set(id, muted)
+    } catch {
+      // No plugin, or the server is away: asked again on the next change.
+    }
+  }
+}
+
+function startMutes() {
+  let timer: number | undefined
+  const soon = () => {
+    window.clearTimeout(timer)
+    timer = window.setTimeout(() => void syncMutes(), 1000)
+  }
+  liveQuery(async () =>
+    (await listProfiles()).map((bot) => `${bot.id}:${bot.muted}`).join(),
+  ).subscribe(soon)
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") soon()
+  })
+}
+
+export function setBotMuted(profileId: string, muted: boolean) {
+  return updateProfile(profileId, { muted: muted || undefined })
+}
+
+export function setThreadMuted(conversationId: string, muted: boolean) {
+  return updateConversation(conversationId, { muted: muted || undefined })
+}
+
 export function startPush() {
+  startMutes()
   if (isNative) startNative()
   else startWeb()
 }

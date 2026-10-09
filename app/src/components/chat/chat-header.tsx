@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { MenuIcon } from "lucide-react"
+import { BellOffIcon, MenuIcon } from "lucide-react"
 
 import { useOpenDrawer } from "@/components/drawer-context"
 import { Bot } from "@/components/bot"
@@ -15,6 +15,7 @@ export function ChatHeader({
   title,
   subtitle,
   botId,
+  muted,
   showBot = true,
   leading,
   actions,
@@ -22,6 +23,8 @@ export function ChatHeader({
 }: {
   title: string
   botId?: string
+  /** Its notifications are muted. */
+  muted?: boolean
   showBot?: boolean
   subtitle?: string
   leading?: ReactNode
@@ -54,7 +57,15 @@ export function ChatHeader({
         <div className="pointer-events-auto flex min-w-0 flex-1 flex-col items-center">
           {showBot && <Bot id={botId} animate className="size-11" />}
           <div className="flex max-w-1/2 min-w-0 flex-col items-center">
-            <span className="max-w-full truncate text-sm font-semibold">{title}</span>
+            <span className="flex max-w-full items-center gap-1.5">
+              <span className="truncate text-sm font-semibold">{title}</span>
+              {muted && (
+                <BellOffIcon
+                  className="size-3.5 shrink-0 text-muted-foreground"
+                  aria-label="Muted"
+                />
+              )}
+            </span>
             {subtitle && (
               <span className="max-w-full truncate text-[11px] leading-tight text-muted-foreground">
                 {subtitle}

@@ -15,29 +15,49 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
-from plugin import alerts, push
+from plugin import alerts, chats, push
 from plugin.store import connect, db_path
 
 
-class Kinds(unittest.TestCase):
+class Categories(unittest.TestCase):
     def test_an_older_subscription_wants_what_it_always_got(self):
-        row = {"kinds": None}
-        for kind in ("approval", "question", "plan"):
-            self.assertTrue(push.wants(row, kind))
-        for kind in ("theseus", "run_done", "run_failed", "pr_checks", "routine_failed"):
-            self.assertFalse(push.wants(row, kind))
+        row = {"categories": None}
+        for category in ("chat_input", "code_input"):
+            self.assertTrue(push.wants(row, category))
+        for category in ("code_theseus", "chat_run_done", "code_run_failed", "routine_failed"):
+            self.assertFalse(push.wants(row, category))
 
     def test_a_subscription_wants_only_what_it_listed(self):
-        row = {"kinds": '["run_failed"]'}
-        self.assertTrue(push.wants(row, "run_failed"))
-        self.assertFalse(push.wants(row, "approval"))
+        row = {"categories": '["code_run_failed"]'}
+        self.assertTrue(push.wants(row, "code_run_failed"))
+        self.assertFalse(push.wants(row, "chat_run_failed"))
+        self.assertFalse(push.wants(row, "chat_input"))
 
-    def test_unknown_kinds_are_dropped(self):
-        self.assertEqual(push.clean_kinds(["plan", "nonsense", "run_done"]), ["plan", "run_done"])
-        self.assertIsNone(push.clean_kinds(None))
-        self.assertEqual(push.clean_kinds([]), [])
+    def test_unknown_categories_are_dropped(self):
+        self.assertEqual(
+            push.clean_categories(["code_input", "nonsense", "chat_run_done"]),
+            ["chat_run_done", "code_input"],
+        )
+        self.assertIsNone(push.clean_categories(None))
+        self.assertEqual(push.clean_categories([]), [])
 
-    def test_a_database_from_before_kinds_gains_the_column(self):
+    def test_a_kind_belongs_to_the_feature_of_its_session(self):
+        self.assertEqual(push.category_of("question"), "chat_input")
+        self.assertEqual(push.category_of("question", project=True), "code_input")
+        self.assertEqual(push.category_of("plan"), "code_input")
+        self.assertEqual(push.category_of("run_failed"), "chat_run_failed")
+        self.assertEqual(push.category_of("run_done", project=True), "code_run_done")
+        self.assertEqual(push.category_of("theseus"), "code_theseus")
+        self.assertEqual(push.category_of("pr_checks"), "code_pr_checks")
+        self.assertEqual(push.category_of("clone_failed"), "code_setup_failed")
+        self.assertEqual(push.category_of("routine_failed"), "routine_failed")
+
+    def test_every_kind_lands_in_a_category_that_exists(self):
+        for kind in push.KINDS:
+            for project in (False, True):
+                self.assertIn(push.category_of(kind, project), push.CATEGORIES)
+
+    def test_a_database_from_before_categories_gains_the_column(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "memento.db"
             old = sqlite3.connect(path)
@@ -46,13 +66,13 @@ class Kinds(unittest.TestCase):
                    p256dh TEXT NOT NULL, auth TEXT NOT NULL, vapid_key TEXT NOT NULL,
                    subject TEXT NOT NULL, created_at INTEGER NOT NULL)"""
             )
-            old.execute("PRAGMA user_version = 11")
+            old.execute("PRAGMA user_version = 13")
             old.commit()
             old.close()
             conn = connect(path)
             columns = {row[1] for row in conn.execute("PRAGMA table_info(push_subscriptions)")}
             conn.close()
-            self.assertIn("kinds", columns)
+            self.assertIn("categories", columns)
 
     def test_once_tells_a_thing_a_single_time_until_cleared(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -62,6 +82,56 @@ class Kinds(unittest.TestCase):
             self.assertTrue(push.once(path, "b"))
             push.clear(path, "a")
             self.assertTrue(push.once(path, "a"))
+
+
+class Mutes(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = db_path(Path(self.tmp.name))
+        self.parents = {}
+        patch = mock.patch("plugin.sessions._parent_of", lambda home, sid: self.parents.get(sid))
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.addCleanup(self.tmp.cleanup)
+
+    def chat(self, chat_id, session, muted=None):
+        value = {"hermesSessionId": session, "title": "t", "createdAt": 1, "updatedAt": 1}
+        if muted is not None:
+            value["muted"] = muted
+        chats.merge(self.path, {chat_id: {"at": 1, "value": value}})
+
+    def test_nothing_is_muted_by_default(self):
+        self.chat("a", "memento-a")
+        self.assertFalse(push.muted(self.path, "question", "memento-a"))
+
+    def test_a_muted_bot_mutes_everything_it_would_say(self):
+        push.set_bot_muted(self.path, True)
+        for kind in ("question", "run_failed", "routine_failed", "clone_failed"):
+            self.assertTrue(push.muted(self.path, kind, "x"))
+        push.set_bot_muted(self.path, False)
+        self.assertFalse(push.muted(self.path, "routine_failed", "x"))
+
+    def test_a_muted_thread_mutes_its_own_session_only(self):
+        self.chat("a", "memento-a", muted=True)
+        self.chat("b", "memento-b")
+        self.assertTrue(push.muted(self.path, "approval", "memento-a"))
+        self.assertTrue(push.muted(self.path, "run_done", "memento-a"))
+        self.assertFalse(push.muted(self.path, "approval", "memento-b"))
+        # Not about a session: a thread's mute has no say.
+        self.assertFalse(push.muted(self.path, "routine_failed", "memento-a"))
+
+    def test_a_compressed_session_is_still_its_chats(self):
+        self.chat("a", "memento-a", muted=True)
+        self.parents["child"] = "memento-a"
+        self.assertTrue(push.muted(self.path, "question", "child"))
+
+    def test_unmuting_a_thread_clears_it(self):
+        self.chat("a", "memento-a", muted=True)
+        chats.merge(
+            self.path,
+            {"a": {"at": 2, "value": {"hermesSessionId": "memento-a", "title": "t", "createdAt": 1, "updatedAt": 1}}},
+        )
+        self.assertFalse(push.muted(self.path, "question", "memento-a"))
 
 
 class Turns(unittest.TestCase):

@@ -1,6 +1,7 @@
 import { useLiveQuery } from "dexie-react-hooks"
 import { matchPath, NavLink, useLocation, type NavLinkProps } from "react-router"
 import {
+  BellOffIcon,
   ChevronRightIcon,
   CodeXmlIcon,
   ListChecksIcon,
@@ -163,6 +164,12 @@ function Bots({ onNavigate }: { onNavigate?: () => void }) {
               <span className="min-w-0 flex-1">
                 <span className="flex items-baseline gap-2">
                   <span className="min-w-0 flex-1 truncate font-medium">{bot.name}</span>
+                  {bot.muted && (
+                    <BellOffIcon
+                      className="size-3.5 shrink-0 text-muted-foreground"
+                      aria-label="Muted"
+                    />
+                  )}
                   {latest && (
                     <span className="shrink-0 text-xs font-normal text-muted-foreground">
                       {formatRelative(latest.updatedAt, now)}

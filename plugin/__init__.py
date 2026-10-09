@@ -891,6 +891,17 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(exc), 400)
         return web.json_response({"object": "memento.push", "subscribed": True})
 
+    async def push_mute(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        muted = body.get("muted") if body else None
+        if not isinstance(muted, bool):
+            return _error(web, "Missing muted", 400)
+        await asyncio.to_thread(push.set_bot_muted, store_path(), muted)
+        return web.json_response({"object": "memento.push", "muted": muted})
+
     async def push_unsubscribe(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -977,6 +988,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/events", stream_events)
     app.router.add_post(f"{PREFIX}/push", push_subscribe)
     app.router.add_post(f"{PREFIX}/push/remove", push_unsubscribe)
+    app.router.add_post(f"{PREFIX}/push/mute", push_mute)
     app.router.add_post(f"{PREFIX}/runs/{{run_id}}/clarify", answer_clarify)
     def request_profile():
         try:

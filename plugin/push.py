@@ -54,9 +54,11 @@ THROTTLE_SECONDS = 5
 RECORD_SIZE = 4096
 MAX_SUBSCRIPTIONS = 20
 # What a push is about. The first three wait on the user; the rest are news. The registry
-# (`app/netlify/lib/fcm.ts`) and the app (`app/src/lib/push-kinds.ts`) keep the same list.
-LEGACY_KINDS = ("approval", "question", "plan")
-KINDS = LEGACY_KINDS + (
+# (`app/netlify/lib/fcm.ts`) and the app (`app/src/lib/push-kinds.ts`) keep the same lists.
+KINDS = (
+    "approval",
+    "question",
+    "plan",
     "theseus",
     "run_done",
     "run_failed",
@@ -65,6 +67,38 @@ KINDS = LEGACY_KINDS + (
     "clone_failed",
     "routine_failed",
 )
+# What a device switches: a kind within a feature (chats, code, routines). A session's kinds belong
+# to Code when it is a project session, else to Chats.
+CATEGORIES = (
+    "chat_input",
+    "chat_run_failed",
+    "chat_run_done",
+    "code_input",
+    "code_theseus",
+    "code_run_failed",
+    "code_run_done",
+    "code_pr_checks",
+    "code_pr_merged",
+    "code_setup_failed",
+    "routine_failed",
+)
+# What a device that never said which it wants gets: what pushed before there were more.
+LEGACY_CATEGORIES = ("chat_input", "code_input")
+# Kinds that are about a chat's session, so that chat can be muted.
+SESSION_KINDS = ("approval", "question", "plan", "theseus", "run_done", "run_failed", "pr_checks", "pr_merged")
+INPUT_KINDS = ("approval", "question", "plan")
+
+
+def category_of(kind: str, project: bool = False) -> str:
+    if kind == "routine_failed":
+        return "routine_failed"
+    if kind == "clone_failed":
+        return "code_setup_failed"
+    if kind in ("theseus", "pr_checks", "pr_merged"):
+        return f"code_{kind}"
+    feature = "code" if project or kind == "plan" else "chat"
+    return f"{feature}_{'input' if kind in INPUT_KINDS else kind}"
+
 
 _lock = threading.Lock()
 _last: Dict[Tuple[str, str, str], float] = {}
@@ -147,21 +181,21 @@ def _public_endpoint(endpoint: str) -> bool:
     return address.is_global
 
 
-def clean_kinds(value: Any) -> Optional[List[str]]:
-    """The kinds a device asked for, without any this plugin doesn't know. None means it didn't say,
-    which an older app doesn't."""
+def clean_categories(value: Any) -> Optional[List[str]]:
+    """The categories a device asked for, without any this plugin doesn't know. None means it didn't
+    say, which an older app doesn't."""
     if not isinstance(value, list):
         return None
-    return [kind for kind in KINDS if kind in value]
+    return [category for category in CATEGORIES if category in value]
 
 
-def wants(row: Dict[str, Any], kind: str) -> bool:
-    """Whether a subscription asked for this kind of push."""
+def wants(row: Dict[str, Any], category: str) -> bool:
+    """Whether a subscription asked for this category of push."""
     try:
-        kinds = json.loads(row["kinds"]) if row.get("kinds") else None
+        categories = json.loads(row["categories"]) if row.get("categories") else None
     except ValueError:
-        kinds = None
-    return kind in (kinds if isinstance(kinds, list) else LEGACY_KINDS)
+        categories = None
+    return category in (categories if isinstance(categories, list) else LEGACY_CATEGORIES)
 
 
 def subscribe(path: Path, body: Dict[str, Any]) -> None:
@@ -183,18 +217,18 @@ def subscribe(path: Path, body: Dict[str, Any]) -> None:
         vapid_headers(endpoint, vapid_key, subject)
     except Exception as exc:
         raise PushError("Not a usable subscription.") from exc
-    kinds = clean_kinds(body.get("kinds"))
+    categories = clean_categories(body.get("categories"))
     conn = connect(path)
     try:
         conn.execute("BEGIN IMMEDIATE")
         # A device has one subscription: a new one replaces the old.
         conn.execute("DELETE FROM push_subscriptions WHERE device = ? AND endpoint != ?", (device, endpoint))
         conn.execute(
-            """INSERT INTO push_subscriptions (endpoint, device, p256dh, auth, vapid_key, subject, created_at, kinds)
+            """INSERT INTO push_subscriptions (endpoint, device, p256dh, auth, vapid_key, subject, created_at, categories)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(endpoint) DO UPDATE SET device = excluded.device, p256dh = excluded.p256dh,
                  auth = excluded.auth, vapid_key = excluded.vapid_key, subject = excluded.subject,
-                 kinds = excluded.kinds""",
+                 categories = excluded.categories""",
             (
                 endpoint,
                 device,
@@ -203,7 +237,7 @@ def subscribe(path: Path, body: Dict[str, Any]) -> None:
                 vapid_key,
                 subject,
                 int(time.time() * 1000),
-                json.dumps(kinds) if kinds is not None else None,
+                json.dumps(categories) if categories is not None else None,
             ),
         )
         count = conn.execute("SELECT COUNT(*) FROM push_subscriptions").fetchone()[0]
@@ -232,7 +266,7 @@ def _rows(path: Path) -> List[Dict[str, Any]]:
     conn = connect(path)
     try:
         cursor = conn.execute(
-            "SELECT endpoint, device, p256dh, auth, vapid_key, subject, kinds FROM push_subscriptions"
+            "SELECT endpoint, device, p256dh, auth, vapid_key, subject, categories FROM push_subscriptions"
         )
         names = [c[0] for c in cursor.description]
         return [dict(zip(names, row)) for row in cursor.fetchall()]
@@ -294,7 +328,7 @@ def _on_screen_devices(path: Path) -> List[str]:
         return [device for (db, device) in _open if db == str(path)]
 
 
-def _relay(path: Path, kind: str, session_id: str) -> None:
+def _relay(path: Path, kind: str, category: str, session_id: str) -> None:
     """Asks the registry to push to the account's Android installs, if this profile is linked."""
     home = path.parent.parent
     state = link.load_state(home)
@@ -308,7 +342,7 @@ def _relay(path: Path, kind: str, session_id: str) -> None:
                 "POST",
                 "push",
                 token=state["token"],
-                body={"kind": kind, "session_id": session_id, "skip": _on_screen_devices(path)[:50]},
+                body={"kind": kind, "category": category, "session_id": session_id, "skip": _on_screen_devices(path)[:50]},
             )
             break
         except link.LinkError as error:
@@ -333,12 +367,12 @@ def _linked(path: Path) -> bool:
     return bool(state.get("token") and not state.get("revoked") and state.get("site"))
 
 
-def _deliver(path: Path, kind: str, session_id: str) -> None:
+def _deliver(path: Path, kind: str, category: str, session_id: str) -> None:
     # At most 32 characters of base64url, and distinct per session however long its id is.
     topic = _b64(hashlib.sha256(f"{kind}:{session_id}".encode()).digest()[:18])
     payload = {"kind": kind, "session_id": session_id}
     for row in _rows(path):
-        if _on_screen(path, row["device"]) or not wants(row, kind):
+        if _on_screen(path, row["device"]) or not wants(row, category):
             continue
         status = send(row, payload, topic)
         if status in (404, 410):
@@ -346,7 +380,7 @@ def _deliver(path: Path, kind: str, session_id: str) -> None:
             unsubscribe(path, row["endpoint"])
         elif status is None or status >= 300:
             logger.debug("memento: push to %s answered %s", urllib.parse.urlsplit(row["endpoint"]).netloc, status)
-    _relay(path, kind, session_id)
+    _relay(path, kind, category, session_id)
 
 
 SEEN_KEEP_MS = 30 * 24 * 3600 * 1000
@@ -403,8 +437,71 @@ def notify(kind: str, session_id: Optional[str], path: Optional[Path] = None) ->
         logger.debug("memento: couldn't send a push", exc_info=True)
 
 
+def set_bot_muted(path: Path, muted: bool) -> None:
+    """Mutes or unmutes every push from this profile (the bot), whatever device would get it."""
+    conn = connect(path)
+    try:
+        if muted:
+            conn.execute("INSERT OR REPLACE INTO push_prefs (key, value) VALUES ('muted', '1')")
+        else:
+            conn.execute("DELETE FROM push_prefs WHERE key = 'muted'")
+    finally:
+        conn.close()
+
+
+def bot_muted(path: Path) -> bool:
+    if not path.exists():
+        return False
+    conn = connect(path)
+    try:
+        return conn.execute("SELECT 1 FROM push_prefs WHERE key = 'muted'").fetchone() is not None
+    finally:
+        conn.close()
+
+
+def _lineage(path: Path, session_id: str) -> List[str]:
+    """The session and its compression ancestors: the chat knows the oldest."""
+    from . import sessions
+
+    found: List[str] = []
+    current: Optional[str] = session_id
+    for _ in range(sessions.MAX_PARENT_HOPS + 1):
+        if not current or current in found:
+            break
+        found.append(current)
+        current = sessions._parent_of(path.parent.parent, current)
+    return found
+
+
+def thread_muted(path: Path, session_id: str) -> bool:
+    """Whether the chat of this session was muted in the app (``muted`` in its chat list record)."""
+    from . import chats
+
+    ids = set(_lineage(path, session_id))
+    for entry in chats.read(path).values():
+        value = entry.get("value")
+        if entry.get("deleted") or not isinstance(value, dict):
+            continue
+        if value.get("hermesSessionId") in ids:
+            return bool(value.get("muted"))
+    return False
+
+
+def muted(path: Path, kind: str, session_id: str) -> bool:
+    return bot_muted(path) or (kind in SESSION_KINDS and thread_muted(path, session_id))
+
+
+def _project_session(path: Path, session_id: str) -> bool:
+    from . import sessions
+
+    return bool(sessions.record_for(path, path.parent.parent, session_id))
+
+
 def _run(path: Path, kind: str, session_id: str) -> None:
     try:
-        _deliver(path, kind, session_id)
+        if muted(path, kind, session_id):
+            return
+        project = kind in SESSION_KINDS and _project_session(path, session_id)
+        _deliver(path, kind, category_of(kind, project), session_id)
     except Exception:
         logger.debug("memento: a push failed", exc_info=True)

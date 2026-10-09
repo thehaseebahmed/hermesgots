@@ -32,8 +32,8 @@ export interface Settings {
   push?: { device: string; vapidKey: string; vapidPublic: string; on: boolean }
   /** The Android app's push identity, local only: Firebase gives the token, this is its device id. */
   fcm?: { device: string; on: boolean; trying?: boolean }
-  /** Which kinds of push this device wants, by category; unset ones follow `PUSH_CATEGORIES`. Local only. */
-  pushKinds?: Partial<Record<string, boolean>>
+  /** Which categories of push this device wants; unset ones follow `PUSH_CATEGORIES`. Local only. */
+  pushCategories?: Partial<Record<string, boolean>>
 }
 
 /** A Hermes profile Memento can talk to. Its Memento plugin registers it (see `registry.ts`). */
@@ -59,6 +59,8 @@ export interface Profile {
   recentModels?: ModelChoice[]
   /** The linked host that registered it; unset for a bot added by hand before linking. */
   hostId?: string
+  /** Its pushes are muted: nothing it says reaches any device. Synced; the plugin holds the mute. */
+  muted?: boolean
   /** Turned off in the app: hidden, and nothing checks on it. Local copy of the registry's flag. */
   disabled?: boolean
   /** When its host last checked in with the registry. Local only. */
@@ -117,6 +119,8 @@ export interface Conversation {
   resolvedAt?: number
   /** Moved to the project's Discarded pile: its pull request closed and its branch deleted. */
   discardedAt?: number
+  /** Its pushes are muted. Synced through the chat list, which is where the plugin reads it. */
+  muted?: boolean
   /** Permission mode, as the plugin last reported it. Local only; the plugin holds it. */
   mode?: SessionMode
   /**
