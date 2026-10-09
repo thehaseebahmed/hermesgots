@@ -1,0 +1,57 @@
+name: Bug report
+description: Something in Memento or its Hermes plugin doesn't work as it should
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What went wrong, and what you expected instead. Screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a chat
+        2. Send a message
+        3. ...
+    validations:
+      required: false
+  - type: input
+    id: app-version
+    attributes:
+      label: App version
+      description: Shown at the bottom of Settings.
+    validations:
+      required: true
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      description: The Memento plugin on your Hermes host, if you know it.
+    validations:
+      required: false
+  - type: input
+    id: hermes-version
+    attributes:
+      label: Hermes version
+      description: "`hermes --version` on the host."
+    validations:
+      required: false
+  - type: input
+    id: platform
+    attributes:
+      label: Device
+      description: Android app, installed web app or a browser tab, and which browser.
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Anything relevant from the browser console or `hermes gateway` logs. Remove API keys and tokens first.
+      render: text
+    validations:
+      required: false
