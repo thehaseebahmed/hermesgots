@@ -1698,7 +1698,7 @@ const PLAN_HINT =
  */
 interface RunOptions {
   model: string
-  /** With a model chosen for the chat; without it a model id names only a `model_routes` alias. */
+  /** With a model chosen for the chat; without it no model is sent and the host's runs. */
   provider?: string
   messages: ChatMessage[]
   sessionId?: string
@@ -1711,8 +1711,10 @@ export function runRequest(config: HermesConfig, options: RunOptions) {
   // Like X-Hermes-Session-Id, a keyed session holds the history, so only the new message goes.
   const keyed = Boolean(options.sessionId && config.apiKey)
   return {
-    model: options.model,
-    ...(options.provider ? { provider: options.provider } : {}),
+    // A model that wasn't picked is the name Hermes advertises for the profile, which a profile
+    // served at /p/<profile> doesn't recognise as its own ("ops is not a valid model ID"), so the
+    // host's model runs when none is sent.
+    ...(options.provider ? { model: options.model, provider: options.provider } : {}),
     input: keyed ? options.messages.slice(-1) : options.messages,
     instructions: [PLAN_HINT, options.workspaceInstructions].filter(Boolean).join("\n"),
     ...(keyed ? { session_id: options.sessionId } : {}),
