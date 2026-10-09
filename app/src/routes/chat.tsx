@@ -430,6 +430,12 @@ export function ChatPage() {
   // From `xl` a session opens beside its project, and a thread beside its bot, which they close to.
   const xl = useXLarge()
   const beside = xl && Boolean(session)
+  // Beside its bot the header drops the picture, so the reply count sits under the title instead.
+  const replyCount = messages?.filter((m) => m.role === "assistant").length ?? 0
+  const repliesLine =
+    botPath && xl && replyCount
+      ? `${replyCount} ${replyCount === 1 ? "reply" : "replies"}`
+      : undefined
   useEffect(() => {
     if (!botPath) return
     return setBackGuard(() => {
@@ -547,7 +553,7 @@ export function ChatPage() {
     <div className="relative flex min-h-0 flex-1 flex-col">
       <ChatHeader
         title={conversation?.title ?? "New chat"}
-        subtitle={(!simple && activity) || session?.worktree?.branch}
+        subtitle={(!simple && activity) || repliesLine || session?.worktree?.branch}
         botId={profile?.botId}
         // Beside its bot, which already shows the bot's picture.
         showBot={!(botPath && xl)}
