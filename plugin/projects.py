@@ -226,6 +226,76 @@ def _columns(conn: sqlite3.Connection) -> set:
     return {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
 
 
+def _model_usage(conn: sqlite3.Connection) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    """Each session's tokens and cost per model, from Hermes's per-call rows.
+
+    A session's ``model`` column is overwritten on a mid-session switch while its counters keep
+    accumulating, so it can't say which model used what. ``session_model_usage`` records every call
+    under the model that ran it (auxiliary calls included, since they're real spend). Empty when the
+    table isn't there, which is an older Hermes."""
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    if "session_model_usage" not in tables:
+        return {}
+    found: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    query = (
+        "SELECT session_id, model, "
+        + ", ".join(f"SUM(COALESCE({c}, 0))" for c in USAGE_COLUMNS)
+        + ", SUM(COALESCE(estimated_cost_usd, 0)) FROM session_model_usage GROUP BY session_id, model"
+    )
+    for session_id, model, *rest in conn.execute(query):
+        found.setdefault(session_id, {})[str(model or "")] = {
+            "counts": [int(c or 0) for c in rest[:4]],
+            "cost": float(rest[4] or 0.0),
+        }
+    return found
+
+
+def _scale(shares: Dict[str, Dict[str, Any]], index: int, covered: int, target: int) -> None:
+    """Shrink one token column so the models' shares add up to the session row exactly."""
+    raw = {name: share["counts"][index] * target / covered for name, share in shares.items()}
+    floors = {name: int(value) for name, value in raw.items()}
+    left = target - sum(floors.values())
+    by_fraction = sorted(raw, key=lambda name: raw[name] - floors[name], reverse=True)
+    for name in by_fraction[:left]:
+        floors[name] += 1
+    for name, share in shares.items():
+        share["counts"][index] = floors[name]
+
+
+def _fit(
+    shares: Dict[str, Dict[str, Any]], counts: List[int], cost: Optional[float], model: str
+) -> None:
+    """Make the per-model split add up to the session row, the source of truth.
+
+    A shortfall (a session from before the per-call table, an absolute overwrite, a delta still
+    queued) goes to the session's own model, the only one it names. An excess is scaled back across
+    the models the per-call rows name. A session row with no cost figure gets none: the split must
+    never name a cost the total doesn't."""
+    for index, count in enumerate(counts):
+        target = int(count or 0)
+        covered = sum(share["counts"][index] for share in shares.values())
+        if covered > target:
+            _scale(shares, index, covered, target)
+    for index, count in enumerate(counts):
+        short = int(count or 0) - sum(share["counts"][index] for share in shares.values())
+        if short > 0:
+            own = shares.setdefault(model, {"counts": [0, 0, 0, 0], "cost": 0.0})
+            own["counts"][index] += short
+    if cost is None:
+        for share in shares.values():
+            share["cost"] = 0.0
+        return
+    target_cost = float(cost)
+    covered_cost = sum(share["cost"] for share in shares.values())
+    if covered_cost > target_cost and covered_cost:
+        factor = target_cost / covered_cost
+        for share in shares.values():
+            share["cost"] *= factor
+    elif target_cost > covered_cost:
+        own = shares.setdefault(model, {"counts": [0, 0, 0, 0], "cost": 0.0})
+        own["cost"] += target_cost - covered_cost
+
+
 def usage(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
     """What the sessions in the project's folders used, summed from Hermes's session store, with
     each session's own share split by model so the app can price it. None when there's no such
@@ -261,6 +331,7 @@ def usage(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
                 + "".join(f", {c}" for c in optional)
                 + " FROM sessions"
             ).fetchall()
+            by_model = _model_usage(conn)
     except sqlite3.Error:
         logger.debug("memento: couldn't read usage for project %s", project_id, exc_info=True)
         return totals
@@ -307,14 +378,27 @@ def usage(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
         if active and (thread["last_active"] is None or active > thread["last_active"]):
             thread["last_active"] = active
         model = str(extra.get("model") or "")
-        bucket = thread["models"].setdefault(
-            model, {"model": model or None, "cost_usd": None, **{c: 0 for c in USAGE_COLUMNS}}
-        )
+        # The per-call rows split a session that switched models; the session row stays the total.
+        shares = {
+            name: {"counts": list(share["counts"]), "cost": share["cost"]}
+            for name, share in by_model.get(session_id, {}).items()
+        }
+        _fit(shares, [int(c or 0) for c in counts], None if cost is None else float(cost), model)
+        for name, share in shares.items():
+            if not any(share["counts"]) and not share["cost"]:
+                continue
+            bucket = thread["models"].setdefault(
+                name, {"model": name or None, "cost_usd": None, **{c: 0 for c in USAGE_COLUMNS}}
+            )
+            for column, count in zip(USAGE_COLUMNS, share["counts"]):
+                bucket[column] += count
+            if share["cost"]:
+                bucket["cost_usd"] = (bucket["cost_usd"] or 0.0) + share["cost"]
+        # Totals come from the session rows, so a session with no per-model rows reports the same
+        # as before and the split can never disagree with the total.
         for column, count in zip(USAGE_COLUMNS, counts):
-            bucket[column] += int(count or 0)
             totals[column] += int(count or 0)
         if cost is not None:
-            bucket["cost_usd"] = (bucket["cost_usd"] or 0.0) + float(cost)
             totals["cost_usd"] = (totals["cost_usd"] or 0.0) + float(cost)
     totals["sessions"] = len(threads)
     totals["threads"] = [{**t, "models": list(t["models"].values())} for t in threads.values()]
