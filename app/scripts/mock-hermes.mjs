@@ -10,6 +10,9 @@
 // The plugin also keeps the chat list (GET and POST /api/plugins/memento/chats, newer record wins) and
 // labels a chat as Memento's on POST /api/plugins/memento/sessions/{id}/label. Its
 // GET /api/plugins/memento/sessions/{id}/context reports a keyed session's latest model call.
+// Images the agent returns come from GET /api/plugins/memento/media?path=… (a .png path, unless it
+// names something missing), and saying "image" has the agent answer with a MEDIA tag: one for the
+// chart it serves and one for a file that isn't there.
 // It lists Hermes Projects on GET /api/plugins/memento/projects. GET /api/plugins/memento/github and
 // github/repos stand in for the host's GitHub account (MOCK_NO_GITHUB=1 leaves it signed out), and
 // POST /api/plugins/memento/projects answers at once with a project that clones its repos in the
@@ -77,6 +80,11 @@ const cors = {
 }
 
 const GITHUB = !process.env.MOCK_NO_GITHUB
+// What the media route serves for chart.png: navy sky, teal ground, a sun.
+const MOCK_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAHgAAABLCAIAAAA06NSGAAAAuklEQVR42u3aQQmAABBE0anhxQYW8mIDz0Y0jhFsIII4iDz4Cd5xZzNMiwoFAWjQAg0aNAXQoAX6dsc+Xwf6deI3uEO5Yx3KHetQ7liHcsc6lDvWoEF/T/mJNWjQoEGDBg0aNGjQoEGDBu3W4dYB2j0atIXFZmgFt4L76/CpBNrvHWiBBi3QoEEL9H+gx21VIdCgQQs0aNAIQIMWaNCgKYAGLdCgQVMADVqgQYMWaNACDRq0QIMW6E92AjwFRtd/9tVBAAAAAElFTkSuQmCC",
+  "base64",
+)
 const githubRepos = [
   { full_name: "mock-user/memento", description: "A PWA companion for Hermes", private: false },
   { full_name: "mock-user/theseus", description: "A tiny maze game", private: true },
@@ -831,6 +839,13 @@ async function playTurn(req, body, last, out) {
         if (heard.length) await say(`Noted: ${heard.at(-1)}.\n\n`)
       }
     }
+  } else if (/image|chart/i.test(last)) {
+    await say(
+      "Here's the chart:\n\n" +
+        "MEDIA:/var/tmp/memento-mock/chart.png\n\n" +
+        "And one for a file I can't find:\n\n" +
+        "MEDIA:/var/tmp/memento-mock/missing.png\n",
+    )
   } else {
     await say("Want me to clean up the rotated files older than 90 days? Just say *clean them up*.")
   }
@@ -1207,7 +1222,7 @@ http
       return json(res, 200, {
         name: "memento",
         version: PLUGIN_VERSION,
-        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "profile_routes", "pr_tool", "close", "merge_resolve", "theseus", ...(EVENTS ? ["events"] : []), "push", "host_model", "queue"],
+        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "theseus", ...(EVENTS ? ["events"] : []), "push", "host_model", "queue"],
         clarify: true,
         hooks: true,
         theseus: THESEUS_START === "unavailable"
@@ -1236,6 +1251,14 @@ http
       const { endpoint } = await readBody(req)
       pushSubscriptions.delete(endpoint)
       return json(res, 200, { object: "memento.push", subscribed: false })
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/media") {
+      const path = url.searchParams.get("path") ?? ""
+      if (/\.png$/i.test(path) && !/missing/i.test(path)) {
+        res.writeHead(200, { "Content-Type": "image/png", ...cors })
+        return res.end(MOCK_PNG)
+      }
+      return json(res, 404, { error: { message: "No such image." } })
     }
     if (PLUGIN && EVENTS && !profile && url.pathname === "/api/plugins/memento/events") {
       const since = url.searchParams.get("since")
