@@ -350,6 +350,47 @@ export function toMessages(
 const isPreview = (tool: ToolEvent) =>
   tool.result !== undefined && tool.result.length >= 500 && tool.result.endsWith("...")
 
+function withTranscriptToolOffsets(local: Message, transcript: Message) {
+  const tools = transcript.tools ?? []
+  if (!tools.length || local.content === transcript.content) return tools
+  const segments: string[] = []
+  let from = 0
+  for (const tool of tools) {
+    const offset = Math.max(from, Math.min(transcript.content.length, tool.contentOffset ?? from))
+    segments.push(transcript.content.slice(from, offset))
+    from = offset
+  }
+  segments.push(transcript.content.slice(from))
+
+  const locations: Array<{ start: number; end: number } | undefined> = []
+  let searchFrom = 0
+  for (const segment of segments) {
+    const text = segment.trim()
+    if (!text) {
+      locations.push(undefined)
+      continue
+    }
+    const start = local.content.indexOf(text, searchFrom)
+    if (start < 0) locations.push(undefined)
+    else {
+      const end = start + text.length
+      locations.push({ start, end })
+      searchFrom = end
+    }
+  }
+
+  return tools.map((tool, index) => {
+    if (tool.contentOffset === undefined) return tool
+    // Match the text immediately around the call in order; if only one side survives the rewrite,
+    // anchor there. If neither does, use the reply start rather than inventing a scaled position.
+    const before = locations[index]
+    let after = locations[index + 1]
+    for (let next = index + 2; !after && next < locations.length; next++) after = locations[next]
+    const contentOffset = before?.end ?? after?.start ?? 0
+    return { ...tool, contentOffset }
+  })
+}
+
 /**
  * What streamed calls only learn from the transcript: their edits' size, and the whole result
  * where the stream sent a cut preview. Matched by tool and label, in order.
@@ -392,12 +433,23 @@ export async function liveTurn(
   userContent: string,
   signal?: AbortSignal,
 ) {
-  const rows = await listSessionMessages(config, sessionId, { limit: PAGE, offset: 0, signal })
-  const start = rows.findLastIndex((row) => isTurnStart(row) && row.content === userContent)
-  if (start < 0) return undefined
-  return toMessages("", sessionId, rows.slice(start), { live: true }).find(
-    (m) => m.role === "assistant",
-  )
+  const rows = new Map<number, SessionMessage>()
+  for (let page = 0; page <= MAX_SKIPS; page++) {
+    const batch = await listSessionMessages(config, sessionId, {
+      limit: PAGE,
+      offset: page * PAGE,
+      signal,
+    })
+    for (const row of batch) rows.set(row.id, row)
+    const sorted = [...rows.values()].sort((a, b) => a.id - b.id)
+    const start = sorted.findLastIndex((row) => isTurnStart(row) && row.content === userContent)
+    if (start >= 0)
+      return toMessages("", sessionId, sorted.slice(start), { live: true }).find(
+        (m) => m.role === "assistant",
+      )
+    if (batch.length < PAGE) return undefined
+  }
+  return undefined
 }
 
 async function connection(conversation: Conversation) {
@@ -557,14 +609,19 @@ async function reconcile(conversationId: string) {
           floor = turnEnd(unmatched[match])
           // A turn streamed here without its events has no tool calls; the transcript's fill it in.
           const local = current[current.indexOf(unmatched[match]) + 1]
-          if (local?.role === "assistant" && !local.tools?.length && reply?.tools?.length)
+          if (local?.role === "assistant" && !local.tools?.length && reply?.tools?.length) {
+            const content =
+              local.content.trim() && reply.content.trimEnd().endsWith(local.content.trim())
+                ? reply.content
+                : local.content
+            const restored = { ...local, content }
             writes.push({
-              ...local,
-              tools: reply.tools,
+              ...restored,
+              tools: withTranscriptToolOffsets(restored, reply),
               reasoning: local.reasoning ?? reply.reasoning,
               steers: local.steers ?? reply.steers,
             })
-          else if (local?.role === "assistant" && local.tools?.length && reply?.tools?.length) {
+          } else if (local?.role === "assistant" && local.tools?.length && reply?.tools?.length) {
             const tools = withTranscriptDetails(local.tools, reply.tools)
             if (tools) writes.push({ ...local, tools })
           }

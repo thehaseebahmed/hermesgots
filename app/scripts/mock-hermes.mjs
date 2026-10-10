@@ -658,6 +658,8 @@ async function playTurn(req, body, last, out) {
         record(req, { role: "tool", tool_call_id: id, tool_name: tool.tool, content: result })
       }
     }
+    if (!out.closed())
+      record(req, { role: "assistant", content: placement.output, finish_reason: "stop" })
     return {
       spoken,
       output: out.closed() ? spoken : placement.output,
