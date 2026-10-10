@@ -12,6 +12,7 @@ import { ApprovalCard } from "@/components/chat/approval-card"
 import { AttachmentTile, AttachmentViewer } from "@/components/chat/attachments"
 import { Markdown } from "@/components/chat/markdown"
 import { AgentCards } from "@/components/chat/agent-card"
+import { MediaTag } from "@/components/chat/media-image"
 import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
 import { ToolGroup } from "@/components/chat/tool-group"
 import { Bot } from "@/components/bot"
@@ -24,20 +25,23 @@ import { openable } from "@/lib/attachments"
 import { removeQueued, sendQueued } from "@/lib/chat"
 import type { Attachment, Message, ToolEvent } from "@/lib/db"
 import { describeActivity, formatDuration } from "@/lib/format"
+import { mediaImages } from "@/lib/media-tags"
 import { cn } from "@/lib/utils"
 import { useReveal } from "@/lib/reveal"
 import { isPlanApproval } from "@/lib/workspace"
 
 type Part =
   | { kind: "text"; at: number; text: string }
+  | { kind: "media"; at: number; path: string }
   | { kind: "tools"; tools: ToolEvent[] }
   | { kind: "clarify"; tool: ToolEvent }
   | { kind: "agent"; tool: ToolEvent }
 
 /**
  * Interleaves a slice of the reply (starting at `start`) with the tools run during it. A clarify
- * call is a card of its own (its question and the answer) rather than a tool row, and so is a
- * delegation (the agent it started).
+ * call is a card of its own (its question and the answer) rather than a tool row, so is a
+ * delegation (the agent it started), and each image the reply names with a `MEDIA:<path>` tag is a
+ * part of its own.
  */
 function toParts(content: string, tools: ToolEvent[], start: number): Part[] {
   const end = start + content.length
@@ -45,7 +49,12 @@ function toParts(content: string, tools: ToolEvent[], start: number): Part[] {
   let cursor = start
   const pushText = (to: number) => {
     const text = content.slice(cursor - start, to - start)
-    if (text.trim()) parts.push({ kind: "text", at: cursor, text })
+    if (text.trim())
+      for (const part of mediaImages(text)) {
+        if (part.kind === "text") {
+          if (part.text.trim()) parts.push({ kind: "text", at: cursor + part.at, text: part.text })
+        } else parts.push({ kind: "media", at: cursor + part.at, path: part.path })
+      }
     cursor = to
   }
   const sorted = [...tools].sort((a, b) => (a.contentOffset ?? 0) - (b.contentOffset ?? 0))
@@ -342,7 +351,13 @@ export function MessageItem({
           <Fragment key={breaks[i - 1]?.key ?? "start"}>
             {i > 0 && breaks[i - 1].node}
             {(parts.length > 0 || (last && footerShown)) && (
-              <AssistantRow botId={botId} plain={plain} lift={last && statsShown} parts={parts}>
+              <AssistantRow
+                conversationId={message.conversationId}
+                botId={botId}
+                plain={plain}
+                lift={last && statsShown}
+                parts={parts}
+              >
                 {last && footer}
               </AssistantRow>
             )}
@@ -358,12 +373,14 @@ export function MessageItem({
 }
 
 function AssistantRow({
+  conversationId,
   botId,
   plain,
   lift,
   parts,
   children,
 }: {
+  conversationId: string
   botId?: string
   plain?: boolean
   /** A line sits under the last bubble, so the avatar rises to stay level with it. */
@@ -388,6 +405,8 @@ function AssistantRow({
             <div key={part.tools[0].toolCallId} className="w-full max-w-xl">
               <ToolGroup tools={part.tools} />
             </div>
+          ) : part.kind === "media" ? (
+            <MediaTag key={part.at} conversationId={conversationId} path={part.path} />
           ) : plain ? (
             <Markdown key={part.at} plain className="px-1 text-[15px] leading-relaxed">
               {part.text}

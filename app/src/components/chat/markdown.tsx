@@ -1,8 +1,9 @@
 import { memo, useState, type ComponentProps } from "react"
-import ReactMarkdown from "react-markdown"
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { CheckIcon, CopyIcon } from "lucide-react"
 
+import { MediaImage } from "@/components/chat/media-image"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -43,6 +44,7 @@ function CodeBlock({ language, code }: { language?: string; code: string }) {
 
 const components: ComponentProps<typeof ReactMarkdown>["components"] = {
   pre: ({ children }) => <>{children}</>,
+  img: ({ src, alt }) => <MediaImage src={typeof src === "string" ? src : ""} alt={alt} />,
   code({ className, children }) {
     const match = /language-(\w+)/.exec(className ?? "")
     const text = String(children ?? "")
@@ -72,6 +74,11 @@ const components: ComponentProps<typeof ReactMarkdown>["components"] = {
   td: ({ children }) => <td className="border-b px-2 py-1">{children}</td>,
 }
 
+// The default transform drops data: URLs, the shape Hermes's chat-completions routes leave an
+// agent's image in.
+const urlTransform = (url: string) =>
+  url.startsWith("data:image/") ? url : defaultUrlTransform(url)
+
 export const Markdown = memo(function Markdown({
   children,
   className,
@@ -90,7 +97,11 @@ export const Markdown = memo(function Markdown({
         className,
       )}
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={components}
+        urlTransform={urlTransform}
+      >
         {children}
       </ReactMarkdown>
     </div>

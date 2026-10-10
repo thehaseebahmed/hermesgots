@@ -682,6 +682,17 @@ export async function queueAction(
   return (await response.json()) as Record<string, unknown>
 }
 
+/** An image the agent named with a `MEDIA:<path>` tag, from the plugin's media route. */
+export async function getPluginMedia(config: HermesConfig, path: string): Promise<Blob> {
+  const response = await request(
+    `${pluginRoot(config.baseUrl)}/media?path=${encodeURIComponent(path)}`,
+    {
+      headers: headers(config),
+    },
+  )
+  return response.blob()
+}
+
 /** The plugin pings its change stream every 20s, so one quiet for longer has died unnoticed. */
 const EVENTS_IDLE_MS = 50_000
 
