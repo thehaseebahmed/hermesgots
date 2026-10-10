@@ -2,16 +2,19 @@ import { useEffect, useState } from "react"
 
 import { Popup, PopupContent } from "@/components/popup"
 import { loadMediaImage } from "@/lib/media-tags"
+import { useWide } from "@/lib/media"
+import { openImageViewer } from "@/lib/native"
 import { cn } from "@/lib/utils"
 
 /** An image in a reply; tapping it opens the larger view. `cell` sizes it for a gallery grid. */
 export function MediaImage({ src, alt, cell }: { src: string; alt?: string; cell?: boolean }) {
   const [open, setOpen] = useState(false)
+  const wide = useWide()
   return (
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => (wide ? setOpen(true) : void openImageViewer(src))}
         aria-label={alt || "Open image"}
         className={cn(
           "block cursor-zoom-in overflow-hidden rounded-xl border bg-muted/40",

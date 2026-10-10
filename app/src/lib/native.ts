@@ -7,6 +7,14 @@ import { placeToasts } from "@/lib/toast"
 /** True inside the Android app, where the page is served from `https://localhost`. */
 export const isNative = Capacitor.isNativePlatform()
 
+/**
+ * Opens an image at full size in the platform's own viewer: a browser tab here, the Android app's
+ * system photo viewer once its bridge is wired in.
+ */
+export function openImageViewer(url: string) {
+  window.open(url, "_blank")
+}
+
 /** The Netlify deploy the app signs in and syncs through, baked in by `pnpm build:android`. */
 export const SITE_URL = (import.meta.env.VITE_SITE_URL ?? "").replace(/\/+$/, "")
 
