@@ -18,7 +18,7 @@ export function MediaImage({ src, alt, cell }: { src: string; alt?: string; cell
         aria-label={alt || "Open image"}
         className={cn(
           "block cursor-zoom-in overflow-hidden rounded-xl border bg-muted/40",
-          cell ? "h-[120px] w-full md:h-[160px] xl:h-[200px]" : "w-fit max-w-[min(100%,42rem)]",
+          cell ? "h-24 w-full md:h-32 xl:h-40" : "w-fit max-w-[min(100%,42rem)]",
         )}
       >
         <img
@@ -27,7 +27,7 @@ export function MediaImage({ src, alt, cell }: { src: string; alt?: string; cell
           className={
             cell
               ? "h-full w-full object-cover"
-              : "max-h-[240px] w-auto max-w-full object-contain md:max-h-[320px] xl:max-h-[400px]"
+              : "max-h-[320px] w-auto max-w-full object-contain md:max-h-[440px] xl:max-h-[560px]"
           }
           draggable={false}
         />
