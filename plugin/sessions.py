@@ -388,13 +388,25 @@ PR_INSTRUCTIONS = (
     "pull request template when it has one (named below), else with Summary, Changes and How to "
     "test sections."
 )
+# The same condition as PR_INSTRUCTIONS: only code sessions get it.
+DONE_INSTRUCTIONS = (
+    "Two things the run's prompt emphasises once the work is done: don't share the pull request url "
+    "or the commit message in your reply — the open_pull_request result and the session's pull "
+    "request list already surface them where the user sees them. And before you finish, update your "
+    "todo list to its final state: every item completed, or cancelled where it was dropped."
+)
 
 
 def instructions(record: Dict[str, Any]) -> str:
     """What the run's system prompt tells the agent: its worktrees (fixed per session), how to open
     its pull request and the repos' templates and, in plan mode, the shape of the plan."""
     worktrees = _worktree_line(record)
-    lines = [worktrees, PR_INSTRUCTIONS if worktrees else "", _template_line(record)]
+    lines = [
+        worktrees,
+        PR_INSTRUCTIONS if worktrees else "",
+        DONE_INSTRUCTIONS if worktrees else "",
+        _template_line(record),
+    ]
     if record.get("mode") == "plan":
         lines.append(PLAN_INSTRUCTIONS)
     if record.get("mode") == "theseus":
