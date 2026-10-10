@@ -1,5 +1,6 @@
 import { App } from "@capacitor/app"
-import { Capacitor } from "@capacitor/core"
+import { Browser } from "@capacitor/browser"
+import { Capacitor, registerPlugin } from "@capacitor/core"
 import { toast } from "sonner"
 
 import { placeToasts } from "@/lib/toast"
@@ -7,11 +8,42 @@ import { placeToasts } from "@/lib/toast"
 /** True inside the Android app, where the page is served from `https://localhost`. */
 export const isNative = Capacitor.isNativePlatform()
 
+interface OpenImagePlugin {
+  open(options: { dataBase64: string; name: string }): Promise<void>
+}
+
+const OpenImage = registerPlugin<OpenImagePlugin>("OpenImage")
+
 /**
- * Opens an image at full size in the platform's own viewer: a browser tab here, the Android app's
- * system photo viewer once its bridge is wired in.
+ * Opens an image at full size in the platform's own viewer: the system photo viewer in the Android
+ * app (the bridge hands it the bytes), a browser tab in a browser.
  */
-export function openImageViewer(url: string) {
+export async function openImageViewer(url: string) {
+  if (isNative && url.startsWith("blob:")) {
+    try {
+      const blob = await fetch(url).then((response) => response.blob())
+      const dataBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result).split(",", 2)[1] ?? "")
+        reader.onerror = () => reject(reader.error)
+        reader.readAsDataURL(blob)
+      })
+      if (dataBase64) {
+        await OpenImage.open({
+          dataBase64,
+          name: `image.${blob.type.split("/")[1] || "png"}`,
+        })
+        return
+      }
+    } catch {
+      // The tab below still opens the image.
+    }
+  }
+  if (isNative) {
+    // A link's image isn't ours to hand over; the platform opens the URL itself.
+    void Browser.open({ url })
+    return
+  }
   window.open(url, "_blank")
 }
 
