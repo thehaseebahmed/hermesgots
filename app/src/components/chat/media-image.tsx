@@ -33,10 +33,7 @@ export function MediaImage({ src, alt, cell }: { src: string; alt?: string; cell
         />
       </button>
       <Popup open={open} onOpenChange={setOpen}>
-        <PopupContent
-          className="inset-x-4 mx-auto w-fit max-w-fit translate-x-0 p-6"
-          closeClassName="top-0 right-0 focus-visible:border-transparent focus-visible:ring-0"
-        >
+        <PopupContent className="inset-x-4 mx-auto w-fit max-w-fit translate-x-0 p-6">
           <img
             src={src}
             alt={alt ?? ""}
