@@ -580,24 +580,34 @@ async function runTurn(
 }
 
 /**
- * Tool cards and the approval sit at offsets into the text streamed so far. When the run's final
- * text replaces it they are carried over proportionally and moved to the nearest paragraph break,
- * so a card never lands inside a word.
+ * Tool cards, the approval and steers sit at offsets into the text streamed so far. When the text is
+ * rewritten they carry over exactly: an offset in the common prefix keeps its place, one in the
+ * common suffix moves by the suffix's shift, and one inside a rewritten region parks at the
+ * rewrite's start, in call order — the call ran around there, and any finer place would be invented.
  */
 function anchorOffsets(draft: Draft, next: string) {
-  const previous = draft.content.length
-  if (draft.content === next) return
-  const breaks = [0, next.length]
-  for (let at = next.indexOf("\n\n"); at >= 0; at = next.indexOf("\n\n", at + 2))
-    breaks.push(at + 2)
-  const anchor = (offset: number | undefined) => {
-    if (offset === undefined) return undefined
-    const target = previous ? Math.round((offset / previous) * next.length) : 0
-    return breaks.reduce((a, b) => (Math.abs(b - target) < Math.abs(a - target) ? b : a))
-  }
-  draft.tools = draft.tools.map((t) => ({ ...t, contentOffset: anchor(t.contentOffset) }))
-  if (draft.approval)
+  const previous = draft.content
+  if (previous === next) return
+  const cap = Math.min(previous.length, next.length)
+  let prefix = 0
+  while (prefix < cap && previous[prefix] === next[prefix]) prefix += 1
+  let suffix = 0
+  while (suffix < cap - prefix && previous[previous.length - 1 - suffix] === next[next.length - 1 - suffix])
+    suffix += 1
+  const movedEnd = previous.length - suffix
+  const shift = next.length - previous.length
+  const anchor = (offset: number) => (offset <= prefix ? offset : offset >= movedEnd ? offset + shift : prefix)
+  draft.tools = draft.tools.map((t) =>
+    t.contentOffset === undefined ? t : { ...t, contentOffset: anchor(t.contentOffset) },
+  )
+  if (draft.approval && draft.approval.contentOffset !== undefined)
     draft.approval = { ...draft.approval, contentOffset: anchor(draft.approval.contentOffset) }
+  if (draft.steers) draft.steers = draft.steers.map((s) => ({ ...s, contentOffset: anchor(s.contentOffset) }))
+}
+
+/** Where the text streamed since the last tool call starts; the run's final answer replaces it. */
+function finalTextStart(draft: Draft) {
+  return Math.max(0, ...draft.tools.map((t) => t.contentOffset ?? 0))
 }
 
 /**
@@ -606,17 +616,28 @@ function anchorOffsets(draft: Draft, next: string) {
  * stream never shows): what streamed holds every attempt, the output only the answer.
  */
 function settleFinalText(draft: Draft, output: string) {
-  const start = Math.max(0, ...draft.tools.map((t) => t.contentOffset ?? 0))
-  const streamed = draft.content.slice(start)
+  const streamed = draft.content.slice(finalTextStart(draft))
   if (!streamed.trim() || streamed.trim() === output.trim()) return
-  draft.content = draft.content.slice(0, start) + /^\s*/.exec(streamed)![0] + output.trim()
+  const next = draft.content.slice(0, finalTextStart(draft)) + /^\s*/.exec(streamed)![0] + output.trim()
+  anchorOffsets(draft, next)
+  draft.content = next
 }
 
 /** Folds a run's outcome into the reply; a run whose events were lost takes its final text. */
 function settleRun(draft: Draft, outcome: RunOutcome) {
   if (outcome.output && (outcome.replaceContent || !draft.content)) {
-    anchorOffsets(draft, outcome.output)
-    draft.content = outcome.output
+    // The events were lost and only the transcript filled the reply. When the answer is already the
+    // rendered tail, the text and its offsets say where the calls ran and stay; a real rewrite
+    // carries the offsets over exactly.
+    const tail = draft.content.slice(finalTextStart(draft))
+    const kept =
+      !!tail.trim() &&
+      (tail.trim() === outcome.output.trim() || draft.content.trimEnd().endsWith(outcome.output.trim()))
+    if (!draft.content) draft.content = outcome.output
+    else if (!kept) {
+      anchorOffsets(draft, outcome.output)
+      draft.content = outcome.output
+    }
   } else if (outcome.output && outcome.status === "completed") {
     settleFinalText(draft, outcome.output)
   }
