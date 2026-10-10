@@ -27,7 +27,7 @@ export function MediaImage({ src, alt, cell }: { src: string; alt?: string; cell
           className={
             cell
               ? "h-full w-full object-cover"
-              : "max-h-[320px] w-auto max-w-full object-contain md:max-h-[440px] xl:max-h-[560px]"
+              : "h-[320px] w-auto max-w-full object-contain md:h-[440px] xl:h-[560px]"
           }
           draggable={false}
         />
