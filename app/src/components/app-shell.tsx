@@ -151,7 +151,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
       >
         <aside
           className={cn(
-            "hidden shrink-0 border-r bg-sidebar text-sidebar-foreground transition-[width] duration-300 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none md:block",
+            "hidden shrink-0 border-r bg-sidebar text-sidebar-foreground transition-[width] duration-300 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none motion-reduce:duration-0 md:block",
             collapsed ? "w-[68px]" : "w-72 lg:w-80",
           )}
         >
