@@ -1,4 +1,4 @@
-"""Tests for ship.handle() error propagation."""
+"""Tests for ship.handle() error propagation and partial-success preservation."""
 
 import json
 import tempfile
@@ -34,7 +34,6 @@ class HandleErrorPropagationTests(unittest.TestCase):
         data = json.loads(raw)
         self.assertIn("error", data)
         self.assertEqual(data["error"], "GitHub refused the push.")
-        self.assertNotIn("results", data)
 
     def test_handle_propagates_multiple_errors(self):
         results = [
@@ -58,7 +57,8 @@ class HandleErrorPropagationTests(unittest.TestCase):
         self.assertNotIn("error", data)
         self.assertEqual(len(data["results"]), 2)
 
-    def test_handle_mixed_results_still_reports_error(self):
+    def test_handle_mixed_results_preserves_success_and_reports_error(self):
+        """Mixed success: per-repo results are preserved alongside the top-level error."""
         results = [
             {"name": "repo1", "committed": "abc123", "pushed": True, "pr": {"number": 1}},
             {"name": "repo2", "error": "Authentication failed."},
@@ -67,12 +67,55 @@ class HandleErrorPropagationTests(unittest.TestCase):
         data = json.loads(raw)
         self.assertIn("error", data)
         self.assertEqual(data["error"], "Authentication failed.")
+        self.assertIn("results", data)
+        self.assertEqual(len(data["results"]), 2)
+        self.assertEqual(data["results"][0]["name"], "repo1")
+        self.assertEqual(data["results"][0]["pushed"], True)
+        self.assertIn("pr", data["results"][0])
+        self.assertEqual(data["results"][1]["name"], "repo2")
+        self.assertIn("error", data["results"][1])
+
+    def test_handle_mixed_results_no_error_key_on_success(self):
+        """A successful repo in a mixed result set has no 'error' key."""
+        results = [
+            {"name": "repo1", "committed": "abc123", "pushed": True, "pr": {"number": 1}},
+            {"name": "repo2", "error": "Auth failed."},
+        ]
+        raw = self._handle_with_results(results)
+        data = json.loads(raw)
+        success = [r for r in data["results"] if "error" not in r]
+        self.assertEqual(len(success), 1)
+        self.assertEqual(success[0]["name"], "repo1")
 
     def test_handle_empty_results_unchanged(self):
         raw = self._handle_with_results([])
         data = json.loads(raw)
         self.assertIn("result", data)
         self.assertIn("Nothing to ship", data["result"])
+
+    def test_detect_tool_failure_on_mixed_result(self):
+        """Hermes _detect_tool_failure recognizes a dict with a truthy 'error' key as failure."""
+        results = [
+            {"name": "repo1", "committed": "abc123", "pushed": True, "pr": {"number": 1}},
+            {"name": "repo2", "error": "Auth failed."},
+        ]
+        raw = self._handle_with_results(results)
+        data = json.loads(raw)
+        # Simulate _detect_tool_failure's dict path:
+        #   err = data.get("error") or data.get("message")
+        #   if err and (failed or "error" in data): -> True
+        err = data.get("error") or data.get("message")
+        self.assertTrue(err and "error" in data, "mixed result must be detected as failure")
+
+    def test_detect_tool_failure_not_triggered_on_success(self):
+        """A pure-success result must not be flagged as failure."""
+        results = [
+            {"name": "repo1", "committed": "abc123", "pushed": True, "pr": {"number": 1}},
+        ]
+        raw = self._handle_with_results(results)
+        data = json.loads(raw)
+        err = data.get("error") or data.get("message")
+        self.assertFalse(err, "all-success result must not be detected as failure")
 
 
 if __name__ == "__main__":

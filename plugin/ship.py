@@ -348,7 +348,7 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
         return json.dumps({"result": "Nothing to ship: every repo is already pushed with a pull request open."})
     errors = [r["error"] for r in results if r.get("error")]
     if errors:
-        return json.dumps({"error": "; ".join(errors)})
+        return json.dumps({"error": "; ".join(errors), "results": results})
     return json.dumps({"results": results})
 
 
