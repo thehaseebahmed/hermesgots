@@ -37,7 +37,7 @@ export function MediaImage({ src, alt, cell }: { src: string; alt?: string; cell
           <img
             src={src}
             alt={alt ?? ""}
-            className="mx-auto max-h-[68dvh] w-auto max-w-full object-contain"
+            className="h-[68dvh] w-full max-w-[40rem] object-contain"
             draggable={false}
           />
         </PopupContent>
