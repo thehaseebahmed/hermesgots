@@ -57,32 +57,22 @@ function Scroll({ children }: { children: ReactNode }) {
 const SCRIM =
   "fixed inset-0 z-50 bg-black/32 transition-opacity data-ending-style:opacity-0 data-starting-style:opacity-0"
 
-function PopupClose({ className }: { className?: string }) {
-  return (
-    <Dialog.Close
-      render={
-        <Button
-          variant="ghost"
-          className={cn("absolute top-4 right-4 z-20", className)}
-          size="icon-sm"
-        />
-      }
-    >
-      <XIcon />
-      <span className="sr-only">Close</span>
-    </Dialog.Close>
-  )
-}
+const CLOSE = (
+  <Dialog.Close
+    render={<Button variant="ghost" className="absolute top-4 right-4 z-20" size="icon-sm" />}
+  >
+    <XIcon />
+    <span className="sr-only">Close</span>
+  </Dialog.Close>
+)
 
 export function PopupContent({
   className,
   children,
   initialFocus,
-  closeClassName,
 }: {
   className?: string
   children: ReactNode
-  closeClassName?: string
   /** `false` focuses the pop-up itself, so a search field doesn't take focus (and the keyboard) on open. */
   initialFocus?: boolean
 }) {
@@ -112,7 +102,7 @@ export function PopupContent({
             <Drawer.Content className="flex min-h-0 flex-1 flex-col">
               <Scroll>{children}</Scroll>
             </Drawer.Content>
-            <PopupClose className={closeClassName} />
+            {CLOSE}
           </Drawer.Popup>
         </Drawer.Viewport>
       </Drawer.Portal>
@@ -163,7 +153,7 @@ export function PopupContent({
         )}
       >
         <Scroll>{children}</Scroll>
-        <PopupClose className={closeClassName} />
+        {CLOSE}
       </Dialog.Popup>
     </Dialog.Portal>
   )
