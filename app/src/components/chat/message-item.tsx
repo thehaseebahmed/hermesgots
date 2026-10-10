@@ -57,9 +57,12 @@ function toParts(content: string, tools: ToolEvent[], start: number): Part[] {
       }
     cursor = to
   }
-  const sorted = [...tools].sort((a, b) => (a.contentOffset ?? 0) - (b.contentOffset ?? 0))
+  const sorted = [...tools].sort(
+    (a, b) =>
+      (a.contentOffset ?? 0) - (b.contentOffset ?? 0) || a.startedAt - b.startedAt,
+  )
   for (const tool of sorted) {
-    const at = Math.min(Math.max(tool.contentOffset ?? 0, cursor), end)
+    const at = tool.contentOffset ?? cursor
     if (at > cursor) pushText(at)
     const last = parts.at(-1)
     if (tool.tool === "clarify") parts.push({ kind: "clarify", tool })
@@ -270,7 +273,7 @@ export function MessageItem({
       time: steer.at,
       node: <SteerBubble text={steer.text} />,
     })
-  breaks.sort((a, b) => a.time - b.time)
+  breaks.sort((a, b) => a.offset - b.offset || a.time - b.time)
   const segments: { start: number; end: number; tools: ToolEvent[] }[] = []
   let start = 0
   let since = -Infinity
@@ -279,7 +282,13 @@ export function MessageItem({
     segments.push({
       start,
       end,
-      tools: tools.filter((t) => t.startedAt > since && t.startedAt <= b.time),
+      tools: tools.filter((tool) => {
+        const at = tool.contentOffset ?? 0
+        return (
+          (at > start || (at === start && tool.startedAt > since)) &&
+          (at < end || (at === end && tool.startedAt <= b.time))
+        )
+      }),
     })
     start = end
     since = b.time
