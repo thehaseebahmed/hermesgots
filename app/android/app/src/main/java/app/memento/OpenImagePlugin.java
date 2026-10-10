@@ -13,7 +13,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 
 /**
- * Opens an image in the phone's own photo viewer: the page hands over the bytes, they are written to
+ * Opens an image in Android's selected image viewer: the page hands over the bytes, they are written to
  * the cache, and the viewer reads them through the manifest's FileProvider.
  */
 @CapacitorPlugin(name = "OpenImage")
