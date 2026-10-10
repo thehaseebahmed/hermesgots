@@ -392,7 +392,10 @@ def usage(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
             )
             for column, count in zip(USAGE_COLUMNS, share["counts"]):
                 bucket[column] += count
-            if share["cost"]:
+            # The session row says whether cost was known at all; a genuine 0.0 (a free model)
+            # must not read back as unknown, so the gate is on the session's cost, not the
+            # share's truthiness.
+            if cost is not None:
                 bucket["cost_usd"] = (bucket["cost_usd"] or 0.0) + share["cost"]
         # Totals come from the session rows, so a session with no per-model rows reports the same
         # as before and the split can never disagree with the total.
