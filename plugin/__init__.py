@@ -32,6 +32,7 @@ from . import (
     github,
     host_model,
     link,
+    media,
     merges,
     outbox,
     projects,
@@ -236,6 +237,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "todo_tool",
                     "agents",
                     "attachments",
+                    "media",
                     "profile_routes",
                     "pr_tool",
                     "close",
@@ -985,6 +987,17 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             {"object": "memento.attachment", "name": saved.name, "path": str(saved), "size": len(data)}
         )
 
+    async def serve_media(request: "web.Request") -> "web.StreamResponse":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            file = await asyncio.to_thread(media.image_file, request.query.get("path", ""))
+        except media.MediaError as error:
+            return _error(web, str(error), error.status)
+        return web.FileResponse(file, headers={"content-type": media.MEDIA_TYPES[file.suffix.lower()]})
+
+    app.router.add_get(f"{PREFIX}/media", serve_media)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/attachments", upload_attachment)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/theseus", get_theseus)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/theseus", post_theseus)
