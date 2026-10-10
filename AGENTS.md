@@ -10,6 +10,8 @@ Guidance for AI coding agents (and humans) working on Memento: a playful, minima
 
 ## Plugin first
 
+**Always read env variables through Hermes's `agent.credential_pool.get_env_prefer_dotenv(key)`, never `os.environ` directly.** The plugin runs inside a Hermes process that may serve several profiles, so `os.environ` holds the launch profile's values — a bare read is a silent cross-profile leak. The helper prefers the profile's `.env` over the process env.
+
 **A user should be able to ask the agent for something, close the app, come back later and find it done.** So work that has to keep going, or stay correct, while the app is closed belongs in the plugin (`plugin/`), which runs on the Hermes host. It doesn't belong in app-side workarounds.
 
 - Before building a feature, check whether it needs the app to be open, following a stream, polling or answering for the agent. If it does, and the plugin (or Hermes itself) could do it, build it in the plugin.

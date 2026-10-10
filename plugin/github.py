@@ -1,9 +1,9 @@
 """GitHub for Memento's Code screen: the host's GitHub account, its repos, and cloning one into a
 Hermes Project.
 
-The token never leaves the Hermes host. It's found the way Hermes's own GitHub calls find it:
-``GITHUB_TOKEN``, then ``GH_TOKEN`` (the process env, then ``$HERMES_HOME/.env``), then the gh CLI's
-login (``gh auth token``).
+The token never leaves the Hermes host. It's resolved through Hermes's own
+``agent.credential_pool.get_env_prefer_dotenv()`` (``GITHUB_TOKEN``, then ``GH_TOKEN``), falling back
+to the gh CLI's login (``gh auth token``).
 """
 
 from __future__ import annotations
