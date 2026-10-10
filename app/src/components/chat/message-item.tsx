@@ -32,7 +32,7 @@ import { isPlanApproval } from "@/lib/workspace"
 
 type Part =
   | { kind: "text"; at: number; text: string }
-  | { kind: "media"; at: number; path: string }
+  | { kind: "media"; at: number; paths: string[] }
   | { kind: "tools"; tools: ToolEvent[] }
   | { kind: "clarify"; tool: ToolEvent }
   | { kind: "agent"; tool: ToolEvent }
@@ -40,8 +40,8 @@ type Part =
 /**
  * Interleaves a slice of the reply (starting at `start`) with the tools run during it. A clarify
  * call is a card of its own (its question and the answer) rather than a tool row, so is a
- * delegation (the agent it started), and each image the reply names with a `MEDIA:<path>` tag is a
- * part of its own.
+ * delegation (the agent it started), and the images a reply sends together — only whitespace
+ * between their `MEDIA:<path>` tags — are one gallery part.
  */
 function toParts(content: string, tools: ToolEvent[], start: number): Part[] {
   const end = start + content.length
@@ -53,7 +53,7 @@ function toParts(content: string, tools: ToolEvent[], start: number): Part[] {
       for (const part of mediaImages(text)) {
         if (part.kind === "text") {
           if (part.text.trim()) parts.push({ kind: "text", at: cursor + part.at, text: part.text })
-        } else parts.push({ kind: "media", at: cursor + part.at, path: part.path })
+        } else parts.push({ kind: "media", at: cursor + part.at, paths: part.paths })
       }
     cursor = to
   }
@@ -415,7 +415,7 @@ function AssistantRow({
               <ToolGroup tools={part.tools} />
             </div>
           ) : part.kind === "media" ? (
-            <MediaTag key={part.at} conversationId={conversationId} path={part.path} />
+            <MediaTag key={part.at} conversationId={conversationId} paths={part.paths} />
           ) : plain ? (
             <Markdown key={part.at} plain className="px-1 text-[15px] leading-relaxed">
               {part.text}

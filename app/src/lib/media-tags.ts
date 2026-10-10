@@ -2,8 +2,7 @@ import { db } from "@/lib/db"
 import { getPluginFeatures, getPluginMedia, type HermesConfig } from "@/lib/hermes"
 
 export type MediaPart =
-  | { kind: "text"; at: number; text: string }
-  | { kind: "media"; at: number; path: string; raw: string }
+  { kind: "text"; at: number; text: string } | { kind: "media"; at: number; paths: string[] }
 
 // Raster formats the plugin serves (its `MEDIA_TYPES` map), longest first like Hermes's own
 // extension alternation.
@@ -42,17 +41,37 @@ function scan(slice: string, at: number, parts: MediaPart[]) {
     parts.push({
       kind: "media",
       at: at + index,
-      path: unquote(match.groups?.path ?? ""),
-      raw: match[0],
+      paths: [unquote(match.groups?.path ?? "")],
     })
     last = index + match[0].length
   }
   if (last < slice.length) parts.push({ kind: "text", at: at + last, text: slice.slice(last) })
 }
 
+/** Tags sent together — only whitespace between them — come out as one part: a gallery. */
+function group(parts: MediaPart[]): MediaPart[] {
+  const grouped: MediaPart[] = []
+  let run: { at: number; paths: string[] } | null = null
+  for (const part of parts) {
+    if (part.kind === "media") {
+      if (run) run.paths.push(...part.paths)
+      else run = { at: part.at, paths: [...part.paths] }
+    } else if (part.text.trim()) {
+      if (run) {
+        grouped.push({ kind: "media", ...run })
+        run = null
+      }
+      grouped.push(part)
+    }
+  }
+  if (run) grouped.push({ kind: "media", ...run })
+  return grouped
+}
+
 /**
- * Splits a reply into text and the images it names with `MEDIA:<path>` tags. A tag inside a fenced
- * code block is an example, not an image, and stays in the text.
+ * Splits a reply into text and the images it names with `MEDIA:<path>` tags: each tag its own part,
+ * and the tags sent together (only whitespace between) one gallery part. A tag inside a fenced code
+ * block is an example, not an image, and stays in the text.
  */
 export function mediaImages(text: string): MediaPart[] {
   const parts: MediaPart[] = []
@@ -73,7 +92,7 @@ export function mediaImages(text: string): MediaPart[] {
     offset += line.length + 1
   }
   scan(text.slice(plainFrom), plainFrom, parts)
-  return parts
+  return group(parts)
 }
 
 /** One shared fetch per image: a chat re-renders constantly while a reply streams in. */
