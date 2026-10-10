@@ -12,12 +12,12 @@ export function MediaImage({ src, alt }: { src: string; alt?: string }) {
         type="button"
         onClick={() => setOpen(true)}
         aria-label={alt || "Open image"}
-        className="block w-full max-w-[min(100%,42rem)] cursor-zoom-in overflow-hidden rounded-xl border bg-muted/40"
+        className="block w-fit max-w-[min(100%,42rem)] cursor-zoom-in overflow-hidden rounded-xl border bg-muted/40"
       >
         <img
           src={src}
           alt={alt ?? ""}
-          className="max-h-[60dvh] w-full object-contain"
+          className="max-h-[240px] w-auto max-w-full object-contain md:max-h-[320px] xl:max-h-[400px]"
           draggable={false}
         />
       </button>
