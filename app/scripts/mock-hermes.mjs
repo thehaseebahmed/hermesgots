@@ -288,6 +288,8 @@ const PLUGIN = process.env.MOCK_NO_PLUGIN !== "1"
 const projectSessions = new Map()
 // The plugin's pull request instruction (sessions.PR_INSTRUCTIONS), word for word.
 const PR_INSTRUCTIONS = "When the work is done and you've checked it, ship it yourself with the open_pull_request tool: it commits what's left, pushes this branch and opens a pull request, or updates the open one. Don't ask first, and don't use git push or gh for it. Write the description from the repo's pull request template when it has one (named below), else with Summary, Changes and How to test sections."
+// The plugin's done-work emphasis (sessions.DONE_INSTRUCTIONS), word for word.
+const DONE_INSTRUCTIONS = "Two things the run's prompt emphasises once the work is done: don't share the pull request url or the commit message in your reply — the open_pull_request result and the session's pull request list already surface them where the user sees them. And before you finish, update your todo list to its final state: every item completed, or cancelled where it was dropped."
 // Theseus runs in Auto with the skill's gates on top, and keeps its mode for the whole session.
 const MODES = ["accept_edits", "auto", "plan", "theseus"]
 // The plugin's Theseus instructions (theseus.INSTRUCTIONS), shortened: the paths are the host's.
@@ -1576,7 +1578,7 @@ http
           ? `You are working in a git worktree of ${record.repos[0].name} at ${record.repos[0].path} (branch ${record.branch}). Keep all work inside it.`
           : `You are working in git worktrees of this project's repos, all on branch ${record.branch}:\n${record.repos.map((r, i) => `- ${r.name} at ${r.path}${i === 0 ? " (your current directory)" : ""}`).join("\n")}\nKeep all work inside them.`
       const instructions = (record) =>
-        [worktreeLine(record), PR_INSTRUCTIONS, record.mode === "plan" ? PLAN_INSTRUCTIONS : "", record.mode === "theseus" ? THESEUS_INSTRUCTIONS : ""].filter(Boolean).join("\n")
+        [worktreeLine(record), PR_INSTRUCTIONS, DONE_INSTRUCTIONS, record.mode === "plan" ? PLAN_INSTRUCTIONS : "", record.mode === "theseus" ? THESEUS_INSTRUCTIONS : ""].filter(Boolean).join("\n")
       const answer = (record) =>
         json(res, 200, {
           object: "memento.workspace",
