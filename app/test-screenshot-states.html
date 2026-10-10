@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Image States Test</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root {
+      --background: oklch(1 0 0);
+      --foreground: oklch(0.145 0 0);
+      --muted: oklch(0.97 0 0);
+      --muted-foreground: oklch(0.556 0 0);
+      --destructive: oklch(0.577 0.245 27.325);
+      --border: oklch(0.922 0 0);
+      --card: oklch(1 0 0);
+    }
+
+    @keyframes shimmer {
+      0% { background-position: -200% 0; }
+      100% { background-position: 200% 0; }
+    }
+
+    .skeleton {
+      background: linear-gradient(90deg, var(--muted) 25%, color-mix(in oklch, var(--muted-foreground) 10%, transparent) 50%, var(--muted) 75%);
+      background-size: 200% 100%;
+    }
+    .skeleton-shimmer {
+      animation: shimmer 1.5s ease-in-out infinite;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .skeleton-shimmer { animation: none !important; }
+    }
+
+    body {
+      background: var(--background);
+      color: var(--foreground);
+      font-family: 'Figtree', system-ui, sans-serif;
+      margin: 0;
+      padding: 2rem;
+    }
+
+    .chat-container {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+    }
+
+    .message {
+      display: flex;
+      gap: 0.75rem;
+      align-items: flex-start;
+    }
+
+    .avatar {
+      width: 2.5rem;
+      height: 2.5rem;
+      border-radius: 9999px;
+      background: color-mix(in oklch, var(--muted-foreground) 10%, transparent);
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      opacity: 0.5;
+    }
+
+    .message-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .message-text {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 1rem 1.25rem 1.25rem 1.25rem;
+      padding: 0.75rem 1rem;
+      font-size: 0.875rem;
+      line-height: 1.5;
+    }
+
+    .image-container {
+      max-width: 320px;
+      border-radius: 0.75rem;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: var(--card);
+    }
+
+    .image-loading {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16/9;
+      background: linear-gradient(90deg, var(--muted) 25%, color-mix(in oklch, var(--muted-foreground) 10%, transparent) 50%, var(--muted) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s ease-in-out infinite;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .image-loading { animation: none; }
+    }
+
+    .image-loaded {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16/9;
+      background: #e0e0e0 url('data:image/svg+xml;base64,PHM8cmVjdCB3aWR0aD0iMTAwIiBoZWlnZXQ9IjEwMCIgZmlsbD0iI2QwYzVkYyIvPjxjaXJjbGUgY3g9IjUwIIGN5PSIzMUiIHI9IjIwIiBmaWxsPSIjYTBlNWZiIi8+PC9zdmc+') center/cover no-repeat;
+      border-radius: 0.5rem;
+    }
+
+    .image-offline {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16/9;
+      background: linear-gradient(90deg, var(--muted) 25%, color-mix(in oklch, var(--muted-foreground) 10%, transparent) 50%, var(--muted) 75%);
+      background-size: 200% 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .image-offline { animation: none; }
+    }
+
+    .offline-message {
+      background: rgba(0, 0, 0, 0.05);
+      border-radius: 0.5rem;
+      padding: 0.25rem 0.5rem;
+      font-size: 0.75rem;
+      color: var(--muted-foreground);
+      display: flex;
+      align-items: center;
+      gap: 0.375rem;
+    }
+
+    .image-error {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16/9;
+      background: linear-gradient(90deg, var(--muted) 25%, color-mix(in oklch, var(--muted-foreground) 10%, transparent) 50%, var(--muted) 75%);
+      background-size: 200% 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .image-error { animation: none; }
+    }
+
+    .error-text {
+      font-size: 0.8rem;
+      color: var(--muted-foreground);
+    }
+
+    .error-button {
+      background: var(--background);
+      border: 1px solid var(--border);
+      border-radius: 0.375rem;
+      padding: 0.375rem 0.75rem;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+
+    h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 1.5rem;
+    }
+
+    .state-label {
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--muted-foreground);
+      margin-bottom: 0.5rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>Image Loading States</h1>
+  <div class="chat-container">
+
+    <div class="message">
+      <div class="avatar">B</div>
+      <div class="message-content">
+        <div class="state-label">1. Loading (shimmer skeleton)</div>
+        <div class="image-container">
+          <div class="image-loading"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="message">
+      <div class="avatar">B</div>
+      <div class="message-content">
+        <div class="state-label">2. Loaded (fade-in)</div>
+        <div class="image-container">
+          <div class="image-loaded"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="message">
+      <div class="avatar">B</div>
+      <div class="message-content">
+        <div class="state-label">3. Offline (static skeleton + message)</div>
+        <div class="image-container">
+          <div class="image-offline">
+            <div class="offline-message">
+              <span>&#8212;</span>
+              <span>Image will load when you're back online</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="message">
+      <div class="avatar">B</div>
+      <div class="message-content">
+        <div class="state-label">4. Error (retry button)</div>
+        <div class="image-container">
+          <div class="image-error">
+            <div class="error-text">Failed to load image</div>
+            <button class="error-button">Retry</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>
