@@ -29,7 +29,9 @@
 // GET /api/plugins/memento/sessions/{id}/todos reads back from a keyed session's transcript.
 // Turns also run on POST /v1/runs, whose events replay from GET /v1/runs/{id}/events?last_seq=N and
 // which keep going when the client drops, unlike a chat completion. Say "long" for a slow reply, and
-// "fail" for a tool call that fails.
+// "fail" for a tool call that fails. Say "tool placement" to replay a real turn whose tool rows
+// rendered in the wrong place (add "report" for the longer work-log turn):
+// scripts/fixtures/tool-placement.json holds both, with the placement each call really had.
 // Project sessions get a worktree in each of the project's repos on
 // POST /api/plugins/memento/sessions/{id}/workspace (GET reads it back, POST …/mode changes the
 // permission mode, POST …/workspace/remove removes the trees unless a turn mentioned "commit"). In
@@ -54,9 +56,13 @@
 
 import http from "node:http"
 import { randomUUID } from "node:crypto"
-import { mkdirSync, writeFileSync, existsSync } from "node:fs"
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
+
+// Two real turns whose tool rows rendered in the wrong place (from session exports), replayed by
+// saying "tool placement plan" or "tool placement report".
+const TOOL_PLACEMENT = JSON.parse(readFileSync(new URL("./fixtures/tool-placement.json", import.meta.url), "utf8"))
 
 const PORT = Number(process.env.PORT ?? 8642)
 const pendingApprovals = new Map()
@@ -526,13 +532,13 @@ async function playTurn(req, body, last, out) {
   let spoken = ""
   titleChat(req, last)
   record(req, { role: "user", content: last })
-  const say = async (text) => {
+  const say = async (text, pace = 25) => {
     for (const piece of text.match(/\S+\s*|\s+/g) ?? []) {
       if (out.closed()) return
       pieces += 1
       spoken += piece
       out.say(piece)
-      await sleep(25)
+      await sleep(pace)
     }
   }
 
@@ -623,6 +629,41 @@ async function playTurn(req, body, last, out) {
     await say(`The delegated agent looked into it. ${report} Setting \`SystemMaxUse=500M\` in journald.conf would cap it.`)
     record(req, { role: "assistant", content: spoken, finish_reason: "stop" })
     return { spoken, prompt_tokens: 5200, completion_tokens: pieces }
+  }
+
+  // The tool-placement replay: one assistant row per step (its text beside its calls, as the session
+  // exports carry them) and the run's `output` the final message only, like Hermes's `final_response`
+  // — the shape whose settle scattered tool rows into the reply. It runs nothing else, so the thread
+  // holds exactly the exported turn.
+  const placement = /tool placement/i.test(last)
+    ? TOOL_PLACEMENT[/\breport\b/i.test(last) ? "report" : "plan"]
+    : undefined
+  if (placement) {
+    for (const step of placement.steps) {
+      if (out.closed()) break
+      if (step.text) await say(spoken ? `\n\n${step.text}` : step.text, 5)
+      const calls = step.tools.map((tool) => ({
+        id: `call_${randomUUID().slice(0, 8)}`,
+        type: "function",
+        function: { name: tool.tool, arguments: JSON.stringify(tool.args) },
+      }))
+      if (step.text || calls.length)
+        record(req, { role: "assistant", content: step.text || null, ...(calls.length ? { tool_calls: calls } : {}) })
+      for (const [i, tool] of step.tools.entries()) {
+        const id = calls[i].id
+        out.tool({ tool: tool.tool, emoji: "🧰", label: tool.label, toolCallId: id, status: "running" })
+        await sleep(150)
+        const result = JSON.stringify(tool.result)
+        out.tool({ tool: tool.tool, toolCallId: id, status: "completed", result })
+        record(req, { role: "tool", tool_call_id: id, tool_name: tool.tool, content: result })
+      }
+    }
+    return {
+      spoken,
+      output: out.closed() ? spoken : placement.output,
+      prompt_tokens: 4000 + Math.round(spoken.length / 4),
+      completion_tokens: pieces,
+    }
   }
 
   // Like Hermes's todo_list: every call returns the whole list, and the result is a transcript row.
@@ -1083,17 +1124,19 @@ function startRun(req, body) {
       push("clarify.responded", { clarify_id, outcome, answers })
       return { answers, outcome }
     },
-  }).then(({ spoken, prompt_tokens, completion_tokens }) => {
+  }).then(({ spoken, output, prompt_tokens, completion_tokens }) => {
     if (steerPoints.get(run.sessionId)) steerPoints.delete(run.sessionId)
     run.status = run.stopped ? "cancelled" : "completed"
     run.endedAt = Date.now()
-    run.output = spoken
+    // A scenario can name the final message alone, as Hermes's `final_response` carries it.
+    const final = output ?? spoken
+    run.output = final
     run.usage = { input_tokens: prompt_tokens, output_tokens: completion_tokens, total_tokens: prompt_tokens + completion_tokens }
     // A hard stop drops an unread steer, as on Hermes; otherwise it goes back to the client.
     if (run.stopped) run.pendingSteer = undefined
     noteEvent("session", run.sessionId)
     noteEvent("runs", run.sessionId)
-    push(`run.${run.status}`, { completed: !run.stopped, interrupted: run.stopped, output: spoken, usage: run.usage, ...(run.pendingSteer ? { pending_steer: run.pendingSteer } : {}) })
+    push(`run.${run.status}`, { completed: !run.stopped, interrupted: run.stopped, output: final, usage: run.usage, ...(run.pendingSteer ? { pending_steer: run.pendingSteer } : {}) })
     for (const listener of run.listeners) listener(null)
     setTimeout(() => pumpQueue(run.sessionId), 300)
   })
