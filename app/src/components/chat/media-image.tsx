@@ -1,48 +1,32 @@
 import { useEffect, useState } from "react"
 
-import { Popup, PopupContent } from "@/components/popup"
 import { loadMediaImage } from "@/lib/media-tags"
-import { useWide } from "@/lib/media"
 import { openImageViewer } from "@/lib/native"
 import { cn } from "@/lib/utils"
 
 /** An image in a reply; tapping it opens the larger view. `cell` sizes it for a gallery grid. */
 export function MediaImage({ src, alt, cell }: { src: string; alt?: string; cell?: boolean }) {
-  const [open, setOpen] = useState(false)
-  const wide = useWide()
   return (
-    <>
-      <button
-        type="button"
-        onClick={() => (wide ? setOpen(true) : void openImageViewer(src))}
-        aria-label={alt || "Open image"}
-        className={cn(
-          "block cursor-zoom-in overflow-hidden rounded-xl border bg-muted/40",
-          cell ? "h-24 w-full md:h-32 xl:h-40" : "w-fit max-w-[min(100%,42rem)]",
-        )}
-      >
-        <img
-          src={src}
-          alt={alt ?? ""}
-          className={
-            cell
-              ? "h-full w-full object-cover"
-              : "h-[320px] w-auto max-w-full object-contain md:h-[440px] xl:h-[560px]"
-          }
-          draggable={false}
-        />
-      </button>
-      <Popup open={open} onOpenChange={setOpen}>
-        <PopupContent className="inset-x-4 mx-auto w-fit max-w-fit translate-x-0 p-6">
-          <img
-            src={src}
-            alt={alt ?? ""}
-            className="h-auto w-auto max-h-[min(80dvh,calc(85dvh-3rem))] max-w-full self-center object-contain"
-            draggable={false}
-          />
-        </PopupContent>
-      </Popup>
-    </>
+    <button
+      type="button"
+      onClick={() => void openImageViewer(src)}
+      aria-label={alt || "Open image"}
+      className={cn(
+        "block cursor-pointer overflow-hidden rounded-xl border bg-muted/40",
+        cell ? "h-24 w-full md:h-32 xl:h-40" : "w-fit max-w-[min(100%,42rem)]",
+      )}
+    >
+      <img
+        src={src}
+        alt={alt ?? ""}
+        className={
+          cell
+            ? "h-full w-full object-cover"
+            : "h-[320px] w-auto max-w-full object-contain md:h-[440px] xl:h-[560px]"
+        }
+        draggable={false}
+      />
+    </button>
   )
 }
 
