@@ -45,6 +45,7 @@ import {
 } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { reasonText, useWaiting, useWaitingSessions, type WaitingReason } from "@/lib/waiting"
+import { sidebarItemAccessibility } from "@/lib/sidebar"
 
 const RECENTS = 10
 
@@ -149,8 +150,7 @@ function Recents({
                 className={(state) =>
                   cn(rowClass(state), collapsed && "relative", collapsed && railRowClass)
                 }
-                title={collapsed ? chat.title : undefined}
-                aria-label={collapsed ? chat.title : undefined}
+                {...sidebarItemAccessibility(chat.title, collapsed)}
               >
                 <Bot id={bot?.botId} className="size-5" />
                 {!collapsed && <span className="min-w-0 flex-1 truncate">{chat.title}</span>}
@@ -338,8 +338,7 @@ function Waiting({
                   to={`/c/${sessionId}`}
                   onClick={onNavigate}
                   className={(state) => cn(rowClass(state), "py-2", collapsed && railRowClass)}
-                  title={collapsed ? label : undefined}
-                  aria-label={collapsed ? label : undefined}
+                  {...sidebarItemAccessibility(label, collapsed)}
                 >
                   <Icon
                     className={cn(
@@ -386,7 +385,7 @@ function ProfileButton({
       to="/settings"
       onClick={onNavigate}
       aria-label="Settings"
-      title={collapsed ? "Settings" : undefined}
+      title={sidebarItemAccessibility("Settings", collapsed).title}
       className={({ isActive }) =>
         cn(
           "flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-full text-muted-foreground transition-shadow",
@@ -460,8 +459,7 @@ export function ConversationList({
             to="/code"
             onClick={onNavigate}
             className={(state) => cn(rowClass(state), collapsed && railRowClass)}
-            title={collapsed ? "Code" : undefined}
-            aria-label={collapsed ? "Code" : undefined}
+            {...sidebarItemAccessibility("Code", collapsed)}
           >
             <CodeXmlIcon className="size-5 text-muted-foreground" />
             {!collapsed && "Code"}
@@ -470,8 +468,7 @@ export function ConversationList({
             to="/routines"
             onClick={onNavigate}
             className={(state) => cn(rowClass(state), collapsed && railRowClass)}
-            title={collapsed ? "Routines" : undefined}
-            aria-label={collapsed ? "Routines" : undefined}
+            {...sidebarItemAccessibility("Routines", collapsed)}
           >
             <TimerIcon className="size-5 text-muted-foreground" />
             {!collapsed && "Routines"}
@@ -499,14 +496,18 @@ export function ConversationList({
           <Button
             size="icon-lg"
             className="size-11 rounded-full"
-            aria-label="New chat"
-            title="New chat"
+            {...sidebarItemAccessibility("New chat", collapsed)}
             onClick={newChat}
           >
             <PlusIcon />
           </Button>
         ) : (
-          <Button size="lg" className="h-11 rounded-full px-5" onClick={newChat}>
+          <Button
+            size="lg"
+            className="h-11 rounded-full px-5"
+            {...sidebarItemAccessibility("New chat", collapsed)}
+            onClick={newChat}
+          >
             <PlusIcon data-icon="inline-start" />
             New chat
           </Button>
