@@ -5,6 +5,13 @@ type SidebarStorageSource = SidebarStorage | (() => SidebarStorage)
 
 export const SIDEBAR_COLLAPSED_KEY = "memento:sidebar:collapsed"
 
+export function sidebarItemAccessibility(
+  label: string,
+  collapsed: boolean,
+): { title?: string; "aria-label": string } {
+  return collapsed ? { title: label, "aria-label": label } : { "aria-label": label }
+}
+
 function resolveStorage(source: SidebarStorageSource): SidebarStorage {
   return typeof source === "function" ? source() : source
 }
