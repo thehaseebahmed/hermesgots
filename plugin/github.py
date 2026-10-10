@@ -38,19 +38,6 @@ class GitHubError(Exception):
         self.status = status
 
 
-def _env_file_token(hermes_home: Path) -> Optional[str]:
-    try:
-        text = (hermes_home / ".env").read_text(encoding="utf-8")
-    except OSError:
-        return None
-    values: Dict[str, str] = {}
-    for line in text.splitlines():
-        match = re.match(r"^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$", line)
-        if match:
-            values[match.group(1)] = match.group(2).strip("'\"")
-    return next((values[name] for name in TOKEN_ENV_VARS if values.get(name)), None)
-
-
 def _gh_cli_token() -> Optional[str]:
     if not shutil.which("gh"):
         return None
@@ -65,13 +52,12 @@ def _gh_cli_token() -> Optional[str]:
 
 def token(hermes_home: Path) -> tuple[Optional[str], Optional[str]]:
     """The token and where it came from (``env`` or ``gh``), or ``(None, None)``."""
+    from agent.credential_pool import get_env_prefer_dotenv
+
     for name in TOKEN_ENV_VARS:
-        value = (os.environ.get(name) or "").strip()
+        value = get_env_prefer_dotenv(name).strip()
         if value:
             return value, "env"
-    value = _env_file_token(hermes_home)
-    if value:
-        return value, "env"
     value = _gh_cli_token()
     return (value, "gh") if value else (None, None)
 
