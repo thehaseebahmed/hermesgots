@@ -886,6 +886,10 @@ async function playTurn(req, body, last, out) {
     await say(
       "Here's the chart:\n\n" +
         "MEDIA:/var/tmp/memento-mock/chart.png\n\n" +
+        "And the shots from the run, all together:\n\n" +
+        "MEDIA:/var/tmp/memento-mock/shot-1.png\n" +
+        "MEDIA:/var/tmp/memento-mock/shot-2.png\n" +
+        "MEDIA:/var/tmp/memento-mock/shot-3.png\n\n" +
         "And one for a file I can't find:\n\n" +
         "MEDIA:/var/tmp/memento-mock/missing.png\n",
     )
