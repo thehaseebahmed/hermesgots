@@ -301,15 +301,21 @@ export function ProjectPage({
 
   // A Theseus run sits in `theseus wait` (a running turn) while it waits on the user.
   const theseusWaits = (c: Conversation) => waits[c.hermesSessionId]?.kind === "theseus"
+  // A session left with an open pull request is waiting to be reviewed and merged, not idle.
+  const groupState = (c: Conversation) => {
+    const state = sessionState(c, live[c.hermesSessionId], {
+      ...local?.[c.id],
+      waiting: local?.[c.id]?.waiting || theseusWaits(c),
+    })
+    return state === "idle" && hasOpenPr(c)
+      ? { state: "waiting" as const, prTick: true }
+      : { state, prTick: false }
+  }
   const grouped = GROUPS.map((group) => ({
     ...group,
-    sessions: (sessions ?? []).filter(
-      (c) =>
-        sessionState(c, live[c.hermesSessionId], {
-          ...local?.[c.id],
-          waiting: local?.[c.id]?.waiting || theseusWaits(c),
-        }) === group.state,
-    ),
+    sessions: (sessions ?? [])
+      .map((c) => ({ c, ...groupState(c) }))
+      .filter((s) => s.state === group.state),
   })).filter((group) => group.sessions.length > 0)
 
   return (
@@ -363,13 +369,14 @@ export function ProjectPage({
                     count={group.sessions.length}
                     fold={group.state === "discarded" ? "always" : group.state === "resolved"}
                   >
-                    {group.sessions.map((c) => (
+                    {group.sessions.map(({ c, prTick }) => (
                       <li key={c.id}>
                         <SessionItem
                           session={c}
                           open={c.id === openSession}
                           pane={openSession ? { profileId, projectId } : undefined}
                           state={group.state}
+                          prTick={prTick}
                           now={now}
                           removed={removedRepos(c)}
                           waiting={waits[c.hermesSessionId]}
@@ -472,6 +479,10 @@ export function ProjectPage({
 
 const names = new Intl.ListFormat(undefined, { type: "conjunction" })
 
+/** A pull request still open (a draft included) is a session waiting to be reviewed and merged. */
+const hasOpenPr = (c: Conversation) =>
+  (c.prs ?? []).some((pr) => pr.state === "open" || pr.state === "draft")
+
 /** In place of the New session button: why there's none right now. */
 function BottomNote({ icon, children }: { icon: ReactNode; children: ReactNode }) {
   return (
@@ -520,6 +531,7 @@ function SessionItem({
   open,
   pane,
   state,
+  prTick,
   now,
   removed,
   waiting,
@@ -530,6 +542,8 @@ function SessionItem({
   /** The project, when a session is open beside it: another one takes its place. */
   pane?: { profileId: string; projectId: string }
   state: SessionState
+  /** Waits on the user with an open pull request to review and merge. */
+  prTick?: boolean
   now: number
   /** Why the server says the session waits on the user, if it does. */
   waiting?: WaitingReason
@@ -558,6 +572,8 @@ function SessionItem({
       <span className="flex w-5 shrink-0 items-center justify-center">
         {removed.length && state !== "working" ? (
           <LockIcon className="size-4 text-muted-foreground" />
+        ) : prTick ? (
+          <CheckIcon className="size-4 text-success" />
         ) : (
           <StateIcon state={state} />
         )}
