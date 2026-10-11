@@ -8,36 +8,10 @@ the literal string ``***`` or any truncated form.
 import base64
 import unittest
 from pathlib import Path
-from types import ModuleType
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from plugin import github
-
-
-def _inject_fake_agent(lookup_fn):
-    """Inject fake agent.credential_pool and agent.secret_scope modules.
-
-    token() defers imports from both packages; this helper provides
-    fakes so tests don't need the real Hermes agent.
-    """
-    fake_agent = ModuleType("agent")
-
-    fake_pool = ModuleType("agent.credential_pool")
-    fake_pool.get_env_prefer_dotenv = lookup_fn
-    fake_agent.credential_pool = fake_pool
-
-    fake_scope = ModuleType("agent.secret_scope")
-    fake_scope.current_secret_scope = MagicMock(return_value=None)
-    fake_scope.build_profile_secret_scope = MagicMock(return_value={})
-    fake_scope.set_secret_scope = MagicMock(return_value="tok")
-    fake_scope.reset_secret_scope = MagicMock()
-    fake_agent.secret_scope = fake_scope
-
-    return patch.dict("sys.modules", {
-        "agent": fake_agent,
-        "agent.credential_pool": fake_pool,
-        "agent.secret_scope": fake_scope,
-    })
+from plugin.tests._helpers import make_fake_agent
 
 
 class CloneAuthTests(unittest.TestCase):
@@ -47,7 +21,7 @@ class CloneAuthTests(unittest.TestCase):
     def _run_clone(self, token_value, run_git_result=(0, "", "")):
         """Run clone() with a faked token and return the git command list."""
         lookup = lambda key: token_value if key == "GITHUB_TOKEN" else ""
-        with _inject_fake_agent(lookup):
+        with make_fake_agent(lookup):
             with patch.object(github, "_run_git") as mock_run:
                 mock_run.return_value = run_git_result
                 github.clone(self.home, "owner/repo", "/tmp/fake-clone")
@@ -83,7 +57,7 @@ class CloneAuthTests(unittest.TestCase):
 
     def test_clone_without_token_omits_header(self):
         """Without a token, clone() should not set the auth header."""
-        with _inject_fake_agent(lambda key: ""):
+        with make_fake_agent(lambda key: ""):
             with patch.object(github, "_run_git") as mock_run, \
                  patch.object(github, "_gh_cli_token", return_value=None):
                 mock_run.return_value = (0, "", "")
@@ -96,7 +70,7 @@ class CloneAuthTests(unittest.TestCase):
     def test_clone_failure_on_bad_auth_raises_github_error(self):
         """clone() should raise GitHubError(403) on git auth failure."""
         fake_token = "ghp_bad_tok"
-        with _inject_fake_agent(lambda key: fake_token if key == "GITHUB_TOKEN" else ""):
+        with make_fake_agent(lambda key: fake_token if key == "GITHUB_TOKEN" else ""):
             with patch.object(github, "_run_git") as mock_run:
                 mock_run.return_value = (1, "", "Authentication failed")
                 with self.assertRaises(github.GitHubError) as ctx:
