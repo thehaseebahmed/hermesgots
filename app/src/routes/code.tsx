@@ -2,8 +2,6 @@ import { useCallback, useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   ChevronUpIcon,
-  FolderGit2Icon,
-  FolderIcon,
   MenuIcon,
   PinIcon,
   PlusIcon,
@@ -33,7 +31,6 @@ import {
   type HermesConfig,
   type HermesProject,
 } from "@/lib/hermes"
-import { folderName } from "@/lib/workspace"
 
 const REFRESH_MS = 60_000
 // While a project is being cloned: the plugin does the work, this just watches for it to finish.
@@ -339,15 +336,6 @@ function PluginNotice({ names: bots, onDismiss }: { names: string[]; onDismiss: 
   )
 }
 
-/** The project's git repos (its folders when none is a repo). */
-function repoLine(project: HermesProject) {
-  const repos = project.folders.filter((folder) => folder.git)
-  return {
-    git: repos.length > 0,
-    names: (repos.length ? repos : project.folders).map(folderName).join(", "),
-  }
-}
-
 function formatWhen(at: number, now: number) {
   if (now - at < DAY_MS) return formatRelative(at, now)
   return new Date(at).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })
@@ -434,7 +422,6 @@ function ProjectItem({
 }) {
   const { profile, project, at } = row
   if (project.status !== "ready") return <PendingItem row={row} onChanged={onChanged} />
-  const repos = repoLine(project)
   return (
     <Link
       to={`/code/${profile.id}/${project.id}`}
@@ -458,16 +445,6 @@ function ProjectItem({
         {project.description && (
           <span className="block truncate text-sm text-muted-foreground">
             {project.description}
-          </span>
-        )}
-        {repos.names && (
-          <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
-            {repos.git ? (
-              <FolderGit2Icon className="size-3.5 shrink-0" aria-hidden />
-            ) : (
-              <FolderIcon className="size-3.5 shrink-0" aria-hidden />
-            )}
-            <span className="min-w-0 truncate">{repos.names}</span>
           </span>
         )}
       </span>
