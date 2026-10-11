@@ -8,32 +8,10 @@ import base64
 import unittest
 from pathlib import Path
 from subprocess import CompletedProcess
-from types import ModuleType
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from plugin import ship
-
-
-def _inject_fake_agent(lookup_fn):
-    """Inject fake agent.credential_pool and agent.secret_scope modules."""
-    fake_agent = ModuleType("agent")
-
-    fake_pool = ModuleType("agent.credential_pool")
-    fake_pool.get_env_prefer_dotenv = lookup_fn
-    fake_agent.credential_pool = fake_pool
-
-    fake_scope = ModuleType("agent.secret_scope")
-    fake_scope.current_secret_scope = MagicMock(return_value=None)
-    fake_scope.build_profile_secret_scope = MagicMock(return_value={})
-    fake_scope.set_secret_scope = MagicMock(return_value="tok")
-    fake_scope.reset_secret_scope = MagicMock()
-    fake_agent.secret_scope = fake_scope
-
-    return patch.dict("sys.modules", {
-        "agent": fake_agent,
-        "agent.credential_pool": fake_pool,
-        "agent.secret_scope": fake_scope,
-    })
+from plugin.tests._helpers import make_fake_agent
 
 
 class PushAuthTests(unittest.TestCase):
@@ -41,9 +19,9 @@ class PushAuthTests(unittest.TestCase):
         self.home = Path("/fake/hermes_home")
 
     def test_push_with_token_builds_valid_auth_header(self):
-        """_push() must set http.extraheader with base64 of x-access-token:<token>."""
+        """_push() must set http.extraheader with base64 of x-access-token:***"""
         fake_token = "ghp_push_token"
-        with _inject_fake_agent(lambda key: fake_token if key == "GITHUB_TOKEN" else ""):
+        with make_fake_agent(lambda key: fake_token if key == "GITHUB_TOKEN" else ""):
             with patch.object(ship, "_run") as mock_run:
                 mock_run.return_value = CompletedProcess(
                     args=[], returncode=0, stdout="", stderr=""
@@ -71,11 +49,11 @@ class PushAuthTests(unittest.TestCase):
         self.assertNotIn("...", b64_value)
 
         decoded = base64.b64decode(b64_value).decode()
-        self.assertEqual(decoded, "x-access-token:" + fake_token)
+        self.assertEqual(decoded, "x-access-token:ghp_push_token")
 
     def test_push_without_token_omits_header(self):
         """Without a token, _push() should not set the auth header."""
-        with _inject_fake_agent(lambda key: ""):
+        with make_fake_agent(lambda key: ""):
             with patch.object(ship, "_run") as mock_run, \
                  patch.object(ship.github, "token", return_value=(None, None)):
                 mock_run.return_value = CompletedProcess(
@@ -92,7 +70,7 @@ class PushAuthTests(unittest.TestCase):
         from plugin.ship import ShipError
 
         fake_token = "ghp_push_token"
-        with _inject_fake_agent(lambda key: fake_token if key == "GITHUB_TOKEN" else ""):
+        with make_fake_agent(lambda key: fake_token if key == "GITHUB_TOKEN" else ""):
             with patch.object(ship, "_run") as mock_run:
                 mock_run.return_value = CompletedProcess(
                     args=[], returncode=1, stdout="", stderr="Authentication failed"

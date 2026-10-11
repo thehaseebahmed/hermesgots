@@ -138,11 +138,11 @@ def _get(path: str, auth: Optional[str]) -> Any:
 def status(hermes_home: Path) -> Dict[str, Any]:
     auth, source = token(hermes_home)
     if not auth:
-        return {"connected": False}
+        return {"connected": False, "source": source, "login": None}
     try:
         user = _get("/user", auth)
     except GitHubError as error:
-        return {"connected": False, "source": source, "error": str(error)}
+        return {"connected": False, "source": source, "login": None, "error": str(error)}
     return {"connected": True, "source": source, "login": user.get("login")}
 
 
