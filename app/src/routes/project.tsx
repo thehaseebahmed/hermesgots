@@ -61,6 +61,24 @@ import {
   type SessionState,
 } from "@/lib/workspace"
 
+/**
+ * Compute the display label for a PR based on all PRs in the session.
+ * Rules:
+ * 1. Single PR, single repo → "PR #142"
+ * 2. Multiple PRs from same repo → "repo #142"
+ * 3. PRs from different repos, same owner → "repo #142"
+ * 4. PRs from different owners → "owner/repo #142"
+ */
+function computePrLabel(pr: PullRequestRef, allPrs: PullRequestRef[]) {
+  if (allPrs.length === 1) return `PR #${pr.number}`
+  const [owner] = pr.repo.split("/")
+  const sameOwner = allPrs.every((p) => p.repo.startsWith(`${owner}/`))
+  const uniqueRepos = new Set(allPrs.map((p) => p.repo))
+  if (uniqueRepos.size === 1) return `${pr.repo.split("/")[1]} #${pr.number}`
+  if (sameOwner) return `${pr.repo.split("/")[1]} #${pr.number}`
+  return `${pr.repo} #${pr.number}`
+}
+
 /** How often the plugin is asked which sessions have a run in flight, while the screen is on. */
 const LIVE_MS = 10_000
 /** While a repo is being added or removed: the plugin does the work, this watches for it to finish. */
@@ -472,12 +490,11 @@ const PR_LABELS = { open: "Open", draft: "Draft", merged: "Merged", closed: "Clo
 function prLine(session: Conversation) {
   const prs = session.prs ?? []
   if (!prs.length) return undefined
-  const named = (session.worktree?.repos.length ?? 0) > 1
   return prs
     .map((pr) => {
       const state =
         pr.checks === "failure" && pr.state !== "merged" ? "Checks failing" : PR_LABELS[pr.state]
-      return `${named ? `${pr.repo} ` : "PR "}#${pr.number} · ${state}`
+      return `${computePrLabel(pr, prs)} · ${state}`
     })
     .join(", ")
 }

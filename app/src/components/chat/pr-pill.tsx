@@ -61,15 +61,16 @@ function openPr(url: string) {
 
 /**
  * A session's pull request as a pill above the composer, coloured by state (orange when its
- * checks fail); opens it on GitHub. `named` adds the repo, for a session that spans several.
+ * checks fail); opens it on GitHub. `label` is the precomputed display text (e.g. "PR #142",
+ * "memento #142", or "thehaseebahmed/memento #142").
  */
 export function PrPill({
   pr,
-  named,
+  label,
   className,
 }: {
   pr: PullRequestRef
-  named?: boolean
+  label: string
   className?: string
 }) {
   const state = PR_LOOKS[pr.state]
@@ -87,7 +88,7 @@ export function PrPill({
       }`}
     >
       <Icon className="size-4" />
-      {named && pr.repo ? `${pr.repo} #${pr.number}` : `PR #${pr.number}`}
+      {label}
     </Button>
   )
 }
