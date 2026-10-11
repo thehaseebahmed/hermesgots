@@ -45,8 +45,8 @@ createRoot(document.getElementById("root")!).render(
         position="bottom-center"
         offset={{ bottom: "var(--toast-bottom)" }}
         mobileOffset={{ bottom: "var(--toast-bottom)" }}
-        // Centred on the screen rather than the window, past the sidebar (w-72, lg:w-80).
-        className="toaster group md:ml-36! lg:ml-40!"
+        // The sidebar width changes with the user's preference.
+        className="toaster group md:ml-[calc(var(--sidebar-width)/2)]!"
       />
     </ThemeProvider>
   </StrictMode>,
