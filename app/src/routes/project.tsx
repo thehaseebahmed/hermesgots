@@ -55,7 +55,6 @@ import {
   type LiveRunStatus,
 } from "@/lib/hermes"
 import {
-  projectRepos,
   refreshPrs,
   refreshWorkspace,
   sessionState,
