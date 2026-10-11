@@ -7,6 +7,7 @@ import {
   CheckIcon,
   ChevronUpIcon,
   CircleAlertIcon,
+  GitPullRequestArrowIcon,
   LockIcon,
   PlusIcon,
   Settings2Icon,
@@ -573,7 +574,7 @@ function SessionItem({
         {removed.length && state !== "working" ? (
           <LockIcon className="size-4 text-muted-foreground" />
         ) : prTick ? (
-          <CheckIcon className="size-4 text-success" />
+          <GitPullRequestArrowIcon className="size-4 text-primary" />
         ) : (
           <StateIcon state={state} />
         )}
