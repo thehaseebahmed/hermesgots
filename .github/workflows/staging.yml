@@ -1,0 +1,61 @@
+name: Staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to deploy to staging--hermes-companion.netlify.app (empty = the branch this run is started on)"
+        type: string
+        required: false
+        default: ""
+
+# One staging deploy at a time. The alias only moves on a finished deploy, so a run that is
+# cancelled mid-upload would leave the last good one in place anyway; queueing is the safer order.
+concurrency:
+  group: staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # workflow_dispatch runs on the branch it was started on; the input overrides it when set.
+      - name: Checkout the selected branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.branch || github.ref_name }}
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Build the app
+        working-directory: app
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Deploy to Netlify
+        # netlify.toml keeps base = "app": the site publishes app/dist and its functions live in
+        # app/netlify/functions. No --prod: an unpublished deploy with the alias keeps staging runs
+        # out of the site's published deploy list, while the alias still serves the latest one.
+        run: |
+          npx --yes netlify-cli@27.12.0 deploy \
+            --dir=app/dist \
+            --functions=app/netlify/functions \
+            --alias staging \
+            --message "${{ inputs.branch || github.ref_name }} @ ${{ github.sha }}"
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
