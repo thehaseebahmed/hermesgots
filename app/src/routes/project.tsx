@@ -243,6 +243,14 @@ export function ProjectPage({
   }, [sessions])
 
   const prs = projectPrs(sessions ?? [])
+  // The header names the repos, like the chips under it do: the one repo's name, or a count.
+  const repos = project ? projectRepos(project) : []
+  const subtitle = [
+    profile?.name,
+    repos.length > 1 ? `${repos.length} repositories` : repos[0]?.name,
+  ]
+    .filter(Boolean)
+    .join(" - ")
 
   // A session spans every repo of the project; without one there's nowhere for it to work, and
   // while one is still being cloned it would start without it.
@@ -309,7 +317,7 @@ export function ProjectPage({
       <ChatHeader
         className="relative pb-2"
         title={project?.name ?? ""}
-        subtitle={profile?.name}
+        subtitle={subtitle}
         showBot={false}
         leading={
           <Button
