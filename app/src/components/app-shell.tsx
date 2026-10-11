@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react"
 import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react"
 import { Outlet, useLocation, useNavigationType } from "react-router"
 
@@ -8,6 +9,7 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { useLarge } from "@/lib/media"
 import { depth } from "@/lib/nav"
 import { useProjectPane } from "@/lib/pane"
+import { loadSidebarCollapsed, saveSidebarCollapsed, sidebarWidth } from "@/lib/sidebar"
 import { useBotPane, useBotThreads } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { BotThreadsPage } from "@/routes/bot-threads"
@@ -105,8 +107,11 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
 }
 
 export function AppShell({ children }: { children?: ReactNode }) {
+  // Lazy so a blocked or missing localStorage cannot keep the saved fold from applying on first render.
+  const [collapsed, setCollapsed] = useState(() => loadSidebarCollapsed(() => window.localStorage))
   const [open, setOpen] = useState(false)
   const { pathname } = useLocation()
+  const large = useLarge()
   const main = useRef<HTMLElement>(null)
   const project = useProjectPane()
   const bot = useBotPane(useBotThreads())
@@ -128,12 +133,35 @@ export function AppShell({ children }: { children?: ReactNode }) {
         node: <BotThreadsPage key={bot.profileId} profileId={bot.profileId} thread={bot.thread} />,
       }
   usePageTransition(main, pane)
+  const width = sidebarWidth(collapsed, large)
+
+  useLayoutEffect(() => {
+    const root = document.documentElement
+    root.style.setProperty("--sidebar-width", width)
+    return () => {
+      root.style.removeProperty("--sidebar-width")
+    }
+  }, [width])
 
   return (
     <DrawerContext.Provider value={() => setOpen(true)}>
-      <div className="flex h-dvh overflow-hidden bg-background">
-        <aside className="hidden w-72 shrink-0 border-r bg-sidebar text-sidebar-foreground md:block lg:w-80">
-          <ConversationList />
+      <div
+        className="flex h-dvh overflow-hidden bg-background"
+        style={{ "--sidebar-width": width } as CSSProperties}
+      >
+        <aside
+          className={cn(
+            "hidden shrink-0 border-r bg-sidebar text-sidebar-foreground transition-[width] duration-300 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none md:block",
+            collapsed ? "w-[68px]" : "w-72 lg:w-80",
+          )}
+        >
+          <ConversationList
+            collapsed={collapsed}
+            onToggleSidebar={() => {
+              setCollapsed(!collapsed)
+              saveSidebarCollapsed(!collapsed, () => window.localStorage)
+            }}
+          />
         </aside>
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetContent side="left" className="w-[85vw] max-w-80 p-0" showCloseButton={false}>

@@ -273,6 +273,17 @@ export function CodePage() {
           </div>
         </div>
       )}
+      {/* The app's toaster sits at the top, over this screen's header. */}
+      <Toaster
+        id={TOASTER}
+        position={wide ? "bottom-center" : "bottom-right"}
+        // Raised on tablets too: from 768px up to about 900px a centred toast reaches the button.
+        offset={ABOVE_BUTTON}
+        mobileOffset={ABOVE_BUTTON}
+        // Centred on this screen rather than the window, past the sidebar's current width. Important,
+        // as sonner's own unlayered styles zero the margin.
+        className="toaster group md:ml-[calc(var(--sidebar-width)/2)]!"
+      />
       <NewProjectPopup
         open={creating}
         onOpenChange={setCreating}
