@@ -21,10 +21,12 @@ import { useOpenDrawer } from "@/components/drawer-context"
 import { NewProjectPopup } from "@/components/new-project"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Toaster } from "@/components/ui/sonner"
 import { Spinner } from "@/components/ui/spinner"
 import { listEnabledProfiles, type Profile } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { SAFETY_MS, useAllLive, useAnyChange } from "@/lib/live"
+import { useWide } from "@/lib/media"
 import {
   HermesError,
   deleteProject,
@@ -38,7 +40,9 @@ import { folderName } from "@/lib/workspace"
 const REFRESH_MS = 60_000
 // While a project is being cloned: the plugin does the work, this just watches for it to finish.
 const CLONING_REFRESH_MS = 3_000
+const TOASTER = "code"
 // Above the floating New project button: its bottom padding, its height and a gap.
+const ABOVE_BUTTON = { bottom: "calc(max(1rem, env(safe-area-inset-bottom)) + 3.75rem)" }
 const DAY_MS = 86_400_000
 
 interface ProjectRow {
@@ -100,6 +104,7 @@ async function loadBot({ id: profileId, ...config }: Target): Promise<BotResult>
 /** Hermes Projects from every bot, pinned ones and then the most recently worked on first. */
 export function CodePage() {
   const openDrawer = useOpenDrawer()
+  const wide = useWide()
   const profiles = useLiveQuery(listEnabledProfiles, [])
   const [results, setResults] = useState<BotResult[]>()
   const [now, setNow] = useState(() => Date.now())

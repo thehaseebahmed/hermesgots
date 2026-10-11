@@ -1,8 +1,6 @@
 import { useLiveQuery } from "dexie-react-hooks"
-import { matchPath, NavLink, useLocation, type NavLinkProps } from "react-router"
+import { NavLink, type NavLinkProps } from "react-router"
 import {
-  ArrowDownUpIcon,
-  BellOffIcon,
   ChevronRightIcon,
   CodeXmlIcon,
   ListChecksIcon,
@@ -20,29 +18,11 @@ import {
 
 import { Bot } from "@/components/bot"
 import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Separator } from "@/components/ui/separator"
-import type { BotSort } from "@/lib/db"
 import { db } from "@/lib/db"
-import { formatRelative } from "@/lib/format"
 import { useNav } from "@/lib/nav"
 import { useResearchEnabled } from "@/lib/research"
 import { useSyncState } from "@/lib/sync"
-import {
-  BOT_SORTS,
-  sortBots,
-  useBotSort,
-  useBotSummaries,
-  useNow,
-} from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { reasonText, useWaiting, useWaitingSessions, type WaitingReason } from "@/lib/waiting"
 import { sidebarItemAccessibility } from "@/lib/sidebar"
@@ -180,121 +160,6 @@ function Recents({
           <ChevronRightIcon className="size-4" />
         </button>
       )}
-    </nav>
-  )
-}
-
-/**
- * With bot threads on, in place of Recents: every bot that's turned on, each with its newest thread
- * and a count of the threads waiting on the user. A bot opens as one chat holding its threads.
- */
-function Bots({ onNavigate }: { onNavigate?: () => void }) {
-  const summaries = useBotSummaries()
-  const [sort, setSort] = useBotSort()
-  const bots = summaries && sortBots(summaries, sort)
-  const { pathname } = useLocation()
-  const chat = matchPath("/c/:id", pathname)?.params.id
-  const owner = useLiveQuery(
-    async () => (chat ? (await db.conversations.get(chat))?.profileId : undefined),
-    [chat],
-  )
-  const now = useNow()
-
-  return (
-    <nav className="flex flex-col gap-0.5" aria-labelledby="bots-heading">
-      <div className="-mt-2 flex items-center justify-between gap-2 pl-3">
-        <h2 id="bots-heading" className="text-sm font-medium text-muted-foreground">
-          Bots
-        </h2>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                variant="ghost"
-                className="h-11 gap-1.5 rounded-full px-3 text-xs text-muted-foreground"
-                aria-label={`Sort bots by ${BOT_SORTS[sort]}`}
-              />
-            }
-          >
-            <ArrowDownUpIcon />
-            {BOT_SORTS[sort]}
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-40">
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>Sort bots by</DropdownMenuLabel>
-              <DropdownMenuRadioGroup
-                value={sort}
-                onValueChange={(value) => setSort(value as BotSort)}
-              >
-                {(Object.keys(BOT_SORTS) as BotSort[]).map((option) => (
-                  <DropdownMenuRadioItem
-                    key={option}
-                    value={option}
-                    className="min-h-11"
-                    closeOnClick
-                  >
-                    {BOT_SORTS[option]}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-      <ul className="flex flex-col gap-0.5">
-        {bots?.map(({ bot, latest, waiting }) => (
-          <li key={bot.id}>
-            <RootLink
-              to={`/b/${bot.id}`}
-              onClick={onNavigate}
-              className={({ isActive }) =>
-                cn(rowClass({ isActive: isActive || owner === bot.id }), "min-h-14 py-2")
-              }
-            >
-              <Bot id={bot.botId} className="size-9" />
-              <span className="min-w-0 flex-1">
-                <span className="flex items-baseline gap-2">
-                  <span className="min-w-0 flex-1 truncate font-medium">{bot.name}</span>
-                  {bot.muted && (
-                    <BellOffIcon
-                      className="size-3.5 shrink-0 text-muted-foreground"
-                      aria-label="Muted"
-                    />
-                  )}
-                  {latest && (
-                    <span className="shrink-0 text-xs font-normal text-muted-foreground">
-                      {formatRelative(latest.updatedAt, now)}
-                    </span>
-                  )}
-                </span>
-                <span className="flex items-center gap-2">
-                  <span className="min-w-0 flex-1 truncate text-xs font-normal text-muted-foreground">
-                    {latest?.title ?? "No threads yet"}
-                  </span>
-                  {waiting > 0 && (
-                    <span className="shrink-0 rounded-full bg-warning/15 px-1.5 text-xs leading-5 font-semibold text-warning tabular-nums">
-                      {waiting}
-                      <span className="sr-only"> waiting for you</span>
-                    </span>
-                  )}
-                </span>
-              </span>
-            </RootLink>
-          </li>
-        ))}
-        <li>
-          <RootLink
-            to="/settings/bots?link=1"
-            onClick={onNavigate}
-            className={() => cn(rowClass({ isActive: false }), "text-muted-foreground")}
-          >
-            <span className="flex size-9 items-center justify-center">
-              <PlusIcon className="size-5" />
-            </span>
-            Link a bot
-          </RootLink>
-        </li>
-      </ul>
     </nav>
   )
 }
