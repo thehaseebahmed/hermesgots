@@ -51,16 +51,43 @@ def _gh_cli_token() -> Optional[str]:
 
 
 def token(hermes_home: Path) -> tuple[Optional[str], Optional[str]]:
-    """The token and where it came from (``env`` or ``gh``), or ``(None, None)``."""
+    """The token and where it came from (``env`` or ``gh``), or ``(None, None)``.
+
+    Reads through ``agent.credential_pool.get_env_prefer_dotenv`` (profile-scoped,
+    never ``os.environ`` directly).  Background threads — project clones, pushes,
+    webhook callbacks — don't inherit the caller's ``ContextVar`` secret scope,
+    so when no scope is active we build one from ``hermes_home``.  Otherwise
+    ``get_secret`` raises ``UnscopedSecretError`` under multiplexing and every
+    clone fails.  See ``agent.secret_scope.UnscopedSecretError`` docstring.
+    """
     from agent.credential_pool import get_env_prefer_dotenv
 
-    for name in TOKEN_ENV_VARS:
-        value = get_env_prefer_dotenv(name).strip()
-        if value:
-            return value, "env"
+    _scope_reset = None
+    try:
+        from agent.secret_scope import (
+            build_profile_secret_scope,
+            set_secret_scope,
+            reset_secret_scope,
+            current_secret_scope,
+        )
+        if current_secret_scope() is None:
+            _scope = build_profile_secret_scope(Path(hermes_home))
+            _scope_reset = set_secret_scope(_scope, profile_home=str(hermes_home))
+    except ImportError:
+        # agent.secret_scope not available (tests, older Hermes) — skip scope setup
+        pass
+
+    try:
+        for name in TOKEN_ENV_VARS:
+            value = get_env_prefer_dotenv(name).strip()
+            if value:
+                return value, "env"
+    finally:
+        if _scope_reset is not None:
+            reset_secret_scope(_scope_reset)
+
     value = _gh_cli_token()
     return (value, "gh") if value else (None, None)
-
 
 def _request(path: str, auth: Optional[str], method: str = "GET", data: Optional[Dict[str, Any]] = None) -> Any:
     # Without a token, public repos still answer (rate-limited).
