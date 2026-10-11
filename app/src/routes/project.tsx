@@ -17,7 +17,6 @@ import { toast } from "sonner"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { PrRow } from "@/components/chat/pr-pill"
 import { ProjectSettings } from "@/components/project-settings"
-import { RepoChips } from "@/components/repos"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -320,13 +319,6 @@ export function ProjectPage({
           )
         }
       />
-      {project?.status === "ready" && (
-        <RepoChips
-          repos={projectRepos(project).map(({ name }) => ({ name }))}
-          line
-          className="-mt-1 px-4 pb-3"
-        />
-      )}
       <Tabs defaultValue="sessions" className="flex-1">
         <TabsList>
           <TabsTrigger value="sessions">Sessions</TabsTrigger>
