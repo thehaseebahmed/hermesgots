@@ -40,7 +40,8 @@
 // says "ship", the agent opens the branch's PRs with the plugin's open_pull_request tool
 // (GET …/sessions/{id}/prs reads them; "draft" in that turn drafts them): "merge" or "close" in a
 // turn sets their state, a merge resolves the session in the chat list, and "break" fails their
-// checks. POST …/close (delete or discard) closes them and removes the trees like …/workspace/remove. GET /api/plugins/memento/runs/live lists the sessions with
+// checks while "pending" runs them for a while before they pass. POST …/close (delete or discard)
+// closes them and removes the trees like …/workspace/remove. GET /api/plugins/memento/runs/live lists the sessions with
 // a run in flight, and why each one waiting on the user waits. …/sessions/{id}/queue holds what
 // the app queued and starts it when the session's run ends, like plugin/outbox.py. The agent asks the user questions
 // with Hermes's clarify tool, which the plugin serves on runs: say "ask" for one, or "ask five" for
@@ -297,6 +298,9 @@ function jobRecord(job) {
 }
 
 const PLUGIN = process.env.MOCK_NO_PLUGIN !== "1"
+
+/** How long a pull request's checks run after a turn says "pending", before they pass. */
+const PENDING_CHECK_S = 12
 
 /** Project sessions as the plugin's memento.db holds them, by Hermes session id. */
 const projectSessions = new Map()
@@ -1752,10 +1756,14 @@ http
         return json(res, 200, { object: "memento.closed", removed: true, kept: [], results })
       }
       if (route === "prs" && req.method === "GET") {
-        // A PR per repo once the agent opened them; "merge" merges them, "break" fails their checks.
+        // A PR per repo once the agent opened them; "merge" merges them, "break" fails their
+        // checks, and "pending" runs them for a while before they pass.
         const turns = userTurns(id)
         const said = (word) => turns.some((r) => new RegExp(word, "i").test(r.content))
         const state = workspace?.closed || said("close") ? "closed" : said("merge") ? "merged" : workspace?.opened?.draft ? "draft" : "open"
+        const pendingTurn = turns.findLast((r) => /pending/i.test(r.content))
+        const checksRunning =
+          pendingTurn && Date.now() / 1000 - pendingTurn.timestamp < PENDING_CHECK_S
 
         const prs = workspace?.opened
           ? workspace.repos.map((repo, i) => ({
@@ -1764,7 +1772,7 @@ http
               title: workspace.opened.title,
               url: `https://github.com/${repo.name}/pull/${27 + i}`,
               state,
-              checks: said("break") ? "failure" : said("pending") ? "pending" : "success",
+              checks: said("break") ? "failure" : checksRunning ? "pending" : "success",
             }))
           : []
         // Like the plugin: a merge resolves the session in the chat list, once.
