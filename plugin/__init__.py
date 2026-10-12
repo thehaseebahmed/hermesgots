@@ -166,6 +166,14 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             await asyncio.to_thread(repos.resume, home)
         except Exception:
             logger.debug("memento: couldn't resume project clones", exc_info=True)
+        try:
+            # A restart also leaves a session's dev servers without their turns; the next
+            # turn starts a fresh one.
+            stopped = await asyncio.to_thread(servers.recover, db_path(home), home)
+            if stopped:
+                logger.info("memento: recovered %d server(s) after restart", stopped)
+        except Exception:
+            logger.debug("memento: couldn't recover servers after restart", exc_info=True)
         tasks = [
             asyncio.ensure_future(cleanup.run_daily(adapter, home)),
             # Linked profiles keep their bot record current in the Memento registry; see link.py.
@@ -174,6 +182,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             # Queued messages start their turn once the session's run is over; see outbox.py.
             asyncio.ensure_future(outbox.run(adapter, home)),
             asyncio.ensure_future(alerts.run(home)),
+            # Forgotten servers (a session that never resolved, a crash) are swept.
+            asyncio.ensure_future(servers.run(home)),
         ]
         yield
         for task in tasks:
@@ -719,13 +729,15 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if denied is not None:
             return denied
         session_id = request.match_info["session_id"]
+        # Its worktrees going is the session ending; its servers go with them.
+        stopped = await asyncio.to_thread(servers.stop_all, store_path(), session_id)
         try:
             result = await asyncio.to_thread(sessions.remove, store_path(), session_id)
         except sessions.WorkspaceError as error:
             return _error(web, str(error), error.status)
         if result.get("removed"):
             sessions._clear_cwd(session_id)
-        return web.json_response({"object": "memento.workspace.removed", **result})
+        return web.json_response({"object": "memento.workspace.removed", **result, "servers_stopped": len(stopped)})
 
     async def session_pr(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)

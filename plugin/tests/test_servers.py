@@ -143,6 +143,19 @@ class ServerLifecycleTests(unittest.TestCase):
         # No start-time baseline (legacy row): degrade to a liveness check.
         self.assertTrue(servers._alive({"pid": 1, "start_time": None}))
 
+    def test_stop_all_kills_a_session_and_spares_the_other(self):
+        self._start(session="session-a")
+        self._start(session="session-b")
+        stopped = servers.stop_all(self.path, "session-a")
+        self.assertEqual(len(stopped), 1)
+        # B's server survives.
+        rows = servers._read_all(self.path)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["session_id"], "session-b")
+        with socket.create_connection(("127.0.0.1", rows[0]["port"]), timeout=2):
+            pass
+        servers.stop_all(self.path, "session-b")
+
 
 class HandleTests(unittest.TestCase):
     """The serve tool's handler, through a synthetic workspace record."""

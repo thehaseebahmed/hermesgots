@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, Optional, Set, Tuple
 
-from . import chats, github, push, sessions
+from . import chats, github, push, servers, sessions
 from .store import connect, db_path
 
 logger = logging.getLogger(__name__)
@@ -92,6 +92,9 @@ def check(hermes_home: Path, only: Optional[Set[str]] = None, now: Optional[int]
         if not new:
             continue
         _mark(path, session_id, new)
+        # A resolved session's dev servers are done with; the sweep would take them too, but
+        # resolution is the moment the user sees.
+        servers.stop_all(path, session_id)
         resolved[chat_id] = {"at": max(now, entry["at"] + 1), "value": {**value, "resolvedAt": now}}
         push.notify("pr_merged", session_id, path)
     if resolved:
