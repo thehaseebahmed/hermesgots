@@ -315,9 +315,10 @@ export function DefaultModelSetting({
   const providers = info?.providers ?? []
   const host = hostChoice(info)
   const hostModel = profile.hostModel
-  // Until the host answers, the model it last had, greyed out.
+  // Until the host answers, the model it last had, greyed out: it's remembered, not a live answer.
   const loading = info === undefined && !saving
-  const current = saving ?? profile.modelChoice ?? (loading ? hostModel : host)
+  const current = saving ?? profile.modelChoice ?? host ?? hostModel
+  const stale = Boolean(hostModel) && current === hostModel
   return (
     <>
       <Button
@@ -328,7 +329,7 @@ export function DefaultModelSetting({
         disabled={!providers.length}
         onClick={() => setOpen(true)}
       >
-        <span className={cn("truncate", loading && "text-muted-foreground")}>
+        <span className={cn("truncate", stale && "text-muted-foreground")}>
           {current ? fullModel(current) : loading ? "…" : "Unknown"}
         </span>
         <ChevronDownIcon className="text-muted-foreground" />
