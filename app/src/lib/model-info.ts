@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 
-import { updateProfile, type ModelChoice, type Profile } from "@/lib/db"
+import { db, updateProfile, type ModelChoice, type Profile } from "@/lib/db"
 import { getModelInfo, getPluginFeatures, setHostModel, type ModelInfo } from "@/lib/hermes"
 
 const FRESH_MS = 60_000
@@ -47,10 +47,25 @@ async function loadModelInfo(server: Server, key: string) {
   return (await getModelInfo(server, { refresh: true })) ?? info
 }
 
+/**
+ * Remembers the model the host just reported on its bot, so a screen can show it while the host is
+ * read again. Written through `updateProfile` so the change syncs, and only when it moved.
+ */
+async function rememberHostModel(profileId: string | undefined, info: ModelInfo | null) {
+  const seen = info?.model ? { provider: info.provider ?? "", model: info.model } : undefined
+  if (!seen || !profileId) return
+  const saved = await db.profiles.get(profileId)
+  const same =
+    saved?.hostModel?.provider === seen.provider && saved?.hostModel?.model === seen.model
+  if (!saved || same) return
+  await updateProfile(profileId, { hostModel: seen })
+}
+
 /** The host's model and the models it's configured for, shared by every picker on its server. */
-export function useModelInfo(profile?: Server | null) {
+export function useModelInfo(profile?: (Server & { id?: string }) | null) {
   const baseUrl = profile?.baseUrl ?? ""
   const apiKey = profile?.apiKey ?? ""
+  const profileId = profile?.id
   const key = `${baseUrl}\n${apiKey}`
   const [state, setState] = useState<{ key: string; info: ModelInfo | null }>()
   const [version, setVersion] = useState(0)
@@ -69,13 +84,14 @@ export function useModelInfo(profile?: Server | null) {
       entry = { at: Date.now(), info: loadModelInfo({ baseUrl, apiKey }, key) }
       cache.set(key, entry)
     }
-    void entry.info.then((info) => {
+    void entry.info.then(async (info) => {
       if (!cancelled) setState({ key, info })
+      await rememberHostModel(profileId, info)
     })
     return () => {
       cancelled = true
     }
-  }, [key, baseUrl, apiKey, version])
+  }, [key, baseUrl, apiKey, version, profileId])
 
   return state?.key === key ? state.info : undefined
 }

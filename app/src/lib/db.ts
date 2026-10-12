@@ -73,7 +73,7 @@ export interface Profile {
   seenAt?: number
   /** The Memento plugin version its host last reported. Local only. */
   pluginVersion?: string
-  /** The host's main model when this device last read it, shown while it's read again. Local only. */
+  /** The host's main model as last read by any device, shown while it's read again. */
   hostModel?: ModelChoice
   createdAt: number
   /** Last change to the config, the clock sync merges on. */
