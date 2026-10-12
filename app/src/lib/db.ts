@@ -330,6 +330,15 @@ export interface Draft {
   at: number
 }
 
+/** The models.dev catalog cached on this device: the registry, its ETag and when it was fetched. */
+export interface ModelsDevCatalog {
+  id: "catalog"
+  /** The registry itself; its shape lives in `models.ts`. */
+  data: unknown
+  etag: string
+  fetchedAt: number
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   id: "settings",
   simplifiedChats: true,
@@ -351,6 +360,7 @@ export const db = new Dexie("memento") as Dexie & {
   tombstones: EntityTable<Tombstone, "id">
   vault: EntityTable<VaultKey, "id">
   drafts: EntityTable<Draft, "id">
+  modelsDevCatalog: EntityTable<ModelsDevCatalog, "id">
 }
 
 db.version(1).stores({
@@ -483,6 +493,9 @@ db.version(9)
         delete conversation.draft
       })
   })
+
+// v10: the models.dev catalog is cached on the device, with a 24-hour freshness window.
+db.version(10).stores({ modelsDevCatalog: "id" })
 
 db.on("populate", (tx) => seedProfile(tx))
 
