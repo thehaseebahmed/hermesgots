@@ -1,5 +1,11 @@
 import { db } from "@/lib/db"
-import { getSessionTodos, parseTodos, type SessionTodos } from "@/lib/hermes"
+import {
+  getSessionTodos,
+  hasPluginFeature,
+  HermesError,
+  parseTodos,
+  type SessionTodos,
+} from "@/lib/hermes"
 import { TODO_TOOLS } from "@/lib/tools"
 
 /** Bots whose plugin has no todos route (an older plugin), and when they were last asked. */
@@ -7,6 +13,11 @@ const unsupported = new Map<string, number>()
 const RETRY_MS = 5 * 60 * 1000
 /** How long a list from the live stream beats the plugin's, whose transcript may not have it yet. */
 const LIVE_MS = 10_000
+/**
+ * Reads the list again a moment after a todo tool call, since Hermes writes the transcript row the
+ * plugin reads only after the tool round; one attempt often lands too early.
+ */
+const TODO_RETRY_MS = [1500, 5000]
 
 async function store(conversationId: string, todos: SessionTodos | null, live: boolean) {
   const current = (await db.conversations.get(conversationId))?.todos
@@ -50,8 +61,15 @@ export async function refreshTodos(conversationId: string) {
   let todos
   try {
     todos = await getSessionTodos(profile, conversation.hermesSessionId)
-  } catch {
-    unsupported.set(key, Date.now())
+  } catch (error) {
+    // A missing todos route (404, or no status when Hermes's 404 skips its CORS middleware) is
+    // worth leaving alone; a flaky read or a busy host isn't, so the next refresh retries it.
+    if (
+      error instanceof HermesError &&
+      (error.status === 404 || error.status === undefined) &&
+      !(await hasPluginFeature({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }, "todos"))
+    )
+      unsupported.set(key, Date.now())
     return
   }
   unsupported.delete(key)
@@ -73,5 +91,5 @@ export async function onTodoTool(conversationId: string, tool: string, preview?:
     // Cut short; the plugin has the whole list.
   }
   if (todos) await store(conversationId, todos, true)
-  window.setTimeout(() => void refreshTodos(conversationId), 1500)
+  for (const ms of TODO_RETRY_MS) window.setTimeout(() => void refreshTodos(conversationId), ms)
 }
