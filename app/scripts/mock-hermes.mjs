@@ -54,6 +54,9 @@
 // ends comes back as the run's `pending_steer`. Say "long" for a turn with a tool call every few steps.
 // POST /api/plugins/memento/sessions/{id}/attachments saves an attached file under the temp dir, and a
 // message that carries attachments (inline images, `<attachment>` lines) gets a reply naming them.
+// POST /api/plugins/memento/dictation turns a recorded clip into a fixed sentence after a moment, like
+// plugin/dictation.py with faster-whisper; MOCK_DICTATION=off reports it unavailable (the mic hides)
+// and MOCK_DICTATION=fail answers every clip with an error.
 //
 //   pnpm mock            # then point Settings at http://localhost:8642/v1
 
@@ -977,6 +980,7 @@ async function streamCompletion(req, res, body) {
 // carry on, but no further events reach the client, like a server whose event fan-out went quiet.
 const runs = new Map()
 const PLUGIN_VERSION = process.env.MOCK_PLUGIN_VERSION || "0.29.1"
+const DICTATION = process.env.MOCK_DICTATION ?? "on"
 const EVENTS = process.env.MOCK_NO_EVENTS !== "1"
 const RUNS = process.env.MOCK_NO_RUNS !== "1"
 const RUN_BACKLOG = Number(process.env.MOCK_RUN_BACKLOG ?? 1000)
@@ -1281,12 +1285,15 @@ http
       return json(res, 200, {
         name: "memento",
         version: PLUGIN_VERSION,
-        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "theseus", ...(EVENTS ? ["events"] : []), "push", "host_model", "queue"],
+        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "theseus", ...(EVENTS ? ["events"] : []), "push", "host_model", "queue", "dictation"],
         clarify: true,
         hooks: true,
         theseus: THESEUS_START === "unavailable"
           ? { skill: "mock", api: 1, node: null, ready: false, reason: "Theseus needs Node 20 or newer on the Hermes host, and there is none.", reviewers: { llm: true, model: true, provider: true } }
           : { skill: "mock", api: 1, node: "22.0.0", ready: true, reason: null, reviewers: { llm: true, model: process.env.MOCK_THESEUS_MODELS !== "0", provider: process.env.MOCK_THESEUS_MODELS !== "0" } },
+        dictation: DICTATION === "off"
+          ? { ready: false, reason: "faster-whisper isn't installed on the host. Run `hermes tools` and pick Local Whisper.", model: "base" }
+          : { ready: true, model: "base", language: "en" },
       })
     }
     // Web Push: the mock keeps subscriptions but sends nothing.
@@ -1555,6 +1562,17 @@ http
       const given = Object.fromEntries(Object.entries(answers ?? {}).map(([k, v]) => [k, Array.isArray(v) ? (v.filter(Boolean).length ? v.filter(Boolean) : null) : (String(v ?? "").trim() || null)]))
       pending.resolve({ answers: given, outcome: outcome === "cancelled" ? "cancelled" : "submitted" })
       return json(res, 200, { object: "memento.clarify_response", run_id: clarifyRoute[1], clarify_id: pending.clarify_id, resolved: true })
+    }
+    if (PLUGIN && !profile && req.method === "POST" && url.pathname === "/api/plugins/memento/dictation/warm") {
+      return json(res, 200, { object: "memento.dictation_warm", warmed: DICTATION !== "off", ms: 0 })
+    }
+    if (PLUGIN && !profile && req.method === "POST" && url.pathname === "/api/plugins/memento/dictation") {
+      const data = await readRaw(req)
+      if (!data.length) return json(res, 400, { error: { message: "The recording is empty." } })
+      if (DICTATION === "off") return json(res, 409, { error: { message: "faster-whisper isn't installed on the host." } })
+      await new Promise((resolve) => setTimeout(resolve, 700))
+      if (DICTATION === "fail") return json(res, 502, { error: { message: "Local transcription failed: the model ran out of memory." } })
+      return json(res, 200, { object: "memento.dictation", text: "Let's ship the dictation feature today.", ms: 700 })
     }
     const attachmentRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/attachments$/.exec(url.pathname)
     if (PLUGIN && !profile && req.method === "POST" && attachmentRoute) {

@@ -5,6 +5,7 @@ import {
   useState,
   type FormEvent,
   type KeyboardEvent,
+  type PointerEvent,
   type ReactNode,
 } from "react"
 import { ArrowUpIcon, CornerDownRightIcon, ListPlusIcon, MicIcon, SquareIcon } from "lucide-react"
@@ -31,7 +32,7 @@ import {
 import type { Attachment } from "@/lib/db"
 import { flushDrafts, loadDraft, saveDraft } from "@/lib/drafts"
 import type { HermesConfig } from "@/lib/hermes"
-import { joinText, useDictation } from "@/lib/speech"
+import { canRecord, joinText, useDictation, useDictationInfo } from "@/lib/dictation"
 import {
   isSendMode,
   localCommand,
@@ -43,6 +44,9 @@ import {
 } from "@/lib/slash"
 import { randomId } from "@/lib/utils"
 
+const HOLD_MS = 400
+const SLIDE_CANCEL_PX = 80
+
 export function Composer({
   busy,
   disabled,
@@ -52,6 +56,7 @@ export function Composer({
   onCommand,
   connection,
   botName = "Hermes",
+  dictationHint,
   model,
   session,
   filesAvailable,
@@ -76,6 +81,8 @@ export function Composer({
   /** The chat's Hermes profile, for the skills in the `/` menu. */
   connection: HermesConfig
   botName?: string
+  /** Names the chat may mention (its title, a project's repos), to help the host hear them. */
+  dictationHint?: string
   /** The model pill, beside the `+` button. */
   model?: ReactNode
   /** A project session: its permission mode, picked in the `+` menu. */
@@ -131,7 +138,14 @@ export function Composer({
   const [active, setActive] = useState(0)
   const textarea = useRef<HTMLTextAreaElement>(null)
   const listId = useId()
-  const dictation = useDictation()
+  const dictationInfo = useDictationInfo(connection)
+  const dictation = useDictation(connection, joinText(botName, dictationHint ?? ""))
+  const canDictate = Boolean(dictationInfo?.ready) && canRecord()
+  // Where the cursor was when dictation started, and whether the clip goes into the text or is sent.
+  const dictationAt = useRef<number | null>(null)
+  const dictationSends = useRef(false)
+  // A press held past HOLD_MS is push-to-talk: letting go finishes, sliding away cancels.
+  const press = useRef<{ x: number; y: number } | null>(null)
   // `/steer` or `/queue` picks how a message sent mid-reply goes; the setting is the default. Only
   // text can steer, so a message with files waits in the queue. An explicit `/steer` asks the
   // host even when the reply looks unsteerable, and falls back to the queue with a toast.
@@ -241,31 +255,79 @@ export function Composer({
     textarea.current?.focus()
   }
 
-  const stopDictation = async () => {
-    const heard = await dictation.finish()
-    if (heard) setValue((current) => joinText(current, heard))
+  const placeDictation = (heard: string) => {
+    if (dictationSends.current) {
+      const text = joinText(value, heard)
+      if (disabled) setValue(text)
+      else submitText(text)
+      return
+    }
+    setValue((current) => {
+      const at = Math.min(dictationAt.current ?? current.length, current.length)
+      const before = current.slice(0, at)
+      const after = current.slice(at)
+      const middle = joinText(heard)
+      return `${before}${before && !/\s$/.test(before) ? " " : ""}${middle}${after && !/^\s/.test(after) ? " " : ""}${after}`
+    })
     setTimeout(() => textarea.current?.focus())
   }
 
-  const sendDictation = async () => {
+  const endDictation = async (send: boolean) => {
+    dictationSends.current = send
     const heard = await dictation.finish()
-    if (!heard) return
-    const text = joinText(value, heard)
-    if (disabled) setValue(text)
-    else submitText(text)
+    if (heard) placeDictation(heard)
+  }
+
+  const retryDictation = async () => {
+    const heard = await dictation.retry()
+    if (heard) placeDictation(heard)
+  }
+
+  const startDictation = () => {
+    dictationAt.current = textarea.current?.selectionStart ?? null
+    dictationSends.current = false
+    dictation
+      .start()
+      .catch((error: unknown) =>
+        toast.error(error instanceof Error ? error.message : "Couldn't start the microphone."),
+      )
+  }
+
+  const pressMic = (event: PointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    press.current = { x: event.clientX, y: event.clientY }
+    const up = (end: globalThis.PointerEvent) => {
+      window.removeEventListener("pointerup", up)
+      window.removeEventListener("pointercancel", up)
+      const start = press.current
+      press.current = null
+      const since = dictation.recordingSince()
+      // A tap, or a hold that ended while the mic was still being asked for, keeps recording, and
+      // so does a press the browser took over (a scroll): the bar's own buttons end it then.
+      if (!start || since === null || end.type === "pointercancel") return
+      if (Date.now() - since < HOLD_MS) return
+      const away = Math.hypot(end.clientX - start.x, end.clientY - start.y) > SLIDE_CANCEL_PX
+      if (away) dictation.cancel()
+      else void endDictation(false)
+    }
+    window.addEventListener("pointerup", up)
+    window.addEventListener("pointercancel", up)
+    startDictation()
   }
 
   if (dictation.status !== "idle") {
     return (
       <div className="mx-auto w-full max-w-3xl">
         <VoiceBar
-          final={dictation.final}
-          interim={dictation.interim}
+          status={dictation.status}
           levels={dictation.levels}
-          finishing={dictation.status === "finishing"}
+          startedAt={dictation.startedAt}
+          error={dictation.error}
           onCancel={dictation.cancel}
-          onStop={() => void stopDictation()}
-          onSend={() => void sendDictation()}
+          onStop={() => void endDictation(false)}
+          onSend={() => void endDictation(true)}
+          onRetry={() => void retryDictation()}
         />
       </div>
     )
@@ -299,13 +361,18 @@ export function Composer({
 
   const controls = (
     <>
-      {dictation.supported && !disabled && (
+      {canDictate && !disabled && (
         <InputGroupButton
           type="button"
           variant="ghost"
           size="icon-sm"
-          className="size-11 rounded-full"
-          onClick={dictation.start}
+          className="size-11 touch-none rounded-full select-none"
+          onPointerDown={pressMic}
+          onClick={(event) => {
+            // Keyboard presses have no pointer; a pointer press already started.
+            if (event.detail === 0) startDictation()
+          }}
+          onContextMenu={(event) => event.preventDefault()}
           aria-label="Voice"
         >
           <MicIcon />
