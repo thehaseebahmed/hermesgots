@@ -10,7 +10,7 @@ import {
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
-import { db, rememberModel, type ModelChoice, type Profile } from "@/lib/db"
+import { rememberModel, type ModelChoice, type Profile } from "@/lib/db"
 import type { ModelInfo, ModelProvider } from "@/lib/hermes"
 import { shortModel, useModelInfo } from "@/lib/model-info"
 import { cn } from "@/lib/utils"
@@ -303,12 +303,6 @@ export function DefaultModelSetting({
   const providers = info?.providers ?? []
   const host = hostChoice(info)
   const hostModel = profile.hostModel
-  useEffect(() => {
-    const seen = hostChoice(info)
-    if (seen && (seen.provider !== hostModel?.provider || seen.model !== hostModel.model)) {
-      void db.profiles.update(profile.id, { hostModel: seen })
-    }
-  }, [profile.id, info, hostModel])
   // Until the host answers, the model it last had, greyed out.
   const loading = info === undefined && !saving
   const current = saving ?? profile.modelChoice ?? (loading ? hostModel : host)
