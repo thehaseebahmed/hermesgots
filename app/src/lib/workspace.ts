@@ -1,4 +1,4 @@
-import { db, type Conversation, type SessionMode } from "@/lib/db"
+import { db, type Conversation, type PullRequestRef, type SessionMode } from "@/lib/db"
 import {
   ensureWorkspace,
   getSessionPrs,
@@ -26,6 +26,12 @@ const unsupported = new Map<string, number>()
 const RETRY_MS = 5 * 60 * 1000
 /** How long a known pull request is trusted before it's read again. */
 const PR_MS = 30_000
+/** Checks still running are read again this often, so the pill shows them as they finish. */
+export const PR_PENDING_MS = 10_000
+
+/** Whether any of a session's pull requests still has checks running. */
+export const prChecksPending = (prs: PullRequestRef[] | undefined) =>
+  (prs ?? []).some((pr) => pr.state !== "merged" && pr.checks === "pending")
 
 export type SessionState = "working" | "waiting" | "idle" | "resolved" | "discarded"
 
@@ -125,7 +131,8 @@ export async function refreshPrs(conversationId: string, { force = false } = {})
   if (!found?.conversation.worktree || found.conversation.discardedAt || cooling(found.key)) return
   const { conversation, profile } = found
   const newest = Math.min(...(conversation.prs ?? []).map((pr) => pr.at))
-  if (!force && conversation.prs?.length && Date.now() - newest < PR_MS) return
+  const trusted = prChecksPending(conversation.prs) ? PR_PENDING_MS : PR_MS
+  if (!force && conversation.prs?.length && Date.now() - newest < trusted) return
   let prs
   try {
     prs = await getSessionPrs(profile, conversation.hermesSessionId)

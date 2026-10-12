@@ -57,6 +57,8 @@ import {
 } from "@/lib/hermes"
 import {
   projectRepos,
+  PR_PENDING_MS,
+  prChecksPending,
   refreshPrs,
   refreshWorkspace,
   sessionState,
@@ -242,6 +244,15 @@ export function ProjectPage({
       read.current.add(c.id)
       void (c.worktree ? Promise.resolve() : refreshWorkspace(c.id)).then(() => refreshPrs(c.id))
     }
+  }, [sessions])
+  // While any session's pull request has checks running, read them again every few seconds, so
+  // the rows here keep up with the pill.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return
+      for (const c of sessions ?? []) if (prChecksPending(c.prs)) void refreshPrs(c.id)
+    }, PR_PENDING_MS)
+    return () => window.clearInterval(timer)
   }, [sessions])
 
   const prs = projectPrs(sessions ?? [])
