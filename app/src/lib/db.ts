@@ -13,6 +13,8 @@ export interface Settings {
   simplifiedChats: boolean
   /** A message sent while a reply runs steers it, instead of waiting in the queue. */
   steerByDefault?: boolean
+  /** Reminds phone users to put the app away while a bot chat or code session runs. Local, on by default. */
+  breakReminders?: boolean
   /** Shows the Developer section in Settings (tapping the version five times). */
   developer?: boolean
   /** Offers Theseus among a project session's modes; a Developer setting, off by default. Local. */
@@ -331,6 +333,7 @@ export interface Draft {
 export const DEFAULT_SETTINGS: Settings = {
   id: "settings",
   simplifiedChats: true,
+  breakReminders: true,
 }
 
 export const DEFAULT_PROFILE = {
