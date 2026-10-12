@@ -1,3 +1,4 @@
+import { useLiveQuery } from "dexie-react-hooks"
 import { useSyncExternalStore } from "react"
 
 import { db, updateProfile, type ModelsDevCatalog, type Profile } from "@/lib/db"
@@ -11,9 +12,11 @@ const TTL_MS = 24 * 60 * 60 * 1000
 interface CatalogModel {
   limit?: { context?: unknown }
   modalities?: { input?: unknown }
+  reasoning?: unknown
+  cost?: { input?: unknown; output?: unknown }
 }
 
-type Catalog = Record<string, { models?: Record<string, CatalogModel> }>
+export type Catalog = Record<string, { models?: Record<string, CatalogModel> }>
 
 /**
  * The last lookup couldn't reach models.dev and had no cached catalog to answer from, so
@@ -147,6 +150,27 @@ function imageInputOf(entry: CatalogModel | undefined) {
   return Array.isArray(input) ? input.includes("image") : undefined
 }
 
+function reasoningOf(entry: CatalogModel | undefined) {
+  return typeof entry?.reasoning === "boolean" ? entry.reasoning : undefined
+}
+
+/** The upper bound of each cost band, in blended USD per million tokens. */
+const COST_BANDS = [2, 8, 25, 80]
+
+/**
+ * The model's cost band, 1–5, from the blended price (5×input + output): `$` under 2, `$$` to 8,
+ * `$$$` to 25, `$$$$` to 80, `$$$$$` above that. Unknown when either price is missing.
+ */
+function costTierOf(entry: CatalogModel | undefined) {
+  const cost = entry?.cost
+  const input = typeof cost?.input === "number" ? cost.input : undefined
+  const output = typeof cost?.output === "number" ? cost.output : undefined
+  if (input === undefined || output === undefined) return undefined
+  const blended = 5 * input + output
+  const band = COST_BANDS.findIndex((max) => blended < max)
+  return band === -1 ? COST_BANDS.length + 1 : band + 1
+}
+
 function matchIn<T>(
   models: Record<string, CatalogModel> | undefined,
   model: string,
@@ -167,15 +191,13 @@ function matchIn<T>(
   return undefined
 }
 
-type ModelRef = Pick<ModelInfo, "provider" | "model">
-
-/** What models.dev says about the model, or undefined if it isn't listed. Throws when unreachable. */
-async function lookUp<T>(
+/** The first value *pick* finds for the model: under its own provider, then under any. */
+function findIn<T>(
+  data: Catalog,
   { provider, model }: ModelRef,
   pick: (entry: CatalogModel | undefined) => T | undefined,
 ) {
   if (!model) return undefined
-  const data = await loadCatalog()
   // Hermes's provider ids don't always match models.dev's, so fall back to any provider.
   const own = provider ? matchIn(data[provider]?.models, model, pick) : undefined
   if (own !== undefined) return own
@@ -186,11 +208,55 @@ async function lookUp<T>(
   return undefined
 }
 
+type ModelRef = Pick<ModelInfo, "provider" | "model">
+
+/** What models.dev says about the model, or undefined if it isn't listed. Throws when unreachable. */
+async function lookUp<T>(info: ModelRef, pick: (entry: CatalogModel | undefined) => T | undefined) {
+  if (!info.model) return undefined
+  return findIn(await loadCatalog(), info, pick)
+}
+
 /** The model's context window per models.dev. */
 export const findContextWindow = (info: ModelRef) => lookUp(info, contextOf)
 
 /** Whether the model takes images (`modalities.input`), unknown when models.dev doesn't say. */
 export const findImageInput = (info: ModelRef) => lookUp(info, imageInputOf)
+
+export interface ModelFacts {
+  context?: number
+  vision?: boolean
+  reasoning?: boolean
+  /** The model's cost band, 1–5; see COST_BANDS. */
+  tier?: number
+}
+
+/** Facts per registry object, so re-renders (search typing) don't re-walk all of models.dev. */
+const factsCache = new WeakMap<Catalog, Map<string, ModelFacts>>()
+
+/** What the cached registry says about a listed model, for the model sheet's detail line. */
+export function modelFacts(catalog: Catalog | undefined, info: ModelRef): ModelFacts {
+  if (!catalog || !info.model) return {}
+  let byModel = factsCache.get(catalog)
+  if (!byModel) factsCache.set(catalog, (byModel = new Map()))
+  const key = `${info.provider ?? ""}/${info.model}`
+  let facts = byModel.get(key)
+  if (!facts) {
+    facts = {
+      context: findIn(catalog, info, contextOf),
+      vision: findIn(catalog, info, imageInputOf),
+      reasoning: findIn(catalog, info, reasoningOf),
+      tier: findIn(catalog, info, costTierOf),
+    }
+    byModel.set(key, facts)
+  }
+  return facts
+}
+
+/** The cached registry itself, live: the model sheet renders its facts from this. */
+export function useModelCatalog() {
+  const catalog = useLiveQuery(() => db.modelsDevCatalog.get(CATALOG_ROW))
+  return catalog?.data as Catalog | undefined
+}
 
 /**
  * Fills in the profile's context window from models.dev whenever the model behind it changes,

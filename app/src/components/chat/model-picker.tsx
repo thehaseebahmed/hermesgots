@@ -11,8 +11,10 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { Button } from "@/components/ui/button"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { rememberModel, type ModelChoice, type Profile } from "@/lib/db"
+import { formatTokens } from "@/lib/format"
 import type { ModelInfo, ModelProvider } from "@/lib/hermes"
 import { fullModel, shortModel, useModelInfo } from "@/lib/model-info"
+import { modelFacts, useModelCatalog, type Catalog } from "@/lib/models"
 import { cn } from "@/lib/utils"
 
 /**
@@ -39,6 +41,8 @@ export function ModelPicker({
 }) {
   const [query, setQuery] = useState("")
   const [openSlug, setOpenSlug] = useState<string>()
+  // The cached models.dev catalog, live: each row's facts repaint when a refresh lands.
+  const catalog = useModelCatalog()
   const sorted = useMemo(() => sortProviders(providers), [providers])
   const root = useRef<HTMLDivElement>(null)
   // A host with one provider has nothing to choose between, so its models show at once.
@@ -122,6 +126,7 @@ export function ModelPicker({
                 <ModelOption
                   key={fullModel(m)}
                   label={fullModel(m)}
+                  detail={modelDetail(catalog, m)}
                   selected={isChosen(m)}
                   onClick={() => onChoose(m)}
                 />
@@ -156,6 +161,7 @@ export function ModelPicker({
                   <ModelOption
                     key={m}
                     label={m}
+                    detail={modelDetail(catalog, { provider: p.slug, model: m })}
                     selected={isChosen({ provider: p.slug, model: m })}
                     onClick={() => onChoose({ provider: p.slug, model: m })}
                   />
@@ -186,6 +192,22 @@ function sortProviders(providers: ModelProvider[]) {
   return providers
     .map((p) => ({ ...p, models: [...p.models].sort(byName.compare) }))
     .sort((a, b) => byName.compare(a.name, b.name))
+}
+
+/**
+ * A model row's muted second line: what models.dev says about it (`1M · vision · $$$`), `—` when
+ * it lists nothing, and no line at all while the catalog is still loading.
+ */
+function modelDetail(catalog: Catalog | undefined, choice: ModelChoice) {
+  if (!catalog) return undefined
+  const { context, vision, reasoning, tier } = modelFacts(catalog, choice)
+  const parts = [
+    context ? formatTokens(context) : null,
+    vision ? "vision" : null,
+    reasoning ? "reasoning" : null,
+    tier ? "$".repeat(tier) : null,
+  ].filter((part): part is string => part !== null)
+  return parts.join(" · ") || "—"
 }
 
 function ModelList({ children }: { children: ReactNode }) {
