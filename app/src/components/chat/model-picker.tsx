@@ -249,8 +249,15 @@ export function ModelMenu({
   const [open, setOpen] = useState(false)
   const info = useModelInfo(profile)
   const providers = info?.providers ?? []
-  const fallback = profile?.modelChoice?.model ?? info?.model
-  const current = choice?.model ?? fallback
+  // The host's last reported model, shown greyed while it's read again. Only a bot whose host runs
+  // the Memento plugin shows it; one without the plugin keeps showing nothing until the host answers.
+  const remembered = profile?.pluginVersion ? profile.hostModel?.model : undefined
+  let current = choice?.model ?? profile?.modelChoice?.model ?? info?.model
+  let stale = false
+  if (!current && remembered) {
+    current = remembered
+    stale = true
+  }
   // Nothing to pick from (an older Hermes, a host that's down, a keyless bot still loading).
   if (!current && !providers.length) return null
   return (
@@ -263,14 +270,19 @@ export function ModelMenu({
         onClick={() => setOpen(true)}
         aria-label={`Model: ${current ?? "Unknown"}`}
       >
-        <span className="truncate">{current ? shortModel(current) : "Model"}</span>
+        <span className={cn("truncate", stale && "text-muted-foreground")}>
+          {current ? shortModel(current) : "Model"}
+        </span>
         {providers.length > 0 && <ChevronDownIcon className="text-muted-foreground" />}
       </Button>
       <Popup open={open} onOpenChange={setOpen}>
         <PopupContent initialFocus={false} className={PICKER_HEIGHT}>
           <ModelPicker
             providers={providers}
-            fallback={{ label: "Default", model: fallback }}
+            fallback={{
+              label: "Default",
+              model: profile?.modelChoice?.model ?? info?.model ?? remembered,
+            }}
             recent={profile?.recentModels}
             choice={choice}
             onChoose={(next) => {
