@@ -16,6 +16,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
 
 import { ChatHeader } from "@/components/chat/chat-header"
+import { prLook } from "@/components/chat/pr-look"
 import { PrRow } from "@/components/chat/pr-pill"
 import { ProjectSettings } from "@/components/project-settings"
 import {
@@ -314,15 +315,17 @@ export function ProjectPage({
 
   // A Theseus run sits in `theseus wait` (a running turn) while it waits on the user.
   const theseusWaits = (c: Conversation) => waits[c.hermesSessionId]?.kind === "theseus"
-  // A session left with an open pull request is waiting to be reviewed and merged, not idle.
+  // A session left with an open pull request is waiting to be reviewed and merged, not idle —
+  // unless its checks are still running, which is work it has left to do.
   const groupState = (c: Conversation) => {
     const state = sessionState(c, live[c.hermesSessionId], {
       ...local?.[c.id],
       waiting: local?.[c.id]?.waiting || theseusWaits(c),
     })
-    return state === "idle" && hasOpenPr(c)
-      ? { state: "waiting" as const, prTick: true }
-      : { state, prTick: false }
+    if (state !== "idle" || !hasOpenPr(c)) return { state, prTick: false }
+    return prChecksPending(c.prs)
+      ? { state: "working" as const, prTick: false }
+      : { state: "waiting" as const, prTick: true }
   }
   const grouped = GROUPS.map((group) => ({
     ...group,
@@ -516,17 +519,14 @@ function formatWhen(at: number, now: number) {
   return new Date(at).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })
 }
 
-const PR_LABELS = { open: "Open", draft: "Draft", merged: "Merged", closed: "Closed" }
-
 /** `user/repo #27 · Open`, naming the repo when the session spans more than one. */
 function prLine(session: Conversation) {
   const prs = session.prs ?? []
   if (!prs.length) return undefined
   return prs
     .map((pr) => {
-      const state =
-        pr.checks === "failure" && pr.state !== "merged" ? "Checks failing" : PR_LABELS[pr.state]
-      return `${computePrLabel(pr, prs)} · ${state}`
+      const state = prLook(pr).label
+      return `${computePrLabel(pr, prs)} · ${state[0].toUpperCase() + state.slice(1)}`
     })
     .join(", ")
 }
