@@ -66,6 +66,12 @@ const FLUSH_INTERVAL_MS = 50
 const POLL_TIMEOUT_MS = 15_000
 /** How often a run whose events can't be read is polled, with the transcript. */
 const POLL_MS = 3000
+/**
+ * How often the run's status is read while its events stream is open. The stream keeps its own
+ * connection alive with keepalives, so a stream whose events stopped arriving (a quiet fan-out, a
+ * proxy holding it open) never times out — only a terminal status read here ends the turn.
+ */
+const STREAM_POLL_MS = 10_000
 /** How long after a turn ends before the plugin is asked about it. */
 const PLUGIN_SETTLE_MS = 1500
 /** Hermes upgrades a placeholder title on later turns, up to the third. */
@@ -389,6 +395,58 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
   let readTranscript: ((signal: AbortSignal) => Promise<void>) | undefined
   let failures = 0
   let errored = false
+  // Raises an approval or question the run's status says it waits on, and expires one it no longer
+  // does. The events stream carries both too; `raisedFor` keeps each owner's raise single.
+  const applyStatus = async (signal: AbortSignal) => {
+    const { outcome, approval, clarify } = await getRun(config, runId, signal)
+    if (outcome) return { ...outcome, replaceContent: lost } as RunOutcome
+    if (approval) {
+      const key = JSON.stringify([approval.command, approval.description])
+      if (key !== raisedFor) {
+        raisedFor = key
+        raiseApproval(turn, approval)
+      }
+    } else {
+      raisedFor = undefined
+      if (polling && draft.approval && !draft.approval.resolved) {
+        draft.approval = { ...draft.approval, resolved: "expired" }
+        touch()
+      }
+    }
+    // A client that can only poll still gets the question: the plugin keeps it on the status.
+    if (clarify) handlers.onClarify?.(clarify)
+    else if (polling && draft.clarify && !draft.clarify.resolved) {
+      draft.clarify = { ...draft.clarify, resolved: "expired" }
+      touch()
+    }
+    return undefined
+  }
+  // Reads the run's status now and then while its events stream is open: a stalled stream still
+  // keepalives, so only this sees the run finish (or wait on the user) and ends the turn.
+  const watchStatus = (current: AbortSignal, done: (outcome: RunOutcome) => void) => {
+    const watcher = new AbortController()
+    const timer = window.setInterval(() => {
+      if (watcher.signal.aborted || current.aborted || signal.aborted) return
+      void applyStatus(AbortSignal.any([current, AbortSignal.timeout(POLL_TIMEOUT_MS)])).then(
+        (outcome) => {
+          if (outcome) {
+            watcher.abort()
+            done(outcome)
+          }
+        },
+        () => undefined,
+      )
+    }, STREAM_POLL_MS)
+    const stop = () => {
+      watcher.abort()
+      window.clearInterval(timer)
+      current.removeEventListener("abort", stop)
+      signal.removeEventListener("abort", stop)
+    }
+    current.addEventListener("abort", stop)
+    signal.addEventListener("abort", stop)
+    return stop
+  }
   for (let attempt = 0; ; attempt++) {
     // Coming back to the app drops this attempt's connection, which may have died meanwhile, and
     // reads the run again at once rather than once a timeout notices.
@@ -399,35 +457,39 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
     try {
       if (!polling) {
         const lastSeq = draft.runSeq ?? -1
-        const outcome = await followRun(config, runId, { lastSeq, signal: current }, handlers)
-        if (outcome) return { ...outcome, replaceContent: lost }
+        let streamError: unknown
+        let settled: RunOutcome | undefined
+        const outcome = await new Promise<RunOutcome | null>((resolve) => {
+          const stopWatching = watchStatus(current, (settledRun) => {
+            settled = settledRun
+            // Drop the stream's connection: the run it followed is over.
+            woken.abort(new DOMException("Settled", "AbortError"))
+            resolve(settledRun)
+          })
+          void followRun(config, runId, { lastSeq, signal: current }, handlers).then(
+            (streamed) => {
+              stopWatching()
+              resolve(streamed)
+            },
+            (error) => {
+              stopWatching()
+              streamError = error
+              resolve(null)
+            },
+          )
+        })
+        // The status watcher saw the run finish before the stream's own error arrived.
+        if (settled) return settled
+        // The stream's error keeps its own handling below (404 -> polling); only a stream that
+        // ended quietly falls through to the status read.
+        if (streamError) throw streamError
+        if (outcome) return outcome
       } else {
         readTranscript ??= await transcriptReader(turn)
         await readTranscript?.(timed())
       }
-      const { outcome, approval, clarify } = await getRun(config, runId, timed())
-      if (outcome) return { ...outcome, replaceContent: lost }
-      // The events stream carries approval requests; when it can't be read, the run's status holds
-      // the one it waits on.
-      if (approval) {
-        const key = JSON.stringify([approval.command, approval.description])
-        if (key !== raisedFor) {
-          raisedFor = key
-          raiseApproval(turn, approval)
-        }
-      } else {
-        raisedFor = undefined
-        if (polling && draft.approval && !draft.approval.resolved) {
-          draft.approval = { ...draft.approval, resolved: "expired" }
-          touch()
-        }
-      }
-      // A client that can only poll still gets the question: the plugin keeps it on the status.
-      if (clarify) handlers.onClarify?.(clarify)
-      else if (polling && draft.clarify && !draft.clarify.resolved) {
-        draft.clarify = { ...draft.clarify, resolved: "expired" }
-        touch()
-      }
+      const status = await applyStatus(timed())
+      if (status) return status
       failures = 0
       errored = false
     } catch (error) {
@@ -592,17 +654,22 @@ function anchorOffsets(draft: Draft, next: string) {
   let prefix = 0
   while (prefix < cap && previous[prefix] === next[prefix]) prefix += 1
   let suffix = 0
-  while (suffix < cap - prefix && previous[previous.length - 1 - suffix] === next[next.length - 1 - suffix])
+  while (
+    suffix < cap - prefix &&
+    previous[previous.length - 1 - suffix] === next[next.length - 1 - suffix]
+  )
     suffix += 1
   const movedEnd = previous.length - suffix
   const shift = next.length - previous.length
-  const anchor = (offset: number) => (offset <= prefix ? offset : offset >= movedEnd ? offset + shift : prefix)
+  const anchor = (offset: number) =>
+    offset <= prefix ? offset : offset >= movedEnd ? offset + shift : prefix
   draft.tools = draft.tools.map((t) =>
     t.contentOffset === undefined ? t : { ...t, contentOffset: anchor(t.contentOffset) },
   )
   if (draft.approval && draft.approval.contentOffset !== undefined)
     draft.approval = { ...draft.approval, contentOffset: anchor(draft.approval.contentOffset) }
-  if (draft.steers) draft.steers = draft.steers.map((s) => ({ ...s, contentOffset: anchor(s.contentOffset) }))
+  if (draft.steers)
+    draft.steers = draft.steers.map((s) => ({ ...s, contentOffset: anchor(s.contentOffset) }))
 }
 
 /** Where the text streamed since the last tool call starts; the run's final answer replaces it. */
@@ -618,7 +685,8 @@ function finalTextStart(draft: Draft) {
 function settleFinalText(draft: Draft, output: string) {
   const streamed = draft.content.slice(finalTextStart(draft))
   if (!streamed.trim() || streamed.trim() === output.trim()) return
-  const next = draft.content.slice(0, finalTextStart(draft)) + /^\s*/.exec(streamed)![0] + output.trim()
+  const next =
+    draft.content.slice(0, finalTextStart(draft)) + /^\s*/.exec(streamed)![0] + output.trim()
   anchorOffsets(draft, next)
   draft.content = next
 }
@@ -632,7 +700,8 @@ function settleRun(draft: Draft, outcome: RunOutcome) {
     const tail = draft.content.slice(finalTextStart(draft))
     const kept =
       !!tail.trim() &&
-      (tail.trim() === outcome.output.trim() || draft.content.trimEnd().endsWith(outcome.output.trim()))
+      (tail.trim() === outcome.output.trim() ||
+        draft.content.trimEnd().endsWith(outcome.output.trim()))
     if (!draft.content) draft.content = outcome.output
     else if (!kept) {
       anchorOffsets(draft, outcome.output)
