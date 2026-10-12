@@ -18,29 +18,11 @@ from unittest import mock
 
 from plugin import library, sessions
 from plugin.store import db_path
+from plugin.tests._helpers import stub_projects_db
 
 
 def fake_project(primary: Path) -> SimpleNamespace:
     return SimpleNamespace(id="p1", folders=[SimpleNamespace(path=str(primary), is_primary=True)])
-
-
-class _FakeContext:
-    def __enter__(self) -> "_FakeContext":
-        return self
-
-    def __exit__(self, *args: object) -> bool:
-        return False
-
-
-def _stub_projects_db(project: SimpleNamespace) -> None:
-    """Stand in for hermes_cli.projects_db, which only exists on a Hermes host."""
-    module = types.ModuleType("hermes_cli")
-    projects_db = types.ModuleType("hermes_cli.projects_db")
-    projects_db.connect_closing = lambda db_path: _FakeContext()
-    projects_db.list_projects = lambda conn, include_archived: [project]
-    module.projects_db = projects_db
-    sys.modules["hermes_cli"] = module
-    sys.modules["hermes_cli.projects_db"] = projects_db
 
 
 class FilesDirTest(unittest.TestCase):
@@ -79,6 +61,31 @@ class FilesDirTest(unittest.TestCase):
         self.assertEqual(record["files_dir"], folder)
         self.assertEqual(record["branch"], "hermes/jazzy-quokka-7bfe")
 
+    def test_ensure_fills_a_row_from_before_the_column(self) -> None:
+        # A pre-v15 row whose worktrees all exist takes ensure's early return: the folder is
+        # filled then, so the instructions name it and the tool doesn't resolve it every call.
+        worktree = self.home / "project" / ".worktrees" / "jazzy-quokka-7bfe"
+        worktree.mkdir(parents=True)
+        (self.home / "project" / ".git").mkdir(parents=True)
+        (self.home / "projects.db").write_bytes(b"")
+        repos = [
+            {
+                "name": "o/web",
+                "repo_root": str(self.home / "project"),
+                "path": str(worktree),
+                "branch": "hermes/jazzy-quokka-7bfe",
+            }
+        ]
+        sessions._upsert(self.db, "memento-1", "p1", repos, "auto", None)
+        with stub_projects_db([self.project]):
+            record = sessions.ensure(self.db, self.home, "memento-1", "p1", None, None)
+        self.assertEqual(
+            record["files_dir"], str(self.home / "project" / "files" / "jazzy-quokka-7bfe")
+        )
+        stored = sessions.read(self.db, "memento-1")
+        assert stored is not None
+        self.assertEqual(stored["files_dir"], record["files_dir"])
+
 
 class AddToLibraryTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -106,6 +113,11 @@ class AddToLibraryTest(unittest.TestCase):
             }
         ]
         sessions._upsert(self.db, "memento-1", "p1", repos, "auto", str(self.files_dir))
+        # The library folder resolves from the project, so projects.db is stubbed for every call.
+        (self.home / "projects.db").write_bytes(b"")
+        projects_patcher = stub_projects_db([fake_project(self.project)])
+        projects_patcher.start()
+        self.addCleanup(projects_patcher.stop)
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
@@ -150,8 +162,6 @@ class AddToLibraryTest(unittest.TestCase):
     def test_a_record_from_before_the_column_still_files_it(self) -> None:
         with sqlite3.connect(self.db) as conn:
             conn.execute("UPDATE project_sessions SET files_dir = NULL WHERE session_id = 'memento-1'")
-        (self.home / "projects.db").write_bytes(b"")
-        _stub_projects_db(fake_project(self.project))
         result = self._call("shot.png")
         self.assertEqual(result["path"], str(self.files_dir / "shot.png"))
 

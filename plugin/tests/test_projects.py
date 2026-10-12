@@ -10,14 +10,13 @@ Run: python3 -m unittest plugin.tests.test_projects -v
 from __future__ import annotations
 
 import sqlite3
-import sys
-import types
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Dict, List, Optional, Tuple
 
 from plugin.projects import USAGE_COLUMNS, _fit, _scale, usage
+from plugin.tests._helpers import stub_projects_db
 
 
 class FakeFolder:
@@ -28,25 +27,6 @@ class FakeFolder:
 class FakeProject:
     def __init__(self, folders: List[FakeFolder]) -> None:
         self.folders = folders
-
-
-class _FakeContext:
-    def __enter__(self) -> "_FakeContext":
-        return self
-
-    def __exit__(self, *args: Any) -> bool:
-        return False
-
-
-def _stub_projects_db(project: FakeProject) -> None:
-    """Stand in for hermes_cli.projects_db, which only exists on a Hermes host."""
-    module = types.ModuleType("hermes_cli")
-    projects_db = types.ModuleType("hermes_cli.projects_db")
-    projects_db.connect_closing = lambda db_path: _FakeContext()
-    projects_db.get_project = lambda conn, project_id: project
-    module.projects_db = projects_db
-    sys.modules["hermes_cli"] = module
-    sys.modules["hermes_cli.projects_db"] = projects_db
 
 
 SESSIONS_DDL = """
@@ -162,8 +142,9 @@ class UsageStore:
         self.conn.commit()
 
     def usage(self) -> Dict[str, Any]:
-        _stub_projects_db(FakeProject([FakeFolder(FOLDER)]))
-        return usage(self.home, "p1")
+        project = FakeProject([FakeFolder(FOLDER)])
+        with stub_projects_db(get_project=lambda conn, project_id: project):
+            return usage(self.home, "p1")
 
     def close(self) -> None:
         self.conn.close()
@@ -269,8 +250,9 @@ class TestUsage(unittest.TestCase):
         store = UsageStore(with_model_table=False)
         try:
             store.add_session("s1", input_tokens=10000, output_tokens=2000, estimated_cost=0.9)
-            _stub_projects_db(FakeProject([FakeFolder(FOLDER)]))
-            result = usage(store.home, "p1")
+            project = FakeProject([FakeFolder(FOLDER)])
+            with stub_projects_db(get_project=lambda conn, project_id: project):
+                result = usage(store.home, "p1")
             threads = _models_of(result)
             self.assertEqual(
                 threads["s1"],

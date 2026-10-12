@@ -732,12 +732,7 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
 
     args = args if isinstance(args, dict) else {}
     path, home = sessions._paths()
-    record = None
-    for key in (task_id, session_id):
-        if key and path.exists():
-            record = sessions.record_for(path, home, key)
-            if record:
-                break
+    record = sessions.record_for_call(path, home, task_id, session_id)
     if not record or record["mode"] != "theseus" or not record["path"]:
         return json.dumps({"error": "This isn't a Theseus session."})
     try:

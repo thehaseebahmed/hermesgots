@@ -35,23 +35,29 @@ def clean_name(name: str) -> str:
     return base or "file"
 
 
-def save(hermes_home: Path, session_id: str, name: str, data: bytes) -> Path:
-    """Writes ``data`` under the session's folder without replacing anything already there."""
-    target_dir = folder(hermes_home, session_id)
-    target_dir.mkdir(parents=True, exist_ok=True)
-    base = clean_name(name)
-    stem, dot, ext = base.rpartition(".")
+def claim(dest_dir: Path, name: str) -> Path:
+    """Claims a free name in ``dest_dir``: ``name``, then ``name-2.ext``, ``name-3.ext``… The
+    first free variant is created empty, so two racing callers can't pick the same one."""
+    stem, dot, ext = name.rpartition(".")
     if not dot or not stem:
-        stem, dot, ext = base, "", ""
+        stem, dot, ext = name, "", ""
     for n in range(1, 1000):
-        candidate = target_dir / (base if n == 1 else f"{stem}-{n}{dot}{ext}")
+        candidate = dest_dir / (name if n == 1 else f"{stem}-{n}{dot}{ext}")
         try:
-            with open(candidate, "xb") as out:
-                out.write(data)
+            open(candidate, "xb").close()
         except FileExistsError:
             continue
         return candidate
     raise OSError("Too many files with that name")
+
+
+def save(hermes_home: Path, session_id: str, name: str, data: bytes) -> Path:
+    """Writes ``data`` under the session's folder without replacing anything already there."""
+    target_dir = folder(hermes_home, session_id)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = claim(target_dir, clean_name(name))
+    target.write_bytes(data)
+    return target
 
 
 def remove(hermes_home: Path, session_id: str) -> None:

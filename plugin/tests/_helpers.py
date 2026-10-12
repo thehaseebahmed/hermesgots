@@ -36,3 +36,31 @@ def make_fake_agent(lookup_fn, scope_already=None):
             "agent.secret_scope": fake_scope,
         },
     )
+
+
+class _FakeProjectsContext:
+    """Stands in for projects_db.connect_closing's context manager."""
+
+    def __enter__(self) -> "_FakeProjectsContext":
+        return self
+
+    def __exit__(self, *args: object) -> bool:
+        return False
+
+
+def stub_projects_db(projects=None, get_project=None, list_projects=None):
+    """Stands in for hermes_cli.projects_db, which only exists on a Hermes host.
+
+    ``projects`` is what ``list_projects`` returns; ``get_project`` and ``list_projects``
+    override those calls. Returns a ``patch.dict`` for ``sys.modules``.
+    """
+    module = ModuleType("hermes_cli")
+    projects_db = ModuleType("hermes_cli.projects_db")
+    projects_db.connect_closing = lambda db_path: _FakeProjectsContext()
+    projects_db.list_projects = list_projects or (
+        lambda conn, include_archived=False: list(projects or [])
+    )
+    if get_project is not None:
+        projects_db.get_project = get_project
+    module.projects_db = projects_db
+    return patch.dict(sys.modules, {"hermes_cli": module, "hermes_cli.projects_db": projects_db})
