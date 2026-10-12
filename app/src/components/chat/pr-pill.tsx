@@ -1,58 +1,10 @@
 import { Browser } from "@capacitor/browser"
-import {
-  CircleAlertIcon,
-  GitMergeIcon,
-  GitPullRequestClosedIcon,
-  GitPullRequestDraftIcon,
-  GitPullRequestIcon,
-} from "lucide-react"
 
+import { prLook } from "@/components/chat/pr-look"
 import { Button } from "@/components/ui/button"
-import type { PrState, PullRequestRef } from "@/lib/db"
+import type { PullRequestRef } from "@/lib/db"
 import { isNative } from "@/lib/native"
 import { cn } from "@/lib/utils"
-
-interface PrLook {
-  label: string
-  icon: typeof GitPullRequestIcon
-  /** The state's text colour on its own. */
-  text: string
-  className: string
-}
-
-const PR_LOOKS: Record<PrState, PrLook> = {
-  open: {
-    label: "open",
-    icon: GitPullRequestIcon,
-    text: "text-success",
-    className: "bg-success/15 text-success hover:bg-success/25",
-  },
-  draft: {
-    label: "draft",
-    icon: GitPullRequestDraftIcon,
-    text: "text-muted-foreground",
-    className: "bg-muted text-muted-foreground hover:bg-muted/70",
-  },
-  merged: {
-    label: "merged",
-    icon: GitMergeIcon,
-    text: "text-merged",
-    className: "bg-merged/15 text-merged hover:bg-merged/25",
-  },
-  closed: {
-    label: "closed",
-    icon: GitPullRequestClosedIcon,
-    text: "text-destructive",
-    className: "bg-destructive/15 text-destructive hover:bg-destructive/25",
-  },
-}
-
-const PR_FAILING: PrLook = {
-  label: "checks failing",
-  icon: CircleAlertIcon,
-  text: "text-warning",
-  className: "bg-warning/15 text-warning hover:bg-warning/25",
-}
 
 function openPr(url: string) {
   if (isNative) void Browser.open({ url })
@@ -60,9 +12,9 @@ function openPr(url: string) {
 }
 
 /**
- * A session's pull request as a pill above the composer, coloured by state (orange when its
- * checks fail); opens it on GitHub. `label` is the precomputed display text (e.g. "PR #142",
- * "memento #142", or "thehaseebahmed/memento #142").
+ * A session's pull request as a pill above the composer, coloured by state (orange while its
+ * checks run, orange with an alert when they fail); opens it on GitHub. `label` is the precomputed
+ * display text (e.g. "PR #142", "memento #142", or "thehaseebahmed/memento #142").
  */
 export function PrPill({
   pr,
@@ -73,8 +25,7 @@ export function PrPill({
   label: string
   className?: string
 }) {
-  const state = PR_LOOKS[pr.state]
-  const look = pr.checks === "failure" && pr.state !== "merged" ? PR_FAILING : state
+  const look = prLook(pr)
   const Icon = look.icon
   return (
     <Button
@@ -83,11 +34,9 @@ export function PrPill({
       className={cn("h-11 gap-2 rounded-full px-4 tabular-nums", look.className, className)}
       disabled={!pr.url}
       onClick={() => pr.url && openPr(pr.url)}
-      aria-label={`Pull request ${pr.number} in ${pr.repo}, ${state.label}${
-        look === PR_FAILING ? ", checks failing" : ""
-      }`}
+      aria-label={`Pull request ${pr.number} in ${pr.repo}, ${look.label}`}
     >
-      <Icon className="size-4" />
+      <Icon className={cn("size-4", look.spin && "motion-safe:animate-spin")} />
       {label}
     </Button>
   )
@@ -95,8 +44,7 @@ export function PrPill({
 
 /** A pull request as a row of a list: its state's icon, title, state, number and repo. */
 export function PrRow({ pr }: { pr: PullRequestRef }) {
-  const state = PR_LOOKS[pr.state]
-  const look = pr.checks === "failure" && pr.state !== "merged" ? PR_FAILING : state
+  const look = prLook(pr)
   const Icon = look.icon
   return (
     <button
@@ -111,7 +59,7 @@ export function PrRow({ pr }: { pr: PullRequestRef }) {
           look.className,
         )}
       >
-        <Icon className="size-5" />
+        <Icon className={cn("size-5", look.spin && "motion-safe:animate-spin")} />
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate font-medium">{pr.title || `#${pr.number}`}</span>
