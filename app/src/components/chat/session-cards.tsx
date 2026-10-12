@@ -67,15 +67,10 @@ export function PlanReadyCard({
         </p>
       </CardContent>
       <CardFooter className="flex flex-col items-stretch gap-2">
+        {/* The model pill takes the whole row; the approvals sit below it, Keep planning last. */}
+        {model}
         {autoAvailable ? (
           <>
-            {/* The pill and Keep planning share a row, so the approvals keep one of their own. */}
-            <div className="flex items-center gap-2">
-              {model && <span className="min-w-0 flex-1">{model}</span>}
-              <Button variant="ghost" {...button("keep")} className="h-11 shrink-0">
-                Keep planning
-              </Button>
-            </div>
             <div className="grid grid-cols-2 gap-2">
               <Button {...button("auto")}>
                 <ZapIcon data-icon="inline-start" />
@@ -86,17 +81,17 @@ export function PlanReadyCard({
                 Accept edits
               </Button>
             </div>
+            <Button variant="ghost" {...button("keep")} className="h-11">
+              Keep planning
+            </Button>
           </>
         ) : (
-          <>
-            {model}
-            <div className="grid grid-cols-2 gap-2">
-              <Button variant="outline" {...button("keep")}>
-                Keep planning
-              </Button>
-              <Button {...button("accept_edits")}>Approve</Button>
-            </div>
-          </>
+          <div className="grid grid-cols-2 gap-2">
+            <Button variant="outline" {...button("keep")}>
+              Keep planning
+            </Button>
+            <Button {...button("accept_edits")}>Approve</Button>
+          </div>
         )}
       </CardFooter>
     </Card>
