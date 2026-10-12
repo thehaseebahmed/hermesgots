@@ -7,6 +7,7 @@ Run: python3 -m unittest plugin.tests.test_library -v
 from __future__ import annotations
 
 import json
+import sqlite3
 import sys
 import tempfile
 import types
@@ -15,12 +16,31 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from plugin import sessions
+from plugin import library, sessions
 from plugin.store import db_path
 
 
 def fake_project(primary: Path) -> SimpleNamespace:
-    return SimpleNamespace(folders=[SimpleNamespace(path=str(primary), is_primary=True)])
+    return SimpleNamespace(id="p1", folders=[SimpleNamespace(path=str(primary), is_primary=True)])
+
+
+class _FakeContext:
+    def __enter__(self) -> "_FakeContext":
+        return self
+
+    def __exit__(self, *args: object) -> bool:
+        return False
+
+
+def _stub_projects_db(project: SimpleNamespace) -> None:
+    """Stand in for hermes_cli.projects_db, which only exists on a Hermes host."""
+    module = types.ModuleType("hermes_cli")
+    projects_db = types.ModuleType("hermes_cli.projects_db")
+    projects_db.connect_closing = lambda db_path: _FakeContext()
+    projects_db.list_projects = lambda conn, include_archived: [project]
+    module.projects_db = projects_db
+    sys.modules["hermes_cli"] = module
+    sys.modules["hermes_cli.projects_db"] = projects_db
 
 
 class FilesDirTest(unittest.TestCase):
@@ -58,6 +78,88 @@ class FilesDirTest(unittest.TestCase):
         assert record is not None
         self.assertEqual(record["files_dir"], folder)
         self.assertEqual(record["branch"], "hermes/jazzy-quokka-7bfe")
+
+
+class AddToLibraryTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name)
+        self.db = db_path(self.home)
+        fake = types.ModuleType("hermes_constants")
+        fake.get_hermes_home = lambda: str(self.home)  # type: ignore[attr-defined]
+        patcher = mock.patch.dict(sys.modules, {"hermes_constants": fake})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        # The project's primary folder is itself a repo, like a real clone.
+        self.project = self.home / "project"
+        (self.project / ".git").mkdir(parents=True)
+        self.worktree = self.project / ".worktrees" / "jazzy-quokka-7bfe"
+        self.worktree.mkdir(parents=True)
+        (self.worktree / "shot.png").write_bytes(b"png")
+        self.files_dir = self.project / "files" / "jazzy-quokka-7bfe"
+        repos = [
+            {
+                "name": "o/web",
+                "repo_root": str(self.project),
+                "path": str(self.worktree),
+                "branch": "hermes/jazzy-quokka-7bfe",
+            }
+        ]
+        sessions._upsert(self.db, "memento-1", "p1", repos, "auto", str(self.files_dir))
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _call(self, path: str, task_id: str = "memento-1") -> dict:
+        return json.loads(library.handle({"path": path}, task_id=task_id))
+
+    def test_a_relative_path_moves_out_of_the_worktree(self) -> None:
+        result = self._call("shot.png")
+        self.assertEqual(result["name"], "shot.png")
+        self.assertEqual(result["path"], str(self.files_dir / "shot.png"))
+        self.assertTrue((self.files_dir / "shot.png").is_file())
+        self.assertFalse((self.worktree / "shot.png").exists())
+
+    def test_an_absolute_path_outside_the_worktree_works(self) -> None:
+        outside = self.home / "elsewhere" / "report.md"
+        outside.parent.mkdir()
+        outside.write_text("report", encoding="utf-8")
+        result = self._call(str(outside))
+        self.assertEqual(result["path"], str(self.files_dir / "report.md"))
+        self.assertFalse(outside.exists())
+
+    def test_the_folder_is_made_and_kept_out_of_git(self) -> None:
+        self.assertFalse(self.files_dir.exists())
+        self._call("shot.png")
+        self.assertTrue(self.files_dir.is_dir())
+        exclude = self.project / ".git" / "info" / "exclude"
+        self.assertIn("files/", exclude.read_text(encoding="utf-8").splitlines())
+
+    def test_a_second_file_of_the_same_name_gets_a_suffix(self) -> None:
+        self.files_dir.mkdir(parents=True)
+        (self.files_dir / "shot.png").write_bytes(b"older")
+        result = self._call("shot.png")
+        self.assertEqual(result["path"], str(self.files_dir / "shot-2.png"))
+        self.assertEqual((self.files_dir / "shot.png").read_bytes(), b"older")
+        self.assertEqual((self.files_dir / "shot-2.png").read_bytes(), b"png")
+
+    def test_a_missing_file_is_an_error(self) -> None:
+        self.assertEqual(self._call("nope.png"), {"error": "No such file."})
+        self.assertFalse(self.files_dir.exists())
+
+    def test_a_record_from_before_the_column_still_files_it(self) -> None:
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("UPDATE project_sessions SET files_dir = NULL WHERE session_id = 'memento-1'")
+        (self.home / "projects.db").write_bytes(b"")
+        _stub_projects_db(fake_project(self.project))
+        result = self._call("shot.png")
+        self.assertEqual(result["path"], str(self.files_dir / "shot.png"))
+
+    def test_no_session_is_an_error(self) -> None:
+        self.assertEqual(
+            json.loads(library.handle({"path": "shot.png"}, task_id="nope")),
+            {"error": "This session has no library to file in."},
+        )
 
 
 if __name__ == "__main__":
