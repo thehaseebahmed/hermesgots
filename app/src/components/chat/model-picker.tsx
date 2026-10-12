@@ -1,8 +1,22 @@
 import { useMemo, useState, type ReactNode } from "react"
-import { CheckIcon, ChevronDownIcon, ChevronRightIcon, SearchIcon } from "lucide-react"
+import {
+  ArrowUpDownIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  SearchIcon,
+} from "lucide-react"
 
+import { MODEL_SORTS, sortByFacts, type ModelSort } from "@/components/chat/model-sort"
 import { Popup, PopupContent, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { rememberModel, type ModelChoice, type Profile } from "@/lib/db"
 import { formatTokens } from "@/lib/format"
@@ -33,6 +47,7 @@ export function ModelPicker({
 }) {
   const [query, setQuery] = useState("")
   const [openSlug, setOpenSlug] = useState<string>()
+  const [sort, setSort] = useState<ModelSort>("name")
   // The cached models.dev catalog, live: each row's facts repaint when a refresh lands.
   const catalog = useModelCatalog()
   const sorted = useMemo(() => sortProviders(providers), [providers])
@@ -49,29 +64,46 @@ export function ModelPicker({
     return (drilled ? [drilled] : sorted)
       .map((p) => {
         const haystack = (m: string) => `${p.name} ${p.slug} ${m}`.toLowerCase()
-        return { ...p, models: p.models.filter((m) => words.every((w) => haystack(m).includes(w))) }
+        const matched = p.models.filter((m) => words.every((w) => haystack(m).includes(w)))
+        // Price ranks by the blended cost, context by the window, both from the cached catalog.
+        return {
+          ...p,
+          models: sortByFacts(
+            sort,
+            (m) => modelFacts(catalog, { provider: p.slug, model: m }),
+            matched,
+          ),
+        }
       })
       .filter((p) => p.models.length)
-  }, [sorted, drilled, query])
+  }, [sorted, drilled, query, sort, catalog])
 
   const top = !query && !drilled
+  // The sort menu orders a flat model list; the providers list stays A to Z, so it shows no menu.
+  const flat = Boolean(drilled) || query.length > 0
 
   return (
     <>
       <PopupTitle className="sr-only">{drilled ? drilled.name : "Model"}</PopupTitle>
       <div className="flex flex-col gap-5 px-6 pt-5 text-[15px]">
-        {total > 8 && (
-          <InputGroup className="h-11">
-            <InputGroupAddon>
-              <SearchIcon />
-            </InputGroupAddon>
-            <InputGroupInput
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={drilled ? `Search ${drilled.name}` : "Search models"}
-              aria-label="Search models"
-            />
-          </InputGroup>
+        {(total > 8 || flat) && (
+          <div className="flex items-center gap-2">
+            {total > 8 && (
+              <InputGroup className="h-11 min-w-0 flex-1">
+                <InputGroupAddon>
+                  <SearchIcon />
+                </InputGroupAddon>
+                <InputGroupInput
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={drilled ? `Search ${drilled.name}` : "Search models"}
+                  aria-label="Search models"
+                />
+              </InputGroup>
+            )}
+            {/* Only a flat list sorts: the providers list stays A to Z, so it shows no menu. */}
+            {flat && <SortMenu sort={sort} onSort={setSort} />}
+          </div>
         )}
         {top && (
           <ModelList>
@@ -170,25 +202,39 @@ function ProviderModels({
   onChoose: (choice: ModelChoice | undefined) => void
 }) {
   const [query, setQuery] = useState("")
+  const [sort, setSort] = useState<ModelSort>("name")
   const words = query.toLowerCase().split(/\s+/).filter(Boolean)
   const haystack = (m: string) => `${provider.name} ${provider.slug} ${m}`.toLowerCase()
-  const models = provider.models.filter((m) => words.every((w) => haystack(m).includes(w)))
+  const matched = provider.models.filter((m) => words.every((w) => haystack(m).includes(w)))
+  const models = sortByFacts(
+    sort,
+    (m) => modelFacts(catalog, { provider: provider.slug, model: m }),
+    matched,
+  )
   return (
     <>
       <PopupTitle className="sr-only">{provider.name}</PopupTitle>
       <div className="flex flex-col gap-5 px-6 pt-5 text-[15px]">
         {provider.models.length > 8 && (
-          <InputGroup className="h-11">
-            <InputGroupAddon>
-              <SearchIcon />
-            </InputGroupAddon>
-            <InputGroupInput
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={`Search ${provider.name}`}
-              aria-label={`Search ${provider.name}`}
-            />
-          </InputGroup>
+          <div className="flex items-center gap-2">
+            <InputGroup className="h-11 min-w-0 flex-1">
+              <InputGroupAddon>
+                <SearchIcon />
+              </InputGroupAddon>
+              <InputGroupInput
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={`Search ${provider.name}`}
+                aria-label={`Search ${provider.name}`}
+              />
+            </InputGroup>
+            <SortMenu sort={sort} onSort={setSort} />
+          </div>
+        )}
+        {provider.models.length <= 8 && (
+          <div className="flex justify-end">
+            <SortMenu sort={sort} onSort={setSort} />
+          </div>
         )}
         {models.length ? (
           <ModelList>
@@ -207,6 +253,35 @@ function ProviderModels({
         )}
       </div>
     </>
+  )
+}
+
+/** The sort menu's icon button, a radio menu of the flat lists' orders. */
+function SortMenu({ sort, onSort }: { sort: ModelSort; onSort: (sort: ModelSort) => void }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon-lg"
+            className="size-11 shrink-0 rounded-full text-muted-foreground"
+            aria-label={`Sort models by ${MODEL_SORTS[sort]}`}
+          />
+        }
+      >
+        <ArrowUpDownIcon />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-40">
+        <DropdownMenuRadioGroup value={sort} onValueChange={(value) => onSort(value as ModelSort)}>
+          {(Object.keys(MODEL_SORTS) as ModelSort[]).map((option) => (
+            <DropdownMenuRadioItem key={option} value={option} className="min-h-11" closeOnClick>
+              {MODEL_SORTS[option]}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
