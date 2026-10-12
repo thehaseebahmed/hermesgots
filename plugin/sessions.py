@@ -47,6 +47,7 @@ FIELDS = (
     "created_at",
     "repos",
     "plan_file",
+    "files_dir",
     "theseus",
 )
 REPO_FIELDS = ("name", "repo_root", "path", "branch")
@@ -75,6 +76,9 @@ PLAN_BLOCK = (
 PLANS_DIR = "plans"
 # A plan-mode reply is saved only when it is a plan: the heading the instructions ask for.
 PLAN_HEADING = "# Plan:"
+# Where the session's generated files (screenshots, images, reports) are filed, under the project's
+# primary folder, in a folder named after the session's worktree. The add_to_library tool makes it.
+FILES_DIR = "files"
 # Added to the run's instructions in plan mode. Fixed per mode, so the prompt cache holds across
 # the turns of one mode. The app's mock repeats it; keep them the same.
 PLAN_INSTRUCTIONS = """You are in plan mode: change nothing. Read what you need. Then, before you write the plan, settle every choice the user would otherwise be left to make: ask with the clarify tool, every question in one call, your recommended answer first. If you can't ask (no clarify tool, or no answer came), decide it yourself and record the decision under Risks and assumptions. Then make your whole final reply the plan below and stop; the user approves it before you act. It is saved to a file as written, so write it for someone who hasn't read this chat, and a plan with an open question isn't finished. Use this Markdown shape exactly:
@@ -300,18 +304,25 @@ def _create_worktree(repo_root: str, name: str) -> Dict[str, str]:
     return {"path": str(info["path"]), "branch": str(info["branch"])}
 
 
-def _upsert(path: Path, session_id: str, project_id: str, repos: list[Dict[str, str]], mode: str):
+def _upsert(
+    path: Path,
+    session_id: str,
+    project_id: str,
+    repos: list[Dict[str, str]],
+    mode: str,
+    files_dir: str,
+):
     first = repos[0]
     conn = connect(path)
     try:
         conn.execute(
             """INSERT INTO project_sessions
-                   (session_id, project_id, repo_root, path, branch, mode, plan_pending, created_at, repos)
-               VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+                   (session_id, project_id, repo_root, path, branch, mode, plan_pending, created_at, repos, files_dir)
+               VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
                ON CONFLICT(session_id) DO UPDATE SET
                    project_id = excluded.project_id, repo_root = excluded.repo_root,
                    path = excluded.path, branch = excluded.branch, mode = excluded.mode,
-                   plan_pending = 0, repos = excluded.repos""",
+                   plan_pending = 0, repos = excluded.repos, files_dir = excluded.files_dir""",
             (
                 session_id,
                 project_id,
@@ -321,6 +332,7 @@ def _upsert(path: Path, session_id: str, project_id: str, repos: list[Dict[str, 
                 mode,
                 int(time.time() * 1000),
                 json.dumps(repos, separators=(",", ":")),
+                files_dir,
             ),
         )
     finally:
@@ -375,7 +387,14 @@ def ensure(
             continue
         tree = _create_worktree(root, name)
         repos.append({"name": _repo_name(root), "repo_root": root, **tree})
-    return _upsert(path, session_id, project_id, repos, mode or (record or {}).get("mode") or MODES[0])
+    return _upsert(
+        path,
+        session_id,
+        project_id,
+        repos,
+        mode or (record or {}).get("mode") or MODES[0],
+        files_dir(project, repos[0]["branch"]),
+    )
 
 
 # Every pull request the plugin opens ends with it.
@@ -448,19 +467,28 @@ def _template_line(record: Dict[str, Any]) -> str:
     return "Pull request templates: " + "; ".join(f"{name}: {path}" for name, path in found) + "."
 
 
+def _branch_slug(branch: Optional[str]) -> str:
+    """``hermes/<slug>`` to ``<slug>``: the worktree's name, which plan and library files are named after."""
+    name = branch.split("/", 1)[1] if branch and "/" in branch else (branch or "")
+    return name or "session"
+
+
 def plan_filename(record: Dict[str, Any], now: datetime) -> str:
     """``<branch slug>-<date>-<time>.md``: every plan of a session together, oldest first."""
-    branch = record.get("branch") or ""
-    name = branch.split("/", 1)[1] if "/" in branch else branch
-    return f"{name or 'session'}-{now:%Y%m%d-%H%M%S}.md"
+    return f"{_branch_slug(record.get('branch'))}-{now:%Y%m%d-%H%M%S}.md"
 
 
-def _exclude_from_git(root: str) -> None:
-    """Keeps ``plans/`` out of ``git status`` when the project's folder is itself a repo."""
+def files_dir(project: Any, branch: Optional[str]) -> str:
+    """``<primary folder>/files/<worktree slug>``: where the session's generated files are filed."""
+    return str(Path(_project_folders(project)[0]) / FILES_DIR / _branch_slug(branch))
+
+
+def _exclude_from_git(root: str, name: str) -> None:
+    """Keeps ``name/`` out of ``git status`` when the project's folder is itself a repo."""
     if not os.path.isdir(os.path.join(root, ".git")):
         return
     exclude = Path(root) / ".git" / "info" / "exclude"
-    line = f"{PLANS_DIR}/"
+    line = f"{name}/"
     try:
         current = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
         if line in current.splitlines():
@@ -469,7 +497,7 @@ def _exclude_from_git(root: str) -> None:
         with exclude.open("a", encoding="utf-8") as handle:
             handle.write(("" if not current or current.endswith("\n") else "\n") + line + "\n")
     except OSError:
-        logger.debug("memento: couldn't exclude %s from git in %s", PLANS_DIR, root, exc_info=True)
+        logger.debug("memento: couldn't exclude %s from git in %s", name, root, exc_info=True)
 
 
 def save_plan(path: Path, hermes_home: Path, record: Dict[str, Any], text: Any) -> Optional[str]:
@@ -485,7 +513,7 @@ def save_plan(path: Path, hermes_home: Path, record: Dict[str, Any], text: Any) 
     name = plan_filename(record, now)
     folder = Path(root) / PLANS_DIR
     folder.mkdir(parents=True, exist_ok=True)
-    _exclude_from_git(root)
+    _exclude_from_git(root, PLANS_DIR)
     front_matter = "\n".join(
         [
             "---",
