@@ -697,6 +697,14 @@ function AppearanceSettings() {
           checked={chatSettings?.steerByDefault ?? false}
           onCheckedChange={(checked) => saveSettings({ steerByDefault: checked })}
         />
+        <SwitchRow
+          id="break-reminders"
+          icon={TimerIcon}
+          title="Take-a-break reminders"
+          subtitle="Remind me to put the phone away while a task runs"
+          checked={chatSettings?.breakReminders ?? DEFAULT_SETTINGS.breakReminders ?? true}
+          onCheckedChange={(checked) => saveSettings({ breakReminders: checked })}
+        />
       </Group>
     </>
   )
