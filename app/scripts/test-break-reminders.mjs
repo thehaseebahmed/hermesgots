@@ -5,6 +5,7 @@ import {
   INITIAL_DELAY_MS,
   REPEAT_INTERVAL_MS,
   ReminderClock,
+  isBackgroundSafeRunActive,
   isEligibleReminderDevice,
 } from "../src/lib/break-reminders.ts"
 
@@ -103,4 +104,34 @@ test("a restored pending reminder remains open and starts a full repeat cooldown
   assert.equal(clock.update(INITIAL_DELAY_MS, true), false)
   assert.equal(clock.update(REPEAT_INTERVAL_MS - 1, true), false)
   assert.equal(clock.update(REPEAT_INTERVAL_MS, true), true)
+})
+
+test("only a live backend run that does not need the user can trigger reminders", () => {
+  const active = {
+    busy: true,
+    runId: "run-1",
+    awaitingApproval: false,
+    awaitingClarify: false,
+    theseusWaits: false,
+    resolved: false,
+    discarded: false,
+    blocked: false,
+  }
+  assert.equal(isBackgroundSafeRunActive(active), true)
+  assert.equal(isBackgroundSafeRunActive({ ...active, runId: undefined }), false)
+  assert.equal(isBackgroundSafeRunActive({ ...active, busy: false }), false)
+  assert.equal(isBackgroundSafeRunActive({ ...active, awaitingApproval: true }), false)
+  assert.equal(isBackgroundSafeRunActive({ ...active, awaitingClarify: true }), false)
+  assert.equal(isBackgroundSafeRunActive({ ...active, theseusWaits: true }), false)
+  assert.equal(isBackgroundSafeRunActive({ ...active, resolved: true }), false)
+  assert.equal(isBackgroundSafeRunActive({ ...active, discarded: true }), false)
+  assert.equal(isBackgroundSafeRunActive({ ...active, blocked: true }), false)
+})
+
+test("reset clears the reminder and timing state when reminders are disabled", () => {
+  const clock = new ReminderClock({ hasShown: true, open: true, cooldown: 20_000 })
+  clock.reset()
+  assert.deepEqual(clock.snapshot(), { hasShown: false, open: false, cooldown: 0 })
+  assert.equal(clock.update(0, true), false)
+  assert.equal(clock.update(INITIAL_DELAY_MS, true), true)
 })

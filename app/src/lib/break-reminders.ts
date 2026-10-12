@@ -20,7 +20,31 @@ export function isEligibleReminderDevice(device: ReminderDevice) {
   return device.platform === "web" && (device.standalone || device.appleStandalone)
 }
 
-interface ReminderClockSnapshot {
+export interface BackgroundRunState {
+  busy: boolean
+  runId?: string
+  awaitingApproval: boolean
+  awaitingClarify: boolean
+  theseusWaits: boolean
+  resolved: boolean
+  discarded: boolean
+  blocked: boolean
+}
+
+export function isBackgroundSafeRunActive(state: BackgroundRunState) {
+  return (
+    state.busy &&
+    Boolean(state.runId) &&
+    !state.awaitingApproval &&
+    !state.awaitingClarify &&
+    !state.theseusWaits &&
+    !state.resolved &&
+    !state.discarded &&
+    !state.blocked
+  )
+}
+
+export interface ReminderClockSnapshot {
   hasShown: boolean
   open: boolean
   cooldown: number
@@ -47,6 +71,15 @@ export class ReminderClock {
       open: this.open,
       cooldown: this.cooldown,
     }
+  }
+
+  reset() {
+    this.lastAt = undefined
+    this.lastEligible = false
+    this.foregroundDwell = 0
+    this.cooldown = 0
+    this.hasShown = false
+    this.open = false
   }
 
   update(now: number, eligible: boolean) {
