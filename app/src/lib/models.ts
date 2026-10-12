@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react"
 
 import { updateProfile, type Profile } from "@/lib/db"
 import { getModelInfo, type ModelInfo } from "@/lib/hermes"
+import { fullModel } from "@/lib/model-info"
 
 const CATALOG_URL = "https://models.dev/api.json"
 
@@ -122,7 +123,7 @@ export async function syncContextWindow(profile: Profile) {
   if (!profile.baseUrl.trim()) return
   const info = await getModelInfo(profile)
   if (!info?.model) return
-  const key = info.provider ? `${info.provider}/${info.model}` : info.model
+  const key = fullModel({ provider: info.provider, model: info.model })
   // A window set by hand (no longer offered) is looked up again.
   if (key === profile.contextModel && profile.contextSource !== "manual") {
     // Bots from before image detection learn it once.

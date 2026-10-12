@@ -67,7 +67,6 @@ export function PlanReadyCard({
         </p>
       </CardContent>
       <CardFooter className="flex flex-col items-stretch gap-2">
-        {/* The model pill takes the whole row; the approvals sit below it, Keep planning last. */}
         {model}
         {autoAvailable ? (
           <>
