@@ -15,7 +15,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import github, projects
+from . import github, projects, tools_common
 from .sessions import PR_FOOTER, WorkspaceError, _git
 
 logger = logging.getLogger(__name__)
@@ -323,12 +323,7 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
 
     args = args if isinstance(args, dict) else {}
     path, home = sessions._paths()
-    record = None
-    for key in (task_id, session_id):
-        if key and path.exists():
-            record = sessions.record_for(path, home, key)
-            if record:
-                break
+    record = sessions.record_for_call(path, home, task_id, session_id)
     if not record:
         return json.dumps({"error": "This session has no worktree to ship."})
     try:
@@ -367,38 +362,12 @@ def register(ctx: Any) -> bool:
 
 
 def wire(adapter: Any) -> bool:
-    """Makes every agent the API server builds carry the tool when this profile registered it, since
-    a saved ``platform_toolsets.api_server`` would otherwise leave the plugin's toolset out."""
-    original = getattr(adapter, "_create_agent", None)
-    if not callable(original):
-        return False
-
-    def create_agent(*args: Any, **kwargs: Any) -> Any:
-        agent = original(*args, **kwargs)
-        try:
-            equip(agent)
-        except Exception:
-            logger.debug("memento: couldn't add the open_pull_request tool to an agent", exc_info=True)
-        return agent
-
-    adapter._create_agent = create_agent
-    return True
+    """Wires the tool into every agent the API server builds."""
+    return tools_common.wire_tool(adapter, TOOL, SCHEMA, "open_pull_request")
 
 
 def equip(agent: Any) -> None:
-    names = getattr(agent, "valid_tool_names", None)
-    tools = getattr(agent, "tools", None)
-    if not isinstance(tools, list) or not isinstance(names, set) or TOOL in names:
-        return
-    try:
-        from tools.registry import registry
-    except ImportError:
-        return
-    # Only where this profile loaded the plugin: anywhere else the call would be an unknown tool.
-    if registry.get_entry(TOOL) is None:
-        return
-    tools.append({"type": "function", "function": SCHEMA})
-    names.add(TOOL)
+    tools_common.equip_tool(agent, TOOL, SCHEMA)
 
 
 def close(hermes_home: Path, record: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:

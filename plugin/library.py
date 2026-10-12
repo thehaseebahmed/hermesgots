@@ -16,7 +16,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-from . import sessions
+from . import attachments, sessions, tools_common
 
 logger = logging.getLogger(__name__)
 
@@ -24,36 +24,21 @@ MAX_PATH = 4000
 
 
 class LibraryError(Exception):
-    def __init__(self, message: str, status: int = 502):
-        super().__init__(message)
-        self.status = status
+    """A file that can't be filed in the library: the tool answers with the message."""
 
 
 def _library_dir(hermes_home: Path, record: Dict[str, Any]) -> Tuple[Path, Path]:
     """The session's library folder and the project folder that holds it.
 
-    The record carries the folder; a row written before it did resolves it from the project, the
-    way ``sessions.save_plan`` resolves the plans folder.
+    Both resolve from the project's primary folder, so the folder stored on the record (schema
+    v15) and a row written before it always agree.
     """
-    folder = record.get("files_dir")
-    if folder:
-        path = Path(folder)
-        return path.parent.parent, path
     project = sessions._project(hermes_home / "projects.db", record["project_id"])
     root = Path(sessions._project_folders(project)[0])
+    folder = record.get("files_dir")
+    if folder:
+        return root, Path(folder)
     return root, root / sessions.FILES_DIR / sessions._branch_slug(record.get("branch"))
-
-
-def _unique(dest_dir: Path, name: str) -> Path:
-    """A path in ``dest_dir`` that replaces nothing: a second ``chart.png`` becomes ``chart-2.png``."""
-    stem, dot, ext = name.rpartition(".")
-    if not dot or not stem:
-        stem, dot, ext = name, "", ""
-    for n in range(1, 1000):
-        candidate = dest_dir / (name if n == 1 else f"{stem}-{n}{dot}{ext}")
-        if not candidate.exists():
-            return candidate
-    raise LibraryError("Too many files with that name.", 409)
 
 
 def file(
@@ -71,17 +56,22 @@ def file(
     if not source.is_absolute():
         source = Path(cwd or record["path"]) / source
     if not source.is_file():
-        raise LibraryError("No such file.", 404)
+        raise LibraryError("No such file.")
     root, dest_dir = _library_dir(hermes_home, record)
     dest_dir.mkdir(parents=True, exist_ok=True)
     # The project's folder is often itself a repo: keep files/ out of its git status, like plans/.
     sessions._exclude_from_git(str(root), sessions.FILES_DIR)
-    name = _unique(dest_dir, source.name)
     try:
-        shutil.move(str(source), str(name))
+        # The claim creates the name empty and exclusively, so two racing calls can't pick one.
+        dest = attachments.claim(dest_dir, source.name)
     except OSError as error:
+        raise LibraryError(f"Couldn't file {source.name}: {error}.") from None
+    try:
+        shutil.move(str(source), str(dest))
+    except OSError as error:
+        dest.unlink(missing_ok=True)  # the claim is ours; don't leave an empty file behind
         raise LibraryError(f"Couldn't move the file: {error.strerror or error}.") from None
-    return {"name": name.name, "path": str(name)}
+    return {"name": dest.name, "path": str(dest)}
 
 
 TOOL = "add_to_library"
@@ -116,12 +106,7 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
     Memento's session id)."""
     args = args if isinstance(args, dict) else {}
     path, home = sessions._paths()
-    record = None
-    for key in (task_id, session_id):
-        if key and path.exists():
-            record = sessions.record_for(path, home, key)
-            if record:
-                break
+    record = sessions.record_for_call(path, home, task_id, session_id)
     if not record:
         return json.dumps({"error": "This session has no library to file in."})
     try:
@@ -146,35 +131,9 @@ def register(ctx: Any) -> bool:
 
 
 def wire(adapter: Any) -> bool:
-    """Makes every agent the API server builds carry the tool when this profile registered it, since
-    a saved ``platform_toolsets.api_server`` would otherwise leave the plugin's toolset out."""
-    original = getattr(adapter, "_create_agent", None)
-    if not callable(original):
-        return False
-
-    def create_agent(*args: Any, **kwargs: Any) -> Any:
-        agent = original(*args, **kwargs)
-        try:
-            equip(agent)
-        except Exception:
-            logger.debug("memento: couldn't add the add_to_library tool to an agent", exc_info=True)
-        return agent
-
-    adapter._create_agent = create_agent
-    return True
+    """Wires the tool into every agent the API server builds."""
+    return tools_common.wire_tool(adapter, TOOL, SCHEMA, "add_to_library")
 
 
 def equip(agent: Any) -> None:
-    names = getattr(agent, "valid_tool_names", None)
-    tools = getattr(agent, "tools", None)
-    if not isinstance(tools, list) or not isinstance(names, set) or TOOL in names:
-        return
-    try:
-        from tools.registry import registry
-    except ImportError:
-        return
-    # Only where this profile loaded the plugin: anywhere else the call would be an unknown tool.
-    if registry.get_entry(TOOL) is None:
-        return
-    tools.append({"type": "function", "function": SCHEMA})
-    names.add(TOOL)
+    tools_common.equip_tool(agent, TOOL, SCHEMA)

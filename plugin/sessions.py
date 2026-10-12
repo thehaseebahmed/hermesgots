@@ -211,6 +211,21 @@ def record_for(path: Path, hermes_home: Path, session_id: str) -> Optional[Dict[
     return None
 
 
+def record_for_call(
+    path: Path, hermes_home: Path, task_id: Optional[str], session_id: Optional[str]
+) -> Optional[Dict[str, Any]]:
+    """The session a tool call belongs to: its task id is Memento's session id, and a call can
+    carry either. Each key is tried once (they are the same one on this surface); a compressed
+    session's child id walks to the parent record, like ``record_for``."""
+    if not path.exists():
+        return None
+    for key in dict.fromkeys(key for key in (task_id, session_id) if key):
+        record = record_for(path, hermes_home, key)
+        if record:
+            return record
+    return None
+
+
 def slug(task: Any = None) -> str:
     """A worktree name of two random words and a few hex digits, so two never clash."""
     return f"{secrets.choice(ADJECTIVES)}-{secrets.choice(NOUNS)}-{secrets.token_hex(2)}"
@@ -310,7 +325,7 @@ def _upsert(
     project_id: str,
     repos: list[Dict[str, str]],
     mode: str,
-    files_dir: str,
+    files_dir: Optional[str],
 ):
     first = repos[0]
     conn = connect(path)
@@ -338,6 +353,24 @@ def _upsert(
     finally:
         conn.close()
     return read(path, session_id)
+
+
+def _fill_library_folder(path: Path, record: Dict[str, Any], project: Any) -> Dict[str, Any]:
+    """Fills the library folder on a session row written before the column existed, so the run's
+    instructions name it and the tool doesn't resolve it from the project on every call."""
+    if record.get("files_dir") or not record.get("repos"):
+        return record
+    folder = files_dir(project, record["repos"][0]["branch"])
+    conn = connect(path)
+    try:
+        conn.execute(
+            "UPDATE project_sessions SET files_dir = ? WHERE session_id = ?",
+            (folder, record["session_id"]),
+        )
+    finally:
+        conn.close()
+    record["files_dir"] = folder
+    return record
 
 
 def ensure(
@@ -375,7 +408,7 @@ def ensure(
     if record and all(root in existing and os.path.isdir(existing[root]["path"] or "") for root in roots):
         if mode and mode != record["mode"]:
             record = set_mode(path, session_id, mode)
-        return record
+        return _fill_library_folder(path, record, project)
     # One branch name across the repos; a later repo joins the name the first one got.
     name = next((repo["branch"].split("/", 1)[1] for repo in existing.values() if repo.get("branch")), None)
     name = name or slug(task)
@@ -496,7 +529,10 @@ def plan_filename(record: Dict[str, Any], now: datetime) -> str:
 
 
 def files_dir(project: Any, branch: Optional[str]) -> str:
-    """``<primary folder>/files/<worktree slug>``: where the session's generated files are filed."""
+    """``<primary folder>/files/<worktree slug>``: where the session's generated files are filed.
+
+    Kept on the session's row so the run's instructions can name it without a projects.db read.
+    """
     return str(Path(_project_folders(project)[0]) / FILES_DIR / _branch_slug(branch))
 
 
@@ -921,11 +957,7 @@ def _before_tool(kwargs: Dict[str, Any]) -> Optional[Dict[str, str]]:
     task_id = kwargs.get("task_id") or ""
     session_id = kwargs.get("session_id") or ""
     path, home = _paths()
-    if not path.exists():
-        return None
-    record = record_for(path, home, task_id)
-    if not record and session_id and session_id != task_id:
-        record = record_for(path, home, session_id)
+    record = record_for_call(path, home, task_id, session_id)
     if not record:
         return None
     if record["path"] and task_id and not _has_cwd(task_id):
