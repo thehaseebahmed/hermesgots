@@ -588,3 +588,62 @@ def equip(agent: Any) -> None:
         return
     tools.append({"type": "function", "function": SCHEMA})
     names.add(TOOL)
+
+
+# --- the pre_tool_call guards ------------------------------------------------------------
+
+
+# A terminal command that starts a known dev server by hand, on its default port, instead of serve.
+_HAND_STARTED = (
+    "pnpm mock",
+    "pnpm dev",
+    "npm run dev",
+    "npm run mock",
+    "yarn dev",
+    "node scripts/mock-hermes.mjs",
+    "mock-hermes.mjs",
+    "vite",
+    "vite dev",
+)
+# A kill by pattern rather than by pid: the documented way sessions kill each other's servers.
+_PATTERN_KILLS = ("pkill -f", "pkill ", "killall ")
+
+
+def hand_started(command: str) -> Optional[str]:
+    """The first known dev-server start in a terminal command, or None.
+
+    Only a command with no port plumbing counts: a hand-written ``PORT=39xxx pnpm mock`` or
+    ``vite --port 39xxx --strictPort`` already picks its own port and isn't the collision.
+    """
+    if not isinstance(command, str):
+        return None
+    for started in _HAND_STARTED:
+        if started in command:
+            break
+    else:
+        return None
+    for plumbed in ("PORT=", "--port", "-p ", " {", "{port}"):
+        if plumbed in command:
+            return None
+    return started
+
+
+def pattern_kill_target(command: str, path: Path, hermes_home: Path, session_id: str) -> Optional[Dict[str, Any]]:
+    """A live server another session owns that a pattern-kill in the command would hit, or None.
+
+    The blocking guard's answer: only a *different* session's server blocks — killing your own
+    with a pattern is sloppy but yours to kill. A pattern that matches nothing is free too.
+    """
+    if not isinstance(command, str) or not any(kill in command for kill in _PATTERN_KILLS):
+        return None
+    pattern = command.rsplit("f ", 1)[-1] if " -f" in command else command.rsplit("kill ", 1)[-1]
+    pattern = pattern.strip().strip("\"'`")
+    if not pattern or " " in pattern:
+        # Not a single-word pattern we can check; leave it to the human approval flow.
+        return None
+    for row in _read_all(path):
+        if row["session_id"] == session_id or not _alive(row):
+            continue
+        if pattern in (row.get("command") or "") or pattern in (row.get("log") or ""):
+            return row
+    return None

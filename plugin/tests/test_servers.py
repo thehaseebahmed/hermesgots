@@ -208,5 +208,71 @@ class HandleTests(unittest.TestCase):
         self.assertIn("error", result)
 
 
+class GuardTests(unittest.TestCase):
+    """The pre_tool_call guards, on the pure matchers."""
+
+    def test_hand_started_blocks_bare_pnpm_mock(self):
+        self.assertEqual(servers.hand_started("cd app && pnpm mock"), "pnpm mock")
+        self.assertEqual(servers.hand_started("node scripts/mock-hermes.mjs"), "node scripts/mock-hermes.mjs")
+
+    def test_hand_started_allows_ported_command(self):
+        self.assertIsNone(servers.hand_started("PORT=39214 pnpm mock"))
+        self.assertIsNone(servers.hand_started("vite --port 39214 --strictPort"))
+        self.assertIsNone(servers.hand_started("node scripts/mock-hermes.mjs --port 39214"))
+
+    def test_hand_started_ignores_other_commands(self):
+        self.assertIsNone(servers.hand_started("pnpm install"))
+        self.assertIsNone(servers.hand_started("git status"))
+
+    def test_pattern_kill_blocked_for_another_session(self):
+        # A live server whose command names the pattern's word, owned by session-a.
+        with tempfile.TemporaryDirectory() as tmp:
+            path, home = _home(tmp)
+            try:
+                servers.start(path, home, "session-a", "mock", PROBE, str(home))
+                target = servers.pattern_kill_target("pkill -f probe_server", path, home, "session-b")
+                self.assertIsNotNone(target)
+                assert target is not None  # noqa: S101 — narrows for the type checker
+                self.assertEqual(target["session_id"], "session-a")
+            finally:
+                for found in servers._read_all(path):
+                    servers._stop_row(path, found)
+
+    def test_pattern_kill_allowed_for_own_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, home = _home(tmp)
+            try:
+                servers.start(path, home, "session-a", "mock", PROBE, str(home))
+                target = servers.pattern_kill_target("pkill -f probe_server", path, home, "session-a")
+                self.assertIsNone(target)
+            finally:
+                for found in servers._read_all(path):
+                    servers._stop_row(path, found)
+
+    def test_pattern_kill_ignores_unrelated_pattern(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, home = _home(tmp)
+            self.assertIsNone(servers.pattern_kill_target("pkill -f nginx", path, home, "s"))
+
+
+class InstructionsTests(unittest.TestCase):
+    def test_server_instructions_added_for_worktree_sessions(self):
+        from plugin import sessions as plugin_sessions
+
+        record = {
+            "session_id": "s",
+            "repos": [{"name": "r", "repo_root": "/x", "path": "/w", "branch": "b"}],
+            "mode": "accept_edits",
+        }
+        text = plugin_sessions.instructions(record)
+        self.assertIn(plugin_sessions.SERVER_INSTRUCTIONS, text)
+
+    def test_server_instructions_absent_without_worktrees(self):
+        from plugin import sessions as plugin_sessions
+
+        record = {"session_id": "s", "repos": [], "mode": "accept_edits"}
+        self.assertNotIn(plugin_sessions.SERVER_INSTRUCTIONS, plugin_sessions.instructions(record))
+
+
 if __name__ == "__main__":
     unittest.main()

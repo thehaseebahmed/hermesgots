@@ -442,6 +442,16 @@ PR_INSTRUCTIONS = (
     "pull request template when it has one (named below), else with Summary, Changes and How to "
     "test sections."
 )
+# Added with PR_INSTRUCTIONS: concurrent sessions collide on shared default ports, so every
+# dev server goes through serve, which picks a port no other session holds.
+SERVER_INSTRUCTIONS = (
+    "Run every dev server (a mock API, Vite, anything that listens) with the serve tool, never with "
+    'the terminal: it picks a port no other session holds and records the server as this session\'s, '
+    'so sessions never collide or kill each other\'s. E.g. serve(action="start", name="mock", '
+    'command="node scripts/mock-hermes.mjs", port_env="PORT", cwd="app"). Give the command exactly '
+    "one way to take the port: a {port} placeholder, port_env or port_flag. When you're done with a "
+    'server, stop it with serve(action="stop", name=…).'
+)
 # The same condition as PR_INSTRUCTIONS: only code sessions get it.
 DONE_INSTRUCTIONS = (
     "Two things the run's prompt emphasises once the work is done: don't share the pull request url "
@@ -460,6 +470,7 @@ def instructions(record: Dict[str, Any]) -> str:
         worktrees,
         _files_line(record),
         PR_INSTRUCTIONS if worktrees else "",
+        SERVER_INSTRUCTIONS if worktrees else "",
         DONE_INSTRUCTIONS if worktrees else "",
         _template_line(record),
     ]
@@ -962,6 +973,33 @@ def _before_tool(kwargs: Dict[str, Any]) -> Optional[Dict[str, str]]:
     record = record_for_call(path, home, task_id, session_id)
     if not record:
         return None
+    from . import servers
+
+    if kwargs.get("tool_name") == "terminal":
+        raw_args = kwargs.get("args")
+        args = raw_args if isinstance(raw_args, dict) else {}
+        raw_command = args.get("command")
+        command = raw_command if isinstance(raw_command, str) else ""
+        hand = servers.hand_started(command)
+        if hand:
+            return {
+                "action": "block",
+                "message": (
+                    f"{hand} would start a dev server on its default port, where concurrent "
+                    f'sessions collide. Use serve instead: serve(action="start", name=…, '
+                    f"command=\"{hand}\", port_env=\"PORT\", cwd=…)."
+                ),
+            }
+        owner = servers.pattern_kill_target(command, path, home, record["session_id"])
+        if owner:
+            return {
+                "action": "block",
+                "message": (
+                    f"That kill would also stop {owner['name']}, a dev server another session "
+                    f"({owner['session_id']}) owns. Stop your own servers with "
+                    f'serve(action="stop", name=…), never by pattern.'
+                ),
+            }
     if record["path"] and task_id and not _has_cwd(task_id):
         # The gateway restarted since the app last posted the workspace.
         apply_cwd(task_id, record["path"])
