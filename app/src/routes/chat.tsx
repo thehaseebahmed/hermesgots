@@ -729,6 +729,11 @@ export function ChatPage() {
           <div className="mx-auto w-full max-w-3xl">
             <PlanReadyCard
               autoAvailable={tracked}
+              model={
+                configured && (
+                  <ModelMenu profile={profile} choice={modelChoice} onChoose={chooseModel} />
+                )
+              }
               onApprove={async (mode) => {
                 await setSessionMode(session.id, mode)
                 await send(planApprovalMessage(session.planFile))

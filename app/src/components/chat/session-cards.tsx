@@ -23,11 +23,14 @@ const CARD = "w-full rounded-3xl border shadow-xl ring-0 shadow-black/10 dark:sh
  */
 export function PlanReadyCard({
   autoAvailable,
+  model,
   onApprove,
   onKeepPlanning,
 }: {
   /** Auto is answered by the plugin on the server, so it needs the plugin. */
   autoAvailable: boolean
+  /** The chat's model pill, so the model the plan runs on can change here. */
+  model?: ReactNode
   onApprove: (mode: "auto" | "accept_edits") => Promise<void>
   onKeepPlanning: () => Promise<void>
 }) {
@@ -63,29 +66,39 @@ export function PlanReadyCard({
             : "Approve it to let the agent make the changes, or keep planning."}
         </p>
       </CardContent>
-      {autoAvailable ? (
-        // Stacked on a phone; from `sm` one row, Approve in Auto rightmost and Keep planning apart.
-        <CardFooter className="flex flex-col items-stretch gap-2 sm:flex-row-reverse sm:flex-wrap">
-          <Button {...button("auto")}>
-            <ZapIcon data-icon="inline-start" />
-            Approve in Auto
-          </Button>
-          <Button variant="outline" {...button("accept_edits")}>
-            <PencilLineIcon data-icon="inline-start" />
-            Approve in Accept edits
-          </Button>
-          <Button variant="ghost" {...button("keep")} className="h-11 sm:mr-auto">
-            Keep planning
-          </Button>
-        </CardFooter>
-      ) : (
-        <CardFooter className="grid grid-cols-2 gap-2">
-          <Button variant="outline" {...button("keep")}>
-            Keep planning
-          </Button>
-          <Button {...button("accept_edits")}>Approve</Button>
-        </CardFooter>
-      )}
+      <CardFooter className="flex flex-col items-stretch gap-2">
+        {autoAvailable ? (
+          <>
+            {/* The pill and Keep planning share a row, so the approvals keep one of their own. */}
+            <div className="flex items-center gap-2">
+              {model && <span className="min-w-0 flex-1">{model}</span>}
+              <Button variant="ghost" {...button("keep")} className="h-11 shrink-0">
+                Keep planning
+              </Button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Button {...button("auto")}>
+                <ZapIcon data-icon="inline-start" />
+                Auto
+              </Button>
+              <Button variant="outline" {...button("accept_edits")}>
+                <PencilLineIcon data-icon="inline-start" />
+                Accept edits
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            {model}
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="outline" {...button("keep")}>
+                Keep planning
+              </Button>
+              <Button {...button("accept_edits")}>Approve</Button>
+            </div>
+          </>
+        )}
+      </CardFooter>
     </Card>
   )
 }
