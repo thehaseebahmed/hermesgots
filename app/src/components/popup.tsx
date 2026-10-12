@@ -113,6 +113,11 @@ export function PopupContent({
     return (
       <Drawer.Portal>
         <Drawer.Backdrop
+          // Base UI renders a nested drawer's backdrop only when forced, and without it a sheet
+          // stacked on another has nothing separating it from the sheet behind: both sit at full
+          // brightness and read as one surface. The child's scrim covers the parent sheet, so the
+          // stack reads as layers, and a press outside the child still dismisses only the child.
+          forceRender
           className={cn(
             SCRIM,
             "opacity-[calc(1-var(--drawer-swipe-progress))] duration-300 data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] data-swiping:duration-0 motion-reduce:duration-0",
