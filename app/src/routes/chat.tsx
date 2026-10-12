@@ -16,6 +16,7 @@ import {
   XIcon,
 } from "lucide-react"
 
+import { useBreakReminderEligibility } from "@/components/break-reminder-context"
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ChatHeader } from "@/components/chat/chat-header"
@@ -94,6 +95,7 @@ import { listProjects, supportsSteer, type HermesProject } from "@/lib/hermes"
 import { loadEarlierHistory, reconcileHistory } from "@/lib/history"
 import { SAFETY_MS, useLive, watchChat } from "@/lib/live"
 import { useXLarge } from "@/lib/media"
+import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { setThreadMuted } from "@/lib/push"
@@ -374,6 +376,19 @@ export function ChatPage() {
   const theseusInfo = useTheseusInfo(profile)
   // The agent sits in `theseus wait` while it waits, so the turn is still running: busy or not.
   const theseusWaits = theseus && waitsOnUser(theseus)
+  // Only persistent /v1/runs work survives losing the app's connection; legacy streams do not.
+  useBreakReminderEligibility(
+    isBackgroundSafeRunActive({
+      busy,
+      runId,
+      awaitingApproval: Boolean(awaitingApproval),
+      awaitingClarify: Boolean(awaitingClarify),
+      theseusWaits: Boolean(theseusWaits),
+      resolved: Boolean(conversation?.resolvedAt),
+      discarded: Boolean(conversation?.discardedAt),
+      blocked: Boolean(conversation?.blocked),
+    }),
+  )
   // A server that streams its changes says when this chat's session moves; the timer is a net.
   const streamOpen = useLive(profile)
   useEffect(() => (id ? watchChat(id) : undefined), [id])

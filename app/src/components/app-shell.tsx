@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } fro
 import { Outlet, useLocation, useNavigationType } from "react-router"
 
 import { ConversationList } from "@/components/conversation-list"
+import { BreakReminderProvider } from "@/components/break-reminder-provider"
 import { CrashBoundary } from "@/components/crash-screen"
 import { DrawerContext } from "@/components/drawer-context"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
@@ -130,23 +131,25 @@ export function AppShell({ children }: { children?: ReactNode }) {
   usePageTransition(main, pane)
 
   return (
-    <DrawerContext.Provider value={() => setOpen(true)}>
-      <div className="flex h-dvh overflow-hidden bg-background">
-        <aside className="hidden w-72 shrink-0 border-r bg-sidebar text-sidebar-foreground md:block lg:w-80">
-          <ConversationList />
-        </aside>
-        <Sheet open={open} onOpenChange={setOpen}>
-          <SheetContent side="left" className="w-[85vw] max-w-80 p-0" showCloseButton={false}>
-            <SheetTitle className="sr-only">Conversations</SheetTitle>
-            <ConversationList onNavigate={() => setOpen(false)} />
-          </SheetContent>
-        </Sheet>
-        <main ref={main} className="flex min-w-0 flex-1 flex-col overflow-x-clip">
-          <CrashBoundary resetKey={pathname} menu>
-            <Panes pane={pane}>{children ?? <Outlet />}</Panes>
-          </CrashBoundary>
-        </main>
-      </div>
-    </DrawerContext.Provider>
+    <BreakReminderProvider>
+      <DrawerContext.Provider value={() => setOpen(true)}>
+        <div className="flex h-dvh overflow-hidden bg-background">
+          <aside className="hidden w-72 shrink-0 border-r bg-sidebar text-sidebar-foreground md:block lg:w-80">
+            <ConversationList />
+          </aside>
+          <Sheet open={open} onOpenChange={setOpen}>
+            <SheetContent side="left" className="w-[85vw] max-w-80 p-0" showCloseButton={false}>
+              <SheetTitle className="sr-only">Conversations</SheetTitle>
+              <ConversationList onNavigate={() => setOpen(false)} />
+            </SheetContent>
+          </Sheet>
+          <main ref={main} className="flex min-w-0 flex-1 flex-col overflow-x-clip">
+            <CrashBoundary resetKey={pathname} menu>
+              <Panes pane={pane}>{children ?? <Outlet />}</Panes>
+            </CrashBoundary>
+          </main>
+        </div>
+      </DrawerContext.Provider>
+    </BreakReminderProvider>
   )
 }

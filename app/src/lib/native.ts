@@ -8,6 +8,12 @@ import { placeToasts } from "@/lib/toast"
 /** True inside the Android app, where the page is served from `https://localhost`. */
 export const isNative = Capacitor.isNativePlatform()
 
+/** Sends the native Android app to the background while leaving its current screen intact. */
+export async function minimizeAndroidApp() {
+  if (!isNative || Capacitor.getPlatform() !== "android") return
+  await App.minimizeApp()
+}
+
 interface OpenImagePlugin {
   open(options: { dataBase64: string; name: string }): Promise<void>
 }
