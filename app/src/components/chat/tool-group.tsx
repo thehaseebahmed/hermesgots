@@ -21,6 +21,7 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { Spinner } from "@/components/ui/spinner"
 import type { ToolEvent } from "@/lib/db"
 import { formatDuration } from "@/lib/format"
+import { useWide } from "@/lib/media"
 import { failureReason, kindOf, phrases, todoTarget, TODO_TOOLS, type KindId } from "@/lib/tools"
 
 function useElapsed(tool: ToolEvent) {
@@ -134,20 +135,25 @@ function StatusIcon({ tool, icon: Icon }: { tool: ToolEvent; icon: LucideIcon })
 
 function ToolDetail({ tool, onBack }: { tool: ToolEvent; onBack: () => void }) {
   const elapsed = useElapsed(tool)
+  // The back button sits over the header, which only exists from tablet width up: on a phone the
+  // sheet's drag handle dismisses it, so the button would float over the handle band.
+  const wide = useWide()
   const status =
     tool.status === "running" ? "Running" : tool.status === "failed" ? "Failed" : "Completed"
   return (
     <>
-      <PopupHeader className="items-center px-16 pb-3 text-center">
-        <Button
-          variant="ghost"
-          size="icon-lg"
-          className="absolute top-3 left-3 size-11"
-          onClick={onBack}
-        >
-          <ArrowLeftIcon />
-          <span className="sr-only">Back</span>
-        </Button>
+      <PopupHeader className="items-center px-6 pb-3 text-center md:px-16">
+        {wide && (
+          <Button
+            variant="ghost"
+            size="icon-lg"
+            className="absolute top-3 left-3 size-11"
+            onClick={onBack}
+          >
+            <ArrowLeftIcon />
+            <span className="sr-only">Back</span>
+          </Button>
+        )}
         <PopupTitle className="max-w-full truncate">
           {tool.emoji ? `${tool.emoji} ` : ""}
           {tool.tool}
