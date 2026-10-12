@@ -417,11 +417,13 @@ DONE_INSTRUCTIONS = (
 
 
 def instructions(record: Dict[str, Any]) -> str:
-    """What the run's system prompt tells the agent: its worktrees (fixed per session), how to open
-    its pull request and the repos' templates and, in plan mode, the shape of the plan."""
+    """What the run's system prompt tells the agent: its worktrees (fixed per session), where its
+    generated files go, how to open its pull request and the repos' templates and, in plan mode,
+    the shape of the plan."""
     worktrees = _worktree_line(record)
     lines = [
         worktrees,
+        _files_line(record),
         PR_INSTRUCTIONS if worktrees else "",
         DONE_INSTRUCTIONS if worktrees else "",
         _template_line(record),
@@ -452,6 +454,21 @@ def _worktree_line(record: Dict[str, Any]) -> str:
         f"You are working in git worktrees of this project's repos, all on branch {repos[0]['branch']}:\n"
         + "\n".join(lines)
         + "\nKeep all work inside them."
+    )
+
+
+def _files_line(record: Dict[str, Any]) -> str:
+    """Where the session's generated files go, and the tool that files them. Fixed per session (the
+    folder is), so the prompt cache holds across its turns; empty for a record from before it."""
+    folder = record.get("files_dir")
+    if not folder:
+        return ""
+    return (
+        f"Files you make for the user — screenshots, images, charts, reports, markdown — belong in "
+        f"this session's library at {folder}, not in the worktree. File each one with the "
+        f"add_to_library tool (its path, absolute or relative): it creates the folder if it needs "
+        f"to, moves the file there and answers with its new path. Return an image's new path in a "
+        f"MEDIA:<path> tag so the user sees it. Source edits stay in the worktree."
     )
 
 

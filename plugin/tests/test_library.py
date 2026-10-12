@@ -162,5 +162,40 @@ class AddToLibraryTest(unittest.TestCase):
         )
 
 
+class InstructionsTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name)
+        self.tree = self.home / "project" / ".worktrees" / "jazzy-quokka-7bfe"
+        self.tree.mkdir(parents=True)
+        self.record = {
+            "session_id": "memento-1",
+            "path": str(self.tree),
+            "branch": "hermes/jazzy-quokka-7bfe",
+            "files_dir": str(self.home / "project" / "files" / "jazzy-quokka-7bfe"),
+            "repos": [
+                {
+                    "name": "o/web",
+                    "repo_root": str(self.home / "project"),
+                    "path": str(self.tree),
+                    "branch": "hermes/jazzy-quokka-7bfe",
+                }
+            ],
+        }
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_the_line_names_the_folder_right_after_the_worktree_line(self) -> None:
+        text = sessions.instructions(self.record)
+        self.assertIn(f"this session's library at {self.record['files_dir']}", text)
+        self.assertIn("add_to_library tool", text)
+        self.assertLess(text.index("library at"), text.index(sessions.PR_INSTRUCTIONS))
+
+    def test_a_record_without_the_folder_has_no_line(self) -> None:
+        legacy = {**self.record, "files_dir": None}
+        self.assertNotIn("library", sessions.instructions(legacy))
+
+
 if __name__ == "__main__":
     unittest.main()

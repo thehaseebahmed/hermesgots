@@ -36,7 +36,9 @@
 // POST /api/plugins/memento/sessions/{id}/workspace (GET reads it back, POST …/mode changes the
 // permission mode, POST …/workspace/remove removes the trees unless a turn mentioned "commit"). In
 // plan mode the agent reads a little, writes a structured plan, leaves it pending and the workspace
-// names the file the plugin would have saved it to (plan_file). From its second turn, or one that
+// names the file the plugin would have saved it to (plan_file). Every session also gets a library
+// folder (files_dir) the instructions tell the agent to file its generated files in, with the
+// plugin's add_to_library tool. From its second turn, or one that
 // says "ship", the agent opens the branch's PRs with the plugin's open_pull_request tool
 // (GET …/sessions/{id}/prs reads them; "draft" in that turn drafts them): "merge" or "close" in a
 // turn sets their state, a merge resolves the session in the chat list, and "break" fails their
@@ -1657,8 +1659,11 @@ http
         record.repos.length === 1
           ? `You are working in a git worktree of ${record.repos[0].name} at ${record.repos[0].path} (branch ${record.branch}). Keep all work inside it.`
           : `You are working in git worktrees of this project's repos, all on branch ${record.branch}:\n${record.repos.map((r, i) => `- ${r.name} at ${r.path}${i === 0 ? " (your current directory)" : ""}`).join("\n")}\nKeep all work inside them.`
+      // The plugin's library line (sessions._files_line), word for word, with the session's path.
+      const filesLine = (record) =>
+        `Files you make for the user — screenshots, images, charts, reports, markdown — belong in this session's library at ${record.files_dir}, not in the worktree. File each one with the add_to_library tool (its path, absolute or relative): it creates the folder if it needs to, moves the file there and answers with its new path. Return an image's new path in a MEDIA:<path> tag so the user sees it. Source edits stay in the worktree.`
       const instructions = (record) =>
-        [worktreeLine(record), PR_INSTRUCTIONS, DONE_INSTRUCTIONS, record.mode === "plan" ? PLAN_INSTRUCTIONS : "", record.mode === "theseus" ? THESEUS_INSTRUCTIONS : ""].filter(Boolean).join("\n")
+        [worktreeLine(record), filesLine(record), PR_INSTRUCTIONS, DONE_INSTRUCTIONS, record.mode === "plan" ? PLAN_INSTRUCTIONS : "", record.mode === "theseus" ? THESEUS_INSTRUCTIONS : ""].filter(Boolean).join("\n")
       const answer = (record) =>
         json(res, 200, {
           object: "memento.workspace",
@@ -1684,7 +1689,7 @@ http
           const pick = (words) => words[Math.floor(Math.random() * words.length)]
           const slug = `${pick(["jazzy", "cosmic", "fuzzy", "zesty", "nimble"])}-${pick(["hopper", "otter", "comet", "waffle", "quokka"])}-${randomUUID().slice(0, 4)}`
           const repos = gitFolders.map((f) => ({ name: f.repo, repo_root: f.path, path: `${f.path}/.worktrees/${slug}`, branch: `hermes/${slug}` }))
-          record = { session_id: id, project_id: project.id, repo_root: repos[0].repo_root, path: repos[0].path, branch: repos[0].branch, mode: mode ?? "accept_edits", plan_pending: 0, created_at: Date.now(), repos, plan_file: null }
+          record = { session_id: id, project_id: project.id, repo_root: repos[0].repo_root, path: repos[0].path, branch: repos[0].branch, mode: mode ?? "accept_edits", plan_pending: 0, created_at: Date.now(), repos, files_dir: `${repos[0].repo_root}/files/${slug}`, plan_file: null }
           projectSessions.set(id, record)
         } else if (mode && mode !== record.mode) {
           if (mode === "theseus" || record.mode === "theseus")
