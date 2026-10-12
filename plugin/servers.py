@@ -435,3 +435,156 @@ async def run(hermes_home: Path) -> None:
                 logger.info("memento: swept %d forgotten server(s)", done)
         except Exception:
             logger.warning("memento: sweeping servers failed", exc_info=True)
+
+
+# --- the serve tool (ship.py's pattern) ------------------------------------------------
+
+
+TOOL = "serve"
+SCHEMA = {
+    "name": TOOL,
+    "description": (
+        "Start, stop or check this session's dev servers (the mock, Vite, anything that "
+        "listens). start picks a port no other session holds and runs command in this "
+        "session's worktree, so never choose a port or start a server with the terminal "
+        "yourself. Give the command exactly one way to take the port: a {port} placeholder, "
+        "port_env (an env var carrying it) or port_flag (a flag appended with it). It "
+        "answers { url, port, pid, log } once the port is listening. stop kills a server "
+        "you started; status lists yours and the ports other sessions hold."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["start", "stop", "status"],
+                "description": "start, stop or status.",
+            },
+            "name": {
+                "type": "string",
+                "description": 'The server\'s short label, like "mock" or "vite".',
+            },
+            "command": {
+                "type": "string",
+                "description": (
+                    "The shell command that runs the server, relative to cwd. Include "
+                    "{port} where the port goes, or use port_env / port_flag instead."
+                ),
+            },
+            "cwd": {
+                "type": "string",
+                "description": (
+                    "Folder to run in, relative to the session's worktree (default: the "
+                    "worktree itself)."
+                ),
+            },
+            "port_env": {
+                "type": "string",
+                "description": "An env var the port is exported under, e.g. PORT.",
+            },
+            "port_flag": {
+                "type": "string",
+                "description": 'A flag the port is appended to, e.g. "--port".',
+            },
+        },
+        "required": ["action"],
+    },
+}
+
+
+def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any) -> str:
+    """The tool: serves the session the call belongs to (its task id is Memento's session id)."""
+    args = args if isinstance(args, dict) else {}
+    path, home = sessions._paths()
+    action = args.get("action")
+    if action == "status":
+        # Needs no workspace: the ports other sessions hold are the point.
+        return json.dumps(status(path, session_id or task_id or ""))
+    record = None
+    for key in (task_id, session_id):
+        if key and path.exists():
+            record = sessions.record_for(path, home, key)
+            if record:
+                break
+    if not record:
+        return json.dumps({"error": "This session has no worktree to run a server in."})
+    session = record["session_id"]
+    try:
+        if action == "start":
+            root = record["path"] or ""
+            if not root:
+                raise ServerError("This session's worktree isn't set up.")
+            cwd = args.get("cwd") or ""
+            folder = os.path.normpath(os.path.join(root, str(cwd))) if cwd else root
+            if not (folder == root or folder.startswith(root + os.sep)):
+                raise ServerError("cwd must sit inside the session's worktree.")
+            if not os.path.isdir(folder):
+                raise ServerError(f"{cwd} doesn't exist in the worktree.")
+            result = start(
+                path,
+                home,
+                session,
+                args.get("name"),
+                args.get("command"),
+                folder,
+                args.get("port_env"),
+                args.get("port_flag"),
+            )
+        elif action == "stop":
+            name = args.get("name")
+            if not isinstance(name, str) or not name.strip():
+                raise ServerError("name is required to stop a server.")
+            result = stop(path, session, name.strip())
+        else:
+            raise ServerError("action must be start, stop or status.")
+    except ServerError as error:
+        return json.dumps({"error": str(error)})
+    return json.dumps(result)
+
+
+def register(ctx: Any) -> bool:
+    """Registers the tool with Hermes, for every surface's agents of this profile."""
+    register_tool = getattr(ctx, "register_tool", None)
+    if not callable(register_tool):
+        return False
+    try:
+        return register_tool(
+            name=TOOL, toolset="memento", schema=SCHEMA, handler=handle, emoji="🛰️"
+        ) is not False
+    except Exception:
+        logger.warning("memento: couldn't register the serve tool", exc_info=True)
+        return False
+
+
+def wire(adapter: Any) -> bool:
+    """Makes every agent the API server builds carry the tool when this profile registered it."""
+    original = getattr(adapter, "_create_agent", None)
+    if not callable(original):
+        return False
+
+    def create_agent(*args: Any, **kwargs: Any) -> Any:
+        agent = original(*args, **kwargs)
+        try:
+            equip(agent)
+        except Exception:
+            logger.debug("memento: couldn't add the serve tool to an agent", exc_info=True)
+        return agent
+
+    adapter._create_agent = create_agent
+    return True
+
+
+def equip(agent: Any) -> None:
+    names = getattr(agent, "valid_tool_names", None)
+    tools = getattr(agent, "tools", None)
+    if not isinstance(tools, list) or not isinstance(names, set) or TOOL in names:
+        return
+    try:
+        from tools.registry import registry
+    except ImportError:
+        return
+    # Only where this profile loaded the plugin: anywhere else the call would be an unknown tool.
+    if registry.get_entry(TOOL) is None:
+        return
+    tools.append({"type": "function", "function": SCHEMA})
+    names.add(TOOL)

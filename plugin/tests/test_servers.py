@@ -4,12 +4,14 @@ Real spawns against a temp home, using ``python3 -m http.server`` as the probe s
 it listens on exactly the port it's given, which is the whole contract ``serve`` depends on.
 """
 
+import json
 import socket
 import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from plugin import servers
 from plugin.store import connect
@@ -140,6 +142,70 @@ class ServerLifecycleTests(unittest.TestCase):
         self.assertFalse(servers._alive(row))
         # No start-time baseline (legacy row): degrade to a liveness check.
         self.assertTrue(servers._alive({"pid": 1, "start_time": None}))
+
+
+class HandleTests(unittest.TestCase):
+    """The serve tool's handler, through a synthetic workspace record."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.path, self.home = _home(self._tmp.name)
+        self.record = {"session_id": "memento-test", "path": str(self.home), "repos": []}
+        self.addCleanup(self._cleanup_servers)
+        self.addCleanup(self._tmp.cleanup)
+
+    def _cleanup_servers(self):
+        for row in servers._read_all(self.path):
+            servers._stop_row(self.path, row)
+
+    def _handle(self, args, task_id="memento-test"):
+        with (
+            patch("plugin.sessions._paths", return_value=(self.path, self.home)),
+            patch("plugin.sessions.record_for", return_value=self.record),
+        ):
+            return json.loads(servers.handle(args, task_id=task_id))
+
+    def test_handle_starts_probe_server(self):
+        result = self._handle({"action": "start", "name": "probe", "command": PROBE})
+        self.assertEqual(result["status"], "started")
+        self.assertIn("port", result)
+        self.assertIn("url", result)
+        with socket.create_connection(("127.0.0.1", result["port"]), timeout=2):
+            pass
+
+    def test_handle_second_start_returns_same_live_server(self):
+        first = self._handle({"action": "start", "name": "probe", "command": PROBE})
+        second = self._handle({"action": "start", "name": "probe", "command": PROBE})
+        self.assertEqual(second["status"], "running")
+        self.assertEqual(first["pid"], second["pid"])
+        self.assertEqual(first["port"], second["port"])
+
+    def test_handle_no_worktree_is_an_error(self):
+        with (
+            patch("plugin.sessions._paths", return_value=(self.path, self.home)),
+            patch("plugin.sessions.record_for", return_value=None),
+        ):
+            raw = servers.handle({"action": "start", "name": "x", "command": "y {port}"}, task_id="s")
+        self.assertIn("error", json.loads(raw))
+
+    def test_handle_cwd_escape_is_refused(self):
+        result = self._handle(
+            {"action": "start", "name": "probe", "command": PROBE, "cwd": "../../.."}
+        )
+        self.assertIn("error", result)
+        self.assertIn("worktree", result["error"])
+
+    def test_handle_status_lists_other_sessions_ports(self):
+        servers.start(self.path, self.home, "other-session", "probe", PROBE, str(self.home))
+        result = self._handle({"action": "status"}, task_id="memento-test")
+        rows = servers._read_all(self.path)
+        self.assertIn("ports_in_use", result)
+        self.assertEqual(len(rows), 1)
+        self.assertIn(rows[0]["port"], result["ports_in_use"])
+
+    def test_handle_stop_requires_name(self):
+        result = self._handle({"action": "stop"})
+        self.assertIn("error", result)
 
 
 if __name__ == "__main__":

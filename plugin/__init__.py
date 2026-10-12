@@ -38,6 +38,7 @@ from . import (
     outbox,
     projects,
     repos,
+    servers,
     sessions,
     push,
     ship,
@@ -148,6 +149,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     ship.wire(adapter)
     # The agent files its generated files in the project's library; see library.py.
     library.wire(adapter)
+    # The agent runs its dev servers on held ports; see servers.py.
+    servers.wire(adapter)
     # Theseus sessions review with another model; see theseus.py.
     theseus.wire(adapter)
     # A background delegation's result would wait for the user's next message; see delegation.py.
@@ -246,6 +249,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "pr_tool",
                     "close",
                     "merge_resolve",
+                    "servers",
                     "events",
                     "theseus",
                     "push",
@@ -1169,6 +1173,7 @@ def register(ctx) -> None:
     ship.register(ctx)
     library.register(ctx)
     theseus.register(ctx)
+    servers.register(ctx)
     register_handler = getattr(ctx, "register_platform_handler", None)
     if register_handler is None:
         logger.warning("memento: this Hermes version can't add API server routes; update Hermes")
