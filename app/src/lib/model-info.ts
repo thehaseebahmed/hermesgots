@@ -100,3 +100,8 @@ export function useModelInfo(profile?: (Server & { id?: string }) | null) {
 export function shortModel(model: string) {
   return model.slice(model.lastIndexOf("/") + 1)
 }
+
+/** `provider/model`, or the model alone when the host didn't name its provider. */
+export function fullModel({ provider, model }: { provider?: string; model: string }) {
+  return provider ? `${provider}/${model}` : model
+}

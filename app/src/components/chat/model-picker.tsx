@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { rememberModel, type ModelChoice, type Profile } from "@/lib/db"
 import type { ModelInfo, ModelProvider } from "@/lib/hermes"
-import { shortModel, useModelInfo } from "@/lib/model-info"
+import { fullModel, shortModel, useModelInfo } from "@/lib/model-info"
 import { cn } from "@/lib/utils"
 
 /**
@@ -120,8 +120,8 @@ export function ModelPicker({
             <ModelList>
               {recentOffered.map((m) => (
                 <ModelOption
-                  key={`${m.provider}/${m.model}`}
-                  label={`${m.provider}/${m.model}`}
+                  key={fullModel(m)}
+                  label={fullModel(m)}
                   selected={isChosen(m)}
                   onClick={() => onChoose(m)}
                 />
@@ -188,11 +188,6 @@ function sortProviders(providers: ModelProvider[]) {
     .sort((a, b) => byName.compare(a.name, b.name))
 }
 
-/** `provider/model`, or the model alone when the host didn't name its provider. */
-function fullModel({ provider, model }: ModelChoice) {
-  return provider ? `${provider}/${model}` : model
-}
-
 function ModelList({ children }: { children: ReactNode }) {
   return <div className="flex flex-col overflow-hidden rounded-2xl bg-muted/60 p-1">{children}</div>
 }
@@ -240,17 +235,17 @@ export function ModelMenu({
   choice,
   onChoose,
   disabled,
-  showProvider,
-  fullWidth,
+  display = "pill",
 }: {
   profile?: Profile | null
   choice?: ModelChoice
   onChoose: (choice: ModelChoice | undefined) => void
   disabled?: boolean
-  /** Names the model's provider in the pill, for a pick that stands alone in a card. */
-  showProvider?: boolean
-  /** Takes the whole row instead of hugging its text. */
-  fullWidth?: boolean
+  /**
+   * How the pill shows: a compact pill in the composer, or a full-width row naming the model's
+   * provider, for a pick that stands alone in the plan-ready card.
+   */
+  display?: "pill" | "block"
 }) {
   const [open, setOpen] = useState(false)
   const info = useModelInfo(profile)
@@ -258,19 +253,19 @@ export function ModelMenu({
   // The host's last reported model, shown greyed while it's read again. Only a bot whose host runs
   // the Memento plugin shows it; one without the plugin keeps showing nothing until the host answers.
   const remembered = profile?.pluginVersion ? profile.hostModel?.model : undefined
-  let current = choice?.model ?? profile?.modelChoice?.model ?? info?.model
+  // One pick, so the name and its provider can't come from different models.
+  const shown = choice ?? profile?.modelChoice ?? hostChoice(info)
+  let current = shown?.model
   let stale = false
   if (!current && remembered) {
     current = remembered
     stale = true
   }
-  const providerSlug = choice?.provider ?? info?.provider
-  // `provider/model` is how the app names a model everywhere else (the bot editor's default and
-  // the picker's recent picks), so the card's pill follows it when it names the provider.
+  // `provider/model` is how the app names a model everywhere else, so the row's pill follows it.
   const label = !current
     ? "Model"
-    : showProvider && providerSlug
-      ? fullModel({ provider: providerSlug, model: current })
+    : display === "block" && shown?.provider
+      ? fullModel({ provider: shown.provider, model: current })
       : shortModel(current)
   // Nothing to pick from (an older Hermes, a host that's down, a keyless bot still loading).
   if (!current && !providers.length) return null
@@ -281,7 +276,7 @@ export function ModelMenu({
         variant="secondary"
         className={cn(
           "h-11 min-w-0 gap-1 rounded-full pr-2.5 pl-3.5",
-          fullWidth ? "w-full justify-between" : "max-w-48 sm:max-w-64",
+          display === "block" ? "w-full justify-between" : "max-w-48 sm:max-w-64",
         )}
         disabled={disabled || !providers.length}
         onClick={() => setOpen(true)}

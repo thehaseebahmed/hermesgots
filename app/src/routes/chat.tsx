@@ -293,6 +293,11 @@ export function ChatPage() {
     if (conversation) void updateConversation(conversation.id, { modelChoice: choice })
     else setPendingModel({ profileId: profile?.id, choice })
   }
+  // The chat's model pill: the composer's, and the plan-ready card's while a plan waits on it.
+  const modelPill = (extra: { display?: "pill" | "block"; disabled?: boolean }) =>
+    configured && (
+      <ModelMenu profile={profile} choice={modelChoice} onChoose={chooseModel} {...extra} />
+    )
   const usage: ContextUsage = {
     tracked,
     tokens: tracked ? live?.tokens : undefined,
@@ -729,17 +734,7 @@ export function ChatPage() {
           <div className="mx-auto w-full max-w-3xl">
             <PlanReadyCard
               autoAvailable={tracked}
-              model={
-                configured && (
-                  <ModelMenu
-                    profile={profile}
-                    choice={modelChoice}
-                    onChoose={chooseModel}
-                    showProvider
-                    fullWidth
-                  />
-                )
-              }
+              model={modelPill({ display: "block" })}
               onApprove={async (mode) => {
                 await setSessionMode(session.id, mode)
                 await send(planApprovalMessage(session.planFile))
@@ -786,16 +781,7 @@ export function ChatPage() {
                   ),
               }
             }
-            model={
-              configured && (
-                <ModelMenu
-                  profile={profile}
-                  choice={modelChoice}
-                  onChoose={chooseModel}
-                  disabled={busy}
-                />
-              )
-            }
+            model={modelPill({ disabled: busy })}
           />
         )}
       </div>
