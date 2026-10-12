@@ -152,7 +152,10 @@ export function PopupContent({
           forceRender
           className={cn(
             SCRIM,
-            "opacity-[calc(var(--sheet-scrim,1)*(1-var(--drawer-swipe-progress)))] duration-300 data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] data-swiping:duration-0 motion-reduce:duration-0",
+            // With snap points Base UI writes the snap progress (1 = collapsed, 0 = expanded)
+            // to --drawer-swipe-progress in the settled state, so the scrim rides on our own
+            // settled-state var instead and fades over the 300ms settle.
+            "opacity-[var(--sheet-scrim,1)] duration-300 data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] motion-reduce:duration-0",
           )}
           style={{ "--sheet-scrim": expanded ? 0 : 1 } as CSSProperties}
         />
