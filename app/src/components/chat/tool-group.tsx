@@ -239,6 +239,14 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
   const failed = failures.length > 0
   const parts = phrases(tools)
   const { row, text, ruler, shown } = useFittingPhrases<HTMLButtonElement>(parts, [running, failed])
+  // From tablet width up the details open in the same sheet, behind a back button; on a phone they
+  // open as a sheet stacked on the list's, dismissed back to it.
+  const wide = useWide()
+  const detail = !wide ? selected : undefined
+  // Kept while the stacked sheet animates out, so it doesn't empty first.
+  const [last, setLast] = useState<ToolEvent | undefined>()
+  if (detail && detail !== last) setLast(detail)
+  const shownDetail = detail ?? last
   return (
     <>
       <button
@@ -271,8 +279,22 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
           if (!next) setSelectedIndex(undefined)
         }}
       >
+        {/* On a phone the details open as a sheet stacked on this one; it renders inside the
+            parent sheet's tree so Base UI registers the nesting. */}
+        {!wide && (
+          <Popup
+            open={Boolean(detail)}
+            onOpenChange={(next) => !next && setSelectedIndex(undefined)}
+          >
+            <PopupContent>
+              {shownDetail && (
+                <ToolDetail tool={shownDetail} onBack={() => setSelectedIndex(undefined)} />
+              )}
+            </PopupContent>
+          </Popup>
+        )}
         <PopupContent>
-          {selected ? (
+          {wide && selected ? (
             <ToolDetail tool={selected} onBack={() => setSelectedIndex(undefined)} />
           ) : (
             <ToolList tools={tools} onSelect={setSelectedIndex} />
