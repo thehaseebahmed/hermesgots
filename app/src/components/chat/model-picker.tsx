@@ -240,11 +240,17 @@ export function ModelMenu({
   choice,
   onChoose,
   disabled,
+  showProvider,
+  fullWidth,
 }: {
   profile?: Profile | null
   choice?: ModelChoice
   onChoose: (choice: ModelChoice | undefined) => void
   disabled?: boolean
+  /** Names the model's provider in the pill, for a pick that stands alone in a card. */
+  showProvider?: boolean
+  /** Takes the whole row instead of hugging its text. */
+  fullWidth?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const info = useModelInfo(profile)
@@ -258,6 +264,15 @@ export function ModelMenu({
     current = remembered
     stale = true
   }
+  const providerSlug = choice?.provider ?? info?.provider
+  const providerOf = providerSlug
+    ? (providers.find((p) => p.slug === providerSlug)?.name ?? providerSlug)
+    : undefined
+  const label = !current
+    ? "Model"
+    : showProvider && providerOf
+      ? `${providerOf} · ${shortModel(current)}`
+      : shortModel(current)
   // Nothing to pick from (an older Hermes, a host that's down, a keyless bot still loading).
   if (!current && !providers.length) return null
   return (
@@ -265,15 +280,16 @@ export function ModelMenu({
       <Button
         type="button"
         variant="secondary"
-        className="h-11 max-w-48 min-w-0 gap-1 rounded-full pr-2.5 pl-3.5 sm:max-w-64"
+        className={cn(
+          "h-11 min-w-0 gap-1 rounded-full pr-2.5 pl-3.5",
+          fullWidth ? "w-full justify-between" : "max-w-48 sm:max-w-64",
+        )}
         disabled={disabled || !providers.length}
         onClick={() => setOpen(true)}
-        aria-label={`Model: ${current ?? "Unknown"}`}
+        aria-label={`Model: ${current ? label : "Unknown"}`}
       >
-        <span className={cn("truncate", stale && "text-muted-foreground")}>
-          {current ? shortModel(current) : "Model"}
-        </span>
-        {providers.length > 0 && <ChevronDownIcon className="text-muted-foreground" />}
+        <span className={cn("min-w-0 truncate", stale && "text-muted-foreground")}>{label}</span>
+        {providers.length > 0 && <ChevronDownIcon className="shrink-0 text-muted-foreground" />}
       </Button>
       <Popup open={open} onOpenChange={setOpen}>
         <PopupContent initialFocus={false} className={PICKER_HEIGHT}>

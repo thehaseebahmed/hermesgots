@@ -731,7 +731,13 @@ export function ChatPage() {
               autoAvailable={tracked}
               model={
                 configured && (
-                  <ModelMenu profile={profile} choice={modelChoice} onChoose={chooseModel} />
+                  <ModelMenu
+                    profile={profile}
+                    choice={modelChoice}
+                    onChoose={chooseModel}
+                    showProvider
+                    fullWidth
+                  />
                 )
               }
               onApprove={async (mode) => {
