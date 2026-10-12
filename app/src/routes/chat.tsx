@@ -286,12 +286,13 @@ export function ChatPage() {
   // A session of a Hermes Project: works in its worktree, with a mode, a PR and a resolved state.
   const session = conversation?.projectId ? conversation : undefined
   // While a pull request's checks run, read them again every few seconds so the pill turns
-  // green (or orange) as soon as they do.
+  // green (or orange) as soon as they do. Forced, so the freshness gate doesn't skip a tick that
+  // lands just inside its window.
   const checksRunning = prChecksPending(session?.prs)
   useEffect(() => {
     if (!id || !checksRunning) return
     const read = () => {
-      if (document.visibilityState === "visible") void refreshPrs(id)
+      if (document.visibilityState === "visible") void refreshPrs(id, { force: true })
     }
     read()
     const timer = window.setInterval(read, PR_PENDING_MS)

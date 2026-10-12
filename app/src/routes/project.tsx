@@ -246,15 +246,22 @@ export function ProjectPage({
       void (c.worktree ? Promise.resolve() : refreshWorkspace(c.id)).then(() => refreshPrs(c.id))
     }
   }, [sessions])
-  // While any session's pull request has checks running, read them again every few seconds, so
-  // the rows here keep up with the pill.
+  // Which sessions have pull requests whose checks run, as one stable string: the effect below
+  // must not re-run on every write, or its interval is remade before it ever ticks.
+  const runningChecks = (sessions ?? [])
+    .filter((c) => prChecksPending(c.prs))
+    .map((c) => c.id)
+    .join("\n")
+  // While any does, read its pull requests again every few seconds, so the rows here keep up with
+  // the pill. Forced, so the freshness gate doesn't skip a tick that lands just inside its window.
   useEffect(() => {
+    if (!runningChecks) return
     const timer = window.setInterval(() => {
       if (document.visibilityState !== "visible") return
-      for (const c of sessions ?? []) if (prChecksPending(c.prs)) void refreshPrs(c.id)
+      for (const id of runningChecks.split("\n")) void refreshPrs(id, { force: true })
     }, PR_PENDING_MS)
     return () => window.clearInterval(timer)
-  }, [sessions])
+  }, [runningChecks])
 
   const prs = projectPrs(sessions ?? [])
   // The header names the repos, like the chips under it do: the one repo's name, or a count.
