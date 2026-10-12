@@ -143,6 +143,21 @@ def connect(path: Path) -> sqlite3.Connection:
                    resumed_at INTEGER NOT NULL DEFAULT 0
                )"""
         )
+        # v15: the dev servers each session started, so they never outlive it.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS session_servers (
+                   session_id TEXT NOT NULL,
+                   name TEXT NOT NULL,
+                   command TEXT NOT NULL,
+                   cwd TEXT NOT NULL,
+                   port INTEGER NOT NULL,
+                   pid INTEGER NOT NULL,
+                   start_time INTEGER,
+                   url TEXT,
+                   log TEXT,
+                   PRIMARY KEY (session_id, name)
+               )"""
+        )
         # v13: what has already been pushed about a thing that can repeat. v14: the categories of push
         # a subscription wants (JSON; null is what pushed before there were more), and a bot-wide mute.
         subscription_columns = {row[1] for row in conn.execute("PRAGMA table_info(push_subscriptions)")}
