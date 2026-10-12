@@ -246,10 +246,11 @@ export function ProjectPage({
       void (c.worktree ? Promise.resolve() : refreshWorkspace(c.id)).then(() => refreshPrs(c.id))
     }
   }, [sessions])
-  // Which sessions have pull requests whose checks run, as one stable string: the effect below
-  // must not re-run on every write, or its interval is remade before it ever ticks.
+  // The open session's chat pane polls its own PR; exclude it here to avoid duplicate reads.
+  // Keep the remaining ids as one stable string: depending on `sessions` recreates the interval on
+  // every Dexie write, before it has time to tick.
   const runningChecks = (sessions ?? [])
-    .filter((c) => prChecksPending(c.prs))
+    .filter((c) => c.id !== openSession && prChecksPending(c.prs))
     .map((c) => c.id)
     .join("\n")
   // While any does, read its pull requests again every few seconds, so the rows here keep up with
