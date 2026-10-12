@@ -971,6 +971,8 @@ async function streamCompletion(req, res, body) {
 // like a phone whose screen went off. MOCK_NO_RUNS=1 turns runs off, like an older Hermes.
 // MOCK_BLOCK_RUN_EVENTS=1 is Hermes v2026.9.24: the event stream has no CORS headers, and the run
 // forgets its events once that (blocked) subscriber leaves, so only GET /v1/runs/{id} is left.
+// MOCK_STALL_EVENTS_MS detaches a stream's listener after that long: the run and its keepalives
+// carry on, but no further events reach the client, like a server whose event fan-out went quiet.
 const runs = new Map()
 const PLUGIN_VERSION = process.env.MOCK_PLUGIN_VERSION || "0.29.1"
 const EVENTS = process.env.MOCK_NO_EVENTS !== "1"
@@ -978,6 +980,7 @@ const RUNS = process.env.MOCK_NO_RUNS !== "1"
 const RUN_BACKLOG = Number(process.env.MOCK_RUN_BACKLOG ?? 1000)
 const DROP_EVENTS_MS = Number(process.env.MOCK_DROP_EVENTS_MS ?? 0)
 const BLOCK_RUN_EVENTS = process.env.MOCK_BLOCK_RUN_EVENTS === "1"
+const STALL_EVENTS_MS = Number(process.env.MOCK_STALL_EVENTS_MS ?? 0)
 
 // The plugin's change stream: one log per profile (the "" key is the default one). Runs and sessions
 // belong to no profile here, so they go to every log.
@@ -1174,6 +1177,7 @@ function streamRunEvents(req, res, run, lastSeq) {
     run.listeners.delete(listener)
   })
   if (DROP_EVENTS_MS) setTimeout(() => res.destroy(), DROP_EVENTS_MS)
+  if (STALL_EVENTS_MS) setTimeout(() => run.listeners.delete(listener), STALL_EVENTS_MS)
 }
 
 const runStatus = (run) => ({
