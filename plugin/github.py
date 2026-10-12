@@ -30,6 +30,8 @@ CLONE_TIMEOUT_S = 600
 MAX_REPOS = 100
 ORIGIN_RE = re.compile(r"github\.com[:/]([A-Za-z0-9-]+/[A-Za-z0-9._-]+?)(?:\.git)?/?$")
 PR_CACHE_S = 30
+# Checks still running are read again this often, so the app's pill is current while they do.
+PR_PENDING_CACHE_S = 10
 
 
 class GitHubError(Exception):
@@ -311,6 +313,11 @@ def _pr(repo: str, row: Any, auth: Optional[str], checks: bool = True) -> Option
     }
 
 
+def _cache_ttl(value: Optional[Dict[str, Any]]) -> float:
+    """How long a cached answer is good for: shorter while its checks are still running."""
+    return PR_PENDING_CACHE_S if value and value.get("checks") == "pending" else PR_CACHE_S
+
+
 def pull_request(
     hermes_home: Path, repo_root: str, branch: str, fresh: bool = False, checks: bool = True
 ) -> Optional[Dict[str, Any]]:
@@ -321,7 +328,7 @@ def pull_request(
     """
     key = (repo_root, branch)
     cached = _pr_cache.get(key)
-    if not fresh and cached and time.time() - cached[0] < PR_CACHE_S:
+    if not fresh and cached and time.time() - cached[0] < _cache_ttl(cached[1]):
         return cached[1]
     value = None
     repo = origin_repo(repo_root)
