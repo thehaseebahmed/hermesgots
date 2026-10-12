@@ -101,6 +101,9 @@ import { syncContextWindow } from "@/lib/models"
 import {
   planApprovalMessage,
   projectRepos,
+  PR_PENDING_MS,
+  prChecksPending,
+  refreshPrs,
   refreshWorkspace,
   closeSessionWork,
   setSessionMode,
@@ -282,6 +285,18 @@ export function ChatPage() {
   const todos = (tracked && conversation?.todos?.items) || []
   // A session of a Hermes Project: works in its worktree, with a mode, a PR and a resolved state.
   const session = conversation?.projectId ? conversation : undefined
+  // While a pull request's checks run, read them again every few seconds so the pill turns
+  // green (or orange) as soon as they do.
+  const checksRunning = prChecksPending(session?.prs)
+  useEffect(() => {
+    if (!id || !checksRunning) return
+    const read = () => {
+      if (document.visibilityState === "visible") void refreshPrs(id)
+    }
+    read()
+    const timer = window.setInterval(read, PR_PENDING_MS)
+    return () => window.clearInterval(timer)
+  }, [id, checksRunning])
   // Plain chats hide context use, stats and tool calls unless the user turned that off.
   const simple = !session && resolved.simplifiedChats
   const modelChoice = conversation
