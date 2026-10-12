@@ -265,13 +265,12 @@ export function ModelMenu({
     stale = true
   }
   const providerSlug = choice?.provider ?? info?.provider
-  const providerOf = providerSlug
-    ? (providers.find((p) => p.slug === providerSlug)?.name ?? providerSlug)
-    : undefined
+  // `provider/model` is how the app names a model everywhere else (the bot editor's default and
+  // the picker's recent picks), so the card's pill follows it when it names the provider.
   const label = !current
     ? "Model"
-    : showProvider && providerOf
-      ? `${providerOf} · ${shortModel(current)}`
+    : showProvider && providerSlug
+      ? fullModel({ provider: providerSlug, model: current })
       : shortModel(current)
   // Nothing to pick from (an older Hermes, a host that's down, a keyless bot still loading).
   if (!current && !providers.length) return null
