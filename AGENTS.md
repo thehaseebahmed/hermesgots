@@ -37,6 +37,8 @@ pnpm sync:theseus --ref <tag|sha> # vendor the Theseus skill into plugin/skills 
 
 Before you commit, run `pnpm lint`, `pnpm typecheck` and `pnpm build`. All three must pass.
 
+CI (`.github/workflows/tests.yml`) runs the plugin tests (`python3 -m unittest discover -s plugin/tests`, from the repo root) and the three app gates on every pull request and on pushes to `main`, so merged work stays green.
+
 ## Git commits
 
 **Always use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).** The format is:
