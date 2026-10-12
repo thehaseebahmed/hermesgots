@@ -1,10 +1,12 @@
 import { useSyncExternalStore } from "react"
 
-import { updateProfile, type Profile } from "@/lib/db"
+import { db, updateProfile, type ModelsDevCatalog, type Profile } from "@/lib/db"
 import { getModelInfo, type ModelInfo } from "@/lib/hermes"
 import { fullModel } from "@/lib/model-info"
 
 const CATALOG_URL = "https://models.dev/api.json"
+const CATALOG_ROW = "catalog"
+const TTL_MS = 24 * 60 * 60 * 1000
 
 interface CatalogModel {
   limit?: { context?: unknown }
@@ -13,9 +15,11 @@ interface CatalogModel {
 
 type Catalog = Record<string, { models?: Record<string, CatalogModel> }>
 
-let catalog: Promise<Catalog> | undefined
-
-/** The last attempt to load models.dev failed (offline, blocked), so "not listed" isn't known. */
+/**
+ * The last lookup couldn't reach models.dev and had no cached catalog to answer from, so
+ * "not listed" isn't known. A cache we can serve — even a stale one — is an answer, so a
+ * failed background refresh never sets this.
+ */
 let unreachable = false
 const listeners = new Set<() => void>()
 
@@ -36,23 +40,97 @@ export function useModelsDevUnreachable() {
   )
 }
 
-/** models.dev's catalog, fetched once per page load (it's large and rarely needed). */
-function loadCatalog() {
-  catalog ??= fetch(CATALOG_URL)
-    .then((response) => {
-      if (!response.ok) throw new Error(`models.dev responded ${response.status}`)
-      return response.json() as Promise<Catalog>
-    })
-    .then((data) => {
+// The cached registry. It's large and rarely needed, so it lives in IndexedDB rather than
+// memory: a fresh row answers with no I/O, a stale row answers at once and is refreshed in
+// the background, and the row is only ever replaced by a validated response.
+
+/** The payload must be the non-empty provider registry the lookups below walk. */
+function isCatalog(data: unknown): data is Catalog {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    !Array.isArray(data) &&
+    Object.keys(data).length > 0
+  )
+}
+
+/** Fetches the registry; with an ETag a 304 means "unchanged", not empty. */
+async function fetchRegistry(etag: string | undefined) {
+  const response = await fetch(
+    CATALOG_URL,
+    etag ? { headers: { "If-None-Match": etag } } : undefined,
+  )
+  if (response.status === 304) return { catalog: undefined, etag: etag ?? "" }
+  if (!response.ok) throw new Error(`models.dev responded ${response.status}`)
+  const data: unknown = await response.json()
+  if (!isCatalog(data)) throw new Error("models.dev returned an unexpected payload")
+  return { catalog: data, etag: response.headers.get("ETag") ?? "" }
+}
+
+/** One shared background refresh at a time. */
+let refreshing: Promise<void> | undefined
+
+/**
+ * Revalidates a stale row in the background: a fresher registry replaces the row, a 304 only
+ * advances its freshness marker, and a failed or invalid response leaves the stale row in
+ * place — the sheet keeps working from what it has until the next load past the TTL.
+ */
+function refreshCatalog(row: ModelsDevCatalog) {
+  refreshing ??= (async () => {
+    try {
+      const { catalog, etag } = await fetchRegistry(row.etag)
+      if (catalog)
+        await db.modelsDevCatalog.put({
+          id: CATALOG_ROW,
+          data: catalog,
+          etag,
+          fetchedAt: Date.now(),
+        })
+      else await db.modelsDevCatalog.update(CATALOG_ROW, { fetchedAt: Date.now() })
       setUnreachable(false)
-      return data
-    })
-    .catch((error) => {
-      catalog = undefined
+    } catch {
+      // The stale row keeps serving; the next load past the TTL tries again.
+    } finally {
+      refreshing = undefined
+    }
+  })()
+}
+
+/** One shared cold fetch, reset on failure so the next lookup retries. */
+let coldFetch: Promise<Catalog> | undefined
+
+async function fetchAndCache(): Promise<Catalog> {
+  const { catalog, etag } = await fetchRegistry(undefined)
+  if (!catalog) throw new Error("models.dev answered 304 with no cached catalog to revalidate")
+  await db.modelsDevCatalog.put({ id: CATALOG_ROW, data: catalog, etag, fetchedAt: Date.now() })
+  setUnreachable(false)
+  return catalog
+}
+
+/** models.dev's catalog, read from the device cache (see the section comment above). */
+async function loadCatalog(): Promise<Catalog> {
+  const row = await db.modelsDevCatalog.get(CATALOG_ROW)
+  if (row) {
+    if (Date.now() - row.fetchedAt >= TTL_MS) refreshCatalog(row)
+    return row.data as Catalog
+  }
+  if (!coldFetch) {
+    coldFetch = fetchAndCache().catch((error: unknown) => {
+      coldFetch = undefined
       setUnreachable(true)
       throw error
     })
-  return catalog
+  }
+  return coldFetch
+}
+
+/**
+ * Warms the cache when the app opens: a fresh row costs one read, a stale one is refreshed in
+ * the background, and a fetch that can't land changes nothing — the sheet keeps serving what
+ * it has. The sheet itself never fetches.
+ */
+export function warmCatalog() {
+  void loadCatalog().catch(() => {})
 }
 
 /** `anthropic/Claude-Sonnet-4.5` and `claude-sonnet-4-5` should meet. */
