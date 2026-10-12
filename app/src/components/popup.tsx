@@ -59,7 +59,9 @@ const SCRIM =
 
 const CLOSE = (
   <Dialog.Close
-    render={<Button variant="ghost" className="absolute top-4 right-4 z-20" size="icon-sm" />}
+    render={
+      <Button variant="ghost" className="absolute top-3 right-3 z-20 size-11" size="icon-lg" />
+    }
   >
     <XIcon />
     <span className="sr-only">Close</span>
