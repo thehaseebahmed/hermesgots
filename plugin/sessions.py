@@ -61,7 +61,9 @@ NOUNS = (
     "otter", "pickle", "puffin", "quokka", "sprocket", "thimble", "walrus", "waffle", "yeti",
 )
 GIT_TIMEOUT_S = 60
-MUTATING_TOOLS = frozenset({"write_file", "patch", "execute_code", "delegate_task", "open_pull_request"})
+MUTATING_TOOLS = frozenset(
+    {"write_file", "patch", "execute_code", "delegate_task", "open_pull_request", "add_to_library"}
+)
 READ_ONLY_COMMANDS = frozenset(
     "ls cat head tail grep rg find fd pwd wc tree stat file which echo printf env du df diff sort "
     "uniq cut jq basename dirname realpath readlink true".split()
