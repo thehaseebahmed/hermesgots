@@ -801,32 +801,17 @@ function modelOf(conversation: Conversation, profile: Profile) {
   return { model: chosen?.model ?? profile.model, provider: chosen?.provider }
 }
 
-/** `queuedId` sends a queued message, keeping its id so the bubble doesn't remount. */
-export async function sendMessage(
+/** Writes the user's message and the empty reply, before the turn opens. */
+async function prepareSend(
   conversationId: string,
-  text: string,
-  options: { queuedId?: string; attachments?: Attachment[] } = {},
+  queuedId: string | undefined,
+  content: string,
+  attachments: Attachment[],
 ) {
-  const { queuedId } = options
-  const content = text.trim()
-  const attachments = options.attachments ?? []
-  if ((!content && !attachments.length) || controllers.has(conversationId)) return
-  // Acquire the guard before any await: two concurrent calls for the same chat both
-  // passed it once and each started a run, duplicating the turn.
-  const controller = new AbortController()
-  controllers.set(conversationId, controller)
-
   const conversation = await db.conversations.get(conversationId)
-  if (!conversation) {
-    controllers.delete(conversationId)
-    return
-  }
+  if (!conversation) return undefined
   const profile = await profileFor(conversation.profileId)
-  if (!profile) {
-    controllers.delete(conversationId)
-    return
-  }
-
+  if (!profile) return undefined
   const history = await getMessages(conversationId)
   const now = Date.now()
   const userMessage: Message = {
@@ -858,6 +843,41 @@ export async function sendMessage(
         : {}),
     })
   })
+  return { conversation, profile, history, userMessage, reply }
+}
+
+/** Stop pressed while a turn sets up: nothing has started on Hermes yet, so nothing needs stopping. */
+function stopIfAborted(turn: Turn) {
+  if (turn.controller.signal.aborted) throw new DOMException("Aborted", "AbortError")
+}
+
+/** `queuedId` sends a queued message, keeping its id so the bubble doesn't remount. */
+export async function sendMessage(
+  conversationId: string,
+  text: string,
+  options: { queuedId?: string; attachments?: Attachment[] } = {},
+) {
+  const { queuedId } = options
+  const content = text.trim()
+  const attachments = options.attachments ?? []
+  if ((!content && !attachments.length) || controllers.has(conversationId)) return
+  // Acquire the guard before any await: two concurrent calls for the same chat both
+  // passed it once and each started a run, duplicating the turn.
+  const controller = new AbortController()
+  controllers.set(conversationId, controller)
+  // Until the turn opens and owns the guard, a throw (say IndexedDB's quota) must release it, or
+  // the chat can't send again until a reload.
+  const prepared = await prepareSend(conversationId, queuedId, content, attachments).catch(
+    (error: unknown) => {
+      controllers.delete(conversationId)
+      throw error
+    },
+  )
+  if (!prepared) {
+    controllers.delete(conversationId)
+    return
+  }
+  const { conversation, profile, history, userMessage, reply } = prepared
 
   const transcript: ChatMessage[] = history
     .filter((m) => m.status === "done" || (m.role === "assistant" && m.content))
@@ -871,6 +891,7 @@ export async function sendMessage(
     if (!config.apiKey) throw new HermesError("This bot has no API key. Link it in Settings.")
     // A project session works in its worktree; the plugin can't be told about it any other way.
     const workspace = await ensureSessionWorkspace(conversationId, content || attachments[0].name)
+    stopIfAborted(turn)
     let sent = attachments
     if (attachments.length) {
       try {
@@ -885,6 +906,7 @@ export async function sendMessage(
         throw error
       }
       await db.messages.update(userMessage.id, { attachments: sent })
+      stopIfAborted(turn)
     }
     const turnOptions = {
       ...modelOf(conversation, profile),
