@@ -9,16 +9,19 @@ import {
   BookOpenTextIcon,
   CheckIcon,
   ClipboardCopyIcon,
-  DownloadIcon,
+  EllipsisIcon,
   FileTextIcon,
   ListChecksIcon,
   MenuIcon,
   PencilIcon,
   PlusIcon,
+  RotateCcwIcon,
+  Trash2Icon,
   XIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 
+import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { useOpenDrawer } from "@/components/drawer-context"
@@ -34,11 +37,22 @@ import {
   StageList,
   StageStrip,
 } from "@/components/research"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
@@ -50,7 +64,7 @@ import {
 } from "@/components/ui/input-group"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
-import { getActiveProfile } from "@/lib/db"
+import { db, getActiveProfile } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useLarge } from "@/lib/media"
 import { setBackGuard } from "@/lib/native"
@@ -59,11 +73,16 @@ import {
   FORMATS,
   MISSION_TYPES,
   SOURCE_KINDS,
+  approveScope,
+  confirmBrief,
   createMission,
+  deleteMission,
+  editBrief,
+  isWorking,
   makeFormat,
-  proposeOutline,
-  startMission,
-  updateMission,
+  needsYou,
+  retryMission,
+  toMarkdown,
   useMission,
   useMissions,
   type Mission,
@@ -79,7 +98,20 @@ const FORMAT_ICONS: Record<OutputFormat, typeof BookOpenTextIcon> = {
   glossary: BookAIcon,
 }
 
-const useActiveBotId = () => useLiveQuery(getActiveProfile, [])?.botId
+/** The picture of the bot running the mission. */
+const useMissionBotId = (mission: Mission) =>
+  useLiveQuery(() => db.profiles.get(mission.profileId), [mission.profileId])?.botId
+
+/** Runs an action on a mission, saying why when it fails. */
+async function attempt(what: string, action: () => Promise<unknown>) {
+  try {
+    await action()
+    return true
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : `Couldn't ${what}.`)
+    return false
+  }
+}
 
 const formatName = (format: OutputFormat) => FORMATS.find((f) => f.id === format)!.name
 
@@ -87,22 +119,30 @@ const formatName = (format: OutputFormat) => FORMATS.find((f) => f.id === format
 export function ResearchPage() {
   const openDrawer = useOpenDrawer()
   const navigate = useNavigate()
-  const missions = useMissions()
+  const { missions, unsupported } = useMissions()
   const profile = useLiveQuery(getActiveProfile, [])
   const [type, setType] = useState<MissionType>("learn")
   const [text, setText] = useState("")
+  const [starting, setStarting] = useState(false)
   const example = MISSION_TYPES.find((t) => t.id === type)!.example
+  const blocked = profile ? unsupported[profile.id] : undefined
 
-  const start = () => {
-    if (!text.trim()) return
-    const mission = createMission(text)
+  const start = async () => {
+    if (!text.trim() || !profile || starting) return
+    setStarting(true)
+    let started: Mission | undefined
+    await attempt("start the mission", async () => {
+      started = await createMission(profile, text, type)
+    })
+    setStarting(false)
+    if (!started) return
     setText("")
-    navigate(`/research/${mission.id}`)
+    navigate(`/research/${started.id}`)
   }
 
-  const needsYou = missions.filter((m) => m.stage === "brief" || m.stage === "scope")
-  const working = missions.filter((m) => ["reading", "drafting", "reviewing"].includes(m.stage))
-  const ready = missions.filter((m) => m.stage === "delivered")
+  const waiting = missions.filter(needsYou)
+  const working = missions.filter((m) => !needsYou(m) && m.stage !== "delivered")
+  const ready = missions.filter((m) => !needsYou(m) && m.stage === "delivered")
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -132,7 +172,7 @@ export function ResearchPage() {
           <form
             onSubmit={(event) => {
               event.preventDefault()
-              start()
+              void start()
             }}
             className="flex flex-col gap-3"
           >
@@ -148,7 +188,7 @@ export function ResearchPage() {
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault()
-                    start()
+                    void start()
                   }
                 }}
                 placeholder={example}
@@ -163,18 +203,19 @@ export function ResearchPage() {
                   variant="default"
                   size="icon-sm"
                   className="size-11 rounded-full"
-                  disabled={!text.trim()}
+                  disabled={!text.trim() || !profile || Boolean(blocked) || starting}
                   aria-label="Start"
                 >
-                  <ArrowUpIcon />
+                  {starting ? <Spinner /> : <ArrowUpIcon />}
                 </InputGroupButton>
               </InputGroupAddon>
             </InputGroup>
           </form>
+          {blocked && <Banner>{blocked}</Banner>}
           <MissionTypes value={type} onChange={setType} />
         </section>
 
-        <MissionGroup title="Needs you" missions={needsYou} />
+        <MissionGroup title="Needs you" missions={waiting} />
         <MissionGroup title="Researching" missions={working} />
         <MissionGroup title="Ready" missions={ready} />
       </div>
@@ -231,13 +272,16 @@ function MissionTypes({
 }
 
 function missionLine(mission: Mission) {
+  if (mission.error) return mission.error
+  if (mission.busy === "brief") return "Reading your question"
+  if (mission.busy === "outline") return "Proposing an outline"
   switch (mission.stage) {
     case "brief":
       return "Check the brief"
     case "scope":
       return "Approve the outline"
     case "reading":
-      return `Reading sources · ${mission.read} so far`
+      return `Reading sources · ${mission.found} so far`
     case "drafting":
       return `Drafting · ${mission.found} sources`
     case "reviewing":
@@ -267,8 +311,8 @@ function MissionGroup({ title, missions }: { title: string; missions: Mission[] 
       <ul className="flex flex-col gap-2">
         {missions.map((mission) => {
           const Icon = FORMAT_ICONS[mission.format]
-          const waiting = mission.stage === "brief" || mission.stage === "scope"
-          const busy = !waiting && mission.stage !== "delivered"
+          const waiting = needsYou(mission)
+          const busy = isWorking(mission)
           return (
             <li key={mission.id}>
               <button
@@ -286,7 +330,12 @@ function MissionGroup({ title, missions }: { title: string; missions: Mission[] 
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate font-medium">{mission.title}</span>
-                  <span className="truncate text-sm text-muted-foreground">
+                  <span
+                    className={cn(
+                      "truncate text-sm text-muted-foreground",
+                      mission.error && "text-warning",
+                    )}
+                  >
                     {missionLine(mission)}
                   </span>
                 </span>
@@ -351,7 +400,7 @@ function Steps({ mission }: { mission: Mission }) {
 /** One mission: the brief, then the Scope Gate, then the output building and delivered. */
 export function MissionPage() {
   const { id = "" } = useParams()
-  const mission = useMission(id)
+  const { mission, loaded } = useMission(id)
   const { up } = useNav()
   const back = useCallback(() => up("/research"), [up])
   useEffect(() => setBackGuard(() => (back(), true)), [back])
@@ -359,7 +408,7 @@ export function MissionPage() {
   if (!mission)
     return (
       <div className="flex flex-1 items-center justify-center p-6 text-muted-foreground">
-        This mission is gone.
+        {loaded ? "This mission is gone." : <Spinner className="size-6" />}
       </div>
     )
 
@@ -368,7 +417,7 @@ export function MissionPage() {
     <WorkView mission={mission} onBack={back} />
   ) : (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-      <MissionHeader mission={mission} onBack={back} />
+      <MissionHeader mission={mission} onBack={back} actions={<MissionMenu mission={mission} />} />
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
         <Steps mission={mission} />
         <p className="ml-auto max-w-[85%] rounded-3xl rounded-br-lg bg-muted px-4 py-2.5">
@@ -384,6 +433,124 @@ export function MissionPage() {
         )}
       </div>
     </div>
+  )
+}
+
+/** A step the plugin couldn't do, and the way to run it again. */
+function MissionError({ mission }: { mission: Mission }) {
+  const [retrying, setRetrying] = useState(false)
+  if (!mission.error) return null
+  return (
+    <Banner
+      action={
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 rounded-full"
+          disabled={retrying}
+          onClick={async () => {
+            setRetrying(true)
+            await attempt("try again", () => retryMission(mission))
+            setRetrying(false)
+          }}
+        >
+          {retrying ? <Spinner /> : <RotateCcwIcon data-icon="inline-start" />}
+          Try again
+        </Button>
+      }
+    >
+      {mission.error}
+    </Banner>
+  )
+}
+
+/** Copy and Markdown once something is made, and Delete. */
+function MissionMenu({ mission, format }: { mission: Mission; format?: OutputFormat }) {
+  const navigate = useNavigate()
+  const [confirming, setConfirming] = useState(false)
+  const made = format && mission.formats.includes(format)
+
+  const download = () => {
+    const blob = new Blob([toMarkdown(mission, format!)], { type: "text/markdown" })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `${mission.title.replace(/[\\/:*?"<>|]+/g, "").trim() || "Research"}.md`
+    link.click()
+    window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
+  }
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="outline"
+              size="icon-lg"
+              className="size-11 rounded-full"
+              aria-label="Mission options"
+            />
+          }
+        >
+          <EllipsisIcon />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-48">
+          {made && (
+            <>
+              <DropdownMenuItem
+                className="min-h-11"
+                onClick={() =>
+                  void navigator.clipboard
+                    .writeText(toMarkdown(mission, format))
+                    .then(() => toast("Copied"))
+                    .catch(() => toast.error("Couldn't copy."))
+                }
+              >
+                <ClipboardCopyIcon />
+                Copy
+              </DropdownMenuItem>
+              <DropdownMenuItem className="min-h-11" onClick={download}>
+                <FileTextIcon />
+                Markdown
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          )}
+          <DropdownMenuItem
+            variant="destructive"
+            className="min-h-11"
+            onClick={() => setConfirming(true)}
+          >
+            <Trash2Icon />
+            Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <AlertDialog open={confirming} onOpenChange={setConfirming}>
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this mission?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Its sources, claims and everything written from them go too.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={async () => {
+                setConfirming(false)
+                if (await attempt("delete the mission", () => deleteMission(mission)))
+                  navigate("/research", { replace: true })
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   )
 }
 
@@ -465,29 +632,60 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
+/** Placeholder lines inside a card while the plugin's model call works. */
+function Thinking({ label }: { label: string }) {
+  return (
+    <div className="flex flex-col gap-3" aria-busy>
+      <p className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Spinner className="size-4" />
+        {label}
+      </p>
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className={cn(
+            "h-3 animate-pulse rounded-full bg-foreground/8 motion-reduce:animate-none",
+            i === 2 ? "w-2/3" : "w-full",
+          )}
+        />
+      ))}
+    </div>
+  )
+}
+
 /** What the bot took from the question, all of it editable, before anything is committed. */
 function ReadBack({ mission }: { mission: Mission }) {
-  const botId = useActiveBotId()
-  const [goal, setGoal] = useState(mission.goal)
-  const [format, setFormat] = useState(mission.format)
-  const [audience, setAudience] = useState(mission.audience)
-  const [depth, setDepth] = useState(mission.depth)
-  const save = () =>
-    updateMission(mission.id, {
-      goal,
-      format,
-      audience,
-      depth,
-      stage: "scope",
-      outline: proposeOutline(mission),
-    })
-
+  const botId = useMissionBotId(mission)
   return (
     <div className="flex flex-col gap-5 rounded-3xl border bg-card p-4 md:p-5">
       <h2 className="flex items-center gap-2.5 font-semibold">
         <Bot id={botId} className="size-7" />
         Here's what I understood
       </h2>
+      <MissionError mission={mission} />
+      {mission.busy === "brief" ? (
+        <Thinking label="Reading your question" />
+      ) : (
+        !mission.error && <BriefForm key={mission.goal} mission={mission} />
+      )}
+    </div>
+  )
+}
+
+function BriefForm({ mission }: { mission: Mission }) {
+  const [goal, setGoal] = useState(mission.goal)
+  const [format, setFormat] = useState(mission.format)
+  const [audience, setAudience] = useState(mission.audience)
+  const [depth, setDepth] = useState(mission.depth)
+  const [saving, setSaving] = useState(false)
+  const save = async () => {
+    setSaving(true)
+    await attempt("save the brief", () => confirmBrief(mission, { goal, format, audience, depth }))
+    setSaving(false)
+  }
+
+  return (
+    <>
       <Field label="Goal">
         <Textarea
           value={goal}
@@ -523,10 +721,16 @@ function ReadBack({ mission }: { mission: Mission }) {
           onChange={setDepth}
         />
       </div>
-      <Button size="lg" className="h-11 rounded-full md:self-end md:px-6" onClick={save}>
+      <Button
+        size="lg"
+        className="h-11 rounded-full md:self-end md:px-6"
+        disabled={!goal.trim() || !audience.trim() || saving}
+        onClick={() => void save()}
+      >
+        {saving && <Spinner data-icon="inline-start" />}
         Continue
       </Button>
-    </div>
+    </>
   )
 }
 
@@ -547,7 +751,8 @@ function BriefSummary({ mission }: { mission: Mission }) {
         variant="ghost"
         size="icon-lg"
         className="-my-1 -mr-2 size-11 shrink-0 rounded-full"
-        onClick={() => updateMission(mission.id, { stage: "brief" })}
+        disabled={Boolean(mission.busy)}
+        onClick={() => void attempt("edit the brief", () => editBrief(mission))}
         aria-label="Edit the brief"
       >
         <PencilIcon />
@@ -560,13 +765,35 @@ const MAX_POINTS = 6
 
 /** The Scope Gate: the outline and the kinds of source, and nothing is researched until approved. */
 function ScopeGate({ mission }: { mission: Mission }) {
-  const botId = useActiveBotId()
+  const botId = useMissionBotId(mission)
+  return (
+    <div className="flex flex-col gap-5 rounded-3xl border bg-card p-4 md:p-5">
+      <MissionError mission={mission} />
+      {mission.busy === "outline" ? (
+        <>
+          <h2 className="flex items-center gap-2.5 font-semibold">
+            <Bot id={botId} className="size-7" />
+            Outline
+          </h2>
+          <Thinking label="Proposing an outline" />
+        </>
+      ) : (
+        !mission.error && (
+          <ScopeForm key={mission.outline.join("\n")} mission={mission} botId={botId} />
+        )
+      )}
+    </div>
+  )
+}
+
+function ScopeForm({ mission, botId }: { mission: Mission; botId?: string }) {
   const [points, setPoints] = useState(mission.outline)
   const [sources, setSources] = useState(mission.sources)
+  const [starting, setStarting] = useState(false)
   const filled = points.filter((p) => p.trim())
 
   return (
-    <div className="flex flex-col gap-5 rounded-3xl border bg-card p-4 md:p-5">
+    <>
       <h2 className="flex items-center gap-2.5 font-semibold">
         <Bot id={botId} className="size-7" />
         <span className="flex-1">Outline</span>
@@ -645,15 +872,17 @@ function ScopeGate({ mission }: { mission: Mission }) {
       <Button
         size="lg"
         className="h-11 rounded-full md:self-end md:px-6"
-        disabled={!filled.length || !sources.length}
-        onClick={() => {
-          updateMission(mission.id, { outline: filled, sources })
-          startMission(mission.id)
+        disabled={!filled.length || !sources.length || starting}
+        onClick={async () => {
+          setStarting(true)
+          await attempt("start the research", () => approveScope(mission, filled, sources))
+          setStarting(false)
         }}
       >
+        {starting && <Spinner data-icon="inline-start" />}
         Approve and start research
       </Button>
-    </div>
+    </>
   )
 }
 
@@ -670,7 +899,12 @@ function WorkView({ mission, onBack }: { mission: Mission; onBack: () => void })
   const [cited, setCited] = useState<string>()
   const [sheet, setSheet] = useState(false)
   const shown: OutputFormat | "making" =
-    mission.making && !mission.formats.includes(format) ? "making" : format
+    !mission.formats.includes(format) && (mission.making === format || !delivered)
+      ? format === "guide"
+        ? "guide"
+        : "making"
+      : format
+  const outputs = mission.outputs ?? {}
 
   const cite = (id: string) => {
     setCited(id)
@@ -682,14 +916,13 @@ function WorkView({ mission, onBack }: { mission: Mission; onBack: () => void })
     )
   }
 
-  const make = (next: OutputFormat) => {
-    makeFormat(mission.id, next)
-    setFormat(next)
+  const make = async (next: OutputFormat) => {
+    if (await attempt("make it", () => makeFormat(mission, next))) setFormat(next)
   }
 
-  const actions = delivered && (
+  const actions = (
     <>
-      {!wide && (
+      {delivered && !wide && (
         <Button
           variant="outline"
           size="icon-lg"
@@ -703,34 +936,7 @@ function WorkView({ mission, onBack }: { mission: Mission; onBack: () => void })
           <BookMarkedIcon />
         </Button>
       )}
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button
-              variant="outline"
-              size="icon-lg"
-              className="size-11 rounded-full"
-              aria-label="Export"
-            />
-          }
-        >
-          <DownloadIcon />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="min-w-48">
-          <DropdownMenuItem className="min-h-11" onClick={() => toast("Copied")}>
-            <ClipboardCopyIcon />
-            Copy
-          </DropdownMenuItem>
-          <DropdownMenuItem className="min-h-11" onClick={() => toast("Saved as Markdown")}>
-            <FileTextIcon />
-            Markdown
-          </DropdownMenuItem>
-          <DropdownMenuItem className="min-h-11" onClick={() => toast("Saved as PDF")}>
-            <DownloadIcon />
-            PDF
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <MissionMenu mission={mission} format={format} />
     </>
   )
 
@@ -752,7 +958,7 @@ function WorkView({ mission, onBack }: { mission: Mission; onBack: () => void })
                   onChange={setPane}
                 />
                 {pane === "evidence" ? (
-                  <Evidence active={cited} />
+                  <Evidence ledger={mission.ledger} active={cited} />
                 ) : (
                   <Contents mission={mission} format={format} />
                 )}
@@ -769,22 +975,23 @@ function WorkView({ mission, onBack }: { mission: Mission; onBack: () => void })
           <div className="mx-auto flex max-w-2xl flex-col gap-6 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))] md:px-8">
             {!wide && !delivered && <StageStrip mission={mission} />}
             {!wide && mission.stage === "reading" && <NowReading mission={mission} />}
+            <MissionError mission={mission} />
             {delivered && (
               <FormatTabs mission={mission} value={format} onChange={setFormat} onMake={make} />
             )}
             <div className="flex flex-col gap-1">
               <h2 className="text-2xl font-semibold tracking-tight">{mission.title}</h2>
               <p className="text-sm text-muted-foreground">
-                {formatName(shown === "making" ? format : shown)} · {mission.found || "…"} sources ·
-                For {mission.audience.charAt(0).toLowerCase() + mission.audience.slice(1)}
+                {formatName(format)} · {mission.found || "…"} sources · For{" "}
+                {mission.audience.charAt(0).toLowerCase() + mission.audience.slice(1)}
               </p>
             </div>
             {shown === "making" ? (
               <MakingCanvas found={mission.found} />
             ) : shown === "quiz" ? (
-              <QuizCanvas onCite={cite} />
+              <QuizCanvas questions={outputs.quiz ?? []} onCite={cite} />
             ) : shown === "glossary" ? (
-              <GlossaryCanvas onCite={cite} />
+              <GlossaryCanvas terms={outputs.glossary ?? []} onCite={cite} />
             ) : (
               <GuideCanvas mission={mission} onCite={cite} />
             )}
@@ -797,7 +1004,7 @@ function WorkView({ mission, onBack }: { mission: Mission; onBack: () => void })
             <PopupTitle>Sources</PopupTitle>
           </PopupHeader>
           <div className="px-4 pb-2">
-            <Evidence active={cited} />
+            <Evidence ledger={mission.ledger} active={cited} />
           </div>
         </PopupContent>
       </Popup>
@@ -835,7 +1042,11 @@ function FormatTabs({
               value === id ? "border-primary bg-primary text-primary-foreground" : "hover:bg-muted",
             )}
           >
-            {making ? <Spinner className="size-4" /> : <Icon className="size-4" />}
+            {making && !mission.error ? (
+              <Spinner className="size-4" />
+            ) : (
+              <Icon className="size-4" />
+            )}
             {formatName(id)}
           </button>
         )
@@ -844,8 +1055,9 @@ function FormatTabs({
         <button
           key={format.id}
           type="button"
+          disabled={Boolean(mission.making)}
           onClick={() => onMake(format.id)}
-          className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border border-dashed px-4 text-sm text-muted-foreground transition-colors hover:bg-muted"
+          className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border border-dashed px-4 text-sm text-muted-foreground transition-colors enabled:hover:bg-muted disabled:opacity-50"
         >
           <PlusIcon className="size-4" />
           Make a {format.name.toLowerCase()}
@@ -856,6 +1068,8 @@ function FormatTabs({
 }
 
 function Contents({ mission, format }: { mission: Mission; format: OutputFormat }) {
+  const unchecked = mission.ledger?.claims.filter((c) => c.confidence === "uncertain").length ?? 0
+  const sections = mission.outputs?.guide ?? []
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1 text-sm">
@@ -865,18 +1079,20 @@ function Contents({ mission, format }: { mission: Mission; format: OutputFormat 
         </span>
         <span className="flex items-center gap-2 text-muted-foreground">
           <CheckIcon className="size-4 text-success" />
-          Every claim checked
+          {unchecked
+            ? `${mission.claimCount - unchecked} of ${mission.claimCount} claims checked`
+            : "Every claim checked"}
         </span>
       </div>
       {format === "guide" && (
         <ol className="flex flex-col gap-0.5">
-          {mission.outline.map((point, index) => (
+          {sections.map((section, index) => (
             <li
-              key={point}
+              key={index}
               className="flex min-h-11 items-center gap-3 rounded-2xl px-3 text-sm hover:bg-muted"
             >
               <span className="text-xs text-muted-foreground tabular-nums">{index + 1}</span>
-              <span className="min-w-0 flex-1">{point}</span>
+              <span className="min-w-0 flex-1">{section.title}</span>
             </li>
           ))}
         </ol>
