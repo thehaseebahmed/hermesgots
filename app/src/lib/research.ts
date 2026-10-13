@@ -1,4 +1,3 @@
-import { useLiveQuery } from "dexie-react-hooks"
 import {
   BadgeCheckIcon,
   CompassIcon,
@@ -11,19 +10,10 @@ import {
 } from "lucide-react"
 
 import { createStore } from "@/lib/store"
-import { getSettings } from "@/lib/db"
 import { randomId } from "@/lib/utils"
 
 // Research is a UI mock so far: missions live in memory and their progress is simulated. Nothing
 // reaches a bot yet.
-
-/** Whether Research is on: experimental, so only behind the Developer switch. */
-export function useResearchEnabled() {
-  return useLiveQuery(async () => {
-    const settings = await getSettings()
-    return Boolean(settings.developer && settings.research)
-  }, [])
-}
 
 export type MissionType =
   "learn" | "compare" | "verify" | "literature" | "prepare" | "investigate" | "brainstorm"

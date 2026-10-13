@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Link, useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
@@ -33,7 +33,7 @@ import {
   PlanReadyCard,
   ResolvedCard,
 } from "@/components/chat/session-cards"
-import { TheseusCard, TheseusPill, TheseusSheet, type SheetView } from "@/components/chat/theseus"
+import type { SheetView } from "@/components/chat/theseus"
 import { TodosPill, TodosSheet } from "@/components/chat/todos"
 import { ModelMenu } from "@/components/chat/model-picker"
 import {
@@ -119,6 +119,12 @@ import { useBotThreads } from "@/lib/threads"
 import { draftKey } from "@/lib/drafts"
 import { useTheseusInfo, useTheseusRun, waitsOnUser } from "@/lib/theseus"
 import { AgentsContext, DELEGATE_TOOL, useSessionAgents } from "@/lib/agents"
+
+// Only a Theseus session shows these, so they load with the first one.
+const theseusUi = () => import("@/components/chat/theseus")
+const TheseusCard = lazy(() => theseusUi().then((m) => ({ default: m.TheseusCard })))
+const TheseusPill = lazy(() => theseusUi().then((m) => ({ default: m.TheseusPill })))
+const TheseusSheet = lazy(() => theseusUi().then((m) => ({ default: m.TheseusSheet })))
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
@@ -681,7 +687,9 @@ export function ChatPage() {
           <div className="-mx-3 flex [scrollbar-width:none] overflow-x-auto px-3 pb-2 sm:-mx-4 sm:px-4 [&::-webkit-scrollbar]:hidden">
             <div className="mx-auto flex w-max max-w-none min-w-full shrink-0 justify-center gap-2">
               {theseus ? (
-                <TheseusPill run={theseus} onClick={() => setTheseusView({ kind: "run" })} />
+                <Suspense fallback={null}>
+                  <TheseusPill run={theseus} onClick={() => setTheseusView({ kind: "run" })} />
+                </Suspense>
               ) : (
                 todos.length > 0 && (
                   <TodosPill items={todos} live={busy} onClick={() => setTodosOpen(true)} />
@@ -727,7 +735,9 @@ export function ChatPage() {
           </div>
         ) : theseusWaits ? (
           <div className="mx-auto w-full max-w-3xl">
-            <TheseusCard run={theseus} onOpen={setTheseusView} />
+            <Suspense fallback={null}>
+              <TheseusCard run={theseus} onOpen={setTheseusView} />
+            </Suspense>
           </div>
         ) : session?.planPending && session.mode === "plan" && !busy ? (
           <div className="mx-auto w-full max-w-3xl">
@@ -795,7 +805,14 @@ export function ChatPage() {
       <UsageSheet open={usageOpen} onOpenChange={setUsageOpen} usage={usage} />
       <TodosSheet open={todosOpen} onOpenChange={setTodosOpen} items={todos} live={busy} />
       {theseus && (
-        <TheseusSheet run={theseus} info={theseusInfo} view={theseusView} onView={setTheseusView} />
+        <Suspense fallback={null}>
+          <TheseusSheet
+            run={theseus}
+            info={theseusInfo}
+            view={theseusView}
+            onView={setTheseusView}
+          />
+        </Suspense>
       )}
 
       <AlertDialog open={renaming} onOpenChange={setRenaming}>
