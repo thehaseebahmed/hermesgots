@@ -95,6 +95,7 @@ function pollAll() {
 function subscribe(listener: () => void) {
   listeners.add(listener)
   if (listeners.size === 1) {
+    void poll()
     timer = window.setInterval(pollDue, POLL_MS)
     document.addEventListener("visibilitychange", pollAll)
     stopListening = onChanges("runs", (key) => {
@@ -122,11 +123,14 @@ export function useWaiting(): Found {
     const unique = new Map(
       profiles.filter((p) => p.apiKey && !p.disabled).map((p) => [connectionKey(p), p]),
     )
-    return JSON.stringify([...unique.values()].map(({ baseUrl, apiKey }) => ({ baseUrl, apiKey })))
+    return [...unique.values()].map(({ baseUrl, apiKey }) => ({ baseUrl, apiKey }))
   }, [])
   useEffect(() => {
-    if (keyed === undefined) return
-    servers = JSON.parse(keyed)
+    // Sync rewrites profile rows often; only a change to the servers asks them again.
+    const same = (a: Server[], b: Server[]) =>
+      a.length === b.length && a.every((s, i) => connectionKey(s) === connectionKey(b[i]))
+    if (keyed === undefined || same(keyed, servers)) return
+    servers = keyed
     answers = new Map([...answers].filter(([key]) => servers.some((s) => connectionKey(s) === key)))
     void poll()
   }, [keyed])
@@ -148,17 +152,18 @@ export function useLiveRuns(profile: Server | undefined) {
 /** Project sessions, across every bot, waiting on the user, newest first. Needs the plugin. */
 export function useWaitingSessions(): WaitingSession[] {
   const waiting = useWaiting()
-  const ids = Object.keys(waiting)
+  const any = Object.keys(waiting).length > 0
+  // Every open project session, matched to what waits below, so the query needn't follow the ids.
   const sessions = useLiveQuery(
     () =>
-      ids.length
+      any
         ? db.conversations
             .where("projectId")
             .above("")
-            .filter((c) => ids.includes(c.hermesSessionId) && !c.resolvedAt && !c.discardedAt)
+            .filter((c) => !c.resolvedAt && !c.discardedAt)
             .toArray()
         : [],
-    [ids.join()],
+    [any],
   )
   // The query can lag a poll, so a session no longer waiting is skipped.
   return [...(sessions ?? [])]

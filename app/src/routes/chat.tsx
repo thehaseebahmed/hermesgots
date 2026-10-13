@@ -309,11 +309,10 @@ export function ChatPage() {
   // Picks up a model changed on the server (only when the connection does, not on every write);
   // the ring follows via the live query.
   const profileId = profile?.id
-  const connection = profile && `${profile.baseUrl}\n${profile.apiKey}`
   useEffect(() => {
     if (!profileId) return
     void db.profiles.get(profileId).then((current) => current && syncContextWindow(current))
-  }, [profileId, connection])
+  }, [profileId, baseUrl, apiKey])
 
   // The plugin holds a session's mode and pending plan; an empty session never catches up below.
   const sessionId = session?.id
@@ -392,8 +391,7 @@ export function ChatPage() {
   const [fetchedProject, setFetchedProject] = useState<HermesProject>()
   const projectId = session?.projectId
   useEffect(() => {
-    if (!projectId || hasMessages || !connection) return
-    const [baseUrl, apiKey] = connection.split("\n")
+    if (!projectId || hasMessages || !baseUrl || apiKey === undefined) return
     let cancelled = false
     listProjects({ baseUrl, apiKey })
       .then((all) => !cancelled && setFetchedProject(all.find((p) => p.id === projectId)))
@@ -401,7 +399,7 @@ export function ChatPage() {
     return () => {
       cancelled = true
     }
-  }, [projectId, hasMessages, connection])
+  }, [projectId, hasMessages, baseUrl, apiKey])
   const project = [fetchedProject, handed].find((p) => p && p.id === projectId)
   const sessionRepos: RepoRef[] = session?.worktree?.repos.length
     ? session.worktree.repos
