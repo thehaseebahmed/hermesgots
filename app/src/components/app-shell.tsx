@@ -1,4 +1,12 @@
-import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react"
+import {
+  lazy,
+  Suspense,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react"
 import { Outlet, useLocation, useNavigationType } from "react-router"
 
 import { ConversationList } from "@/components/conversation-list"
@@ -11,8 +19,6 @@ import { depth } from "@/lib/nav"
 import { useProjectPane } from "@/lib/pane"
 import { useBotPane, useBotThreads } from "@/lib/threads"
 import { cn } from "@/lib/utils"
-import { BotThreadsPage } from "@/routes/bot-threads"
-import { ProjectPage } from "@/routes/project"
 
 /**
  * A list kept on screen, from `xl`, beside what it opened: a project beside its session, or a bot
@@ -32,6 +38,11 @@ function screenOf(path: string, large: boolean, pane: ListPane | undefined) {
   if (pane) return pane.screen
   return large && path.startsWith("/settings") ? "/settings" : path
 }
+
+const BotThreadsPage = lazy(() =>
+  import("@/routes/bot-threads").then((m) => ({ default: m.BotThreadsPage })),
+)
+const ProjectPage = lazy(() => import("@/routes/project").then((m) => ({ default: m.ProjectPage })))
 
 /**
  * Animates the main pane in when the screen changes: from the right when it was opened on top of
@@ -94,12 +105,12 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
             open ? "w-103 border-r" : "w-full",
           )}
         >
-          {pane.node}
+          <Suspense fallback={null}>{pane.node}</Suspense>
         </div>
       )}
       <div ref={session} className="flex min-w-0 flex-1 flex-col">
         {/* The project's own route has nothing to add beside it. */}
-        {pane && !open ? null : children}
+        {pane && !open ? null : <Suspense fallback={null}>{children}</Suspense>}
       </div>
     </div>
   )

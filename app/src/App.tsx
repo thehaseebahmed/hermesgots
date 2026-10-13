@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { lazy, useEffect } from "react"
 import { useTheme } from "next-themes"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Navigate, Route, Routes } from "react-router"
@@ -10,17 +10,32 @@ import { warmCatalog } from "@/lib/models"
 import { warmRankings } from "@/lib/rankings"
 import { useShareReceiver } from "@/lib/share"
 import { useBotThreads } from "@/lib/threads"
-import { BotThreadsPage } from "@/routes/bot-threads"
-import { BotsPage } from "@/routes/bots"
 import { ChatPage } from "@/routes/chat"
-import { OpenSessionPage } from "@/routes/open-session"
-import { CodePage } from "@/routes/code"
-import { ProjectPage } from "@/routes/project"
-import { MissionPage, ResearchPage } from "@/routes/research"
-import { RoutinesPage } from "@/routes/routines"
-import { SharePage } from "@/routes/share"
-import { SettingsPage } from "@/routes/settings"
 import { SetupGate } from "@/routes/setup"
+
+// Only a chat is on the startup path; every other screen loads when it's first opened.
+const BotThreadsPage = lazy(() =>
+  import("@/routes/bot-threads").then((m) => ({ default: m.BotThreadsPage })),
+)
+const BotsPage = lazy(() => import("@/routes/bots").then((m) => ({ default: m.BotsPage })))
+const OpenSessionPage = lazy(() =>
+  import("@/routes/open-session").then((m) => ({ default: m.OpenSessionPage })),
+)
+const CodePage = lazy(() => import("@/routes/code").then((m) => ({ default: m.CodePage })))
+const ProjectPage = lazy(() => import("@/routes/project").then((m) => ({ default: m.ProjectPage })))
+const ResearchPage = lazy(() =>
+  import("@/routes/research").then((m) => ({ default: m.ResearchPage })),
+)
+const MissionPage = lazy(() =>
+  import("@/routes/research").then((m) => ({ default: m.MissionPage })),
+)
+const RoutinesPage = lazy(() =>
+  import("@/routes/routines").then((m) => ({ default: m.RoutinesPage })),
+)
+const SharePage = lazy(() => import("@/routes/share").then((m) => ({ default: m.SharePage })))
+const SettingsPage = lazy(() =>
+  import("@/routes/settings").then((m) => ({ default: m.SettingsPage })),
+)
 
 /** Computed colours come back as oklch(), which browser chrome may not parse; hex always works. */
 function toHex(color: string) {
