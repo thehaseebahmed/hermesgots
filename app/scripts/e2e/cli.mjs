@@ -51,6 +51,11 @@ const FLOWS = {
     about:
       "A streaming reply is written in batches: at most 6 writes a second on the mock (main wrote 7.5)",
   },
+  "idle-requests": {
+    script: "e2e/idle-requests.mjs",
+    mock: "polling",
+    about: "An idle open chat makes at most 12 requests in 65s",
+  },
   screens: {
     script: "e2e/screens.mjs",
     about: "Code, a project, Routines and a chat load at 390 and 1024px, light and dark",
