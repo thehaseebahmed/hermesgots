@@ -1,14 +1,22 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useMemo, useState, type ReactNode } from "react"
 import {
-  ArrowLeftIcon,
+  ArrowUpDownIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   SearchIcon,
 } from "lucide-react"
 
-import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { MODEL_SORTS, sortByFacts, type ModelSort } from "@/components/chat/model-sort"
+import { Popup, PopupContent, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { rememberModel, type ModelChoice, type Profile } from "@/lib/db"
 import { formatTokens } from "@/lib/format"
@@ -28,7 +36,6 @@ export function ModelPicker({
   recent = [],
   choice,
   onChoose,
-  onBack,
 }: {
   providers: ModelProvider[]
   /** The row that clears the choice: its label and the model it runs. */
@@ -37,17 +44,16 @@ export function ModelPicker({
   recent?: ModelChoice[]
   choice?: ModelChoice
   onChoose: (choice: ModelChoice | undefined) => void
-  onBack?: () => void
 }) {
   const [query, setQuery] = useState("")
   const [openSlug, setOpenSlug] = useState<string>()
+  const [sort, setSort] = useState<ModelSort>("name")
   // The cached models.dev catalog, live: each row's facts repaint when a refresh lands.
   const catalog = useModelCatalog()
   const sorted = useMemo(() => sortProviders(providers), [providers])
-  const root = useRef<HTMLDivElement>(null)
   // A host with one provider has nothing to choose between, so its models show at once.
-  const open = sorted.length === 1 ? sorted[0] : sorted.find((p) => p.slug === openSlug)
-  const total = (open ? [open] : sorted).reduce((n, p) => n + p.models.length, 0)
+  const drilled = sorted.length === 1 ? sorted[0] : sorted.find((p) => p.slug === openSlug)
+  const total = (drilled ? [drilled] : sorted).reduce((n, p) => n + p.models.length, 0)
   // Only ones the host still offers, so a recent pick never sends a model it dropped.
   const recentOffered = recent.filter((r) =>
     providers.some((p) => p.slug === r.provider && p.models.includes(r.model)),
@@ -55,58 +61,49 @@ export function ModelPicker({
   const isChosen = (m: ModelChoice) => choice?.provider === m.provider && choice.model === m.model
   const groups = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean)
-    return (open ? [open] : sorted)
+    return (drilled ? [drilled] : sorted)
       .map((p) => {
         const haystack = (m: string) => `${p.name} ${p.slug} ${m}`.toLowerCase()
-        return { ...p, models: p.models.filter((m) => words.every((w) => haystack(m).includes(w))) }
+        const matched = p.models.filter((m) => words.every((w) => haystack(m).includes(w)))
+        // Price ranks by the blended cost, context by the window, both from the cached catalog.
+        return {
+          ...p,
+          models: sortByFacts(
+            sort,
+            (m) => modelFacts(catalog, { provider: p.slug, model: m }),
+            matched,
+          ),
+        }
       })
       .filter((p) => p.models.length)
-  }, [sorted, open, query])
+  }, [sorted, drilled, query, sort, catalog])
 
-  const show = (slug: string | undefined) => {
-    setOpenSlug(slug)
-    setQuery("")
-  }
-  // The popup's scroller, so a list doesn't open where the last one was left. Braced: Chrome 150+
-  // returns a Promise from scrollTo, which React would call as the effect's cleanup.
-  useEffect(() => {
-    root.current?.parentElement?.scrollTo({ top: 0 })
-  }, [openSlug])
-  const drilled = open && sorted.length > 1
-  const back = drilled ? () => show(undefined) : onBack
   const top = !query && !drilled
+  // The sort menu orders a flat model list; the providers list stays A to Z, so it shows no menu.
+  const flat = Boolean(drilled) || query.length > 0
 
   return (
     <>
-      <PopupHeader className="flex-row items-center gap-1 pb-2">
-        {back && (
-          <Button
-            variant="ghost"
-            size="icon-lg"
-            className="-ml-2 size-11 rounded-full"
-            onClick={back}
-            aria-label="Back"
-          >
-            <ArrowLeftIcon />
-          </Button>
-        )}
-        <PopupTitle className={cn("min-w-0 flex-1 truncate", !back && "text-center")}>
-          {drilled ? open.name : "Model"}
-        </PopupTitle>
-      </PopupHeader>
-      <div ref={root} className="flex flex-col gap-5 px-6 text-[15px]">
-        {total > 8 && (
-          <InputGroup className="h-11">
-            <InputGroupAddon>
-              <SearchIcon />
-            </InputGroupAddon>
-            <InputGroupInput
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={drilled ? `Search ${open.name}` : "Search models"}
-              aria-label="Search models"
-            />
-          </InputGroup>
+      <PopupTitle className="sr-only">{drilled ? drilled.name : "Model"}</PopupTitle>
+      <div className="flex flex-col gap-5 px-6 pt-5 text-[15px]">
+        {(total > 8 || flat) && (
+          <div className="flex items-center gap-2">
+            {total > 8 && (
+              <InputGroup className="h-11 min-w-0 flex-1">
+                <InputGroupAddon>
+                  <SearchIcon />
+                </InputGroupAddon>
+                <InputGroupInput
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={drilled ? `Search ${drilled.name}` : "Search models"}
+                  aria-label="Search models"
+                />
+              </InputGroup>
+            )}
+            {/* Only a flat list sorts: the providers list stays A to Z, so it shows no menu. */}
+            {flat && <SortMenu sort={sort} onSort={setSort} />}
+          </div>
         )}
         {top && (
           <ModelList>
@@ -134,7 +131,7 @@ export function ModelPicker({
             </ModelList>
           </section>
         )}
-        {top && !open ? (
+        {top && !drilled ? (
           <section className="flex flex-col gap-2">
             <h3 className="px-1 text-sm text-muted-foreground">Providers</h3>
             <ModelList>
@@ -146,7 +143,7 @@ export function ModelPicker({
                     detail={`${p.models.length} ${p.models.length === 1 ? "model" : "models"}`}
                     selected={false}
                     opens
-                    onClick={() => show(p.slug)}
+                    onClick={() => setOpenSlug(p.slug)}
                   />
                 )
               })}
@@ -174,7 +171,117 @@ export function ModelPicker({
           <p className="px-1 text-sm text-muted-foreground">No models match.</p>
         )}
       </div>
+      {/* A provider's models open as a sheet stacked on this one, dismissed back to it; it
+          renders inside this sheet's tree so Base UI registers the nesting. */}
+      {drilled && (
+        <Popup open onOpenChange={(next) => !next && setOpenSlug(undefined)}>
+          <PopupContent initialFocus={false} className={PICKER_HEIGHT}>
+            <ProviderModels
+              provider={drilled}
+              catalog={catalog}
+              isChosen={isChosen}
+              onChoose={onChoose}
+            />
+          </PopupContent>
+        </Popup>
+      )}
     </>
+  )
+}
+
+/** One provider's models, for the sheet stacked over the picker: search at once, no drill. */
+function ProviderModels({
+  provider,
+  catalog,
+  isChosen,
+  onChoose,
+}: {
+  provider: ModelProvider
+  catalog: Catalog | undefined
+  isChosen: (m: ModelChoice) => boolean
+  onChoose: (choice: ModelChoice | undefined) => void
+}) {
+  const [query, setQuery] = useState("")
+  const [sort, setSort] = useState<ModelSort>("name")
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+  const haystack = (m: string) => `${provider.name} ${provider.slug} ${m}`.toLowerCase()
+  const matched = provider.models.filter((m) => words.every((w) => haystack(m).includes(w)))
+  const models = sortByFacts(
+    sort,
+    (m) => modelFacts(catalog, { provider: provider.slug, model: m }),
+    matched,
+  )
+  return (
+    <>
+      <PopupTitle className="sr-only">{provider.name}</PopupTitle>
+      <div className="flex flex-col gap-5 px-6 pt-5 text-[15px]">
+        {provider.models.length > 8 && (
+          <div className="flex items-center gap-2">
+            <InputGroup className="h-11 min-w-0 flex-1">
+              <InputGroupAddon>
+                <SearchIcon />
+              </InputGroupAddon>
+              <InputGroupInput
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={`Search ${provider.name}`}
+                aria-label={`Search ${provider.name}`}
+              />
+            </InputGroup>
+            <SortMenu sort={sort} onSort={setSort} />
+          </div>
+        )}
+        {provider.models.length <= 8 && (
+          <div className="flex justify-end">
+            <SortMenu sort={sort} onSort={setSort} />
+          </div>
+        )}
+        {models.length ? (
+          <ModelList>
+            {models.map((m) => (
+              <ModelOption
+                key={m}
+                label={m}
+                detail={modelDetail(catalog, { provider: provider.slug, model: m })}
+                selected={isChosen({ provider: provider.slug, model: m })}
+                onClick={() => onChoose({ provider: provider.slug, model: m })}
+              />
+            ))}
+          </ModelList>
+        ) : (
+          <p className="px-1 text-sm text-muted-foreground">No models match.</p>
+        )}
+      </div>
+    </>
+  )
+}
+
+/** The sort menu's icon button, a radio menu of the flat lists' orders. */
+function SortMenu({ sort, onSort }: { sort: ModelSort; onSort: (sort: ModelSort) => void }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon-lg"
+            className="size-11 shrink-0 rounded-full text-muted-foreground"
+            aria-label={`Sort models by ${MODEL_SORTS[sort]}`}
+          />
+        }
+      >
+        <ArrowUpDownIcon />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-40">
+        <DropdownMenuRadioGroup value={sort} onValueChange={(value) => onSort(value as ModelSort)}>
+          {(Object.keys(MODEL_SORTS) as ModelSort[]).map((option) => (
+            <DropdownMenuRadioItem key={option} value={option} className="min-h-11" closeOnClick>
+              {MODEL_SORTS[option]}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 

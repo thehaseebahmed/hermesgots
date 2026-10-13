@@ -171,6 +171,15 @@ function costTierOf(entry: CatalogModel | undefined) {
   return band === -1 ? COST_BANDS.length + 1 : band + 1
 }
 
+/** The blended USD per million tokens behind the cost band, or undefined when either price is missing. */
+function blendedCostOf(entry: CatalogModel | undefined) {
+  const cost = entry?.cost
+  const input = typeof cost?.input === "number" ? cost.input : undefined
+  const output = typeof cost?.output === "number" ? cost.output : undefined
+  if (input === undefined || output === undefined) return undefined
+  return 5 * input + output
+}
+
 function matchIn<T>(
   models: Record<string, CatalogModel> | undefined,
   model: string,
@@ -228,6 +237,8 @@ export interface ModelFacts {
   reasoning?: boolean
   /** The model's cost band, 1–5; see COST_BANDS. */
   tier?: number
+  /** The blended USD per million tokens (`5×input + output`) the cost band is ranked by. */
+  cost?: number
 }
 
 /** Facts per registry object, so re-renders (search typing) don't re-walk all of models.dev. */
@@ -246,6 +257,7 @@ export function modelFacts(catalog: Catalog | undefined, info: ModelRef): ModelF
       vision: findIn(catalog, info, imageInputOf),
       reasoning: findIn(catalog, info, reasoningOf),
       tier: findIn(catalog, info, costTierOf),
+      cost: findIn(catalog, info, blendedCostOf),
     }
     byModel.set(key, facts)
   }
