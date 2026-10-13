@@ -43,6 +43,7 @@ import {
 } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useDraft } from "@/lib/drafts"
+import { cooldown } from "@/lib/cooldown"
 import { useChanges, useLive, SAFETY_MS } from "@/lib/live"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
@@ -61,6 +62,8 @@ import {
 
 /** While a repo is being added or removed: the plugin does the work, this watches for it to finish. */
 const CHANGING_MS = 3_000
+/** How long a session's worktree/PR read from its once-per-visit pass is trusted before redoing it. */
+const FRESH_MS = 30_000
 const DAY_MS = 86_400_000
 const GROUPS: { state: SessionState; label: string }[] = [
   { state: "working", label: "Working" },
@@ -181,12 +184,13 @@ export function ProjectPage({
   const sessions = rows?.filter((c) => c.draftAt || c.updatedAt > c.createdAt || local?.[c.id]?.any)
 
   // A session's PRs are read when it's open; this reads them for every session once per visit, its
-  // worktree first when this device hasn't seen it (a session started elsewhere).
-  const read = useRef(new Set<string>())
+  // worktree first when this device hasn't seen it (a session started elsewhere). Freshness-gated
+  // (not once-ever) so a session left open on this screen still catches up eventually.
+  const read = useRef(cooldown(FRESH_MS))
   useEffect(() => {
     for (const c of sessions ?? []) {
-      if (read.current.has(c.id)) continue
-      read.current.add(c.id)
+      if (read.current.cooling(c.id)) continue
+      read.current.cool(c.id)
       void (c.worktree ? Promise.resolve() : refreshWorkspace(c.id)).then(() => refreshPrs(c.id))
     }
   }, [sessions])
