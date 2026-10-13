@@ -8,24 +8,24 @@ const RANKINGS_URL = `${isNative ? SITE_URL : ""}/.netlify/functions/benchlm`
 const RANKINGS_ROW = "coding"
 const TTL_MS = 24 * 60 * 60 * 1000
 
-/** A row in BenchLM's coding rankings: a model's id and its BenchAlign score. */
+/** A row in BenchLM's coding rankings: a model's key/slug and its BenchAlign score. */
 interface RankingRow {
-  model_id?: unknown
+  modelKey?: unknown
+  slug?: unknown
   name?: unknown
   score?: unknown
-  rank?: unknown
 }
 
 /** The shape we expect from the BenchLM coding surface, validated before caching. */
 interface RankingsPayload {
-  rankings?: unknown
+  items?: unknown
 }
 
-/** The cached payload must carry a rankings array to be useful. */
+/** The cached payload must carry an items array to be useful. */
 function isRankings(data: unknown): data is RankingsPayload {
   if (typeof data !== "object" || data === null || Array.isArray(data)) return false
-  const rankings = (data as Record<string, unknown>).rankings
-  return Array.isArray(rankings)
+  const items = (data as Record<string, unknown>).items
+  return Array.isArray(items)
 }
 
 /** Fetches the rankings from the Netlify proxy. */
@@ -93,15 +93,15 @@ export function useCodingRankings() {
 const normalise = (id: string) => id.toLowerCase().replace(/\./g, "-")
 const lastSegment = (id: string) => id.slice(id.lastIndexOf("/") + 1)
 
-/** Extracts the score from a ranking row, guarding the payload's unconfirmed shape. */
+/** Extracts the score from a ranking row, guarding the payload shape. */
 function scoreOf(row: RankingRow | undefined): number | undefined {
   const score = row?.score
   return typeof score === "number" && Number.isFinite(score) ? score : undefined
 }
 
-/** Extracts a model id from a ranking row, guarding the payload's unconfirmed shape. */
+/** Extracts a model id from a ranking row: modelKey, then slug, then name. */
 function modelIdOf(row: RankingRow | undefined): string | undefined {
-  const id = row?.model_id ?? row?.name
+  const id = row?.modelKey ?? row?.slug ?? row?.name
   return typeof id === "string" && id.trim() ? id.trim() : undefined
 }
 
@@ -114,7 +114,7 @@ type ModelRef = Pick<ModelInfo, "provider" | "model">
  */
 export function codingScoreOf(rankings: unknown, { model }: ModelRef): number | undefined {
   if (!model || !isRankings(rankings)) return undefined
-  const rows = rankings.rankings as RankingRow[]
+  const rows = rankings.items as RankingRow[]
   const full = normalise(model)
   const short = lastSegment(full)
   // Exact match on the model id, then a normalised match, then a last-segment match.

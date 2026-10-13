@@ -1,16 +1,18 @@
 /** How a flat model list orders itself; the providers list stays A to Z whatever this says. */
-export type ModelSort = "name" | "price" | "context"
+export type ModelSort = "name" | "price" | "context" | "benchlm"
 
 export const MODEL_SORTS: Record<ModelSort, string> = {
   name: "A to Z",
   price: "Price",
   context: "Context",
+  benchlm: "BenchLM Score",
 }
 
 /** The facts a sort ranks by — the picks `modelFacts` in lib/models.ts makes over a catalog. */
 export interface SortFacts {
   context?: number
   cost?: number
+  benchlm?: number
 }
 
 const byName = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" })
@@ -27,10 +29,15 @@ export function sortByFacts(
   if (sort === "name") return [...models].sort(byName.compare)
   const keyed = models.map((model) => ({
     model,
-    value: sort === "price" ? facts(model).cost : facts(model).context,
+    value:
+      sort === "price"
+        ? facts(model).cost
+        : sort === "context"
+          ? facts(model).context
+          : facts(model).benchlm,
   }))
-  // Listed models first, in the picked order (cheapest first, largest window first); the
-  // unlisted ones follow in A to Z order.
+  // Listed models first, in the picked order (cheapest first, largest window first, highest
+  // score first); the unlisted ones follow in A to Z order.
   const [listed, unlisted] = keyed.reduce<[typeof keyed, typeof keyed]>(
     ([yes, no], row) => (row.value === undefined ? [yes, [...no, row]] : [[...yes, row], no]),
     [[], []],
