@@ -95,7 +95,7 @@ export function ProjectSettings({
       }}
       onOpenChangeComplete={(next) => !next && setView("settings")}
     >
-      <PopupContent className="pb-0">
+      <PopupContent className="max-h-[92dvh] pb-0 md:max-h-[85dvh] md:pb-0">
         <PopupHeader className="relative items-center pb-2">
           {view === "usage" && (
             <Button
