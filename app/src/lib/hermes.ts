@@ -1,3 +1,4 @@
+import { connectionKey } from "@/lib/connection"
 import type {
   ApprovalChoice,
   ClarifyAnswers,
@@ -604,7 +605,7 @@ const pluginFeatures = new Map<string, Promise<string[] | null>>()
 
 /** `getPluginFeatures`, asked once per server and key; a failed ask is tried again next time. */
 export async function hasPluginFeature(config: HermesConfig, feature: string) {
-  const key = `${config.baseUrl}\n${config.apiKey}`
+  const key = connectionKey(config)
   let pending = pluginFeatures.get(key)
   if (!pending) {
     pending = getPluginFeatures(config).catch(() => null)
@@ -1591,21 +1592,6 @@ export async function getSessionPrs(
 
 export type LiveRunStatus = "running" | "waiting_for_approval"
 
-/** Sessions with a run in flight on the server, by Hermes session id. Needs the Memento plugin. */
-export async function listLiveRuns(config: HermesConfig): Promise<Record<string, LiveRunStatus>> {
-  const response = await request(`${pluginRoot(config.baseUrl)}/runs/live`, {
-    headers: headers(config),
-  })
-  const sessions: unknown = (await response.json())?.sessions
-  if (!sessions || typeof sessions !== "object") return {}
-  return Object.fromEntries(
-    Object.entries(sessions).filter(
-      (entry): entry is [string, LiveRunStatus] =>
-        entry[1] === "running" || entry[1] === "waiting_for_approval",
-    ),
-  )
-}
-
 /** Why a session waits on the user. */
 export type WaitingReason =
   | { kind: "question"; count: number }
@@ -1614,55 +1600,60 @@ export type WaitingReason =
   /** A Theseus run waiting on the user: its plan, its checkpoints, a checkpoint or its closing. */
   | { kind: "theseus"; stage: "plan" | "checkpoints" | "approval" | "closing" }
 
-/**
- * Sessions waiting on the user (a question, an approval or a plan to review), by Hermes session id,
- * each with its project's name when it's a project session. Needs the Memento plugin (0.16).
- */
-export async function listWaiting(
-  config: HermesConfig,
-  signal?: AbortSignal,
-): Promise<Record<string, WaitingReason & { project?: string }>> {
+/** What a server's plugin reports of its runs, by Hermes session id. */
+export interface LiveRuns {
+  /** Sessions with a run in flight. */
+  sessions: Record<string, LiveRunStatus>
+  /** Each one's run (plugin 0.12). */
+  runIds: Record<string, string>
+  /** Why a session waits on the user, with its project's name for a project session (0.16). */
+  waiting: Record<string, WaitingReason & { project?: string }>
+}
+
+/** The server's runs in flight and what waits on the user. Needs the Memento plugin. */
+export async function getLiveRuns(config: HermesConfig, signal?: AbortSignal): Promise<LiveRuns> {
   const response = await request(`${pluginRoot(config.baseUrl)}/runs/live`, {
     headers: headers(config),
     signal,
   })
-  const waiting: unknown = (await response.json())?.waiting
-  if (!waiting || typeof waiting !== "object") return {}
-  const found: Record<string, WaitingReason & { project?: string }> = {}
-  for (const [id, raw] of Object.entries(waiting as Record<string, Record<string, unknown>>)) {
-    const project = typeof raw?.project === "string" ? raw.project : undefined
-    if (raw?.kind === "question")
-      found[id] = {
+  const body = await response.json()
+  const object = (value: unknown) =>
+    value && typeof value === "object" ? (value as Record<string, unknown>) : {}
+  const sessions = Object.fromEntries(
+    Object.entries(object(body?.sessions)).filter(
+      (entry): entry is [string, LiveRunStatus] =>
+        entry[1] === "running" || entry[1] === "waiting_for_approval",
+    ),
+  )
+  const runIds = Object.fromEntries(
+    Object.entries(object(body?.run_ids)).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  )
+  const waiting: LiveRuns["waiting"] = {}
+  for (const [id, value] of Object.entries(object(body?.waiting))) {
+    const raw = object(value)
+    const project = typeof raw.project === "string" ? raw.project : undefined
+    if (raw.kind === "question")
+      waiting[id] = {
         kind: "question",
         count: typeof raw.count === "number" ? raw.count : 1,
         project,
       }
-    else if (raw?.kind === "approval")
-      found[id] = {
+    else if (raw.kind === "approval")
+      waiting[id] = {
         kind: "approval",
         command: typeof raw.command === "string" ? raw.command : undefined,
         project,
       }
-    else if (raw?.kind === "plan") found[id] = { kind: "plan", project }
+    else if (raw.kind === "plan") waiting[id] = { kind: "plan", project }
     else if (
-      raw?.kind === "theseus" &&
+      raw.kind === "theseus" &&
       ["plan", "checkpoints", "approval", "closing"].includes(String(raw.stage))
     )
-      found[id] = { kind: "theseus", stage: raw.stage as "plan", project }
+      waiting[id] = { kind: "theseus", stage: raw.stage as "plan", project }
   }
-  return found
-}
-
-/** The run in flight for a session, if the plugin reports one (it adds `run_ids` from 0.12). */
-export async function liveRunOf(config: HermesConfig, sessionId: string) {
-  const response = await request(`${pluginRoot(config.baseUrl)}/runs/live`, {
-    headers: headers(config),
-  })
-  const body = await response.json()
-  const status = body?.sessions?.[sessionId]
-  if (status !== "running" && status !== "waiting_for_approval") return undefined
-  const runId: unknown = body?.run_ids?.[sessionId]
-  return { status: status as LiveRunStatus, runId: typeof runId === "string" ? runId : undefined }
+  return { sessions, runIds, waiting }
 }
 
 /** Answers the agent's questions. Needs the Memento plugin, which serves the clarify tool on runs. */
@@ -1697,7 +1688,7 @@ export async function labelSession(config: HermesConfig, sessionId: string) {
 const runFeatures = new Map<string, Promise<Record<string, unknown> | null>>()
 
 function features(config: HermesConfig) {
-  const key = `${config.baseUrl}\n${config.apiKey}`
+  const key = connectionKey(config)
   let pending = runFeatures.get(key)
   if (!pending) {
     pending = request(endpoint(config.baseUrl, "/capabilities"), { headers: headers(config) })

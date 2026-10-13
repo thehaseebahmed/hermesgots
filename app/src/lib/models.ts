@@ -1,6 +1,6 @@
 import { useLiveQuery } from "dexie-react-hooks"
-import { useSyncExternalStore } from "react"
 
+import { createStore } from "@/lib/store"
 import { db, updateProfile, type ModelsDevCatalog, type Profile } from "@/lib/db"
 import { getModelInfo, type ModelInfo } from "@/lib/hermes"
 import { fullModel } from "@/lib/model-info"
@@ -23,25 +23,11 @@ export type Catalog = Record<string, { models?: Record<string, CatalogModel> }>
  * "not listed" isn't known. A cache we can serve — even a stale one — is an answer, so a
  * failed background refresh never sets this.
  */
-let unreachable = false
-const listeners = new Set<() => void>()
-
-function setUnreachable(next: boolean) {
-  if (next === unreachable) return
-  unreachable = next
-  listeners.forEach((listener) => listener())
-}
+const unreachable = createStore(false)
+const setUnreachable = unreachable.set
 
 /** Whether the last models.dev lookup couldn't reach it. */
-export function useModelsDevUnreachable() {
-  return useSyncExternalStore(
-    (listener) => {
-      listeners.add(listener)
-      return () => listeners.delete(listener)
-    },
-    () => unreachable,
-  )
-}
+export const useModelsDevUnreachable = unreachable.use
 
 // The cached registry. It's large and rarely needed, so it lives in IndexedDB rather than
 // memory: a fresh row answers with no I/O, a stale row answers at once and is refreshed in

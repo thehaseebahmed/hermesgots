@@ -9,6 +9,10 @@ import {
   UserCheckIcon,
 } from "lucide-react"
 
+import { AGENT_WORK_MS, THESEUS_INFO_MS } from "@/lib/freshness"
+import { noteFailure, quietly } from "@/lib/report"
+import { createSignal } from "@/lib/store"
+import { connectionKey } from "@/lib/connection"
 import { getSettings, type Conversation, type Profile } from "@/lib/db"
 import {
   getTheseus,
@@ -21,6 +25,7 @@ import {
   type TheseusModels,
 } from "@/lib/hermes"
 import { useChanges } from "@/lib/live"
+import { usePoll } from "@/lib/poll"
 
 /**
  * Theseus: a session mode that runs the THA Theseus skill end to end in Auto. The work is split
@@ -223,20 +228,22 @@ export function markIntroSeen() {
 
 /** What the plugin's `info` says about Theseus on a bot's host, read once a minute at most. */
 const infos = new Map<string, { at: number; info: TheseusInfo | null }>()
-const INFO_MS = 60_000
 
 export async function readTheseusInfo(profile: Pick<Profile, "baseUrl" | "apiKey">) {
-  const key = `${profile.baseUrl}\n${profile.apiKey}`
+  const key = connectionKey(profile)
   const hit = infos.get(key)
-  if (hit && Date.now() - hit.at < INFO_MS) return hit.info
-  const info = await getTheseusInfo(profile).catch(() => null)
+  if (hit && Date.now() - hit.at < THESEUS_INFO_MS) return hit.info
+  const info = await getTheseusInfo(profile).catch((error) => {
+    noteFailure("Reading Theseus info", error)
+    return null
+  })
   infos.set(key, { at: Date.now(), info })
   return info
 }
 
 /** Whether the bot's host can run Theseus, and if not, why. Null while it's being asked. */
 export function useTheseusInfo(profile?: Pick<Profile, "baseUrl" | "apiKey" | "disabled"> | null) {
-  const key = profile?.apiKey && !profile.disabled ? `${profile.baseUrl}\n${profile.apiKey}` : ""
+  const key = profile?.apiKey && !profile.disabled ? connectionKey(profile) : ""
   const read = useSyncExternalStore(subscribe, () => infos.get(key)?.info)
   useEffect(() => {
     if (!key || !profile) return
@@ -417,17 +424,7 @@ export function toRun(raw: RawTheseus, sessionId: string, actions: TheseusAction
 // --- the store ---------------------------------------------------------------------------------
 
 const raws = new Map<string, RawTheseus>()
-const listeners = new Set<() => void>()
-const notify = () => listeners.forEach((listener) => listener())
-
-function subscribe(listener: () => void) {
-  listeners.add(listener)
-  return () => {
-    listeners.delete(listener)
-  }
-}
-
-const POLL_MS = 4000
+const { subscribe, notify } = createSignal()
 
 type Session = Pick<Conversation, "id" | "hermesSessionId">
 type Server = Pick<Profile, "baseUrl" | "apiKey">
@@ -473,28 +470,21 @@ export function useTheseusRun(
   const sessionId = session?.hermesSessionId
   const baseUrl = profile?.baseUrl
   const apiKey = profile?.apiKey
-  useEffect(() => {
-    if (!enabled || !id || !sessionId || !baseUrl || !apiKey) return
-    let cancelled = false
-    const read = () => {
-      if (document.visibilityState !== "visible") return
+  usePoll(
+    (signal) => {
+      if (!id || !sessionId || !baseUrl || !apiKey) return
       getTheseus({ baseUrl, apiKey }, sessionId)
         .then((next) => {
-          if (cancelled) return
+          if (signal.aborted) return
           raws.set(id, next)
           notify()
         })
-        .catch(() => undefined)
-    }
-    read()
-    const timer = window.setInterval(read, POLL_MS)
-    document.addEventListener("visibilitychange", read)
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-      document.removeEventListener("visibilitychange", read)
-    }
-  }, [enabled, id, sessionId, baseUrl, apiKey, changes])
+        .catch(quietly("Reading a Theseus run"))
+    },
+    AGENT_WORK_MS,
+    [id, sessionId, baseUrl, apiKey, changes],
+    { active: Boolean(enabled && id && sessionId && baseUrl && apiKey) },
+  )
   const actions = useMemo(
     () =>
       id && sessionId && baseUrl && apiKey

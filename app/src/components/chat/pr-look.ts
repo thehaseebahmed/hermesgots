@@ -68,3 +68,15 @@ export function prLook(pr: PullRequestRef): PrLook {
   if (pr.checks === "failure") return PR_FAILING
   return PR_LOOKS[pr.state]
 }
+
+/**
+ * A pull request's name among a session's: "PR #142" when it's the only one, "repo #142" when they
+ * all share an owner, else "owner/repo #142".
+ */
+export function prLabel(pr: PullRequestRef, all: PullRequestRef[]) {
+  if (all.length === 1) return `PR #${pr.number}`
+  const [owner, name] = pr.repo.split("/")
+  return all.every((p) => p.repo.startsWith(`${owner}/`))
+    ? `${name} #${pr.number}`
+    : `${pr.repo} #${pr.number}`
+}

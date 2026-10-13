@@ -16,12 +16,15 @@ import {
   XIcon,
 } from "lucide-react"
 
+import { CATCH_UP_MS, HOST_QUEUE_MS, PR_PENDING_MS, SAFETY_MS } from "@/lib/freshness"
+import { quietly } from "@/lib/report"
 import { useBreakReminderEligibility } from "@/components/break-reminder-context"
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
+import { prLabel } from "@/components/chat/pr-look"
 import { PrPill } from "@/components/chat/pr-pill"
 import { QuestionCard } from "@/components/chat/question-card"
 import {
@@ -88,12 +91,13 @@ import {
   getActiveProfile,
   getMessages,
   updateConversation,
-  type PullRequestRef,
 } from "@/lib/db"
 import { describeActivity } from "@/lib/format"
-import { listProjects, supportsSteer, type HermesProject } from "@/lib/hermes"
+import { supportsSteer, type HermesProject } from "@/lib/hermes"
+import { readProjects, useProjects } from "@/lib/projects"
 import { loadEarlierHistory, reconcileHistory } from "@/lib/history"
-import { SAFETY_MS, useLive, watchChat } from "@/lib/live"
+import { useLive, watchChat } from "@/lib/live"
+import { usePoll } from "@/lib/poll"
 import { useXLarge } from "@/lib/media"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { setBackGuard } from "@/lib/native"
@@ -103,7 +107,6 @@ import { syncContextWindow } from "@/lib/models"
 import {
   planApprovalMessage,
   projectRepos,
-  PR_PENDING_MS,
   prChecksPending,
   refreshPrs,
   refreshWorkspace,
@@ -117,30 +120,7 @@ import { draftKey } from "@/lib/drafts"
 import { useTheseusInfo, useTheseusRun, waitsOnUser } from "@/lib/theseus"
 import { AgentsContext, DELEGATE_TOOL, useSessionAgents } from "@/lib/agents"
 
-/** How often an open chat checks Hermes for turns sent from another device. */
-const CATCH_UP_MS = 30_000
-/** How often an open chat looks for a turn the plugin started from its queue. */
-const HOST_QUEUE_POLL_MS = 3000
-
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
-
-/**
- * Compute the display label for a PR pill based on all PRs in the session.
- * Rules:
- * 1. Single PR, single repo → "PR #142"
- * 2. Multiple PRs from same repo → "repo #142"
- * 3. PRs from different repos, same owner → "repo #142"
- * 4. PRs from different owners → "owner/repo #142"
- */
-function computePrLabel(pr: PullRequestRef, allPrs: PullRequestRef[]) {
-  if (allPrs.length === 1) return `PR #${pr.number}`
-  const [owner] = pr.repo.split("/")
-  const sameOwner = allPrs.every((p) => p.repo.startsWith(`${owner}/`))
-  const uniqueRepos = new Set(allPrs.map((p) => p.repo))
-  if (uniqueRepos.size === 1) return `${pr.repo.split("/")[1]} #${pr.number}`
-  if (sameOwner) return `${pr.repo.split("/")[1]} #${pr.number}`
-  return `${pr.repo} #${pr.number}`
-}
 
 function EmptyState({
   name,
@@ -275,7 +255,7 @@ export function ChatPage() {
     !busy && Boolean(messages?.some((m) => m.hostQueued && m.status === "queued" && !m.queuePaused))
   useEffect(() => {
     if (!id || !hostWaiting) return
-    const timer = window.setInterval(() => void refreshQueue(id), HOST_QUEUE_POLL_MS)
+    const timer = window.setInterval(() => void refreshQueue(id), HOST_QUEUE_MS)
     return () => window.clearInterval(timer)
   }, [id, hostWaiting])
   const awaitingApproval = messages?.find((m) => m.approval && !m.approval.resolved)
@@ -326,11 +306,10 @@ export function ChatPage() {
   // Picks up a model changed on the server (only when the connection does, not on every write);
   // the ring follows via the live query.
   const profileId = profile?.id
-  const connection = profile && `${profile.baseUrl}\n${profile.apiKey}`
   useEffect(() => {
     if (!profileId) return
     void db.profiles.get(profileId).then((current) => current && syncContextWindow(current))
-  }, [profileId, connection])
+  }, [profileId, baseUrl, apiKey])
 
   // The plugin holds a session's mode and pending plan; an empty session never catches up below.
   const sessionId = session?.id
@@ -392,40 +371,29 @@ export function ChatPage() {
   // A server that streams its changes says when this chat's session moves; the timer is a net.
   const streamOpen = useLive(profile)
   useEffect(() => (id ? watchChat(id) : undefined), [id])
-  useEffect(() => {
-    if (!id || !hasMessages) return
-    const catchUp = () => {
-      if (document.visibilityState !== "visible") return
-      reattachRun(id).catch(() => undefined)
-      reconcileHistory(id).catch(() => undefined)
-    }
-    catchUp()
-    const timer = window.setInterval(catchUp, streamOpen ? SAFETY_MS : CATCH_UP_MS)
-    document.addEventListener("visibilitychange", catchUp)
-    window.addEventListener("online", catchUp)
-    return () => {
-      window.clearInterval(timer)
-      document.removeEventListener("visibilitychange", catchUp)
-      window.removeEventListener("online", catchUp)
-    }
-  }, [id, hasMessages, updatedAt, streamOpen])
+  usePoll(
+    () => {
+      if (!id) return
+      reattachRun(id).catch(quietly("Reattaching a run"))
+      reconcileHistory(id).catch(quietly("Catching up a chat"))
+    },
+    streamOpen ? SAFETY_MS : CATCH_UP_MS,
+    [id, updatedAt],
+    { active: Boolean(id && hasMessages) },
+  )
 
   // A session not started yet names the repos it will work in; the project screen hands its project
   // over, and it's read again here regardless.
   const handed = (useLocation().state as { project?: HermesProject } | null)?.project
-  const [fetchedProject, setFetchedProject] = useState<HermesProject>()
   const projectId = session?.projectId
+  const projects = useProjects(
+    projectId && baseUrl && apiKey !== undefined ? { baseUrl, apiKey } : undefined,
+  )
+  const fetchedProject = projects?.find((p) => p.id === projectId)
   useEffect(() => {
-    if (!projectId || hasMessages || !connection) return
-    const [baseUrl, apiKey] = connection.split("\n")
-    let cancelled = false
-    listProjects({ baseUrl, apiKey })
-      .then((all) => !cancelled && setFetchedProject(all.find((p) => p.id === projectId)))
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
-  }, [projectId, hasMessages, connection])
+    if (!projectId || hasMessages || !baseUrl || apiKey === undefined) return
+    readProjects({ baseUrl, apiKey }).catch(quietly("Reading projects"))
+  }, [projectId, hasMessages, baseUrl, apiKey])
   const project = [fetchedProject, handed].find((p) => p && p.id === projectId)
   const sessionRepos: RepoRef[] = session?.worktree?.repos.length
     ? session.worktree.repos
@@ -723,7 +691,7 @@ export function ChatPage() {
                 <PrPill
                   key={pr.repo + "#" + pr.number}
                   pr={pr}
-                  label={computePrLabel(pr, session.prs ?? [])}
+                  label={prLabel(pr, session.prs ?? [])}
                   className="shrink-0"
                 />
               ))}

@@ -1,5 +1,6 @@
 import { toast } from "sonner"
 
+import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import {
   db,
   getActiveProfile,
@@ -25,7 +26,6 @@ import {
   hasPluginFeature,
   HermesError,
   labelSession,
-  liveRunOf,
   queueAction,
   respondToApproval,
   respondToClarify,
@@ -49,6 +49,7 @@ import { liveTurn, patchStats, reconcileHistory } from "@/lib/history"
 import { isLive } from "@/lib/live"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { randomId } from "@/lib/utils"
+import { readLiveRuns } from "@/lib/waiting"
 import { onWake } from "@/lib/wake"
 import { ensureSessionWorkspace, refreshPrs, refreshWorkspace } from "@/lib/workspace"
 
@@ -63,7 +64,6 @@ const FLUSH_INTERVAL_MS = 50
  * the request ever failing (a phone that slept, a tunnel that dropped it), which would hold the
  * reply on its last tool call for good.
  */
-const POLL_TIMEOUT_MS = 15_000
 /** How often a run whose events can't be read is polled, with the transcript. */
 const POLL_MS = 3000
 /**
@@ -427,7 +427,7 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
     const watcher = new AbortController()
     const timer = window.setInterval(() => {
       if (watcher.signal.aborted || current.aborted || signal.aborted) return
-      void applyStatus(AbortSignal.any([current, AbortSignal.timeout(POLL_TIMEOUT_MS)])).then(
+      void applyStatus(AbortSignal.any([current, AbortSignal.timeout(READ_TIMEOUT_MS)])).then(
         (outcome) => {
           if (outcome) {
             watcher.abort()
@@ -453,7 +453,7 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
     const woken = new AbortController()
     const stopWaking = onWake(() => woken.abort(new DOMException("Woken", "AbortError")))
     const current = AbortSignal.any([signal, woken.signal])
-    const timed = () => AbortSignal.any([current, AbortSignal.timeout(POLL_TIMEOUT_MS)])
+    const timed = () => AbortSignal.any([current, AbortSignal.timeout(READ_TIMEOUT_MS)])
     try {
       if (!polling) {
         const lastSeq = draft.runSeq ?? -1
@@ -935,14 +935,12 @@ export async function reattachRun(conversationId: string) {
   if (!stale) return
   // Hermes only keys the session by our id with an API key, so only then can the run be looked up,
   // and only the plugin lists runs.
+  // Read through the shared poll, so the sidebar and the project screen hear the same answer.
   const live =
     profile.apiKey && !profile.disabled
-      ? await liveRunOf(
-          { baseUrl: profile.baseUrl, apiKey: profile.apiKey },
-          conversation.hermesSessionId,
-        ).catch(() => undefined)
+      ? await readLiveRuns({ baseUrl: profile.baseUrl, apiKey: profile.apiKey })
       : undefined
-  const runId = stale.runId ?? live?.runId
+  const runId = stale.runId ?? live?.runIds[conversation.hermesSessionId]
   if (!runId) {
     // Nothing is running for it: a streamed chat completion died with the tab, or the run never
     // started.

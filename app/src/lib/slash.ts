@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 
+import { connectionKey } from "@/lib/connection"
 import { listSkills, type HermesConfig, type Skill } from "@/lib/hermes"
 
 export type LocalCommand = "new" | "settings"
@@ -44,7 +45,7 @@ const requests = new Map<string, Promise<Skill[]>>()
 const loaded = new Map<string, Skill[]>()
 
 function cacheKey({ baseUrl, apiKey }: HermesConfig) {
-  return `${baseUrl}\n${apiKey}`
+  return connectionKey({ baseUrl, apiKey })
 }
 
 async function loadSkills({ baseUrl, apiKey }: HermesConfig) {

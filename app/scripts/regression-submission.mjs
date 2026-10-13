@@ -33,7 +33,7 @@ try {
   }, mock)
   await page.reload()
   await page
-    .getByRole("navigation", { name: "Conversations" })
+    .getByRole("navigation", { name: "Recents" })
     .getByText("Overlap test", { exact: true })
     .waitFor()
 

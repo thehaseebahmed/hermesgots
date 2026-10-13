@@ -15,6 +15,7 @@ import {
 import { Link } from "react-router"
 import { toast } from "sonner"
 
+import { HOST_WORK_MS, LIST_MS, SAFETY_MS } from "@/lib/freshness"
 import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { useOpenDrawer } from "@/components/drawer-context"
@@ -24,20 +25,18 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Spinner } from "@/components/ui/spinner"
 import { listEnabledProfiles, type Profile } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
-import { SAFETY_MS, useAllLive, useAnyChange } from "@/lib/live"
+import { useAllLive, useAnyChange } from "@/lib/live"
+import { readProjects } from "@/lib/projects"
+import { usePoll } from "@/lib/poll"
 import {
   HermesError,
   deleteProject,
-  listProjects,
   retryProject,
   type HermesConfig,
   type HermesProject,
 } from "@/lib/hermes"
 import { folderName } from "@/lib/workspace"
 
-const REFRESH_MS = 60_000
-// While a project is being cloned: the plugin does the work, this just watches for it to finish.
-const CLONING_REFRESH_MS = 3_000
 // Above the floating New project button: its bottom padding, its height and a gap.
 const DAY_MS = 86_400_000
 
@@ -88,7 +87,7 @@ function describeError(error: unknown) {
 
 async function loadBot({ id: profileId, ...config }: Target): Promise<BotResult> {
   try {
-    return { profileId, projects: await listProjects(config) }
+    return { profileId, projects: await readProjects(config) }
   } catch (reason) {
     // Hermes's 404 for an unknown route has no CORS headers, so a missing plugin can also fail with
     // no status at all.
@@ -113,20 +112,7 @@ export function CodePage() {
   const streaming = useAllLive(profiles)
   const changes = useAnyChange("projects")
 
-  useEffect(() => {
-    const timer = setInterval(
-      () => {
-        if (document.visibilityState === "visible") refresh()
-      },
-      streaming ? SAFETY_MS : REFRESH_MS,
-    )
-    const onVisible = () => document.visibilityState === "visible" && refresh()
-    document.addEventListener("visibilitychange", onVisible)
-    return () => {
-      clearInterval(timer)
-      document.removeEventListener("visibilitychange", onVisible)
-    }
-  }, [refresh, streaming])
+  usePoll(refresh, streaming ? SAFETY_MS : LIST_MS, [], { immediate: false })
 
   const cloning = results?.some(
     (result) =>
@@ -137,13 +123,11 @@ export function CodePage() {
           p.folders.some((f) => f.status === "cloning" || f.status === "removing"),
       ),
   )
-  useEffect(() => {
-    if (!cloning || streaming) return
-    const timer = setInterval(() => {
-      if (document.visibilityState === "visible") setTick((n) => n + 1)
-    }, CLONING_REFRESH_MS)
-    return () => clearInterval(timer)
-  }, [cloning, streaming])
+  usePoll(() => setTick((n) => n + 1), HOST_WORK_MS, [], {
+    active: Boolean(cloning && !streaming),
+    immediate: false,
+    onShow: false,
+  })
 
   // Sync rewrites profile rows often; only a change to what's fetched should fetch again.
   const targetsKey = JSON.stringify(

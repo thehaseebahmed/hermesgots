@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 
+import { connectionKey } from "@/lib/connection"
 import { callFunction, failure, functionUrl } from "@/lib/account"
 import { checkHealth } from "@/lib/hermes"
 import {
@@ -233,10 +234,11 @@ async function pull() {
 export function useReachable(profile: Profile | undefined) {
   const [state, setState] = useState<{ key: string; ok: boolean }>()
   const [tick, setTick] = useState(0)
-  const key = profile && !profile.disabled ? `${profile.baseUrl}\n${profile.apiKey}` : ""
+  const baseUrl = profile && !profile.disabled ? profile.baseUrl : undefined
+  const apiKey = profile?.apiKey ?? ""
+  const key = baseUrl === undefined ? "" : connectionKey({ baseUrl, apiKey })
   useEffect(() => {
-    if (!key) return
-    const [baseUrl, apiKey] = key.split("\n")
+    if (baseUrl === undefined) return
     let cancelled = false
     let timer: number | undefined
     checkHealth({ baseUrl, apiKey }).then(
@@ -252,6 +254,6 @@ export function useReachable(profile: Profile | undefined) {
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [key, tick])
+  }, [key, baseUrl, apiKey, tick])
   return state?.key === key && key ? state.ok : undefined
 }

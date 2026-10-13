@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import Dexie from "dexie"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   ArchiveIcon,
@@ -15,8 +16,10 @@ import {
 import { Link, useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
 
+import { HOST_WORK_MS, PR_PENDING_MS, SAFETY_MS, SESSION_REREAD_MS } from "@/lib/freshness"
+import { quietly } from "@/lib/report"
 import { ChatHeader } from "@/components/chat/chat-header"
-import { prLook } from "@/components/chat/pr-look"
+import { prLabel, prLook } from "@/components/chat/pr-look"
 import { PrRow } from "@/components/chat/pr-pill"
 import { ProjectSettings } from "@/components/project-settings"
 import {
@@ -39,55 +42,28 @@ import {
   db,
   deleteConversation,
   type Conversation,
-  type Profile,
   type PullRequestRef,
 } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useDraft } from "@/lib/drafts"
-import { SAFETY_MS, useChanges, useLive } from "@/lib/live"
+import { useChanges, useLive } from "@/lib/live"
+import { usePoll } from "@/lib/poll"
+import { waitsOnUser } from "@/lib/theseus"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { cn } from "@/lib/utils"
-import { reasonText, useWaiting, type WaitingReason } from "@/lib/waiting"
-import {
-  deleteProject,
-  listLiveRuns,
-  listProjects,
-  type HermesProject,
-  type LiveRunStatus,
-} from "@/lib/hermes"
+import { reasonText, useLiveRuns, useWaiting, type WaitingReason } from "@/lib/waiting"
+import { deleteProject, type HermesProject } from "@/lib/hermes"
+import { readProjects, useProjects } from "@/lib/projects"
 import {
   projectRepos,
-  PR_PENDING_MS,
   prChecksPending,
   refreshPrs,
   refreshWorkspace,
-  sessionState,
+  sessionGroup,
   type SessionState,
 } from "@/lib/workspace"
 
-/**
- * Compute the display label for a PR based on all PRs in the session.
- * Rules:
- * 1. Single PR, single repo → "PR #142"
- * 2. Multiple PRs from same repo → "repo #142"
- * 3. PRs from different repos, same owner → "repo #142"
- * 4. PRs from different owners → "owner/repo #142"
- */
-function computePrLabel(pr: PullRequestRef, allPrs: PullRequestRef[]) {
-  if (allPrs.length === 1) return `PR #${pr.number}`
-  const [owner] = pr.repo.split("/")
-  const sameOwner = allPrs.every((p) => p.repo.startsWith(`${owner}/`))
-  const uniqueRepos = new Set(allPrs.map((p) => p.repo))
-  if (uniqueRepos.size === 1) return `${pr.repo.split("/")[1]} #${pr.number}`
-  if (sameOwner) return `${pr.repo.split("/")[1]} #${pr.number}`
-  return `${pr.repo} #${pr.number}`
-}
-
-/** How often the plugin is asked which sessions have a run in flight, while the screen is on. */
-const LIVE_MS = 10_000
-/** While a repo is being added or removed: the plugin does the work, this watches for it to finish. */
-const CHANGING_MS = 3_000
 const DAY_MS = 86_400_000
 const GROUPS: { state: SessionState; label: string }[] = [
   { state: "working", label: "Working" },
@@ -101,35 +77,6 @@ const FOLD_OVER = 5
 
 function serverKey(baseUrl: string) {
   return baseUrl.trim().replace(/\/+$/, "").replace(/\/v1$/, "")
-}
-
-/** Sessions with a run in flight on the bot's server, by Hermes session id. */
-function useLiveRuns(profile: Profile | undefined) {
-  const [live, setLive] = useState<Record<string, LiveRunStatus>>({})
-  const connection = profile && `${profile.baseUrl}\n${profile.apiKey}`
-  // A server that streams its changes says when a run starts, ends or waits; the timer is a net.
-  const streaming = useLive(profile)
-  const changes = useChanges("runs", profile)
-  useEffect(() => {
-    if (!connection) return
-    const [baseUrl, apiKey] = connection.split("\n")
-    let cancelled = false
-    const poll = () => {
-      if (document.visibilityState !== "visible") return
-      listLiveRuns({ baseUrl, apiKey })
-        .then((next) => !cancelled && setLive(next))
-        .catch(() => undefined)
-    }
-    poll()
-    const timer = window.setInterval(poll, streaming ? SAFETY_MS : LIVE_MS)
-    document.addEventListener("visibilitychange", poll)
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-      document.removeEventListener("visibilitychange", poll)
-    }
-  }, [connection, streaming, changes])
-  return live
 }
 
 /**
@@ -160,7 +107,10 @@ export function ProjectPage({
   }, [back])
   const passed = (useLocation().state as { project?: HermesProject } | null)?.project
   const profile = useLiveQuery(() => db.profiles.get(profileId), [profileId])
-  const [fetched, setFetched] = useState<HermesProject>()
+  const baseUrl = profile?.baseUrl
+  const apiKey = profile?.apiKey
+  const server = baseUrl !== undefined && apiKey !== undefined ? { baseUrl, apiKey } : undefined
+  const fetched = useProjects(server)?.find((p) => p.id === projectId)
   // The Code screen hands the project over, so it shows at once; it's read again here regardless.
   const project = fetched ?? (passed?.id === projectId ? passed : undefined)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -174,61 +124,55 @@ export function ProjectPage({
   const changing = project?.folders.some((f) => f.status === "cloning" || f.status === "removing")
 
   useEffect(() => {
-    if (!profile) return
-    let cancelled = false
-    listProjects(profile)
-      .then((all) => {
-        const found = all.find((p) => p.id === projectId)
-        if (!cancelled && found) setFetched(found)
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
-  }, [profile, projectId, reads, projectChanges])
+    if (baseUrl === undefined || apiKey === undefined) return
+    readProjects({ baseUrl, apiKey }).catch(quietly("Reading projects"))
+  }, [baseUrl, apiKey, reads, projectChanges])
 
-  useEffect(() => {
-    if (!changing) return
-    const timer = window.setInterval(
-      () => {
-        if (document.visibilityState === "visible") setReads((n) => n + 1)
-      },
-      streaming ? SAFETY_MS : CHANGING_MS,
-    )
-    return () => window.clearInterval(timer)
-  }, [changing, streaming])
+  usePoll(() => setReads((n) => n + 1), streaming ? SAFETY_MS : HOST_WORK_MS, [], {
+    active: Boolean(changing),
+    immediate: false,
+    onShow: false,
+  })
 
-  // Bots on one server share its projects, so their sessions all belong here.
+  // Bots on one server share its projects, so their sessions all belong here. With them, what this
+  // device sees of its own turns: a reply streaming, an approval or a question waiting. Only a reply
+  // in flight can carry those (a finished turn expires its approval and question), and it's the
+  // newest reply, so each session's messages are read back only as far as that, past any queued
+  // after it.
   const listed = useLiveQuery(async () => {
-    if (!profile) return { rows: [] as Conversation[], now: Date.now() }
+    const local: Record<string, { any?: boolean; streaming?: boolean; waiting?: boolean }> = {}
+    if (!profile) return { rows: [] as Conversation[], local, now: Date.now() }
     const server = serverKey(profile.baseUrl)
     const bots = new Set(
       (await db.profiles.toArray()).filter((p) => serverKey(p.baseUrl) === server).map((p) => p.id),
     )
-    const rows = await db.conversations.where("projectId").equals(projectId).toArray()
-    return {
-      rows: rows.filter((c) => bots.has(c.profileId)).sort((a, b) => b.updatedAt - a.updatedAt),
-      now: Date.now(),
-    }
+    const rows = (await db.conversations.where("projectId").equals(projectId).toArray())
+      .filter((c) => bots.has(c.profileId))
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+    await Promise.all(
+      rows.map(async (c) => {
+        const tail = await db.messages
+          .where("[conversationId+createdAt]")
+          .between([c.id, Dexie.minKey], [c.id, Dexie.maxKey])
+          .reverse()
+          .until((m) => m.role === "assistant", true)
+          .toArray()
+        if (!tail.length) return
+        local[c.id] = {
+          any: true,
+          streaming: tail.some((m) => m.status === "streaming"),
+          waiting: tail.some(
+            (m) => (m.approval && !m.approval.resolved) || (m.clarify && !m.clarify.resolved),
+          ),
+        }
+      }),
+    )
+    return { rows, local, now: Date.now() }
   }, [profile, projectId])
   const rows = listed?.rows
+  const local = listed?.local
   const now = listed?.now ?? 0
 
-  // What this device sees of its own turns: a reply streaming, an approval or a question waiting.
-  const ids = rows?.map((c) => c.id) ?? []
-  const local = useLiveQuery(async () => {
-    const signals: Record<string, { any?: boolean; streaming?: boolean; waiting?: boolean }> = {}
-    if (ids.length === 0) return signals
-    const messages = await db.messages.where("conversationId").anyOf(ids).toArray()
-    for (const m of messages) {
-      const signal = (signals[m.conversationId] ??= {})
-      signal.any = true
-      if (m.status === "streaming") signal.streaming = true
-      if ((m.approval && !m.approval.resolved) || (m.clarify && !m.clarify.resolved))
-        signal.waiting = true
-    }
-    return signals
-  }, [ids.join("\n")])
   // What the server says waits on the user, including a Theseus run's plan, checkpoints or approval.
   const waits = useWaiting()
 
@@ -236,33 +180,35 @@ export function ProjectPage({
   // `updatedAt`, since their messages load only when opened.
   const sessions = rows?.filter((c) => c.draftAt || c.updatedAt > c.createdAt || local?.[c.id]?.any)
 
-  // A session's PRs are read when it's open; this reads them for every session once per visit, its
-  // worktree first when this device hasn't seen it (a session started elsewhere).
-  const read = useRef(new Set<string>())
+  // A session's PRs are read when it's open; this reads them for every session as the screen opens,
+  // its worktree first when this device hasn't seen it (a session started elsewhere). While the
+  // screen stays open it reads both again, at most every minute, as the sessions change, so a plan
+  // approved or a pull request opened on another device shows here too.
+  const read = useRef(new Map<string, number>())
   useEffect(() => {
+    const now = Date.now()
     for (const c of sessions ?? []) {
-      if (read.current.has(c.id)) continue
-      read.current.add(c.id)
-      void (c.worktree ? Promise.resolve() : refreshWorkspace(c.id)).then(() => refreshPrs(c.id))
+      const last = read.current.get(c.id)
+      if (last !== undefined && now - last < SESSION_REREAD_MS) continue
+      read.current.set(c.id, now)
+      const workspace = !c.worktree || last !== undefined
+      void (workspace ? refreshWorkspace(c.id) : Promise.resolve()).then(() => refreshPrs(c.id))
     }
   }, [sessions])
   // The open session's chat pane polls its own PR; exclude it here to avoid duplicate reads.
-  // Keep the remaining ids as one stable string: depending on `sessions` recreates the interval on
-  // every Dexie write, before it has time to tick.
-  const runningChecks = (sessions ?? [])
-    .filter((c) => c.id !== openSession && prChecksPending(c.prs))
-    .map((c) => c.id)
-    .join("\n")
+  const runningChecks = (sessions ?? []).filter(
+    (c) => c.id !== openSession && prChecksPending(c.prs),
+  )
   // While any does, read its pull requests again every few seconds, so the rows here keep up with
   // the pill. Forced, so the freshness gate doesn't skip a tick that lands just inside its window.
-  useEffect(() => {
-    if (!runningChecks) return
-    const timer = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return
-      for (const id of runningChecks.split("\n")) void refreshPrs(id, { force: true })
-    }, PR_PENDING_MS)
-    return () => window.clearInterval(timer)
-  }, [runningChecks])
+  usePoll(
+    () => {
+      for (const c of runningChecks) void refreshPrs(c.id, { force: true })
+    },
+    PR_PENDING_MS,
+    [],
+    { active: runningChecks.length > 0, immediate: false, onShow: false },
+  )
 
   const prs = projectPrs(sessions ?? [])
   // The header names the repos, like the chips under it do: the one repo's name, or a count.
@@ -322,24 +268,20 @@ export function ProjectPage({
   }
 
   // A Theseus run sits in `theseus wait` (a running turn) while it waits on the user.
-  const theseusWaits = (c: Conversation) => waits[c.hermesSessionId]?.kind === "theseus"
-  // A session left with an open pull request is waiting to be reviewed and merged, not idle —
-  // unless its checks are still running, which is work it has left to do.
-  const groupState = (c: Conversation) => {
-    const state = sessionState(c, live[c.hermesSessionId], {
+  const theseusWaits = (c: Conversation) => {
+    const reason = waits[c.hermesSessionId]
+    return reason?.kind === "theseus" && waitsOnUser(reason)
+  }
+  const placed = (sessions ?? []).map((c) => ({
+    c,
+    ...sessionGroup(c, live[c.hermesSessionId], {
       ...local?.[c.id],
       waiting: local?.[c.id]?.waiting || theseusWaits(c),
-    })
-    if (state !== "idle" || !hasOpenPr(c)) return { state, prTick: false }
-    return prChecksPending(c.prs)
-      ? { state: "working" as const, prTick: false }
-      : { state: "waiting" as const, prTick: true }
-  }
+    }),
+  }))
   const grouped = GROUPS.map((group) => ({
     ...group,
-    sessions: (sessions ?? [])
-      .map((c) => ({ c, ...groupState(c) }))
-      .filter((s) => s.state === group.state),
+    sessions: placed.filter((s) => s.state === group.state),
   })).filter((group) => group.sessions.length > 0)
 
   return (
@@ -503,10 +445,6 @@ export function ProjectPage({
 
 const names = new Intl.ListFormat(undefined, { type: "conjunction" })
 
-/** A pull request still open (a draft included) is a session waiting to be reviewed and merged. */
-const hasOpenPr = (c: Conversation) =>
-  (c.prs ?? []).some((pr) => pr.state === "open" || pr.state === "draft")
-
 /** In place of the New session button: why there's none right now. */
 function BottomNote({ icon, children }: { icon: ReactNode; children: ReactNode }) {
   return (
@@ -534,7 +472,7 @@ function prLine(session: Conversation) {
   return prs
     .map((pr) => {
       const state = prLook(pr).label
-      return `${computePrLabel(pr, prs)} · ${state[0].toUpperCase() + state.slice(1)}`
+      return `${prLabel(pr, prs)} · ${state[0].toUpperCase() + state.slice(1)}`
     })
     .join(", ")
 }

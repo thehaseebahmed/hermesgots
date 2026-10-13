@@ -1,6 +1,8 @@
 import { useSyncExternalStore } from "react"
 import { liveQuery } from "dexie"
 
+import { noteFailure } from "@/lib/report"
+import { createSignal } from "@/lib/store"
 import {
   deleteDoc,
   getDoc,
@@ -89,21 +91,15 @@ let state: SyncState = {
   syncing: false,
   chatStores: {},
 }
-const listeners = new Set<() => void>()
+const stateSignal = createSignal()
 
 function setState(patch: Partial<SyncState>) {
   state = { ...state, ...patch }
-  listeners.forEach((listener) => listener())
+  stateSignal.notify()
 }
 
 export function useSyncState() {
-  return useSyncExternalStore(
-    (listener) => {
-      listeners.add(listener)
-      return () => listeners.delete(listener)
-    },
-    () => state,
-  )
+  return useSyncExternalStore(stateSignal.subscribe, () => state)
 }
 
 let remoteVault: { vault: Vault; etag?: string } | null = null
@@ -445,7 +441,8 @@ async function syncPluginChats(profile: Profile) {
   let merged: Doc<ChatValue>
   try {
     merged = await mergeChatList(profile, local)
-  } catch {
+  } catch (error) {
+    noteFailure(`Syncing ${profile.name}'s chats`, error)
     return false
   }
   await applyChats(profile.id, mergeDocs(merged, local).pull)

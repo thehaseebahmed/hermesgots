@@ -45,19 +45,17 @@ try {
   }, mock)
   await page.reload()
   await page
-    .getByRole("navigation", { name: "Conversations" })
+    .getByRole("navigation", { name: "Recents" })
     .getByText("Plain chat", { exact: true })
     .waitFor()
   assert.equal(
     await page
-      .getByRole("navigation", { name: "Conversations" })
+      .getByRole("navigation", { name: "Recents" })
       .getByText("Code session", { exact: true })
       .count(),
     0,
     "Code sessions must not appear under bot chats",
   )
-  await page.getByRole("button", { name: "Test bot", exact: true }).click()
-  await page.waitForURL("**/c/plain")
   const profileId = await page.evaluate(
     async () => (await (await import("/src/lib/db.ts")).db.profiles.toArray())[0].id,
   )
@@ -65,7 +63,7 @@ try {
   await page.getByText("Code session", { exact: true }).waitFor()
   await page.getByText("Code session", { exact: true }).click()
   await page.waitForURL("**/c/code")
-  console.log("PASS: sessions stay in Code; bot selection opens the newest plain chat")
+  console.log("PASS: sessions stay in Code and open from their project")
 } finally {
   await browser.close()
 }

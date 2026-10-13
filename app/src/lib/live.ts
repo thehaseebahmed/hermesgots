@@ -1,6 +1,10 @@
 import { useSyncExternalStore } from "react"
 import { liveQuery } from "dexie"
 
+import { MISSING_ROUTE_MS } from "@/lib/freshness"
+import { quietly } from "@/lib/report"
+import { connectionKey } from "@/lib/connection"
+import { cooldown } from "@/lib/cooldown"
 import { db, getSettings, updateConversation, type Profile } from "@/lib/db"
 import {
   followEvents,
@@ -22,19 +26,13 @@ import { syncNow } from "@/lib/sync"
 
 /** Backoff between reconnects. */
 const RETRY_MS = [1000, 2000, 5000, 10_000, 30_000]
-/** How long a plugin without the stream (an older one) is left alone before it's asked again. */
-const UNSUPPORTED_MS = 5 * 60_000
 /** A `runs` event often comes with a status the server sets a moment later. */
 const RUNS_SETTLE_MS = 300
-/** How often a screen asks anyway when its server streams the changes. */
-export const SAFETY_MS = 5 * 60_000
 
 export type Kind = "cron" | "runs" | "projects"
 type Connection = Pick<HermesConfig, "baseUrl" | "apiKey">
 
-/** One server and key: bots that share both share a stream. */
-export const connectionKey = (profile: Connection) =>
-  `${profile.baseUrl.trim().replace(/\/+$/, "")}\n${profile.apiKey}`
+export { connectionKey }
 
 interface Stream {
   controller: AbortController
@@ -43,7 +41,8 @@ interface Stream {
 const streams = new Map<string, Stream>()
 /** Where each stream got to, so a reconnect only hears what it missed. */
 const cursors = new Map<string, number>()
-const unsupported = new Map<string, number>()
+/** Plugins without the stream. */
+const unsupported = cooldown(MISSING_ROUTE_MS)
 /** Connections whose stream is open. */
 let live = new Set<string>()
 /** Changes heard per connection and kind, for screens to refresh on. */
@@ -88,7 +87,7 @@ function statusOf(profile?: Connection | null): LiveStatus {
   if (!profile) return "off"
   const key = connectionKey(profile)
   if (live.has(key)) return "push"
-  if (Date.now() - (unsupported.get(key) ?? -Infinity) < UNSUPPORTED_MS) return "unsupported"
+  if (unsupported.cooling(key)) return "unsupported"
   return streams.has(key) ? "connecting" : "off"
 }
 
@@ -158,7 +157,7 @@ function catchUpChat(conversationId: string) {
   }
   catchingUp.add(conversationId)
   reconcileHistory(conversationId)
-    .catch(() => undefined)
+    .catch(quietly("Catching up a chat"))
     .finally(() => {
       catchingUp.delete(conversationId)
       if (catchUpAgain.delete(conversationId)) catchUpChat(conversationId)
@@ -239,7 +238,7 @@ function onEvent(key: string, event: string, data: Record<string, unknown>) {
       )
       break
     case "title":
-      void applyTitle(key, data.session_id).catch(() => undefined)
+      void applyTitle(key, data.session_id).catch(quietly("Reading a title"))
       break
     case "chats":
       void syncNow()
@@ -288,9 +287,9 @@ async function follow(config: HermesConfig, key: string, signal: AbortSignal) {
       })
     } catch (error) {
       if (!signal.aborted && (await lacksStream(config, error))) {
-        unsupported.set(key, Date.now())
+        unsupported.start(key)
         notify()
-        window.setTimeout(reconcileStreams, UNSUPPORTED_MS)
+        window.setTimeout(reconcileStreams, MISSING_ROUTE_MS)
         break
       }
     }
@@ -310,7 +309,7 @@ function reconcileStreams() {
     for (const profile of profiles) {
       if (profile.disabled || !profile.apiKey || !profile.baseUrl.trim()) continue
       const key = connectionKey(profile)
-      if (Date.now() - (unsupported.get(key) ?? -Infinity) < UNSUPPORTED_MS) continue
+      if (unsupported.cooling(key)) continue
       if (!wanted.has(key)) wanted.set(key, profile)
     }
   }

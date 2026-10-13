@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 
+import { DICTATION_INFO_MS } from "@/lib/freshness"
+import { createSignal } from "@/lib/store"
+import { connectionKey } from "@/lib/connection"
 import { db, type DictationPiece } from "@/lib/db"
 import {
   getDictationInfo,
@@ -8,6 +11,7 @@ import {
   type DictationInfo,
   type HermesConfig,
 } from "@/lib/hermes"
+import { usePoll } from "@/lib/poll"
 
 /**
  * Dictation: the clip is recorded here and turned into text by the bot's own faster-whisper,
@@ -17,24 +21,15 @@ import {
  * (`db.dictations`, under the composer's draft key). A bot whose host can't is never offered a mic.
  */
 
-const INFO_MS = 5 * 60 * 1000
 const infos = new Map<string, { at: number; info: DictationInfo | null }>()
-const listeners = new Set<() => void>()
-const notify = () => listeners.forEach((listener) => listener())
+const { subscribe, notify } = createSignal()
 
-function subscribe(listener: () => void) {
-  listeners.add(listener)
-  return () => {
-    listeners.delete(listener)
-  }
-}
-
-const infoKey = (config: HermesConfig) => `${config.baseUrl}\n${config.apiKey}`
+const infoKey = connectionKey
 
 async function readDictationInfo(config: HermesConfig, force = false) {
   const key = infoKey(config)
   const hit = infos.get(key)
-  if (!force && hit && Date.now() - hit.at < INFO_MS) return hit.info
+  if (!force && hit && Date.now() - hit.at < DICTATION_INFO_MS) return hit.info
   const info = await getDictationInfo(config).catch(() => null)
   infos.set(key, { at: Date.now(), info })
   notify()
@@ -46,12 +41,10 @@ export function useDictationInfo(config: HermesConfig) {
   const key = config.apiKey && config.baseUrl ? infoKey(config) : ""
   const info = useSyncExternalStore(subscribe, () => infos.get(key)?.info ?? null)
   const { baseUrl, apiKey } = config
-  useEffect(() => {
-    if (!key) return
-    void readDictationInfo({ baseUrl, apiKey })
-    const timer = window.setInterval(() => void readDictationInfo({ baseUrl, apiKey }), INFO_MS)
-    return () => window.clearInterval(timer)
-  }, [key, baseUrl, apiKey])
+  usePoll(() => void readDictationInfo({ baseUrl, apiKey }), DICTATION_INFO_MS, [baseUrl, apiKey], {
+    active: Boolean(key),
+    onShow: false,
+  })
   return key ? info : null
 }
 

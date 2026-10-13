@@ -1,12 +1,18 @@
+import { PR_MS, PR_PENDING_MS } from "@/lib/freshness"
+import { noteFailure } from "@/lib/report"
+import { connectionKey } from "@/lib/connection"
+import { cooldown } from "@/lib/cooldown"
 import { db, type Conversation, type PullRequestRef, type SessionMode } from "@/lib/db"
 import {
   ensureWorkspace,
+  getPluginFeatures,
   getSessionPrs,
   getWorkspace,
   HermesError,
   closeSession,
   removeWorkspace,
   setWorkspaceMode,
+  type HermesConfig,
   type HermesProject,
   type HermesProjectFolder,
   type KeptWorktree,
@@ -21,13 +27,8 @@ import { syncNow } from "@/lib/sync"
  * of it; this keeps a local copy.
  */
 
-/** Bots whose plugin has no workspace routes (an older plugin), and when they were last asked. */
-const unsupported = new Map<string, number>()
-const RETRY_MS = 5 * 60 * 1000
-/** How long a known pull request is trusted before it's read again. */
-const PR_MS = 30_000
-/** Checks still running are read again this often, so the pill shows them as they finish. */
-export const PR_PENDING_MS = 10_000
+/** Bots whose plugin has no workspace routes (an older plugin). */
+const unsupported = cooldown()
 
 /** Whether any of a session's pull requests still has checks running. */
 export const prChecksPending = (prs: PullRequestRef[] | undefined) =>
@@ -48,10 +49,21 @@ async function tracked(conversationId: string) {
   const profile = conversation && (await db.profiles.get(conversation.profileId))
   // Keyless chats have no session id Hermes knows.
   if (!conversation?.projectId || !profile?.apiKey || profile.disabled) return null
-  return { conversation, profile, key: `${profile.baseUrl}\n${profile.apiKey}` }
+  return { conversation, profile, key: connectionKey(profile) }
 }
 
-const cooling = (key: string) => Date.now() - (unsupported.get(key) ?? -Infinity) < RETRY_MS
+/**
+ * Whether a failed read means the plugin lacks the route (an older one) rather than a blip: a busy
+ * host, a dropped connection or a refused key is asked again on the next read, not left 5 minutes.
+ * Hermes's 404 for an unknown route skips its CORS middleware, so it can arrive with no status.
+ */
+async function lacksRoute(server: HermesConfig, error: unknown, feature: string) {
+  if (!(error instanceof HermesError) || (error.status && error.status !== 404)) return false
+  return getPluginFeatures(server).then(
+    (features) => !features.includes(feature),
+    () => false,
+  )
+}
 
 async function store(conversationId: string, workspace: SessionWorkspace | null) {
   if (!workspace) return
@@ -112,15 +124,16 @@ export async function ensureSessionWorkspace(
 /** Reads the session's workspace from the plugin: its mode and whether a plan is waiting. */
 export async function refreshWorkspace(conversationId: string) {
   const found = await tracked(conversationId)
-  if (!found || cooling(found.key)) return
+  if (!found || unsupported.cooling(found.key)) return
   let workspace
   try {
     workspace = await getWorkspace(found.profile, found.conversation.hermesSessionId)
-  } catch {
-    unsupported.set(found.key, Date.now())
+  } catch (error) {
+    noteFailure("Reading a session's workspace", error)
+    if (await lacksRoute(found.profile, error, "sessions")) unsupported.start(found.key)
     return
   }
-  unsupported.delete(found.key)
+  unsupported.clear(found.key)
   await store(conversationId, workspace)
 }
 
@@ -128,7 +141,12 @@ export async function refreshWorkspace(conversationId: string) {
 export async function refreshPrs(conversationId: string, { force = false } = {}) {
   const found = await tracked(conversationId)
   // A discarded session's pull requests stay as it closed them; its branch is gone.
-  if (!found?.conversation.worktree || found.conversation.discardedAt || cooling(found.key)) return
+  if (
+    !found?.conversation.worktree ||
+    found.conversation.discardedAt ||
+    unsupported.cooling(found.key)
+  )
+    return
   const { conversation, profile } = found
   const newest = Math.min(...(conversation.prs ?? []).map((pr) => pr.at))
   const trusted = prChecksPending(conversation.prs) ? PR_PENDING_MS : PR_MS
@@ -136,11 +154,12 @@ export async function refreshPrs(conversationId: string, { force = false } = {})
   let prs
   try {
     prs = await getSessionPrs(profile, conversation.hermesSessionId)
-  } catch {
-    unsupported.set(found.key, Date.now())
+  } catch (error) {
+    noteFailure("Reading a session's pull requests", error)
+    if (await lacksRoute(profile, error, "prs")) unsupported.start(found.key)
     return
   }
-  unsupported.delete(found.key)
+  unsupported.clear(found.key)
   const at = Date.now()
   await db.conversations.update(conversationId, { prs: prs.map((pr) => ({ ...pr, at })) })
   // The plugin resolves the session once its pull request merges; the chat list brings that here.
@@ -225,6 +244,27 @@ export function sessionState(
     return "waiting"
   if (local?.streaming || live === "running") return "working"
   return "idle"
+}
+
+/** A pull request still open (a draft included) is a session waiting to be reviewed and merged. */
+export const hasOpenPr = (conversation: Pick<Conversation, "prs">) =>
+  (conversation.prs ?? []).some((pr) => pr.state === "open" || pr.state === "draft")
+
+/**
+ * Where a session stands as the project screen groups it: an idle session left with an open pull
+ * request waits to be reviewed and merged (`prTick`), unless its checks are still running, which is
+ * work it has left to do.
+ */
+export function sessionGroup(
+  conversation: Pick<Conversation, "resolvedAt" | "discardedAt" | "planPending" | "prs">,
+  live?: LiveRunStatus,
+  local?: { streaming?: boolean; waiting?: boolean },
+): { state: SessionState; prTick: boolean } {
+  const state = sessionState(conversation, live, local)
+  if (state !== "idle" || !hasOpenPr(conversation)) return { state, prTick: false }
+  return prChecksPending(conversation.prs)
+    ? { state: "working", prTick: false }
+    : { state: "waiting", prTick: true }
 }
 
 const PLAN_GO_AHEAD = "Go ahead with the plan"

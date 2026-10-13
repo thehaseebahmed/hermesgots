@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { BotIcon, CheckIcon, ChevronRightIcon, PauseIcon } from "lucide-react"
 
+import { AGENT_WORK_MS } from "@/lib/freshness"
 import { Banner } from "@/components/banner"
 import { MessageItem } from "@/components/chat/message-item"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
@@ -19,7 +20,6 @@ import { toMessages } from "@/lib/history"
 import { activityOf } from "@/lib/tools"
 import { cn } from "@/lib/utils"
 
-const POLL_MS = 4000
 const RECENT_ROWS = 40
 const STEPS = 2
 
@@ -105,7 +105,7 @@ function useTranscript(server: HermesConfig, agent: DelegatedAgent, limit: numbe
         .catch(() => !cancelled && setFailed(true))
     }
     read()
-    const timer = running ? window.setInterval(read, POLL_MS) : undefined
+    const timer = running ? window.setInterval(read, AGENT_WORK_MS) : undefined
     return () => {
       cancelled = true
       window.clearInterval(timer)
