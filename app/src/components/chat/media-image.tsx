@@ -48,21 +48,23 @@ export function MediaTag({ conversationId, paths }: { conversationId: string; pa
   // join keys the fetch below.
   const joined = paths.join("\n")
   const list = joined.split("\n")
-  const [urls, setUrls] = useState<(string | null)[] | null>()
+  // By path, so a gallery that grows while the reply streams keeps the images it has, and a new
+  // tag is loading, not shown as text, until its read is in.
+  const [loaded, setLoaded] = useState<Map<string, string | null>>()
   useEffect(() => {
     let stale = false
-    void Promise.all(joined.split("\n").map((path) => loadMediaImage(conversationId, path))).then(
-      (next) => {
-        if (!stale) setUrls(next)
-      },
-    )
+    const paths = joined.split("\n")
+    void Promise.all(paths.map((path) => loadMediaImage(conversationId, path))).then((next) => {
+      if (!stale) setLoaded(new Map(paths.map((path, i) => [path, next[i]])))
+    })
     return () => {
       stale = true
     }
   }, [conversationId, joined])
-  if (!urls) return null
+  if (!loaded) return null
   if (list.length === 1) {
-    const url = urls[0]
+    const url = loaded.get(list[0])
+    if (url === undefined) return null
     return url ? <MediaImage src={url} /> : <Tag path={list[0]} />
   }
   return (
@@ -73,7 +75,11 @@ export function MediaTag({ conversationId, paths }: { conversationId: string; pa
       )}
     >
       {list.map((path, i) => {
-        const url = urls[i]
+        const url = loaded.get(path)
+        if (url === undefined)
+          return (
+            <div key={i} className="h-24 w-full rounded-xl border bg-muted/40 md:h-32 xl:h-40" />
+          )
         return url ? <MediaImage key={i} src={url} cell /> : <Tag key={i} path={path} />
       })}
     </div>

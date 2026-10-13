@@ -1,4 +1,5 @@
 import { MISSING_ROUTE_MS } from "@/lib/freshness"
+import { getPluginFeatures, HermesError, type HermesConfig } from "@/lib/hermes"
 
 /**
  * Servers whose plugin lacks a route (an older plugin), each left alone for `ms` before it's asked
@@ -11,4 +12,17 @@ export function cooldown(ms = MISSING_ROUTE_MS) {
     start: (key: string) => void since.set(key, Date.now()),
     clear: (key: string) => void since.delete(key),
   }
+}
+
+/**
+ * Whether a failed read means the plugin lacks the route (an older one) rather than a blip: a busy
+ * host, a dropped connection or a refused key is asked again on the next read, not left 5 minutes.
+ * Hermes's 404 for an unknown route skips its CORS middleware, so it can arrive with no status.
+ */
+export async function lacksRoute(server: HermesConfig, error: unknown, feature: string) {
+  if (!(error instanceof HermesError) || (error.status && error.status !== 404)) return false
+  return getPluginFeatures(server).then(
+    (features) => !features.includes(feature),
+    () => false,
+  )
 }

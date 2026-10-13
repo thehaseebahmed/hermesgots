@@ -1067,11 +1067,16 @@ export async function deleteProject(config: HermesConfig, id: string): Promise<v
  * Merges this device's chat list into the one the Memento plugin keeps, newer record winning, and
  * returns the merged list. A 404 (or a CORS-blocked one, with no status) means no plugin, or an older one.
  */
-export async function mergeChatList<T>(config: HermesConfig, chats: Doc<T>): Promise<Doc<T>> {
+export async function mergeChatList<T>(
+  config: HermesConfig,
+  chats: Doc<T>,
+  signal?: AbortSignal,
+): Promise<Doc<T>> {
   const response = await request(`${pluginRoot(config.baseUrl)}/chats`, {
     method: "POST",
     headers: headers(config),
     body: JSON.stringify({ chats }),
+    signal,
   })
   const body = await response.json()
   if (!body?.chats || typeof body.chats !== "object") throw new Error("Unexpected chat list")

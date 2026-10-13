@@ -48,6 +48,7 @@ import { refreshContext } from "@/lib/context"
 import { liveTurn, patchStats, reconcileHistory } from "@/lib/history"
 import { isLive } from "@/lib/live"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
+import { quietly } from "@/lib/report"
 import { randomId } from "@/lib/utils"
 import { readLiveRuns } from "@/lib/waiting"
 import { onWake } from "@/lib/wake"
@@ -78,6 +79,8 @@ const PLUGIN_SETTLE_MS = 1500
 const TITLED_TURNS = 3
 /** Hermes titles with a model call in the background, which can land after the reply ends. */
 const TITLE_CHECKS_MS = [0, 3000, 10000]
+/** A reply whose connection gave up is followed again after these waits, the last one repeating. */
+const REATTACH_MS = [2_000, 5_000, 15_000, 30_000, 60_000]
 const controllers = new Map<string, AbortController>()
 /** In-flight reply drafts by message id, so approval answers land in the draft being flushed. */
 const activeDrafts = new Map<string, { draft: Message; touch: () => void }>()
@@ -391,23 +394,22 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
   }
   // Once Hermes drops the event buffer, only the run's status is left to poll, and the transcript.
   let polling = false
-  let raisedFor: string | undefined
   let readTranscript: ((signal: AbortSignal) => Promise<void>) | undefined
   let failures = 0
   let errored = false
   // Raises an approval or question the run's status says it waits on, and expires one it no longer
-  // does. The events stream carries both too; `raisedFor` keeps each owner's raise single.
+  // does. The events stream carries both too, so an approval already on the reply isn't raised
+  // again, and neither is one answered while the read was out: Hermes saw it still waiting.
   const applyStatus = async (signal: AbortSignal) => {
+    const before = draft.approval
     const { outcome, approval, clarify } = await getRun(config, runId, signal)
     if (outcome) return { ...outcome, replaceContent: lost } as RunOutcome
     if (approval) {
-      const key = JSON.stringify([approval.command, approval.description])
-      if (key !== raisedFor) {
-        raisedFor = key
-        raiseApproval(turn, approval)
-      }
+      const shown = draft.approval
+      const same =
+        shown?.command === approval.command && shown?.description === approval.description
+      if (!same || (shown?.resolved && shown === before)) raiseApproval(turn, approval)
     } else {
-      raisedFor = undefined
       if (polling && draft.approval && !draft.approval.resolved) {
         draft.approval = { ...draft.approval, resolved: "expired" }
         touch()
@@ -606,6 +608,16 @@ async function requeueSteer(conversationId: string, text: string) {
   })
 }
 
+const reattachTries = new Map<string, number>()
+function reattachLater(conversationId: string) {
+  const tries = reattachTries.get(conversationId) ?? 0
+  reattachTries.set(conversationId, tries + 1)
+  window.setTimeout(
+    () => reattachRun(conversationId).catch(quietly("Reattaching a run")),
+    REATTACH_MS[Math.min(tries, REATTACH_MS.length - 1)],
+  )
+}
+
 /** Runs a turn on `/v1/runs` when Hermes has it, else streams a chat completion. */
 async function runTurn(
   turn: Turn,
@@ -624,9 +636,11 @@ async function runTurn(
     if (controller.signal.aborted) {
       draft.status = "stopped"
     } else if (draft.runId && retryable(error)) {
-      // Hermes may still be running it: leave the reply streaming for `reattachRun` to pick up.
+      // Hermes may still be running it: leave the reply streaming and follow it again soon. Until
+      // then it holds the chat's catch-up and queue, so the chat's own timer is too slow for it.
       draft.statusText = undefined
       await turn.close()
+      reattachLater(turn.conversationId)
       return draft.status
     } else {
       draft.status = "error"
@@ -634,6 +648,7 @@ async function runTurn(
         error instanceof HermesError ? error.message : "Something went wrong talking to Hermes."
     }
   }
+  reattachTries.delete(turn.conversationId)
   await finishTurn(turn, usage)
   // The plugin puts a leftover steer first in its own queue, and starts what waits there.
   if (await hostQueue(turn.config)) followHostQueue(turn.conversationId)
@@ -786,32 +801,17 @@ function modelOf(conversation: Conversation, profile: Profile) {
   return { model: chosen?.model ?? profile.model, provider: chosen?.provider }
 }
 
-/** `queuedId` sends a queued message, keeping its id so the bubble doesn't remount. */
-export async function sendMessage(
+/** Writes the user's message and the empty reply, before the turn opens. */
+async function prepareSend(
   conversationId: string,
-  text: string,
-  options: { queuedId?: string; attachments?: Attachment[] } = {},
+  queuedId: string | undefined,
+  content: string,
+  attachments: Attachment[],
 ) {
-  const { queuedId } = options
-  const content = text.trim()
-  const attachments = options.attachments ?? []
-  if ((!content && !attachments.length) || controllers.has(conversationId)) return
-  // Acquire the guard before any await: two concurrent calls for the same chat both
-  // passed it once and each started a run, duplicating the turn.
-  const controller = new AbortController()
-  controllers.set(conversationId, controller)
-
   const conversation = await db.conversations.get(conversationId)
-  if (!conversation) {
-    controllers.delete(conversationId)
-    return
-  }
+  if (!conversation) return undefined
   const profile = await profileFor(conversation.profileId)
-  if (!profile) {
-    controllers.delete(conversationId)
-    return
-  }
-
+  if (!profile) return undefined
   const history = await getMessages(conversationId)
   const now = Date.now()
   const userMessage: Message = {
@@ -843,6 +843,41 @@ export async function sendMessage(
         : {}),
     })
   })
+  return { conversation, profile, history, userMessage, reply }
+}
+
+/** Stop pressed while a turn sets up: nothing has started on Hermes yet, so nothing needs stopping. */
+function stopIfAborted(turn: Turn) {
+  if (turn.controller.signal.aborted) throw new DOMException("Aborted", "AbortError")
+}
+
+/** `queuedId` sends a queued message, keeping its id so the bubble doesn't remount. */
+export async function sendMessage(
+  conversationId: string,
+  text: string,
+  options: { queuedId?: string; attachments?: Attachment[] } = {},
+) {
+  const { queuedId } = options
+  const content = text.trim()
+  const attachments = options.attachments ?? []
+  if ((!content && !attachments.length) || controllers.has(conversationId)) return
+  // Acquire the guard before any await: two concurrent calls for the same chat both
+  // passed it once and each started a run, duplicating the turn.
+  const controller = new AbortController()
+  controllers.set(conversationId, controller)
+  // Until the turn opens and owns the guard, a throw (say IndexedDB's quota) must release it, or
+  // the chat can't send again until a reload.
+  const prepared = await prepareSend(conversationId, queuedId, content, attachments).catch(
+    (error: unknown) => {
+      controllers.delete(conversationId)
+      throw error
+    },
+  )
+  if (!prepared) {
+    controllers.delete(conversationId)
+    return
+  }
+  const { conversation, profile, history, userMessage, reply } = prepared
 
   const transcript: ChatMessage[] = history
     .filter((m) => m.status === "done" || (m.role === "assistant" && m.content))
@@ -856,6 +891,7 @@ export async function sendMessage(
     if (!config.apiKey) throw new HermesError("This bot has no API key. Link it in Settings.")
     // A project session works in its worktree; the plugin can't be told about it any other way.
     const workspace = await ensureSessionWorkspace(conversationId, content || attachments[0].name)
+    stopIfAborted(turn)
     let sent = attachments
     if (attachments.length) {
       try {
@@ -870,6 +906,7 @@ export async function sendMessage(
         throw error
       }
       await db.messages.update(userMessage.id, { attachments: sent })
+      stopIfAborted(turn)
     }
     const turnOptions = {
       ...modelOf(conversation, profile),

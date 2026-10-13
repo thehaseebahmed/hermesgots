@@ -1,6 +1,6 @@
 import { noteFailure } from "@/lib/report"
 import { connectionKey } from "@/lib/connection"
-import { cooldown } from "@/lib/cooldown"
+import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { db } from "@/lib/db"
 import { getSessionContext } from "@/lib/hermes"
 
@@ -24,8 +24,10 @@ export async function refreshContext(conversationId: string) {
     live = await getSessionContext(profile, conversation.hermesSessionId)
   } catch (error) {
     noteFailure("Reading context use", error)
+    // A blip keeps the figure until the next read; a plugin without the route has none to give,
+    // and one left from before would be older than the turns since.
+    if (!(await lacksRoute(profile, error, "context"))) return
     unsupported.start(key)
-    // Older than the turns since, so showing it would mislead.
     if (conversation.liveContext)
       await db.conversations.update(conversationId, { liveContext: undefined })
     return

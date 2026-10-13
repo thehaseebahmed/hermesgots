@@ -1,18 +1,16 @@
 import { PR_MS, PR_PENDING_MS } from "@/lib/freshness"
 import { noteFailure } from "@/lib/report"
 import { connectionKey } from "@/lib/connection"
-import { cooldown } from "@/lib/cooldown"
+import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { db, type Conversation, type PullRequestRef, type SessionMode } from "@/lib/db"
 import {
   ensureWorkspace,
-  getPluginFeatures,
   getSessionPrs,
   getWorkspace,
   HermesError,
   closeSession,
   removeWorkspace,
   setWorkspaceMode,
-  type HermesConfig,
   type HermesProject,
   type HermesProjectFolder,
   type KeptWorktree,
@@ -50,19 +48,6 @@ async function tracked(conversationId: string) {
   // Keyless chats have no session id Hermes knows.
   if (!conversation?.projectId || !profile?.apiKey || profile.disabled) return null
   return { conversation, profile, key: connectionKey(profile) }
-}
-
-/**
- * Whether a failed read means the plugin lacks the route (an older one) rather than a blip: a busy
- * host, a dropped connection or a refused key is asked again on the next read, not left 5 minutes.
- * Hermes's 404 for an unknown route skips its CORS middleware, so it can arrive with no status.
- */
-async function lacksRoute(server: HermesConfig, error: unknown, feature: string) {
-  if (!(error instanceof HermesError) || (error.status && error.status !== 404)) return false
-  return getPluginFeatures(server).then(
-    (features) => !features.includes(feature),
-    () => false,
-  )
 }
 
 async function store(conversationId: string, workspace: SessionWorkspace | null) {

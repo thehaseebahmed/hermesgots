@@ -1,7 +1,7 @@
 import { useLiveQuery } from "dexie-react-hooks"
 
 import { createStore } from "@/lib/store"
-import { db, updateProfile, type ModelsDevCatalog, type Profile } from "@/lib/db"
+import { db, type ModelsDevCatalog, type Profile } from "@/lib/db"
 import { getModelInfo, type ModelInfo } from "@/lib/hermes"
 import { fullModel } from "@/lib/model-info"
 
@@ -259,7 +259,8 @@ export function useModelCatalog() {
 /**
  * Fills in the profile's context window from models.dev whenever the model behind it changes,
  * clearing it when the new model isn't listed. When models.dev can't be
- * reached the profile is left alone, so the next sync looks again.
+ * reached the profile is left alone, so the next sync looks again. Each device looks it up for
+ * itself, so it's written without moving the bot's sync clock.
  */
 export async function syncContextWindow(profile: Profile) {
   if (!profile.baseUrl.trim()) return
@@ -271,7 +272,7 @@ export async function syncContextWindow(profile: Profile) {
     // Bots from before image detection learn it once.
     if (profile.imageInput === undefined) {
       const imageInput = await findImageInput(info).catch(() => undefined)
-      if (imageInput !== undefined) await updateProfile(profile.id, { imageInput })
+      if (imageInput !== undefined) await db.profiles.update(profile.id, { imageInput })
     }
     return
   }
@@ -281,7 +282,7 @@ export async function syncContextWindow(profile: Profile) {
   } catch {
     // The old model's window would be wrong for this one; the next sync looks the new one up.
     if (profile.contextModel) {
-      await updateProfile(profile.id, {
+      await db.profiles.update(profile.id, {
         contextModel: undefined,
         contextWindow: undefined,
         contextSource: undefined,
@@ -289,7 +290,7 @@ export async function syncContextWindow(profile: Profile) {
     }
     return
   }
-  await updateProfile(profile.id, {
+  await db.profiles.update(profile.id, {
     contextModel: key,
     contextWindow: found,
     contextSource: found ? "models.dev" : undefined,

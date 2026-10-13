@@ -442,7 +442,10 @@ export async function liveTurn(
     })
     for (const row of batch) rows.set(row.id, row)
     const sorted = [...rows.values()].sort((a, b) => a.id - b.id)
-    const start = sorted.findLastIndex((row) => isTurnStart(row) && row.content === userContent)
+    // The row carries the attachments' lines after the text the user typed.
+    const start = sorted.findLastIndex(
+      (row) => isTurnStart(row) && splitAttachments(row.content ?? "").text === userContent,
+    )
     if (start >= 0)
       return toMessages("", sessionId, sorted.slice(start), { live: true }).find(
         (m) => m.role === "assistant",

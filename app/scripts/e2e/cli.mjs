@@ -41,6 +41,11 @@ const FLOWS = {
     mock: "polling",
     about: "runs/live is read by one shared poll: at most 3 times in 25s with every screen open",
   },
+  "photo-progress": {
+    script: "e2e/photo-progress.mjs",
+    mock: "legacy",
+    about: "A message with a photo shows its reply's tool calls while it runs, from the transcript",
+  },
   screens: {
     script: "e2e/screens.mjs",
     about: "Code, a project, Routines and a chat load at 390 and 1024px, light and dark",
