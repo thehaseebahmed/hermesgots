@@ -1,13 +1,7 @@
 import { connectionKey } from "@/lib/connection"
-import { cooldown } from "@/lib/cooldown"
+import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { db } from "@/lib/db"
-import {
-  getSessionTodos,
-  hasPluginFeature,
-  HermesError,
-  parseTodos,
-  type SessionTodos,
-} from "@/lib/hermes"
+import { getSessionTodos, parseTodos, type SessionTodos } from "@/lib/hermes"
 import { TODO_TOOLS } from "@/lib/tools"
 
 /** Bots whose plugin has no todos route (an older plugin). */
@@ -63,14 +57,7 @@ export async function refreshTodos(conversationId: string) {
   try {
     todos = await getSessionTodos(profile, conversation.hermesSessionId)
   } catch (error) {
-    // A missing todos route (404, or no status when Hermes's 404 skips its CORS middleware) is
-    // worth leaving alone; a flaky read or a busy host isn't, so the next refresh retries it.
-    if (
-      error instanceof HermesError &&
-      (error.status === 404 || error.status === undefined) &&
-      !(await hasPluginFeature({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }, "todos"))
-    )
-      unsupported.start(key)
+    if (await lacksRoute(profile, error, "todos")) unsupported.start(key)
     return
   }
   unsupported.clear(key)
