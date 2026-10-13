@@ -2,7 +2,7 @@ import { useEffect, useSyncExternalStore } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
 import { db } from "@/lib/db"
-import { listWaiting, type WaitingReason } from "@/lib/hermes"
+import { listLiveRuns, listWaiting, type LiveRunStatus, type WaitingReason } from "@/lib/hermes"
 import { connectionKey, isLive, onChanges, SAFETY_MS } from "@/lib/live"
 
 export type { WaitingReason }
@@ -36,16 +36,22 @@ const THESEUS_WAITS = {
 const POLL_MS = 10_000
 const TIMEOUT_MS = 15_000
 
+/** Why each session, by Hermes session id, waits on the user, across every keyed bot's server. */
 type Found = Record<string, WaitingReason & { project?: string }>
+/** Which sessions have a run in flight, by Hermes session id. */
+type Runs = Record<string, LiveRunStatus>
 type Server = { baseUrl: string; apiKey: string }
 
 /**
- * What every bot's server reports waiting, by Hermes session id. One poll for the whole app, shared
- * by every sidebar that's mounted, and only while one is. A server that streams its changes is asked
- * when it says a run changed, and now and then anyway; the rest are asked every few seconds.
+ * What every bot's server reports: why each session waits on the user, and which have a run in
+ * flight, both by Hermes session id. One poll for the whole app, shared by every screen that reads
+ * them, and only while one is. A server that streams its changes is asked when it says a run
+ * changed, and now and then anyway; the rest are asked every few seconds.
  */
 let answers = new Map<string, Found>()
+let runs = new Map<string, Runs>()
 let found: Found = {}
+let live: Runs = {}
 let servers: Server[] = []
 const listeners = new Set<() => void>()
 let timer: number | undefined
@@ -56,12 +62,17 @@ async function poll(only: Server[] = servers) {
   await Promise.all(
     only.map(async (server) => {
       // A failed read (a busy host starting another bot's run, a dropped connection) says nothing
-      // about what waits, so the last answer stands instead of clearing every mark of that server.
-      const next = await listWaiting(server, AbortSignal.timeout(TIMEOUT_MS)).catch(() => undefined)
-      if (next) answers.set(connectionKey(server), next)
+      // about what waits or what runs, so the last answer stands instead of clearing every mark.
+      const [waiting, running] = await Promise.all([
+        listWaiting(server, AbortSignal.timeout(TIMEOUT_MS)).catch(() => undefined),
+        listLiveRuns(server, AbortSignal.timeout(TIMEOUT_MS)).catch(() => undefined),
+      ])
+      if (waiting) answers.set(connectionKey(server), waiting)
+      if (running) runs.set(connectionKey(server), running)
     }),
   )
   found = Object.assign({}, ...servers.map((server) => answers.get(connectionKey(server)) ?? {}))
+  live = Object.assign({}, ...servers.map((server) => runs.get(connectionKey(server)) ?? {}))
   listeners.forEach((listener) => listener())
 }
 
@@ -95,7 +106,9 @@ function subscribe(listener: () => void) {
 
 let stopListening: (() => void) | undefined
 
-/** Why each session, by Hermes session id, waits on the user, across every keyed bot's server. */
+/**
+ * Why each session, by Hermes session id, waits on the user, across every keyed bot's server.
+ */
 export function useWaiting(): Found {
   const waiting = useSyncExternalStore(subscribe, () => found)
   // Keyless bots have no session ids, so nothing of theirs can be matched. A bot whose plugin hasn't
@@ -113,9 +126,18 @@ export function useWaiting(): Found {
     if (keyed === undefined) return
     servers = JSON.parse(keyed)
     answers = new Map([...answers].filter(([key]) => servers.some((s) => connectionKey(s) === key)))
+    runs = new Map([...runs].filter(([key]) => servers.some((s) => connectionKey(s) === key)))
     void poll()
   }, [keyed])
   return waiting
+}
+
+/**
+ * Which sessions have a run in flight, by Hermes session id, across every keyed bot's server. The
+ * same poll the waiting reasons come from, so a screen and the sidebar never disagree.
+ */
+export function useLiveRuns(): Runs {
+  return useSyncExternalStore(subscribe, () => live)
 }
 
 /** Project sessions, across every bot, waiting on the user, newest first. Needs the plugin. */

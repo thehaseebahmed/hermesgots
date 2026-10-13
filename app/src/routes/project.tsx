@@ -39,23 +39,16 @@ import {
   db,
   deleteConversation,
   type Conversation,
-  type Profile,
   type PullRequestRef,
 } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useDraft } from "@/lib/drafts"
-import { SAFETY_MS, useChanges, useLive } from "@/lib/live"
+import { useChanges, useLive, SAFETY_MS } from "@/lib/live"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { cn } from "@/lib/utils"
-import { reasonText, useWaiting, type WaitingReason } from "@/lib/waiting"
-import {
-  deleteProject,
-  listLiveRuns,
-  listProjects,
-  type HermesProject,
-  type LiveRunStatus,
-} from "@/lib/hermes"
+import { reasonText, useLiveRuns, useWaiting, type WaitingReason } from "@/lib/waiting"
+import { deleteProject, listProjects, type HermesProject } from "@/lib/hermes"
 import {
   projectRepos,
   PR_PENDING_MS,
@@ -84,8 +77,6 @@ function computePrLabel(pr: PullRequestRef, allPrs: PullRequestRef[]) {
   return `${pr.repo} #${pr.number}`
 }
 
-/** How often the plugin is asked which sessions have a run in flight, while the screen is on. */
-const LIVE_MS = 10_000
 /** While a repo is being added or removed: the plugin does the work, this watches for it to finish. */
 const CHANGING_MS = 3_000
 const DAY_MS = 86_400_000
@@ -101,35 +92,6 @@ const FOLD_OVER = 5
 
 function serverKey(baseUrl: string) {
   return baseUrl.trim().replace(/\/+$/, "").replace(/\/v1$/, "")
-}
-
-/** Sessions with a run in flight on the bot's server, by Hermes session id. */
-function useLiveRuns(profile: Profile | undefined) {
-  const [live, setLive] = useState<Record<string, LiveRunStatus>>({})
-  const connection = profile && `${profile.baseUrl}\n${profile.apiKey}`
-  // A server that streams its changes says when a run starts, ends or waits; the timer is a net.
-  const streaming = useLive(profile)
-  const changes = useChanges("runs", profile)
-  useEffect(() => {
-    if (!connection) return
-    const [baseUrl, apiKey] = connection.split("\n")
-    let cancelled = false
-    const poll = () => {
-      if (document.visibilityState !== "visible") return
-      listLiveRuns({ baseUrl, apiKey })
-        .then((next) => !cancelled && setLive(next))
-        .catch(() => undefined)
-    }
-    poll()
-    const timer = window.setInterval(poll, streaming ? SAFETY_MS : LIVE_MS)
-    document.addEventListener("visibilitychange", poll)
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-      document.removeEventListener("visibilitychange", poll)
-    }
-  }, [connection, streaming, changes])
-  return live
 }
 
 /**
@@ -168,7 +130,7 @@ export function ProjectPage({
   const [busy, setBusy] = useState(false)
   const [reads, setReads] = useState(0)
   const reload = () => setReads((n) => n + 1)
-  const live = useLiveRuns(profile)
+  const live = useLiveRuns()
   const streaming = useLive(profile)
   const projectChanges = useChanges("projects", profile)
   const changing = project?.folders.some((f) => f.status === "cloning" || f.status === "removing")

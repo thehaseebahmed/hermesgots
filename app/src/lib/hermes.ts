@@ -1592,9 +1592,13 @@ export async function getSessionPrs(
 export type LiveRunStatus = "running" | "waiting_for_approval"
 
 /** Sessions with a run in flight on the server, by Hermes session id. Needs the Memento plugin. */
-export async function listLiveRuns(config: HermesConfig): Promise<Record<string, LiveRunStatus>> {
+export async function listLiveRuns(
+  config: HermesConfig,
+  signal?: AbortSignal,
+): Promise<Record<string, LiveRunStatus>> {
   const response = await request(`${pluginRoot(config.baseUrl)}/runs/live`, {
     headers: headers(config),
+    signal,
   })
   const sessions: unknown = (await response.json())?.sessions
   if (!sessions || typeof sessions !== "object") return {}
