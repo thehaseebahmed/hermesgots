@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import Dexie from "dexie"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   ArchiveIcon,
@@ -141,37 +142,45 @@ export function ProjectPage({
     onShow: false,
   })
 
-  // Bots on one server share its projects, so their sessions all belong here.
+  // Bots on one server share its projects, so their sessions all belong here. With them, what this
+  // device sees of its own turns: a reply streaming, an approval or a question waiting. Only a reply
+  // in flight can carry those (a finished turn expires its approval and question), and it's the
+  // newest reply, so each session's messages are read back only as far as that, past any queued
+  // after it.
   const listed = useLiveQuery(async () => {
-    if (!profile) return { rows: [] as Conversation[], now: Date.now() }
+    const local: Record<string, { any?: boolean; streaming?: boolean; waiting?: boolean }> = {}
+    if (!profile) return { rows: [] as Conversation[], local, now: Date.now() }
     const server = serverKey(profile.baseUrl)
     const bots = new Set(
       (await db.profiles.toArray()).filter((p) => serverKey(p.baseUrl) === server).map((p) => p.id),
     )
-    const rows = await db.conversations.where("projectId").equals(projectId).toArray()
-    return {
-      rows: rows.filter((c) => bots.has(c.profileId)).sort((a, b) => b.updatedAt - a.updatedAt),
-      now: Date.now(),
-    }
+    const rows = (await db.conversations.where("projectId").equals(projectId).toArray())
+      .filter((c) => bots.has(c.profileId))
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+    await Promise.all(
+      rows.map(async (c) => {
+        const tail = await db.messages
+          .where("[conversationId+createdAt]")
+          .between([c.id, Dexie.minKey], [c.id, Dexie.maxKey])
+          .reverse()
+          .until((m) => m.role === "assistant", true)
+          .toArray()
+        if (!tail.length) return
+        local[c.id] = {
+          any: true,
+          streaming: tail.some((m) => m.status === "streaming"),
+          waiting: tail.some(
+            (m) => (m.approval && !m.approval.resolved) || (m.clarify && !m.clarify.resolved),
+          ),
+        }
+      }),
+    )
+    return { rows, local, now: Date.now() }
   }, [profile, projectId])
   const rows = listed?.rows
+  const local = listed?.local
   const now = listed?.now ?? 0
 
-  // What this device sees of its own turns: a reply streaming, an approval or a question waiting.
-  const ids = rows?.map((c) => c.id) ?? []
-  const local = useLiveQuery(async () => {
-    const signals: Record<string, { any?: boolean; streaming?: boolean; waiting?: boolean }> = {}
-    if (ids.length === 0) return signals
-    const messages = await db.messages.where("conversationId").anyOf(ids).toArray()
-    for (const m of messages) {
-      const signal = (signals[m.conversationId] ??= {})
-      signal.any = true
-      if (m.status === "streaming") signal.streaming = true
-      if ((m.approval && !m.approval.resolved) || (m.clarify && !m.clarify.resolved))
-        signal.waiting = true
-    }
-    return signals
-  }, [ids.join("\n")])
   // What the server says waits on the user, including a Theseus run's plan, checkpoints or approval.
   const waits = useWaiting()
 
