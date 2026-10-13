@@ -1,3 +1,4 @@
+import Dexie from "dexie"
 import { useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { matchPath, useLocation } from "react-router"
@@ -161,14 +162,26 @@ export function useBotSummaries(): BotSummary[] | undefined {
           .filter((c) => !c.projectId)
           .limit(THREADS)
           .toArray()
-        const open = await db.messages
-          .where("conversationId")
-          .anyOf(chats.map((c) => c.id))
-          .filter(
-            (m) => !!(m.approval && !m.approval.resolved) || !!(m.clarify && !m.clarify.resolved),
-          )
-          .toArray()
-        return { bot, chats, local: new Set(open.map((m) => m.conversationId)) }
+        // Only a chat's newest reply can wait on the user, so only that one is read.
+        const newest = await Promise.all(
+          chats.map((c) =>
+            db.messages
+              .where("[conversationId+createdAt]")
+              .between([c.id, Dexie.minKey], [c.id, Dexie.maxKey])
+              .reverse()
+              .filter((m) => m.role === "assistant")
+              .first(),
+          ),
+        )
+        const local = new Set(
+          newest
+            .filter(
+              (m) =>
+                !!(m?.approval && !m.approval.resolved) || !!(m?.clarify && !m.clarify.resolved),
+            )
+            .map((m) => m!.conversationId),
+        )
+        return { bot, chats, local }
       }),
     )
   }, [])
