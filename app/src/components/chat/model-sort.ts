@@ -17,6 +17,20 @@ export interface SortFacts {
 
 const byName = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" })
 
+/** The numeric fact each sort orders by, or undefined if it doesn't apply. */
+const SORT_VALUE: Record<Exclude<ModelSort, "name">, (f: SortFacts) => number | undefined> = {
+  price: (f) => f.cost,
+  context: (f) => f.context,
+  benchlm: (f) => f.benchlm,
+}
+
+/** Price sorts ascending (cheapest first); context and benchlm sort descending. */
+const SORT_ASC: Record<Exclude<ModelSort, "name">, boolean> = {
+  price: true,
+  context: false,
+  benchlm: false,
+}
+
 /**
  * Orders a flat model list by one of `facts`. Unlisted models — models.dev doesn't say, or the
  * catalog hasn't loaded — keep A to Z order after the sorted ones, so a sort never hides a model.
@@ -27,23 +41,16 @@ export function sortByFacts(
   models: string[],
 ) {
   if (sort === "name") return [...models].sort(byName.compare)
-  const keyed = models.map((model) => ({
-    model,
-    value:
-      sort === "price"
-        ? facts(model).cost
-        : sort === "context"
-          ? facts(model).context
-          : facts(model).benchlm,
-  }))
-  // Listed models first, in the picked order (cheapest first, largest window first, highest
-  // score first); the unlisted ones follow in A to Z order.
+  const valueOf = SORT_VALUE[sort]
+  const asc = SORT_ASC[sort]
+  const keyed = models.map((model) => ({ model, value: valueOf(facts(model)) }))
+  // Listed models first, in the picked order; the unlisted ones follow in A to Z order.
   const [listed, unlisted] = keyed.reduce<[typeof keyed, typeof keyed]>(
     ([yes, no], row) => (row.value === undefined ? [yes, [...no, row]] : [[...yes, row], no]),
     [[], []],
   )
   listed.sort((a, b) =>
-    sort === "price"
+    asc
       ? a.value! - b.value!
       : b.value! - a.value! || byName.compare(a.model, b.model),
   )

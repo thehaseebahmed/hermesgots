@@ -23,7 +23,7 @@ import { formatTokens } from "@/lib/format"
 import type { ModelInfo, ModelProvider } from "@/lib/hermes"
 import { fullModel, shortModel, useModelInfo } from "@/lib/model-info"
 import { modelFacts, useModelCatalog, type Catalog } from "@/lib/models"
-import { codingScoreOf, useCodingRankings } from "@/lib/rankings"
+import { codingScoreOf, useCodingRankings, type RankingsPayload } from "@/lib/rankings"
 import { cn } from "@/lib/utils"
 
 /**
@@ -206,23 +206,25 @@ function ProviderModels({
 }: {
   provider: ModelProvider
   catalog: Catalog | undefined
-  rankings: unknown
+  rankings: RankingsPayload | undefined
   isChosen: (m: ModelChoice) => boolean
   onChoose: (choice: ModelChoice | undefined) => void
 }) {
   const [query, setQuery] = useState("")
   const [sort, setSort] = useState<ModelSort>("name")
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
-  const haystack = (m: string) => `${provider.name} ${provider.slug} ${m}`.toLowerCase()
-  const matched = provider.models.filter((m) => words.every((w) => haystack(m).includes(w)))
-  const models = sortByFacts(
-    sort,
-    (m) => ({
-      ...modelFacts(catalog, { provider: provider.slug, model: m }),
-      benchlm: codingScoreOf(rankings, { provider: provider.slug, model: m }),
-    }),
-    matched,
-  )
+  const models = useMemo(() => {
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+    const haystack = (m: string) => `${provider.name} ${provider.slug} ${m}`.toLowerCase()
+    const matched = provider.models.filter((m) => words.every((w) => haystack(m).includes(w)))
+    return sortByFacts(
+      sort,
+      (m) => ({
+        ...modelFacts(catalog, { provider: provider.slug, model: m }),
+        benchlm: codingScoreOf(rankings, { provider: provider.slug, model: m }),
+      }),
+      matched,
+    )
+  }, [provider, query, sort, catalog, rankings])
   return (
     <>
       <PopupTitle className="sr-only">{provider.name}</PopupTitle>
@@ -320,7 +322,7 @@ function sortProviders(providers: ModelProvider[]) {
  */
 function modelDetail(
   catalog: Catalog | undefined,
-  rankings: unknown,
+  rankings: RankingsPayload | undefined,
   choice: ModelChoice,
 ) {
   if (!catalog) return undefined

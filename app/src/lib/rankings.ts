@@ -1,8 +1,9 @@
 import { useLiveQuery } from "dexie-react-hooks"
 
-import { db, type CodingRankings } from "@/lib/db"
-import { isNative, SITE_URL } from "@/lib/native"
+import { db } from "@/lib/db"
 import type { ModelInfo } from "@/lib/hermes"
+import { isNative, SITE_URL } from "@/lib/native"
+import { lastSegment, normalise } from "@/lib/models"
 
 const RANKINGS_URL = `${isNative ? SITE_URL : ""}/.netlify/functions/benchlm`
 const RANKINGS_ROW = "coding"
@@ -17,7 +18,7 @@ interface RankingRow {
 }
 
 /** The shape we expect from the BenchLM coding surface, validated before caching. */
-interface RankingsPayload {
+export interface RankingsPayload {
   items?: unknown
 }
 
@@ -29,7 +30,7 @@ function isRankings(data: unknown): data is RankingsPayload {
 }
 
 /** Fetches the rankings from the Netlify proxy. */
-async function fetchRankings(): Promise<unknown> {
+async function fetchRankings(): Promise<RankingsPayload> {
   const response = await fetch(RANKINGS_URL)
   if (!response.ok) throw new Error(`BenchLM proxy responded ${response.status}`)
   const data: unknown = await response.json()
@@ -40,7 +41,7 @@ async function fetchRankings(): Promise<unknown> {
 /** One shared background refresh at a time. */
 let refreshing: Promise<void> | undefined
 
-function refreshRankings(_row: CodingRankings) {
+function refreshRankings() {
   refreshing ??= (async () => {
     try {
       const data = await fetchRankings()
@@ -54,20 +55,20 @@ function refreshRankings(_row: CodingRankings) {
 }
 
 /** One shared cold fetch, reset on failure so the next lookup retries. */
-let coldFetch: Promise<unknown> | undefined
+let coldFetch: Promise<RankingsPayload> | undefined
 
-async function fetchAndCache(): Promise<unknown> {
+async function fetchAndCache(): Promise<RankingsPayload> {
   const data = await fetchRankings()
   await db.codingRankings.put({ id: RANKINGS_ROW, data, fetchedAt: Date.now() })
   return data
 }
 
 /** BenchLM's coding rankings, read from the device cache. */
-async function loadRankings(): Promise<unknown> {
+async function loadRankings(): Promise<RankingsPayload> {
   const row = await db.codingRankings.get(RANKINGS_ROW)
   if (row) {
-    if (Date.now() - row.fetchedAt >= TTL_MS) refreshRankings(row)
-    return row.data
+    if (Date.now() - row.fetchedAt >= TTL_MS) refreshRankings()
+    return row.data as RankingsPayload
   }
   if (!coldFetch) {
     coldFetch = fetchAndCache().catch((error: unknown) => {
@@ -84,14 +85,10 @@ export function warmRankings() {
 }
 
 /** The cached rankings payload, live: the model sheet renders scores from this. */
-export function useCodingRankings() {
+export function useCodingRankings(): RankingsPayload | undefined {
   const row = useLiveQuery(() => db.codingRankings.get(RANKINGS_ROW))
-  return row?.data
+  return row?.data as RankingsPayload | undefined
 }
-
-/** `anthropic/Claude-Sonnet-4.5` and `claude-sonnet-4-5` should meet. */
-const normalise = (id: string) => id.toLowerCase().replace(/\./g, "-")
-const lastSegment = (id: string) => id.slice(id.lastIndexOf("/") + 1)
 
 /** Extracts the score from a ranking row, guarding the payload shape. */
 function scoreOf(row: RankingRow | undefined): number | undefined {
@@ -107,24 +104,42 @@ function modelIdOf(row: RankingRow | undefined): string | undefined {
 
 type ModelRef = Pick<ModelInfo, "provider" | "model">
 
+// Pre-normalised score lookup, built once per payload so repeated calls during search typing
+// are O(1) — mirrors the WeakMap cache in `modelFacts`.
+const scoreCache = new WeakMap<RankingsPayload, Map<string, number | undefined>>()
+
+function buildScoreMap(rows: RankingRow[]): Map<string, number | undefined> {
+  const map = new Map<string, number | undefined>()
+  for (const row of rows) {
+    const id = modelIdOf(row)
+    if (!id) continue
+    const full = normalise(id)
+    const short = lastSegment(full)
+    const score = scoreOf(row)
+    // Full match takes priority; only store short if no full entry exists yet.
+    if (!map.has(full)) map.set(full, score)
+    if (!map.has(short)) map.set(short, score)
+  }
+  return map
+}
+
 /**
  * The model's BenchLM coding score, or undefined if it isn't ranked. The matching follows the
  * same normalise → exact → suffix order as `models.ts` so `anthropic/claude-sonnet-4-5` meets
  * `sonnet-4-5` under any provider.
  */
-export function codingScoreOf(rankings: unknown, { model }: ModelRef): number | undefined {
-  if (!model || !isRankings(rankings)) return undefined
-  const rows = rankings.items as RankingRow[]
+export function codingScoreOf(
+  rankings: RankingsPayload | undefined,
+  { model }: ModelRef,
+): number | undefined {
+  if (!model || !rankings) return undefined
+  let map = scoreCache.get(rankings)
+  if (!map) {
+    if (!isRankings(rankings)) return undefined
+    map = buildScoreMap(rankings.items as RankingRow[])
+    scoreCache.set(rankings, map)
+  }
   const full = normalise(model)
   const short = lastSegment(full)
-  // Exact match on the model id, then a normalised match, then a last-segment match.
-  for (const row of rows) {
-    const id = modelIdOf(row)
-    if (id && normalise(id) === full) return scoreOf(row)
-  }
-  for (const row of rows) {
-    const id = modelIdOf(row)
-    if (id && lastSegment(normalise(id)) === short) return scoreOf(row)
-  }
-  return undefined
+  return map.get(full) ?? map.get(short)
 }

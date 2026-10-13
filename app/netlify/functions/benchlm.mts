@@ -67,7 +67,7 @@ function json(data: unknown, fetchedAt: number, cached: boolean) {
   return new Response(JSON.stringify(data), {
     headers: {
       "Content-Type": "application/json",
-      "Cache-Control": "public, max-age=14400",
+      "Cache-Control": `public, max-age=${MAX_AGE_MS / 1000}`,
       "Access-Control-Allow-Origin": "*",
       "X-Cached": cached ? "1" : "0",
       "X-Fetched-At": String(fetchedAt),

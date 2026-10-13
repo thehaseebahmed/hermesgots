@@ -137,8 +137,8 @@ export function warmCatalog() {
 }
 
 /** `anthropic/Claude-Sonnet-4.5` and `claude-sonnet-4-5` should meet. */
-const normalise = (id: string) => id.toLowerCase().replace(/\./g, "-")
-const lastSegment = (id: string) => id.slice(id.lastIndexOf("/") + 1)
+export const normalise = (id: string) => id.toLowerCase().replace(/\./g, "-")
+export const lastSegment = (id: string) => id.slice(id.lastIndexOf("/") + 1)
 
 function contextOf(entry: CatalogModel | undefined) {
   const context = entry?.limit?.context
