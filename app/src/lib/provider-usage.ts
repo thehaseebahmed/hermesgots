@@ -18,6 +18,7 @@ export interface UsageWindowView {
   usedPercent: number
   remaining: number
   resetsAt?: number
+  detail?: string
 }
 
 export function tightestWindow(usage: ProviderUsageData | undefined): UsageWindowView | undefined {
@@ -28,6 +29,7 @@ export function tightestWindow(usage: ProviderUsageData | undefined): UsageWindo
       usedPercent: w.usedPercent,
       remaining: Math.max(0, Math.round(100 - w.usedPercent)),
       ...(w.resetsAt ? { resetsAt: w.resetsAt } : {}),
+      ...(w.detail ? { detail: w.detail } : {}),
     }))
     .sort((a, b) => a.remaining - b.remaining)[0]
 }

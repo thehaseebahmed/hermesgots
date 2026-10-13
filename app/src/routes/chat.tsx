@@ -110,6 +110,7 @@ import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { setThreadMuted } from "@/lib/push"
 import { syncContextWindow } from "@/lib/models"
+import { effectiveProvider } from "@/lib/provider-usage"
 import {
   planApprovalMessage,
   projectRepos,
@@ -314,6 +315,11 @@ export function ChatPage() {
     window:
       live?.window ?? (profile?.contextSource === "models.dev" ? profile.contextWindow : undefined),
   }
+  const provider = effectiveProvider(conversation ?? undefined, profile ?? undefined)
+  const providerUsage =
+    profile?.providerUsage && profile.providerUsage.provider === provider
+      ? profile.providerUsage
+      : undefined
 
   // Picks up a model changed on the server (only when the connection does, not on every write);
   // the ring follows via the live query.
@@ -810,7 +816,7 @@ export function ChatPage() {
         )}
       </div>
 
-      <UsageSheet open={usageOpen} onOpenChange={setUsageOpen} usage={usage} />
+      <UsageSheet open={usageOpen} onOpenChange={setUsageOpen} usage={usage} providerUsage={providerUsage} />
       <TodosSheet open={todosOpen} onOpenChange={setTodosOpen} items={todos} live={busy} />
       {theseus && (
         <Suspense fallback={null}>
