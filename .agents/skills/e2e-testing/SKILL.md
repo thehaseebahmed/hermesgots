@@ -56,6 +56,7 @@ elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` l
 | `reattach` | A reply still streaming when the page reloads picks its run up again and finishes |
 | `live-poll` | `runs/live` is read by one shared poll: at most 3 times in 25s with the session, its project and the sidebar open. Main read it 4 times |
 | `photo-progress` | A message with a photo shows its reply's tool calls while it runs, on the `legacy` mock where the app follows the turn in the transcript. Main showed none |
+| `stream-writes` | A streaming reply is written to IndexedDB at most 6 times a second on the mock. Main wrote it 7.5 times |
 | `screens` | Code, a project, Routines and a chat load at 390 and 1024px, light and dark, with no console errors |
 | `clarify-polling`, `clarify-transcript` | Answered questions survive stale polls, a reload and a fresh transcript |
 | `code-sessions` | Project sessions stay out of Recents and open from their project |
