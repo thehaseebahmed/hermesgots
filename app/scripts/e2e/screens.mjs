@@ -8,7 +8,7 @@ for (const width of [390, 1024]) {
     const look = `${width}${dark ? "-dark" : ""}`
     await flow(
       `screens-${look}`,
-      async ({ page, profileId, send, shot }) => {
+      async ({ page, profileId, send, lastReply, until, shot }) => {
         page.on("pageerror", (error) => errors.push(`${look}: ${error.message}`))
         page.on("console", (message) => {
           if (message.type() === "error") errors.push(`${look}: ${message.text()}`)
@@ -25,7 +25,12 @@ for (const width of [390, 1024]) {
         await page.goto(app)
         await send("hello")
         await page.waitForURL("**/c/**", { timeout: 15_000 })
-        await page.waitForTimeout(2000)
+        const chatId = new URL(page.url()).pathname.split("/").at(-1)
+        await until(
+          async () => (await lastReply(chatId))?.status === "done",
+          20_000,
+          "the reply to finish",
+        )
         await shot("chat")
         pass(`Code, a project, Routines and a chat load at ${look}`)
       },
