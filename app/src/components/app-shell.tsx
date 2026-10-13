@@ -6,7 +6,7 @@ import { BreakReminderProvider } from "@/components/break-reminder-provider"
 import { CrashBoundary } from "@/components/crash-screen"
 import { DrawerContext } from "@/components/drawer-context"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
-import { useLarge } from "@/lib/media"
+import { useLarge, useWide } from "@/lib/media"
 import { depth } from "@/lib/nav"
 import { useProjectPane } from "@/lib/pane"
 import { useBotPane, useBotThreads } from "@/lib/threads"
@@ -106,6 +106,7 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
 }
 
 export function AppShell({ children }: { children?: ReactNode }) {
+  const wide = useWide()
   const [open, setOpen] = useState(false)
   const { pathname } = useLocation()
   const main = useRef<HTMLElement>(null)
@@ -134,9 +135,12 @@ export function AppShell({ children }: { children?: ReactNode }) {
     <BreakReminderProvider>
       <DrawerContext.Provider value={() => setOpen(true)}>
         <div className="flex h-dvh overflow-hidden bg-background">
-          <aside className="hidden w-72 shrink-0 border-r bg-sidebar text-sidebar-foreground md:block lg:w-80">
-            <ConversationList />
-          </aside>
+          {/* Not mounted on phones, where the drawer holds the list, so its queries don't run twice. */}
+          {wide && (
+            <aside className="w-72 shrink-0 border-r bg-sidebar text-sidebar-foreground lg:w-80">
+              <ConversationList />
+            </aside>
+          )}
           <Sheet open={open} onOpenChange={setOpen}>
             <SheetContent side="left" className="w-[85vw] max-w-80 p-0" showCloseButton={false}>
               <SheetTitle className="sr-only">Conversations</SheetTitle>
