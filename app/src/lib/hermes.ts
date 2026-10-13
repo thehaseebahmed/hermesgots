@@ -1289,10 +1289,15 @@ export async function transcribeClip(
   config: HermesConfig,
   clip: Blob,
   hint: string,
+  context: string,
   signal?: AbortSignal,
 ) {
-  const query = hint ? `?hint=${encodeURIComponent(hint)}` : ""
-  const response = await request(`${pluginRoot(config.baseUrl)}/dictation${query}`, {
+  const query = new URLSearchParams()
+  if (hint) query.set("hint", hint)
+  // A plugin before 0.35 ignores the text heard before this clip.
+  if (context) query.set("context", context.slice(-400))
+  const search = query.toString() ? `?${query}` : ""
+  const response = await request(`${pluginRoot(config.baseUrl)}/dictation${search}`, {
     method: "POST",
     headers: headers(config, { "Content-Type": clip.type || "audio/webm" }),
     body: clip,

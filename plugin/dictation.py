@@ -21,6 +21,8 @@ from typing import Any, Dict, Optional
 MAX_BYTES = 9 * 1024 * 1024
 # Whisper keeps the last 224 tokens of a prompt; a hint is a handful of names.
 MAX_HINT = 300
+# The text already heard, for a clip that carries on from the one before it; its end matters most.
+MAX_CONTEXT = 400
 
 SUFFIXES = {
     "audio/webm": ".webm",
@@ -129,6 +131,16 @@ def clean_hint(hint: Optional[str]) -> str:
     return text[:MAX_HINT]
 
 
+def clean_context(context: Optional[str]) -> str:
+    """The end of what was said before this clip, so a sentence cut at a pause carries on."""
+    text = " ".join((context or "").split())
+    if len(text) <= MAX_CONTEXT:
+        return text
+    tail = text[-MAX_CONTEXT:]
+    # Start on a whole word.
+    return tail.split(" ", 1)[1] if " " in tail else tail
+
+
 def suffix_for(content_type: Optional[str]) -> str:
     kind = (content_type or "").split(";", 1)[0].strip().lower()
     return SUFFIXES.get(kind, ".webm")
@@ -145,16 +157,20 @@ def _hallucination(text: str) -> bool:
         return False
 
 
-def transcribe(data: bytes, content_type: Optional[str], hint: str = "") -> Dict[str, Any]:
+def transcribe(
+    data: bytes, content_type: Optional[str], hint: str = "", context: str = ""
+) -> Dict[str, Any]:
     """The clip's text, ``""`` when nobody spoke. DictationError when the host can't."""
     state = info()
     if not state.get("ready"):
         raise DictationError(state.get("reason") or "Dictation is off on the host.", 409)
     tt = _tools()
     cfg = _local_config(tt)
-    # Our hint goes after the host's own prompt, which a `pre_transcription` plugin may also fill.
+    # Our hint goes after the host's own prompt, which a `pre_transcription` plugin may also fill, and
+    # the text before this clip goes last: Whisper reads a prompt as what was just said.
     configured = (cfg.get("local") or {}).get("initial_prompt")
-    prompt = " ".join(p for p in (configured if isinstance(configured, str) else "", hint) if p).strip()
+    parts = (configured if isinstance(configured, str) else "", hint, context)
+    prompt = " ".join(p for p in parts if p).strip()
     started = time.monotonic()
     fd, path = tempfile.mkstemp(prefix="memento-dictation-", suffix=suffix_for(content_type))
     try:

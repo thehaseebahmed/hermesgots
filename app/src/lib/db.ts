@@ -330,6 +330,22 @@ export interface Draft {
   at: number
 }
 
+/** A piece of a recording, cut at a pause; `text` is null until the host has transcribed it. */
+export interface DictationPiece {
+  blob: Blob
+  text: string | null
+}
+
+/**
+ * A recording not yet turned into text, kept on this device under its composer's draft key, so a
+ * reload, a failed host or leaving the chat doesn't lose it.
+ */
+export interface SavedDictation {
+  id: string
+  pieces: DictationPiece[]
+  at: number
+}
+
 /** The models.dev catalog cached on this device: the registry, its ETag and when it was fetched. */
 export interface ModelsDevCatalog {
   id: "catalog"
@@ -370,6 +386,7 @@ export const db = new Dexie("memento") as Dexie & {
   drafts: EntityTable<Draft, "id">
   modelsDevCatalog: EntityTable<ModelsDevCatalog, "id">
   codingRankings: EntityTable<CodingRankings, "id">
+  dictations: EntityTable<SavedDictation, "id">
 }
 
 db.version(1).stores({
@@ -509,6 +526,9 @@ db.version(10).stores({ modelsDevCatalog: "id" })
 // v11: BenchLM coding rankings cached on the device, with a 24-hour freshness window.
 db.version(11).stores({ codingRankings: "id" })
 
+// v12: a recording waiting for its text is kept, under its composer's draft key.
+db.version(12).stores({ dictations: "id" })
+
 db.on("populate", (tx) => seedProfile(tx))
 
 export async function getSettings(): Promise<Settings> {
@@ -623,11 +643,12 @@ export async function updateConversation(
 }
 
 export async function deleteConversation(id: string, { remote = false } = {}) {
-  const tables = [db.conversations, db.messages, db.tombstones, db.drafts]
+  const tables = [db.conversations, db.messages, db.tombstones, db.drafts, db.dictations]
   await db.transaction("rw", tables, async () => {
     const conversation = await db.conversations.get(id)
     await db.messages.where("conversationId").equals(id).delete()
     await db.drafts.delete(`c:${id}`)
+    await db.dictations.delete(`c:${id}`)
     await db.conversations.delete(id)
     if (conversation && !remote) {
       await db.tombstones.put({
@@ -655,6 +676,7 @@ export async function clearAllData() {
     db.tombstones,
     db.vault,
     db.drafts,
+    db.dictations,
   ]
   await db.transaction("rw", tables, async () => {
     await Promise.all(tables.map((table) => table.clear()))

@@ -83,6 +83,13 @@ class TranscribeTest(unittest.TestCase):
         self.assertEqual(tt.calls[0]["prompt"], "Haseeb Memento")
         self.assertTrue(tt.calls[0]["path"].endswith(".mp4"))
 
+    def test_the_text_before_the_clip_goes_last(self) -> None:
+        cfg = {"local": {"model": "base", "initial_prompt": "Haseeb"}}
+        tt, patch = hermes(_load_stt_config=lambda: cfg)
+        with patch:
+            dictation.transcribe(b"x", "audio/webm", "Memento", "We should ship it")
+        self.assertEqual(tt.calls[0]["prompt"], "Haseeb Memento We should ship it")
+
     def test_no_speech_is_empty_text(self) -> None:
         empty = lambda path, model, prompt=None: {"success": False, "error": "Empty transcript"}
         _, patch = hermes(_transcribe_local=empty)
@@ -120,6 +127,16 @@ class HintTest(unittest.TestCase):
     def test_squashes_and_caps(self) -> None:
         self.assertEqual(dictation.clean_hint("  a\n b  "), "a b")
         self.assertEqual(len(dictation.clean_hint("x" * 1000)), dictation.MAX_HINT)
+
+
+class ContextTest(unittest.TestCase):
+    def test_keeps_the_end_from_a_whole_word(self) -> None:
+        self.assertEqual(dictation.clean_context(" so\n  far "), "so far")
+        said = " ".join(f"word{n}" for n in range(200))
+        kept = dictation.clean_context(said)
+        self.assertLessEqual(len(kept), dictation.MAX_CONTEXT)
+        self.assertTrue(said.endswith(kept))
+        self.assertTrue(kept.startswith("word"))
 
 
 if __name__ == "__main__":

@@ -1011,10 +1011,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if len(data) > dictation.MAX_BYTES:
             return _error(web, "The recording is too long.", 413)
         hint = dictation.clean_hint(request.query.get("hint"))
+        context = dictation.clean_context(request.query.get("context"))
         async with dictating:
             try:
                 result = await asyncio.to_thread(
-                    dictation.transcribe, data, request.headers.get("content-type"), hint
+                    dictation.transcribe, data, request.headers.get("content-type"), hint, context
                 )
             except dictation.DictationError as error:
                 return _error(web, str(error), error.status)
