@@ -1,12 +1,4 @@
-import {
-  createContext,
-  useContext,
-  useRef,
-  useState,
-  type ComponentProps,
-  type CSSProperties,
-  type ReactNode,
-} from "react"
+import { createContext, useContext, useRef, type ComponentProps, type ReactNode } from "react"
 import { Dialog } from "@base-ui/react/dialog"
 import { Drawer } from "@base-ui/react/drawer"
 import { XIcon } from "lucide-react"
@@ -23,39 +15,17 @@ import { cn } from "@/lib/utils"
  *
  * The sheet follows Material 3's modal bottom sheet: a 32×4 drag handle in a 48px target, 28px top
  * corners, a 32% scrim, at most 640px wide, sized to its content, and dismissed by swiping it down,
- * tapping the scrim, Escape, or Android's back button (`handleBackButton`).
- *
- * On phones the sheet is expandable, Material 3 style: two snap points (85dvh and full screen), so
- * swiping up past the content's scroll end grows it to full screen — corners square off and the
- * scrim fades out there — and swiping down collapses it back before a further swipe dismisses it.
- * Sheets whose content is shorter than the screen have a single snap point and keep the plain
- * swipe-to-dismiss behavior. The popup is always full height and `--drawer-snap-point-offset` holds
- * it down, so the collapsed look is the offset and expanding is the offset going to zero.
+ * tapping the scrim or the handle, Escape, or Android's back button (`handleBackButton`).
  *
  * A pop-up you read beside the chat rather than act in (`side`: tool details, an agent's transcript)
  * is a modal side sheet from 1280px instead, Material's place for supporting content: full height on
  * the right, swiped off to the right.
  */
-const SNAP_COLLAPSED = 0.85
-const SNAP_POINTS = [SNAP_COLLAPSED, 1]
-
 export function Popup({ side, ...props }: ComponentProps<typeof Drawer.Root> & { side?: boolean }) {
-  const wide = useWide()
   const sideSheet = useXLarge() && Boolean(side)
-  const [snapPoint, setSnapPoint] =
-    useState<ComponentProps<typeof Drawer.Root>["snapPoint"]>(SNAP_COLLAPSED)
   return (
     <SideSheet.Provider value={sideSheet}>
-      <Expanded.Provider value={!wide && snapPoint === 1}>
-        <Drawer.Root
-          swipeDirection={sideSheet ? "right" : "down"}
-          snapPoints={wide ? undefined : SNAP_POINTS}
-          snapPoint={wide ? undefined : snapPoint}
-          onSnapPointChange={wide ? undefined : setSnapPoint}
-          snapToSequentialPoints={!wide}
-          {...props}
-        />
-      </Expanded.Provider>
+      <Drawer.Root swipeDirection={sideSheet ? "right" : "down"} {...props} />
     </SideSheet.Provider>
   )
 }
@@ -64,7 +34,6 @@ export const PopupDescription = SheetDescription
 
 const InSheet = createContext(false)
 const SideSheet = createContext(false)
-const Expanded = createContext(false)
 
 export function PopupHeader({ className, ...props }: ComponentProps<typeof SheetHeader>) {
   const sheet = useContext(InSheet)
@@ -113,7 +82,6 @@ export function PopupContent({
   const focus = initialFocus === false ? popup : undefined
   const wide = useWide()
   const side = useContext(SideSheet)
-  const expanded = useContext(Expanded)
   if (side)
     return (
       <Drawer.Portal>
@@ -152,35 +120,30 @@ export function PopupContent({
           forceRender
           className={cn(
             SCRIM,
-            // With snap points Base UI writes the snap progress (1 = collapsed, 0 = expanded)
-            // to --drawer-swipe-progress in the settled state, so the scrim rides on our own
-            // settled-state var instead and fades over the 300ms settle.
-            "opacity-[var(--sheet-scrim,1)] duration-300 data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] motion-reduce:duration-0",
+            "opacity-[calc(1-var(--drawer-swipe-progress))] duration-300 data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] data-swiping:duration-0 motion-reduce:duration-0",
           )}
-          style={{ "--sheet-scrim": expanded ? 0 : 1 } as CSSProperties}
         />
         <Drawer.Viewport className="fixed inset-0 z-50 flex items-end justify-center">
           <Drawer.Popup
             ref={popup}
             initialFocus={focus}
             className={cn(
-              "group/popup relative flex max-h-[100dvh] w-full max-w-[640px] flex-col overflow-hidden rounded-t-[28px] bg-popover pb-[max(1.5rem,env(safe-area-inset-bottom))] text-sm text-popover-foreground shadow-lg outline-none",
+              "group/popup relative flex max-h-[85dvh] w-full max-w-[640px] flex-col overflow-hidden rounded-t-[28px] bg-popover pb-[max(1.5rem,env(safe-area-inset-bottom))] text-sm text-popover-foreground shadow-lg outline-none",
               // A sheet opened on top of this one stacks on it: this one lifts so a peek shows above
               // the child, its content and handle fading out, and the child's own scrim dims this
               // sheet so the stack reads as layers. Base UI sets the nested count, both heights and
               // the child's swipe progress on the popup, and the lift keeps the peek constant
-              // whatever either sheet's height is, unwinding with the child's swipe. The snap point
-              // offset joins the transform's other terms, holding the sheet down when collapsed.
-              "[transform:translateY(calc(var(--drawer-snap-point-offset)+var(--drawer-swipe-movement-y)-var(--stack-peek-offset)-var(--stack-lift)))] transition-[transform,height] duration-300 ease-[cubic-bezier(0.2,0,0,1)] [--peek:1.75rem] [--stack-front:var(--drawer-frontmost-height,0px)] [--stack-lift:calc(var(--stack-front)-var(--stack-own))] [--stack-own:var(--drawer-height,var(--drawer-frontmost-height,0px))] [--stack-peek-offset:max(0px,calc((var(--nested-drawers)-var(--stack-progress))*var(--peek)))] [--stack-progress:clamp(0,var(--drawer-swipe-progress),1)] data-ending-style:[transform:translateY(100%)] data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] data-nested-drawer-open:h-[var(--drawer-height)] data-nested-drawer-swiping:duration-0 data-starting-style:[transform:translateY(100%)] data-swiping:duration-0 data-swiping:select-none data-[expanded]:rounded-none motion-reduce:duration-0",
+              // whatever either sheet's height is, unwinding with the child's swipe.
+              "[transform:translateY(calc(var(--drawer-swipe-movement-y)-var(--stack-peek-offset)-var(--stack-lift)))] transition-[transform,height] duration-300 ease-[cubic-bezier(0.2,0,0,1)] [--peek:1.75rem] [--stack-front:var(--drawer-frontmost-height,0px)] [--stack-lift:calc(var(--stack-front)-var(--stack-own))] [--stack-own:var(--drawer-height,var(--drawer-frontmost-height,0px))] [--stack-peek-offset:max(0px,calc((var(--nested-drawers)-var(--stack-progress))*var(--peek)))] [--stack-progress:clamp(0,var(--drawer-swipe-progress),1)] data-ending-style:[transform:translateY(100%)] data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] data-nested-drawer-open:h-[var(--drawer-height)] data-nested-drawer-swiping:duration-0 data-starting-style:[transform:translateY(100%)] data-swiping:duration-0 data-swiping:select-none motion-reduce:duration-0",
               className,
             )}
           >
-            <div
-              aria-hidden
-              className="mx-auto flex h-12 w-16 shrink-0 cursor-grab touch-none items-center justify-center transition-opacity duration-200 group-data-nested-drawer-open/popup:opacity-0 group-data-nested-drawer-swiping/popup:opacity-100"
+            <Drawer.Close
+              aria-label="Close"
+              className="mx-auto flex h-12 w-16 shrink-0 cursor-grab touch-none items-center justify-center transition-opacity duration-200 outline-none group-data-nested-drawer-open/popup:opacity-0 group-data-nested-drawer-swiping/popup:opacity-100 focus-visible:[&>span]:bg-ring"
             >
               <span className="h-1 w-8 rounded-full bg-muted-foreground/60" />
-            </div>
+            </Drawer.Close>
             <InSheet.Provider value>
               <Drawer.Content className="flex min-h-0 flex-1 flex-col transition-opacity duration-300 group-data-nested-drawer-open/popup:opacity-0 group-data-nested-drawer-swiping/popup:opacity-100">
                 <Scroll>{children}</Scroll>
