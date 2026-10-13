@@ -10,7 +10,7 @@ import { LinkBots } from "@/components/link-bots"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { signIn } from "@/lib/account"
-import { getActiveProfile, getSettings, saveSettings } from "@/lib/db"
+import { db, getActiveProfile, getSettings, saveSettings } from "@/lib/db"
 import { needsBotSetup, setUpSync, syncNow, useSyncState, type SyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
 
@@ -30,6 +30,8 @@ export function SetupGate({ children }: { children: ReactNode }) {
   const sync = useSyncState()
   const onboarded = useLiveQuery(async () => (await getSettings()).onboarded ?? null, [])
   const noBots = useLiveQuery(needsBotSetup, [])
+  // Signing out clears it, so a data key here means this device was set up and unlocked before.
+  const unlockedBefore = useLiveQuery(async () => Boolean(await db.vault.get("key")), [])
   // Held here so the dialog outlives the wizard if unlocking is all this device needed.
   const [recoveryCode, setRecoveryCode] = useState<string>()
 
@@ -39,7 +41,15 @@ export function SetupGate({ children }: { children: ReactNode }) {
     onboarded === undefined ||
     noBots === undefined ||
     (account.status === "signed-in" && sync.vault === "unknown" && !sync.error)
-  if (waiting) return <div className="h-dvh bg-background" />
+  // A returning device opens at once rather than after Identity and the vault answer; if they then
+  // say it's signed out or locked, setup takes over.
+  if (waiting) {
+    return unlockedBefore && onboarded && !noBots ? (
+      children
+    ) : (
+      <div className="h-dvh bg-background" />
+    )
+  }
   // Without Identity nothing can link, so the seed bot is set up by hand in Settings instead.
   const linking = account.status !== "unavailable" && noBots
   if (isAuthed(sync) && onboarded && !linking && !recoveryCode) return children
