@@ -8,7 +8,7 @@ import {
   type PointerEvent,
   type ReactNode,
 } from "react"
-import { ArrowUpIcon, CornerDownRightIcon, ListPlusIcon, MicIcon, SquareIcon } from "lucide-react"
+import { ArrowUpIcon, MicIcon, SquareIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { AttachMenu } from "@/components/chat/attach-menu"
@@ -378,30 +378,17 @@ export function Composer({
           <MicIcon />
         </InputGroupButton>
       )}
-      {busy ? (
-        <>
-          {canSend && (
-            <InputGroupButton
-              type="submit"
-              variant="ghost"
-              size="icon-sm"
-              className="size-11 rounded-full"
-              aria-label={steering ? "Steer" : "Queue"}
-            >
-              {steering ? <CornerDownRightIcon /> : <ListPlusIcon />}
-            </InputGroupButton>
-          )}
-          <InputGroupButton
-            type="button"
-            variant="secondary"
-            size="icon-sm"
-            className="size-11 rounded-full"
-            onClick={onStop}
-            aria-label="Stop"
-          >
-            <SquareIcon className="fill-current" />
-          </InputGroupButton>
-        </>
+      {busy && !canSend ? (
+        <InputGroupButton
+          type="button"
+          variant="secondary"
+          size="icon-sm"
+          className="size-11 rounded-full"
+          onClick={onStop}
+          aria-label="Stop"
+        >
+          <SquareIcon className="fill-current" />
+        </InputGroupButton>
       ) : (
         <InputGroupButton
           type="submit"
@@ -473,7 +460,9 @@ export function Composer({
             disabled
               ? "Connect to Hermes in Settings first"
               : busy
-                ? "Queue a message…"
+                ? steering
+                  ? "Steer the response…"
+                  : "Queue a message…"
                 : `Message ${botName}…`
           }
           disabled={disabled}
