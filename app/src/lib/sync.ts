@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react"
 import { liveQuery } from "dexie"
 
+import { createSignal } from "@/lib/store"
 import {
   deleteDoc,
   getDoc,
@@ -89,21 +90,15 @@ let state: SyncState = {
   syncing: false,
   chatStores: {},
 }
-const listeners = new Set<() => void>()
+const stateSignal = createSignal()
 
 function setState(patch: Partial<SyncState>) {
   state = { ...state, ...patch }
-  listeners.forEach((listener) => listener())
+  stateSignal.notify()
 }
 
 export function useSyncState() {
-  return useSyncExternalStore(
-    (listener) => {
-      listeners.add(listener)
-      return () => listeners.delete(listener)
-    },
-    () => state,
-  )
+  return useSyncExternalStore(stateSignal.subscribe, () => state)
 }
 
 let remoteVault: { vault: Vault; etag?: string } | null = null

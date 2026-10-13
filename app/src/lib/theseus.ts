@@ -9,6 +9,7 @@ import {
   UserCheckIcon,
 } from "lucide-react"
 
+import { createSignal } from "@/lib/store"
 import { connectionKey } from "@/lib/connection"
 import { getSettings, type Conversation, type Profile } from "@/lib/db"
 import {
@@ -419,15 +420,7 @@ export function toRun(raw: RawTheseus, sessionId: string, actions: TheseusAction
 // --- the store ---------------------------------------------------------------------------------
 
 const raws = new Map<string, RawTheseus>()
-const listeners = new Set<() => void>()
-const notify = () => listeners.forEach((listener) => listener())
-
-function subscribe(listener: () => void) {
-  listeners.add(listener)
-  return () => {
-    listeners.delete(listener)
-  }
-}
+const { subscribe, notify } = createSignal()
 
 const POLL_MS = 4000
 

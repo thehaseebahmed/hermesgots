@@ -1,4 +1,3 @@
-import { useSyncExternalStore } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   BadgeCheckIcon,
@@ -11,6 +10,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 
+import { createStore } from "@/lib/store"
 import { getSettings } from "@/lib/db"
 import { randomId } from "@/lib/utils"
 
@@ -551,16 +551,10 @@ const seed: Mission[] = [
   },
 ]
 
-let missions = seed
-const listeners = new Set<() => void>()
-const subscribe = (listener: () => void) => {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
-}
-const emit = () => listeners.forEach((listener) => listener())
+const missions = createStore(seed)
 
 export function useMissions() {
-  return useSyncExternalStore(subscribe, () => missions)
+  return missions.use()
 }
 
 export function useMission(id: string) {
@@ -568,8 +562,7 @@ export function useMission(id: string) {
 }
 
 export function updateMission(id: string, patch: Partial<Mission>) {
-  missions = missions.map((m) => (m.id === id ? { ...m, ...patch } : m))
-  emit()
+  missions.set(missions.get().map((m) => (m.id === id ? { ...m, ...patch } : m)))
 }
 
 /** What the mock "infers" from a typed topic. */
@@ -597,8 +590,7 @@ export function createMission(input: string): Mission {
     written: 0,
     formats: [],
   }
-  missions = [mission, ...missions]
-  emit()
+  missions.set([mission, ...missions.get()])
   return mission
 }
 
@@ -630,7 +622,7 @@ const STEP_MS = 1800
 let timer: number | undefined
 
 function tick() {
-  const live = missions.filter((m) => m.live)
+  const live = missions.get().filter((m) => m.live)
   if (!live.length) {
     window.clearInterval(timer)
     timer = undefined

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 
+import { createSignal } from "@/lib/store"
 import { connectionKey } from "@/lib/connection"
 import { db, type DictationPiece } from "@/lib/db"
 import {
@@ -21,15 +22,7 @@ import { usePoll } from "@/lib/poll"
 
 const INFO_MS = 5 * 60 * 1000
 const infos = new Map<string, { at: number; info: DictationInfo | null }>()
-const listeners = new Set<() => void>()
-const notify = () => listeners.forEach((listener) => listener())
-
-function subscribe(listener: () => void) {
-  listeners.add(listener)
-  return () => {
-    listeners.delete(listener)
-  }
-}
+const { subscribe, notify } = createSignal()
 
 const infoKey = connectionKey
 

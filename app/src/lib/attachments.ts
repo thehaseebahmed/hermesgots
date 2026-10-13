@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react"
 
+import { createSignal } from "@/lib/store"
 import type { Attachment } from "@/lib/db"
 import type { ContentPart } from "@/lib/hermes"
 import { randomId } from "@/lib/utils"
@@ -90,22 +91,17 @@ export const inlineBytes = (attachments: Attachment[]) =>
 
 // Attachments being saved on the Hermes host right now, so their tiles can say so.
 const uploading = new Set<string>()
-const listeners = new Set<() => void>()
+const uploads = createSignal()
 
 export function setUploading(id: string, busy: boolean) {
+  if (busy === uploading.has(id)) return
   if (busy) uploading.add(id)
   else uploading.delete(id)
-  for (const listener of listeners) listener()
+  uploads.notify()
 }
 
 export function useUploading(id: string) {
-  return useSyncExternalStore(
-    (listener) => {
-      listeners.add(listener)
-      return () => void listeners.delete(listener)
-    },
-    () => uploading.has(id),
-  )
+  return useSyncExternalStore(uploads.subscribe, () => uploading.has(id))
 }
 
 function blobToDataUrl(blob: Blob) {

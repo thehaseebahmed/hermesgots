@@ -1,5 +1,6 @@
 import { createContext, useContext, useSyncExternalStore } from "react"
 
+import { createSignal } from "@/lib/store"
 import type { Conversation, Profile, ToolEvent } from "@/lib/db"
 import {
   getSessionAgents,
@@ -20,15 +21,7 @@ export const DELEGATE_TOOL = "delegate_task"
 const POLL_MS = 4000
 
 const lists = new Map<string, DelegatedAgent[]>()
-const listeners = new Set<() => void>()
-const notify = () => listeners.forEach((listener) => listener())
-
-function subscribe(listener: () => void) {
-  listeners.add(listener)
-  return () => {
-    listeners.delete(listener)
-  }
-}
+const { subscribe, notify } = createSignal()
 
 export interface AgentsSource {
   agents: DelegatedAgent[]

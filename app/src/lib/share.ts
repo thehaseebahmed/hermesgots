@@ -1,7 +1,8 @@
-import { useEffect, useSyncExternalStore } from "react"
+import { useEffect } from "react"
 import { Capacitor, registerPlugin, type PluginListenerHandle } from "@capacitor/core"
 import { useNavigate } from "react-router"
 
+import { createStore } from "@/lib/store"
 import { skipLaunchRestore } from "@/lib/launch"
 import { isNative } from "@/lib/native"
 import { randomId } from "@/lib/utils"
@@ -48,25 +49,12 @@ export function shareText(share: IncomingShare, note: string) {
   return [note.trim(), shared.filter(Boolean).join("\n")].filter(Boolean).join("\n\n")
 }
 
-let current: IncomingShare | null = null
-const listeners = new Set<() => void>()
-
-function setShare(share: IncomingShare | null) {
-  current = share
-  for (const listener of listeners) listener()
-}
+const current = createStore<IncomingShare | null>(null)
+const setShare = current.set
 
 export const clearShare = () => setShare(null)
 
-export function useIncomingShare() {
-  return useSyncExternalStore(
-    (listener) => {
-      listeners.add(listener)
-      return () => void listeners.delete(listener)
-    },
-    () => current,
-  )
-}
+export const useIncomingShare = current.use
 
 const SHARE_CACHE = "memento-share"
 
