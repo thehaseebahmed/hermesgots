@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react"
 import { liveQuery } from "dexie"
 
+import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import { noteFailure } from "@/lib/report"
 import { createSignal } from "@/lib/store"
 import {
@@ -436,18 +437,16 @@ async function pullFallbackChats(key: CryptoKey, profileId: string) {
 }
 
 /** Syncs a bot's chats with its server's Memento plugin; false when it didn't answer. */
-async function syncPluginChats(profile: Profile) {
+/** Merges the bot's chat list with its plugin's; the merged list, or undefined when it didn't answer. */
+async function mergePluginChats(profile: Profile) {
   const local = await localChats(profile.id)
-  let merged: Doc<ChatValue>
   try {
-    merged = await mergeChatList(profile, local)
+    const merged = await mergeChatList(profile, local, AbortSignal.timeout(READ_TIMEOUT_MS))
+    return { local, merged }
   } catch (error) {
     noteFailure(`Syncing ${profile.name}'s chats`, error)
-    return false
+    return undefined
   }
-  await applyChats(profile.id, mergeDocs(merged, local).pull)
-  await settleChatTombstones(profile.id, merged)
-  return true
 }
 
 async function fingerprint() {
@@ -475,15 +474,26 @@ async function runSync() {
     const chatStores = { ...state.chatStores }
     const seed = await pristineSeed()
     const { movedChats = [] } = await getSettings()
-    for (const profile of await db.profiles.toArray()) {
-      // Turned off: nothing checks on it. Without a key, Hermes keeps no session for our ids.
-      if (profile.disabled || !profile.apiKey || profile.id === seed?.id) continue
-      const moving = Boolean(key && !movedChats.includes(profile.id))
-      const held = moving && (await pullFallbackChats(key!, profile.id))
-      const answered = await syncPluginChats(profile)
-      chatStores[profile.id] = answered ? "plugin" : "unreachable"
-      if (moving && answered) {
-        if (held) await deleteDoc(`chats/${profile.id}`).catch(() => undefined)
+    // Turned off: nothing checks on it. Without a key, Hermes keeps no session for our ids.
+    const profiles = (await db.profiles.toArray()).filter(
+      (p) => !p.disabled && p.apiKey && p.id !== seed?.id,
+    )
+    const held = new Set<string>()
+    for (const profile of profiles) {
+      if (key && !movedChats.includes(profile.id) && (await pullFallbackChats(key, profile.id)))
+        held.add(profile.id)
+    }
+    // Every host at once, so one that hangs holds up only its own bots.
+    const results = await Promise.all(profiles.map(mergePluginChats))
+    // Applied in order: two bots on one server share its list, and a chat stays with the first.
+    for (const [i, profile] of profiles.entries()) {
+      const result = results[i]
+      chatStores[profile.id] = result ? "plugin" : "unreachable"
+      if (!result) continue
+      await applyChats(profile.id, mergeDocs(result.merged, result.local).pull)
+      await settleChatTombstones(profile.id, result.merged)
+      if (key && !movedChats.includes(profile.id)) {
+        if (held.has(profile.id)) await deleteDoc(`chats/${profile.id}`).catch(() => undefined)
         await saveSettings({ movedChats: [...movedChats, profile.id] })
         movedChats.push(profile.id)
       }
