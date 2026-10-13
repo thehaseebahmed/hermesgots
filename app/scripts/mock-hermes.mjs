@@ -56,7 +56,8 @@
 // message that carries attachments (inline images, `<attachment>` lines) gets a reply naming them.
 // POST /api/plugins/memento/dictation turns a recorded clip into a fixed sentence after a moment, like
 // plugin/dictation.py with faster-whisper; MOCK_DICTATION=off reports it unavailable (the mic hides)
-// and MOCK_DICTATION=fail answers every clip with an error.
+// and MOCK_DICTATION=fail answers every clip with an error. GET /__mock/dictation lists the clips it
+// was sent (size, type, hint and the text before each), for the regression script.
 //
 //   pnpm mock            # then point Settings at http://localhost:8642/v1
 
@@ -981,6 +982,7 @@ async function streamCompletion(req, res, body) {
 const runs = new Map()
 const PLUGIN_VERSION = process.env.MOCK_PLUGIN_VERSION || "0.29.1"
 const DICTATION = process.env.MOCK_DICTATION ?? "on"
+const dictationClips = []
 const EVENTS = process.env.MOCK_NO_EVENTS !== "1"
 const RUNS = process.env.MOCK_NO_RUNS !== "1"
 const RUN_BACKLOG = Number(process.env.MOCK_RUN_BACKLOG ?? 1000)
@@ -1569,6 +1571,7 @@ http
     if (PLUGIN && !profile && req.method === "POST" && url.pathname === "/api/plugins/memento/dictation") {
       const data = await readRaw(req)
       if (!data.length) return json(res, 400, { error: { message: "The recording is empty." } })
+      dictationClips.push({ bytes: data.length, type: req.headers["content-type"], hint: url.searchParams.get("hint"), context: url.searchParams.get("context") })
       if (DICTATION === "off") return json(res, 409, { error: { message: "faster-whisper isn't installed on the host." } })
       await new Promise((resolve) => setTimeout(resolve, 700))
       if (DICTATION === "fail") return json(res, 502, { error: { message: "Local transcription failed: the model ran out of memory." } })
@@ -1659,6 +1662,9 @@ http
       return json(res, 200, { object: "memento.runs", sessions, run_ids, waiting })
     }
     // Dev only: POST { stage } moves every Theseus run (and the next ones) to that stage.
+    if (url.pathname === "/__mock/dictation" && req.method === "GET") {
+      return json(res, 200, { clips: dictationClips })
+    }
     if (url.pathname === "/__mock/theseus" && req.method === "POST") {
       const { stage } = await readBody(req)
       if (!THESEUS_STAGES.includes(stage)) return json(res, 400, { error: { message: "No such stage." } })

@@ -139,7 +139,7 @@ export function Composer({
   const textarea = useRef<HTMLTextAreaElement>(null)
   const listId = useId()
   const dictationInfo = useDictationInfo(connection)
-  const dictation = useDictation(connection, joinText(botName, dictationHint ?? ""))
+  const dictation = useDictation(connection, joinText(botName, dictationHint ?? ""), draftKey)
   const canDictate = Boolean(dictationInfo?.ready) && canRecord()
   // Where the cursor was when dictation started, and whether the clip goes into the text or is sent.
   const dictationAt = useRef<number | null>(null)

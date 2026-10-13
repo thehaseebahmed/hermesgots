@@ -1,19 +1,62 @@
 // Run with Vite on APP_URL and an isolated mock on MOCK_URL (MOCK_DICTATION=off on OFF_MOCK_URL).
-// Requires Playwright; Chromium's fake microphone stands in for a real one.
+// Requires Playwright; Chromium's fake microphone stands in for a real one, and for the pieces cut
+// at pauses it plays a made-up voice that stops for a moment twice.
 import assert from "node:assert/strict"
+import { mkdtempSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? "playwright")
 
 const app = process.env.APP_URL ?? "http://localhost:15173"
 const mock = process.env.MOCK_URL ?? "http://localhost:18642"
 const offMock = process.env.OFF_MOCK_URL
 const shots = process.env.SHOTS_DIR
-const browser = await chromium.launch({
-  headless: true,
-  args: ["--no-sandbox", "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"],
-})
+const SENTENCE = "Let's ship the dictation feature today."
+const fakeMic = ["--no-sandbox", "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"]
+const browser = await chromium.launch({ headless: true, args: fakeMic })
 
-async function open(server, viewport, colorScheme = "light") {
-  const context = await browser.newContext({ viewport, colorScheme })
+/** 7s of a buzzing, syllable-shaped voice, 1.5s of quiet, 7s more, 1.5s, 4s, then quiet. */
+function speech() {
+  const rate = 48000
+  const parts = [[0.5, 0], [7, 1], [1.5, 0], [7, 1], [1.5, 0], [4, 1], [3, 0]]
+  const total = parts.reduce((sum, [seconds]) => sum + Math.round(seconds * rate), 0)
+  const wav = Buffer.alloc(44 + total * 2)
+  wav.write("RIFF", 0)
+  wav.writeUInt32LE(36 + total * 2, 4)
+  wav.write("WAVEfmt ", 8)
+  wav.writeUInt32LE(16, 16)
+  wav.writeUInt16LE(1, 20)
+  wav.writeUInt16LE(1, 22)
+  wav.writeUInt32LE(rate, 24)
+  wav.writeUInt32LE(rate * 2, 28)
+  wav.writeUInt16LE(2, 32)
+  wav.writeUInt16LE(16, 34)
+  wav.write("data", 36)
+  wav.writeUInt32LE(total * 2, 40)
+  let at = 0
+  for (const [seconds, voiced] of parts) {
+    for (let i = 0; i < Math.round(seconds * rate); i++, at++) {
+      const t = at / rate
+      let value = 0.0005 * (Math.random() * 2 - 1)
+      if (voiced) {
+        const envelope = Math.max(0, Math.sin(2 * Math.PI * 4.3 * t)) ** 0.6
+        const pitch = 140 + 25 * Math.sin(2 * Math.PI * 0.7 * t)
+        let tone = 0
+        for (let k = 1; k < 8; k++) tone += Math.sin(2 * Math.PI * pitch * k * t) / k
+        value = envelope * (0.25 * tone + 0.08 * (Math.random() * 2 - 1))
+      }
+      wav.writeInt16LE(Math.round(Math.max(-1, Math.min(1, value)) * 32767), 44 + at * 2)
+    }
+  }
+  const path = join(mkdtempSync(join(tmpdir(), "memento-dictation-")), "speech.wav")
+  writeFileSync(path, wav)
+  return path
+}
+
+const clips = async () => (await (await fetch(`${mock}/__mock/dictation`)).json()).clips
+
+async function open(server, viewport, colorScheme = "light", on = browser) {
+  const context = await on.newContext({ viewport, colorScheme })
   await context.grantPermissions(["microphone"], { origin: app })
   const page = await context.newPage()
   await page.goto(app)
@@ -52,7 +95,7 @@ try {
       undefined,
       { timeout: 5000 },
     )
-    assert.equal(await composer.inputValue(), "Note: Let's ship the dictation feature today.")
+    assert.equal(await composer.inputValue(), `Note: ${SENTENCE}`)
     await shot(page, `${label}-3-inserted`)
 
     // Hold to talk: letting go finishes.
@@ -67,13 +110,52 @@ try {
       undefined,
       { timeout: 5000 },
     )
-    assert.equal(await composer.inputValue(), "Let's ship the dictation feature today.")
+    assert.equal(await composer.inputValue(), SENTENCE)
 
     // Cancel drops the clip without asking the host.
     await mic.click()
     await page.getByRole("button", { name: "Cancel" }).click()
     await mic.waitFor()
     await page.close()
+  }
+
+  // A recording left by a reload comes back with Retry.
+  {
+    const page = await open(mock, { width: 390, height: 844 })
+    await page.getByRole("button", { name: "Voice" }).click()
+    await page.getByRole("button", { name: "Stop" }).waitFor()
+    await page.waitForTimeout(3500)
+    await page.reload()
+    await page.getByText("hasn't been transcribed yet").waitFor()
+    await shot(page, "phone-light-6-kept")
+    await page.getByRole("button", { name: "Retry" }).click()
+    await page.getByRole("button", { name: "Voice" }).waitFor()
+    assert.equal(await page.getByRole("textbox").last().inputValue(), SENTENCE)
+    await page.reload()
+    await page.getByRole("button", { name: "Voice" }).waitFor()
+    await page.close()
+  }
+
+  // A long recording goes in pieces cut at the pauses, each sent while the voice carries on.
+  {
+    const talker = await chromium.launch({
+      headless: true,
+      args: [...fakeMic, `--use-file-for-fake-audio-capture=${speech()}`],
+    })
+    const page = await open(mock, { width: 390, height: 844 }, "light", talker)
+    const before = (await clips()).length
+    await page.getByRole("button", { name: "Voice" }).click()
+    await page.getByRole("button", { name: "Stop" }).waitFor()
+    await page.waitForTimeout(19_000)
+    const sent = (await clips()).slice(before)
+    assert.equal(sent.length, 2, "two pieces sent before Stop")
+    assert.equal(sent[1].context, SENTENCE, "the second piece carries on from the first")
+    await page.getByRole("button", { name: "Stop" }).click()
+    await page.getByRole("button", { name: "Voice" }).waitFor()
+    const all = (await clips()).slice(before)
+    assert.equal(all.length, 3)
+    assert.equal(await page.getByRole("textbox").last().inputValue(), Array(3).fill(SENTENCE).join(" "))
+    await talker.close()
   }
 
   if (offMock) {

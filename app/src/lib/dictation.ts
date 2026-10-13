@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 
+import { db, type DictationPiece } from "@/lib/db"
 import {
   getDictationInfo,
   transcribeClip,
@@ -11,7 +12,9 @@ import {
 /**
  * Dictation: the clip is recorded here and turned into text by the bot's own faster-whisper,
  * through the Memento plugin (`plugin/dictation.py`). Hermes's local model doesn't stream, so the
- * text arrives once the clip is done. A bot whose host can't is never offered a mic.
+ * recording is cut at the speaker's pauses and each piece is sent while they keep talking: on Stop
+ * only the last piece is left to wait for. Until its text is in, a recording is kept on the device
+ * (`db.dictations`, under the composer's draft key). A bot whose host can't is never offered a mic.
  */
 
 const INFO_MS = 5 * 60 * 1000
@@ -52,7 +55,7 @@ export function useDictationInfo(config: HermesConfig) {
   return key ? info : null
 }
 
-/** The longest clip; at 24 kbps it stays far under the API server's 10 MB body limit. */
+/** The longest recording; at 24 kbps it stays far under the API server's 10 MB body limit. */
 const MAX_MS = 10 * 60 * 1000
 /** Shorter than this is a stray tap, not speech. */
 const MIN_MS = 300
@@ -61,6 +64,18 @@ const TRANSCRIBE_MS = 120_000
 const TYPES = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4", "audio/webm"]
 const BARS = 32
 const SAMPLE_MS = 50
+// A piece is cut at a pause once it holds some speech: long enough that Whisper has a sentence to
+// work with, and sooner at a shorter pause once it's long.
+const PIECE_MS = 6000
+const PAUSE_MS = 700
+const LONG_PIECE_MS = 25_000
+const SHORT_PAUSE_MS = 350
+// Loudness (RMS of the wave, 0 to 1) under which the mic counts as quiet: a few times the room's
+// own noise, within these bounds.
+const QUIET_MIN = 0.012
+const QUIET_MAX = 0.05
+const SAVE_MS = 2000
+const RESTORED = "This recording hasn't been transcribed yet."
 
 export const canRecord = () =>
   typeof window !== "undefined" &&
@@ -81,18 +96,53 @@ function micError(error: unknown) {
 
 export type DictationStatus = "idle" | "listening" | "transcribing" | "failed"
 
-interface Recording {
-  stream: MediaStream
+/** One recorder's stretch of the recording; a cut at a pause starts the next. */
+interface Segment {
   recorder: MediaRecorder
   chunks: Blob[]
-  audio?: AudioContext
-  frame?: number
-  cap?: number
-  /** When the recorder started; null while the mic is still being asked for. */
-  startedAt: number | null
-  stoppedAt?: number
+  startedAt: number
+  /** Whether the meter has heard speech in it (always, when there's no meter). */
+  heard: boolean
+  /** Too short to send: the last moment before Stop, after a cut. */
+  skip?: boolean
   stopped: Promise<void>
 }
+
+interface Recording {
+  stream: MediaStream
+  mimeType?: string
+  segments: Segment[]
+  startedAt: number
+  stoppedAt?: number
+  measured: boolean
+  audio?: AudioContext
+  timer?: number
+  cap?: number
+}
+
+interface Session {
+  key?: string
+  pieces: DictationPiece[]
+  recording: Recording | null
+  upload: AbortController | null
+  draining: Promise<boolean> | null
+  error: unknown
+  /** Cancelled or done: nothing more is kept. */
+  closed: boolean
+  saving: Promise<unknown>
+  saveTimer?: number
+}
+
+const newSession = (key: string | undefined, pieces: DictationPiece[] = []): Session => ({
+  key,
+  pieces,
+  recording: null,
+  upload: null,
+  draining: null,
+  error: null,
+  closed: false,
+  saving: Promise.resolve(),
+})
 
 export function joinText(...parts: string[]) {
   return parts
@@ -101,78 +151,200 @@ export function joinText(...parts: string[]) {
     .join(" ")
 }
 
-export function useDictation(config: HermesConfig, hint: string) {
+function save(session: Session, now = false) {
+  if (!session.key || session.closed) return
+  if (!now) {
+    session.saveTimer ??= window.setTimeout(() => save(session, true), SAVE_MS)
+    return
+  }
+  window.clearTimeout(session.saveTimer)
+  session.saveTimer = undefined
+  const key = session.key
+  const live = (session.recording?.segments ?? [])
+    .filter((segment) => segment.chunks.length)
+    .map((segment) => ({
+      blob: new Blob(segment.chunks, { type: segment.recorder.mimeType || "audio/webm" }),
+      text: null,
+    }))
+  const pieces = [...session.pieces.map((piece) => ({ ...piece })), ...live]
+  session.saving = session.saving
+    .then(async () => {
+      if (pieces.length) await db.dictations.put({ id: key, pieces, at: Date.now() })
+      else await db.dictations.delete(key)
+    })
+    .catch(() => undefined)
+}
+
+function forget(session: Session) {
+  session.closed = true
+  window.clearTimeout(session.saveTimer)
+  const key = session.key
+  if (key) session.saving = session.saving.then(() => db.dictations.delete(key)).catch(() => {})
+}
+
+function release(recording: Recording) {
+  window.clearInterval(recording.timer)
+  window.clearTimeout(recording.cap)
+  recording.stream.getTracks().forEach((track) => track.stop())
+  void recording.audio?.close().catch(() => {})
+  recording.timer = undefined
+  recording.audio = undefined
+}
+
+function stopSegments(recording: Recording) {
+  const open = [...recording.segments]
+  for (const segment of open) if (segment.recorder.state !== "inactive") segment.recorder.stop()
+  recording.stoppedAt ??= Date.now()
+  return Promise.all(open.map((segment) => segment.stopped))
+}
+
+export function useDictation(config: HermesConfig, hint: string, key?: string) {
   const [status, setStatus] = useState<DictationStatus>("idle")
   const [levels, setLevels] = useState<number[] | null>(null)
   const [startedAt, setStartedAt] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const recording = useRef<Recording | null>(null)
-  // Set from `start` until the session ends, so a second press can't start another.
-  const active = useRef(false)
-  const clip = useRef<Blob | null>(null)
-  const pending = useRef<AbortController | null>(null)
-  const latest = useRef({ config, hint })
+  const session = useRef<Session | null>(null)
+  const latest = useRef({ config, hint, key })
   useEffect(() => {
-    latest.current = { config, hint }
+    latest.current = { config, hint, key }
   })
 
-  const release = useCallback((current: Recording) => {
-    if (current.frame !== undefined) cancelAnimationFrame(current.frame)
-    if (current.cap !== undefined) window.clearTimeout(current.cap)
-    current.stream.getTracks().forEach((track) => track.stop())
-    void current.audio?.close().catch(() => {})
-    current.frame = undefined
-    current.audio = undefined
-  }, [])
-
-  const reset = useCallback(() => {
-    const current = recording.current
-    recording.current = null
-    if (current) {
-      if (current.recorder.state !== "inactive") current.recorder.stop()
-      release(current)
-    }
-    pending.current?.abort()
-    pending.current = null
-    clip.current = null
-    active.current = false
+  const showIdle = useCallback(() => {
     setStatus("idle")
     setLevels(null)
     setStartedAt(null)
     setError(null)
-  }, [release])
-
-  const meter = useCallback((current: Recording) => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
-    try {
-      const audio = new AudioContext()
-      const analyser = audio.createAnalyser()
-      analyser.fftSize = 512
-      audio.createMediaStreamSource(current.stream).connect(analyser)
-      current.audio = audio
-      const samples = new Uint8Array(analyser.fftSize)
-      let history = Array<number>(BARS).fill(0)
-      let last = 0
-      const tick = (now: number) => {
-        current.frame = requestAnimationFrame(tick)
-        if (now - last < SAMPLE_MS) return
-        last = now
-        analyser.getByteTimeDomainData(samples)
-        let sum = 0
-        for (const sample of samples) sum += ((sample - 128) / 128) ** 2
-        history = [...history.slice(1), Math.min(1, Math.sqrt(sum / samples.length) * 5)]
-        setLevels(history)
-      }
-      current.frame = requestAnimationFrame(tick)
-    } catch {
-      // The meter is cosmetic.
-    }
   }, [])
+
+  /** Sends each piece still without text, in order, each after the text before it. */
+  const drain = useCallback((current: Session) => {
+    const run = async () => {
+      for (;;) {
+        const index = current.pieces.findIndex((piece) => piece.text === null)
+        if (index < 0) return true
+        const piece = current.pieces[index]
+        const before = joinText(...current.pieces.slice(0, index).map((done) => done.text ?? ""))
+        const controller = new AbortController()
+        current.upload = controller
+        const timer = window.setTimeout(() => controller.abort(), TRANSCRIBE_MS)
+        try {
+          const { config, hint } = latest.current
+          const text = await transcribeClip(config, piece.blob, hint, before, controller.signal)
+          if (current.upload !== controller) return false
+          piece.text = text
+          current.error = null
+        } catch (failure) {
+          if (current.upload === controller) current.error = failure
+          return false
+        } finally {
+          window.clearTimeout(timer)
+          if (current.upload === controller) current.upload = null
+        }
+        save(current, true)
+      }
+    }
+    if (!current.draining) {
+      const draining: Promise<boolean> = run().finally(() => {
+        if (current.draining === draining) current.draining = null
+      })
+      current.draining = draining
+    }
+    return current.draining
+  }, [])
+
+  const openSegment = useCallback(
+    (current: Session, recording: Recording) => {
+      const recorder = new MediaRecorder(recording.stream, {
+        mimeType: recording.mimeType,
+        audioBitsPerSecond: 24_000,
+      })
+      let stopped!: () => void
+      const segment: Segment = {
+        recorder,
+        chunks: [],
+        startedAt: Date.now(),
+        heard: !recording.measured,
+        stopped: new Promise((resolve) => (stopped = resolve)),
+      }
+      recorder.ondataavailable = (event) => {
+        if (!event.data.size) return
+        segment.chunks.push(event.data)
+        save(current)
+      }
+      recorder.onstop = () => {
+        recording.segments = recording.segments.filter((open) => open !== segment)
+        if (segment.chunks.length && !segment.skip) {
+          const type = recorder.mimeType || recording.mimeType || "audio/webm"
+          current.pieces.push({ blob: new Blob(segment.chunks, { type }), text: null })
+        }
+        save(current, true)
+        // Pieces go while the speaker carries on; one that fails is tried again with the next.
+        if (session.current === current) void drain(current)
+        stopped()
+      }
+      recording.segments.push(segment)
+      recorder.start(1000)
+      return segment
+    },
+    [drain],
+  )
+
+  const monitor = useCallback(
+    (current: Session, recording: Recording) => {
+      try {
+        const audio = new AudioContext()
+        void audio.resume().catch(() => {})
+        const analyser = audio.createAnalyser()
+        analyser.fftSize = 512
+        audio.createMediaStreamSource(recording.stream).connect(analyser)
+        recording.audio = audio
+        recording.measured = true
+        const motion = !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        const samples = new Uint8Array(analyser.fftSize)
+        let history = Array<number>(BARS).fill(0)
+        let floor = Infinity
+        let quietSince: number | null = null
+        recording.timer = window.setInterval(() => {
+          analyser.getByteTimeDomainData(samples)
+          let sum = 0
+          for (const sample of samples) sum += ((sample - 128) / 128) ** 2
+          const loudness = Math.sqrt(sum / samples.length)
+          // The quietest the room gets, creeping up slowly so a noisier room is learnt.
+          floor = loudness < floor ? loudness : floor + (loudness - floor) * 0.002
+          const quiet = loudness < Math.min(Math.max(QUIET_MIN, floor * 2.5), QUIET_MAX)
+          const now = Date.now()
+          const segment = recording.segments.at(-1)
+          if (!quiet) quietSince = null
+          else quietSince ??= now
+          if (segment && !quiet) segment.heard = true
+          if (segment?.heard && quietSince !== null && segment.recorder.state === "recording") {
+            const length = now - segment.startedAt
+            const pause = now - quietSince
+            if (
+              (length >= PIECE_MS && pause >= PAUSE_MS) ||
+              (length >= LONG_PIECE_MS && pause >= SHORT_PAUSE_MS)
+            ) {
+              openSegment(current, recording)
+              segment.recorder.stop()
+            }
+          }
+          if (motion && session.current === current) {
+            history = [...history.slice(1), Math.min(1, loudness * 5)]
+            setLevels(history)
+          }
+        }, SAMPLE_MS)
+      } catch {
+        // Without a meter the recording goes whole, as one piece.
+      }
+    },
+    [openSegment],
+  )
 
   /** Starts recording; false when the mic couldn't be had. */
   const start = useCallback(async () => {
-    if (active.current || !canRecord()) return false
-    active.current = true
+    if (session.current || !canRecord()) return false
+    const current = newSession(latest.current.key)
+    session.current = current
     setError(null)
     setStatus("listening")
     void warmDictation(latest.current.config).catch(() => {})
@@ -187,114 +359,146 @@ export function useDictation(config: HermesConfig, hint: string) {
         },
       })
     } catch (failure) {
-      active.current = false
-      setStatus("idle")
+      if (session.current === current) {
+        session.current = null
+        showIdle()
+      }
       throw new Error(micError(failure))
     }
     // Cancelled while the mic was asked for.
-    if (!active.current) {
+    if (session.current !== current) {
       stream.getTracks().forEach((track) => track.stop())
       return false
     }
-    const mimeType = recordingType()
-    const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 24_000 })
-    const chunks: Blob[] = []
-    let stopped!: () => void
-    const current: Recording = {
+    const recording: Recording = {
       stream,
-      recorder,
-      chunks,
-      startedAt: null,
-      stopped: new Promise((resolve) => (stopped = resolve)),
+      mimeType: recordingType(),
+      segments: [],
+      startedAt: Date.now(),
+      measured: false,
     }
-    recorder.ondataavailable = (event) => {
-      if (event.data.size) chunks.push(event.data)
-    }
-    recorder.onstop = () => {
-      current.stoppedAt ??= Date.now()
-      stopped()
-    }
-    recording.current = current
-    recorder.start(1000)
-    current.startedAt = Date.now()
-    setStartedAt(current.startedAt)
-    // Past the cap the clip stops growing; Stop or Send still turns it into text.
-    current.cap = window.setTimeout(() => {
-      if (recorder.state !== "inactive") recorder.stop()
-      release(current)
-      setLevels(null)
+    current.recording = recording
+    monitor(current, recording)
+    openSegment(current, recording)
+    setStartedAt(recording.startedAt)
+    // Past the cap the recording stops growing; Stop or Send still turns it into text.
+    recording.cap = window.setTimeout(() => {
+      void stopSegments(recording)
+      release(recording)
+      if (session.current === current) setLevels(null)
     }, MAX_MS)
-    meter(current)
     return true
-  }, [meter, release])
+  }, [monitor, openSegment, showIdle])
 
-  const transcribe = useCallback(
-    async (audio: Blob) => {
+  /** Waits for every piece's text: the whole of it, or null with the recording kept for `retry`. */
+  const settle = useCallback(
+    async (current: Session) => {
       setStatus("transcribing")
       setLevels(null)
-      const controller = new AbortController()
-      pending.current = controller
-      const timer = window.setTimeout(() => controller.abort(), TRANSCRIBE_MS)
-      try {
-        const { config, hint } = latest.current
-        const text = await transcribeClip(config, audio, hint, controller.signal)
-        if (pending.current !== controller) return null
-        reset()
-        return text
-      } catch (failure) {
-        if (pending.current !== controller) return null
-        pending.current = null
-        const timedOut = failure instanceof DOMException && failure.name === "AbortError"
-        setError(
-          timedOut
-            ? "The bot took too long to transcribe."
-            : failure instanceof Error
-              ? failure.message
-              : "Couldn't transcribe the recording.",
-        )
-        setStatus("failed")
-        // The host may have lost faster-whisper since; ask again so the mic hides if so.
-        void readDictationInfo(latest.current.config, true)
-        return null
-      } finally {
-        window.clearTimeout(timer)
+      setError(null)
+      const done = await drain(current)
+      if (session.current !== current) return null
+      if (done) {
+        forget(current)
+        session.current = null
+        showIdle()
+        return joinText(...current.pieces.map((piece) => piece.text ?? ""))
       }
+      const failure = current.error
+      const timedOut = failure instanceof DOMException && failure.name === "AbortError"
+      setError(
+        timedOut
+          ? "The bot took too long to transcribe."
+          : failure instanceof Error
+            ? failure.message
+            : "Couldn't transcribe the recording.",
+      )
+      setStatus("failed")
+      // The host may have lost faster-whisper since; ask again so the mic hides if so.
+      void readDictationInfo(latest.current.config, true)
+      return null
     },
-    [reset],
+    [drain, showIdle],
   )
 
+  const cancel = useCallback(() => {
+    const current = session.current
+    session.current = null
+    if (current) {
+      forget(current)
+      current.upload?.abort()
+      current.upload = null
+      if (current.recording) {
+        void stopSegments(current.recording)
+        release(current.recording)
+      }
+    }
+    showIdle()
+  }, [showIdle])
+
   /**
-   * Ends the recording and returns its text: `""` for a clip too short to hold speech, null when
-   * the host couldn't transcribe it (the clip is kept for `retry`).
+   * Ends the recording and returns its text: `""` for a recording too short to hold speech, null
+   * when the host couldn't transcribe it (it's kept for `retry`).
    */
   const finish = useCallback(async () => {
-    const current = recording.current
-    if (!current || current.startedAt === null) {
-      reset()
+    const current = session.current
+    const recording = current?.recording
+    if (!current || !recording) {
+      cancel()
       return ""
     }
-    if (current.recorder.state !== "inactive") current.recorder.stop()
-    release(current)
-    await current.stopped
-    recording.current = null
-    const length = (current.stoppedAt ?? Date.now()) - current.startedAt
-    const audio = new Blob(current.chunks, { type: current.recorder.mimeType || "audio/webm" })
-    if (length < MIN_MS || !audio.size) {
-      reset()
+    const last = recording.segments.at(-1)
+    if (last && current.pieces.length && Date.now() - last.startedAt < MIN_MS) last.skip = true
+    const stopping = stopSegments(recording)
+    release(recording)
+    await stopping
+    if (session.current !== current) return null
+    current.recording = null
+    const length = (recording.stoppedAt ?? Date.now()) - recording.startedAt
+    if (length < MIN_MS || !current.pieces.length) {
+      cancel()
       return ""
     }
-    clip.current = audio
-    return transcribe(audio)
-  }, [release, reset, transcribe])
+    return settle(current)
+  }, [cancel, settle])
 
   const retry = useCallback(async () => {
-    const audio = clip.current
-    if (!audio) return null
-    setError(null)
-    return transcribe(audio)
-  }, [transcribe])
+    const current = session.current
+    if (!current?.pieces.length) return null
+    return settle(current)
+  }, [settle])
 
-  useEffect(() => () => reset(), [reset])
+  // A recording left unfinished (another chat, the screen closed) is kept for when it's back.
+  useEffect(() => {
+    let live = true
+    if (key)
+      void db.dictations
+        .get(key)
+        .catch(() => undefined)
+        .then((saved) => {
+          if (!live || session.current || !saved?.pieces.length) return
+          session.current = newSession(key, saved.pieces)
+          setError(RESTORED)
+          setStatus("failed")
+        })
+    return () => {
+      live = false
+      const current = session.current
+      session.current = null
+      if (!current) return
+      current.upload?.abort()
+      current.upload = null
+      const recording = current.recording
+      if (recording) {
+        release(recording)
+        void stopSegments(recording).then(() => {
+          current.recording = null
+          save(current, true)
+        })
+      }
+      showIdle()
+    }
+  }, [key, showIdle])
 
   return {
     status,
@@ -302,10 +506,10 @@ export function useDictation(config: HermesConfig, hint: string) {
     startedAt,
     error,
     /** When the recorder started, for a hold that ends before the mic was granted. */
-    recordingSince: () => recording.current?.startedAt ?? null,
+    recordingSince: () => session.current?.recording?.startedAt ?? null,
     start,
     finish,
     retry,
-    cancel: reset,
+    cancel,
   }
 }
