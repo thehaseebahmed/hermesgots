@@ -451,7 +451,7 @@ async function runDelegation(parent, goal, out) {
 // A wireframe for a gate 2 capture; the reference is dashed, the build is solid.
 const theseusCapture = (reference) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 400"><rect width="300" height="400" fill="#fff"/><rect x="1" y="1" width="298" height="398" fill="none" stroke="#888" ${reference ? 'stroke-dasharray="6 4"' : ""}/><rect x="24" y="28" width="130" height="12" rx="6" fill="#333"/><rect x="24" y="68" width="252" height="34" rx="10" fill="none" stroke="#999"/><rect x="24" y="116" width="252" height="68" rx="10" fill="none" stroke="#999"/><rect x="24" y="198" width="252" height="34" rx="10" fill="none" stroke="#d33"/><rect x="24" y="242" width="170" height="8" rx="4" fill="#d33"/><rect x="170" y="344" width="106" height="34" rx="17" fill="#7a8cff"/></svg>`
 
-// The plugin's plan-mode instructions (sessions.PLAN_INSTRUCTIONS), word for word.
+// The plugin's plan-mode instructions (prompt_builder._PLAN_INSTRUCTIONS), word for word.
 const PLAN_INSTRUCTIONS = `You are in plan mode: change nothing. Read what you need. Then, before you write the plan, settle every choice the user would otherwise be left to make: ask with the clarify tool, every question in one call, your recommended answer first. If you can't ask (no clarify tool, or no answer came), decide it yourself and record the decision under Risks and assumptions. Then make your whole final reply the plan below and stop; the user approves it before you act. It is saved to a file as written, so write it for someone who hasn't read this chat, and a plan with an open question isn't finished. Use this Markdown shape exactly:
 
 # Plan: <short title>

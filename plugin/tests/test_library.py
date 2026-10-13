@@ -16,7 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from plugin import library, sessions
+from plugin import library, prompt_builder, sessions
 from plugin.store import db_path
 from plugin.tests._helpers import stub_projects_db
 
@@ -197,14 +197,14 @@ class InstructionsTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_the_line_names_the_folder_right_after_the_worktree_line(self) -> None:
-        text = sessions.instructions(self.record)
+        text = prompt_builder.session_prompt(self.record)
         self.assertIn(f"this session's library at {self.record['files_dir']}", text)
         self.assertIn("add_to_library tool", text)
-        self.assertLess(text.index("library at"), text.index(sessions.PR_INSTRUCTIONS))
+        self.assertLess(text.index("library at"), text.index("open_pull_request tool"))
 
     def test_a_record_without_the_folder_has_no_line(self) -> None:
         legacy = {**self.record, "files_dir": None}
-        self.assertNotIn("library", sessions.instructions(legacy))
+        self.assertNotIn("library", prompt_builder.session_prompt(legacy))
 
 
 if __name__ == "__main__":
