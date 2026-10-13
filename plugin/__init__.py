@@ -5,7 +5,7 @@ can read cron run history from Hermes's execution ledger instead of piecing it t
 device, keep its chat list on the server (``chats.py``), report each chat's context use
 (``context.py``) and the agent's todo list (``todos.py``), list and create Hermes Projects (``projects.py``) with GitHub repos cloned into
 them in the background (``clones.py``, ``github.py``), add and remove a project's repos (``repos.py``), run project sessions in their own worktrees with a permission mode and save their plans
-(``sessions.py``), let the agent push and open its pull requests, close them when a session is dropped (``ship.py``), file the files it generates in the project's library (``library.py``) and resolve a session once its pull request merges (``merges.py``), run a session end to end with the Theseus skill (``theseus.py``), let the agent ask the user questions with Hermes's ``clarify`` tool (``clarify.py``), keep its delegations in the turn that made them (``delegation.py``) and
+(``sessions.py``), let the agent push and open its pull requests, close them when a session is dropped (``ship.py``), file the files it generates in the project's library (``library.py``) and resolve a session once its pull request merges (``merges.py``), run a session end to end with the Theseus skill (``theseus.py``), research a question into a cited guide, quiz or glossary (``research.py``), let the agent ask the user questions with Hermes's ``clarify`` tool (``clarify.py``), keep its delegations in the turn that made them (``delegation.py``) and
 set the profile's main model from a bot's Default model (``host_model.py``), label its chats as Memento's, tell the app what changed as it happens (``events.py``, ``stream.py``), and links the profile to a Memento account (``link.py``). The dashboard half lives in ``dashboard/``.
 """
 
@@ -40,6 +40,7 @@ from . import (
     projects,
     prompt_builder,
     repos,
+    research,
     sessions,
     push,
     ship,
@@ -155,6 +156,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     theseus.wire(adapter)
     # A background delegation's result would wait for the user's next message; see delegation.py.
     delegation.wire(adapter)
+    # Research missions' researchers record their claims; see research.py.
+    research.wire(adapter)
 
     async def daily_cleanup(_app: Any):
         from hermes_constants import get_hermes_home
@@ -174,6 +177,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             # Queued messages start their turn once the session's run is over; see outbox.py.
             asyncio.ensure_future(outbox.run(adapter, home)),
             asyncio.ensure_future(alerts.run(home)),
+            # Research missions write up once their researcher stops; see research.py.
+            asyncio.ensure_future(research.run(home)),
         ]
         yield
         for task in tasks:
@@ -257,12 +262,14 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "queue",
                     "dictation",
                     "usage",
+                    "research",
                 ],
                 "clarify": asks,
                 "todo_tool": todo_tool,
                 "hooks": hooks_live(),
                 "theseus": await asyncio.to_thread(theseus.info),
                 "dictation": await asyncio.to_thread(dictation.info),
+                "research": {"ready": research.available() is None, "reason": research.available()},
             }
         )
 
@@ -1196,6 +1203,163 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue/{{item_id}}/remove", remove_queued)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue/{{item_id}}/send", send_queued)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue/{{item_id}}/steer", steer_queued)
+    async def research_view(path: Path, mission_id: str) -> "web.Response":
+        found = await asyncio.to_thread(research.mission, path, mission_id)
+        if found is None:
+            return _error(web, "No such mission.", 404)
+        return web.json_response({"object": "memento.research.mission", "mission": found})
+
+    async def research_step(request: "web.Request", step, *args) -> "web.Response":
+        """Runs a step on a mission and answers with the mission as it now is."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        path, mission_id = store_path(), request.match_info["mission_id"]
+        try:
+            found = await asyncio.to_thread(step, path, mission_id, *args)
+        except research.ResearchError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "memento.research.mission", "mission": found})
+
+    async def list_research(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        path = store_path()
+        # A /p/<profile> bot's missions are only seen once it asks.
+        await asyncio.to_thread(research.resume, path)
+        rows = await asyncio.to_thread(research.missions, path)
+        return web.json_response(
+            {"object": "memento.research", "missions": rows, "unavailable": research.available()}
+        )
+
+    async def create_research(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        reason = research.available()
+        if reason:
+            return _error(web, reason, 501)
+        path, profile = store_path(), request_profile()
+        try:
+            found = await asyncio.to_thread(
+                research.create, path, profile, body.get("input"), body.get("type")
+            )
+        except research.ResearchError as error:
+            return _error(web, str(error), error.status)
+        research.spawn(path, found["id"], profile)
+        return web.json_response({"object": "memento.research.mission", "mission": found}, status=202)
+
+    async def get_research(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        return await research_view(store_path(), request.match_info["mission_id"])
+
+    async def start_researcher(request: "web.Request", path: Path, found: Dict[str, Any]) -> None:
+        """Starts the mission's researcher as an ordinary run, with the key the app asked with."""
+        profile = request_profile()
+        research.watch(path, found["id"], profile)
+        try:
+            started = await outbox.post(
+                adapter,
+                profile,
+                "/v1/runs",
+                research.run_body(found),
+                authorization=request.headers.get("Authorization"),
+            )
+        except outbox.StartError as error:
+            await asyncio.to_thread(
+                research.set_run, path, found["id"], None, f"Couldn't start the research: {error}"
+            )
+            return
+        run_id = started.get("run_id")
+        if isinstance(run_id, str) and run_id:
+            await asyncio.to_thread(research.set_run, path, found["id"], run_id)
+        else:
+            await asyncio.to_thread(
+                research.set_run, path, found["id"], None, "Hermes didn't start the research."
+            )
+
+    async def research_brief(request: "web.Request") -> "web.Response":
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        answer = await research_step(request, research.confirm_brief, body)
+        if answer.status == 200:
+            research.spawn(store_path(), request.match_info["mission_id"], request_profile())
+        return answer
+
+    async def research_edit(request: "web.Request") -> "web.Response":
+        return await research_step(request, research.edit_brief)
+
+    async def research_start(request: "web.Request") -> "web.Response":
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        answer = await research_step(request, research.approve_scope, body)
+        if answer.status != 200:
+            return answer
+        path, mission_id = store_path(), request.match_info["mission_id"]
+        found = await asyncio.to_thread(research.mission, path, mission_id)
+        await start_researcher(request, path, found)
+        return await research_view(path, mission_id)
+
+    async def research_format(request: "web.Request") -> "web.Response":
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        answer = await research_step(request, research.make_format, body.get("format"))
+        if answer.status == 200:
+            research.spawn(store_path(), request.match_info["mission_id"], request_profile())
+        return answer
+
+    async def research_retry(request: "web.Request") -> "web.Response":
+        answer = await research_step(request, research.retry)
+        if answer.status != 200:
+            return answer
+        path, mission_id = store_path(), request.match_info["mission_id"]
+        found = await asyncio.to_thread(research.mission, path, mission_id)
+        if found["stage"] == "reading":
+            # The same session, so the researcher carries on from what it already recorded.
+            await start_researcher(request, path, found)
+        else:
+            research.spawn(path, mission_id, request_profile())
+        return await research_view(path, mission_id)
+
+    async def remove_research(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        path, mission_id = store_path(), request.match_info["mission_id"]
+        found = await asyncio.to_thread(research.remove, path, mission_id)
+        if found is None:
+            return _error(web, "No such mission.", 404)
+        if found.get("run_id") and research._run_status(found["run_id"]) in research.ACTIVE:
+            try:
+                await outbox.post(
+                    adapter,
+                    request_profile(),
+                    f"/v1/runs/{found['run_id']}/stop",
+                    {},
+                    authorization=request.headers.get("Authorization"),
+                )
+            except outbox.StartError:
+                logger.debug("memento: couldn't stop the researcher of %s", mission_id, exc_info=True)
+        return web.json_response({"object": "memento.research.removed", "removed": True})
+
+    app.router.add_get(f"{PREFIX}/research", list_research)
+    app.router.add_post(f"{PREFIX}/research", create_research)
+    app.router.add_get(f"{PREFIX}/research/{{mission_id}}", get_research)
+    app.router.add_post(f"{PREFIX}/research/{{mission_id}}/brief", research_brief)
+    app.router.add_post(f"{PREFIX}/research/{{mission_id}}/edit", research_edit)
+    app.router.add_post(f"{PREFIX}/research/{{mission_id}}/start", research_start)
+    app.router.add_post(f"{PREFIX}/research/{{mission_id}}/formats", research_format)
+    app.router.add_post(f"{PREFIX}/research/{{mission_id}}/retry", research_retry)
+    app.router.add_post(f"{PREFIX}/research/{{mission_id}}/remove", remove_research)
     mirror_for_profiles(app, web)
     logger.info("memento: serving %s on the API server", PREFIX)
 
@@ -1205,6 +1369,7 @@ def register(ctx) -> None:
     if register_hook is not None:
         register_hook("post_api_request", context.record)
         register_hook("pre_tool_call", sessions.before_tool)
+        register_hook("pre_tool_call", research.before_tool)
         register_hook("pre_llm_call", sessions.before_llm)
         register_hook("on_session_start", sessions.started)
         register_hook("post_llm_call", sessions.after_llm)
@@ -1232,6 +1397,7 @@ def register(ctx) -> None:
     ship.register(ctx)
     library.register(ctx)
     theseus.register(ctx)
+    research.register(ctx)
     register_handler = getattr(ctx, "register_platform_handler", None)
     if register_handler is None:
         logger.warning("memento: this Hermes version can't add API server routes; update Hermes")
