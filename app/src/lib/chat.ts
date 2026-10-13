@@ -391,23 +391,22 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
   }
   // Once Hermes drops the event buffer, only the run's status is left to poll, and the transcript.
   let polling = false
-  let raisedFor: string | undefined
   let readTranscript: ((signal: AbortSignal) => Promise<void>) | undefined
   let failures = 0
   let errored = false
   // Raises an approval or question the run's status says it waits on, and expires one it no longer
-  // does. The events stream carries both too; `raisedFor` keeps each owner's raise single.
+  // does. The events stream carries both too, so an approval already on the reply isn't raised
+  // again, and neither is one answered while the read was out: Hermes saw it still waiting.
   const applyStatus = async (signal: AbortSignal) => {
+    const before = draft.approval
     const { outcome, approval, clarify } = await getRun(config, runId, signal)
     if (outcome) return { ...outcome, replaceContent: lost } as RunOutcome
     if (approval) {
-      const key = JSON.stringify([approval.command, approval.description])
-      if (key !== raisedFor) {
-        raisedFor = key
-        raiseApproval(turn, approval)
-      }
+      const shown = draft.approval
+      const same =
+        shown?.command === approval.command && shown?.description === approval.description
+      if (!same || (shown?.resolved && shown === before)) raiseApproval(turn, approval)
     } else {
-      raisedFor = undefined
       if (polling && draft.approval && !draft.approval.resolved) {
         draft.approval = { ...draft.approval, resolved: "expired" }
         touch()
