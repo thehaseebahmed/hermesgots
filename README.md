@@ -9,7 +9,7 @@ A playful, minimal companion app for [Hermes Agent](https://github.com/NousResea
 
 - **Chat** streams replies from Hermes's OpenAI-compatible API, with live tool cards. When Hermes asks to run a dangerous command, an **approval** card (Once / Session / Always / Deny) takes the place of the message bar. Once you answer, the card moves into the thread at the point where Hermes asked.
 - **Todos**: when the agent plans multi-step work, a "2/5 todos" pill above the message bar shows its progress, and tapping it opens the list. The agent keeps the list; it needs the [Memento plugin](plugin/README.md).
-- **Voice**: the mic button dictates with the browser's speech recognition and shows the words live. Cancel discards them, Stop drops them into the message bar to edit, and Send sends them straight away. The button only appears in browsers that support it (Chrome, Edge, Safari).
+- **Voice**: the mic button records you and the bot's own Hermes host turns it into text with its local faster-whisper model. Tap to start and stop, or hold and let go. Cancel discards the recording, Stop drops the text into the message bar to edit, and Send sends it straight away. The button only appears for a bot whose host has faster-whisper installed (`hermes tools`, then Local Whisper under Speech-to-Text) and the Memento plugin 0.34 or newer.
 - **Bots**: each bot is a Hermes profile with its own API URL, key and model. Bots sit in a horizontal strip at the top of the sidebar. Tap one to open its latest chat (or a new one if it has none), and new chats go to it. A new bot gets a random image from the 8 glassy SVG characters (soft shapes with an accessory each; see `/bots`), unique until all 8 are taken, and you can change it in Settings. The header bot is animated, and the bots next to messages stay still.
 - **Routines** (`/routines`): every Hermes cron job, grouped by bot, with its last 24 runs as status bars and Run now / Pause / Resume. Run history comes from the [Memento plugin](plugin/README.md) on your Hermes server, so every device sees the same runs. Bots fold away, and the header flags failing and recently failed routines.
 - **Settings**: sync, bots (name, image, API URL and key, model picker, whether its Memento plugin is in use), theme, reply stats, and clearing local data.
@@ -141,7 +141,6 @@ In the app:
 - Plain-HTTP Hermes servers on other hosts work, since the app isn't bound by the browser's mixed-content rule.
 - Sign-in opens GitHub in a browser tab and returns to the app.
 - Passkeys belong to the website's domain, so the app unlocks sync with the recovery code.
-- Voice input isn't available, because Android's WebView has no Web Speech API.
 
 To build locally (needs JDK 21 and the Android SDK):
 

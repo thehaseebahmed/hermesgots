@@ -794,6 +794,13 @@ export function ChatPage() {
             onCommand={(command) => root(command === "new" ? (botPath ?? "/") : "/settings")}
             connection={{ baseUrl: profile?.baseUrl ?? "", apiKey: profile?.apiKey ?? "" }}
             botName={profile?.name}
+            dictationHint={[
+              conversation?.title,
+              project?.name,
+              ...sessionRepos.map((repo) => repo.name.split("/").pop()),
+            ]
+              .filter(Boolean)
+              .join(", ")}
             session={
               session && {
                 // Without the plugin nothing answers for Auto, so the session runs as Accept edits.

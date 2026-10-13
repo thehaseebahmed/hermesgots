@@ -28,6 +28,7 @@ from . import (
     clones,
     context,
     delegation,
+    dictation,
     events,
     github,
     host_model,
@@ -252,11 +253,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "sync_delegation",
                     "host_model",
                     "queue",
+                    "dictation",
                 ],
                 "clarify": asks,
                 "todo_tool": todo_tool,
                 "hooks": hooks_live(),
                 "theseus": await asyncio.to_thread(theseus.info),
+                "dictation": await asyncio.to_thread(dictation.info),
             }
         )
 
@@ -991,6 +994,41 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             {"object": "memento.attachment", "name": saved.name, "path": str(saved), "size": len(data)}
         )
 
+    # One clip at a time, so a long dictation can't starve the agent's turns of CPU.
+    dictating = asyncio.Lock()
+
+    async def dictate(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            data = await request.read()
+        except web.HTTPRequestEntityTooLarge:
+            return _error(web, "The recording is too long.", 413)
+        if not data:
+            return _error(web, "The recording is empty.", 400)
+        if len(data) > dictation.MAX_BYTES:
+            return _error(web, "The recording is too long.", 413)
+        hint = dictation.clean_hint(request.query.get("hint"))
+        async with dictating:
+            try:
+                result = await asyncio.to_thread(
+                    dictation.transcribe, data, request.headers.get("content-type"), hint
+                )
+            except dictation.DictationError as error:
+                return _error(web, str(error), error.status)
+            except Exception:
+                logger.warning("memento: dictation failed", exc_info=True)
+                return _error(web, "Transcription failed.", 502)
+        return web.json_response({"object": "memento.dictation", **result})
+
+    async def warm_dictation(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        result = await asyncio.to_thread(dictation.warm)
+        return web.json_response({"object": "memento.dictation_warm", **result})
+
     async def serve_media(request: "web.Request") -> "web.StreamResponse":
         denied = unauthorized(request)
         if denied is not None:
@@ -1002,6 +1040,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return web.FileResponse(file, headers={"content-type": media.MEDIA_TYPES[file.suffix.lower()]})
 
     app.router.add_get(f"{PREFIX}/media", serve_media)
+    app.router.add_post(f"{PREFIX}/dictation", dictate)
+    app.router.add_post(f"{PREFIX}/dictation/warm", warm_dictation)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/attachments", upload_attachment)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/theseus", get_theseus)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/theseus", post_theseus)

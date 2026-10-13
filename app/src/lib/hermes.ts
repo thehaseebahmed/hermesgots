@@ -1256,6 +1256,52 @@ export async function uploadAttachment(
   return body.path as string
 }
 
+/** Whether the bot's host can turn speech into text with its own faster-whisper (`info`'s `dictation`). */
+export interface DictationInfo {
+  ready: boolean
+  /** Why it can't: no faster-whisper, speech-to-text turned off, or a plugin from before dictation. */
+  reason: string | null
+  model?: string
+}
+
+export async function getDictationInfo(config: HermesConfig): Promise<DictationInfo> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/info`, { headers: headers(config) })
+  const raw = (await response.json())?.dictation
+  if (!raw || typeof raw !== "object")
+    return { ready: false, reason: "The Memento plugin on this bot's host is too old to dictate." }
+  return {
+    ready: Boolean(raw.ready),
+    reason: typeof raw.reason === "string" ? raw.reason : null,
+    model: typeof raw.model === "string" ? raw.model : undefined,
+  }
+}
+
+/** Loads the host's speech model while the user talks, so the clip doesn't wait for it. */
+export async function warmDictation(config: HermesConfig) {
+  await request(`${pluginRoot(config.baseUrl)}/dictation/warm`, {
+    method: "POST",
+    headers: headers(config),
+  })
+}
+
+/** A recorded clip's text, `""` when nobody spoke. */
+export async function transcribeClip(
+  config: HermesConfig,
+  clip: Blob,
+  hint: string,
+  signal?: AbortSignal,
+) {
+  const query = hint ? `?hint=${encodeURIComponent(hint)}` : ""
+  const response = await request(`${pluginRoot(config.baseUrl)}/dictation${query}`, {
+    method: "POST",
+    headers: headers(config, { "Content-Type": clip.type || "audio/webm" }),
+    body: clip,
+    signal,
+  })
+  const text = (await response.json())?.text
+  return typeof text === "string" ? text : ""
+}
+
 /** The session's workspace, or null when it has none (or the plugin predates them). */
 export async function getWorkspace(
   config: HermesConfig,
