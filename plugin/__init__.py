@@ -38,6 +38,7 @@ from . import (
     merges,
     outbox,
     projects,
+    prompt_builder,
     repos,
     sessions,
     push,
@@ -637,7 +638,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             {
                 "object": "memento.workspace",
                 "workspace": record,
-                "instructions": sessions.instructions(record) if record else None,
+                "instructions": prompt_builder.session_prompt(record) if record else None,
                 "blocked": await asyncio.to_thread(sessions.blocked, hermes_home(), record),
             }
         )
