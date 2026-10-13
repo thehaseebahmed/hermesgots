@@ -1,6 +1,7 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useRef,
   useState,
   type ComponentProps,
@@ -47,14 +48,16 @@ export function Popup({ side, ...props }: ComponentProps<typeof Drawer.Root> & {
   return (
     <SideSheet.Provider value={sideSheet}>
       <Expanded.Provider value={!wide && snapPoint === 1}>
-        <Drawer.Root
-          swipeDirection={sideSheet ? "right" : "down"}
-          snapPoints={wide ? undefined : SNAP_POINTS}
-          snapPoint={wide ? undefined : snapPoint}
-          onSnapPointChange={wide ? undefined : setSnapPoint}
-          snapToSequentialPoints={!wide}
-          {...props}
-        />
+        <SetSnapPoint.Provider value={setSnapPoint}>
+          <Drawer.Root
+            swipeDirection={sideSheet ? "right" : "down"}
+            snapPoints={wide ? undefined : SNAP_POINTS}
+            snapPoint={wide ? undefined : snapPoint}
+            onSnapPointChange={wide ? undefined : setSnapPoint}
+            snapToSequentialPoints={!wide}
+            {...props}
+          />
+        </SetSnapPoint.Provider>
       </Expanded.Provider>
     </SideSheet.Provider>
   )
@@ -65,6 +68,35 @@ export const PopupDescription = SheetDescription
 const InSheet = createContext(false)
 const SideSheet = createContext(false)
 const Expanded = createContext(false)
+const SetSnapPoint = createContext<(snap: ComponentProps<typeof Drawer.Root>["snapPoint"]) => void>(
+  () => {},
+)
+
+/** The innermost scrollable ancestor between `from` and the popup, the way Base UI finds it. */
+function findScrollable(from: Element, stop: Element): HTMLElement | null {
+  let node: Element | null = from
+  while (node && node !== stop) {
+    const overflowY = getComputedStyle(node).overflowY
+    if (
+      (overflowY === "auto" || overflowY === "scroll") &&
+      node.scrollHeight > node.clientHeight + 1
+    ) {
+      return node as HTMLElement
+    }
+    node = node.parentElement
+  }
+  return null
+}
+
+type ChainGesture = {
+  scroll: HTMLElement | null
+  offset: number
+  lastY: number
+  lastT: number
+  vy: number
+  claimY: number
+  claimed: boolean
+}
 
 export function PopupHeader({ className, ...props }: ComponentProps<typeof SheetHeader>) {
   const sheet = useContext(InSheet)
@@ -114,6 +146,136 @@ export function PopupContent({
   const wide = useWide()
   const side = useContext(SideSheet)
   const expanded = useContext(Expanded)
+  const setSnapPoint = useContext(SetSnapPoint)
+  // Base UI marks a sheet expanded at its top snap point even when that point resolves to the
+  // sheet's own height — a sheet shorter than 85dvh has both snap points at the same offset, so an
+  // up-drag advances it to the "expanded" index without the sheet ever reaching full screen. The
+  // full-screen look (square corners, no scrim, flush behind a child) follows the measured
+  // geometry instead: it only applies to a sheet at its top snap point that is tall enough for
+  // full screen to mean anything, the same height test the chaining gesture uses.
+  const [fullScreen, setFullScreen] = useState(false)
+  useEffect(() => {
+    if (wide || side) return
+    const el = popup.current
+    if (!el) return
+    const measure = () => {
+      // The popup is as tall as its content allows, up to 100dvh; a sheet shorter than that sits
+      // at the top snap point without ever being full screen (both snap points share an offset),
+      // so only a sheet that actually fills the viewport gets the full-screen look.
+      const full = expanded && el.getBoundingClientRect().height >= window.innerHeight - 2
+      setFullScreen(full)
+      el.toggleAttribute("data-full", full)
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    window.addEventListener("resize", measure)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener("resize", measure)
+    }
+  }, [wide, side, expanded])
+
+  // Scroll-to-expand chaining. Base UI's drawer only claims a content drag that moves toward
+  // dismiss, so an upward drag at the content's scroll top is yielded to the scroller and the
+  // sheet never grows. Claim it here — before Base UI's own document-capture listener runs — and
+  // drive the sheet through the same vars Base UI uses, settling on release. A downward reversal
+  // hands the gesture straight back to Base UI, which then collapses or dismisses as usual.
+  useEffect(() => {
+    if (wide || side) return
+    // The popup's DOM sits in a portal that only mounts while open, so the element is resolved
+    // when the gesture starts, not here (this effect runs once, while the sheet is still closed).
+    let gesture: ChainGesture | null = null
+    const release = (el: HTMLElement) => {
+      el.style.removeProperty("--drawer-swipe-movement-y")
+      el.removeAttribute("data-swiping")
+    }
+    const onStart = (e: TouchEvent) => {
+      gesture = null
+      const el = popup.current
+      if (!el || e.touches.length !== 1) return
+      const target = e.target
+      if (!(target instanceof Element) || !el.contains(target)) return
+      // Skip interactive targets and an active selection, the way Base UI's own swipe does.
+      if (target.closest("button,a,input,select,textarea,label,[role=button]")) return
+      const selection = document.getSelection()
+      if (selection && !selection.isCollapsed) return
+      const offset =
+        parseFloat(getComputedStyle(el).getPropertyValue("--drawer-snap-point-offset")) || 0
+      if (offset <= 0) return
+      gesture = {
+        scroll: findScrollable(target, el),
+        offset,
+        lastY: e.touches[0].clientY,
+        lastT: e.timeStamp,
+        vy: 0,
+        claimY: 0,
+        claimed: false,
+      }
+    }
+    const onMove = (e: TouchEvent) => {
+      if (!gesture || e.touches.length !== 1) return
+      const el = popup.current
+      if (!el) return
+      const y = e.touches[0].clientY
+      const dy = y - gesture.lastY
+      const dt = e.timeStamp - gesture.lastT
+      gesture.lastY = y
+      gesture.lastT = e.timeStamp
+      if (dt > 0) gesture.vy = dy / dt
+      if (gesture.claimed) {
+        if (dy > 0) {
+          // The finger reversed: Base UI owns the gesture from here (collapse or dismiss).
+          release(el)
+          gesture = null
+          return
+        }
+        const moved = y - gesture.claimY
+        const next = gesture.offset + moved
+        // Same damping Base UI applies past the top edge: square root of the overshoot.
+        el.style.setProperty(
+          "--drawer-swipe-movement-y",
+          `${next >= 0 ? moved : -Math.sqrt(-next) - gesture.offset}px`,
+        )
+        e.preventDefault()
+        e.stopPropagation()
+        return
+      }
+      if (dy >= 0) return // down drags are Base UI's, from the content's top edge
+      if (!gesture.scroll) return // chrome outside the scroller: Base UI swipes it itself
+      if (gesture.scroll.scrollTop > 0.5) {
+        // Content still scrolls: let it, and keep Base UI's React path from claiming an up-drag
+        // at the content's end edge in parallel with the native scroll.
+        e.stopPropagation()
+        return
+      }
+      gesture.claimed = true
+      gesture.claimY = y
+      el.setAttribute("data-swiping", "")
+      el.style.setProperty("--drawer-swipe-movement-y", "0px")
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    const onEnd = () => {
+      if (!gesture) return
+      if (gesture.claimed && popup.current) {
+        const up = gesture.claimY - gesture.lastY
+        release(popup.current)
+        if (up >= gesture.offset * 0.5 || (up > 12 && gesture.vy <= -0.5)) setSnapPoint(1)
+      }
+      gesture = null
+    }
+    window.addEventListener("touchstart", onStart, { capture: true, passive: true })
+    window.addEventListener("touchmove", onMove, { capture: true, passive: false })
+    window.addEventListener("touchend", onEnd, { capture: true, passive: true })
+    window.addEventListener("touchcancel", onEnd, { capture: true, passive: true })
+    return () => {
+      window.removeEventListener("touchstart", onStart, { capture: true })
+      window.removeEventListener("touchmove", onMove, { capture: true })
+      window.removeEventListener("touchend", onEnd, { capture: true })
+      window.removeEventListener("touchcancel", onEnd, { capture: true })
+    }
+  }, [wide, side, setSnapPoint])
   if (side)
     return (
       <Drawer.Portal>
@@ -157,7 +319,7 @@ export function PopupContent({
             // settled-state var instead and fades over the 300ms settle.
             "opacity-[var(--sheet-scrim,1)] duration-300 data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] motion-reduce:duration-0",
           )}
-          style={{ "--sheet-scrim": expanded ? 0 : 1 } as CSSProperties}
+          style={{ "--sheet-scrim": fullScreen ? 0 : 1 } as CSSProperties}
         />
         <Drawer.Viewport className="fixed inset-0 z-50 flex items-end justify-center">
           <Drawer.Popup
@@ -175,7 +337,7 @@ export function PopupContent({
               // so the peek is measured from where the child actually sits; --stack-flush cancels
               // the peek when this sheet is expanded, leaving it flush and hidden behind the child.
               // The peek unwinds with the child's swipe.
-              "[transform:translateY(calc(var(--drawer-snap-point-offset)+var(--drawer-swipe-movement-y)+var(--stack-gate)*(var(--stack-own)-var(--stack-front)+var(--stack-child-offset)-var(--stack-peek-offset)+var(--stack-flush)-var(--drawer-snap-point-offset))))] transition-[transform,height] duration-300 ease-[cubic-bezier(0.2,0,0,1)] [--peek:1.75rem] [--stack-child-offset:calc(var(--stack-gate)*max(0px,calc(var(--stack-front)_-_85dvh)))] [--stack-flush:0px] [--stack-front:var(--drawer-frontmost-height,0px)] [--stack-gate:min(1,var(--nested-drawers))] [--stack-own:var(--drawer-height,var(--drawer-frontmost-height,0px))] [--stack-peek-offset:max(0px,calc((var(--nested-drawers)-var(--stack-progress))*var(--peek)))] [--stack-progress:clamp(0,var(--drawer-swipe-progress),1)] data-ending-style:[transform:translateY(100%)] data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] data-expanded:[--stack-flush:calc(var(--stack-gate)*var(--peek))] data-nested-drawer-open:h-[var(--drawer-height)] data-nested-drawer-swiping:duration-0 data-starting-style:[transform:translateY(100%)] data-swiping:duration-0 data-swiping:select-none data-[expanded]:rounded-none motion-reduce:duration-0",
+              "[transform:translateY(calc(var(--drawer-snap-point-offset)+var(--drawer-swipe-movement-y)+var(--stack-gate)*(var(--stack-own)-var(--stack-front)+var(--stack-child-offset)-var(--stack-peek-offset)+var(--stack-flush)-var(--drawer-snap-point-offset))))] transition-[transform,height] duration-300 ease-[cubic-bezier(0.2,0,0,1)] [--peek:1.75rem] [--stack-child-offset:calc(var(--stack-gate)*max(0px,calc(var(--stack-front)_-_85dvh)))] [--stack-flush:0px] [--stack-front:var(--drawer-frontmost-height,0px)] [--stack-gate:min(1,var(--nested-drawers))] [--stack-own:var(--drawer-height,var(--drawer-frontmost-height,0px))] [--stack-peek-offset:max(0px,calc((var(--nested-drawers)-var(--stack-progress))*var(--peek)))] [--stack-progress:clamp(0,var(--drawer-swipe-progress),1)] data-ending-style:[transform:translateY(100%)] data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] data-full:rounded-none data-full:[--stack-flush:calc(var(--stack-gate)*var(--peek))] data-nested-drawer-open:h-[var(--drawer-height)] data-nested-drawer-swiping:duration-0 data-starting-style:[transform:translateY(100%)] data-swiping:duration-0 data-swiping:select-none motion-reduce:duration-0",
               className,
             )}
           >
