@@ -1172,7 +1172,7 @@ async function syncQueue(conversationId: string) {
     }
     for (const item of items) {
       const mine = byId.get(item.id)
-      await db.messages.put({
+      const next: Message = {
         id: item.id,
         conversationId,
         role: "user",
@@ -1183,7 +1183,9 @@ async function syncQueue(conversationId: string) {
         queuePaused: paused || Boolean(item.error),
         createdAt: mine?.createdAt ?? item.createdAt,
         hostQueued: true,
-      })
+      }
+      // Read every 3s while the queue waits; a write that changes nothing still wakes every query.
+      if (!mine || JSON.stringify(mine) !== JSON.stringify(next)) await db.messages.put(next)
     }
     for (const item of sent) {
       const mine = byId.get(item.id)
