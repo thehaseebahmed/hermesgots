@@ -1,3 +1,4 @@
+import { connectionKey } from "@/lib/connection"
 import { cooldown } from "@/lib/cooldown"
 import { db } from "@/lib/db"
 import { getPluginFeatures, getPluginMedia, type HermesConfig } from "@/lib/hermes"
@@ -123,7 +124,7 @@ export async function loadMediaImage(conversationId: string, path: string): Prom
   const conversation = await db.conversations.get(conversationId)
   const profile = conversation && (await db.profiles.get(conversation.profileId))
   if (!profile) return null
-  const key = `${profile.baseUrl}\n${profile.apiKey}`
+  const key = connectionKey(profile)
   if (unsupported.cooling(key)) return null
   let features: string[]
   try {

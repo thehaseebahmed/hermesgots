@@ -1,3 +1,4 @@
+import { connectionKey } from "@/lib/connection"
 import { cooldown } from "@/lib/cooldown"
 import { db } from "@/lib/db"
 import {
@@ -56,7 +57,7 @@ export async function refreshTodos(conversationId: string) {
   const found = await tracked(conversationId)
   if (!found) return
   const { conversation, profile } = found
-  const key = `${profile.baseUrl}\n${profile.apiKey}`
+  const key = connectionKey(profile)
   if (unsupported.cooling(key)) return
   let todos
   try {

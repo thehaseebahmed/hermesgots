@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 
+import { connectionKey } from "@/lib/connection"
 import { db, type DictationPiece } from "@/lib/db"
 import {
   getDictationInfo,
@@ -30,7 +31,7 @@ function subscribe(listener: () => void) {
   }
 }
 
-const infoKey = (config: HermesConfig) => `${config.baseUrl}\n${config.apiKey}`
+const infoKey = connectionKey
 
 async function readDictationInfo(config: HermesConfig, force = false) {
   const key = infoKey(config)

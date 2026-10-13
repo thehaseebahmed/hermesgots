@@ -9,6 +9,7 @@ import {
   UserCheckIcon,
 } from "lucide-react"
 
+import { connectionKey } from "@/lib/connection"
 import { getSettings, type Conversation, type Profile } from "@/lib/db"
 import {
   getTheseus,
@@ -227,7 +228,7 @@ const infos = new Map<string, { at: number; info: TheseusInfo | null }>()
 const INFO_MS = 60_000
 
 export async function readTheseusInfo(profile: Pick<Profile, "baseUrl" | "apiKey">) {
-  const key = `${profile.baseUrl}\n${profile.apiKey}`
+  const key = connectionKey(profile)
   const hit = infos.get(key)
   if (hit && Date.now() - hit.at < INFO_MS) return hit.info
   const info = await getTheseusInfo(profile).catch(() => null)
@@ -237,7 +238,7 @@ export async function readTheseusInfo(profile: Pick<Profile, "baseUrl" | "apiKey
 
 /** Whether the bot's host can run Theseus, and if not, why. Null while it's being asked. */
 export function useTheseusInfo(profile?: Pick<Profile, "baseUrl" | "apiKey" | "disabled"> | null) {
-  const key = profile?.apiKey && !profile.disabled ? `${profile.baseUrl}\n${profile.apiKey}` : ""
+  const key = profile?.apiKey && !profile.disabled ? connectionKey(profile) : ""
   const read = useSyncExternalStore(subscribe, () => infos.get(key)?.info)
   useEffect(() => {
     if (!key || !profile) return

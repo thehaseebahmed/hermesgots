@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 
+import { connectionKey } from "@/lib/connection"
 import { db, updateProfile, type ModelChoice, type Profile } from "@/lib/db"
 import { getModelInfo, getPluginFeatures, setHostModel, type ModelInfo } from "@/lib/hermes"
 
@@ -14,7 +15,7 @@ const listeners = new Set<() => void>()
 type Server = Pick<Profile, "baseUrl" | "apiKey">
 
 function forget(profile: Server) {
-  cache.delete(`${profile.baseUrl}\n${profile.apiKey}`)
+  cache.delete(connectionKey(profile))
   for (const listener of listeners) listener()
 }
 
@@ -66,7 +67,7 @@ export function useModelInfo(profile?: (Server & { id?: string }) | null) {
   const baseUrl = profile?.baseUrl ?? ""
   const apiKey = profile?.apiKey ?? ""
   const profileId = profile?.id
-  const key = `${baseUrl}\n${apiKey}`
+  const key = connectionKey({ baseUrl, apiKey })
   const [state, setState] = useState<{ key: string; info: ModelInfo | null }>()
   const [version, setVersion] = useState(0)
 

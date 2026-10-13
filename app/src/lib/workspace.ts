@@ -1,3 +1,4 @@
+import { connectionKey } from "@/lib/connection"
 import { cooldown } from "@/lib/cooldown"
 import { db, type Conversation, type PullRequestRef, type SessionMode } from "@/lib/db"
 import {
@@ -48,7 +49,7 @@ async function tracked(conversationId: string) {
   const profile = conversation && (await db.profiles.get(conversation.profileId))
   // Keyless chats have no session id Hermes knows.
   if (!conversation?.projectId || !profile?.apiKey || profile.disabled) return null
-  return { conversation, profile, key: `${profile.baseUrl}\n${profile.apiKey}` }
+  return { conversation, profile, key: connectionKey(profile) }
 }
 
 async function store(conversationId: string, workspace: SessionWorkspace | null) {

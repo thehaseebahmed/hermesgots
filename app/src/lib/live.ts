@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react"
 import { liveQuery } from "dexie"
 
+import { connectionKey } from "@/lib/connection"
 import { cooldown } from "@/lib/cooldown"
 import { db, getSettings, updateConversation, type Profile } from "@/lib/db"
 import {
@@ -33,9 +34,7 @@ export const SAFETY_MS = 5 * 60_000
 export type Kind = "cron" | "runs" | "projects"
 type Connection = Pick<HermesConfig, "baseUrl" | "apiKey">
 
-/** One server and key: bots that share both share a stream. */
-export const connectionKey = (profile: Connection) =>
-  `${profile.baseUrl.trim().replace(/\/+$/, "")}\n${profile.apiKey}`
+export { connectionKey }
 
 interface Stream {
   controller: AbortController

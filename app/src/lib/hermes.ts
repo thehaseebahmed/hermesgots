@@ -1,3 +1,4 @@
+import { connectionKey } from "@/lib/connection"
 import type {
   ApprovalChoice,
   ClarifyAnswers,
@@ -604,7 +605,7 @@ const pluginFeatures = new Map<string, Promise<string[] | null>>()
 
 /** `getPluginFeatures`, asked once per server and key; a failed ask is tried again next time. */
 export async function hasPluginFeature(config: HermesConfig, feature: string) {
-  const key = `${config.baseUrl}\n${config.apiKey}`
+  const key = connectionKey(config)
   let pending = pluginFeatures.get(key)
   if (!pending) {
     pending = getPluginFeatures(config).catch(() => null)
@@ -1687,7 +1688,7 @@ export async function labelSession(config: HermesConfig, sessionId: string) {
 const runFeatures = new Map<string, Promise<Record<string, unknown> | null>>()
 
 function features(config: HermesConfig) {
-  const key = `${config.baseUrl}\n${config.apiKey}`
+  const key = connectionKey(config)
   let pending = runFeatures.get(key)
   if (!pending) {
     pending = request(endpoint(config.baseUrl, "/capabilities"), { headers: headers(config) })

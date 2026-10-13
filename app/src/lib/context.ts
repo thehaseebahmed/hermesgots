@@ -1,3 +1,4 @@
+import { connectionKey } from "@/lib/connection"
 import { cooldown } from "@/lib/cooldown"
 import { db } from "@/lib/db"
 import { getSessionContext } from "@/lib/hermes"
@@ -15,7 +16,7 @@ export async function refreshContext(conversationId: string) {
   const profile = conversation && (await db.profiles.get(conversation.profileId))
   // Keyless chats have no session id Hermes knows.
   if (!conversation || !profile?.apiKey || profile.disabled) return
-  const key = `${profile.baseUrl}\n${profile.apiKey}`
+  const key = connectionKey(profile)
   if (unsupported.cooling(key)) return
   let live
   try {
