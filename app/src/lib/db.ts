@@ -1,6 +1,7 @@
 import Dexie, { type EntityTable, type Transaction } from "dexie"
 
 import { BOTS, LEGACY_BOT_IDS } from "@/components/bots"
+import type { ProviderUsage } from "@/lib/hermes"
 import { randomId } from "@/lib/utils"
 
 export type ThemePreference = "system" | "light" | "dark"
@@ -77,6 +78,10 @@ export interface Profile {
   pluginVersion?: string
   /** The host's main model as last read by any device, shown while it's read again. */
   hostModel?: ModelChoice
+  /** The provider's account-usage windows, local only; read from the Memento plugin. */
+  providerUsage?: ProviderUsage
+  /** A dismissed limit-notice key (provider + window label + reset), local only. */
+  limitDismissed?: string
   createdAt: number
   /** Last change to the config, the clock sync merges on. */
   updatedAt: number
