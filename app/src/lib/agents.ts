@@ -1,5 +1,6 @@
 import { createContext, useContext, useSyncExternalStore } from "react"
 
+import { AGENT_WORK_MS } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
 import { createSignal } from "@/lib/store"
 import type { Conversation, Profile, ToolEvent } from "@/lib/db"
@@ -18,8 +19,6 @@ import { usePoll } from "@/lib/poll"
  */
 
 export const DELEGATE_TOOL = "delegate_task"
-
-const POLL_MS = 4000
 
 const lists = new Map<string, DelegatedAgent[]>()
 const { subscribe, notify } = createSignal()
@@ -63,7 +62,7 @@ export function useSessionAgents(
         })
         .catch(quietly("Reading delegated agents"))
     },
-    working ? POLL_MS : false,
+    working ? AGENT_WORK_MS : false,
     [sessionId, baseUrl, apiKey, changes],
     { active: enabled },
   )

@@ -1,3 +1,4 @@
+import { PR_MS, PR_PENDING_MS } from "@/lib/freshness"
 import { noteFailure } from "@/lib/report"
 import { connectionKey } from "@/lib/connection"
 import { cooldown } from "@/lib/cooldown"
@@ -28,10 +29,6 @@ import { syncNow } from "@/lib/sync"
 
 /** Bots whose plugin has no workspace routes (an older plugin). */
 const unsupported = cooldown()
-/** How long a known pull request is trusted before it's read again. */
-const PR_MS = 30_000
-/** Checks still running are read again this often, so the pill shows them as they finish. */
-export const PR_PENDING_MS = 10_000
 
 /** Whether any of a session's pull requests still has checks running. */
 export const prChecksPending = (prs: PullRequestRef[] | undefined) =>

@@ -16,6 +16,7 @@ import {
 import { Link, useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
 
+import { HOST_WORK_MS, PR_PENDING_MS, SAFETY_MS, SESSION_REREAD_MS } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { prLabel, prLook } from "@/components/chat/pr-look"
@@ -45,7 +46,7 @@ import {
 } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useDraft } from "@/lib/drafts"
-import { SAFETY_MS, useChanges, useLive } from "@/lib/live"
+import { useChanges, useLive } from "@/lib/live"
 import { usePoll } from "@/lib/poll"
 import { waitsOnUser } from "@/lib/theseus"
 import { setBackGuard } from "@/lib/native"
@@ -56,7 +57,6 @@ import { deleteProject, type HermesProject } from "@/lib/hermes"
 import { readProjects, useProjects } from "@/lib/projects"
 import {
   projectRepos,
-  PR_PENDING_MS,
   prChecksPending,
   refreshPrs,
   refreshWorkspace,
@@ -64,10 +64,6 @@ import {
   type SessionState,
 } from "@/lib/workspace"
 
-/** While a repo is being added or removed: the plugin does the work, this watches for it to finish. */
-const CHANGING_MS = 3_000
-/** How soon the screen reads a session's worktree and pull requests again while it stays open. */
-const REREAD_MS = 60_000
 const DAY_MS = 86_400_000
 const GROUPS: { state: SessionState; label: string }[] = [
   { state: "working", label: "Working" },
@@ -132,7 +128,7 @@ export function ProjectPage({
     readProjects({ baseUrl, apiKey }).catch(quietly("Reading projects"))
   }, [baseUrl, apiKey, reads, projectChanges])
 
-  usePoll(() => setReads((n) => n + 1), streaming ? SAFETY_MS : CHANGING_MS, [], {
+  usePoll(() => setReads((n) => n + 1), streaming ? SAFETY_MS : HOST_WORK_MS, [], {
     active: Boolean(changing),
     immediate: false,
     onShow: false,
@@ -193,7 +189,7 @@ export function ProjectPage({
     const now = Date.now()
     for (const c of sessions ?? []) {
       const last = read.current.get(c.id)
-      if (last !== undefined && now - last < REREAD_MS) continue
+      if (last !== undefined && now - last < SESSION_REREAD_MS) continue
       read.current.set(c.id, now)
       const workspace = !c.worktree || last !== undefined
       void (workspace ? refreshWorkspace(c.id) : Promise.resolve()).then(() => refreshPrs(c.id))

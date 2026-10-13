@@ -12,6 +12,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
+import { LIST_MS, SAFETY_MS } from "@/lib/freshness"
 import { Bot } from "@/components/bot"
 import { CopyBlock } from "@/components/copy-block"
 import { useOpenDrawer } from "@/components/drawer-context"
@@ -35,14 +36,12 @@ import {
   type CronState,
 } from "@/lib/cron"
 import { listEnabledProfiles, type Profile } from "@/lib/db"
-import { SAFETY_MS, useChanges, useLive } from "@/lib/live"
+import { useChanges, useLive } from "@/lib/live"
 import { usePoll } from "@/lib/poll"
 import { formatDuration, formatRelative } from "@/lib/format"
 import { describeSchedule } from "@/lib/schedule"
 import { HermesError, INSTALL_PLUGIN, controlCronJob, type CronJob } from "@/lib/hermes"
 import { cn } from "@/lib/utils"
-
-const REFRESH_MS = 60_000
 
 /** Hermes cron jobs, grouped by bot, each with its recent runs as Gatus-style bars. */
 export function RoutinesPage() {
@@ -53,7 +52,7 @@ export function RoutinesPage() {
   const [collapsed, setOpen] = useCollapsedBots()
   const refresh = useCallback(() => setTick((n) => n + 1), [])
 
-  usePoll(() => setPollTick((n) => n + 1), REFRESH_MS, [], { immediate: false, onShow: false })
+  usePoll(() => setPollTick((n) => n + 1), LIST_MS, [], { immediate: false, onShow: false })
   // Coming back reads everything, not just what's due.
   usePoll(refresh, false, [], { immediate: false })
 
@@ -179,7 +178,7 @@ function BotRoutines({
   const [ownTick, setOwnTick] = useState(0)
   const live = useLive(profile)
   const cronTick = useChanges("cron", profile)
-  const timedTick = live ? Math.floor(pollTick / (SAFETY_MS / REFRESH_MS)) : pollTick
+  const timedTick = live ? Math.floor(pollTick / (SAFETY_MS / LIST_MS)) : pollTick
   const jobs = cron?.jobs
   const failing = cron && !error ? failingCount(cron) : 0
 

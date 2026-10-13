@@ -9,6 +9,7 @@ import {
   UserCheckIcon,
 } from "lucide-react"
 
+import { AGENT_WORK_MS, THESEUS_INFO_MS } from "@/lib/freshness"
 import { noteFailure, quietly } from "@/lib/report"
 import { createSignal } from "@/lib/store"
 import { connectionKey } from "@/lib/connection"
@@ -227,12 +228,11 @@ export function markIntroSeen() {
 
 /** What the plugin's `info` says about Theseus on a bot's host, read once a minute at most. */
 const infos = new Map<string, { at: number; info: TheseusInfo | null }>()
-const INFO_MS = 60_000
 
 export async function readTheseusInfo(profile: Pick<Profile, "baseUrl" | "apiKey">) {
   const key = connectionKey(profile)
   const hit = infos.get(key)
-  if (hit && Date.now() - hit.at < INFO_MS) return hit.info
+  if (hit && Date.now() - hit.at < THESEUS_INFO_MS) return hit.info
   const info = await getTheseusInfo(profile).catch((error) => {
     noteFailure("Reading Theseus info", error)
     return null
@@ -426,8 +426,6 @@ export function toRun(raw: RawTheseus, sessionId: string, actions: TheseusAction
 const raws = new Map<string, RawTheseus>()
 const { subscribe, notify } = createSignal()
 
-const POLL_MS = 4000
-
 type Session = Pick<Conversation, "id" | "hermesSessionId">
 type Server = Pick<Profile, "baseUrl" | "apiKey">
 
@@ -483,7 +481,7 @@ export function useTheseusRun(
         })
         .catch(quietly("Reading a Theseus run"))
     },
-    POLL_MS,
+    AGENT_WORK_MS,
     [id, sessionId, baseUrl, apiKey, changes],
     { active: Boolean(enabled && id && sessionId && baseUrl && apiKey) },
   )

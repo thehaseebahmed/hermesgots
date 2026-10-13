@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react"
 import { liveQuery } from "dexie"
 
+import { MISSING_ROUTE_MS } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
 import { connectionKey } from "@/lib/connection"
 import { cooldown } from "@/lib/cooldown"
@@ -25,12 +26,8 @@ import { syncNow } from "@/lib/sync"
 
 /** Backoff between reconnects. */
 const RETRY_MS = [1000, 2000, 5000, 10_000, 30_000]
-/** How long a plugin without the stream (an older one) is left alone before it's asked again. */
-const UNSUPPORTED_MS = 5 * 60_000
 /** A `runs` event often comes with a status the server sets a moment later. */
 const RUNS_SETTLE_MS = 300
-/** How often a screen asks anyway when its server streams the changes. */
-export const SAFETY_MS = 5 * 60_000
 
 export type Kind = "cron" | "runs" | "projects"
 type Connection = Pick<HermesConfig, "baseUrl" | "apiKey">
@@ -45,7 +42,7 @@ const streams = new Map<string, Stream>()
 /** Where each stream got to, so a reconnect only hears what it missed. */
 const cursors = new Map<string, number>()
 /** Plugins without the stream. */
-const unsupported = cooldown(UNSUPPORTED_MS)
+const unsupported = cooldown(MISSING_ROUTE_MS)
 /** Connections whose stream is open. */
 let live = new Set<string>()
 /** Changes heard per connection and kind, for screens to refresh on. */
@@ -292,7 +289,7 @@ async function follow(config: HermesConfig, key: string, signal: AbortSignal) {
       if (!signal.aborted && (await lacksStream(config, error))) {
         unsupported.start(key)
         notify()
-        window.setTimeout(reconcileStreams, UNSUPPORTED_MS)
+        window.setTimeout(reconcileStreams, MISSING_ROUTE_MS)
         break
       }
     }

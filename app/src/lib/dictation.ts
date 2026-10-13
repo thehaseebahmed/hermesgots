@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 
+import { DICTATION_INFO_MS } from "@/lib/freshness"
 import { createSignal } from "@/lib/store"
 import { connectionKey } from "@/lib/connection"
 import { db, type DictationPiece } from "@/lib/db"
@@ -20,7 +21,6 @@ import { usePoll } from "@/lib/poll"
  * (`db.dictations`, under the composer's draft key). A bot whose host can't is never offered a mic.
  */
 
-const INFO_MS = 5 * 60 * 1000
 const infos = new Map<string, { at: number; info: DictationInfo | null }>()
 const { subscribe, notify } = createSignal()
 
@@ -29,7 +29,7 @@ const infoKey = connectionKey
 async function readDictationInfo(config: HermesConfig, force = false) {
   const key = infoKey(config)
   const hit = infos.get(key)
-  if (!force && hit && Date.now() - hit.at < INFO_MS) return hit.info
+  if (!force && hit && Date.now() - hit.at < DICTATION_INFO_MS) return hit.info
   const info = await getDictationInfo(config).catch(() => null)
   infos.set(key, { at: Date.now(), info })
   notify()
@@ -41,7 +41,7 @@ export function useDictationInfo(config: HermesConfig) {
   const key = config.apiKey && config.baseUrl ? infoKey(config) : ""
   const info = useSyncExternalStore(subscribe, () => infos.get(key)?.info ?? null)
   const { baseUrl, apiKey } = config
-  usePoll(() => void readDictationInfo({ baseUrl, apiKey }), INFO_MS, [baseUrl, apiKey], {
+  usePoll(() => void readDictationInfo({ baseUrl, apiKey }), DICTATION_INFO_MS, [baseUrl, apiKey], {
     active: Boolean(key),
     onShow: false,
   })

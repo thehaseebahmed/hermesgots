@@ -1,10 +1,11 @@
 import { useEffect, useSyncExternalStore } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
+import { READ_TIMEOUT_MS, RUNS_MS, SAFETY_MS } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
 import { db } from "@/lib/db"
 import { getLiveRuns, type LiveRunStatus, type LiveRuns, type WaitingReason } from "@/lib/hermes"
-import { connectionKey, isLive, onChanges, SAFETY_MS } from "@/lib/live"
+import { connectionKey, isLive, onChanges } from "@/lib/live"
 
 export type { WaitingReason }
 
@@ -33,9 +34,6 @@ const THESEUS_WAITS = {
   approval: "A checkpoint needs your approval",
   closing: "Ready to close the run",
 } as const
-
-const POLL_MS = 10_000
-const TIMEOUT_MS = 15_000
 
 type Found = LiveRuns["waiting"]
 type Server = { baseUrl: string; apiKey: string }
@@ -69,7 +67,7 @@ function notify() {
  * last answer stands instead of clearing every mark of that server.
  */
 export async function readLiveRuns(server: Server): Promise<LiveRuns | undefined> {
-  const next = await getLiveRuns(server, AbortSignal.timeout(TIMEOUT_MS)).catch(
+  const next = await getLiveRuns(server, AbortSignal.timeout(READ_TIMEOUT_MS)).catch(
     quietly("Reading runs/live"),
   )
   if (next) {
@@ -87,7 +85,7 @@ async function poll(only: Server[] = servers) {
 
 function pollDue() {
   rounds += 1
-  const all = rounds % (SAFETY_MS / POLL_MS) === 0
+  const all = rounds % (SAFETY_MS / RUNS_MS) === 0
   void poll(all ? servers : servers.filter((server) => !isLive(server)))
 }
 
@@ -99,7 +97,7 @@ function subscribe(listener: () => void) {
   listeners.add(listener)
   if (listeners.size === 1) {
     void poll()
-    timer = window.setInterval(pollDue, POLL_MS)
+    timer = window.setInterval(pollDue, RUNS_MS)
     document.addEventListener("visibilitychange", pollAll)
     stopListening = onChanges("runs", (key) => {
       void poll(servers.filter((server) => connectionKey(server) === key))

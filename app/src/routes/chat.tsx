@@ -16,6 +16,7 @@ import {
   XIcon,
 } from "lucide-react"
 
+import { CATCH_UP_MS, HOST_QUEUE_MS, PR_PENDING_MS, SAFETY_MS } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
 import { useBreakReminderEligibility } from "@/components/break-reminder-context"
 import { ApprovalCard } from "@/components/chat/approval-card"
@@ -95,7 +96,7 @@ import { describeActivity } from "@/lib/format"
 import { supportsSteer, type HermesProject } from "@/lib/hermes"
 import { readProjects, useProjects } from "@/lib/projects"
 import { loadEarlierHistory, reconcileHistory } from "@/lib/history"
-import { SAFETY_MS, useLive, watchChat } from "@/lib/live"
+import { useLive, watchChat } from "@/lib/live"
 import { usePoll } from "@/lib/poll"
 import { useXLarge } from "@/lib/media"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
@@ -106,7 +107,6 @@ import { syncContextWindow } from "@/lib/models"
 import {
   planApprovalMessage,
   projectRepos,
-  PR_PENDING_MS,
   prChecksPending,
   refreshPrs,
   refreshWorkspace,
@@ -119,11 +119,6 @@ import { useBotThreads } from "@/lib/threads"
 import { draftKey } from "@/lib/drafts"
 import { useTheseusInfo, useTheseusRun, waitsOnUser } from "@/lib/theseus"
 import { AgentsContext, DELEGATE_TOOL, useSessionAgents } from "@/lib/agents"
-
-/** How often an open chat checks Hermes for turns sent from another device. */
-const CATCH_UP_MS = 30_000
-/** How often an open chat looks for a turn the plugin started from its queue. */
-const HOST_QUEUE_POLL_MS = 3000
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
@@ -260,7 +255,7 @@ export function ChatPage() {
     !busy && Boolean(messages?.some((m) => m.hostQueued && m.status === "queued" && !m.queuePaused))
   useEffect(() => {
     if (!id || !hostWaiting) return
-    const timer = window.setInterval(() => void refreshQueue(id), HOST_QUEUE_POLL_MS)
+    const timer = window.setInterval(() => void refreshQueue(id), HOST_QUEUE_MS)
     return () => window.clearInterval(timer)
   }, [id, hostWaiting])
   const awaitingApproval = messages?.find((m) => m.approval && !m.approval.resolved)
