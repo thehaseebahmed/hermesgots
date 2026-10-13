@@ -7,6 +7,7 @@ import { AppShell } from "@/components/app-shell"
 import { getActiveProfile } from "@/lib/db"
 import { useLaunchRestore, useRecordLastChat } from "@/lib/launch"
 import { warmCatalog } from "@/lib/models"
+import { warmRankings } from "@/lib/rankings"
 import { useShareReceiver } from "@/lib/share"
 import { useBotThreads } from "@/lib/threads"
 import { BotThreadsPage } from "@/routes/bot-threads"
@@ -57,10 +58,11 @@ function Home() {
 function AppRoutes() {
   useRecordLastChat()
   useShareReceiver()
-  // The model sheet reads the catalog on every open, so warm it here: a returning user's
-  // facts refresh in the background without the sheet itself ever fetching.
+  // The model sheet reads the catalog and rankings on every open, so warm them here: a
+  // returning user's facts and scores refresh in the background without the sheet fetching.
   useEffect(() => {
     void warmCatalog()
+    void warmRankings()
   }, [])
   if (!useLaunchRestore()) return null
   return (

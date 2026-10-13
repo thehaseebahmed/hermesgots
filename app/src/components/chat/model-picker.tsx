@@ -23,6 +23,7 @@ import { formatTokens } from "@/lib/format"
 import type { ModelInfo, ModelProvider } from "@/lib/hermes"
 import { fullModel, shortModel, useModelInfo } from "@/lib/model-info"
 import { modelFacts, useModelCatalog, type Catalog } from "@/lib/models"
+import { codingScoreOf, useCodingRankings, type RankingsPayload } from "@/lib/rankings"
 import { cn } from "@/lib/utils"
 
 /**
@@ -50,6 +51,8 @@ export function ModelPicker({
   const [sort, setSort] = useState<ModelSort>("name")
   // The cached models.dev catalog, live: each row's facts repaint when a refresh lands.
   const catalog = useModelCatalog()
+  // The cached BenchLM coding rankings, live: each row's score repaints when a refresh lands.
+  const rankings = useCodingRankings()
   const sorted = useMemo(() => sortProviders(providers), [providers])
   // A host with one provider has nothing to choose between, so its models show at once.
   const drilled = sorted.length === 1 ? sorted[0] : sorted.find((p) => p.slug === openSlug)
@@ -65,18 +68,21 @@ export function ModelPicker({
       .map((p) => {
         const haystack = (m: string) => `${p.name} ${p.slug} ${m}`.toLowerCase()
         const matched = p.models.filter((m) => words.every((w) => haystack(m).includes(w)))
-        // Price ranks by the blended cost, context by the window, both from the cached catalog.
+        // Price ranks by the blended cost, context by the window, BenchLM by the coding score.
         return {
           ...p,
           models: sortByFacts(
             sort,
-            (m) => modelFacts(catalog, { provider: p.slug, model: m }),
+            (m) => ({
+              ...modelFacts(catalog, { provider: p.slug, model: m }),
+              benchlm: codingScoreOf(rankings, { provider: p.slug, model: m }),
+            }),
             matched,
           ),
         }
       })
       .filter((p) => p.models.length)
-  }, [sorted, drilled, query, sort, catalog])
+  }, [sorted, drilled, query, sort, catalog, rankings])
 
   const top = !query && !drilled
   // The sort menu orders a flat model list; the providers list stays A to Z, so it shows no menu.
@@ -123,7 +129,7 @@ export function ModelPicker({
                 <ModelOption
                   key={fullModel(m)}
                   label={fullModel(m)}
-                  detail={modelDetail(catalog, m)}
+                  detail={modelDetail(catalog, rankings, m)}
                   selected={isChosen(m)}
                   onClick={() => onChoose(m)}
                 />
@@ -158,7 +164,7 @@ export function ModelPicker({
                   <ModelOption
                     key={m}
                     label={m}
-                    detail={modelDetail(catalog, { provider: p.slug, model: m })}
+                    detail={modelDetail(catalog, rankings, { provider: p.slug, model: m })}
                     selected={isChosen({ provider: p.slug, model: m })}
                     onClick={() => onChoose({ provider: p.slug, model: m })}
                   />
@@ -179,6 +185,7 @@ export function ModelPicker({
             <ProviderModels
               provider={drilled}
               catalog={catalog}
+              rankings={rankings}
               isChosen={isChosen}
               onChoose={onChoose}
             />
@@ -193,56 +200,56 @@ export function ModelPicker({
 function ProviderModels({
   provider,
   catalog,
+  rankings,
   isChosen,
   onChoose,
 }: {
   provider: ModelProvider
   catalog: Catalog | undefined
+  rankings: RankingsPayload | undefined
   isChosen: (m: ModelChoice) => boolean
   onChoose: (choice: ModelChoice | undefined) => void
 }) {
   const [query, setQuery] = useState("")
   const [sort, setSort] = useState<ModelSort>("name")
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
-  const haystack = (m: string) => `${provider.name} ${provider.slug} ${m}`.toLowerCase()
-  const matched = provider.models.filter((m) => words.every((w) => haystack(m).includes(w)))
-  const models = sortByFacts(
-    sort,
-    (m) => modelFacts(catalog, { provider: provider.slug, model: m }),
-    matched,
-  )
+  const models = useMemo(() => {
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+    const haystack = (m: string) => `${provider.name} ${provider.slug} ${m}`.toLowerCase()
+    const matched = provider.models.filter((m) => words.every((w) => haystack(m).includes(w)))
+    return sortByFacts(
+      sort,
+      (m) => ({
+        ...modelFacts(catalog, { provider: provider.slug, model: m }),
+        benchlm: codingScoreOf(rankings, { provider: provider.slug, model: m }),
+      }),
+      matched,
+    )
+  }, [provider, query, sort, catalog, rankings])
   return (
     <>
       <PopupTitle className="sr-only">{provider.name}</PopupTitle>
       <div className="flex flex-col gap-5 px-6 pt-5 text-[15px]">
-        {provider.models.length > 8 && (
-          <div className="flex items-center gap-2">
-            <InputGroup className="h-11 min-w-0 flex-1">
-              <InputGroupAddon>
-                <SearchIcon />
-              </InputGroupAddon>
-              <InputGroupInput
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={`Search ${provider.name}`}
-                aria-label={`Search ${provider.name}`}
-              />
-            </InputGroup>
-            <SortMenu sort={sort} onSort={setSort} />
-          </div>
-        )}
-        {provider.models.length <= 8 && (
-          <div className="flex justify-end">
-            <SortMenu sort={sort} onSort={setSort} />
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          <InputGroup className="h-11 min-w-0 flex-1">
+            <InputGroupAddon>
+              <SearchIcon />
+            </InputGroupAddon>
+            <InputGroupInput
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={`Search ${provider.name}`}
+              aria-label={`Search ${provider.name}`}
+            />
+          </InputGroup>
+          <SortMenu sort={sort} onSort={setSort} />
+        </div>
         {models.length ? (
           <ModelList>
             {models.map((m) => (
               <ModelOption
                 key={m}
                 label={m}
-                detail={modelDetail(catalog, { provider: provider.slug, model: m })}
+                detail={modelDetail(catalog, rankings, { provider: provider.slug, model: m })}
                 selected={isChosen({ provider: provider.slug, model: m })}
                 onClick={() => onChoose({ provider: provider.slug, model: m })}
               />
@@ -302,13 +309,20 @@ function sortProviders(providers: ModelProvider[]) {
 }
 
 /**
- * A model row's muted second line: what models.dev says about it (`1M · vision · $$$`), `—` when
- * it lists nothing, and no line at all while the catalog is still loading.
+ * A model row's muted second line: what models.dev and BenchLM say about it
+ * (`BenchLM 87 · 1M · vision · $$$`), `—` when neither lists anything, and no line at all
+ * while the catalog is still loading.
  */
-function modelDetail(catalog: Catalog | undefined, choice: ModelChoice) {
+function modelDetail(
+  catalog: Catalog | undefined,
+  rankings: RankingsPayload | undefined,
+  choice: ModelChoice,
+) {
   if (!catalog) return undefined
   const { context, vision, reasoning, tier } = modelFacts(catalog, choice)
+  const score = codingScoreOf(rankings, choice)
   const parts = [
+    score !== undefined ? `BenchLM ${Math.round(score)}` : null,
     context ? formatTokens(context) : null,
     vision ? "vision" : null,
     reasoning ? "reasoning" : null,

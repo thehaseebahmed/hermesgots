@@ -339,6 +339,14 @@ export interface ModelsDevCatalog {
   fetchedAt: number
 }
 
+/** BenchLM coding rankings cached on this device, with a 24-hour freshness window. */
+export interface CodingRankings {
+  id: "coding"
+  /** The rankings payload; its shape lives in `rankings.ts`. */
+  data: unknown
+  fetchedAt: number
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   id: "settings",
   simplifiedChats: true,
@@ -361,6 +369,7 @@ export const db = new Dexie("memento") as Dexie & {
   vault: EntityTable<VaultKey, "id">
   drafts: EntityTable<Draft, "id">
   modelsDevCatalog: EntityTable<ModelsDevCatalog, "id">
+  codingRankings: EntityTable<CodingRankings, "id">
 }
 
 db.version(1).stores({
@@ -496,6 +505,9 @@ db.version(9)
 
 // v10: the models.dev catalog is cached on the device, with a 24-hour freshness window.
 db.version(10).stores({ modelsDevCatalog: "id" })
+
+// v11: BenchLM coding rankings cached on the device, with a 24-hour freshness window.
+db.version(11).stores({ codingRankings: "id" })
 
 db.on("populate", (tx) => seedProfile(tx))
 
