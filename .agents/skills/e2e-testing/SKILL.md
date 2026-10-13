@@ -55,6 +55,7 @@ elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` l
 | `approval` | A project session waiting on an approval shows in the sidebar's Waiting for input and its project's Waiting on you. Both move it to Idle once it's allowed |
 | `reattach` | A reply still streaming when the page reloads picks its run up again and finishes |
 | `live-poll` | `runs/live` is read by one shared poll: at most 3 times in 25s with the session, its project and the sidebar open. Main read it 4 times |
+| `photo-progress` | A message with a photo shows its reply's tool calls while it runs, on the `legacy` mock where the app follows the turn in the transcript. Main showed none |
 | `screens` | Code, a project, Routines and a chat load at 390 and 1024px, light and dark, with no console errors |
 | `clarify-polling`, `clarify-transcript` | Answered questions survive stale polls, a reload and a fresh transcript |
 | `code-sessions` | Project sessions stay out of Recents and open from their project |
