@@ -2,7 +2,7 @@ import { useEffect, useSyncExternalStore } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
 import { db } from "@/lib/db"
-import { listWaiting, type WaitingReason } from "@/lib/hermes"
+import { getLiveRuns, type LiveRunStatus, type LiveRuns, type WaitingReason } from "@/lib/hermes"
 import { connectionKey, isLive, onChanges, SAFETY_MS } from "@/lib/live"
 
 export type { WaitingReason }
@@ -36,33 +36,50 @@ const THESEUS_WAITS = {
 const POLL_MS = 10_000
 const TIMEOUT_MS = 15_000
 
-type Found = Record<string, WaitingReason & { project?: string }>
+type Found = LiveRuns["waiting"]
 type Server = { baseUrl: string; apiKey: string }
 
 /**
- * What every bot's server reports waiting, by Hermes session id. One poll for the whole app, shared
- * by every sidebar that's mounted, and only while one is. A server that streams its changes is asked
- * when it says a run changed, and now and then anyway; the rest are asked every few seconds.
+ * What every bot's server reports of its runs (`runs/live`): which sessions run and which wait on the
+ * user, by Hermes session id. One poll for the whole app, shared by every screen that reads it, so
+ * the sidebar, a project's sessions and an open chat see the same answer at the same moment. A
+ * server that streams its changes is asked when it says a run changed, and now and then anyway; the
+ * rest are asked every few seconds.
  */
-let answers = new Map<string, Found>()
+let answers = new Map<string, LiveRuns>()
 let found: Found = {}
 let servers: Server[] = []
 const listeners = new Set<() => void>()
 let timer: number | undefined
 let rounds = 0
+const NO_RUNS: Record<string, LiveRunStatus> = {}
+
+function notify() {
+  found = Object.assign(
+    {},
+    ...servers.map((server) => answers.get(connectionKey(server))?.waiting ?? {}),
+  )
+  listeners.forEach((listener) => listener())
+}
+
+/**
+ * Asks one server now and shares its answer with every screen. Undefined when the read failed: a
+ * busy host starting another bot's run or a dropped connection says nothing about what runs, so the
+ * last answer stands instead of clearing every mark of that server.
+ */
+export async function readLiveRuns(server: Server): Promise<LiveRuns | undefined> {
+  const next = await getLiveRuns(server, AbortSignal.timeout(TIMEOUT_MS)).catch(() => undefined)
+  if (next) {
+    answers.set(connectionKey(server), next)
+    notify()
+  }
+  return next
+}
 
 async function poll(only: Server[] = servers) {
   if (document.visibilityState !== "visible") return
-  await Promise.all(
-    only.map(async (server) => {
-      // A failed read (a busy host starting another bot's run, a dropped connection) says nothing
-      // about what waits, so the last answer stands instead of clearing every mark of that server.
-      const next = await listWaiting(server, AbortSignal.timeout(TIMEOUT_MS)).catch(() => undefined)
-      if (next) answers.set(connectionKey(server), next)
-    }),
-  )
-  found = Object.assign({}, ...servers.map((server) => answers.get(connectionKey(server)) ?? {}))
-  listeners.forEach((listener) => listener())
+  await Promise.all(only.map(readLiveRuns))
+  notify()
 }
 
 function pollDue() {
@@ -103,9 +120,7 @@ export function useWaiting(): Found {
   const keyed = useLiveQuery(async () => {
     const profiles = await db.profiles.toArray()
     const unique = new Map(
-      profiles
-        .filter((p) => p.apiKey && !p.disabled)
-        .map((p) => [`${p.baseUrl.trim().replace(/\/+$/, "")} ${p.apiKey}`, p]),
+      profiles.filter((p) => p.apiKey && !p.disabled).map((p) => [connectionKey(p), p]),
     )
     return JSON.stringify([...unique.values()].map(({ baseUrl, apiKey }) => ({ baseUrl, apiKey })))
   }, [])
@@ -116,6 +131,18 @@ export function useWaiting(): Found {
     void poll()
   }, [keyed])
   return waiting
+}
+
+/** Sessions with a run in flight on the bot's server, by Hermes session id. Needs the plugin. */
+export function useLiveRuns(profile: Server | undefined) {
+  const baseUrl = profile?.baseUrl
+  const apiKey = profile?.apiKey
+  const key = baseUrl && apiKey ? connectionKey({ baseUrl, apiKey }) : undefined
+  // Asked once as the screen opens; the shared poll keeps it current after that.
+  useEffect(() => {
+    if (baseUrl && apiKey) void readLiveRuns({ baseUrl, apiKey })
+  }, [baseUrl, apiKey])
+  return useSyncExternalStore(subscribe, () => (key && answers.get(key)?.sessions) || NO_RUNS)
 }
 
 /** Project sessions, across every bot, waiting on the user, newest first. Needs the plugin. */

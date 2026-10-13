@@ -25,7 +25,6 @@ import {
   hasPluginFeature,
   HermesError,
   labelSession,
-  liveRunOf,
   queueAction,
   respondToApproval,
   respondToClarify,
@@ -49,6 +48,7 @@ import { liveTurn, patchStats, reconcileHistory } from "@/lib/history"
 import { isLive } from "@/lib/live"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { randomId } from "@/lib/utils"
+import { readLiveRuns } from "@/lib/waiting"
 import { onWake } from "@/lib/wake"
 import { ensureSessionWorkspace, refreshPrs, refreshWorkspace } from "@/lib/workspace"
 
@@ -935,14 +935,12 @@ export async function reattachRun(conversationId: string) {
   if (!stale) return
   // Hermes only keys the session by our id with an API key, so only then can the run be looked up,
   // and only the plugin lists runs.
+  // Read through the shared poll, so the sidebar and the project screen hear the same answer.
   const live =
     profile.apiKey && !profile.disabled
-      ? await liveRunOf(
-          { baseUrl: profile.baseUrl, apiKey: profile.apiKey },
-          conversation.hermesSessionId,
-        ).catch(() => undefined)
+      ? await readLiveRuns({ baseUrl: profile.baseUrl, apiKey: profile.apiKey })
       : undefined
-  const runId = stale.runId ?? live?.runId
+  const runId = stale.runId ?? live?.runIds[conversation.hermesSessionId]
   if (!runId) {
     // Nothing is running for it: a streamed chat completion died with the tab, or the run never
     // started.
