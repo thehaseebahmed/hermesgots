@@ -45,7 +45,7 @@ import {
 } from "@/lib/hermes"
 import { attachmentsText, setUploading, wireContent } from "@/lib/attachments"
 import { refreshContext } from "@/lib/context"
-import { liveTurn, patchStats, reconcileHistory } from "@/lib/history"
+import { liveTurn, noteFollowUps, patchStats, reconcileHistory } from "@/lib/history"
 import { isLive } from "@/lib/live"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { quietly } from "@/lib/report"
@@ -601,6 +601,7 @@ async function finishTurn(turn: Turn, usage: TurnUsage | undefined) {
   draft.runId = undefined
   draft.runSeq = undefined
   await turn.close()
+  noteFollowUps(conversationId)
   await updateConversation(conversationId, { updatedAt: endedAt })
   void refreshContext(conversationId)
   void refreshTodos(conversationId)

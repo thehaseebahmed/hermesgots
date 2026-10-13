@@ -156,7 +156,8 @@ function catchUpChat(conversationId: string) {
     return
   }
   catchingUp.add(conversationId)
-  reconcileHistory(conversationId)
+  // Called when the server says the session moved, which a mode or a plan does without a row.
+  reconcileHistory(conversationId, { changed: true })
     .catch(quietly("Catching up a chat"))
     .finally(() => {
       catchingUp.delete(conversationId)

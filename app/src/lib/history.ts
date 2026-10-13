@@ -7,6 +7,8 @@ import {
   type ToolEvent,
 } from "@/lib/db"
 import { refreshQueue } from "@/lib/chat"
+import { FOLLOW_UP_MS, JUST_FOLLOWED_UP_MS } from "@/lib/freshness"
+import { quietly } from "@/lib/report"
 import { refreshContext } from "@/lib/context"
 import { refreshTodos } from "@/lib/todos"
 import { refreshPrs, refreshWorkspace } from "@/lib/workspace"
@@ -479,26 +481,55 @@ async function refreshTitle(conversationId: string) {
   if (title && title !== conversation.title) await updateConversation(conversationId, { title })
 }
 
+const followedUp = new Map<string, number>()
+const caughtUp = new Map<string, number>()
+
+/** A turn that just ended read the chat's context and todos itself. */
+export function noteFollowUps(conversationId: string) {
+  followedUp.set(conversationId, Date.now())
+}
+
+/** Whether the chat caught up with its transcript within `ms`. */
+export const caughtUpWithin = (conversationId: string, ms: number) =>
+  Date.now() - (caughtUp.get(conversationId) ?? -Infinity) < ms
+
+/**
+ * The reads that follow a catch-up: the title, context use, todos, and a session's workspace and
+ * pull requests. They run when the transcript moved or the server said the session changed (a mode
+ * or a plan moves without a row), the first time, and otherwise every `FOLLOW_UP_MS`, not on every
+ * catch-up of an idle chat. A turn that ended just now read them.
+ */
+function followUps(conversationId: string, moved: boolean) {
+  const since = Date.now() - (followedUp.get(conversationId) ?? -Infinity)
+  if (since < JUST_FOLLOWED_UP_MS || (!moved && since < FOLLOW_UP_MS)) return
+  followedUp.set(conversationId, Date.now())
+  void Promise.all([
+    refreshTitle(conversationId),
+    refreshContext(conversationId),
+    refreshTodos(conversationId),
+    refreshWorkspace(conversationId),
+    refreshPrs(conversationId),
+  ]).catch(quietly("Reading a chat's details"))
+}
+
 /**
  * Catches a chat up with its transcript on Hermes, which holds every device's turns. An empty chat
  * gets the newest page; otherwise only turns newer than the last one seen arrive. Turns streamed on
  * this device are kept as they are (they carry stats and approvals Hermes doesn't store) and only
- * matched to their rows. Resolves to how many messages arrived.
+ * matched to their rows. Resolves to how many messages arrived, without waiting for the follow-up
+ * reads, so a send waits on the transcript alone.
  */
-export function reconcileHistory(conversationId: string) {
+export function reconcileHistory(conversationId: string, { changed = false } = {}) {
   let pending = reconciling.get(conversationId)
   if (!pending) {
+    const tip = () => db.conversations.get(conversationId).then((c) => c?.hermesTip)
     // The queue first: a turn the plugin started from it is followed live, not loaded half done.
-    pending = refreshQueue(conversationId)
-      .then(() => reconcile(conversationId))
-      .then(async (added) => {
-        await Promise.all([
-          refreshTitle(conversationId),
-          refreshContext(conversationId),
-          refreshTodos(conversationId),
-          refreshWorkspace(conversationId),
-          refreshPrs(conversationId),
-        ])
+    pending = Promise.all([tip(), refreshQueue(conversationId)])
+      .then(async ([before]) => {
+        const added = await reconcile(conversationId)
+        if (added === null) return 0
+        caughtUp.set(conversationId, Date.now())
+        followUps(conversationId, changed || added > 0 || (await tip()) !== before)
         return added
       })
       .finally(() => reconciling.delete(conversationId))
@@ -555,7 +586,8 @@ async function reconcile(conversationId: string) {
   const config = await connection(conversation)
   if (!config) return 0
   const local = await getMessages(conversationId)
-  if (isStreaming(local)) return 0
+  // The streaming reply catches up when it ends.
+  if (isStreaming(local)) return null
   const sessionId = conversation.hermesSessionId
   const tip = local.length ? conversation.hermesTip : undefined
   if (tip !== undefined) {
@@ -569,7 +601,7 @@ async function reconcile(conversationId: string) {
     const turns = turnsOf(conversationId, sessionId, rows)
     return await db.transaction("rw", db.messages, db.conversations, async () => {
       const current = await getMessages(conversationId)
-      if (isStreaming(current)) return 0
+      if (isStreaming(current)) return null
       const byId = new Map(current.map((m) => [m.id, m]))
       const known = new Map<number, Message>()
       for (const m of current) {
