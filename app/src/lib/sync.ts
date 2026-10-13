@@ -53,7 +53,20 @@ import {
  * document for another.
  */
 
-type BotValue = Omit<Profile, "id" | "updatedAt" | "disabled" | "seenAt" | "pluginVersion">
+/**
+ * What each device keeps for itself: the registry's copies, and what it looks up from models.dev,
+ * which a newer lookup here mustn't push over a rename made on another device.
+ */
+const LOCAL_BOT_FIELDS = [
+  "disabled",
+  "seenAt",
+  "pluginVersion",
+  "contextWindow",
+  "contextModel",
+  "contextSource",
+  "imageInput",
+] as const
+type BotValue = Omit<Profile, "id" | "updatedAt" | (typeof LOCAL_BOT_FIELDS)[number]>
 const CHAT_FIELDS = [
   "title",
   "titleEdited",
@@ -292,15 +305,10 @@ async function syncDoc<T>(
   throw new Error("Another device kept changing the same data. Try again.")
 }
 
-function botValue({
-  id: _id,
-  updatedAt: _updatedAt,
-  disabled: _disabled,
-  seenAt: _seenAt,
-  pluginVersion: _pluginVersion,
-  ...value
-}: Profile): BotValue {
-  return value
+function botValue({ id: _id, updatedAt: _updatedAt, ...profile }: Profile): BotValue {
+  const value: Partial<Profile> = { ...profile }
+  for (const field of LOCAL_BOT_FIELDS) delete value[field]
+  return value as BotValue
 }
 
 async function localBots(): Promise<Doc<BotValue>> {
@@ -352,15 +360,9 @@ async function syncBots(key: CryptoKey) {
           if (await db.profiles.get(id)) await deleteProfile(id, { remote: true })
         } else if (entry.value) {
           await db.transaction("rw", db.profiles, db.tombstones, async () => {
-            const { disabled, seenAt, pluginVersion } = (await db.profiles.get(id)) ?? {}
-            await db.profiles.put({
-              ...entry.value!,
-              id,
-              updatedAt: entry.at,
-              disabled,
-              seenAt,
-              pluginVersion,
-            })
+            const current = await db.profiles.get(id)
+            const local = Object.fromEntries(LOCAL_BOT_FIELDS.map((f) => [f, current?.[f]]))
+            await db.profiles.put({ ...entry.value!, ...local, id, updatedAt: entry.at } as Profile)
             await db.tombstones.delete(`bot:${id}`)
           })
         }
