@@ -52,7 +52,8 @@ import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { cn } from "@/lib/utils"
 import { reasonText, useLiveRuns, useWaiting, type WaitingReason } from "@/lib/waiting"
-import { deleteProject, listProjects, type HermesProject } from "@/lib/hermes"
+import { deleteProject, type HermesProject } from "@/lib/hermes"
+import { readProjects, useProjects } from "@/lib/projects"
 import {
   projectRepos,
   PR_PENDING_MS,
@@ -110,7 +111,10 @@ export function ProjectPage({
   }, [back])
   const passed = (useLocation().state as { project?: HermesProject } | null)?.project
   const profile = useLiveQuery(() => db.profiles.get(profileId), [profileId])
-  const [fetched, setFetched] = useState<HermesProject>()
+  const baseUrl = profile?.baseUrl
+  const apiKey = profile?.apiKey
+  const server = baseUrl !== undefined && apiKey !== undefined ? { baseUrl, apiKey } : undefined
+  const fetched = useProjects(server)?.find((p) => p.id === projectId)
   // The Code screen hands the project over, so it shows at once; it's read again here regardless.
   const project = fetched ?? (passed?.id === projectId ? passed : undefined)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -124,18 +128,9 @@ export function ProjectPage({
   const changing = project?.folders.some((f) => f.status === "cloning" || f.status === "removing")
 
   useEffect(() => {
-    if (!profile) return
-    let cancelled = false
-    listProjects(profile)
-      .then((all) => {
-        const found = all.find((p) => p.id === projectId)
-        if (!cancelled && found) setFetched(found)
-      })
-      .catch(quietly("Reading projects"))
-    return () => {
-      cancelled = true
-    }
-  }, [profile, projectId, reads, projectChanges])
+    if (baseUrl === undefined || apiKey === undefined) return
+    readProjects({ baseUrl, apiKey }).catch(quietly("Reading projects"))
+  }, [baseUrl, apiKey, reads, projectChanges])
 
   usePoll(() => setReads((n) => n + 1), streaming ? SAFETY_MS : CHANGING_MS, [], {
     active: Boolean(changing),

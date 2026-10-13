@@ -92,7 +92,8 @@ import {
   updateConversation,
 } from "@/lib/db"
 import { describeActivity } from "@/lib/format"
-import { listProjects, supportsSteer, type HermesProject } from "@/lib/hermes"
+import { supportsSteer, type HermesProject } from "@/lib/hermes"
+import { readProjects, useProjects } from "@/lib/projects"
 import { loadEarlierHistory, reconcileHistory } from "@/lib/history"
 import { SAFETY_MS, useLive, watchChat } from "@/lib/live"
 import { usePoll } from "@/lib/poll"
@@ -389,17 +390,14 @@ export function ChatPage() {
   // A session not started yet names the repos it will work in; the project screen hands its project
   // over, and it's read again here regardless.
   const handed = (useLocation().state as { project?: HermesProject } | null)?.project
-  const [fetchedProject, setFetchedProject] = useState<HermesProject>()
   const projectId = session?.projectId
+  const projects = useProjects(
+    projectId && baseUrl && apiKey !== undefined ? { baseUrl, apiKey } : undefined,
+  )
+  const fetchedProject = projects?.find((p) => p.id === projectId)
   useEffect(() => {
     if (!projectId || hasMessages || !baseUrl || apiKey === undefined) return
-    let cancelled = false
-    listProjects({ baseUrl, apiKey })
-      .then((all) => !cancelled && setFetchedProject(all.find((p) => p.id === projectId)))
-      .catch(quietly("Reading projects"))
-    return () => {
-      cancelled = true
-    }
+    readProjects({ baseUrl, apiKey }).catch(quietly("Reading projects"))
   }, [projectId, hasMessages, baseUrl, apiKey])
   const project = [fetchedProject, handed].find((p) => p && p.id === projectId)
   const sessionRepos: RepoRef[] = session?.worktree?.repos.length

@@ -25,11 +25,11 @@ import { Spinner } from "@/components/ui/spinner"
 import { listEnabledProfiles, type Profile } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { SAFETY_MS, useAllLive, useAnyChange } from "@/lib/live"
+import { readProjects } from "@/lib/projects"
 import { usePoll } from "@/lib/poll"
 import {
   HermesError,
   deleteProject,
-  listProjects,
   retryProject,
   type HermesConfig,
   type HermesProject,
@@ -89,7 +89,7 @@ function describeError(error: unknown) {
 
 async function loadBot({ id: profileId, ...config }: Target): Promise<BotResult> {
   try {
-    return { profileId, projects: await listProjects(config) }
+    return { profileId, projects: await readProjects(config) }
   } catch (reason) {
     // Hermes's 404 for an unknown route has no CORS headers, so a missing plugin can also fail with
     // no status at all.
