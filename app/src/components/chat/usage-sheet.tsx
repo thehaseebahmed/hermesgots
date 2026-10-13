@@ -109,7 +109,6 @@ export function LimitBanner({
   onView: () => void
 }) {
   const exhausted = notice.remaining <= 0
-  const resetText = notice.resetsAt ? ` · Resets at ${resetsAtText(notice.resetsAt)}` : ""
   return (
     <Banner tone={exhausted ? "error" : "warning"} action={
       <div className="flex items-center gap-1">
@@ -127,10 +126,12 @@ export function LimitBanner({
         </Button>
       </div>
     }>
-      <span>
-        {exhausted ? "Limit reached" : "Approaching limit"} — {notice.label}
-        {resetText}
-      </span>
+      <div className="flex flex-col">
+        <span>{exhausted ? `${notice.label} limit reached` : `Approaching ${notice.label} limit`}</span>
+        {notice.resetsAt && (
+          <span className="text-muted-foreground">Resets at {resetsAtText(notice.resetsAt)}</span>
+        )}
+      </div>
     </Banner>
   )
 }
