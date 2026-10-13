@@ -261,23 +261,29 @@ def blocked(hermes_home: Path, record: Optional[Dict[str, Any]]) -> Optional[str
     return _blocked(project, record)
 
 
-def _fetch_origin(repo_root: str) -> None:
+def _fetch_origin(repo_root: str, auth: Optional[str] = None) -> None:
     """Best-effort fetch so a new worktree branches from the latest remote tip, not a stale
     local ref. _setup_worktree's own fetch has a short timeout and a freshness window that can
     skip it; this runs first with the plugin's longer timeout. Never raises — offline or auth
-    failures fall through to _setup_worktree's cached ref or the local-HEAD fallback."""
+    failures fall through to _setup_worktree's cached ref or the local-HEAD fallback.
+
+    The token is passed via ``http.extraheader`` (not saved in .git/config) so private repos
+    accept the fetch."""
+    from . import github
+
+    args = [*github.git_auth_args(auth), "fetch", "origin", "--prune"]
     try:
-        result = _git(repo_root, "fetch", "origin", "--prune")
+        result = _git(repo_root, *args)
         if result.returncode != 0:
             logger.debug("memento: fetch origin in %s failed: %s", repo_root, result.stderr.strip())
     except WorkspaceError:
         logger.debug("memento: fetch origin in %s failed", repo_root, exc_info=True)
 
 
-def _create_worktree(repo_root: str, name: str) -> Dict[str, str]:
+def _create_worktree(repo_root: str, name: str, auth: Optional[str] = None) -> Dict[str, str]:
     from hermes_cli.worktree_ops import _setup_worktree
 
-    _fetch_origin(repo_root)
+    _fetch_origin(repo_root, auth)
     info = None
     try:
         info = _setup_worktree(repo_root=repo_root, sync_base=True, name=name)
@@ -387,13 +393,21 @@ def ensure(
     # One branch name across the repos; a later repo joins the name the first one got.
     name = next((repo["branch"].split("/", 1)[1] for repo in existing.values() if repo.get("branch")), None)
     name = name or slug(task)
+    # Resolve the token once: the host's GitHub credential is the same for every repo.
+    auth: Optional[str] = None
+    try:
+        from . import github
+
+        auth, _ = github.token(hermes_home)
+    except Exception:
+        logger.debug("memento: couldn't resolve GitHub token for fetch", exc_info=True)
     repos = []
     for root in roots:
         kept = existing.get(root)
         if kept and os.path.isdir(kept["path"] or ""):
             repos.append(kept)
             continue
-        tree = _create_worktree(root, name)
+        tree = _create_worktree(root, name, auth)
         repos.append({"name": _repo_name(root), "repo_root": root, **tree})
     return _upsert(
         path,

@@ -6,7 +6,6 @@ session (discarded or deleted in the app) closes its pull requests and deletes i
 
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import os
@@ -145,11 +144,7 @@ def _commit(hermes_home: Path, tree: str, message: str) -> str:
 
 def _push(hermes_home: Path, tree: str, branch: str) -> None:
     auth, _ = github.token(hermes_home)
-    command = []
-    if auth:
-        # Like the clone: a header, so the token isn't saved in the repo's config.
-        basic = base64.b64encode(f"x-access-token:{auth}".encode()).decode()
-        command += ["-c", f"http.https://github.com/.extraheader=AUTHORIZATION: basic {basic}"]
+    command = github.git_auth_args(auth)
     pushed = _run(tree, [*command, "push", "-u", "origin", f"HEAD:refs/heads/{branch}"])
     if pushed.returncode != 0:
         stderr = pushed.stderr

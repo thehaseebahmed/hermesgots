@@ -34,6 +34,14 @@ PR_CACHE_S = 30
 PR_PENDING_CACHE_S = 10
 
 
+def git_auth_args(auth: Optional[str]) -> list[str]:
+    """``-c http…extraheader`` args for a ``git -c … fetch/clone/push`` command, or ``[]``."""
+    if not auth:
+        return []
+    basic = base64.b64encode(f"x-access-token:{auth}".encode()).decode()
+    return ["-c", f"http.https://github.com/.extraheader=AUTHORIZATION: basic {basic}"]
+
+
 class GitHubError(Exception):
     def __init__(self, message: str, status: int = 502):
         super().__init__(message)
@@ -217,8 +225,7 @@ def clone(hermes_home: Path, repo: Any, dest_raw: Any, cancel: Optional[threadin
     if auth:
         # A header rather than a token in the URL, so it isn't saved in .git/config. Later fetches and
         # pushes use the host's own git credentials, like any other checkout there.
-        basic = base64.b64encode(f"x-access-token:{auth}".encode()).decode()
-        command += ["-c", f"http.https://github.com/.extraheader=AUTHORIZATION: basic {basic}"]
+        command += git_auth_args(auth)
     command += ["clone", "--", f"https://github.com/{repo}.git", dest]
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     try:
