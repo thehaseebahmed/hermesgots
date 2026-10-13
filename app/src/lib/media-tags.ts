@@ -1,3 +1,4 @@
+import { cooldown } from "@/lib/cooldown"
 import { db } from "@/lib/db"
 import { getPluginFeatures, getPluginMedia, type HermesConfig } from "@/lib/hermes"
 
@@ -111,9 +112,8 @@ export function getMediaImage(config: HermesConfig, path: string): Promise<strin
   return pending
 }
 
-/** Bots whose plugin has no media route (an older plugin), and when one was last tried. */
-const unsupported = new Map<string, number>()
-const RETRY_MS = 5 * 60 * 1000
+/** Bots whose plugin has no media route (an older plugin). */
+const unsupported = cooldown()
 
 /**
  * The image behind a chat's `MEDIA:<path>` tag, as an object URL, or null when its bot can't serve
@@ -124,18 +124,18 @@ export async function loadMediaImage(conversationId: string, path: string): Prom
   const profile = conversation && (await db.profiles.get(conversation.profileId))
   if (!profile) return null
   const key = `${profile.baseUrl}\n${profile.apiKey}`
-  if (Date.now() - (unsupported.get(key) ?? -Infinity) < RETRY_MS) return null
+  if (unsupported.cooling(key)) return null
   let features: string[]
   try {
     features = await getPluginFeatures(profile)
   } catch {
-    unsupported.set(key, Date.now())
+    unsupported.start(key)
     return null
   }
   if (!features.includes("media")) {
-    unsupported.set(key, Date.now())
+    unsupported.start(key)
     return null
   }
-  unsupported.delete(key)
+  unsupported.clear(key)
   return getMediaImage(profile, path)
 }

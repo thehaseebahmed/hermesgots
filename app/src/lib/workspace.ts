@@ -1,3 +1,4 @@
+import { cooldown } from "@/lib/cooldown"
 import { db, type Conversation, type PullRequestRef, type SessionMode } from "@/lib/db"
 import {
   ensureWorkspace,
@@ -21,9 +22,8 @@ import { syncNow } from "@/lib/sync"
  * of it; this keeps a local copy.
  */
 
-/** Bots whose plugin has no workspace routes (an older plugin), and when they were last asked. */
-const unsupported = new Map<string, number>()
-const RETRY_MS = 5 * 60 * 1000
+/** Bots whose plugin has no workspace routes (an older plugin). */
+const unsupported = cooldown()
 /** How long a known pull request is trusted before it's read again. */
 const PR_MS = 30_000
 /** Checks still running are read again this often, so the pill shows them as they finish. */
@@ -50,8 +50,6 @@ async function tracked(conversationId: string) {
   if (!conversation?.projectId || !profile?.apiKey || profile.disabled) return null
   return { conversation, profile, key: `${profile.baseUrl}\n${profile.apiKey}` }
 }
-
-const cooling = (key: string) => Date.now() - (unsupported.get(key) ?? -Infinity) < RETRY_MS
 
 async function store(conversationId: string, workspace: SessionWorkspace | null) {
   if (!workspace) return
@@ -112,15 +110,15 @@ export async function ensureSessionWorkspace(
 /** Reads the session's workspace from the plugin: its mode and whether a plan is waiting. */
 export async function refreshWorkspace(conversationId: string) {
   const found = await tracked(conversationId)
-  if (!found || cooling(found.key)) return
+  if (!found || unsupported.cooling(found.key)) return
   let workspace
   try {
     workspace = await getWorkspace(found.profile, found.conversation.hermesSessionId)
   } catch {
-    unsupported.set(found.key, Date.now())
+    unsupported.start(found.key)
     return
   }
-  unsupported.delete(found.key)
+  unsupported.clear(found.key)
   await store(conversationId, workspace)
 }
 
@@ -128,7 +126,12 @@ export async function refreshWorkspace(conversationId: string) {
 export async function refreshPrs(conversationId: string, { force = false } = {}) {
   const found = await tracked(conversationId)
   // A discarded session's pull requests stay as it closed them; its branch is gone.
-  if (!found?.conversation.worktree || found.conversation.discardedAt || cooling(found.key)) return
+  if (
+    !found?.conversation.worktree ||
+    found.conversation.discardedAt ||
+    unsupported.cooling(found.key)
+  )
+    return
   const { conversation, profile } = found
   const newest = Math.min(...(conversation.prs ?? []).map((pr) => pr.at))
   const trusted = prChecksPending(conversation.prs) ? PR_PENDING_MS : PR_MS
@@ -137,10 +140,10 @@ export async function refreshPrs(conversationId: string, { force = false } = {})
   try {
     prs = await getSessionPrs(profile, conversation.hermesSessionId)
   } catch {
-    unsupported.set(found.key, Date.now())
+    unsupported.start(found.key)
     return
   }
-  unsupported.delete(found.key)
+  unsupported.clear(found.key)
   const at = Date.now()
   await db.conversations.update(conversationId, { prs: prs.map((pr) => ({ ...pr, at })) })
   // The plugin resolves the session once its pull request merges; the chat list brings that here.

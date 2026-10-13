@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react"
 import { liveQuery } from "dexie"
 
+import { cooldown } from "@/lib/cooldown"
 import { db, getSettings, updateConversation, type Profile } from "@/lib/db"
 import {
   followEvents,
@@ -43,7 +44,8 @@ interface Stream {
 const streams = new Map<string, Stream>()
 /** Where each stream got to, so a reconnect only hears what it missed. */
 const cursors = new Map<string, number>()
-const unsupported = new Map<string, number>()
+/** Plugins without the stream. */
+const unsupported = cooldown(UNSUPPORTED_MS)
 /** Connections whose stream is open. */
 let live = new Set<string>()
 /** Changes heard per connection and kind, for screens to refresh on. */
@@ -88,7 +90,7 @@ function statusOf(profile?: Connection | null): LiveStatus {
   if (!profile) return "off"
   const key = connectionKey(profile)
   if (live.has(key)) return "push"
-  if (Date.now() - (unsupported.get(key) ?? -Infinity) < UNSUPPORTED_MS) return "unsupported"
+  if (unsupported.cooling(key)) return "unsupported"
   return streams.has(key) ? "connecting" : "off"
 }
 
@@ -288,7 +290,7 @@ async function follow(config: HermesConfig, key: string, signal: AbortSignal) {
       })
     } catch (error) {
       if (!signal.aborted && (await lacksStream(config, error))) {
-        unsupported.set(key, Date.now())
+        unsupported.start(key)
         notify()
         window.setTimeout(reconcileStreams, UNSUPPORTED_MS)
         break
@@ -310,7 +312,7 @@ function reconcileStreams() {
     for (const profile of profiles) {
       if (profile.disabled || !profile.apiKey || !profile.baseUrl.trim()) continue
       const key = connectionKey(profile)
-      if (Date.now() - (unsupported.get(key) ?? -Infinity) < UNSUPPORTED_MS) continue
+      if (unsupported.cooling(key)) continue
       if (!wanted.has(key)) wanted.set(key, profile)
     }
   }
