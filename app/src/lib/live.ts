@@ -14,7 +14,7 @@ import {
   type HermesConfig,
 } from "@/lib/hermes"
 import { reconcileHistory } from "@/lib/history"
-import { syncNow } from "@/lib/sync"
+import { syncChatsOf, syncNow } from "@/lib/sync"
 
 /**
  * Hears from each server's Memento plugin as things change, instead of asking every so often: one
@@ -156,7 +156,8 @@ function catchUpChat(conversationId: string) {
     return
   }
   catchingUp.add(conversationId)
-  reconcileHistory(conversationId)
+  // Called when the server says the session moved, which a mode or a plan does without a row.
+  reconcileHistory(conversationId, { changed: true })
     .catch(quietly("Catching up a chat"))
     .finally(() => {
       catchingUp.delete(conversationId)
@@ -235,7 +236,7 @@ function onEvent(key: string, event: string, data: Record<string, unknown>) {
       void applyTitle(key, data.session_id).catch(quietly("Reading a title"))
       break
     case "chats":
-      void syncNow()
+      void syncChatsOf(botsOf(key).map((bot) => bot.id))
       break
     case "runs":
       bumpRunsSoon(key)

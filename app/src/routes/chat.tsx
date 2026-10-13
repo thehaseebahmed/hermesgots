@@ -16,7 +16,13 @@ import {
   XIcon,
 } from "lucide-react"
 
-import { CATCH_UP_MS, HOST_QUEUE_MS, PR_PENDING_MS, SAFETY_MS } from "@/lib/freshness"
+import {
+  CATCH_UP_MS,
+  HOST_QUEUE_MS,
+  PR_PENDING_MS,
+  SAFETY_MS,
+  SEND_CAUGHT_UP_MS,
+} from "@/lib/freshness"
 import { quietly } from "@/lib/report"
 import { useBreakReminderEligibility } from "@/components/break-reminder-context"
 import { ApprovalCard } from "@/components/chat/approval-card"
@@ -95,7 +101,7 @@ import {
 import { describeActivity } from "@/lib/format"
 import { supportsSteer, type HermesProject } from "@/lib/hermes"
 import { readProjects, useProjects } from "@/lib/projects"
-import { loadEarlierHistory, reconcileHistory } from "@/lib/history"
+import { caughtUpWithin, loadEarlierHistory, reconcileHistory } from "@/lib/history"
 import { useLive, watchChat } from "@/lib/live"
 import { usePoll } from "@/lib/poll"
 import { useXLarge } from "@/lib/media"
@@ -500,8 +506,10 @@ export function ChatPage() {
     try {
       let conversationId = id
       if (conversationId) {
-        // So a reply that builds on another device's latest turn shows after it, not before.
-        await Promise.race([reconcileHistory(conversationId).catch(() => undefined), wait(1500)])
+        // So a reply that builds on another device's latest turn shows after it, not before; a chat
+        // that caught up a moment ago doesn't wait again.
+        if (!caughtUpWithin(conversationId, SEND_CAUGHT_UP_MS))
+          await Promise.race([reconcileHistory(conversationId).catch(() => undefined), wait(1500)])
       } else {
         if (!profile) return
         conversationId = (await createConversation(profile.id, { modelChoice: modelChoice })).id

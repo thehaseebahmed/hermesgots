@@ -45,7 +45,7 @@ import {
 } from "@/lib/hermes"
 import { attachmentsText, setUploading, wireContent } from "@/lib/attachments"
 import { refreshContext } from "@/lib/context"
-import { liveTurn, patchStats, reconcileHistory } from "@/lib/history"
+import { liveTurn, noteFollowUps, patchStats, reconcileHistory } from "@/lib/history"
 import { isLive } from "@/lib/live"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { quietly } from "@/lib/report"
@@ -459,12 +459,26 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
     }
     return undefined
   }
+  // When the stream last carried an event; its keepalives don't count.
+  let heardAt = Date.now()
+  const heard = new Proxy(handlers, {
+    get(target, key, receiver) {
+      const value = Reflect.get(target, key, receiver)
+      if (typeof value !== "function") return value
+      return (...args: unknown[]) => {
+        heardAt = Date.now()
+        return value.apply(target, args)
+      }
+    },
+  })
   // Reads the run's status now and then while its events stream is open: a stalled stream still
   // keepalives, so only this sees the run finish (or wait on the user) and ends the turn.
   const watchStatus = (current: AbortSignal, done: (outcome: RunOutcome) => void) => {
     const watcher = new AbortController()
     const timer = window.setInterval(() => {
       if (watcher.signal.aborted || current.aborted || signal.aborted) return
+      // Events still arriving say the run goes on; only a quiet stream needs its status read.
+      if (Date.now() - heardAt < STREAM_POLL_MS) return
       void applyStatus(AbortSignal.any([current, AbortSignal.timeout(READ_TIMEOUT_MS)])).then(
         (outcome) => {
           if (outcome) {
@@ -504,7 +518,7 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
             woken.abort(new DOMException("Settled", "AbortError"))
             resolve(settledRun)
           })
-          void followRun(config, runId, { lastSeq, signal: current }, handlers).then(
+          void followRun(config, runId, { lastSeq, signal: current }, heard).then(
             (streamed) => {
               stopWatching()
               resolve(streamed)
@@ -601,6 +615,7 @@ async function finishTurn(turn: Turn, usage: TurnUsage | undefined) {
   draft.runId = undefined
   draft.runSeq = undefined
   await turn.close()
+  noteFollowUps(conversationId)
   await updateConversation(conversationId, { updatedAt: endedAt })
   void refreshContext(conversationId)
   void refreshTodos(conversationId)

@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react"
 import { liveQuery } from "dexie"
 
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
-import { noteFailure } from "@/lib/report"
+import { noteFailure, quietly } from "@/lib/report"
 import { createSignal } from "@/lib/store"
 import {
   deleteDoc,
@@ -473,34 +473,7 @@ async function runSync() {
     if (key) await ensureInbox(key)
     if (key) await syncBots(key)
     if (key) await pullRegistry()
-    const chatStores = { ...state.chatStores }
-    const seed = await pristineSeed()
-    const { movedChats = [] } = await getSettings()
-    // Turned off: nothing checks on it. Without a key, Hermes keeps no session for our ids.
-    const profiles = (await db.profiles.toArray()).filter(
-      (p) => !p.disabled && p.apiKey && p.id !== seed?.id,
-    )
-    const held = new Set<string>()
-    for (const profile of profiles) {
-      if (key && !movedChats.includes(profile.id) && (await pullFallbackChats(key, profile.id)))
-        held.add(profile.id)
-    }
-    // Every host at once, so one that hangs holds up only its own bots.
-    const results = await Promise.all(profiles.map(mergePluginChats))
-    // Applied in order: two bots on one server share its list, and a chat stays with the first.
-    for (const [i, profile] of profiles.entries()) {
-      const result = results[i]
-      chatStores[profile.id] = result ? "plugin" : "unreachable"
-      if (!result) continue
-      await applyChats(profile.id, mergeDocs(result.merged, result.local).pull)
-      await settleChatTombstones(profile.id, result.merged)
-      if (key && !movedChats.includes(profile.id)) {
-        if (held.has(profile.id)) await deleteDoc(`chats/${profile.id}`).catch(() => undefined)
-        await saveSettings({ movedChats: [...movedChats, profile.id] })
-        movedChats.push(profile.id)
-      }
-    }
-    setState({ chatStores })
+    await syncChatLists(key)
     syncedFingerprint = await fingerprint()
     if (!key) return setState({ syncing: false })
     const syncedAt = Date.now()
@@ -509,6 +482,38 @@ async function runSync() {
   } catch (error) {
     setState({ syncing: false, error: error instanceof Error ? error.message : "Sync failed" })
   }
+}
+
+/** Merges each bot's chat list with its plugin's: every bot's, or only those `only` names. */
+async function syncChatLists(key: CryptoKey | undefined, only?: Set<string>) {
+  const chatStores = { ...state.chatStores }
+  const seed = await pristineSeed()
+  const { movedChats = [] } = await getSettings()
+  // Turned off: nothing checks on it. Without a key, Hermes keeps no session for our ids.
+  const profiles = (await db.profiles.toArray()).filter(
+    (p) => !p.disabled && p.apiKey && p.id !== seed?.id && (!only || only.has(p.id)),
+  )
+  const held = new Set<string>()
+  for (const profile of profiles) {
+    if (key && !movedChats.includes(profile.id) && (await pullFallbackChats(key, profile.id)))
+      held.add(profile.id)
+  }
+  // Every host at once, so one that hangs holds up only its own bots.
+  const results = await Promise.all(profiles.map(mergePluginChats))
+  // Applied in order: two bots on one server share its list, and a chat stays with the first.
+  for (const [i, profile] of profiles.entries()) {
+    const result = results[i]
+    chatStores[profile.id] = result ? "plugin" : "unreachable"
+    if (!result) continue
+    await applyChats(profile.id, mergeDocs(result.merged, result.local).pull)
+    await settleChatTombstones(profile.id, result.merged)
+    if (key && !movedChats.includes(profile.id)) {
+      if (held.has(profile.id)) await deleteDoc(`chats/${profile.id}`).catch(() => undefined)
+      await saveSettings({ movedChats: [...movedChats, profile.id] })
+      movedChats.push(profile.id)
+    }
+  }
+  setState({ chatStores })
 }
 
 /** Reads the registry; once a linked bot is in, the untouched seed bot makes way for it. */
@@ -534,6 +539,29 @@ export async function refreshBots() {
 }
 
 /** Syncs now, or once more after the sync already running. */
+/**
+ * Merges the chat lists of these bots only, for a server whose plugin said its list changed. A
+ * whole sync already running covers them, so it runs once more instead.
+ */
+export function syncChatsOf(botIds: string[]): Promise<void> {
+  if (running) {
+    again = true
+    return running
+  }
+  running = syncChatLists(undefined, new Set(botIds))
+    // What it pulled in isn't a change of this device's to push back.
+    .then(async () => void (syncedFingerprint = await fingerprint()))
+    .catch(quietly("Syncing chat lists"))
+    .finally(() => {
+      running = undefined
+      if (again) {
+        again = false
+        void syncNow()
+      }
+    })
+  return running
+}
+
 export function syncNow(): Promise<void> {
   if (running) {
     again = true

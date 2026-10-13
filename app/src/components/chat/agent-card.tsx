@@ -18,6 +18,7 @@ import type { Message, ToolEvent } from "@/lib/db"
 import type { DelegatedAgent, HermesConfig } from "@/lib/hermes"
 import { toMessages } from "@/lib/history"
 import { activityOf } from "@/lib/tools"
+import { connectionKey } from "@/lib/connection"
 import { cn } from "@/lib/utils"
 
 const RECENT_ROWS = 40
@@ -86,20 +87,28 @@ function StatusIcon({ agent }: { agent: DelegatedAgent }) {
   return <CheckIcon className="size-3" aria-label="Done" />
 }
 
+/** Finished agents' transcripts, which don't change, by server, agent and length. */
+const finished = new Map<string, Message[]>()
+
 /** An agent's transcript as the chat shows a reply, read again while the agent works. */
 function useTranscript(server: HermesConfig, agent: DelegatedAgent, limit: number) {
-  const [messages, setMessages] = useState<Message[]>()
-  const [failed, setFailed] = useState(false)
   const running = agent.status === "running"
   const { baseUrl, apiKey } = server
+  const cacheKey = `${connectionKey(server)}|${agent.id}|${limit}`
+  const [messages, setMessages] = useState<Message[]>()
+  const [failed, setFailed] = useState(false)
+  const kept = running ? undefined : finished.get(cacheKey)
   useEffect(() => {
+    if (kept) return
     let cancelled = false
     const read = () => {
       if (document.visibilityState !== "visible") return
       agentTranscript({ baseUrl, apiKey }, agent.id, limit)
         .then((rows) => {
           if (cancelled) return
-          setMessages(toMessages(`agent-${agent.id}`, agent.id, rows, { live: running }))
+          const next = toMessages(`agent-${agent.id}`, agent.id, rows, { live: running })
+          if (!running) finished.set(cacheKey, next)
+          setMessages(next)
           setFailed(false)
         })
         .catch(() => !cancelled && setFailed(true))
@@ -110,8 +119,8 @@ function useTranscript(server: HermesConfig, agent: DelegatedAgent, limit: numbe
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [baseUrl, apiKey, agent.id, limit, running])
-  return { messages, failed }
+  }, [baseUrl, apiKey, agent.id, limit, running, cacheKey, kept])
+  return { messages: kept ?? messages, failed: !kept && failed }
 }
 
 function AgentCard({ agent, source }: { agent: DelegatedAgent; source: AgentsSource }) {

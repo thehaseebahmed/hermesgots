@@ -15,6 +15,15 @@ export const MISSING_ROUTE_MS = 5 * 60_000
 export const RUNS_MS = 10_000
 /** An open chat looks for turns sent from another device. */
 export const CATCH_UP_MS = 30_000
+/**
+ * A chat's title, context use, todos, workspace and pull requests are read again when its
+ * transcript moves, when its server says the session changed, and otherwise this often.
+ */
+export const FOLLOW_UP_MS = 2 * 60_000
+/** A turn that ended within this long read them itself. */
+export const JUST_FOLLOWED_UP_MS = 3_000
+/** A send doesn't wait to catch the chat up when it caught up this recently. */
+export const SEND_CAUGHT_UP_MS = 5_000
 /** An open chat looks for a turn the plugin started from its queue, while one waits there. */
 export const HOST_QUEUE_MS = 3_000
 /** While the host does slow work the screen waits on (cloning a repo, adding or removing one). */
