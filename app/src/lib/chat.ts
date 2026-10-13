@@ -48,6 +48,7 @@ import { refreshContext } from "@/lib/context"
 import { liveTurn, patchStats, reconcileHistory } from "@/lib/history"
 import { isLive } from "@/lib/live"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
+import { quietly } from "@/lib/report"
 import { randomId } from "@/lib/utils"
 import { readLiveRuns } from "@/lib/waiting"
 import { onWake } from "@/lib/wake"
@@ -78,6 +79,8 @@ const PLUGIN_SETTLE_MS = 1500
 const TITLED_TURNS = 3
 /** Hermes titles with a model call in the background, which can land after the reply ends. */
 const TITLE_CHECKS_MS = [0, 3000, 10000]
+/** A reply whose connection gave up is followed again after these waits, the last one repeating. */
+const REATTACH_MS = [2_000, 5_000, 15_000, 30_000, 60_000]
 const controllers = new Map<string, AbortController>()
 /** In-flight reply drafts by message id, so approval answers land in the draft being flushed. */
 const activeDrafts = new Map<string, { draft: Message; touch: () => void }>()
@@ -605,6 +608,16 @@ async function requeueSteer(conversationId: string, text: string) {
   })
 }
 
+const reattachTries = new Map<string, number>()
+function reattachLater(conversationId: string) {
+  const tries = reattachTries.get(conversationId) ?? 0
+  reattachTries.set(conversationId, tries + 1)
+  window.setTimeout(
+    () => reattachRun(conversationId).catch(quietly("Reattaching a run")),
+    REATTACH_MS[Math.min(tries, REATTACH_MS.length - 1)],
+  )
+}
+
 /** Runs a turn on `/v1/runs` when Hermes has it, else streams a chat completion. */
 async function runTurn(
   turn: Turn,
@@ -623,9 +636,11 @@ async function runTurn(
     if (controller.signal.aborted) {
       draft.status = "stopped"
     } else if (draft.runId && retryable(error)) {
-      // Hermes may still be running it: leave the reply streaming for `reattachRun` to pick up.
+      // Hermes may still be running it: leave the reply streaming and follow it again soon. Until
+      // then it holds the chat's catch-up and queue, so the chat's own timer is too slow for it.
       draft.statusText = undefined
       await turn.close()
+      reattachLater(turn.conversationId)
       return draft.status
     } else {
       draft.status = "error"
@@ -633,6 +648,7 @@ async function runTurn(
         error instanceof HermesError ? error.message : "Something went wrong talking to Hermes."
     }
   }
+  reattachTries.delete(turn.conversationId)
   await finishTurn(turn, usage)
   // The plugin puts a leftover steer first in its own queue, and starts what waits there.
   if (await hostQueue(turn.config)) followHostQueue(turn.conversationId)
