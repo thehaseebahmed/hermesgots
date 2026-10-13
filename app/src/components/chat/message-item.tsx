@@ -1,4 +1,4 @@
-import { Fragment, useState, type ReactNode } from "react"
+import { Fragment, memo, useState, type ReactNode } from "react"
 import {
   AlertCircleIcon,
   ClockIcon,
@@ -189,14 +189,7 @@ function StatusLine({ text }: { text: string }) {
   )
 }
 
-export function MessageItem({
-  message,
-  showStats,
-  botId,
-  busy,
-  plain,
-  simple,
-}: {
+interface MessageItemProps {
   message: Message
   showStats: boolean
   /** A simplified chat: the agent's tool calls and its activity line are left out. */
@@ -206,7 +199,16 @@ export function MessageItem({
   busy?: boolean
   /** A project session's thread: no avatars, and the agent's replies sit on the page, not in bubbles. */
   plain?: boolean
-}) {
+}
+
+export const MessageItem = memo(function MessageItem({
+  message,
+  showStats,
+  botId,
+  busy,
+  plain,
+  simple,
+}: MessageItemProps) {
   // Replies type out a word at a time, however Hermes delivers them.
   const content = useReveal(message.role === "assistant" ? message.content : "")
   const revealing = content.length < message.content.length && message.role === "assistant"
@@ -379,6 +381,17 @@ export function MessageItem({
       )}
     </div>
   )
+}, sameMessage)
+
+/**
+ * A live query hands back fresh objects on every write, so a streaming reply would re-render the
+ * whole thread with each token. Only a message whose stored value changed renders again.
+ */
+function sameMessage(a: MessageItemProps, b: MessageItemProps) {
+  for (const key of Object.keys({ ...a, ...b }) as (keyof MessageItemProps)[]) {
+    if (key !== "message" && a[key] !== b[key]) return false
+  }
+  return a.message === b.message || JSON.stringify(a.message) === JSON.stringify(b.message)
 }
 
 function AssistantRow({
