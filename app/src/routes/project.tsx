@@ -61,6 +61,8 @@ import {
 
 /** While a repo is being added or removed: the plugin does the work, this watches for it to finish. */
 const CHANGING_MS = 3_000
+/** How soon the screen reads a session's worktree and pull requests again while it stays open. */
+const REREAD_MS = 60_000
 const DAY_MS = 86_400_000
 const GROUPS: { state: SessionState; label: string }[] = [
   { state: "working", label: "Working" },
@@ -180,14 +182,19 @@ export function ProjectPage({
   // `updatedAt`, since their messages load only when opened.
   const sessions = rows?.filter((c) => c.draftAt || c.updatedAt > c.createdAt || local?.[c.id]?.any)
 
-  // A session's PRs are read when it's open; this reads them for every session once per visit, its
-  // worktree first when this device hasn't seen it (a session started elsewhere).
-  const read = useRef(new Set<string>())
+  // A session's PRs are read when it's open; this reads them for every session as the screen opens,
+  // its worktree first when this device hasn't seen it (a session started elsewhere). While the
+  // screen stays open it reads both again, at most every minute, as the sessions change, so a plan
+  // approved or a pull request opened on another device shows here too.
+  const read = useRef(new Map<string, number>())
   useEffect(() => {
+    const now = Date.now()
     for (const c of sessions ?? []) {
-      if (read.current.has(c.id)) continue
-      read.current.add(c.id)
-      void (c.worktree ? Promise.resolve() : refreshWorkspace(c.id)).then(() => refreshPrs(c.id))
+      const last = read.current.get(c.id)
+      if (last !== undefined && now - last < REREAD_MS) continue
+      read.current.set(c.id, now)
+      const workspace = !c.worktree || last !== undefined
+      void (workspace ? refreshWorkspace(c.id) : Promise.resolve()).then(() => refreshPrs(c.id))
     }
   }, [sessions])
   // The open session's chat pane polls its own PR; exclude it here to avoid duplicate reads.
