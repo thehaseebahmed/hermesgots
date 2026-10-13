@@ -1,4 +1,4 @@
-import { TriangleAlertIcon, XIcon } from "lucide-react"
+import { XIcon } from "lucide-react"
 import { Meter } from "@base-ui/react/meter"
 
 import { Banner } from "@/components/banner"
@@ -127,8 +127,7 @@ export function LimitBanner({
         </Button>
       </div>
     }>
-      <span className="flex items-center gap-1.5">
-        <TriangleAlertIcon className="size-4 shrink-0" />
+      <span>
         {exhausted ? "Limit reached" : "Approaching limit"} — {notice.label}
         {resetText}
       </span>
