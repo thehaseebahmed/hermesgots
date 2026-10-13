@@ -1,5 +1,6 @@
 import { createContext, useContext, useSyncExternalStore } from "react"
 
+import { quietly } from "@/lib/report"
 import { createSignal } from "@/lib/store"
 import type { Conversation, Profile, ToolEvent } from "@/lib/db"
 import {
@@ -60,7 +61,7 @@ export function useSessionAgents(
           lists.set(sessionId, next)
           notify()
         })
-        .catch(() => undefined)
+        .catch(quietly("Reading delegated agents"))
     },
     working ? POLL_MS : false,
     [sessionId, baseUrl, apiKey, changes],

@@ -1,3 +1,4 @@
+import { noteFailure } from "@/lib/report"
 import { connectionKey } from "@/lib/connection"
 import { cooldown } from "@/lib/cooldown"
 import { db } from "@/lib/db"
@@ -21,7 +22,8 @@ export async function refreshContext(conversationId: string) {
   let live
   try {
     live = await getSessionContext(profile, conversation.hermesSessionId)
-  } catch {
+  } catch (error) {
+    noteFailure("Reading context use", error)
     unsupported.start(key)
     // Older than the turns since, so showing it would mislead.
     if (conversation.liveContext)

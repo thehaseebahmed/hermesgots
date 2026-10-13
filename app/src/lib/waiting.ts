@@ -1,6 +1,7 @@
 import { useEffect, useSyncExternalStore } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
+import { quietly } from "@/lib/report"
 import { db } from "@/lib/db"
 import { getLiveRuns, type LiveRunStatus, type LiveRuns, type WaitingReason } from "@/lib/hermes"
 import { connectionKey, isLive, onChanges, SAFETY_MS } from "@/lib/live"
@@ -68,7 +69,9 @@ function notify() {
  * last answer stands instead of clearing every mark of that server.
  */
 export async function readLiveRuns(server: Server): Promise<LiveRuns | undefined> {
-  const next = await getLiveRuns(server, AbortSignal.timeout(TIMEOUT_MS)).catch(() => undefined)
+  const next = await getLiveRuns(server, AbortSignal.timeout(TIMEOUT_MS)).catch(
+    quietly("Reading runs/live"),
+  )
   if (next) {
     answers.set(connectionKey(server), next)
     notify()

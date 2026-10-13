@@ -1,3 +1,4 @@
+import { noteFailure } from "@/lib/report"
 import { connectionKey } from "@/lib/connection"
 import { cooldown } from "@/lib/cooldown"
 import { db, type Conversation, type PullRequestRef, type SessionMode } from "@/lib/db"
@@ -115,7 +116,8 @@ export async function refreshWorkspace(conversationId: string) {
   let workspace
   try {
     workspace = await getWorkspace(found.profile, found.conversation.hermesSessionId)
-  } catch {
+  } catch (error) {
+    noteFailure("Reading a session's workspace", error)
     unsupported.start(found.key)
     return
   }
@@ -140,7 +142,8 @@ export async function refreshPrs(conversationId: string, { force = false } = {})
   let prs
   try {
     prs = await getSessionPrs(profile, conversation.hermesSessionId)
-  } catch {
+  } catch (error) {
+    noteFailure("Reading a session's pull requests", error)
     unsupported.start(found.key)
     return
   }

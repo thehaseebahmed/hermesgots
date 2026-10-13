@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react"
 import { liveQuery } from "dexie"
 
+import { quietly } from "@/lib/report"
 import { connectionKey } from "@/lib/connection"
 import { cooldown } from "@/lib/cooldown"
 import { db, getSettings, updateConversation, type Profile } from "@/lib/db"
@@ -159,7 +160,7 @@ function catchUpChat(conversationId: string) {
   }
   catchingUp.add(conversationId)
   reconcileHistory(conversationId)
-    .catch(() => undefined)
+    .catch(quietly("Catching up a chat"))
     .finally(() => {
       catchingUp.delete(conversationId)
       if (catchUpAgain.delete(conversationId)) catchUpChat(conversationId)
@@ -240,7 +241,7 @@ function onEvent(key: string, event: string, data: Record<string, unknown>) {
       )
       break
     case "title":
-      void applyTitle(key, data.session_id).catch(() => undefined)
+      void applyTitle(key, data.session_id).catch(quietly("Reading a title"))
       break
     case "chats":
       void syncNow()

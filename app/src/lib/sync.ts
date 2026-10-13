@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react"
 import { liveQuery } from "dexie"
 
+import { noteFailure } from "@/lib/report"
 import { createSignal } from "@/lib/store"
 import {
   deleteDoc,
@@ -440,7 +441,8 @@ async function syncPluginChats(profile: Profile) {
   let merged: Doc<ChatValue>
   try {
     merged = await mergeChatList(profile, local)
-  } catch {
+  } catch (error) {
+    noteFailure(`Syncing ${profile.name}'s chats`, error)
     return false
   }
   await applyChats(profile.id, mergeDocs(merged, local).pull)

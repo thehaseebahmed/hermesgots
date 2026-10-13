@@ -16,6 +16,7 @@ import {
   XIcon,
 } from "lucide-react"
 
+import { quietly } from "@/lib/report"
 import { useBreakReminderEligibility } from "@/components/break-reminder-context"
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { BotPicker } from "@/components/chat/bot-picker"
@@ -377,8 +378,8 @@ export function ChatPage() {
   usePoll(
     () => {
       if (!id) return
-      reattachRun(id).catch(() => undefined)
-      reconcileHistory(id).catch(() => undefined)
+      reattachRun(id).catch(quietly("Reattaching a run"))
+      reconcileHistory(id).catch(quietly("Catching up a chat"))
     },
     streamOpen ? SAFETY_MS : CATCH_UP_MS,
     [id, updatedAt],
@@ -395,7 +396,7 @@ export function ChatPage() {
     let cancelled = false
     listProjects({ baseUrl, apiKey })
       .then((all) => !cancelled && setFetchedProject(all.find((p) => p.id === projectId)))
-      .catch(() => {})
+      .catch(quietly("Reading projects"))
     return () => {
       cancelled = true
     }

@@ -9,6 +9,7 @@ import {
   UserCheckIcon,
 } from "lucide-react"
 
+import { noteFailure, quietly } from "@/lib/report"
 import { createSignal } from "@/lib/store"
 import { connectionKey } from "@/lib/connection"
 import { getSettings, type Conversation, type Profile } from "@/lib/db"
@@ -232,7 +233,10 @@ export async function readTheseusInfo(profile: Pick<Profile, "baseUrl" | "apiKey
   const key = connectionKey(profile)
   const hit = infos.get(key)
   if (hit && Date.now() - hit.at < INFO_MS) return hit.info
-  const info = await getTheseusInfo(profile).catch(() => null)
+  const info = await getTheseusInfo(profile).catch((error) => {
+    noteFailure("Reading Theseus info", error)
+    return null
+  })
   infos.set(key, { at: Date.now(), info })
   return info
 }
@@ -477,7 +481,7 @@ export function useTheseusRun(
           raws.set(id, next)
           notify()
         })
-        .catch(() => undefined)
+        .catch(quietly("Reading a Theseus run"))
     },
     POLL_MS,
     [id, sessionId, baseUrl, apiKey, changes],

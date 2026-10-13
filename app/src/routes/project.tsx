@@ -16,6 +16,7 @@ import {
 import { Link, useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
 
+import { quietly } from "@/lib/report"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { prLabel, prLook } from "@/components/chat/pr-look"
 import { PrRow } from "@/components/chat/pr-pill"
@@ -130,7 +131,7 @@ export function ProjectPage({
         const found = all.find((p) => p.id === projectId)
         if (!cancelled && found) setFetched(found)
       })
-      .catch(() => {})
+      .catch(quietly("Reading projects"))
     return () => {
       cancelled = true
     }
