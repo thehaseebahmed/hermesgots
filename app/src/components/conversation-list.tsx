@@ -33,7 +33,7 @@ import type { BotSort, Message } from "@/lib/db"
 import { db } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useNav } from "@/lib/nav"
-import { useResearchEnabled } from "@/lib/research"
+import { useResearchEnabled } from "@/lib/research-flag"
 import { useSyncState } from "@/lib/sync"
 import {
   BOT_SORTS,

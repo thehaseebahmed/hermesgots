@@ -1406,7 +1406,7 @@ export async function answerClarify(
  * the run carried on without us. A streamed chat completion died with the tab, so it's stopped.
  */
 export async function recoverInterruptedMessages() {
-  const interrupted = await db.messages.filter((m) => m.status === "streaming").toArray()
+  const interrupted = await db.messages.where("status").equals("streaming").toArray()
   await Promise.all(
     interrupted.map((reply) =>
       reply.runId ? resumeReply(reply) : reattachRun(reply.conversationId),

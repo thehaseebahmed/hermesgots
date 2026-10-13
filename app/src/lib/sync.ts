@@ -452,15 +452,15 @@ async function mergePluginChats(profile: Profile) {
 }
 
 async function fingerprint() {
-  const [profiles, conversations, tombstones, settings] = await Promise.all([
+  const [profiles, count, newest, tombstones, settings] = await Promise.all([
     db.profiles.toArray(),
-    db.conversations.orderBy("id").toArray(),
+    db.conversations.count(),
+    db.conversations.orderBy("changedAt").last(),
     db.tombstones.count(),
     getSettings(),
   ])
   const bots = profiles.map((p) => `${p.id}@${p.updatedAt}`).join(",")
-  const chats = conversations.reduce((n, c) => Math.max(n, c.changedAt), 0)
-  return `${bots}|${conversations.length}@${chats}|${tombstones}|${settings.onboarded}`
+  return `${bots}|${count}@${newest?.changedAt ?? 0}|${tombstones}|${settings.onboarded}`
 }
 
 let running: Promise<void> | undefined
