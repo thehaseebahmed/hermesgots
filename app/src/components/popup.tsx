@@ -168,10 +168,14 @@ export function PopupContent({
               // A sheet opened on top of this one stacks on it: this one lifts so a peek shows above
               // the child, its content and handle fading out, and the child's own scrim dims this
               // sheet so the stack reads as layers. Base UI sets the nested count, both heights and
-              // the child's swipe progress on the popup, and the lift keeps the peek constant
-              // whatever either sheet's height is, unwinding with the child's swipe. The snap point
-              // offset joins the transform's other terms, holding the sheet down when collapsed.
-              "[transform:translateY(calc(var(--drawer-snap-point-offset)+var(--drawer-swipe-movement-y)-var(--stack-peek-offset)-var(--stack-lift)))] transition-[transform,height] duration-300 ease-[cubic-bezier(0.2,0,0,1)] [--peek:1.75rem] [--stack-front:var(--drawer-frontmost-height,0px)] [--stack-lift:calc(var(--stack-front)-var(--stack-own))] [--stack-own:var(--drawer-height,var(--drawer-frontmost-height,0px))] [--stack-peek-offset:max(0px,calc((var(--nested-drawers)-var(--stack-progress))*var(--peek)))] [--stack-progress:clamp(0,var(--drawer-swipe-progress),1)] data-ending-style:[transform:translateY(100%)] data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] data-nested-drawer-open:h-[var(--drawer-height)] data-nested-drawer-swiping:duration-0 data-starting-style:[transform:translateY(100%)] data-swiping:duration-0 data-swiping:select-none data-[expanded]:rounded-none motion-reduce:duration-0",
+              // the child's swipe progress on the popup. While a child is open the child's geometry,
+              // not this sheet's own snap offset, places this sheet: its top lands at the child's
+              // top, less a 28px peek when this sheet is collapsed. --stack-child-offset pays back
+              // the child's own collapsed offset (a child taller than 85dvh is held down that far),
+              // so the peek is measured from where the child actually sits; --stack-flush cancels
+              // the peek when this sheet is expanded, leaving it flush and hidden behind the child.
+              // The peek unwinds with the child's swipe.
+              "[transform:translateY(calc(var(--drawer-snap-point-offset)+var(--drawer-swipe-movement-y)+var(--stack-gate)*(var(--stack-own)-var(--stack-front)+var(--stack-child-offset)-var(--stack-peek-offset)+var(--stack-flush)-var(--drawer-snap-point-offset))))] transition-[transform,height] duration-300 ease-[cubic-bezier(0.2,0,0,1)] [--peek:1.75rem] [--stack-child-offset:calc(var(--stack-gate)*max(0px,calc(var(--stack-front)_-_85dvh)))] [--stack-flush:0px] [--stack-front:var(--drawer-frontmost-height,0px)] [--stack-gate:min(1,var(--nested-drawers))] [--stack-own:var(--drawer-height,var(--drawer-frontmost-height,0px))] [--stack-peek-offset:max(0px,calc((var(--nested-drawers)-var(--stack-progress))*var(--peek)))] [--stack-progress:clamp(0,var(--drawer-swipe-progress),1)] data-ending-style:[transform:translateY(100%)] data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] data-expanded:[--stack-flush:calc(var(--stack-gate)*var(--peek))] data-nested-drawer-open:h-[var(--drawer-height)] data-nested-drawer-swiping:duration-0 data-starting-style:[transform:translateY(100%)] data-swiping:duration-0 data-swiping:select-none data-[expanded]:rounded-none motion-reduce:duration-0",
               className,
             )}
           >
