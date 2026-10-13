@@ -55,8 +55,8 @@ function speech() {
 
 const clips = async () => (await (await fetch(`${mock}/__mock/dictation`)).json()).clips
 
-async function open(server, viewport, colorScheme = "light", on = browser) {
-  const context = await on.newContext({ viewport, colorScheme })
+async function open(server, viewport, colorScheme = "light", on = browser, touch = false) {
+  const context = await on.newContext({ viewport, colorScheme, hasTouch: touch, isMobile: touch })
   await context.grantPermissions(["microphone"], { origin: app })
   const page = await context.newPage()
   await page.goto(app)
@@ -79,7 +79,7 @@ try {
   ]) {
     const page = await open(mock, viewport, scheme)
     const composer = page.getByRole("textbox").last()
-    const mic = page.getByRole("button", { name: "Voice" })
+    const mic = page.getByRole("button", { name: "Voice", exact: true })
 
     // Tap to toggle: the bar records until Stop, then the host's text lands at the cursor.
     await composer.fill("Note:")
@@ -122,17 +122,17 @@ try {
   // A recording left by a reload comes back with Retry.
   {
     const page = await open(mock, { width: 390, height: 844 })
-    await page.getByRole("button", { name: "Voice" }).click()
+    await page.getByRole("button", { name: "Voice", exact: true }).click()
     await page.getByRole("button", { name: "Stop" }).waitFor()
     await page.waitForTimeout(3500)
     await page.reload()
     await page.getByText("hasn't been transcribed yet").waitFor()
     await shot(page, "phone-light-6-kept")
     await page.getByRole("button", { name: "Retry" }).click()
-    await page.getByRole("button", { name: "Voice" }).waitFor()
+    await page.getByRole("button", { name: "Voice", exact: true }).waitFor()
     assert.equal(await page.getByRole("textbox").last().inputValue(), SENTENCE)
     await page.reload()
-    await page.getByRole("button", { name: "Voice" }).waitFor()
+    await page.getByRole("button", { name: "Voice", exact: true }).waitFor()
     await page.close()
   }
 
@@ -144,26 +144,69 @@ try {
     })
     const page = await open(mock, { width: 390, height: 844 }, "light", talker)
     const before = (await clips()).length
-    await page.getByRole("button", { name: "Voice" }).click()
+    await page.getByRole("button", { name: "Voice", exact: true }).click()
     await page.getByRole("button", { name: "Stop" }).waitFor()
     await page.waitForTimeout(19_000)
     const sent = (await clips()).slice(before)
     assert.equal(sent.length, 2, "two pieces sent before Stop")
     assert.equal(sent[1].context, SENTENCE, "the second piece carries on from the first")
     await page.getByRole("button", { name: "Stop" }).click()
-    await page.getByRole("button", { name: "Voice" }).waitFor()
+    await page.getByRole("button", { name: "Voice", exact: true }).waitFor()
     const all = (await clips()).slice(before)
     assert.equal(all.length, 3)
     assert.equal(await page.getByRole("textbox").last().inputValue(), Array(3).fill(SENTENCE).join(" "))
     await talker.close()
   }
 
-  if (offMock) {
-    const page = await open(offMock, { width: 390, height: 844 })
-    await page.getByRole("textbox").last().waitFor()
+  // A tap on a phone keeps recording: its click must not land on the bar that took the mic's place.
+  {
+    const page = await open(mock, { width: 390, height: 844 }, "light", browser, true)
+    const mic = page.getByRole("button", { name: "Voice", exact: true })
+    const box = await mic.boundingBox()
+    await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2)
+    await page.getByRole("button", { name: "Stop" }).waitFor()
     await page.waitForTimeout(1500)
-    assert.equal(await page.getByRole("button", { name: "Voice" }).count(), 0, "no mic without faster-whisper")
-    await shot(page, "phone-light-4-no-mic")
+    assert.equal(await page.getByRole("button", { name: "Stop" }).count(), 1, "still recording")
+    await page.getByRole("button", { name: "Stop" }).tap()
+    await mic.waitFor()
+    assert.equal(await page.getByRole("textbox").last().inputValue(), SENTENCE)
+    await page.close()
+  }
+
+  // While the host is asked, the mic is greyed out and does nothing.
+  {
+    const page = await open(mock, { width: 390, height: 844 })
+    await page.route("**/api/plugins/memento/info", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 3000))
+      await route.continue().catch(() => {})
+    })
+    await page.reload()
+    const greyed = page.getByRole("button", { name: "Voice unavailable" })
+    await greyed.waitFor()
+    assert.ok(await greyed.isDisabled(), "greyed out while checking")
+    await shot(page, "phone-light-7-checking")
+    await page.getByRole("button", { name: "Voice", exact: true }).waitFor({ timeout: 10_000 })
+    await page.close()
+  }
+
+  // A host that can't check says why on a tap, and so does one that couldn't be asked.
+  for (const [label, server, words] of [
+    ["off", offMock, "faster-whisper isn't installed"],
+    ["failed", "http://localhost:9", "Couldn't check with Hermes"],
+  ]) {
+    if (!server) continue
+    const page = await open(server, { width: 390, height: 844 })
+    const greyed = page.getByRole("button", { name: "Voice unavailable" })
+    await greyed.waitFor()
+    await page.waitForFunction(
+      () => !document.querySelector('[aria-label="Voice unavailable"]')?.hasAttribute("disabled"),
+      undefined,
+      { timeout: 10_000 },
+    )
+    await greyed.click()
+    await page.getByText(words).waitFor()
+    await shot(page, `phone-light-8-${label}`)
+    assert.equal(await page.getByRole("button", { name: "Voice", exact: true }).count(), 0)
     await page.close()
   }
   console.log("dictation: ok")

@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState, type MouseEvent } from "react"
 import { ArrowUpIcon, RotateCwIcon, SquareIcon, XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import type { DictationStatus } from "@/lib/dictation"
+import { keyboardClick, type DictationStatus } from "@/lib/dictation"
 
 const IDLE_BARS = Array<number>(32).fill(0)
 
@@ -52,14 +52,23 @@ export function VoiceBar({
   }, [onCancel])
 
   const transcribing = status === "transcribing"
+  // The bar takes the mic's place under the finger, so the tap that started recording ends with a
+  // click on whatever button sits there now; only a press that began on the bar counts.
+  const pressed = useRef(false)
+  const pressedHere = (action: () => void) => (event: MouseEvent) => {
+    if (pressed.current || keyboardClick(event)) action()
+  }
 
   return (
-    <div className="flex items-center gap-2 rounded-[1.75rem] border border-input bg-background p-1.5 shadow-lg shadow-black/5 dark:bg-input/30">
+    <div
+      onPointerDownCapture={() => (pressed.current = true)}
+      className="flex items-center gap-2 rounded-[1.75rem] border border-input bg-background p-1.5 shadow-lg shadow-black/5 dark:bg-input/30"
+    >
       <Button
         type="button"
         variant="secondary"
         className="size-11 rounded-full"
-        onClick={onCancel}
+        onClick={pressedHere(onCancel)}
         aria-label={status === "failed" ? "Discard" : "Cancel"}
       >
         <XIcon />
@@ -73,7 +82,7 @@ export function VoiceBar({
           >
             {error ?? "Couldn't transcribe the recording."}
           </p>
-          <Button type="button" className="h-11 rounded-full px-4" onClick={onRetry}>
+          <Button type="button" className="h-11 rounded-full px-4" onClick={pressedHere(onRetry)}>
             <RotateCwIcon />
             Retry
           </Button>
@@ -101,7 +110,7 @@ export function VoiceBar({
             type="button"
             variant="secondary"
             className="size-11 rounded-full"
-            onClick={onStop}
+            onClick={pressedHere(onStop)}
             disabled={transcribing}
             aria-label="Stop"
           >
@@ -110,7 +119,7 @@ export function VoiceBar({
           <Button
             type="button"
             className="size-11 rounded-full"
-            onClick={onSend}
+            onClick={pressedHere(onSend)}
             disabled={transcribing}
             aria-label="Send"
           >

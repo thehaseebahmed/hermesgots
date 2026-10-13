@@ -22,6 +22,7 @@ import {
   InputGroupButton,
   InputGroupTextarea,
 } from "@/components/ui/input-group"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   formatBytes,
   inlineBytes,
@@ -32,7 +33,14 @@ import {
 import type { Attachment } from "@/lib/db"
 import { flushDrafts, loadDraft, saveDraft } from "@/lib/drafts"
 import type { HermesConfig } from "@/lib/hermes"
-import { canRecord, joinText, useDictation, useDictationInfo } from "@/lib/dictation"
+import {
+  canRecord,
+  joinText,
+  keyboardClick,
+  useDictation,
+  useDictationInfo,
+  type DictationAvailability,
+} from "@/lib/dictation"
 import {
   isSendMode,
   localCommand,
@@ -140,7 +148,7 @@ export function Composer({
   const listId = useId()
   const dictationInfo = useDictationInfo(connection)
   const dictation = useDictation(connection, joinText(botName, dictationHint ?? ""), draftKey)
-  const canDictate = Boolean(dictationInfo?.ready) && canRecord()
+  const canDictate = dictationInfo?.status === "ready" && canRecord()
   // Where the cursor was when dictation started, and whether the clip goes into the text or is sent.
   const dictationAt = useRef<number | null>(null)
   const dictationSends = useRef(false)
@@ -361,6 +369,9 @@ export function Composer({
 
   const controls = (
     <>
+      {dictationInfo && canRecord() && !disabled && !canDictate && (
+        <MicUnavailable availability={dictationInfo} />
+      )}
       {canDictate && !disabled && (
         <InputGroupButton
           type="button"
@@ -370,7 +381,7 @@ export function Composer({
           onPointerDown={pressMic}
           onClick={(event) => {
             // Keyboard presses have no pointer; a pointer press already started.
-            if (event.detail === 0) startDictation()
+            if (keyboardClick(event)) startDictation()
           }}
           onContextMenu={(event) => event.preventDefault()}
           aria-label="Voice"
@@ -485,5 +496,39 @@ export function Composer({
         </InputGroupAddon>
       </InputGroup>
     </form>
+  )
+}
+
+function MicUnavailable({
+  availability,
+}: {
+  availability: DictationAvailability & { recheck: () => void }
+}) {
+  const mic = (
+    <InputGroupButton
+      type="button"
+      variant="ghost"
+      size="icon-sm"
+      className="size-11 rounded-full text-muted-foreground opacity-50"
+      disabled={availability.status === "checking"}
+      aria-label="Voice unavailable"
+    >
+      <MicIcon />
+    </InputGroupButton>
+  )
+  if (availability.status === "checking") return mic
+  return (
+    <Popover
+      onOpenChange={(open) => {
+        if (open && availability.status === "failed") availability.recheck()
+      }}
+    >
+      <PopoverTrigger render={mic} />
+      <PopoverContent side="top" align="end">
+        {availability.status === "off"
+          ? availability.reason
+          : "Couldn't check with Hermes whether speech-to-text is on. Try again later."}
+      </PopoverContent>
+    </Popover>
   )
 }

@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type MouseEvent,
+} from "react"
 
 import { DICTATION_INFO_MS } from "@/lib/freshness"
 import { createSignal } from "@/lib/store"
@@ -18,10 +25,11 @@ import { usePoll } from "@/lib/poll"
  * through the Memento plugin (`plugin/dictation.py`). Hermes's local model doesn't stream, so the
  * recording is cut at the speaker's pauses and each piece is sent while they keep talking: on Stop
  * only the last piece is left to wait for. Until its text is in, a recording is kept on the device
- * (`db.dictations`, under the composer's draft key). A bot whose host can't is never offered a mic.
+ * (`db.dictations`, under the composer's draft key). The mic is greyed out until the host says it can.
  */
 
-const infos = new Map<string, { at: number; info: DictationInfo | null }>()
+// What each host last said about dictating; no `info` when it hasn't answered yet.
+const infos = new Map<string, { at: number; info?: DictationInfo }>()
 const { subscribe, notify } = createSignal()
 
 const infoKey = connectionKey
@@ -29,23 +37,48 @@ const infoKey = connectionKey
 async function readDictationInfo(config: HermesConfig, force = false) {
   const key = infoKey(config)
   const hit = infos.get(key)
-  if (!force && hit && Date.now() - hit.at < DICTATION_INFO_MS) return hit.info
-  const info = await getDictationInfo(config).catch(() => null)
-  infos.set(key, { at: Date.now(), info })
+  if (!force && hit && Date.now() - hit.at < DICTATION_INFO_MS) return
+  const info = await getDictationInfo(config).catch(() => undefined)
+  // A check that fails keeps the last answer, so the mic doesn't flicker on a bad connection.
+  const known = info ?? infos.get(key)?.info
+  infos.set(key, { at: Date.now(), info: known })
   notify()
-  return info
 }
 
-/** What the bot's host says about dictating, or null while it's asked (or unreachable). */
+export type DictationAvailability =
+  | { status: "checking" }
+  | { status: "ready" }
+  | { status: "off"; reason: string }
+  | { status: "failed" }
+
+const CHECKING: DictationAvailability = { status: "checking" }
+const READY: DictationAvailability = { status: "ready" }
+const FAILED: DictationAvailability = { status: "failed" }
+const offs = new Map<string, DictationAvailability>()
+
+function availability(key: string): DictationAvailability {
+  const hit = infos.get(key)
+  if (!hit) return CHECKING
+  if (!hit.info) return FAILED
+  if (hit.info.ready) return READY
+  const reason = hit.info.reason || "Dictation is off on this bot's host."
+  if (!offs.has(reason)) offs.set(reason, { status: "off", reason })
+  return offs.get(reason)!
+}
+
+/** Whether the bot's host can dictate, and a way to ask it again; null for a bot without a key. */
 export function useDictationInfo(config: HermesConfig) {
   const key = config.apiKey && config.baseUrl ? infoKey(config) : ""
-  const info = useSyncExternalStore(subscribe, () => infos.get(key)?.info ?? null)
+  const state = useSyncExternalStore(subscribe, () => availability(key))
   const { baseUrl, apiKey } = config
   usePoll(() => void readDictationInfo({ baseUrl, apiKey }), DICTATION_INFO_MS, [baseUrl, apiKey], {
     active: Boolean(key),
     onShow: false,
   })
-  return key ? info : null
+  const recheck = useCallback(() => {
+    if (key) void readDictationInfo({ baseUrl, apiKey }, true)
+  }, [key, baseUrl, apiKey])
+  return key ? { ...state, recheck } : null
 }
 
 /** The longest recording; at 24 kbps it stays far under the API server's 10 MB body limit. */
@@ -69,6 +102,11 @@ const QUIET_MIN = 0.012
 const QUIET_MAX = 0.05
 const SAVE_MS = 2000
 const RESTORED = "This recording hasn't been transcribed yet."
+
+/** A click from Enter or Space: no pointer made it (a touch's click can also have no detail). */
+export function keyboardClick(event: MouseEvent) {
+  return event.detail === 0 && !(event.nativeEvent as Partial<PointerEvent>).pointerType
+}
 
 export const canRecord = () =>
   typeof window !== "undefined" &&
