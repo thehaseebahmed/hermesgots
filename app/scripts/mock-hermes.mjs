@@ -309,9 +309,9 @@ const PENDING_CHECK_S = 12
 
 /** Project sessions as the plugin's memento.db holds them, by Hermes session id. */
 const projectSessions = new Map()
-// The plugin's pull request instruction (sessions.PR_INSTRUCTIONS), word for word.
+// The plugin's pull request instruction (prompt_builder._PR_INSTRUCTIONS), word for word.
 const PR_INSTRUCTIONS = "When the work is done and you've checked it, ship it yourself with the open_pull_request tool: it commits what's left, pushes this branch and opens a pull request, or updates the open one. Don't ask first, and don't use git push or gh for it. Write the description from the repo's pull request template when it has one (named below), else with Summary, Changes and How to test sections."
-// The plugin's done-work emphasis (sessions.DONE_INSTRUCTIONS), word for word.
+// The plugin's done-work emphasis (prompt_builder._DONE_INSTRUCTIONS), word for word.
 const DONE_INSTRUCTIONS = "Two things the run's prompt emphasises once the work is done: don't share the pull request url or the commit message in your reply — the open_pull_request result and the session's pull request list already surface them where the user sees them. And before you finish, update your todo list to its final state: every item completed, or cancelled where it was dropped."
 // Theseus runs in Auto with the skill's gates on top, and keeps its mode for the whole session.
 const MODES = ["accept_edits", "auto", "plan", "theseus"]
