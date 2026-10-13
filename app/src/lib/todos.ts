@@ -1,4 +1,5 @@
 import { db } from "@/lib/db"
+import { cooldown } from "@/lib/cooldown"
 import {
   getSessionTodos,
   hasPluginFeature,
@@ -9,8 +10,7 @@ import {
 import { TODO_TOOLS } from "@/lib/tools"
 
 /** Bots whose plugin has no todos route (an older plugin), and when they were last asked. */
-const unsupported = new Map<string, number>()
-const RETRY_MS = 5 * 60 * 1000
+const unsupported = cooldown(5 * 60 * 1000)
 /** How long a list from the live stream beats the plugin's, whose transcript may not have it yet. */
 const LIVE_MS = 10_000
 /**
@@ -57,7 +57,7 @@ export async function refreshTodos(conversationId: string) {
   if (!found) return
   const { conversation, profile } = found
   const key = `${profile.baseUrl}\n${profile.apiKey}`
-  if (Date.now() - (unsupported.get(key) ?? -Infinity) < RETRY_MS) return
+  if (unsupported.cooling(key)) return
   let todos
   try {
     todos = await getSessionTodos(profile, conversation.hermesSessionId)
@@ -69,10 +69,10 @@ export async function refreshTodos(conversationId: string) {
       (error.status === 404 || error.status === undefined) &&
       !(await hasPluginFeature({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }, "todos"))
     )
-      unsupported.set(key, Date.now())
+      unsupported.cool(key)
     return
   }
-  unsupported.delete(key)
+  unsupported.clear(key)
   await store(conversationId, todos, false)
 }
 
