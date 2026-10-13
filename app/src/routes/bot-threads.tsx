@@ -150,9 +150,10 @@ export function BotThreadsPage({
   const modelChoice = pendingModel?.profileId === profileId ? pendingModel.choice : undefined
 
   // Where a new chat goes, and where the app comes back to.
+  const found = Boolean(profile)
   useEffect(() => {
-    if (profile) void setActiveProfile(profile.id)
-  }, [profile])
+    if (found) void setActiveProfile(profileId)
+  }, [found, profileId])
 
   // An unknown or removed bot falls back to the active one.
   useEffect(() => {

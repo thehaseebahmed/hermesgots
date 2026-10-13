@@ -536,8 +536,14 @@ export async function getSettings(): Promise<Settings> {
 }
 
 export async function saveSettings(patch: Partial<Omit<Settings, "id">>) {
-  const current = await getSettings()
-  await db.settings.put({ ...current, ...patch, id: "settings" })
+  const stored = await db.settings.get("settings")
+  // Every screen reads settings live, so a write that changes nothing would wake them all.
+  const changed =
+    !stored ||
+    (Object.keys(patch) as (keyof typeof patch)[]).some(
+      (key) => JSON.stringify(stored[key]) !== JSON.stringify(patch[key]),
+    )
+  if (changed) await db.settings.put({ ...DEFAULT_SETTINGS, ...stored, ...patch, id: "settings" })
 }
 
 export async function listProfiles() {
