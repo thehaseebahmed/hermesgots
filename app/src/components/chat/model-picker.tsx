@@ -229,27 +229,20 @@ function ProviderModels({
     <>
       <PopupTitle className="sr-only">{provider.name}</PopupTitle>
       <div className="flex flex-col gap-5 px-6 pt-5 text-[15px]">
-        {provider.models.length > 8 && (
-          <div className="flex items-center gap-2">
-            <InputGroup className="h-11 min-w-0 flex-1">
-              <InputGroupAddon>
-                <SearchIcon />
-              </InputGroupAddon>
-              <InputGroupInput
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={`Search ${provider.name}`}
-                aria-label={`Search ${provider.name}`}
-              />
-            </InputGroup>
-            <SortMenu sort={sort} onSort={setSort} />
-          </div>
-        )}
-        {provider.models.length <= 8 && (
-          <div className="flex justify-end">
-            <SortMenu sort={sort} onSort={setSort} />
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          <InputGroup className="h-11 min-w-0 flex-1">
+            <InputGroupAddon>
+              <SearchIcon />
+            </InputGroupAddon>
+            <InputGroupInput
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={`Search ${provider.name}`}
+              aria-label={`Search ${provider.name}`}
+            />
+          </InputGroup>
+          <SortMenu sort={sort} onSort={setSort} />
+        </div>
         {models.length ? (
           <ModelList>
             {models.map((m) => (
