@@ -37,6 +37,8 @@ pnpm sync:theseus --ref <tag|sha> # vendor the Theseus skill into plugin/skills 
 
 Before you commit, run `pnpm lint`, `pnpm typecheck` and `pnpm build`. All three must pass.
 
+For a change to chats, sessions, polling or sync, also run the browser tests against the mock: `.agents/skills/e2e-testing/run.sh` from the repo root (see that skill for adding one).
+
 CI (`.github/workflows/tests.yml`) runs the plugin tests (`python3 -m unittest discover -s plugin/tests`, from the repo root) and the three app gates on every pull request and on pushes to `main`, so merged work stays green.
 
 ## Git commits
