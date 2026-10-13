@@ -59,7 +59,12 @@ import { ensureSessionWorkspace, refreshPrs, refreshWorkspace } from "@/lib/work
  * The UI renders straight from Dexie live queries, so it never holds stream state itself.
  */
 
-const FLUSH_INTERVAL_MS = 50
+/**
+ * How often streamed text is written to IndexedDB. Each write re-runs every live query over the
+ * chat, and `useReveal` paces the text on screen anyway, so a faster write buys nothing. A tool
+ * call, an approval, a question or a status change is written at once.
+ */
+const FLUSH_INTERVAL_MS = 150
 /**
  * How long one status or transcript read of a running turn may take. A connection can die without
  * the request ever failing (a phone that slept, a tunnel that dropped it), which would hold the
@@ -131,6 +136,22 @@ interface Turn {
 
 const turns = new Map<string, Turn>()
 
+/** What about a reply is worth writing at once, rather than with the next batch of text. */
+function shape(draft: Draft) {
+  const done = draft.tools.filter((t) => t.status !== "running").length
+  const { approval, clarify } = draft
+  return [
+    draft.status,
+    draft.statusText,
+    draft.tools.length,
+    done,
+    approval?.command,
+    approval?.resolved,
+    clarify?.clarifyId,
+    Boolean(clarify?.resolved),
+  ].join("|")
+}
+
 /** Mutable working copy of a reply, flushed to Dexie on a timer so token deltas don't hammer IndexedDB. */
 function openTurn(
   conversationId: string,
@@ -141,19 +162,34 @@ function openTurn(
 ): Turn {
   const draft: Draft = { ...reply, tools: [...(reply.tools ?? [])] }
   let dirty = false
-  const flush = async () => {
-    if (!dirty) return
-    dirty = false
-    const { id: _id, ...changes } = draft
-    await db.messages.update(reply.id, changes)
+  let closed = false
+  let timer: number | undefined
+  // One write at a time: a slow IndexedDB queues no backlog, and the next write takes the latest.
+  let writing: Promise<void> = Promise.resolve()
+  let flushed = shape(draft)
+  const flush = () => {
+    timer = undefined
+    writing = writing.then(async () => {
+      if (!dirty) return
+      dirty = false
+      flushed = shape(draft)
+      const { id: _id, ...changes } = draft
+      await db.messages.update(reply.id, changes)
+    })
+    return writing
   }
-  const timer = window.setInterval(flush, FLUSH_INTERVAL_MS)
   const touch = () => {
     dirty = true
+    if (closed) return
+    const urgent = shape(draft) !== flushed
+    if (urgent) window.clearTimeout(timer)
+    if (urgent || timer === undefined)
+      timer = window.setTimeout(flush, urgent ? 0 : FLUSH_INTERVAL_MS)
   }
   const controller = existingController ?? new AbortController()
   const close = async () => {
-    window.clearInterval(timer)
+    closed = true
+    window.clearTimeout(timer)
     controllers.delete(conversationId)
     turns.delete(conversationId)
     activeDrafts.delete(reply.id)
