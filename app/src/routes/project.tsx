@@ -44,6 +44,7 @@ import {
 import { formatRelative } from "@/lib/format"
 import { useDraft } from "@/lib/drafts"
 import { SAFETY_MS, useChanges, useLive } from "@/lib/live"
+import { usePoll } from "@/lib/poll"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { cn } from "@/lib/utils"
@@ -133,16 +134,11 @@ export function ProjectPage({
     }
   }, [profile, projectId, reads, projectChanges])
 
-  useEffect(() => {
-    if (!changing) return
-    const timer = window.setInterval(
-      () => {
-        if (document.visibilityState === "visible") setReads((n) => n + 1)
-      },
-      streaming ? SAFETY_MS : CHANGING_MS,
-    )
-    return () => window.clearInterval(timer)
-  }, [changing, streaming])
+  usePoll(() => setReads((n) => n + 1), streaming ? SAFETY_MS : CHANGING_MS, [], {
+    active: Boolean(changing),
+    immediate: false,
+    onShow: false,
+  })
 
   // Bots on one server share its projects, so their sessions all belong here.
   const listed = useLiveQuery(async () => {
@@ -198,22 +194,19 @@ export function ProjectPage({
     }
   }, [sessions])
   // The open session's chat pane polls its own PR; exclude it here to avoid duplicate reads.
-  // Keep the remaining ids as one stable string: depending on `sessions` recreates the interval on
-  // every Dexie write, before it has time to tick.
-  const runningChecks = (sessions ?? [])
-    .filter((c) => c.id !== openSession && prChecksPending(c.prs))
-    .map((c) => c.id)
-    .join("\n")
+  const runningChecks = (sessions ?? []).filter(
+    (c) => c.id !== openSession && prChecksPending(c.prs),
+  )
   // While any does, read its pull requests again every few seconds, so the rows here keep up with
   // the pill. Forced, so the freshness gate doesn't skip a tick that lands just inside its window.
-  useEffect(() => {
-    if (!runningChecks) return
-    const timer = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return
-      for (const id of runningChecks.split("\n")) void refreshPrs(id, { force: true })
-    }, PR_PENDING_MS)
-    return () => window.clearInterval(timer)
-  }, [runningChecks])
+  usePoll(
+    () => {
+      for (const c of runningChecks) void refreshPrs(c.id, { force: true })
+    },
+    PR_PENDING_MS,
+    [],
+    { active: runningChecks.length > 0, immediate: false, onShow: false },
+  )
 
   const prs = projectPrs(sessions ?? [])
   // The header names the repos, like the chips under it do: the one repo's name, or a count.

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useSyncExternalStore } from "react"
+import { createContext, useContext, useSyncExternalStore } from "react"
 
 import type { Conversation, Profile, ToolEvent } from "@/lib/db"
 import {
@@ -8,6 +8,7 @@ import {
   type HermesConfig,
 } from "@/lib/hermes"
 import { useChanges } from "@/lib/live"
+import { usePoll } from "@/lib/poll"
 
 /**
  * The agents a chat's agent delegated to with `delegate_task`. Hermes keeps each as a session of
@@ -57,28 +58,21 @@ export function useSessionAgents(
   const apiKey = profile?.apiKey
   const enabled = delegated && Boolean(sessionId && baseUrl && apiKey && !profile?.disabled)
   const working = delegating || Boolean(agents?.some((a) => a.status === "running"))
-  useEffect(() => {
-    if (!enabled || !sessionId || !baseUrl || !apiKey) return
-    let cancelled = false
-    const read = () => {
-      if (document.visibilityState !== "visible") return
+  usePoll(
+    (signal) => {
+      if (!sessionId || !baseUrl || !apiKey) return
       getSessionAgents({ baseUrl, apiKey }, sessionId)
         .then((next) => {
-          if (cancelled) return
+          if (signal.aborted) return
           lists.set(sessionId, next)
           notify()
         })
         .catch(() => undefined)
-    }
-    read()
-    const timer = working ? window.setInterval(read, POLL_MS) : undefined
-    document.addEventListener("visibilitychange", read)
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-      document.removeEventListener("visibilitychange", read)
-    }
-  }, [enabled, sessionId, baseUrl, apiKey, working, changes])
+    },
+    working ? POLL_MS : false,
+    [sessionId, baseUrl, apiKey, changes],
+    { active: enabled },
+  )
   return enabled ? agents : undefined
 }
 

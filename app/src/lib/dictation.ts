@@ -8,6 +8,7 @@ import {
   type DictationInfo,
   type HermesConfig,
 } from "@/lib/hermes"
+import { usePoll } from "@/lib/poll"
 
 /**
  * Dictation: the clip is recorded here and turned into text by the bot's own faster-whisper,
@@ -46,12 +47,10 @@ export function useDictationInfo(config: HermesConfig) {
   const key = config.apiKey && config.baseUrl ? infoKey(config) : ""
   const info = useSyncExternalStore(subscribe, () => infos.get(key)?.info ?? null)
   const { baseUrl, apiKey } = config
-  useEffect(() => {
-    if (!key) return
-    void readDictationInfo({ baseUrl, apiKey })
-    const timer = window.setInterval(() => void readDictationInfo({ baseUrl, apiKey }), INFO_MS)
-    return () => window.clearInterval(timer)
-  }, [key, baseUrl, apiKey])
+  usePoll(() => void readDictationInfo({ baseUrl, apiKey }), INFO_MS, [baseUrl, apiKey], {
+    active: Boolean(key),
+    onShow: false,
+  })
   return key ? info : null
 }
 

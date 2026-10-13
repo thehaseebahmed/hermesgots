@@ -94,6 +94,7 @@ import { describeActivity } from "@/lib/format"
 import { listProjects, supportsSteer, type HermesProject } from "@/lib/hermes"
 import { loadEarlierHistory, reconcileHistory } from "@/lib/history"
 import { SAFETY_MS, useLive, watchChat } from "@/lib/live"
+import { usePoll } from "@/lib/poll"
 import { useXLarge } from "@/lib/media"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { setBackGuard } from "@/lib/native"
@@ -374,23 +375,16 @@ export function ChatPage() {
   // A server that streams its changes says when this chat's session moves; the timer is a net.
   const streamOpen = useLive(profile)
   useEffect(() => (id ? watchChat(id) : undefined), [id])
-  useEffect(() => {
-    if (!id || !hasMessages) return
-    const catchUp = () => {
-      if (document.visibilityState !== "visible") return
+  usePoll(
+    () => {
+      if (!id) return
       reattachRun(id).catch(() => undefined)
       reconcileHistory(id).catch(() => undefined)
-    }
-    catchUp()
-    const timer = window.setInterval(catchUp, streamOpen ? SAFETY_MS : CATCH_UP_MS)
-    document.addEventListener("visibilitychange", catchUp)
-    window.addEventListener("online", catchUp)
-    return () => {
-      window.clearInterval(timer)
-      document.removeEventListener("visibilitychange", catchUp)
-      window.removeEventListener("online", catchUp)
-    }
-  }, [id, hasMessages, updatedAt, streamOpen])
+    },
+    streamOpen ? SAFETY_MS : CATCH_UP_MS,
+    [id, updatedAt],
+    { active: Boolean(id && hasMessages) },
+  )
 
   // A session not started yet names the repos it will work in; the project screen hands its project
   // over, and it's read again here regardless.

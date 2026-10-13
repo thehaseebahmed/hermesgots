@@ -21,6 +21,7 @@ import {
   type TheseusModels,
 } from "@/lib/hermes"
 import { useChanges } from "@/lib/live"
+import { usePoll } from "@/lib/poll"
 
 /**
  * Theseus: a session mode that runs the THA Theseus skill end to end in Auto. The work is split
@@ -473,28 +474,21 @@ export function useTheseusRun(
   const sessionId = session?.hermesSessionId
   const baseUrl = profile?.baseUrl
   const apiKey = profile?.apiKey
-  useEffect(() => {
-    if (!enabled || !id || !sessionId || !baseUrl || !apiKey) return
-    let cancelled = false
-    const read = () => {
-      if (document.visibilityState !== "visible") return
+  usePoll(
+    (signal) => {
+      if (!id || !sessionId || !baseUrl || !apiKey) return
       getTheseus({ baseUrl, apiKey }, sessionId)
         .then((next) => {
-          if (cancelled) return
+          if (signal.aborted) return
           raws.set(id, next)
           notify()
         })
         .catch(() => undefined)
-    }
-    read()
-    const timer = window.setInterval(read, POLL_MS)
-    document.addEventListener("visibilitychange", read)
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-      document.removeEventListener("visibilitychange", read)
-    }
-  }, [enabled, id, sessionId, baseUrl, apiKey, changes])
+    },
+    POLL_MS,
+    [id, sessionId, baseUrl, apiKey, changes],
+    { active: Boolean(enabled && id && sessionId && baseUrl && apiKey) },
+  )
   const actions = useMemo(
     () =>
       id && sessionId && baseUrl && apiKey

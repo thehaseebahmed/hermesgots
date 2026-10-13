@@ -36,6 +36,7 @@ import {
 } from "@/lib/cron"
 import { listEnabledProfiles, type Profile } from "@/lib/db"
 import { SAFETY_MS, useChanges, useLive } from "@/lib/live"
+import { usePoll } from "@/lib/poll"
 import { formatDuration, formatRelative } from "@/lib/format"
 import { describeSchedule } from "@/lib/schedule"
 import { HermesError, INSTALL_PLUGIN, controlCronJob, type CronJob } from "@/lib/hermes"
@@ -52,17 +53,9 @@ export function RoutinesPage() {
   const [collapsed, setOpen] = useCollapsedBots()
   const refresh = useCallback(() => setTick((n) => n + 1), [])
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      if (document.visibilityState === "visible") setPollTick((n) => n + 1)
-    }, REFRESH_MS)
-    const onVisible = () => document.visibilityState === "visible" && refresh()
-    document.addEventListener("visibilitychange", onVisible)
-    return () => {
-      clearInterval(timer)
-      document.removeEventListener("visibilitychange", onVisible)
-    }
-  }, [refresh])
+  usePoll(() => setPollTick((n) => n + 1), REFRESH_MS, [], { immediate: false, onShow: false })
+  // Coming back reads everything, not just what's due.
+  usePoll(refresh, false, [], { immediate: false })
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">

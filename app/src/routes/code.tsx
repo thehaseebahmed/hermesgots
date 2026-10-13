@@ -25,6 +25,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { listEnabledProfiles, type Profile } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { SAFETY_MS, useAllLive, useAnyChange } from "@/lib/live"
+import { usePoll } from "@/lib/poll"
 import {
   HermesError,
   deleteProject,
@@ -113,20 +114,7 @@ export function CodePage() {
   const streaming = useAllLive(profiles)
   const changes = useAnyChange("projects")
 
-  useEffect(() => {
-    const timer = setInterval(
-      () => {
-        if (document.visibilityState === "visible") refresh()
-      },
-      streaming ? SAFETY_MS : REFRESH_MS,
-    )
-    const onVisible = () => document.visibilityState === "visible" && refresh()
-    document.addEventListener("visibilitychange", onVisible)
-    return () => {
-      clearInterval(timer)
-      document.removeEventListener("visibilitychange", onVisible)
-    }
-  }, [refresh, streaming])
+  usePoll(refresh, streaming ? SAFETY_MS : REFRESH_MS, [], { immediate: false })
 
   const cloning = results?.some(
     (result) =>
@@ -137,13 +125,11 @@ export function CodePage() {
           p.folders.some((f) => f.status === "cloning" || f.status === "removing"),
       ),
   )
-  useEffect(() => {
-    if (!cloning || streaming) return
-    const timer = setInterval(() => {
-      if (document.visibilityState === "visible") setTick((n) => n + 1)
-    }, CLONING_REFRESH_MS)
-    return () => clearInterval(timer)
-  }, [cloning, streaming])
+  usePoll(() => setTick((n) => n + 1), CLONING_REFRESH_MS, [], {
+    active: Boolean(cloning && !streaming),
+    immediate: false,
+    onShow: false,
+  })
 
   // Sync rewrites profile rows often; only a change to what's fetched should fetch again.
   const targetsKey = JSON.stringify(
