@@ -66,18 +66,29 @@ export function useThreads(profileId: string | undefined): Thread[] | undefined 
       .filter((c) => !c.projectId)
       .limit(THREADS)
       .toArray()
-    const messages = await db.messages
-      .where("conversationId")
-      .anyOf(chats.map((c) => c.id))
-      .toArray()
-    return chats
-      .sort((a, b) => a.createdAt - b.createdAt)
-      .map((chat) => {
-        const own = messages
-          .filter((m) => m.conversationId === chat.id)
-          .sort((a, b) => a.createdAt - b.createdAt)
-        const replies = own.filter((m) => m.role === "assistant")
-        const latest = replies.at(-1)
+    // Each thread reads only what its card shows: its opener, its newest replies and how many.
+    const rows = await Promise.all(
+      chats.map(async (chat) => {
+        const range = db.messages
+          .where("[conversationId+createdAt]")
+          .between([chat.id, Dexie.minKey], [chat.id, Dexie.maxKey])
+        const [opener, latest, last, replies] = await Promise.all([
+          range
+            .clone()
+            .filter((m) => m.role === "user")
+            .first(),
+          range
+            .clone()
+            .reverse()
+            .filter((m) => m.role === "assistant")
+            .first(),
+          range
+            .clone()
+            .reverse()
+            .filter((m) => m.role === "assistant" && Boolean(m.content.trim()))
+            .first(),
+          db.messages.where("[conversationId+role]").equals([chat.id, "assistant"]).count(),
+        ])
         const local: WaitingReason | undefined =
           latest?.clarify && !latest.clarify.resolved
             ? { kind: "question", count: latest.clarify.questions.length || 1 }
@@ -86,14 +97,16 @@ export function useThreads(profileId: string | undefined): Thread[] | undefined 
               : undefined
         return {
           chat,
-          opener: line(own.find((m) => m.role === "user")?.content),
-          last: line(replies.findLast((m) => m.content.trim())?.content),
-          replies: replies.length,
+          opener: line(opener?.content),
+          last: line(last?.content),
+          replies,
           streaming: latest?.status === "streaming",
           failed: latest?.status === "error",
           local,
         }
-      })
+      }),
+    )
+    return rows.sort((a, b) => a.chat.createdAt - b.chat.createdAt)
   }, [profileId])
 
   return rows?.map(({ chat, opener, last, replies, streaming, failed, local }) => {

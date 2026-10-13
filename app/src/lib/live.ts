@@ -170,16 +170,10 @@ function botsOf(key: string) {
 
 async function chatsFor(key: string, sessionId: unknown) {
   if (typeof sessionId !== "string" || !sessionId) return []
-  const found = await Promise.all(
-    botsOf(key).map((bot) =>
-      db.conversations
-        .where("[profileId+updatedAt]")
-        .between([bot.id, -Infinity], [bot.id, Infinity])
-        .filter((c) => c.hermesSessionId === sessionId)
-        .toArray(),
-    ),
+  const bots = new Set(botsOf(key).map((bot) => bot.id))
+  return (await db.conversations.where("hermesSessionId").equals(sessionId).toArray()).filter((c) =>
+    bots.has(c.profileId),
   )
-  return found.flat()
 }
 
 /** After a gap in what this device heard: everything that may have changed meanwhile. */

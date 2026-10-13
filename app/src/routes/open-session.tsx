@@ -11,7 +11,8 @@ export function OpenSessionPage() {
   useEffect(() => {
     let cancelled = false
     void db.conversations
-      .filter((chat) => chat.hermesSessionId === sessionId)
+      .where("hermesSessionId")
+      .equals(sessionId ?? "")
       .first()
       .then((chat) => {
         if (!cancelled) navigate(chat ? `/c/${chat.id}` : "/", { replace: true })
