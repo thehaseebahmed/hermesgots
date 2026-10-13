@@ -17,7 +17,7 @@ class PluginImportTests(unittest.TestCase):
         "clones", "context", "delegation", "events", "github",
         "host_model", "link", "media", "merges", "outbox",
         "projects", "repos", "sessions", "push", "ship",
-        "stream", "theseus", "todos",
+        "stream", "theseus", "todos", "usage",
     ]
 
     def test_all_modules_import(self):

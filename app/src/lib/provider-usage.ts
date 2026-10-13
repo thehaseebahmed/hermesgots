@@ -1,13 +1,22 @@
+import { noteFailure } from "@/lib/report"
+import { connectionKey } from "@/lib/connection"
+import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { db, type Conversation, type Profile } from "@/lib/db"
-import { getProviderUsage, type HermesConfig, type ProviderUsage as ProviderUsageData } from "@/lib/hermes"
+import {
+  getProviderUsage,
+  type HermesConfig,
+  type ProviderUsage as ProviderUsageData,
+} from "@/lib/hermes"
 
-/** Bots whose plugin has no usage route (or an older plugin), and when they were last asked. */
-const unsupported = new Map<string, number>()
-const RETRY_MS = 5 * 60 * 1000
+/** Bots whose plugin has no usage route (an older plugin). */
+const unsupported = cooldown()
 /** Show the banner when this much or less of a window is left. */
 export const NOTICE_REMAINING_PERCENT = 20
 
-export function effectiveProvider(conversation: Conversation | undefined, profile: Profile | undefined) {
+export function effectiveProvider(
+  conversation: Conversation | undefined,
+  profile: Profile | undefined,
+) {
   if (conversation?.modelChoice?.provider) return conversation.modelChoice.provider
   if (profile?.modelChoice?.provider) return profile.modelChoice.provider
   return profile?.hostModel?.provider
@@ -21,8 +30,8 @@ export interface UsageWindowView {
   detail?: string
 }
 
-export function tightestWindow(usage: ProviderUsageData | undefined): UsageWindowView | undefined {
-  if (!usage?.windows.length) return undefined
+export function windowViews(usage: ProviderUsageData | undefined): UsageWindowView[] {
+  if (!usage?.windows.length) return []
   return usage.windows
     .map((w) => ({
       label: w.label,
@@ -31,7 +40,11 @@ export function tightestWindow(usage: ProviderUsageData | undefined): UsageWindo
       ...(w.resetsAt ? { resetsAt: w.resetsAt } : {}),
       ...(w.detail ? { detail: w.detail } : {}),
     }))
-    .sort((a, b) => a.remaining - b.remaining)[0]
+    .sort((a, b) => a.remaining - b.remaining)
+}
+
+export function tightestWindow(usage: ProviderUsageData | undefined) {
+  return windowViews(usage)[0]
 }
 
 export function limitNotice(usage: ProviderUsageData | undefined) {
@@ -44,14 +57,18 @@ export function limitNoticeKey(provider: string, window: UsageWindowView) {
   return `${provider}:${window.label}:${window.resetsAt ?? 0}`
 }
 
+/** Two answers are the same when their windows match by value, not by reference. */
+function sameWindows(a: ProviderUsageData | undefined, b: ProviderUsageData) {
+  if (!a || a.provider !== b.provider || a.windows.length !== b.windows.length) return false
+  const shape = (w: { label: string; usedPercent: number; resetsAt?: number }) =>
+    `${w.label}:${w.usedPercent}:${w.resetsAt ?? 0}`
+  return a.windows.every((w, i) => shape(w) === shape(b.windows[i]))
+}
+
 export function resetsInText(ms: number) {
-  const now = Date.now()
-  const seconds = Math.max(0, Math.round((ms - now) / 1000))
+  const seconds = Math.max(0, Math.round((ms - Date.now()) / 1000))
   if (seconds < 60) return `${seconds}s`
-  if (seconds < 3600) {
-    const m = Math.floor(seconds / 60)
-    return `${m}m`
-  }
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
   if (seconds < 86400) return m ? `${h}h ${m}m` : `${h}h`
@@ -74,27 +91,22 @@ export async function refreshProviderUsage(profileId: string, provider: string |
   if (!provider) return
   const profile = await db.profiles.get(profileId)
   if (!profile || !profile.apiKey || profile.disabled) return
-  const key = `${profile.baseUrl}\n${profile.apiKey}`
-  if (Date.now() - (unsupported.get(key) ?? -Infinity) < RETRY_MS) return
+  const key = connectionKey(profile)
+  if (unsupported.cooling(key)) return
   const config: HermesConfig = { baseUrl: profile.baseUrl, apiKey: profile.apiKey }
   let usage: ProviderUsageData | null
   try {
     usage = await getProviderUsage(config, provider)
-  } catch {
-    unsupported.set(key, Date.now())
+  } catch (error) {
+    noteFailure("Reading provider limits", error)
+    // A blip keeps the figure until the next read; a plugin without the route has none to give.
+    if (!(await lacksRoute(profile, error, "usage"))) return
+    unsupported.start(key)
     if (profile.providerUsage) await db.profiles.update(profileId, { providerUsage: undefined })
     return
   }
-  // A 404 (CORS-blocked) means the plugin isn't there; back off so the catch-up
-  // timer doesn't hammer it. getProviderUsage returns null on any failure, so we
-  // can't tell a missing plugin from "no windows" — treat null + no existing
-  // data as unsupported to avoid clearing good data on a transient empty result.
-  if (!usage) {
-    if (!profile.providerUsage) unsupported.set(key, Date.now())
-    return
-  }
-  unsupported.delete(key)
-  const current = profile.providerUsage
-  if (current && current.provider === usage.provider && current.windows === usage.windows) return
+  unsupported.clear(key)
+  if (!usage || sameWindows(profile.providerUsage, usage)) return
+  // Not through updateProfile: this is local, so it mustn't move the sync clock.
   await db.profiles.update(profileId, { providerUsage: usage })
 }

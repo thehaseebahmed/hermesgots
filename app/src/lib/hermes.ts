@@ -1125,46 +1125,46 @@ export interface ProviderUsage {
 
 /**
  * The provider's account-usage windows (plan quota), from the Memento plugin's
- * route that calls Hermes core's fetch_account_usage. Null when the plugin
- * isn't there or the provider has no live windows.
+ * route that calls Hermes core's fetch_account_usage. Null when the provider has
+ * no live windows; a failed read throws, so the caller can tell a missing plugin
+ * (an older one, no route) from a busy server.
  */
 export async function getProviderUsage(
   config: HermesConfig,
   provider: string,
 ): Promise<ProviderUsage | null> {
-  try {
-    const response = await request(
-      `${pluginRoot(config.baseUrl)}/usage?provider=${encodeURIComponent(provider)}`,
-      { headers: headers(config) },
-    )
-    const body = await response.json()
-    const rawWindows: unknown[] = Array.isArray(body?.windows) ? body.windows : []
-    const now = Date.now()
-    const windows: UsageWindow[] = []
-    for (const raw of rawWindows) {
-      if (!raw || typeof raw !== "object") continue
-      const r = raw as Record<string, unknown>
-      const pct = typeof r.used_percent === "number" && Number.isFinite(r.used_percent) ? r.used_percent : undefined
-      if (pct === undefined) continue
-      const resetIso = typeof r.resets_at === "string" && r.resets_at ? r.resets_at : undefined
-      const resetMs = resetIso ? Date.parse(resetIso) : NaN
-      if (resetIso && (!Number.isFinite(resetMs) || resetMs <= now)) continue
-      windows.push({
-        label: typeof r.label === "string" ? r.label : "",
-        usedPercent: Math.max(0, Math.min(100, pct)),
-        ...(Number.isFinite(resetMs) ? { resetsAt: resetMs } : {}),
-        ...(typeof r.detail === "string" && r.detail ? { detail: r.detail } : {}),
-      })
-    }
-    if (!windows.length) return null
-    return {
-      provider,
-      ...(typeof body?.plan === "string" && body.plan ? { plan: body.plan } : {}),
-      windows,
-      at: now,
-    }
-  } catch {
-    return null
+  const response = await request(
+    `${pluginRoot(config.baseUrl)}/usage?provider=${encodeURIComponent(provider)}`,
+    { headers: headers(config) },
+  )
+  const body = await response.json()
+  const rawWindows: unknown[] = Array.isArray(body?.windows) ? body.windows : []
+  const now = Date.now()
+  const windows: UsageWindow[] = []
+  for (const raw of rawWindows) {
+    if (!raw || typeof raw !== "object") continue
+    const r = raw as Record<string, unknown>
+    const pct =
+      typeof r.used_percent === "number" && Number.isFinite(r.used_percent)
+        ? r.used_percent
+        : undefined
+    if (pct === undefined) continue
+    const resetIso = typeof r.resets_at === "string" && r.resets_at ? r.resets_at : undefined
+    const resetMs = resetIso ? Date.parse(resetIso) : NaN
+    if (resetIso && (!Number.isFinite(resetMs) || resetMs <= now)) continue
+    windows.push({
+      label: typeof r.label === "string" ? r.label : "",
+      usedPercent: Math.max(0, Math.min(100, pct)),
+      ...(Number.isFinite(resetMs) ? { resetsAt: resetMs } : {}),
+      ...(typeof r.detail === "string" && r.detail ? { detail: r.detail } : {}),
+    })
+  }
+  if (!windows.length) return null
+  return {
+    provider,
+    ...(typeof body?.plan === "string" && body.plan ? { plan: body.plan } : {}),
+    windows,
+    at: now,
   }
 }
 

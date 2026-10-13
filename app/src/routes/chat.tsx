@@ -110,7 +110,6 @@ import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { setThreadMuted } from "@/lib/push"
-import { connectionKey } from "@/lib/connection"
 import { syncContextWindow } from "@/lib/models"
 import {
   effectiveProvider,
@@ -329,8 +328,7 @@ export function ChatPage() {
       : undefined
   const notice = limitNotice(providerUsage)
   const noticeDismissed =
-    Boolean(notice && provider) &&
-    profile?.limitDismissed === limitNoticeKey(provider!, notice!)
+    Boolean(notice && provider) && profile?.limitDismissed === limitNoticeKey(provider!, notice!)
 
   // Picks up a model changed on the server (only when the connection does, not on every write);
   // the ring follows via the live query.
@@ -341,13 +339,12 @@ export function ChatPage() {
   }, [profileId, baseUrl, apiKey])
 
   // The provider's limits are read once per connection and provider, then refreshed
-  // with every catch-up; the read itself is cached server-side by staleness.
-  const connection =
-    baseUrl === undefined ? "" : connectionKey({ baseUrl, apiKey: apiKey ?? "" })
+  // with every catch-up. usePoll covers a chat that already has turns; this covers
+  // the new chat, which has no session to catch up yet.
   useEffect(() => {
     if (!profileId) return
-    void refreshProviderUsage(profileId, provider).catch(() => undefined)
-  }, [profileId, connection, provider])
+    void refreshProviderUsage(profileId, provider).catch(quietly("Reading provider limits"))
+  }, [profileId, baseUrl, apiKey, provider])
 
   // The plugin holds a session's mode and pending plan; an empty session never catches up below.
   const sessionId = session?.id
@@ -414,7 +411,8 @@ export function ChatPage() {
       if (!id) return
       reattachRun(id).catch(quietly("Reattaching a run"))
       reconcileHistory(id).catch(quietly("Catching up a chat"))
-      if (profileId) void refreshProviderUsage(profileId, provider).catch(quietly("Reading provider limits"))
+      if (profileId)
+        void refreshProviderUsage(profileId, provider).catch(quietly("Reading provider limits"))
     },
     streamOpen ? SAFETY_MS : CATCH_UP_MS,
     [id, updatedAt, profileId, provider],
@@ -851,7 +849,12 @@ export function ChatPage() {
         )}
       </div>
 
-      <UsageSheet open={usageOpen} onOpenChange={setUsageOpen} usage={usage} providerUsage={providerUsage} />
+      <UsageSheet
+        open={usageOpen}
+        onOpenChange={setUsageOpen}
+        usage={usage}
+        providerUsage={providerUsage}
+      />
       <TodosSheet open={todosOpen} onOpenChange={setTodosOpen} items={todos} live={busy} />
       {theseus && (
         <Suspense fallback={null}>

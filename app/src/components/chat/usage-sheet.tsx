@@ -7,8 +7,10 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { formatTokens } from "@/lib/format"
 import { useModelsDevUnreachable } from "@/lib/models"
 import {
+  NOTICE_REMAINING_PERCENT,
   resetsAtText,
   resetsInText,
+  windowViews,
   type UsageWindowView,
 } from "@/lib/provider-usage"
 import type { ProviderUsage } from "@/lib/hermes"
@@ -74,7 +76,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function WindowRow({ window }: { window: UsageWindowView }) {
   const pct = window.usedPercent
-  const near = pct >= 80
+  const near = pct >= 100 - NOTICE_REMAINING_PERCENT
   return (
     <Meter.Root value={pct} className="flex flex-col gap-2.5">
       <div className="flex items-baseline justify-between gap-4">
@@ -91,9 +93,7 @@ function WindowRow({ window }: { window: UsageWindowView }) {
           Resets in {resetsInText(window.resetsAt)} ({resetsAtText(window.resetsAt)})
         </span>
       )}
-      {window.detail && (
-        <span className="text-sm text-muted-foreground">{window.detail}</span>
-      )}
+      {window.detail && <span className="text-sm text-muted-foreground">{window.detail}</span>}
     </Meter.Root>
   )
 }
@@ -110,24 +110,29 @@ export function LimitBanner({
 }) {
   const exhausted = notice.remaining <= 0
   return (
-    <Banner tone={exhausted ? "error" : "warning"} action={
-      <div className="flex items-center gap-1">
-        <Button variant="outline" size="sm" onClick={onView}>
-          View usage
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="size-8 shrink-0"
-          onClick={onDismiss}
-          aria-label="Dismiss"
-        >
-          <XIcon />
-        </Button>
-      </div>
-    }>
+    <Banner
+      tone={exhausted ? "error" : "warning"}
+      action={
+        <div className="flex items-center gap-1">
+          <Button variant="outline" size="sm" onClick={onView}>
+            View usage
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="size-8 shrink-0"
+            onClick={onDismiss}
+            aria-label="Dismiss"
+          >
+            <XIcon />
+          </Button>
+        </div>
+      }
+    >
       <div className="flex flex-col">
-        <span>{exhausted ? `${notice.label} limit reached` : `Approaching ${notice.label} limit`}</span>
+        <span>
+          {exhausted ? `${notice.label} limit reached` : `Approaching ${notice.label} limit`}
+        </span>
         {notice.resetsAt && (
           <span className="text-muted-foreground">Resets at {resetsAtText(notice.resetsAt)}</span>
         )}
@@ -149,15 +154,7 @@ export function UsageSheet({
 }) {
   const unreachable = useModelsDevUnreachable()
   const filled = fraction(usage)
-  const windows = providerUsage?.windows
-    .map((w) => ({
-      label: w.label,
-      usedPercent: w.usedPercent,
-      remaining: Math.max(0, Math.round(100 - w.usedPercent)),
-      ...(w.resetsAt ? { resetsAt: w.resetsAt } : {}),
-      ...(w.detail ? { detail: w.detail } : {}),
-    }))
-    .sort((a, b) => a.remaining - b.remaining) ?? []
+  const windows = windowViews(providerUsage)
 
   return (
     <Popup side open={open} onOpenChange={onOpenChange}>

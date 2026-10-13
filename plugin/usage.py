@@ -6,6 +6,7 @@ module wraps it so the plugin route stays thin: it calls the fetcher under the
 request's profile scope (credentials stay server-side), drops windows without a
 ``used_percent`` or whose ``reset_at`` has already passed, and serializes the
 rest for the app.
+
 """
 
 from __future__ import annotations
@@ -14,21 +15,9 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 
-def _parse_dt(value: Any) -> Optional[datetime]:
-    if value in {None, ""}:
-        return None
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    if isinstance(value, (int, float)):
-        return datetime.fromtimestamp(float(value), tz=timezone.utc)
-    if not isinstance(value, str) or not (text := value.strip()):
-        return None
-    text = text[:-1] + "+00:00" if text.endswith("Z") else text
-    try:
-        dt = datetime.fromisoformat(text)
-        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-    except ValueError:
-        return None
+def _utc(value: datetime) -> datetime:
+    """A naive stamp is UTC; core's fetchers always pass a datetime or None."""
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
 def serialize(snapshot: Any, now: Optional[datetime] = None) -> Optional[Dict[str, Any]]:
@@ -40,27 +29,25 @@ def serialize(snapshot: Any, now: Optional[datetime] = None) -> Optional[Dict[st
     """
     if snapshot is None:
         return None
-    now = now or datetime.now(timezone.utc)
+    now = _utc(now) if now else datetime.now(timezone.utc)
     windows: List[Dict[str, Any]] = []
-    for w in getattr(snapshot, "windows", ()) or ():
-        pct = getattr(w, "used_percent", None)
-        if pct is None or not isinstance(pct, (int, float)):
+    for w in snapshot.windows or ():
+        if w.used_percent is None:
             continue
-        reset_dt = _parse_dt(getattr(w, "reset_at", None))
-        if reset_dt is not None and reset_dt <= now:
+        reset = w.reset_at
+        if reset is not None and _utc(reset) <= now:
             continue
         windows.append(
             {
-                "label": getattr(w, "label", ""),
-                "used_percent": float(pct),
-                "resets_at": reset_dt.isoformat() if reset_dt else None,
-                "detail": getattr(w, "detail", None),
+                "label": w.label,
+                "used_percent": float(w.used_percent),
+                "resets_at": _utc(reset).isoformat() if reset is not None else None,
+                "detail": w.detail,
             }
         )
-    plan = getattr(snapshot, "plan", None)
     return {
-        "provider": getattr(snapshot, "provider", ""),
-        "plan": plan if isinstance(plan, str) and plan else None,
+        "provider": snapshot.provider,
+        "plan": snapshot.plan if isinstance(snapshot.plan, str) and snapshot.plan else None,
         "windows": windows,
     }
 
@@ -69,12 +56,14 @@ def fetch(provider: str) -> Optional[Dict[str, Any]]:
     """Call Hermes core's ``fetch_account_usage`` and serialize the result.
 
     ``read_only=True`` so a display read never refreshes or rotates a credential.
-    Any exception is treated as no data (the route answers an empty windows list).
+    Any exception — including a provider plugin that returns a shape core doesn't
+    promise — is treated as no data, so the route answers an empty windows list
+    rather than a 500.
     """
     try:
         from agent.account_usage import fetch_account_usage
 
         snapshot = fetch_account_usage(provider, read_only=True)
+        return serialize(snapshot)
     except Exception:
         return None
-    return serialize(snapshot)

@@ -5,21 +5,13 @@ Run: python3 -m unittest plugin.tests.test_usage -v
 
 from __future__ import annotations
 
-import importlib.util
 import unittest
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Optional
 from unittest import mock
 
-# Import usage.py directly, avoiding plugin/__init__.py's import chain
-# (which pulls in cryptography and other Hermes-host deps).
-_spec = importlib.util.spec_from_file_location(
-    "plugin_usage", Path(__file__).resolve().parent.parent / "usage.py"
-)
-usage = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(usage)
+from plugin import usage
 
 
 @dataclass(frozen=True)
@@ -28,14 +20,12 @@ class FakeWindow:
     used_percent: Optional[float] = None
     reset_at: Optional[datetime] = None
     detail: Optional[str] = None
-    scope: str = "account"
 
 
 @dataclass(frozen=True)
 class FakeSnapshot:
     provider: str
     source: str = "test"
-    fetched_at: datetime = None  # type: ignore
     plan: Optional[str] = None
     windows: tuple = ()
     details: tuple = ()
