@@ -5,7 +5,8 @@ const CACHE_KEY = "coding"
 // 4 hours: BenchLM's free plan is 1,000 reads/month, so a single shared fetch every 4
 // hours stays well under the limit regardless of how many devices open the picker.
 const MAX_AGE_MS = 4 * 60 * 60 * 1000
-// The API caps at 100 items per request; the coding surface has ~147, so two pages get all.
+// The API caps at 100 items per request; the coding surface has ~147, so the proxy
+// paginates dynamically until a page comes back short.
 const PAGE_SIZE = 100
 
 interface CachedRankings {
@@ -20,17 +21,21 @@ interface RankingsPayload {
 /** Fetches all pages of the coding rankings, merging the items into one payload. */
 async function fetchAllRankings(key: string): Promise<unknown> {
   const headers = { Authorization: `Bearer ${key}` }
-  const first = await fetch(`${BENCHLM_URL}&limit=${PAGE_SIZE}`, { headers })
-  if (!first.ok) throw new Error(`BenchLM responded ${first.status}`)
-  const data: RankingsPayload = await first.json()
-  if (!Array.isArray(data.items)) throw new Error("BenchLM returned an unexpected payload")
-  // If the first page is full, fetch the rest.
-  if (data.items.length === PAGE_SIZE) {
-    const second = await fetch(`${BENCHLM_URL}&limit=${PAGE_SIZE}&offset=${PAGE_SIZE}`, { headers })
-    if (second.ok) {
-      const more: RankingsPayload = await second.json()
-      if (Array.isArray(more.items)) data.items = [...data.items, ...more.items]
+  let offset = 0
+  let data: RankingsPayload | undefined
+  // Keep fetching until a page returns fewer than PAGE_SIZE items (or none at all).
+  for (;;) {
+    const response = await fetch(`${BENCHLM_URL}&limit=${PAGE_SIZE}&offset=${offset}`, { headers })
+    if (!response.ok) throw new Error(`BenchLM responded ${response.status}`)
+    const page: RankingsPayload = await response.json()
+    if (!Array.isArray(page.items)) throw new Error("BenchLM returned an unexpected payload")
+    if (!data) {
+      data = page
+    } else {
+      data.items = [...(data.items ?? []), ...page.items]
     }
+    if (page.items.length < PAGE_SIZE) break
+    offset += PAGE_SIZE
   }
   return data
 }
