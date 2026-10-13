@@ -141,8 +141,8 @@ export function ProjectPage({
   // after it.
   const listed = useLiveQuery(async () => {
     const local: Record<string, { any?: boolean; streaming?: boolean; waiting?: boolean }> = {}
-    if (!profile) return { rows: [] as Conversation[], local, now: Date.now() }
-    const server = serverKey(profile.baseUrl)
+    if (baseUrl === undefined) return { rows: [] as Conversation[], local, now: Date.now() }
+    const server = serverKey(baseUrl)
     const bots = new Set(
       (await db.profiles.toArray()).filter((p) => serverKey(p.baseUrl) === server).map((p) => p.id),
     )
@@ -168,7 +168,8 @@ export function ProjectPage({
       }),
     )
     return { rows, local, now: Date.now() }
-  }, [profile, projectId])
+    // The address, not the bot: its row changes far more often than which server it's on.
+  }, [baseUrl, projectId])
   const rows = listed?.rows
   const local = listed?.local
   const now = listed?.now ?? 0

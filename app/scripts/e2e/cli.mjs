@@ -46,6 +46,11 @@ const FLOWS = {
     mock: "legacy",
     about: "A message with a photo shows its reply's tool calls while it runs, from the transcript",
   },
+  "stream-writes": {
+    script: "e2e/stream-writes.mjs",
+    about:
+      "A streaming reply is written in batches: at most 6 writes a second on the mock (main wrote 7.5)",
+  },
   screens: {
     script: "e2e/screens.mjs",
     about: "Code, a project, Routines and a chat load at 390 and 1024px, light and dark",

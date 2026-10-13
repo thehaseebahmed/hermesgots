@@ -52,8 +52,7 @@ async function tracked(conversationId: string) {
 
 async function store(conversationId: string, workspace: SessionWorkspace | null) {
   if (!workspace) return
-  // Not through updateConversation: this is local, so it mustn't move the sync clock.
-  await db.conversations.update(conversationId, {
+  const next: Partial<Conversation> = {
     mode: workspace.mode,
     worktree: {
       branch: workspace.branch,
@@ -63,7 +62,15 @@ async function store(conversationId: string, workspace: SessionWorkspace | null)
     planPending: workspace.planPending,
     planFile: workspace.planFile ?? undefined,
     blocked: workspace.blocked ?? undefined,
-  })
+  }
+  // Read after every turn and catch-up; a write that changes nothing still wakes every query.
+  const current = await db.conversations.get(conversationId)
+  if (!current) return
+  const same = (Object.keys(next) as (keyof Conversation)[]).every(
+    (key) => JSON.stringify(current[key]) === JSON.stringify(next[key]),
+  )
+  // Not through updateConversation: this is local, so it mustn't move the sync clock.
+  if (!same) await db.conversations.update(conversationId, next)
 }
 
 /**

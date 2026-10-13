@@ -28,7 +28,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Separator } from "@/components/ui/separator"
-import type { BotSort } from "@/lib/db"
+import Dexie from "dexie"
+import type { BotSort, Message } from "@/lib/db"
 import { db } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useNav } from "@/lib/nav"
@@ -94,12 +95,21 @@ function Recents({ onNavigate }: { onNavigate?: () => void }) {
       .limit(RECENTS)
       .toArray()
     // This device's own unanswered approval or question, which a keyless bot or one without the
-    // plugin can't report.
-    const open = await db.messages
-      .where("conversationId")
-      .anyOf(chats.map((c) => c.id))
-      .filter((m) => !!(m.approval && !m.approval.resolved) || !!(m.clarify && !m.clarify.resolved))
-      .toArray()
+    // plugin can't report. Only a chat's newest reply can wait, so only that one is read.
+    const newest = await Promise.all(
+      chats.map((c) =>
+        db.messages
+          .where("[conversationId+createdAt]")
+          .between([c.id, Dexie.minKey], [c.id, Dexie.maxKey])
+          .reverse()
+          .filter((m) => m.role === "assistant")
+          .first(),
+      ),
+    )
+    const open = newest.filter(
+      (m): m is Message =>
+        !!(m?.approval && !m.approval.resolved) || !!(m?.clarify && !m.clarify.resolved),
+    )
     const local = new Map<string, WaitingReason>(
       open.map((m) => [
         m.conversationId,
