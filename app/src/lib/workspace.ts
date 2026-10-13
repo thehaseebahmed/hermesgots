@@ -230,6 +230,27 @@ export function sessionState(
   return "idle"
 }
 
+/** A pull request still open (a draft included) is a session waiting to be reviewed and merged. */
+export const hasOpenPr = (conversation: Pick<Conversation, "prs">) =>
+  (conversation.prs ?? []).some((pr) => pr.state === "open" || pr.state === "draft")
+
+/**
+ * Where a session stands as the project screen groups it: an idle session left with an open pull
+ * request waits to be reviewed and merged (`prTick`), unless its checks are still running, which is
+ * work it has left to do.
+ */
+export function sessionGroup(
+  conversation: Pick<Conversation, "resolvedAt" | "discardedAt" | "planPending" | "prs">,
+  live?: LiveRunStatus,
+  local?: { streaming?: boolean; waiting?: boolean },
+): { state: SessionState; prTick: boolean } {
+  const state = sessionState(conversation, live, local)
+  if (state !== "idle" || !hasOpenPr(conversation)) return { state, prTick: false }
+  return prChecksPending(conversation.prs)
+    ? { state: "working", prTick: false }
+    : { state: "waiting", prTick: true }
+}
+
 const PLAN_GO_AHEAD = "Go ahead with the plan"
 
 /** What approving a plan sends: the saved plan's checkpoints, each committed, or just a go-ahead. */

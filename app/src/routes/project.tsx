@@ -45,6 +45,7 @@ import { formatRelative } from "@/lib/format"
 import { useDraft } from "@/lib/drafts"
 import { SAFETY_MS, useChanges, useLive } from "@/lib/live"
 import { usePoll } from "@/lib/poll"
+import { waitsOnUser } from "@/lib/theseus"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { cn } from "@/lib/utils"
@@ -56,7 +57,7 @@ import {
   prChecksPending,
   refreshPrs,
   refreshWorkspace,
-  sessionState,
+  sessionGroup,
   type SessionState,
 } from "@/lib/workspace"
 
@@ -266,24 +267,20 @@ export function ProjectPage({
   }
 
   // A Theseus run sits in `theseus wait` (a running turn) while it waits on the user.
-  const theseusWaits = (c: Conversation) => waits[c.hermesSessionId]?.kind === "theseus"
-  // A session left with an open pull request is waiting to be reviewed and merged, not idle —
-  // unless its checks are still running, which is work it has left to do.
-  const groupState = (c: Conversation) => {
-    const state = sessionState(c, live[c.hermesSessionId], {
+  const theseusWaits = (c: Conversation) => {
+    const reason = waits[c.hermesSessionId]
+    return reason?.kind === "theseus" && waitsOnUser(reason)
+  }
+  const placed = (sessions ?? []).map((c) => ({
+    c,
+    ...sessionGroup(c, live[c.hermesSessionId], {
       ...local?.[c.id],
       waiting: local?.[c.id]?.waiting || theseusWaits(c),
-    })
-    if (state !== "idle" || !hasOpenPr(c)) return { state, prTick: false }
-    return prChecksPending(c.prs)
-      ? { state: "working" as const, prTick: false }
-      : { state: "waiting" as const, prTick: true }
-  }
+    }),
+  }))
   const grouped = GROUPS.map((group) => ({
     ...group,
-    sessions: (sessions ?? [])
-      .map((c) => ({ c, ...groupState(c) }))
-      .filter((s) => s.state === group.state),
+    sessions: placed.filter((s) => s.state === group.state),
   })).filter((group) => group.sessions.length > 0)
 
   return (
@@ -446,10 +443,6 @@ export function ProjectPage({
 }
 
 const names = new Intl.ListFormat(undefined, { type: "conjunction" })
-
-/** A pull request still open (a draft included) is a session waiting to be reviewed and merged. */
-const hasOpenPr = (c: Conversation) =>
-  (c.prs ?? []).some((pr) => pr.state === "open" || pr.state === "draft")
 
 /** In place of the New session button: why there's none right now. */
 function BottomNote({ icon, children }: { icon: ReactNode; children: ReactNode }) {
