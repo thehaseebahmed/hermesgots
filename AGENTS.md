@@ -27,6 +27,7 @@ pnpm install
 pnpm dev         # Vite dev server
 pnpm dev:netlify # Netlify CLI dev server (Identity + the sync function; needs a linked site)
 pnpm mock        # fake Hermes API on :8642 (say "clean up" to trigger an approval)
+pnpm e2e <flow>  # browser flows against the mock (list, all, shot <path>, up, down)
 pnpm lint        # oxlint
 pnpm typecheck   # tsc -b
 pnpm build       # typecheck + production build (also generates the service worker)
@@ -37,7 +38,7 @@ pnpm sync:theseus --ref <tag|sha> # vendor the Theseus skill into plugin/skills 
 
 Before you commit, run `pnpm lint`, `pnpm typecheck` and `pnpm build`. All three must pass.
 
-For a change to chats, sessions, polling or sync, also run the browser tests against the mock: `.agents/skills/e2e-testing/run.sh` from the repo root (see that skill for adding one).
+For a change to chats, sessions, polling or sync, also run the browser flows against the mock: `pnpm e2e <flow>` (or `pnpm e2e all`); `pnpm e2e list` names them and `pnpm e2e shot <path>` screenshots a screen. The e2e-testing skill (`.agents/skills/e2e-testing/`) says how to add a flow.
 
 CI (`.github/workflows/tests.yml`) runs the plugin tests (`python3 -m unittest discover -s plugin/tests`, from the repo root) and the three app gates on every pull request and on pushes to `main`, so merged work stays green.
 

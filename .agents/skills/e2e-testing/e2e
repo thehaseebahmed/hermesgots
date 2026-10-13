@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+# The e2e CLI from anywhere in the repo: .agents/skills/e2e-testing/e2e <flow|all|list|shot|up|down>
+exec node "$(dirname "$0")/../../../app/scripts/e2e/cli.mjs" "$@"
