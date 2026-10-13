@@ -594,12 +594,23 @@ export async function rememberModel(profileId: string, choice: ModelChoice) {
  * from another device, which needs no tombstone of its own.
  */
 export async function deleteProfile(id: string, { remote = false, last = false } = {}) {
-  const tables = [db.profiles, db.conversations, db.messages, db.tombstones]
+  const tables = [
+    db.profiles,
+    db.conversations,
+    db.messages,
+    db.tombstones,
+    db.drafts,
+    db.dictations,
+  ]
   return db.transaction("rw", tables, async () => {
     const alone = (await db.profiles.count()) <= 1
     if (alone && !last) return false
     const ids = await conversationsOf(id).primaryKeys()
     await db.messages.where("conversationId").anyOf(ids).delete()
+    // Unsent text and recordings, the chats' and the bot's new thread's.
+    const keys = [...ids.map((chat) => `c:${chat}`), `new:${id}`]
+    await db.drafts.bulkDelete(keys)
+    await db.dictations.bulkDelete(keys)
     await db.conversations.bulkDelete(ids)
     await db.profiles.delete(id)
     if (!remote) await db.tombstones.put({ id: `bot:${id}`, deletedAt: Date.now(), profileId: id })
