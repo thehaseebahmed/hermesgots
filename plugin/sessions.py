@@ -261,23 +261,36 @@ def blocked(hermes_home: Path, record: Optional[Dict[str, Any]]) -> Optional[str
     return _blocked(project, record)
 
 
-def _fetch_origin(repo_root: str) -> None:
+def _fetch_origin(repo_root: str, hermes_home: Path) -> None:
     """Best-effort fetch so a new worktree branches from the latest remote tip, not a stale
     local ref. _setup_worktree's own fetch has a short timeout and a freshness window that can
     skip it; this runs first with the plugin's longer timeout. Never raises — offline or auth
-    failures fall through to _setup_worktree's cached ref or the local-HEAD fallback."""
+    failures fall through to _setup_worktree's cached ref or the local-HEAD fallback.
+
+    The clone was made with a one-time token header (not saved in .git/config), so the token
+    is passed here the same way ``github.clone`` does — without it, private repos reject the
+    fetch and the worktree branches from a stale cached ``origin/main``."""
+    import base64
+
+    from . import github
+
+    args: list[str] = ["fetch", "origin", "--prune"]
+    auth, _ = github.token(hermes_home)
+    if auth:
+        basic = base64.b64encode(f"x-access-token:{auth}".encode()).decode()
+        args = ["-c", f"http.https://github.com/.extraheader=AUTHORIZATION: basic {basic}", *args]
     try:
-        result = _git(repo_root, "fetch", "origin", "--prune")
+        result = _git(repo_root, *args)
         if result.returncode != 0:
             logger.debug("memento: fetch origin in %s failed: %s", repo_root, result.stderr.strip())
     except WorkspaceError:
         logger.debug("memento: fetch origin in %s failed", repo_root, exc_info=True)
 
 
-def _create_worktree(repo_root: str, name: str) -> Dict[str, str]:
+def _create_worktree(repo_root: str, name: str, hermes_home: Path) -> Dict[str, str]:
     from hermes_cli.worktree_ops import _setup_worktree
 
-    _fetch_origin(repo_root)
+    _fetch_origin(repo_root, hermes_home)
     info = None
     try:
         info = _setup_worktree(repo_root=repo_root, sync_base=True, name=name)
@@ -393,7 +406,7 @@ def ensure(
         if kept and os.path.isdir(kept["path"] or ""):
             repos.append(kept)
             continue
-        tree = _create_worktree(root, name)
+        tree = _create_worktree(root, name, hermes_home)
         repos.append({"name": _repo_name(root), "repo_root": root, **tree})
     return _upsert(
         path,
