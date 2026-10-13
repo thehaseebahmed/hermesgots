@@ -22,6 +22,7 @@ import { BotPicker } from "@/components/chat/bot-picker"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
+import { prLabel } from "@/components/chat/pr-look"
 import { PrPill } from "@/components/chat/pr-pill"
 import { QuestionCard } from "@/components/chat/question-card"
 import {
@@ -88,7 +89,6 @@ import {
   getActiveProfile,
   getMessages,
   updateConversation,
-  type PullRequestRef,
 } from "@/lib/db"
 import { describeActivity } from "@/lib/format"
 import { listProjects, supportsSteer, type HermesProject } from "@/lib/hermes"
@@ -123,24 +123,6 @@ const CATCH_UP_MS = 30_000
 const HOST_QUEUE_POLL_MS = 3000
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
-
-/**
- * Compute the display label for a PR pill based on all PRs in the session.
- * Rules:
- * 1. Single PR, single repo → "PR #142"
- * 2. Multiple PRs from same repo → "repo #142"
- * 3. PRs from different repos, same owner → "repo #142"
- * 4. PRs from different owners → "owner/repo #142"
- */
-function computePrLabel(pr: PullRequestRef, allPrs: PullRequestRef[]) {
-  if (allPrs.length === 1) return `PR #${pr.number}`
-  const [owner] = pr.repo.split("/")
-  const sameOwner = allPrs.every((p) => p.repo.startsWith(`${owner}/`))
-  const uniqueRepos = new Set(allPrs.map((p) => p.repo))
-  if (uniqueRepos.size === 1) return `${pr.repo.split("/")[1]} #${pr.number}`
-  if (sameOwner) return `${pr.repo.split("/")[1]} #${pr.number}`
-  return `${pr.repo} #${pr.number}`
-}
 
 function EmptyState({
   name,
@@ -723,7 +705,7 @@ export function ChatPage() {
                 <PrPill
                   key={pr.repo + "#" + pr.number}
                   pr={pr}
-                  label={computePrLabel(pr, session.prs ?? [])}
+                  label={prLabel(pr, session.prs ?? [])}
                   className="shrink-0"
                 />
               ))}

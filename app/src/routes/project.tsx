@@ -16,7 +16,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
 
 import { ChatHeader } from "@/components/chat/chat-header"
-import { prLook } from "@/components/chat/pr-look"
+import { prLabel, prLook } from "@/components/chat/pr-look"
 import { PrRow } from "@/components/chat/pr-pill"
 import { ProjectSettings } from "@/components/project-settings"
 import {
@@ -58,24 +58,6 @@ import {
   sessionState,
   type SessionState,
 } from "@/lib/workspace"
-
-/**
- * Compute the display label for a PR based on all PRs in the session.
- * Rules:
- * 1. Single PR, single repo → "PR #142"
- * 2. Multiple PRs from same repo → "repo #142"
- * 3. PRs from different repos, same owner → "repo #142"
- * 4. PRs from different owners → "owner/repo #142"
- */
-function computePrLabel(pr: PullRequestRef, allPrs: PullRequestRef[]) {
-  if (allPrs.length === 1) return `PR #${pr.number}`
-  const [owner] = pr.repo.split("/")
-  const sameOwner = allPrs.every((p) => p.repo.startsWith(`${owner}/`))
-  const uniqueRepos = new Set(allPrs.map((p) => p.repo))
-  if (uniqueRepos.size === 1) return `${pr.repo.split("/")[1]} #${pr.number}`
-  if (sameOwner) return `${pr.repo.split("/")[1]} #${pr.number}`
-  return `${pr.repo} #${pr.number}`
-}
 
 /** While a repo is being added or removed: the plugin does the work, this watches for it to finish. */
 const CHANGING_MS = 3_000
@@ -496,7 +478,7 @@ function prLine(session: Conversation) {
   return prs
     .map((pr) => {
       const state = prLook(pr).label
-      return `${computePrLabel(pr, prs)} · ${state[0].toUpperCase() + state.slice(1)}`
+      return `${prLabel(pr, prs)} · ${state[0].toUpperCase() + state.slice(1)}`
     })
     .join(", ")
 }
