@@ -267,7 +267,7 @@ def origin_repo(repo_root: str) -> Optional[str]:
     return match.group(1) if match else None
 
 
-_pr_cache: Dict[Tuple[str, str], Tuple[float, List[Dict[str, Any]]]] = {}
+_pr_cache: Dict[Tuple[str, str, Optional[int]], Tuple[float, List[Dict[str, Any]]]] = {}
 
 
 FAILED_CONCLUSIONS = {"failure", "timed_out", "cancelled", "action_required", "startup_failure"}
@@ -339,12 +339,17 @@ def pull_requests(
     fresh: bool = False,
     checks: bool = True,
     strict: bool = False,
+    limit: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
-    """Every pull request from ``branch`` of the checkout's GitHub repo, newest first.
+    """The pull requests from ``branch`` of the checkout's GitHub repo, newest first.
 
     A branch keeps its pull requests on GitHub, the merged and closed ones included, so this is the
     session's whole history — what the app's outputs drawer lists. Only the live ones carry checks: a
     finished pull request's no longer matter, and each lookup is a request of its own.
+
+    ``limit`` asks GitHub for only the newest few, for the caller that wants one (``pull_request``).
+    The answer is cached under its own key, so a capped read can never serve the app's read of the
+    session's whole history.
 
     Cached for a short while per branch: the app asks after every turn and on every catch-up. A
     cached answer serves a call without ``checks`` too; one without them isn't cached.
@@ -354,7 +359,7 @@ def pull_requests(
     — never reads one as the other. Either way a failed lookup isn't cached: a failure isn't an
     answer.
     """
-    key = (repo_root, branch)
+    key = (repo_root, branch, limit)
     cached = _pr_cache.get(key)
     if not fresh and cached and time.time() - cached[0] < _cache_ttl(cached[1]):
         return cached[1]
@@ -365,18 +370,22 @@ def pull_requests(
         head = urllib.parse.quote(f"{repo.split('/')[0]}:{branch}", safe=":")
         auth, _ = token(hermes_home)
         try:
-            rows = _get(f"/repos/{repo}/pulls?head={head}&state=all&per_page={MAX_PRS}", auth)
+            rows = _get(
+                f"/repos/{repo}/pulls?head={head}&state=all&per_page={limit or MAX_PRS}", auth
+            )
         except GitHubError:
             if strict:
                 raise
             failed, rows = True, []
         if isinstance(rows, list):
+            rows = rows[:limit] if limit else rows
             value = [
                 pr
                 for pr in (_pr(repo, row, auth, checks and _live(row)) for row in rows)
                 if pr is not None
             ]
     if checks and not failed:
+        _prune_cache()
         _pr_cache[key] = (time.time(), value)
     return value
 
@@ -391,15 +400,26 @@ def pull_request(
 ) -> Optional[Dict[str, Any]]:
     """The newest pull request from ``branch`` of the checkout's GitHub repo, with its checks, or None.
 
-    The first of ``pull_requests``, cached and made strict by it: a branch's newest is the one its
-    session is working on, which is all a check on its state needs.
+    The one ``pull_requests`` is asked for, capped and cached on its own: a branch's newest is the one
+    its session is working on, which is all a check on its state needs.
     """
-    found = pull_requests(hermes_home, repo_root, branch, fresh=fresh, checks=checks, strict=strict)
+    found = pull_requests(
+        hermes_home, repo_root, branch, fresh=fresh, checks=checks, strict=strict, limit=1
+    )
     return found[0] if found else None
 
 
+def _prune_cache() -> None:
+    """Drops what's stale: a host keeps an entry per session it has ever opened a branch for."""
+    stale = time.time() - PR_CACHE_S * 4
+    for key in [key for key, (at, _) in _pr_cache.items() if at < stale]:
+        del _pr_cache[key]
+
+
 def forget_pull_request(repo_root: str, branch: str) -> None:
-    _pr_cache.pop((repo_root, branch), None)
+    """Forgets a branch's answers, the capped one ``pull_request`` keeps included."""
+    for key in [key for key in _pr_cache if key[:2] == (repo_root, branch)]:
+        del _pr_cache[key]
 
 
 def create_pull_request(
