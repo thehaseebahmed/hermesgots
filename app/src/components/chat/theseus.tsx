@@ -354,7 +354,7 @@ function ChangesPopup({
   const [sending, setSending] = useState(false)
   return (
     <Popup open={asking !== null} onOpenChange={(open) => !open && onClose()}>
-      <PopupContent className="sm:max-w-md">
+      <PopupContent size="md">
         <PopupHeader>
           <PopupTitle>{asking?.title}</PopupTitle>
         </PopupHeader>
@@ -481,7 +481,7 @@ export function TheseusSheet({
   const checkpoint = view?.kind === "checkpoint" && run.checkpoints.find((cp) => cp.id === view.id)
   return (
     <Popup side open={view !== null} onOpenChange={(open) => !open && onView(null)}>
-      <PopupContent className="sm:max-w-xl">
+      <PopupContent size="xl">
         {view?.kind === "plan" ? (
           <PlanView run={run} onBack={() => onView({ kind: "run" })} />
         ) : view?.kind === "setting" ? (

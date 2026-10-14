@@ -24,7 +24,8 @@ import { cn } from "@/lib/utils"
  *
  * A pop-up you read beside the chat rather than act in (`side`: tool details, an agent's transcript)
  * is a modal side sheet from 1280px instead, Material's place for supporting content: full height on
- * the right, swiped off to the right.
+ * the right, swiped off to the right, a third of the viewport wide — never narrower than the 412px
+ * list pane it sits beside, never wider than four thirds of it (549px).
  */
 export function Popup({ side, ...props }: ComponentProps<typeof Drawer.Root> & { side?: boolean }) {
   const sideSheet = useXLarge() && Boolean(side)
@@ -91,12 +92,29 @@ const CLOSE = (
   </Dialog.Close>
 )
 
+/**
+ * A pop-up's width: the dialog's max width, `lg` (the default) unless a wider or narrower one is
+ * asked for. A phone sheet is full width up to 640px whatever it is, and a side sheet takes its own
+ * width instead, so a size never caps it.
+ */
+export type PopupSize = "md" | "lg" | "xl" | "2xl"
+
+const SIZE: Record<PopupSize, string> = {
+  md: "sm:max-w-md",
+  lg: "",
+  xl: "sm:max-w-xl",
+  "2xl": "md:max-w-2xl",
+}
+
 export function PopupContent({
   className,
+  size = "lg",
   children,
   initialFocus,
 }: {
   className?: string
+  /** The dialog's max width; a side sheet is a third of the viewport whatever this is. */
+  size?: PopupSize
   children: ReactNode
   /** `false` focuses the pop-up itself, so a search field doesn't take focus (and the keyboard) on open. */
   initialFocus?: boolean
@@ -139,7 +157,7 @@ export function PopupContent({
               ref={popup}
               initialFocus={focus}
               className={cn(
-                "relative flex h-full w-[400px] max-w-[calc(100vw-3.5rem)] flex-col overflow-hidden rounded-l-2xl bg-popover pb-6 text-sm text-popover-foreground shadow-lg outline-none",
+                "relative flex h-full w-[clamp(calc(var(--spacing)*103),33.33vw,calc(var(--spacing)*103*4/3))] max-w-[calc(100vw-3.5rem)] flex-col overflow-hidden rounded-l-2xl bg-popover pb-6 text-sm text-popover-foreground shadow-lg outline-none",
                 "[transform:translateX(var(--drawer-swipe-movement-x))] transition-transform duration-300 ease-[cubic-bezier(0.2,0,0,1)] data-ending-style:[transform:translateX(100%)] data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] data-starting-style:[transform:translateX(100%)] data-swiping:duration-0 data-swiping:select-none motion-reduce:duration-0",
                 className,
               )}
@@ -173,6 +191,7 @@ export function PopupContent({
               initialFocus={focus}
               className={cn(
                 "group/popup relative flex max-h-[85dvh] w-full max-w-[640px] flex-col overflow-hidden rounded-t-[28px] bg-popover pb-[max(1.5rem,env(safe-area-inset-bottom))] text-sm text-popover-foreground shadow-lg outline-none",
+                SIZE[size],
                 // A sheet opened on top of this one stacks on it: this one lifts so a peek shows above
                 // the child, its content and handle fading out, and the child's own scrim dims this
                 // sheet so the stack reads as layers. Base UI sets the nested count, both heights and
@@ -207,6 +226,7 @@ export function PopupContent({
           initialFocus={focus}
           className={cn(
             "fixed top-1/2 left-1/2 z-50 flex max-h-[85dvh] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-3xl bg-popover pb-6 text-sm text-popover-foreground shadow-lg transition duration-150 outline-none data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0",
+            SIZE[size],
             className,
           )}
         >
