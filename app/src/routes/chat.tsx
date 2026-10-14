@@ -32,6 +32,7 @@ import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
 import { prLabel } from "@/components/chat/pr-look"
 import { PrPill } from "@/components/chat/pr-pill"
+import { LibraryPill } from "@/components/chat/library-pill"
 import { QuestionCard } from "@/components/chat/question-card"
 import {
   BlockedCard,
@@ -121,6 +122,7 @@ import {
   planApprovalMessage,
   projectRepos,
   prChecksPending,
+  refreshLibrary,
   refreshPrs,
   refreshWorkspace,
   closeSessionWork,
@@ -348,7 +350,10 @@ export function ChatPage() {
   // The plugin holds a session's mode and pending plan; an empty session never catches up below.
   const sessionId = session?.id
   useEffect(() => {
-    if (sessionId) void refreshWorkspace(sessionId)
+    if (sessionId) {
+      void refreshWorkspace(sessionId)
+      void refreshLibrary(sessionId)
+    }
   }, [sessionId])
 
   // A chat synced from another device arrives empty; its transcript is on Hermes.
@@ -712,7 +717,10 @@ export function ChatPage() {
       )}
 
       <div data-toast-above className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
-        {(todos.length > 0 || theseus || (session?.prs?.length ?? 0) > 0) && (
+        {(todos.length > 0 ||
+          theseus ||
+          (session?.prs?.length ?? 0) > 0 ||
+          (session?.library?.count ?? 0) > 0) && (
           // One line, centred; wider than the screen it scrolls, from the first pill.
           <div className="-mx-3 flex [scrollbar-width:none] overflow-x-auto px-3 pb-2 sm:-mx-4 sm:px-4 [&::-webkit-scrollbar]:hidden">
             <div className="mx-auto flex w-max max-w-none min-w-full shrink-0 justify-center gap-2">
@@ -724,6 +732,9 @@ export function ChatPage() {
                 todos.length > 0 && (
                   <TodosPill items={todos} live={busy} onClick={() => setTodosOpen(true)} />
                 )
+              )}
+              {(session?.library?.count ?? 0) > 0 && (
+                <LibraryPill count={session!.library!.count} className="shrink-0" />
               )}
               {session?.prs?.map((pr) => (
                 <PrPill

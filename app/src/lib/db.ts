@@ -148,6 +148,11 @@ export interface Conversation {
   blocked?: string
   /** The branch's pull request in each repo, and when they were last read. Local only. */
   prs?: PullRequestRef[]
+  /**
+   * The files the session filed in its library, and when they were last counted. Local only;
+   * every device reads them from the Memento plugin.
+   */
+  library?: { worktree: string; count: number; at: number }
 }
 
 /** How much a project session may do without asking. */
