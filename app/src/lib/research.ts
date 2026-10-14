@@ -9,11 +9,23 @@ import {
   type LucideIcon,
 } from "lucide-react"
 
-import { createStore } from "@/lib/store"
-import { randomId } from "@/lib/utils"
+import { useLiveQuery } from "dexie-react-hooks"
 
-// Research is a UI mock so far: missions live in memory and their progress is simulated. Nothing
-// reaches a bot yet.
+import { connectionKey } from "@/lib/connection"
+import { db, listEnabledProfiles, type Profile } from "@/lib/db"
+import { HOST_WORK_MS, LIST_MS, SAFETY_MS } from "@/lib/freshness"
+import {
+  createResearch,
+  getResearch,
+  hasPluginFeature,
+  listResearch,
+  researchAction,
+} from "@/lib/hermes"
+import { useAllLive, useAnyChange, useChanges, useLive } from "@/lib/live"
+import { usePoll } from "@/lib/poll"
+import { createStore } from "@/lib/store"
+
+// Missions live on each bot's Memento plugin (`research.py`), which runs them with the app closed.
 
 export type MissionType =
   "learn" | "compare" | "verify" | "literature" | "prepare" | "investigate" | "brainstorm"
@@ -122,8 +134,21 @@ export interface GlossaryTerm {
   cite: string
 }
 
+export interface Ledger {
+  sources: Source[]
+  claims: Claim[]
+}
+
+export interface Outputs {
+  guide?: Section[]
+  quiz?: QuizQuestion[]
+  glossary?: GlossaryTerm[]
+}
+
 export interface Mission {
   id: string
+  /** The bot whose plugin runs it. */
+  profileId: string
   type: MissionType
   /** What the user typed. */
   input: string
@@ -135,471 +160,264 @@ export interface Mission {
   outline: string[]
   sources: SourceKind[]
   stage: MissionStage
+  /** A model call the plugin is making: reading the question back, or proposing the outline. */
+  busy?: "brief" | "outline"
+  /** Why the current step failed; `retryMission` runs it again. */
+  error?: string
   createdAt: number
-  /** Sources read so far, of `found`. */
-  read: number
+  /** Sources the researcher took claims from, and the claims, so far. */
   found: number
-  /** Sections of the first format written so far. */
+  claimCount: number
+  /** Sections (or 1 for a quiz or glossary) of the first format written so far. */
   written: number
   /** Formats made from the ledger, in order, and the one being made. */
   formats: OutputFormat[]
   making?: OutputFormat
-  /** Advances on its own, for a mission started here. */
-  live?: boolean
+  /** Only once the mission itself has been read, not from the list. */
+  ledger?: Ledger
+  outputs?: Outputs
 }
 
-// The one mission's worth of content every mock mission shows.
+const pick = <T extends string>(value: unknown, options: readonly T[], fallback: T) =>
+  options.includes(value as T) ? (value as T) : fallback
+const text = (value: unknown) => (typeof value === "string" ? value : "")
+const list = (value: unknown) => (Array.isArray(value) ? value : [])
+const STAGES = ["brief", "scope", "reading", "drafting", "reviewing", "delivered"] as const
+const FORMAT_IDS = ["guide", "quiz", "glossary"] as const
+const KIND_IDS = ["papers", "docs", "articles", "videos", "forums"] as const
 
-export const SOURCES: Source[] = [
-  {
-    id: "s1",
-    title: "Attention Is All You Need",
-    url: "https://arxiv.org/abs/1706.03762",
-    kind: "papers",
-  },
-  {
-    id: "s2",
-    title: "The Illustrated Transformer",
-    url: "https://jalammar.github.io/illustrated-transformer/",
-    kind: "articles",
-  },
-  {
-    id: "s3",
-    title: "Layer Normalization",
-    url: "https://arxiv.org/abs/1607.06450",
-    kind: "papers",
-  },
-  {
-    id: "s4",
-    title: "Deep Residual Learning for Image Recognition",
-    url: "https://arxiv.org/abs/1512.03385",
-    kind: "papers",
-  },
-  {
-    id: "s5",
-    title: "BERT: Pre-training of Deep Bidirectional Transformers",
-    url: "https://arxiv.org/abs/1810.04805",
-    kind: "papers",
-  },
-]
-
-export const CLAIMS: Claim[] = [
-  {
-    id: "c1",
-    text: "The Transformer drops recurrence and convolutions and relies on attention alone.",
-    source: "s1",
-    snippet:
-      "We propose a new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely.",
-    confidence: "supported",
-  },
-  {
-    id: "c2",
-    text: "Each word is turned into a vector by an embedding before the first layer.",
-    source: "s2",
-    snippet:
-      "As is the case in NLP applications in general, we begin by turning each input word into a vector using an embedding algorithm.",
-    confidence: "supported",
-  },
-  {
-    id: "c3",
-    text: "Position is added to the embeddings, because nothing else tells the model the order.",
-    source: "s1",
-    snippet:
-      "Since our model contains no recurrence and no convolution, in order for the model to make use of the order of the sequence, we must inject some information about the relative or absolute position of the tokens in the sequence.",
-    confidence: "supported",
-  },
-  {
-    id: "c4",
-    text: "Attention scores are dot products of a query with every key, scaled by √dₖ and softmaxed.",
-    source: "s1",
-    snippet:
-      "We compute the dot products of the query with all keys, divide each by √dk, and apply a softmax function to obtain the weights on the values.",
-    confidence: "supported",
-  },
-  {
-    id: "c5",
-    text: "Several heads attend in parallel, each to a different representation subspace.",
-    source: "s1",
-    snippet:
-      "Multi-head attention allows the model to jointly attend to information from different representation subspaces at different positions.",
-    confidence: "supported",
-  },
-  {
-    id: "c6",
-    text: "Every sub-layer sits inside a residual connection followed by layer normalization.",
-    source: "s1",
-    snippet:
-      "We employ a residual connection around each of the two sub-layers, followed by layer normalization.",
-    confidence: "supported",
-  },
-  {
-    id: "c7",
-    text: "Residual connections make very deep networks easier to train.",
-    source: "s4",
-    snippet:
-      "We present a residual learning framework to ease the training of networks that are substantially deeper than those used previously.",
-    confidence: "supported",
-  },
-  {
-    id: "c8",
-    text: "Layer normalization normalizes over a layer's units, so it doesn't depend on the batch.",
-    source: "s3",
-    snippet:
-      "We transpose batch normalization into layer normalization by computing the mean and variance used for normalization from all of the summed inputs to the neurons in a layer on a single training case.",
-    confidence: "supported",
-  },
-  {
-    id: "c9",
-    text: "The decoder masks future positions, so a prediction only sees earlier outputs.",
-    source: "s1",
-    snippet:
-      "This masking, combined with fact that the output embeddings are offset by one position, ensures that the predictions for position i can depend only on the known outputs at positions less than i.",
-    confidence: "supported",
-  },
-  {
-    id: "c10",
-    text: "Encoder-only models like BERT read the whole sentence in both directions at once.",
-    source: "s5",
-    snippet:
-      "BERT is designed to pre-train deep bidirectional representations from unlabeled text by jointly conditioning on both left and right context in all layers.",
-    confidence: "supported",
-  },
-  {
-    id: "c11",
-    text: "The base model trained in 12 hours on eight P100 GPUs.",
-    source: "s1",
-    snippet: "We trained the base models for a total of 100,000 steps or 12 hours.",
-    confidence: "uncertain",
-  },
-]
-
-export const GUIDE: Section[] = [
-  {
-    title: "Why transformers exist",
-    paragraphs: [
-      [
-        {
-          text: "Before 2017, language models read a sentence one word at a time, carrying a memory forward. The Transformer threw that out: it looks at every word at once and lets each one decide which others matter.",
-          cites: ["c1"],
-        },
-        {
-          text: " That's why they took over almost every language task within a few years.",
-          flagged: true,
-        },
-      ],
-    ],
-  },
-  {
-    title: "From words to vectors",
-    paragraphs: [
-      [
-        {
-          text: "The model can't read text, so each word (strictly, each token) becomes a list of numbers, its embedding.",
-          cites: ["c2"],
-        },
-        {
-          text: " Because attention looks at all the words at once, the order would be lost, so a positional signal is added to every embedding.",
-          cites: ["c3"],
-        },
-      ],
-    ],
-  },
-  {
-    title: "Attention, step by step",
-    paragraphs: [
-      [
-        {
-          text: "Each word asks a question (its query) and offers a label (its key). Comparing one word's query with every key gives a score per word; scaled and passed through a softmax, the scores become weights for mixing the words' values.",
-          cites: ["c4"],
-        },
-      ],
-      [
-        {
-          text: "One set of weights can only capture one kind of relationship, so the model runs several attention heads side by side and joins their results.",
-          cites: ["c5"],
-        },
-      ],
-    ],
-  },
-  {
-    title: "Stacking layers",
-    paragraphs: [
-      [
-        {
-          text: "A layer is attention followed by a small feed-forward network. Each of the two is wrapped in a shortcut that adds its input back to its output, then normalized.",
-          cites: ["c6"],
-        },
-        {
-          text: " The shortcuts are what let dozens of layers train at all,",
-          cites: ["c7"],
-        },
-        {
-          text: " and normalizing per layer keeps the numbers in range without depending on the batch.",
-          cites: ["c8"],
-        },
-      ],
-    ],
-  },
-  {
-    title: "Encoders, decoders and what came next",
-    paragraphs: [
-      [
-        {
-          text: "The original model has an encoder that reads the input and a decoder that writes the output one token at a time, masked so it never peeks ahead.",
-          cites: ["c9"],
-        },
-        {
-          text: " Later models kept only one half: BERT is an encoder that reads in both directions,",
-          cites: ["c10"],
-        },
-        {
-          text: " while GPT-style models are decoders that predict the next word.",
-          flagged: true,
-        },
-      ],
-    ],
-  },
-]
-
-export const QUIZ: QuizQuestion[] = [
-  {
-    question: "What did the Transformer remove that earlier language models relied on?",
-    choices: ["Embeddings", "Recurrence", "Softmax", "Training data"],
-    answer: 1,
-    cite: "c1",
-  },
-  {
-    question: "Why is a positional signal added to each embedding?",
-    choices: [
-      "To make the vectors shorter",
-      "Attention alone doesn't know word order",
-      "To mark the end of a sentence",
-      "It speeds up training",
-    ],
-    answer: 1,
-    cite: "c3",
-  },
-  {
-    question: "What are attention scores divided by before the softmax?",
-    choices: ["The batch size", "The number of heads", "√dₖ", "The sentence length"],
-    answer: 2,
-    cite: "c4",
-  },
-  {
-    question: "Why does the decoder mask future positions?",
-    choices: [
-      "To save memory",
-      "So a prediction only sees earlier outputs",
-      "To handle long sentences",
-      "Because the encoder can't",
-    ],
-    answer: 1,
-    cite: "c9",
-  },
-]
-
-export const GLOSSARY: GlossaryTerm[] = [
-  {
-    term: "Attention",
-    definition: "Weighing every other word by how much it matters to this one.",
-    cite: "c4",
-  },
-  {
-    term: "Embedding",
-    definition: "The list of numbers a word becomes before the model reads it.",
-    cite: "c2",
-  },
-  {
-    term: "Head",
-    definition: "One of several attention calculations run side by side.",
-    cite: "c5",
-  },
-  {
-    term: "Layer normalization",
-    definition: "Rescaling a layer's outputs so they stay in a steady range.",
-    cite: "c8",
-  },
-  {
-    term: "Positional encoding",
-    definition: "The signal added to embeddings so the model knows word order.",
-    cite: "c3",
-  },
-  {
-    term: "Residual connection",
-    definition: "A shortcut that adds a sub-layer's input back to its output.",
-    cite: "c6",
-  },
-]
-
-const OUTLINE = [
-  "Why transformers replaced recurrent networks",
-  "Tokens, embeddings and positional encoding",
-  "Self-attention: queries, keys and values",
-  "Multi-head attention and feed-forward layers",
-  "Encoder, decoder and the models built on them",
-]
-
-const HOUR = 3_600_000
-const now = Date.now()
-
-const seed: Mission[] = [
-  {
-    id: "transformers",
+function toMission(raw: Record<string, unknown>, profileId: string): Mission {
+  const ledger = raw.ledger as Record<string, unknown> | undefined
+  const outputs = raw.outputs as Record<string, Record<string, unknown>> | undefined
+  return {
+    id: text(raw.id),
+    profileId,
     type: "learn",
-    input: "Explain how transformers work, starting from the basics",
-    title: "How transformers work",
-    goal: "Understand how a transformer turns text into predictions, from embeddings to attention to stacked layers.",
-    format: "guide",
-    audience: "A developer new to machine learning",
-    depth: "overview",
-    outline: OUTLINE,
-    sources: ["papers", "docs", "articles"],
-    stage: "delivered",
-    createdAt: now - 26 * HOUR,
-    read: 14,
-    found: 14,
-    written: GUIDE.length,
-    formats: ["guide", "quiz"],
-  },
-  {
-    id: "llm-attention",
-    type: "learn",
-    input: "Walk me through the transformer architecture for a product manager",
-    title: "Transformers for product managers",
-    goal: "Understand the transformer architecture well enough to talk about model choices, without the maths.",
-    format: "guide",
-    audience: "A product manager",
-    depth: "overview",
-    outline: OUTLINE,
-    sources: ["docs", "articles"],
-    stage: "drafting",
-    createdAt: now - 0.2 * HOUR,
-    read: 11,
-    found: 11,
-    written: 1,
-    formats: [],
-  },
-  {
-    id: "crdts",
-    type: "learn",
-    input: "How do CRDTs work and why do local-first apps use them?",
-    title: "CRDTs and local-first apps",
-    goal: "Understand what CRDTs are, how they merge edits without a server, and why local-first apps rely on them.",
-    format: "guide",
-    audience: "A web developer",
-    depth: "deep",
-    outline: [
-      "The problem: editing the same data on two offline devices",
-      "State-based and operation-based CRDTs",
-      "Common types: counters, registers, sets and sequences",
-      "How local-first apps like Automerge and Yjs use them",
-      "Costs: metadata growth and garbage collection",
-    ],
-    sources: ["papers", "docs", "articles"],
-    stage: "scope",
-    createdAt: now - 1.5 * HOUR,
-    read: 0,
-    found: 0,
-    written: 0,
-    formats: [],
-  },
-  {
-    id: "kidney",
-    type: "learn",
-    input: "what do kidneys actually do",
-    title: "What kidneys do",
-    goal: "Learn what the kidneys do in the body: filtering blood, balancing fluids and salts, and the hormones they make.",
-    format: "glossary",
-    audience: "Someone with no biology background",
-    depth: "overview",
-    outline: [],
-    sources: ["articles", "docs"],
-    stage: "brief",
-    createdAt: now - 3 * HOUR,
-    read: 0,
-    found: 0,
-    written: 0,
-    formats: [],
-  },
-  {
-    id: "byzantine",
-    type: "learn",
-    input: "Explain the Byzantine generals problem",
-    title: "The Byzantine generals problem",
-    goal: "Understand the Byzantine generals problem and how consensus protocols tolerate faulty nodes.",
-    format: "quiz",
-    audience: "A software engineer",
-    depth: "overview",
-    outline: [],
-    sources: ["papers", "articles"],
-    stage: "delivered",
-    createdAt: now - 5 * 24 * HOUR,
-    read: 9,
-    found: 9,
-    written: 4,
-    formats: ["quiz", "guide", "glossary"],
-  },
-]
-
-const missions = createStore(seed)
-
-export function useMissions() {
-  return missions.use()
-}
-
-export function useMission(id: string) {
-  return useMissions().find((m) => m.id === id)
-}
-
-export function updateMission(id: string, patch: Partial<Mission>) {
-  missions.set(missions.get().map((m) => (m.id === id ? { ...m, ...patch } : m)))
-}
-
-/** What the mock "infers" from a typed topic. */
-export function createMission(input: string): Mission {
-  const text = input.trim().replace(/[.?!]+$/, "")
-  const topic = text.replace(
-    /^(explain|teach me|tell me about|how does|how do|what is|what are)\s+/i,
-    "",
-  )
-  const mission: Mission = {
-    id: randomId(),
-    type: "learn",
-    input,
-    title: topic.charAt(0).toUpperCase() + topic.slice(1),
-    goal: `Understand ${topic}, starting from the basics and building up to how it's used in practice.`,
-    format: "guide",
-    audience: "A curious beginner",
-    depth: "overview",
-    outline: [],
-    sources: ["papers", "docs", "articles"],
-    stage: "brief",
-    createdAt: Date.now(),
-    read: 0,
-    found: 0,
-    written: 0,
-    formats: [],
+    input: text(raw.input),
+    title: text(raw.title),
+    goal: text(raw.goal),
+    format: pick(raw.format, FORMAT_IDS, "guide"),
+    audience: text(raw.audience),
+    depth: raw.depth === "deep" ? "deep" : "overview",
+    outline: list(raw.outline).filter((p): p is string => typeof p === "string"),
+    sources: list(raw.source_kinds).filter((k): k is SourceKind => KIND_IDS.includes(k)),
+    stage: pick(raw.stage, STAGES, "brief"),
+    busy: raw.busy === "brief" || raw.busy === "outline" ? raw.busy : undefined,
+    error: text(raw.error) || undefined,
+    createdAt: Number(raw.created_at) || Date.now(),
+    found: Number(raw.found) || 0,
+    claimCount: Number(raw.claims) || 0,
+    written: Number(raw.written) || 0,
+    formats: list(raw.formats).filter((f): f is OutputFormat => FORMAT_IDS.includes(f)),
+    making: FORMAT_IDS.find((f) => f === raw.making),
+    ledger: ledger && {
+      sources: list(ledger.sources) as Source[],
+      claims: list(ledger.claims) as Claim[],
+    },
+    outputs: outputs && {
+      guide: outputs.guide && (list(outputs.guide.sections) as Section[]),
+      quiz: outputs.quiz && (list(outputs.quiz.questions) as QuizQuestion[]),
+      glossary: outputs.glossary && (list(outputs.glossary.terms) as GlossaryTerm[]),
+    },
   }
-  missions.set([mission, ...missions.get()])
+}
+
+/** Whether the plugin is still doing the mission's current step, so the screen keeps reading it. */
+export const isWorking = (m: Mission) =>
+  !m.error &&
+  (Boolean(m.busy) || ["reading", "drafting", "reviewing"].includes(m.stage) || Boolean(m.making))
+
+/** Waits on the user: the brief, the Scope Gate, or a step that failed. */
+export const needsYou = (m: Mission) =>
+  Boolean(m.error) || ((m.stage === "brief" || m.stage === "scope") && !m.busy)
+
+interface State {
+  /** Each bot's missions, by profile id, as last listed. */
+  lists: Record<string, Mission[]>
+  /** Missions read in full. */
+  details: Record<string, Mission>
+  /** Bots whose plugin has no Research, or whose host can't run it, and why. */
+  unsupported: Record<string, string>
+  loaded: boolean
+}
+
+const store = createStore<State>({ lists: {}, details: {}, unsupported: {}, loaded: false })
+
+function put(mission: Mission) {
+  const state = store.get()
+  const own = state.lists[mission.profileId] ?? []
+  const listed = own.some((m) => m.id === mission.id)
+    ? own.map((m) =>
+        m.id === mission.id ? { ...mission, ledger: undefined, outputs: undefined } : m,
+      )
+    : [mission, ...own]
+  store.set({
+    ...state,
+    lists: { ...state.lists, [mission.profileId]: listed },
+    details: mission.ledger ? { ...state.details, [mission.id]: mission } : state.details,
+  })
+}
+
+/** Bots on the same server and profile share one list; the first bot keeps it. */
+async function targets() {
+  const seen = new Set<string>()
+  return (await listEnabledProfiles()).filter((profile) => {
+    const key = connectionKey(profile)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+let listing: Promise<void> | undefined
+
+/** Lists every bot's missions (or joins the read on its way). */
+export function refreshMissions() {
+  listing ??= (async () => {
+    const lists: Record<string, Mission[]> = {}
+    const unsupported: Record<string, string> = {}
+    const previous = store.get()
+    await Promise.all(
+      (await targets()).map(async (profile) => {
+        try {
+          if (!(await hasPluginFeature(profile, "research"))) {
+            unsupported[profile.id] = "Its Memento plugin needs an update for Research."
+            return
+          }
+          const found = await listResearch(profile)
+          if (found.unavailable) unsupported[profile.id] = found.unavailable
+          lists[profile.id] = found.missions.map((raw) => toMission(raw, profile.id))
+        } catch {
+          // An unreachable bot keeps what it showed.
+          if (previous.lists[profile.id]) lists[profile.id] = previous.lists[profile.id]
+        }
+      }),
+    )
+    store.set({ ...store.get(), lists, unsupported, loaded: true })
+  })().finally(() => (listing = undefined))
+  return listing
+}
+
+/** Every bot's missions, newest first, kept fresh while the screen is open. */
+export function useMissions() {
+  const state = store.use()
+  const profiles = useLiveQuery(listEnabledProfiles, [])
+  const missions = Object.values(state.lists)
+    .flat()
+    .sort((a, b) => b.createdAt - a.createdAt)
+  const working = missions.some(isWorking)
+  const live = useAllLive(profiles)
+  const changes = useAnyChange("research")
+  usePoll(
+    () => void refreshMissions(),
+    working && !live ? HOST_WORK_MS : live ? SAFETY_MS : LIST_MS,
+    [changes],
+  )
+  return { missions, loaded: state.loaded, unsupported: state.unsupported }
+}
+
+const profileOf = (id: string) =>
+  Object.values(store.get().lists)
+    .flat()
+    .find((m) => m.id === id)?.profileId ?? store.get().details[id]?.profileId
+
+async function configOf(profileId: string): Promise<Profile> {
+  const profile = await db.profiles.get(profileId)
+  if (!profile) throw new Error("The bot running this mission is gone.")
+  return profile
+}
+
+/** Reads one mission in full. */
+export async function refreshMission(id: string, signal?: AbortSignal) {
+  if (!profileOf(id)) await refreshMissions()
+  const profileId = profileOf(id)
+  if (!profileId) return
+  const raw = await getResearch(await configOf(profileId), id, signal)
+  if (raw) put(toMission(raw, profileId))
+}
+
+/** One mission in full (or as listed, until it's read), kept fresh while it's on screen. */
+export function useMission(id: string) {
+  const state = store.use()
+  const mission =
+    state.details[id] ??
+    Object.values(state.lists)
+      .flat()
+      .find((m) => m.id === id)
+  const profile = useLiveQuery(
+    () => (mission ? db.profiles.get(mission.profileId) : undefined),
+    [mission?.profileId],
+  )
+  const live = useLive(profile)
+  const changes = useChanges("research", profile)
+  const working = mission ? isWorking(mission) : false
+  usePoll(
+    (signal) => void refreshMission(id, signal).catch(() => undefined),
+    working && !live ? HOST_WORK_MS : live ? SAFETY_MS : LIST_MS,
+    [id, changes],
+  )
+  return { mission, loaded: state.loaded || Boolean(mission) }
+}
+
+async function act(
+  mission: Mission,
+  action: Parameters<typeof researchAction>[2],
+  body?: Record<string, unknown>,
+) {
+  const raw = await researchAction(await configOf(mission.profileId), mission.id, action, body)
+  if (raw) put(toMission(raw, mission.profileId))
+}
+
+/** Starts a mission on the bot; the plugin reads the question back as a brief. */
+export async function createMission(profile: Profile, input: string, type: MissionType) {
+  const raw = await createResearch(profile, input, type)
+  const mission = toMission(raw, profile.id)
+  put({ ...mission, ledger: mission.ledger ?? { sources: [], claims: [] } })
   return mission
 }
 
-/** The mock's proposed outline for a brief: the transformers one, or one shaped by the goal. */
-export function proposeOutline(mission: Mission) {
-  if (mission.outline.length) return mission.outline
-  if (/transformer/i.test(mission.input)) return OUTLINE
-  return [
-    `What ${mission.title.toLowerCase()} is, in plain words`,
-    "The key ideas, one at a time",
-    "How the pieces fit together",
-    "Common misconceptions",
-    "Where to go next",
-  ]
+export const confirmBrief = (
+  mission: Mission,
+  brief: Pick<Mission, "goal" | "format" | "audience" | "depth">,
+) => act(mission, "brief", brief)
+
+export const editBrief = (mission: Mission) => act(mission, "edit")
+
+/** The Scope Gate: nothing is researched until the outline and the kinds of source are approved. */
+export const approveScope = (mission: Mission, outline: string[], sources: SourceKind[]) =>
+  act(mission, "start", { outline, source_kinds: sources })
+
+/** Another format from the same ledger: no new reading, only writing. */
+export const makeFormat = (mission: Mission, format: OutputFormat) =>
+  act(mission, "formats", { format })
+
+export const retryMission = (mission: Mission) => act(mission, "retry")
+
+export async function deleteMission(mission: Mission) {
+  await researchAction(await configOf(mission.profileId), mission.id, "remove")
+  const state = store.get()
+  const details = { ...state.details }
+  delete details[mission.id]
+  store.set({
+    ...state,
+    details,
+    lists: {
+      ...state.lists,
+      [mission.profileId]: (state.lists[mission.profileId] ?? []).filter(
+        (m) => m.id !== mission.id,
+      ),
+    },
+  })
 }
 
-export const sourceOf = (claim: Claim) => SOURCES.find((s) => s.id === claim.source)!
-export const claimNumber = (id: string) => CLAIMS.findIndex((c) => c.id === id) + 1
-export const hostOf = (url: string) => new URL(url).hostname.replace(/^www\./, "")
+export const claimNumber = (id: string) => Number(id.replace(/^c/, "")) || 0
+export const hostOf = (url: string) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "")
+  } catch {
+    return url
+  }
+}
 
 export const RESEARCH_STAGES: { id: MissionStage; name: string }[] = [
   { id: "reading", name: "Reading sources" },
@@ -607,43 +425,49 @@ export const RESEARCH_STAGES: { id: MissionStage; name: string }[] = [
   { id: "reviewing", name: "Reviewing" },
 ]
 
-/** Plays live missions forward: reading sources, then a section at a time, then the review. */
-const STEP_MS = 1800
-let timer: number | undefined
+/** How many pieces the first format is written in: a section per outline point, else one. */
+export const pieces = (mission: Mission) =>
+  mission.format === "guide" ? Math.max(1, mission.outline.length) : 1
 
-function tick() {
-  const live = missions.get().filter((m) => m.live)
-  if (!live.length) {
-    window.clearInterval(timer)
-    timer = undefined
-    return
+/** A made format as Markdown, its claims numbered and listed with their sources at the end. */
+export function toMarkdown(mission: Mission, format: OutputFormat) {
+  const ledger = mission.ledger ?? { sources: [], claims: [] }
+  const used = new Set<string>()
+  const cite = (ids: string[] = []) => {
+    ids.forEach((id) => used.add(id))
+    return ids.map((id) => `[${claimNumber(id)}]`).join("")
   }
-  for (const m of live) {
-    if (m.making) {
-      updateMission(m.id, { formats: [...m.formats, m.making], making: undefined, live: false })
-    } else if (m.stage === "reading") {
-      const read = Math.min(m.found, m.read + 3)
-      updateMission(m.id, { read, stage: read === m.found ? "drafting" : "reading" })
-    } else if (m.stage === "drafting") {
-      const written = m.written + 1
-      updateMission(m.id, { written, stage: written >= GUIDE.length ? "reviewing" : "drafting" })
-    } else if (m.stage === "reviewing") {
-      updateMission(m.id, { stage: "delivered", formats: [m.format], live: false })
+  const out = [`# ${mission.title}`, ""]
+  const outputs = mission.outputs ?? {}
+  if (format === "guide") {
+    for (const section of outputs.guide ?? []) {
+      out.push(`## ${section.title}`, "")
+      for (const paragraph of section.paragraphs)
+        out.push(
+          paragraph.map((s) => `${s.text}${s.flagged ? " (no source)" : cite(s.cites)}`).join(""),
+          "",
+        )
+    }
+  } else if (format === "quiz") {
+    ;(outputs.quiz ?? []).forEach((q, index) => {
+      out.push(`${index + 1}. ${q.question}`)
+      q.choices.forEach((choice, c) => out.push(`   ${String.fromCharCode(65 + c)}. ${choice}`))
+      out.push(`   Answer: ${String.fromCharCode(65 + q.answer)} ${cite([q.cite])}`, "")
+    })
+  } else {
+    for (const term of outputs.glossary ?? [])
+      out.push(`**${term.term}**: ${term.definition} ${cite([term.cite])}`, "")
+  }
+  const sources = new Map(ledger.sources.map((s) => [s.id, s]))
+  const claims = ledger.claims.filter((c) => used.has(c.id))
+  if (claims.length) {
+    out.push("## Sources", "")
+    for (const claim of claims) {
+      const source = sources.get(claim.source)
+      out.push(
+        `[${claimNumber(claim.id)}] ${claim.text} ${source ? `[${source.title}](${source.url})` : ""}`,
+      )
     }
   }
-}
-
-const play = () => {
-  timer ??= window.setInterval(tick, STEP_MS)
-}
-
-export function startMission(id: string) {
-  updateMission(id, { stage: "reading", read: 0, found: 14, written: 0, live: true })
-  play()
-}
-
-/** Another format from the same ledger: no new reading, only writing. */
-export function makeFormat(id: string, format: OutputFormat) {
-  updateMission(id, { making: format, live: true })
-  play()
+  return out.join("\n").trim() + "\n"
 }

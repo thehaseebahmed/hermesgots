@@ -60,6 +60,8 @@
 // plugin/dictation.py with faster-whisper; MOCK_DICTATION=off reports it unavailable (the mic hides)
 // and MOCK_DICTATION=fail answers every clip with an error. GET /__mock/dictation lists the clips it
 // was sent (size, type, hint and the text before each), for the regression script.
+// Research missions (GET and POST /api/plugins/memento/research, …/research/{id} and its actions)
+// live in mock-research.mjs.
 //
 //   pnpm mock            # then point Settings at http://localhost:8642/v1
 
@@ -68,6 +70,8 @@ import { randomUUID } from "node:crypto"
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
+
+import { handleResearch } from "./mock-research.mjs"
 
 // Two real turns whose tool rows rendered in the wrong place (from session exports), replayed by
 // saying "tool placement plan" or "tool placement report".
@@ -306,6 +310,8 @@ function jobRecord(job) {
 }
 
 const PLUGIN = process.env.MOCK_NO_PLUGIN !== "1"
+// Research missions (mock-research.mjs); MOCK_RESEARCH=0 serves a plugin without them.
+const RESEARCH = process.env.MOCK_RESEARCH !== "0"
 
 /** How long a pull request's checks run after a turn says "pending", before they pass. */
 const PENDING_CHECK_S = 12
@@ -1289,17 +1295,20 @@ http
       return json(res, 200, {
         name: "memento",
         version: PLUGIN_VERSION,
-        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "theseus", ...(EVENTS ? ["events"] : []), "push", "host_model", "queue", "dictation"],
+        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "theseus", ...(EVENTS ? ["events"] : []), "push", "host_model", "queue", "dictation", ...(RESEARCH ? ["research"] : [])],
         clarify: true,
         hooks: true,
         theseus: THESEUS_START === "unavailable"
           ? { skill: "mock", api: 1, node: null, ready: false, reason: "Theseus needs Node 20 or newer on the Hermes host, and there is none.", reviewers: { llm: true, model: true, provider: true } }
           : { skill: "mock", api: 1, node: "22.0.0", ready: true, reason: null, reviewers: { llm: true, model: process.env.MOCK_THESEUS_MODELS !== "0", provider: process.env.MOCK_THESEUS_MODELS !== "0" } },
+        research: { ready: true, reason: null },
         dictation: DICTATION === "off"
           ? { ready: false, reason: "faster-whisper isn't installed on the host. Run `hermes tools` and pick Local Whisper.", model: "base" }
           : { ready: true, model: "base", language: "en" },
       })
     }
+    if (PLUGIN && RESEARCH && !profile && (await handleResearch(req, res, url.pathname, { json, readBody, noteEvent })))
+      return
     // Web Push: the mock keeps subscriptions but sends nothing.
     if (PLUGIN && !profile && req.method === "POST" && url.pathname === "/api/plugins/memento/push") {
       const { subscription, device, vapid_key, subject, categories } = await readBody(req)

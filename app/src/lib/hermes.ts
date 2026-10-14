@@ -683,6 +683,55 @@ export async function queueAction(
   return (await response.json()) as Record<string, unknown>
 }
 
+function researchRoot(config: HermesConfig, id?: string) {
+  const root = `${pluginRoot(config.baseUrl)}/research`
+  return id ? `${root}/${encodeURIComponent(id)}` : root
+}
+
+/** The bot's research missions on the plugin (`research.py`), as it sends them. */
+export async function listResearch(config: HermesConfig, signal?: AbortSignal) {
+  const response = await request(researchRoot(config), { headers: headers(config), signal })
+  const body = await response.json()
+  return {
+    missions: Array.isArray(body?.missions) ? (body.missions as Record<string, unknown>[]) : [],
+    unavailable: typeof body?.unavailable === "string" ? body.unavailable : null,
+  }
+}
+
+/** Starts a mission at its brief, which the plugin reads back from the question. */
+export async function createResearch(config: HermesConfig, input: string, type: string) {
+  const response = await request(researchRoot(config), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ input, type }),
+  })
+  return (await response.json())?.mission as Record<string, unknown>
+}
+
+/** A mission with its ledger and what was written from it. */
+export async function getResearch(config: HermesConfig, id: string, signal?: AbortSignal) {
+  const response = await request(researchRoot(config, id), { headers: headers(config), signal })
+  return (await response.json())?.mission as Record<string, unknown>
+}
+
+/**
+ * `brief` confirms the brief, `edit` goes back to it, `start` passes the Scope Gate, `formats`
+ * makes another format, `retry` runs a failed step again and `remove` deletes the mission.
+ */
+export async function researchAction(
+  config: HermesConfig,
+  id: string,
+  action: "brief" | "edit" | "start" | "formats" | "retry" | "remove",
+  body: Record<string, unknown> = {},
+) {
+  const response = await request(`${researchRoot(config, id)}/${action}`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify(body),
+  })
+  return (await response.json())?.mission as Record<string, unknown> | undefined
+}
+
 /** An image the agent named with a `MEDIA:<path>` tag, from the plugin's media route. */
 export async function getPluginMedia(config: HermesConfig, path: string): Promise<Blob> {
   const response = await request(

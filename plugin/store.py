@@ -3,14 +3,15 @@ project sessions (``sessions.py``),
 projects still cloning (``clones.py``), repos being added to or removed from a project (``repos.py``),
 pinned projects (``projects.py``), merged pull requests (``merges.py``) and recent changes for the
 app's live stream (``events.py``), devices' push subscriptions (``push.py``) and messages waiting
-for a session's run (``outbox.py``)."""
+for a session's run (``outbox.py``) and research missions with their evidence ledgers
+(``research.py``)."""
 
 from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -158,6 +159,64 @@ def connect(path: Path) -> sqlite3.Connection:
             """CREATE TABLE IF NOT EXISTS push_seen (
                    key TEXT PRIMARY KEY,
                    at INTEGER NOT NULL
+               )"""
+        )
+        # v16: research missions, the sources and claims their researcher recorded, and what was
+        # written from them.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS research_missions (
+                   id TEXT PRIMARY KEY,
+                   profile TEXT,
+                   type TEXT NOT NULL,
+                   input TEXT NOT NULL,
+                   title TEXT NOT NULL,
+                   goal TEXT NOT NULL,
+                   format TEXT NOT NULL,
+                   audience TEXT NOT NULL,
+                   depth TEXT NOT NULL,
+                   outline TEXT NOT NULL,
+                   source_kinds TEXT NOT NULL,
+                   stage TEXT NOT NULL,
+                   busy TEXT,
+                   error TEXT,
+                   run_id TEXT,
+                   formats TEXT NOT NULL,
+                   making TEXT,
+                   written INTEGER NOT NULL DEFAULT 0,
+                   created_at INTEGER NOT NULL,
+                   updated_at INTEGER NOT NULL
+               )"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS research_sources (
+                   mission_id TEXT NOT NULL,
+                   id TEXT NOT NULL,
+                   url TEXT NOT NULL,
+                   title TEXT NOT NULL,
+                   kind TEXT NOT NULL,
+                   at INTEGER NOT NULL,
+                   PRIMARY KEY (mission_id, id)
+               )"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS research_claims (
+                   mission_id TEXT NOT NULL,
+                   id TEXT NOT NULL,
+                   source_id TEXT NOT NULL,
+                   text TEXT NOT NULL,
+                   snippet TEXT NOT NULL,
+                   confidence TEXT NOT NULL,
+                   at INTEGER NOT NULL,
+                   PRIMARY KEY (mission_id, id)
+               )"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS research_outputs (
+                   mission_id TEXT NOT NULL,
+                   format TEXT NOT NULL,
+                   content TEXT NOT NULL,
+                   updated_at INTEGER NOT NULL,
+                   PRIMARY KEY (mission_id, format)
                )"""
         )
         # v4: a session has a worktree in every repo of its project. v5: its newest plan file. v10: its

@@ -60,6 +60,10 @@ const FLOWS = {
     script: "e2e/screens.mjs",
     about: "Code, a project, Routines and a chat load at 390 and 1024px, light and dark",
   },
+  research: {
+    script: "e2e/research.mjs",
+    about: "A research mission from question to guide, another format, and a citation's source",
+  },
   "clarify-polling": {
     script: "regression-clarify-polling.mjs",
     mock: "legacy",

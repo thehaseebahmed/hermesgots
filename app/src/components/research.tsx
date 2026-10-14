@@ -1,21 +1,27 @@
 import { useState } from "react"
-import { CheckIcon, CircleIcon, ExternalLinkIcon, FlagIcon, XIcon } from "lucide-react"
+import {
+  CheckIcon,
+  CircleIcon,
+  ExternalLinkIcon,
+  FlagIcon,
+  TriangleAlertIcon,
+  XIcon,
+} from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import {
-  CLAIMS,
-  GLOSSARY,
-  GUIDE,
-  QUIZ,
   RESEARCH_STAGES,
-  SOURCES,
   claimNumber,
   hostOf,
-  sourceOf,
+  pieces,
   type Claim,
+  type GlossaryTerm,
+  type Ledger,
   type Mission,
   type MissionStage,
+  type QuizQuestion,
+  type Source,
   type Span,
 } from "@/lib/research"
 import { cn } from "@/lib/utils"
@@ -75,8 +81,8 @@ function Bars({ lines = 3 }: { lines?: number }) {
 }
 
 /**
- * The guide, built a section at a time: written sections in full, the one being written cut off at
- * a caret, the rest as their outline point over placeholder lines.
+ * The guide, built a section at a time: written sections in full, the rest as their outline point
+ * over placeholder lines, the one being written pulsing.
  */
 export function GuideCanvas({
   mission,
@@ -85,44 +91,41 @@ export function GuideCanvas({
   mission: Mission
   onCite: (id: string) => void
 }) {
-  const done = mission.stage === "delivered" || mission.stage === "reviewing"
-  const written = done ? GUIDE.length : mission.stage === "drafting" ? mission.written : 0
-  const flagged = GUIDE.flatMap((s) => s.paragraphs.flat()).filter((s) => s.flagged).length
+  const sections = mission.outputs?.guide ?? []
+  const writing = mission.stage === "drafting" || mission.making === "guide"
+  const flagged = sections.flatMap((s) => s.paragraphs.flat()).filter((s) => s.flagged).length
+  const points = Math.max(mission.outline.length, sections.length)
 
   return (
     <article className="flex flex-col gap-7">
       {mission.stage === "delivered" && flagged > 0 && (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <FlagIcon className="size-4 text-warning" />
-          {CLAIMS.length} claims sourced, {flagged} sentences without a source
+          {mission.claimCount} claims sourced, {flagged} {flagged === 1 ? "sentence" : "sentences"}{" "}
+          without a source
         </p>
       )}
-      {GUIDE.map((section, index) => {
-        const writing = !done && index === written && mission.stage === "drafting"
-        const pending = index > written || (index === written && !writing)
+      {Array.from({ length: points }, (_, index) => {
+        const section = sections[index]
+        const now = !section && writing && index === sections.length
         return (
-          <section key={section.title} className="flex flex-col gap-3">
+          <section key={index} className="flex flex-col gap-3">
             <h2
               className={cn(
                 "text-lg font-semibold tracking-tight",
-                pending && "text-muted-foreground/60",
+                !section && "text-muted-foreground/60",
               )}
             >
-              {pending ? (mission.outline[index] ?? section.title) : section.title}
+              {section?.title ?? mission.outline[index]}
             </h2>
-            {pending ? (
-              <Bars />
-            ) : writing ? (
-              <p className="leading-7">
-                {section.paragraphs[0][0].text.slice(0, 120)}
-                <span className="ml-0.5 inline-block h-5 w-0.5 translate-y-1 animate-pulse bg-foreground motion-reduce:animate-none" />
-              </p>
-            ) : (
+            {section ? (
               section.paragraphs.map((spans, p) => (
                 <p key={p} className="leading-7">
                   <Spans spans={spans} onCite={onCite} />
                 </p>
               ))
+            ) : (
+              <Bars lines={now ? 4 : 3} />
             )}
           </section>
         )
@@ -131,17 +134,23 @@ export function GuideCanvas({
   )
 }
 
-export function QuizCanvas({ onCite }: { onCite: (id: string) => void }) {
+export function QuizCanvas({
+  questions,
+  onCite,
+}: {
+  questions: QuizQuestion[]
+  onCite: (id: string) => void
+}) {
   const [picked, setPicked] = useState<Record<number, number>>({})
   return (
     <ol className="flex flex-col gap-4">
-      {QUIZ.map((q, index) => {
+      {questions.map((q, index) => {
         const choice = picked[index]
         const answered = choice !== undefined
         return (
           <li key={q.question} className="rounded-3xl border bg-card p-4 md:p-5">
             <p className="text-xs font-medium text-muted-foreground">
-              Question {index + 1} of {QUIZ.length}
+              Question {index + 1} of {questions.length}
             </p>
             <p className="mt-1 font-medium">{q.question}</p>
             <div className="mt-3 flex flex-col gap-2">
@@ -187,10 +196,16 @@ export function QuizCanvas({ onCite }: { onCite: (id: string) => void }) {
   )
 }
 
-export function GlossaryCanvas({ onCite }: { onCite: (id: string) => void }) {
+export function GlossaryCanvas({
+  terms,
+  onCite,
+}: {
+  terms: GlossaryTerm[]
+  onCite: (id: string) => void
+}) {
   return (
     <dl className="flex flex-col divide-y">
-      {GLOSSARY.map((entry) => (
+      {terms.map((entry) => (
         <div key={entry.term} className="flex flex-col gap-1 py-3.5 first:pt-0">
           <dt className="font-semibold">{entry.term}</dt>
           <dd className="leading-7 text-muted-foreground">
@@ -220,8 +235,7 @@ export function MakingCanvas({ found }: { found: number }) {
   )
 }
 
-function ClaimCard({ claim, active }: { claim: Claim; active?: boolean }) {
-  const source = sourceOf(claim)
+function ClaimCard({ claim, source, active }: { claim: Claim; source?: Source; active?: boolean }) {
   return (
     <li
       id={`claim-${claim.id}`}
@@ -242,20 +256,22 @@ function ClaimCard({ claim, active }: { claim: Claim; active?: boolean }) {
           <blockquote className="border-l-2 pl-3 text-sm leading-6 text-muted-foreground">
             {claim.snippet}
           </blockquote>
-          <a
-            href={source.url}
-            target="_blank"
-            rel="noreferrer"
-            className="-mx-2 flex min-h-11 items-center gap-2 rounded-2xl px-2 text-sm hover:bg-muted"
-          >
-            <span className="min-w-0 flex-1">
-              <span className="block truncate font-medium">{source.title}</span>
-              <span className="block truncate text-xs text-muted-foreground">
-                {hostOf(source.url)}
+          {source && (
+            <a
+              href={source.url}
+              target="_blank"
+              rel="noreferrer"
+              className="-mx-2 flex min-h-11 items-center gap-2 rounded-2xl px-2 text-sm hover:bg-muted"
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium">{source.title}</span>
+                <span className="block truncate text-xs text-muted-foreground">
+                  {hostOf(source.url)}
+                </span>
               </span>
-            </span>
-            <ExternalLinkIcon className="size-4 shrink-0 text-muted-foreground" />
-          </a>
+              <ExternalLinkIcon className="size-4 shrink-0 text-muted-foreground" />
+            </a>
+          )}
         </div>
       </div>
     </li>
@@ -263,15 +279,22 @@ function ClaimCard({ claim, active }: { claim: Claim; active?: boolean }) {
 }
 
 /** The evidence ledger, read-only: every claim with its source and the passage behind it. */
-export function Evidence({ active }: { active?: string }) {
+export function Evidence({ ledger, active }: { ledger?: Ledger; active?: string }) {
+  const sources = new Map(ledger?.sources.map((source) => [source.id, source]))
+  const claims = ledger?.claims ?? []
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted-foreground">
-        {CLAIMS.length} claims from {SOURCES.length} sources
+        {claims.length} claims from {sources.size} sources
       </p>
       <ol className="flex flex-col gap-3">
-        {CLAIMS.map((claim) => (
-          <ClaimCard key={claim.id} claim={claim} active={claim.id === active} />
+        {claims.map((claim) => (
+          <ClaimCard
+            key={claim.id}
+            claim={claim}
+            source={sources.get(claim.source)}
+            active={claim.id === active}
+          />
         ))}
       </ol>
     </div>
@@ -281,10 +304,13 @@ export function Evidence({ active }: { active?: string }) {
 const order: MissionStage[] = ["reading", "drafting", "reviewing", "delivered"]
 
 function stageDetail(mission: Mission, stage: MissionStage) {
-  if (stage === "reading") return `${mission.read} of ${mission.found || "…"} sources`
-  if (stage === "drafting") return `${mission.written} of ${GUIDE.length} sections`
+  if (stage === "reading") return `${mission.found} sources · ${mission.claimCount} claims`
+  if (stage === "drafting")
+    return mission.format === "guide"
+      ? `${mission.written} of ${pieces(mission)} sections`
+      : `${mission.claimCount} claims`
   return mission.stage === "delivered"
-    ? `${CLAIMS.length} claims checked`
+    ? `${mission.claimCount} claims checked`
     : "Every claim to a source"
 }
 
@@ -316,6 +342,8 @@ export function StageList({ mission }: { mission: Mission }) {
             >
               {state === "done" ? (
                 <CheckIcon className="size-3.5" />
+              ) : state === "now" && mission.error ? (
+                <TriangleAlertIcon className="size-3.5 text-warning" />
               ) : state === "now" ? (
                 <Spinner className="size-3.5" />
               ) : (
@@ -343,7 +371,8 @@ export function StageList({ mission }: { mission: Mission }) {
 
 /** The sources read most recently, while reading. */
 export function NowReading({ mission }: { mission: Mission }) {
-  const recent = SOURCES.slice(0, Math.max(1, Math.min(3, Math.ceil(mission.read / 3))))
+  const recent = (mission.ledger?.sources ?? []).slice(-3).reverse()
+  if (!recent.length) return null
   return (
     <ul className="flex flex-col gap-1">
       {recent.map((source) => (
@@ -361,16 +390,21 @@ export function StageStrip({ mission }: { mission: Mission }) {
   const at = order.indexOf(mission.stage)
   const stage = RESEARCH_STAGES[at]
   if (!stage) return null
+  // Reading has no known end, so its third fills as claims come in, up to a typical ledger.
   const progress =
     mission.stage === "reading"
-      ? mission.read / (mission.found || 1) / 3
+      ? Math.min(1, mission.claimCount / (mission.outline.length * 4 || 1)) / 3
       : mission.stage === "drafting"
-        ? 1 / 3 + mission.written / GUIDE.length / 3
+        ? 1 / 3 + mission.written / pieces(mission) / 3
         : 0.9
   return (
     <div className="flex flex-col gap-2 rounded-3xl border bg-card px-4 py-3">
       <div className="flex items-center gap-2 text-sm">
-        <Spinner className="size-4 text-primary" />
+        {mission.error ? (
+          <TriangleAlertIcon className="size-4 text-warning" />
+        ) : (
+          <Spinner className="size-4 text-primary" />
+        )}
         <span className="font-medium">{stage.name}</span>
         <span className="text-muted-foreground">· {stageDetail(mission, stage.id)}</span>
         <span className="ml-auto text-xs text-muted-foreground tabular-nums">

@@ -29,7 +29,7 @@ const RETRY_MS = [1000, 2000, 5000, 10_000, 30_000]
 /** A `runs` event often comes with a status the server sets a moment later. */
 const RUNS_SETTLE_MS = 300
 
-export type Kind = "cron" | "runs" | "projects"
+export type Kind = "cron" | "runs" | "projects" | "research"
 type Connection = Pick<HermesConfig, "baseUrl" | "apiKey">
 
 export { connectionKey }
@@ -185,7 +185,7 @@ function catchUpAll(key: string) {
       if (chat && botsOf(key).some((bot) => bot.id === chat.profileId)) catchUpChat(id)
     })
   }
-  for (const kind of ["cron", "runs", "projects"] as const) bump(key, kind)
+  for (const kind of ["cron", "runs", "projects", "research"] as const) bump(key, kind)
 }
 
 async function applyTitle(key: string, sessionId: unknown) {
@@ -243,6 +243,7 @@ function onEvent(key: string, event: string, data: Record<string, unknown>) {
       break
     case "cron":
     case "projects":
+    case "research":
       bump(key, event)
       break
   }
