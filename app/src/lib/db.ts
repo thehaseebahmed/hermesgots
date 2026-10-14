@@ -33,8 +33,6 @@ export interface Settings {
   wrapToolOutput?: boolean
   /** Bots whose old Netlify chat list was moved onto their Memento plugin and deleted. */
   movedChats?: string[]
-  /** Saw the notice that bots added by hand need linking. */
-  linkNoticeSeen?: boolean
   /** This device's Web Push identity, local only: its id, its VAPID key pair and whether it's on. */
   push?: { device: string; vapidKey: string; vapidPublic: string; on: boolean }
   /** The Android app's push identity, local only: Firebase gives the token, this is its device id. */
