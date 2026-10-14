@@ -53,8 +53,8 @@ class PrCacheTests(unittest.TestCase):
             one.stop()
         github._pr_cache.clear()
 
-    def _answer(self, conclusion):
-        """``_get`` serving the pulls, check-runs and status calls; counts every read."""
+    def _serve(self, rows, conclusion="success"):
+        """``_get`` serving a branch's pulls, their check-runs and their status; counts every read."""
 
         def get(path, auth):
             self.reads += 1
@@ -70,19 +70,13 @@ class PrCacheTests(unittest.TestCase):
                 }
             if path.endswith("/status"):
                 return {"total_count": 0}
-            return [
-                {
-                    "number": 27,
-                    "title": "t",
-                    "html_url": "u",
-                    "state": "open",
-                    "draft": False,
-                    "merged_at": None,
-                    "head": {"sha": "abc"},
-                }
-            ]
+            return rows
 
         return patch.object(github, "_get", get)
+
+    def _answer(self, conclusion):
+        """``_get`` serving the one open pull request the cache tests read."""
+        return self._serve([pr_row(27)], conclusion)
 
     def _read(self, conclusion):
         with self._answer(conclusion):
@@ -99,22 +93,9 @@ class PrCacheTests(unittest.TestCase):
 
         return patch.object(github, "_get", get)
 
-    def _rows(self, rows):
-        """``_get`` serving a branch's pulls as GitHub answers them; counts every read."""
-
-        def get(path, auth):
-            self.reads += 1
-            if "/check-runs" in path:
-                return {"check_runs": [{"status": "completed", "conclusion": "success"}]}
-            if path.endswith("/status"):
-                return {"total_count": 0}
-            return rows
-
-        return patch.object(github, "_get", get)
-
     def test_a_branchs_pull_requests_all_come_back(self):
         rows = [pr_row(28), pr_row(27, state="closed", merged=True)]
-        with self._rows(rows):
+        with self._serve(rows):
             found = github.pull_requests(Path("/fake/home"), "/repo", "branch")
         self.assertEqual(
             [pr["number"] for pr in found], [28, 27], "every one of them, newest first"
@@ -123,20 +104,20 @@ class PrCacheTests(unittest.TestCase):
 
     def test_only_a_live_pull_request_has_its_checks_read(self):
         rows = [pr_row(28), pr_row(27, state="closed", merged=True)]
-        with self._rows(rows):
+        with self._serve(rows):
             found = github.pull_requests(Path("/fake/home"), "/repo", "branch")
         self.assertEqual(found[0]["checks"], "success", "the open one's checks are read")
         self.assertIsNone(found[1]["checks"], "a merged one's aren't: they don't matter any more")
 
     def test_the_newest_pull_request_is_the_one_a_caller_gets(self):
         rows = [pr_row(28), pr_row(27, state="closed", merged=True)]
-        with self._rows(rows):
+        with self._serve(rows):
             newest = github.pull_request(Path("/fake/home"), "/repo", "branch")
         assert newest is not None
         self.assertEqual(newest["number"], 28)
 
     def test_a_branch_with_no_pull_requests_answers_nothing(self):
-        with self._rows([]):
+        with self._serve([]):
             self.assertEqual(github.pull_requests(Path("/fake/home"), "/repo", "branch"), [])
             self.assertIsNone(github.pull_request(Path("/fake/home"), "/repo", "branch"))
 
