@@ -35,7 +35,6 @@ import {
   TelescopeIcon,
   TimerIcon,
   UserIcon,
-  XIcon,
   type LucideIcon,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -105,11 +104,6 @@ const SECTIONS: Record<string, { title: string; render: () => ReactNode }> = {
   notifications: { title: "Notification types", render: () => <NotificationTypes /> },
   data: { title: "Local data", render: () => <DataSettings /> },
   developer: { title: "Developer", render: () => <DeveloperSettings /> },
-}
-
-/** A bot added by hand before linking, as opposed to the untouched seed of a fresh install. */
-function handAdded(profile: Profile) {
-  return !profile.hostId && (Boolean(profile.apiKey) || profile.updatedAt !== profile.createdAt)
 }
 
 /** The title of an open section screen; a bot's screen is named after the bot. */
@@ -213,7 +207,6 @@ function MenuScreen({
   const linking = params.get("link") === "1"
   const setLinking = (open: boolean) =>
     setParams(open ? { link: "1" } : {}, { replace: true, state: { quiet: true } })
-  const unlinked = settings && !settings.linkNoticeSeen && profiles?.some(handAdded)
 
   return (
     <Screen
@@ -233,32 +226,11 @@ function MenuScreen({
     >
       <AccountRow />
       {registryError && <Banner tone="error">Couldn't refresh bots. {registryError}</Banner>}
-      {unlinked && (
-        <Banner
-          action={
-            <Button
-              variant="ghost"
-              size="icon-lg"
-              className="size-11"
-              aria-label="Dismiss"
-              onClick={() => void saveSettings({ linkNoticeSeen: true })}
-            >
-              <XIcon />
-            </Button>
-          }
-        >
-          Bots added by hand can't be added any more.{" "}
-          <button type="button" className="underline" onClick={() => setLinking(true)}>
-            Link them
-          </button>{" "}
-          to keep them up to date.
-        </Banner>
-      )}
       <Group>
         {profiles?.map((profile) => (
           <BotRow key={profile.id} profile={profile} />
         ))}
-        <AddBotRow onAdd={() => setLinking(true)} />
+        <LinkBotRow onLink={() => setLinking(true)} />
       </Group>
       <Group>
         <Row
@@ -307,11 +279,11 @@ function BotRow({ profile }: { profile: Profile }) {
 }
 
 /** The row that opens the link sheet, at the end of the bots. */
-function AddBotRow({ onAdd }: { onAdd: () => void }) {
+function LinkBotRow({ onLink }: { onLink: () => void }) {
   return (
-    <button type="button" onClick={onAdd} className={linkRowClass}>
+    <button type="button" onClick={onLink} className={linkRowClass}>
       <PlusIcon className="size-5 shrink-0 text-muted-foreground" />
-      <RowText title="Add bot" />
+      <RowText title="Link a bot" />
     </button>
   )
 }
