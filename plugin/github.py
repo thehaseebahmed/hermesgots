@@ -32,6 +32,8 @@ ORIGIN_RE = re.compile(r"github\.com[:/]([A-Za-z0-9-]+/[A-Za-z0-9._-]+?)(?:\.git
 PR_CACHE_S = 30
 # Checks still running are read again this often, so the app's pill is current while they do.
 PR_PENDING_CACHE_S = 10
+# A branch's pull requests, newest first as GitHub answers them; a session's history is short.
+MAX_PRS = 100
 
 
 def git_auth_args(auth: Optional[str]) -> list[str]:
@@ -265,7 +267,7 @@ def origin_repo(repo_root: str) -> Optional[str]:
     return match.group(1) if match else None
 
 
-_pr_cache: Dict[Tuple[str, str], Tuple[float, Optional[Dict[str, Any]]]] = {}
+_pr_cache: Dict[Tuple[str, str], Tuple[float, List[Dict[str, Any]]]] = {}
 
 
 FAILED_CONCLUSIONS = {"failure", "timed_out", "cancelled", "action_required", "startup_failure"}
@@ -320,9 +322,63 @@ def _pr(repo: str, row: Any, auth: Optional[str], checks: bool = True) -> Option
     }
 
 
-def _cache_ttl(value: Optional[Dict[str, Any]]) -> float:
-    """How long a cached answer is good for: shorter while its checks are still running."""
-    return PR_PENDING_CACHE_S if value and value.get("checks") == "pending" else PR_CACHE_S
+def _cache_ttl(value: List[Dict[str, Any]]) -> float:
+    """How long a cached answer is good for: shorter while any of its checks is still running."""
+    return PR_PENDING_CACHE_S if any(pr.get("checks") == "pending" for pr in value) else PR_CACHE_S
+
+
+def _live(row: Any) -> bool:
+    """Whether a pull request's checks are worth asking after: it's open, a draft included."""
+    return isinstance(row, dict) and row.get("state") == "open" and not row.get("merged_at")
+
+
+def pull_requests(
+    hermes_home: Path,
+    repo_root: str,
+    branch: str,
+    fresh: bool = False,
+    checks: bool = True,
+    strict: bool = False,
+) -> List[Dict[str, Any]]:
+    """Every pull request from ``branch`` of the checkout's GitHub repo, newest first.
+
+    A branch keeps its pull requests on GitHub, the merged and closed ones included, so this is the
+    session's whole history — what the app's outputs drawer lists. Only the live ones carry checks: a
+    finished pull request's no longer matter, and each lookup is a request of its own.
+
+    Cached for a short while per branch: the app asks after every turn and on every catch-up. A
+    cached answer serves a call without ``checks`` too; one without them isn't cached.
+
+    ``strict`` lets the GitHub failure out instead of answering an empty list, so a caller that must
+    tell "no pull requests" from "couldn't ask GitHub" — the app's read of a session's pull requests
+    — never reads one as the other. Either way a failed lookup isn't cached: a failure isn't an
+    answer.
+    """
+    key = (repo_root, branch)
+    cached = _pr_cache.get(key)
+    if not fresh and cached and time.time() - cached[0] < _cache_ttl(cached[1]):
+        return cached[1]
+    value: List[Dict[str, Any]] = []
+    failed = False
+    repo = origin_repo(repo_root)
+    if repo:
+        head = urllib.parse.quote(f"{repo.split('/')[0]}:{branch}", safe=":")
+        auth, _ = token(hermes_home)
+        try:
+            rows = _get(f"/repos/{repo}/pulls?head={head}&state=all&per_page={MAX_PRS}", auth)
+        except GitHubError:
+            if strict:
+                raise
+            failed, rows = True, []
+        if isinstance(rows, list):
+            value = [
+                pr
+                for pr in (_pr(repo, row, auth, checks and _live(row)) for row in rows)
+                if pr is not None
+            ]
+    if checks and not failed:
+        _pr_cache[key] = (time.time(), value)
+    return value
 
 
 def pull_request(
@@ -335,33 +391,11 @@ def pull_request(
 ) -> Optional[Dict[str, Any]]:
     """The newest pull request from ``branch`` of the checkout's GitHub repo, with its checks, or None.
 
-    Cached for a short while per branch: the app asks after every turn and on every catch-up. A
-    cached answer serves a call without ``checks`` too; one without them isn't cached.
-
-    ``strict`` lets the GitHub failure out instead of answering None, so a caller that must tell "no
-    pull request" from "couldn't ask GitHub" — the app's read of a session's pull requests — never
-    reads one as the other. Either way a failed lookup isn't cached: a failure isn't an answer.
+    The first of ``pull_requests``, cached and made strict by it: a branch's newest is the one its
+    session is working on, which is all a check on its state needs.
     """
-    key = (repo_root, branch)
-    cached = _pr_cache.get(key)
-    if not fresh and cached and time.time() - cached[0] < _cache_ttl(cached[1]):
-        return cached[1]
-    value = None
-    failed = False
-    repo = origin_repo(repo_root)
-    if repo:
-        head = urllib.parse.quote(f"{repo.split('/')[0]}:{branch}", safe=":")
-        auth, _ = token(hermes_home)
-        try:
-            rows = _get(f"/repos/{repo}/pulls?head={head}&state=all&per_page=1", auth)
-        except GitHubError:
-            if strict:
-                raise
-            failed, rows = True, []
-        value = _pr(repo, rows[0], auth, checks) if isinstance(rows, list) and rows else None
-    if checks and not failed:
-        _pr_cache[key] = (time.time(), value)
-    return value
+    found = pull_requests(hermes_home, repo_root, branch, fresh=fresh, checks=checks, strict=strict)
+    return found[0] if found else None
 
 
 def forget_pull_request(repo_root: str, branch: str) -> None:
