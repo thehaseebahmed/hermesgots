@@ -4,14 +4,18 @@ The screenshots, images, charts, reports and markdown a session makes for the us
 session's library folder (``<project>/files/<worktree>/``, beside ``plans/``), not in the worktree,
 so they stay out of the branch's diff and the app's Library can link them later. The agent calls
 this tool with a file's path and the folder to file it in; the tool creates the folder if it needs
-to, moves the file there and answers with its new path. A file of that name already in the folder
-is an error: the agent renames it and calls again.
+to, moves the file there and answers with its new path. Folders and file names are kebab-case
+slugs, folders named after the flow or change the files belong to (``library-tab``,
+``library-tab-tree-view``), so the library reads as a tree of what was done. A name that isn't a
+slug, or a file of that name already in the folder, is an error: the agent fixes the name and
+calls again — nothing is renamed for it.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -23,10 +27,63 @@ logger = logging.getLogger(__name__)
 MAX_PATH = 4000
 # A library walk answers with at most this many files, so one project's library can't flood the app.
 MAX_FILES = 500
+# Folders and file names are kebab-case slugs: lowercase words joined by single hyphens. Folders are
+# named after the flow or change the files belong to (library-tab, library-tab-tree-view), so one
+# project's library reads as a tree of what was done, not a pile of file types.
+SLUG = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+# A file name is a slug plus one extension (dashboard-light.png); the extension is kept as filed.
+EXTENSION = re.compile(r"^\.[a-z0-9]{1,8}$")
+
+# The naming rule, for the errors: what a slug is and what it should mean.
+SLUG_RULE = (
+    "kebab-case: lowercase words joined by single hyphens, no spaces, capitals, underscores "
+    "or path separators"
+)
+FOLDER_NAMING = (
+    "name the folder after the flow or change the files belong to — library-tab for work on "
+    "the library tab, library-tab-tree-view for a follow-up change to it — not the file type"
+)
 
 
 class LibraryError(Exception):
     """A file that can't be filed in the library: the tool answers with the message."""
+
+
+def _slug(value: str, what: str, naming: str) -> str:
+    """One kebab-case slug, or an error the agent can act on.
+
+    Bad names are rejected with the nearest correction rather than rewritten silently, so the
+    agent files where it meant to and learns the rule for the next call.
+    """
+    if not SLUG.match(value):
+        # The nearest correction: word boundaries (spaces, capitals, punctuation) become hyphens.
+        spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "-", value)
+        correction = re.sub(r"[^a-z0-9]+", "-", spaced.lower()).strip("-")
+        suggestion = f" Call again with {what} '{correction}'." if correction else ""
+        raise ValueError(f"{value!r} is not a slug ({SLUG_RULE}); {naming}.{suggestion}")
+    return value
+
+
+def _file_name(name: str) -> str:
+    """A file name that is a slug with one extension: the stem is a slug, the extension kept.
+
+    A bad stem (spaces, capitals, extra dots) is an error naming the file, since only the agent
+    can rename it on disk before it calls again.
+    """
+    stem, dot, extension = name.rpartition(".")
+    if not dot or not stem:
+        raise ValueError(
+            f"{name!r} is not a slug with an extension ({SLUG_RULE}), like "
+            f"dashboard-light.png. Rename the file on disk to kebab-case, keeping its extension, "
+            f"then call again with its new path."
+        )
+    if not SLUG.match(stem) or not EXTENSION.match(f".{extension}"):
+        raise ValueError(
+            f"{name!r} is not a slug with an extension ({SLUG_RULE}), like "
+            f"dashboard-light.png. Rename the file on disk to kebab-case, keeping its extension, "
+            f"then call again with its new path."
+        )
+    return name
 
 
 def _library_dir(hermes_home: Path, record: Dict[str, Any]) -> Tuple[Path, Path]:
@@ -50,14 +107,14 @@ def worktree(record: Dict[str, Any]) -> str:
 
 
 def _folder(folder: Any) -> str:
-    """The one-level folder to file a file in. Bad names are rejected, never rewritten, so the
-    agent corrects itself instead of silently filing somewhere else."""
+    """The one-level folder to file a file in: a kebab-case slug, so the library reads as a tree
+    of flows. Bad names are rejected with the correction, never rewritten."""
     if not isinstance(folder, str) or not folder.strip():
         raise ValueError("folder is required.")
     name = folder.strip()
-    if len(name) > attachments.MAX_NAME or "/" in name or "\\" in name or name.startswith("."):
-        raise ValueError("folder must be a single folder name (no path separators).")
-    return name
+    if len(name) > attachments.MAX_NAME:
+        raise ValueError(f"folder must be at most {attachments.MAX_NAME} characters.")
+    return _slug(name, "folder", FOLDER_NAMING)
 
 
 def file(
@@ -79,6 +136,7 @@ def file(
         source = Path(cwd or record["path"]) / source
     if not source.is_file():
         raise LibraryError("No such file.")
+    _file_name(source.name)
     root, dest_dir = _library_dir(hermes_home, record)
     dest_dir = dest_dir / name
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -86,7 +144,11 @@ def file(
     sessions._exclude_from_git(str(root), sessions.FILES_DIR)
     dest = dest_dir / source.name
     if dest.exists():
-        raise LibraryError(f"{source.name} is already in {name}; rename the file and call again.")
+        raise LibraryError(
+            f"{source.name} is already in {name}. Rename the file on disk — a distinguishing "
+            f"suffix or a more specific name — then call library_add again with its new path; "
+            f"nothing was moved."
+        )
     try:
         shutil.move(str(source), str(dest))
     except OSError as error:
@@ -186,15 +248,19 @@ SCHEMA = {
                 "type": "string",
                 "description": (
                     "The file to file in the session's library: its path, absolute or relative "
-                    "to your current directory."
+                    "to your current directory. Its name must be kebab-case with its extension "
+                    "(dashboard-light.png); rename it on disk first if it isn't."
                 ),
             },
             "folder": {
                 "type": "string",
                 "description": (
-                    "The folder to file it in under the session's library (e.g. screenshots, "
-                    "reports): one level, no path separators. A file of the same name already "
-                    "there is an error — rename the file and call again."
+                    "The folder to file it in under the session's library. Name it after the "
+                    "flow or change the files belong to — library-tab for work on the library "
+                    "tab, library-tab-tree-view for a follow-up change to it — not the file "
+                    "type (not screenshots or reports). One level, kebab-case: lowercase words "
+                    "joined by single hyphens. A file of the same name already there is an "
+                    "error — rename the file and call again."
                 ),
             },
         },

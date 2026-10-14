@@ -149,15 +149,14 @@ class LibraryAddTest(unittest.TestCase):
         self.assertIn("files/", exclude.read_text(encoding="utf-8").splitlines())
 
     def test_a_name_already_in_the_folder_is_an_error(self) -> None:
-        self.files_dir.joinpath("screenshots").mkdir(parents=True)
-        self.files_dir.joinpath("screenshots", "shot.png").write_bytes(b"older")
-        self.assertEqual(
-            self._call("shot.png"),
-            {"error": "shot.png is already in screenshots; rename the file and call again."},
-        )
+        self.files_dir.joinpath("library-tab").mkdir(parents=True)
+        self.files_dir.joinpath("library-tab", "shot.png").write_bytes(b"older")
+        result = self._call("shot.png", "library-tab")
+        self.assertIn("shot.png is already in library-tab", result["error"])
+        self.assertIn("Rename the file", result["error"])
         # Nothing moved and nothing was renamed: the agent renames the file itself.
         self.assertEqual(
-            self.files_dir.joinpath("screenshots", "shot.png").read_bytes(), b"older"
+            self.files_dir.joinpath("library-tab", "shot.png").read_bytes(), b"older"
         )
         self.assertTrue((self.worktree / "shot.png").is_file())
 
@@ -165,12 +164,58 @@ class LibraryAddTest(unittest.TestCase):
         result = json.loads(library.handle({"path": "shot.png"}, task_id="memento-1"))
         self.assertEqual(result, {"error": "folder is required."})
 
-    def test_a_folder_with_a_path_separator_is_rejected(self) -> None:
-        for bad in ("a/b", "..", ".hidden", "a" * 121):
+    def test_a_folder_must_be_a_kebab_case_slug(self) -> None:
+        result = self._call("shot.png", "Library Tab")
+        self.assertIn("'Library Tab' is not a slug", result["error"])
+        self.assertIn("kebab-case: lowercase words joined by single hyphens", result["error"])
+        # The naming rule and the correction, so the next call is right the first time.
+        self.assertIn("name the folder after the flow", result["error"])
+        self.assertIn("Call again with folder 'library-tab'.", result["error"])
+        # Nothing was filed and no folder was made for a rejected name.
+        self.assertFalse(self.files_dir.exists())
+        self.assertTrue((self.worktree / "shot.png").is_file())
+
+    def test_bad_folders_are_rejected_with_the_correction(self) -> None:
+        for bad, fixed in [
+            ("Screenshots", "screenshots"),
+            ("library_tab", "library-tab"),
+            ("libraryTab", "library-tab"),
+            ("a/b", "a-b"),
+            ("..", None),
+            (".hidden", "hidden"),
+            ("--leading", "leading"),
+        ]:
             result = self._call("shot.png", bad)
-            self.assertEqual(
-                result, {"error": "folder must be a single folder name (no path separators)."}
-            )
+            self.assertIn(f"{bad!r} is not a slug", result["error"])
+            if fixed:
+                self.assertIn(f"Call again with folder '{fixed}'.", result["error"])
+            else:
+                self.assertNotIn("Call again with", result["error"])
+
+    def test_a_folder_over_the_name_limit_is_rejected(self) -> None:
+        result = self._call("shot.png", "a" * 121)
+        self.assertEqual(result, {"error": "folder must be at most 120 characters."})
+
+    def test_a_file_name_must_be_a_slug_with_an_extension(self) -> None:
+        (self.worktree / "Dashboard Light.png").write_bytes(b"png")
+        result = self._call("Dashboard Light.png")
+        self.assertIn("'Dashboard Light.png' is not a slug with an extension", result["error"])
+        self.assertIn("dashboard-light.png", result["error"])
+        self.assertIn("Rename the file on disk", result["error"])
+        self.assertFalse(self.files_dir.exists())
+
+    def test_a_file_name_needs_exactly_one_extension(self) -> None:
+        for name in ("noext", "report.final.md", ".png"):
+            (self.worktree / name).write_bytes(b"x")
+            result = self._call(name)
+            self.assertIn(f"{name!r} is not a slug with an extension", result["error"])
+
+    def test_a_kebab_file_name_files_fine(self) -> None:
+        (self.worktree / "dashboard-light.png").write_bytes(b"png")
+        result = self._call("dashboard-light.png", "library-tab")
+        self.assertEqual(
+            result["path"], str(self.files_dir / "library-tab" / "dashboard-light.png")
+        )
 
     def test_a_missing_file_is_an_error(self) -> None:
         self.assertEqual(self._call("nope.png"), {"error": "No such file."})
@@ -273,6 +318,13 @@ class InstructionsTest(unittest.TestCase):
         self.assertIn(f"this session's library at {self.record['files_dir']}", text)
         self.assertIn("library_add tool", text)
         self.assertLess(text.index("library at"), text.index("open_pull_request tool"))
+
+    def test_the_line_teaches_the_naming_convention(self) -> None:
+        text = prompt_builder.session_prompt(self.record)
+        # Folders are named after the flow, kebab-case, and file names too.
+        self.assertIn("library-tab-tree-view", text)
+        self.assertIn("kebab-case", text)
+        self.assertIn("dashboard-light.png", text)
 
     def test_a_record_without_the_folder_has_no_line(self) -> None:
         legacy = {**self.record, "files_dir": None}

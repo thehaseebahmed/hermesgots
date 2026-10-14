@@ -507,15 +507,15 @@ const sessionLibrary = (record) => {
   })
   return [
     {
-      name: "screenshots",
+      name: "library-tab",
       files: [
-        file("screenshots", "dashboard-light.png", 20480, 4),
-        file("screenshots", "dashboard-dark.png", 19456, 2),
+        file("library-tab", "dashboard-light.png", 20480, 4),
+        file("library-tab", "dashboard-dark.png", 19456, 2),
       ],
     },
     {
-      name: "reports",
-      files: [file("reports", "cleanup-report.md", 1843, 9)],
+      name: "log-cleanup",
+      files: [file("log-cleanup", "cleanup-report.md", 1843, 9)],
     },
   ]
 }
@@ -1797,7 +1797,7 @@ http
           : `You are working in git worktrees of this project's repos, all on branch ${record.branch}:\n${record.repos.map((r, i) => `- ${r.name} at ${r.path}${i === 0 ? " (your current directory)" : ""}`).join("\n")}\nKeep all work inside them.`
       // The plugin's library line (sessions._files_line), word for word, with the session's path.
       const filesLine = (record) =>
-        `Files you make for the user — screenshots, images, charts, reports, markdown — belong in this session's library at ${record.files_dir}, not in the worktree. File each one with the library_add tool (its path and a folder name, one level, such as screenshots): it makes ${record.files_dir}/<folder> if it needs to, moves the file there and answers with its new path. A file of that name already in the folder is an error — rename it and call again. Return an image's new path in a MEDIA:<path> tag so the user sees it. Source edits stay in the worktree.`
+        `Files you make for the user — screenshots, images, charts, reports, markdown — belong in this session's library at ${record.files_dir}, not in the worktree. File each one with the library_add tool (its path and a folder name, one level): name folders after the flow or change the files belong to, kebab-case — library-tab for work on the library tab, library-tab-tree-view for a follow-up change to it — not the file type, and file names kebab-case with their extension (dashboard-light.png). The tool makes ${record.files_dir}/<folder> if it needs to, moves the file there and answers with its new path; a name that isn't kebab-case, or a file of that name already in the folder, is an error — fix the name and call again. Return an image's new path in a MEDIA:<path> tag so the user sees it. Source edits stay in the worktree.`
       // A session's filed files, as the plugin's library routes would list them (see
       // `sessionLibrary` at module scope, shared with the project route).
       const instructions = (record) =>
