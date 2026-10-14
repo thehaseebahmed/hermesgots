@@ -68,6 +68,7 @@ import {
   db,
   getSettings,
   listProfiles,
+  saveAppearance,
   saveSettings,
   type Profile,
 } from "@/lib/db"
@@ -783,7 +784,7 @@ function AppearanceSettings() {
           title="Simplified chats"
           subtitle="Hide tool calls, stats and context use"
           checked={simplified ?? DEFAULT_SETTINGS.simplifiedChats}
-          onCheckedChange={(checked) => saveSettings({ simplifiedChats: checked })}
+          onCheckedChange={(checked) => saveAppearance({ simplifiedChats: checked })}
         />
         <SwitchRow
           id="steer-by-default"
@@ -791,7 +792,7 @@ function AppearanceSettings() {
           title="Steer by default"
           subtitle="Messages sent mid-reply go straight to it"
           checked={chatSettings?.steerByDefault ?? false}
-          onCheckedChange={(checked) => saveSettings({ steerByDefault: checked })}
+          onCheckedChange={(checked) => saveAppearance({ steerByDefault: checked })}
         />
         <SwitchRow
           id="break-reminders"
@@ -799,7 +800,7 @@ function AppearanceSettings() {
           title="Take-a-break reminders"
           subtitle="Remind me to put the phone away while a task runs"
           checked={chatSettings?.breakReminders ?? DEFAULT_SETTINGS.breakReminders ?? true}
-          onCheckedChange={(checked) => saveSettings({ breakReminders: checked })}
+          onCheckedChange={(checked) => saveAppearance({ breakReminders: checked })}
         />
       </Group>
     </>

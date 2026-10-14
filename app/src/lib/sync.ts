@@ -16,6 +16,7 @@ import {
 import { mergeChatList } from "@/lib/hermes"
 import {
   DEFAULT_PROFILE,
+  DEFAULT_SETTINGS,
   db,
   deleteConversation,
   deleteProfile,
@@ -46,11 +47,12 @@ import {
 } from "@/lib/vault"
 
 /**
- * Syncs bots and the chat list (titles, Hermes session ids and context use, not messages). Bots come
- * from the registry and the sealed `bots` document; each bot's chat list lives with the Memento
- * plugin on its own Hermes server. Everything sent to Netlify is sealed with the account's data key,
- * and each document's associated data names its owner and slot, so the server can't swap one
- * document for another.
+ * Syncs bots, the appearance switches and the chat list (titles, Hermes session ids and context
+ * use, not messages). Bots come from the registry and the sealed `bots` document; the Appearance
+ * section's switches from the `settings` document, which every device merges on `appearanceAt`;
+ * each bot's chat list lives with the Memento plugin on its own Hermes server. Everything sent to
+ * Netlify is sealed with the account's data key, and each document's associated data names its
+ * owner and slot, so the server can't swap one document for another.
  */
 
 /**
@@ -377,6 +379,40 @@ async function syncBots(key: CryptoKey) {
   }
 }
 
+/** What sync carries for the Appearance section's switches: everything there but the colour mode. */
+type AppearanceValue = {
+  simplifiedChats: boolean
+  steerByDefault: boolean
+  breakReminders: boolean
+}
+
+/**
+ * The appearance switches as the `settings` document's one record. `appearanceAt` is 0 until the
+ * user changes one here, so a choice made on another device wins until then; the defaults
+ * `getSettings` fills in are what a device that never touched them pushes.
+ */
+async function localAppearance(): Promise<Doc<AppearanceValue>> {
+  const { appearanceAt, simplifiedChats, steerByDefault, breakReminders } = await getSettings()
+  return {
+    appearance: {
+      at: appearanceAt ?? 0,
+      value: {
+        simplifiedChats,
+        steerByDefault: steerByDefault ?? false,
+        breakReminders: breakReminders ?? DEFAULT_SETTINGS.breakReminders ?? true,
+      },
+    },
+  }
+}
+
+async function syncAppearance(key: CryptoKey) {
+  await syncDoc<AppearanceValue>(key, "settings", localAppearance, async (pull) => {
+    for (const [, entry] of pull) {
+      if (entry.value) await saveSettings({ ...entry.value, appearanceAt: entry.at })
+    }
+  })
+}
+
 async function localChats(profileId: string): Promise<Doc<ChatValue>> {
   const doc: Doc<ChatValue> = {}
   for (const c of await db.conversations.where("profileId").equals(profileId).toArray()) {
@@ -459,7 +495,7 @@ async function fingerprint() {
     getSettings(),
   ])
   const bots = profiles.map((p) => `${p.id}@${p.updatedAt}`).join(",")
-  return `${bots}|${count}@${newest?.changedAt ?? 0}|${tombstones}|${settings.onboarded}`
+  return `${bots}|${count}@${newest?.changedAt ?? 0}|${tombstones}|${settings.onboarded}|${settings.appearanceAt ?? 0}`
 }
 
 let running: Promise<void> | undefined
@@ -471,6 +507,7 @@ async function runSync() {
   try {
     if (key) await ensureInbox(key)
     if (key) await syncBots(key)
+    if (key) await syncAppearance(key)
     if (key) await pullRegistry()
     await syncChatLists(key)
     syncedFingerprint = await fingerprint()

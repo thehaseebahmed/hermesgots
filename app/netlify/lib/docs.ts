@@ -16,7 +16,7 @@ export interface DocStore {
   delete(key: string): Promise<void>
 }
 
-const DOC = /^(vault|bots|chats\/[A-Za-z0-9_-]{1,64})$/
+const DOC = /^(vault|bots|settings|chats\/[A-Za-z0-9_-]{1,64})$/
 const USER = /^[A-Za-z0-9_-]{1,128}$/
 const MAX_BYTES = 1024 * 1024
 

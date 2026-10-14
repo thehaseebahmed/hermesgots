@@ -16,8 +16,10 @@ export interface Settings {
   simplifiedChats: boolean
   /** A message sent while a reply runs steers it, instead of waiting in the queue. */
   steerByDefault?: boolean
-  /** Reminds phone users to put the app away while a bot chat or code session runs. Local, on by default. */
+  /** Reminds phone users to put the app away while a bot chat or code session runs. On by default. */
   breakReminders?: boolean
+  /** When this device last changed an appearance switch, the clock sync merges on. */
+  appearanceAt?: number
   /** Shows the Developer section in Settings (tapping the version five times). */
   developer?: boolean
   /** Offers Theseus among a project session's modes; a Developer setting, off by default. Local. */
@@ -562,6 +564,13 @@ export async function saveSettings(patch: Partial<Omit<Settings, "id">>) {
       (key) => JSON.stringify(stored[key]) !== JSON.stringify(patch[key]),
     )
   if (changed) await db.settings.put({ ...DEFAULT_SETTINGS, ...stored, ...patch, id: "settings" })
+}
+
+/** Saves an appearance switch; the clock moves so sync carries the change to the account's devices. */
+export async function saveAppearance(
+  patch: Partial<Pick<Settings, "simplifiedChats" | "steerByDefault" | "breakReminders">>,
+) {
+  await saveSettings({ ...patch, appearanceAt: Date.now() })
 }
 
 export async function listProfiles() {
