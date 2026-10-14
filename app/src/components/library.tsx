@@ -207,15 +207,17 @@ function useLibraryRead(
 
 /**
  * A library as a tree: each folder — named after the flow its files belong to — with the sessions
- * that filed it, folded away until it's tapped and ordered by the sort menu. A session's own tree
+ * that filed it, folded away until it's tapped, in the `order` it is handed. A session's own tree
  * (`own`) is one session's files: no second line, its folders close together with room under an open
- * one, and the default newest-first order without a menu to change it.
+ * one, and no sort menu of its own.
  */
 export function LibraryTree({
   config,
   folders,
   titles,
   own,
+  order,
+  onSort,
 }: {
   config: HermesConfig
   folders: LibraryFolder[]
@@ -223,9 +225,11 @@ export function LibraryTree({
   titles?: Map<string, string>
   /** A session's own files, rather than a project's across its sessions. */
   own?: boolean
+  /** The order its folders and files are shown in. */
+  order: LibrarySort
+  /** Changes the order; left out, the tree carries no sort menu. */
+  onSort?: (sort: LibrarySort) => void
 }) {
-  const [sort, setSort] = useLibrarySort()
-  const order = own ? "new" : sort
   const ordered = useMemo(() => sortFolders(folders, order), [folders, order])
   if (!folders.length) {
     return (
@@ -234,7 +238,7 @@ export function LibraryTree({
   }
   return (
     <div className="px-3 pb-4 sm:px-4">
-      {!own && (
+      {onSort && (
         <div className="sticky top-0 z-10 flex justify-end bg-background py-2">
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -242,19 +246,19 @@ export function LibraryTree({
                 <Button
                   variant="ghost"
                   className="h-11 gap-1.5 rounded-full px-3 text-xs text-muted-foreground"
-                  aria-label={`Sort the library by ${LIBRARY_SORTS[sort]}`}
+                  aria-label={`Sort the library by ${LIBRARY_SORTS[order]}`}
                 />
               }
             >
               <ArrowDownUpIcon />
-              {LIBRARY_SORTS[sort]}
+              {LIBRARY_SORTS[order]}
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-40">
               <DropdownMenuGroup>
                 <DropdownMenuLabel>Sort by</DropdownMenuLabel>
                 <DropdownMenuRadioGroup
-                  value={sort}
-                  onValueChange={(value) => setSort(value as LibrarySort)}
+                  value={order}
+                  onValueChange={(value) => onSort(value as LibrarySort)}
                 >
                   {(Object.keys(LIBRARY_SORTS) as LibrarySort[]).map((option) => (
                     <DropdownMenuRadioItem
@@ -308,7 +312,10 @@ export function LibraryTab({
     [config, projectId],
   )
   const folders = useLibraryRead(config, load, active)
-  return <LibraryTree config={config} folders={folders} titles={titles} />
+  const [sort, setSort] = useLibrarySort()
+  return (
+    <LibraryTree config={config} folders={folders} titles={titles} order={sort} onSort={setSort} />
+  )
 }
 
 /**
@@ -329,5 +336,5 @@ export function SessionLibrary({
     [config, sessionId],
   )
   const folders = useLibraryRead(config, load, active)
-  return <LibraryTree config={config} folders={folders} own />
+  return <LibraryTree config={config} folders={folders} own order="new" />
 }
