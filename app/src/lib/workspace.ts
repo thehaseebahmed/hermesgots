@@ -35,9 +35,9 @@ const unsupported = cooldown()
  */
 const libraryRead = new Map<string, number>()
 
-/** Whether any of a session's pull requests still has checks running. */
+/** Whether any of a session's live pull requests still has checks running. */
 export const prChecksPending = (prs: PullRequestRef[] | undefined) =>
-  (prs ?? []).some((pr) => pr.state !== "merged" && pr.checks === "pending")
+  (prs ?? []).some((pr) => (pr.state === "open" || pr.state === "draft") && pr.checks === "pending")
 
 export type SessionState = "working" | "waiting" | "idle" | "resolved" | "discarded"
 
