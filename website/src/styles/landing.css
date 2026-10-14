@@ -56,7 +56,7 @@ input:focus-visible,
   text-decoration: none;
   font-size: 1.5rem;
   font-weight: 800;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.045em;
 }
 
 .nav nav {
@@ -882,13 +882,6 @@ html:not(.js) .dots {
   color: inherit;
 }
 
-.footer .wordmark {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: var(--foreground);
-}
-
 .footer nav {
   display: flex;
   gap: 1.25rem;
@@ -916,6 +909,10 @@ html:not(.js) .dots {
   }
 }
 
-.wordmark .o {
-  color: var(--primary);
+.nav .wordmark,
+.footer .wordmark {
+  background: linear-gradient(100deg, var(--primary), var(--usage-cache-write) 55%, var(--usage-input));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
