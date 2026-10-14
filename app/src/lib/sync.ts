@@ -403,11 +403,17 @@ async function localAppearance(): Promise<Doc<Appearance>> {
 }
 
 async function syncAppearance(key: CryptoKey) {
-  await syncDoc<Appearance>(key, "settings", localAppearance, async (pull) => {
-    for (const [, entry] of pull) {
-      if (entry.value) await adoptAppearance(entry.value, entry.at)
-    }
-  })
+  try {
+    await syncDoc<Appearance>(key, "settings", localAppearance, async (pull) => {
+      for (const [, entry] of pull) {
+        if (entry.value) await adoptAppearance(entry.value, entry.at)
+      }
+    })
+  } catch (error) {
+    // The switches aren't worth the bots, the registry and every chat list this pass carries, so a
+    // settings document this deployment doesn't know yet, or a plain failure, is noted and goes by.
+    noteFailure("Syncing the appearance switches", error)
+  }
 }
 
 async function localChats(profileId: string): Promise<Doc<ChatValue>> {
