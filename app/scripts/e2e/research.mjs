@@ -17,6 +17,10 @@ for (const width of [390, 1440]) {
       await page.goto(`${app}/research`)
       await page.getByText("How transformers work").first().waitFor({ timeout: 15_000 })
       await shot("list")
+      assert.ok(
+        (await page.locator("main li button [role=img]").count()) > 0,
+        "each mission row shows its bot",
+      )
 
       await page.getByRole("textbox", { name: "What to research" }).fill("Explain transformers")
       await page.getByRole("button", { name: "Start" }).click()
@@ -39,6 +43,7 @@ for (const width of [390, 1440]) {
       const glossary = page.getByRole("button", { name: "Make a glossary" })
       await glossary.waitFor({ timeout: 45_000 })
       await shot("delivered")
+      await page.getByText(/Learn & understand · .+ · claude-opus-5-5/).first().waitFor({ timeout: 5_000 })
       pass(`a mission goes from question to guide at ${width}px`)
 
       await glossary.click()

@@ -350,6 +350,7 @@ function mission(fields) {
     revisions: [],
     pending: null,
     writer: null,
+    researcher: { provider: "anthropic", model: "claude-opus-5-5" },
     created_at: now,
     updated_at: now,
     ledger: { sources: [], claims: [] },
