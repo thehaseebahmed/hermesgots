@@ -145,6 +145,83 @@ class TestFetch(unittest.TestCase):
             result = usage.fetch("some-unknown-provider")
             self.assertIsNone(result)
 
+    # --- the ollama-cloud fallback: core answers first, the plugin's fetcher is the net ---
+
+    def _core_module(self, snapshot: object = None, error: Optional[Exception] = None):
+        """A stand-in agent.account_usage whose fetch answers `snapshot` or raises `error`."""
+        module = mock.MagicMock()
+        module.fetch_account_usage = mock.MagicMock(
+            return_value=None if error else snapshot, side_effect=error
+        )
+        return module
+
+    def _patched_core(self, module):
+        return mock.patch.dict(
+            "sys.modules", {"agent": mock.MagicMock(), "agent.account_usage": module}
+        )
+
+    def test_core_windows_win(self) -> None:
+        """A provider core does fetch is never read a second time by the plugin."""
+        core = FakeSnapshot(
+            provider="ollama-cloud",
+            windows=(
+                FakeWindow(
+                    label="Session",
+                    used_percent=42.0,
+                    reset_at=datetime(2030, 1, 1, tzinfo=timezone.utc),
+                ),
+            ),
+        )
+        module = self._core_module(core)
+        with self._patched_core(module):
+            with mock.patch.object(usage_ollama, "fetch_windows") as plugin_fetch:
+                result = usage.fetch("ollama-cloud")
+        assert result is not None
+        self.assertEqual("Session", result["windows"][0]["label"])
+        self.assertEqual(42.0, result["windows"][0]["used_percent"])
+        module.fetch_account_usage.assert_called_once_with("ollama-cloud", read_only=True)
+        plugin_fetch.assert_not_called()
+
+    def test_falls_back_to_the_plugin_fetcher(self) -> None:
+        """Core has no ollama-cloud fetcher, so the balance read answers instead."""
+        snapshot = usage_ollama.Snapshot(
+            provider="ollama-cloud",
+            windows=(
+                usage_ollama.Window(
+                    label="Included credits",
+                    used_percent=71.5,
+                    detail="Purchased credits: $25.00",
+                ),
+            ),
+        )
+        with self._patched_core(self._core_module(None)):
+            with mock.patch.object(usage_ollama, "fetch_windows", return_value=snapshot) as plugin_fetch:
+                result = usage.fetch("ollama-cloud")
+        plugin_fetch.assert_called_once_with()
+        assert result is not None
+        self.assertEqual("ollama-cloud", result["provider"])
+        self.assertEqual("Included credits", result["windows"][0]["label"])
+        self.assertEqual("Purchased credits: $25.00", result["windows"][0]["detail"])
+
+    def test_another_provider_is_not_read_from_ollama(self) -> None:
+        with self._patched_core(self._core_module(None)):
+            with mock.patch.object(usage_ollama, "fetch_windows") as plugin_fetch:
+                self.assertIsNone(usage.fetch("mistral"))
+        plugin_fetch.assert_not_called()
+
+    def test_core_exception_is_no_data(self) -> None:
+        for provider in ("openrouter", "ollama-cloud"):
+            with self.subTest(provider=provider):
+                with self._patched_core(self._core_module(error=RuntimeError("core blew up"))):
+                    self.assertIsNone(usage.fetch(provider))
+
+    def test_plugin_fetch_exception_is_no_data(self) -> None:
+        with self._patched_core(self._core_module(None)):
+            with mock.patch.object(
+                usage_ollama, "fetch_windows", side_effect=RuntimeError("no balance")
+            ):
+                self.assertIsNone(usage.fetch("ollama-cloud"))
+
 
 class _BalanceResponse:
     """The bit of a urllib response the module reads: a context manager with read()."""

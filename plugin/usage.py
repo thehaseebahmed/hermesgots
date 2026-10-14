@@ -5,7 +5,8 @@ anthropic, openai-codex, openrouter and the opencode-go plugin hook. This
 module wraps it so the plugin route stays thin: it calls the fetcher under the
 request's profile scope (credentials stay server-side), drops windows without a
 ``used_percent`` or whose ``reset_at`` has already passed, and serializes the
-rest for the app.
+rest for the app. ``ollama-cloud``, which core has no fetcher for, is read by
+``usage_ollama`` instead.
 
 """
 
@@ -13,6 +14,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
+from . import usage_ollama
 
 
 def _utc(value: datetime) -> datetime:
@@ -53,17 +56,25 @@ def serialize(snapshot: Any, now: Optional[datetime] = None) -> Optional[Dict[st
 
 
 def fetch(provider: str) -> Optional[Dict[str, Any]]:
-    """Call Hermes core's ``fetch_account_usage`` and serialize the result.
+    """The provider's windows, or None.
 
-    ``read_only=True`` so a display read never refreshes or rotates a credential.
-    Any exception — including a provider plugin that returns a shape core doesn't
-    promise — is treated as no data, so the route answers an empty windows list
-    rather than a 500.
+    Hermes core answers first — ``read_only=True`` so a display read never refreshes or
+    rotates a credential — and ``ollama-cloud``, which core has no fetcher for, falls back
+    to the one the plugin owns. Any failure (a core exception, a provider plugin returning a
+    shape core doesn't promise, an unreadable balance) is no data, so the route answers an
+    empty windows list rather than a 500 and the sheet shows nothing.
     """
     try:
         from agent.account_usage import fetch_account_usage
 
         snapshot = fetch_account_usage(provider, read_only=True)
-        return serialize(snapshot)
     except Exception:
         return None
+    if snapshot is not None:
+        return serialize(snapshot)
+    if provider == "ollama-cloud":
+        try:
+            return serialize(usage_ollama.fetch_windows())
+        except Exception:
+            return None
+    return None
