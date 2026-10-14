@@ -472,7 +472,13 @@ function MissionError({ mission }: { mission: Mission }) {
 function MissionMenu({ mission, format }: { mission: Mission; format?: OutputFormat }) {
   const navigate = useNavigate()
   const [confirming, setConfirming] = useState(false)
+  const [asking, setAsking] = useState(false)
   const made = format && mission.formats.includes(format)
+  const canAsk =
+    mission.stage === "delivered" &&
+    Boolean(mission.followups) &&
+    mission.outline.length < MAX_OUTLINE &&
+    !mission.making
 
   const download = () => {
     const blob = new Blob([toMarkdown(mission, format!)], { type: "text/markdown" })
@@ -521,6 +527,15 @@ function MissionMenu({ mission, format }: { mission: Mission; format?: OutputFor
               <DropdownMenuSeparator />
             </>
           )}
+          {canAsk && (
+            <>
+              <DropdownMenuItem className="min-h-11" onClick={() => setAsking(true)}>
+                <MessageCircleQuestionIcon />
+                Missed something?
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          )}
           <DropdownMenuItem
             variant="destructive"
             className="min-h-11"
@@ -531,6 +546,14 @@ function MissionMenu({ mission, format }: { mission: Mission; format?: OutputFor
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <Popup open={asking && canAsk} onOpenChange={setAsking}>
+        <PopupContent>
+          <PopupHeader>
+            <PopupTitle>Missed something?</PopupTitle>
+          </PopupHeader>
+          <MissedQuestions mission={mission} onSent={() => setAsking(false)} />
+        </PopupContent>
+      </Popup>
       <AlertDialog open={confirming} onOpenChange={setConfirming}>
         <AlertDialogContent size="sm">
           <AlertDialogHeader>
@@ -999,9 +1022,6 @@ function WorkView({ mission, onBack }: { mission: Mission; onBack: () => void })
             ) : (
               <GuideCanvas mission={mission} onCite={cite} />
             )}
-            {delivered && mission.followups && mission.outline.length < MAX_OUTLINE && (
-              <MissedQuestions key={mission.followups.length} mission={mission} />
-            )}
           </div>
         </main>
       </div>
@@ -1023,7 +1043,7 @@ function WorkView({ mission, onBack }: { mission: Mission; onBack: () => void })
  * Questions the mission missed: the ones the model thinks it leaves open, to pick, and the user's
  * own. Sending them reads for them and adds them to everything it made.
  */
-function MissedQuestions({ mission }: { mission: Mission }) {
+function MissedQuestions({ mission, onSent }: { mission: Mission; onSent: () => void }) {
   const [picked, setPicked] = useState<string[]>([])
   const [text, setText] = useState("")
   const [sending, setSending] = useState(false)
@@ -1036,19 +1056,13 @@ function MissedQuestions({ mission }: { mission: Mission }) {
   const send = async () => {
     if (!questions.length || questions.length > room || busy) return
     setSending(true)
-    if (await attempt("ask it", () => followUp(mission, questions))) {
-      setPicked([])
-      setText("")
-    }
+    const sent = await attempt("ask it", () => followUp(mission, questions))
     setSending(false)
+    if (sent) onSent()
   }
 
   return (
-    <section className="flex flex-col gap-3 rounded-3xl border bg-card p-4">
-      <h3 className="flex items-center gap-2 font-medium">
-        <MessageCircleQuestionIcon className="size-4 text-muted-foreground" />
-        Missed something?
-      </h3>
+    <div className="flex flex-col gap-3 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
       {mission.suggestions.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {mission.suggestions.map((question) => {
@@ -1117,7 +1131,7 @@ function MissedQuestions({ mission }: { mission: Mission }) {
           </InputGroupAddon>
         </InputGroup>
       </form>
-    </section>
+    </div>
   )
 }
 

@@ -49,10 +49,13 @@ for (const width of [390, 1440]) {
       pass(`another format and a citation's source at ${width}px`)
 
       if (width < 768) await page.keyboard.press("Escape")
+      await page.getByRole("button", { name: "Mission options" }).click()
+      await page.getByRole("menuitem", { name: "Missed something?" }).click()
       await page.getByRole("button", { name: "How is a transformer trained?" }).click()
       await page.getByRole("textbox", { name: "A question it missed" }).fill("Why does BERT mask words?")
       await shot("missed")
       await page.getByRole("button", { name: "Research these" }).click()
+      await page.getByRole("dialog").waitFor({ state: "hidden", timeout: 5_000 })
       await page.getByText("Reading sources").first().waitFor({ timeout: 5_000 })
       await page.getByRole("button", { name: "Guide" }).waitFor({ timeout: 30_000 })
       await page.getByRole("button", { name: "Guide" }).click()
