@@ -4,6 +4,7 @@ import {
   CircleIcon,
   ExternalLinkIcon,
   FlagIcon,
+  MessageCircleQuestionIcon,
   TriangleAlertIcon,
   XIcon,
 } from "lucide-react"
@@ -110,6 +111,12 @@ export function GuideCanvas({
         const now = !section && writing && index === sections.length
         return (
           <section key={index} className="flex flex-col gap-3">
+            {section?.question && (
+              <span className="-mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                <MessageCircleQuestionIcon className="size-3.5 shrink-0" />
+                {section.question}
+              </span>
+            )}
             <h2
               className={cn(
                 "text-lg font-semibold tracking-tight",

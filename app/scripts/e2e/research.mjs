@@ -1,6 +1,7 @@
 // A research mission end to end on the mock plugin: the question read back as a brief, the Scope
-// Gate, reading and drafting, delivered, another format, and a citation opening its source. At
-// phone and laptop widths, with no errors in the console.
+// Gate, reading and drafting, delivered, another format, a citation opening its source, and
+// questions it missed read for and added. At phone and laptop widths, with no errors in the
+// console.
 import { app, assert, flow, pass } from "./lib.mjs"
 
 const errors = []
@@ -46,6 +47,19 @@ for (const width of [390, 1440]) {
       await page.locator("#claim-c3").getByText("inject some information").waitFor({ timeout: 5_000 })
       await shot("evidence")
       pass(`another format and a citation's source at ${width}px`)
+
+      if (width < 768) await page.keyboard.press("Escape")
+      await page.getByRole("button", { name: "How is a transformer trained?" }).click()
+      await page.getByRole("textbox", { name: "A question it missed" }).fill("Why does BERT mask words?")
+      await shot("missed")
+      await page.getByRole("button", { name: "Research these" }).click()
+      await page.getByText("Reading sources").first().waitFor({ timeout: 5_000 })
+      await page.getByRole("button", { name: "Guide" }).waitFor({ timeout: 30_000 })
+      await page.getByRole("button", { name: "Guide" }).click()
+      await page.getByText("How it learns").first().waitFor({ timeout: 5_000 })
+      await page.getByText("Why does BERT mask words?").first().scrollIntoViewIfNeeded()
+      await shot("followed-up")
+      pass(`questions it missed are researched and added at ${width}px`)
     },
     { viewport: { width, height: width < 768 ? 844 : 900 } },
   )

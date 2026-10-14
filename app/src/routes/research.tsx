@@ -12,6 +12,7 @@ import {
   EllipsisIcon,
   FileTextIcon,
   ListChecksIcon,
+  MessageCircleQuestionIcon,
   MenuIcon,
   PencilIcon,
   PlusIcon,
@@ -71,6 +72,8 @@ import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import {
   FORMATS,
+  MAX_FOLLOWUPS,
+  MAX_OUTLINE,
   MISSION_TYPES,
   SOURCE_KINDS,
   approveScope,
@@ -78,6 +81,7 @@ import {
   createMission,
   deleteMission,
   editBrief,
+  followUp,
   isWorking,
   makeFormat,
   needsYou,
@@ -995,6 +999,9 @@ function WorkView({ mission, onBack }: { mission: Mission; onBack: () => void })
             ) : (
               <GuideCanvas mission={mission} onCite={cite} />
             )}
+            {delivered && mission.followups && mission.outline.length < MAX_OUTLINE && (
+              <MissedQuestions key={mission.followups.length} mission={mission} />
+            )}
           </div>
         </main>
       </div>
@@ -1009,6 +1016,108 @@ function WorkView({ mission, onBack }: { mission: Mission; onBack: () => void })
         </PopupContent>
       </Popup>
     </div>
+  )
+}
+
+/**
+ * Questions the mission missed: the ones the model thinks it leaves open, to pick, and the user's
+ * own. Sending them reads for them and adds them to everything it made.
+ */
+function MissedQuestions({ mission }: { mission: Mission }) {
+  const [picked, setPicked] = useState<string[]>([])
+  const [text, setText] = useState("")
+  const [sending, setSending] = useState(false)
+  const room = Math.min(MAX_FOLLOWUPS, MAX_OUTLINE - mission.outline.length)
+  const own = text.trim()
+  const questions = [...picked, ...(own ? [own] : [])]
+  const full = questions.length >= room
+  const busy = sending || Boolean(mission.making)
+
+  const send = async () => {
+    if (!questions.length || questions.length > room || busy) return
+    setSending(true)
+    if (await attempt("ask it", () => followUp(mission, questions))) {
+      setPicked([])
+      setText("")
+    }
+    setSending(false)
+  }
+
+  return (
+    <section className="flex flex-col gap-3 rounded-3xl border bg-card p-4">
+      <h3 className="flex items-center gap-2 font-medium">
+        <MessageCircleQuestionIcon className="size-4 text-muted-foreground" />
+        Missed something?
+      </h3>
+      {mission.suggestions.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {mission.suggestions.map((question) => {
+            const on = picked.includes(question)
+            return (
+              <button
+                key={question}
+                type="button"
+                aria-pressed={on}
+                disabled={!on && full}
+                onClick={() =>
+                  setPicked(on ? picked.filter((q) => q !== question) : [...picked, question])
+                }
+                className={cn(
+                  "flex min-h-11 items-center gap-1.5 rounded-2xl border px-3 py-2 text-left text-sm transition-colors disabled:opacity-50",
+                  on ? "border-primary bg-primary/10 text-foreground" : "enabled:hover:bg-muted",
+                )}
+              >
+                {on ? (
+                  <CheckIcon className="size-4 shrink-0 text-primary" />
+                ) : (
+                  <PlusIcon className="size-4 shrink-0 text-muted-foreground" />
+                )}
+                {question}
+              </button>
+            )
+          })}
+        </div>
+      )}
+      <form
+        onSubmit={(event) => {
+          event.preventDefault()
+          void send()
+        }}
+      >
+        <InputGroup className="bg-background has-[textarea]:rounded-[1.5rem] dark:bg-input/30">
+          <InputGroupTextarea
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault()
+                void send()
+              }
+            }}
+            placeholder="What didn't it answer?"
+            disabled={!own && picked.length >= room}
+            rows={1}
+            className="max-h-32 min-h-11 px-4 pt-3 pb-1 text-base md:text-[15px]"
+            aria-label="A question it missed"
+          />
+          <InputGroupAddon align="block-end" className="px-2 pt-0 pb-1.5">
+            <span className="flex-1 px-2 text-xs text-muted-foreground tabular-nums">
+              {questions.length > 0 && `${questions.length} of ${room}`}
+            </span>
+            <InputGroupButton
+              type="submit"
+              variant="default"
+              size="icon-sm"
+              className="size-11 rounded-full"
+              disabled={!questions.length || questions.length > room || busy}
+              aria-label="Research these"
+            >
+              {sending ? <Spinner /> : <ArrowUpIcon />}
+            </InputGroupButton>
+          </InputGroupAddon>
+        </InputGroup>
+      </form>
+    </section>
   )
 }
 

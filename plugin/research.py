@@ -60,6 +60,11 @@ MAX_AUDIENCE = 160
 MAX_TITLE = 120
 MAX_POINTS = 6
 MAX_POINT = 200
+# A follow-up round adds at most this many questions, each a section of its own, and the outline
+# grows to at most MAX_OUTLINE points that way.
+MAX_FOLLOWUPS = 3
+MAX_OUTLINE = 12
+MAX_SUGGESTIONS = 3
 MAX_CLAIMS = 120
 MAX_CLAIM = 600
 MIN_SNIPPET = 20
@@ -136,6 +141,8 @@ def _summary(row: Any, conn: Any) -> Dict[str, Any]:
         "formats": _loads(row["formats"], []),
         "making": row["making"],
         "written": row["written"],
+        "followups": _loads(row["followups"], []),
+        "suggestions": _loads(row["suggestions"], []),
         "found": counts[0],
         "claims": counts[1],
         "created_at": row["created_at"],
@@ -148,7 +155,7 @@ def _row(conn: Any, mission_id: str) -> Any:
 
 
 def _update(path: Path, mission_id: str, **fields: Any) -> None:
-    for key in ("outline", "source_kinds", "formats"):
+    for key in ("outline", "source_kinds", "formats", "followups", "suggestions"):
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
     fields["updated_at"] = _now()
@@ -345,6 +352,57 @@ def make_format(path: Path, mission_id: str, fmt: Any) -> Dict[str, Any]:
     return mission(path, mission_id)  # type: ignore[return-value]
 
 
+def followup(path: Path, mission_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    """Questions the delivered mission missed: each becomes an outline point, the researcher reads
+    for them in the same session and ledger, and the made formats are written up again."""
+    found = _need(path, mission_id, ("delivered",))
+    if found["making"]:
+        raise ResearchError("Wait for the format being made.", 409)
+    raw = body.get("questions")
+    if not isinstance(raw, list):
+        raise ResearchError("Ask at least one question.")
+    seen = {point.casefold() for point in found["outline"]}
+    questions: List[str] = []
+    for item in raw:
+        if not isinstance(item, str) or not item.strip():
+            continue
+        question = _text(item, MAX_POINT, "A question")
+        if question.casefold() not in seen:
+            seen.add(question.casefold())
+            questions.append(question)
+    if not questions:
+        raise ResearchError("Ask at least one question it hasn't covered.")
+    if len(questions) > MAX_FOLLOWUPS:
+        raise ResearchError(f"Ask {MAX_FOLLOWUPS} questions at most at a time.")
+    if len(found["outline"]) + len(questions) > MAX_OUTLINE:
+        raise ResearchError("This mission can't take more questions. Start a new one.")
+    rounds = [
+        *found["followups"],
+        {"questions": questions, "from": len(found["outline"]), "claims": found["claims"], "at": _now()},
+    ]
+    guide = (found["outputs"].get("guide") or {}).get("sections") or []
+    _update(
+        path,
+        mission_id,
+        outline=[*found["outline"], *questions],
+        followups=rounds,
+        suggestions=[],
+        stage="reading",
+        # The guide keeps its sections and only gains the new ones; a quiz or glossary is rewritten.
+        written=len(guide) if found["format"] == "guide" else 0,
+        busy=None,
+        error=None,
+        run_id=None,
+    )
+    return mission(path, mission_id)  # type: ignore[return-value]
+
+
+def _first_followup(found: Dict[str, Any]) -> Optional[int]:
+    """The index of the first outline point that came from a follow-up, if any did."""
+    rounds = found.get("followups") or []
+    return rounds[0].get("from") if rounds and isinstance(rounds[0].get("from"), int) else None
+
+
 def remove(path: Path, mission_id: str) -> Optional[Dict[str, Any]]:
     """Deletes the mission and its ledger, and answers with what it was (for its run)."""
     found = mission(path, mission_id)
@@ -527,6 +585,17 @@ RESEARCHER_INSTRUCTIONS = """You are the researcher of a Memento research missio
 
 def researcher_prompt(found: Dict[str, Any]) -> str:
     per_point = "6 to 10" if found["depth"] == "deep" else "3 to 6"
+    if found["followups"]:
+        latest = found["followups"][-1]
+        covered = "\n".join(f"- {point}" for point in found["outline"][: latest["from"]])
+        asked = "\n".join(f"- {question}" for question in latest["questions"])
+        return (
+            f"Mission: {found['title']}\nGoal: {found['goal']}\nAudience: {found['audience']}\n"
+            f"The write-up already covers:\n{covered}\n\nThe reader says it missed these "
+            f"questions:\n{asked}\n\nFind sources that answer them and record {per_point} claims "
+            f"per question. The ledger already holds {found['claims']} claims, so record only "
+            f"facts it doesn't have yet."
+        )
     points = "\n".join(f"{index + 1}. {point}" for index, point in enumerate(found["outline"]))
     kinds = ", ".join(SOURCE_NAMES[kind] for kind in found["source_kinds"] if kind in SOURCE_NAMES)
     return (
@@ -895,9 +964,12 @@ def write_section(found: Dict[str, Any], index: int, done: List[str]) -> Dict[st
     point = found["outline"][index]
     known = {claim["id"] for claim in found["ledger"]["claims"]}
     paragraphs = "2 to 4" if found["depth"] == "deep" else "1 to 3"
+    first = _first_followup(found)
+    asked = first is not None and index >= first
+    covers = f"This section answers the reader's question: {point}" if asked else f"This section covers: {point}"
     instructions = (
         f"Write section {index + 1} of {len(found['outline'])} of a guide whose goal is: "
-        f"{found['goal']}\nThis section covers: {point}\n"
+        f"{found['goal']}\n{covers}\n"
         + (f"Sections already written: {'; '.join(done)}. Don't repeat them.\n" if done else "")
         + f"Write {paragraphs} paragraphs. End every sentence with the ids of the claims behind "
         f"it in square brackets, right after its full stop, like \"... the values. [c3]\" or "
@@ -914,7 +986,10 @@ def write_section(found: Dict[str, Any], index: int, done: List[str]) -> Dict[st
     paragraphs_out = [paragraph for paragraph in paragraphs_out if paragraph]
     if not paragraphs_out:
         raise ResearchError("The writer returned an empty section.", 502)
-    return {"title": _clip(answer.get("title"), MAX_POINT) or point, "paragraphs": paragraphs_out}
+    section = {"title": _clip(answer.get("title"), MAX_POINT) or point, "paragraphs": paragraphs_out}
+    if asked:
+        section["question"] = point
+    return section
 
 
 def write_quiz(found: Dict[str, Any]) -> Dict[str, Any]:
@@ -998,12 +1073,66 @@ def _write(path: Path, found: Dict[str, Any], fmt: str, first: bool) -> None:
 
 
 def _draft(path: Path, found: Dict[str, Any]) -> None:
+    mission_id = found["id"]
     if found["stage"] == "drafting":
         _write(path, found, found["format"], True)
         # Every span was checked against the ledger as it was written; the review is that check.
-        _update(path, found["id"], stage="reviewing")
-    _update(path, found["id"], stage="delivered", formats=[found["format"]])
-    _tell(path, "research_done", found["id"], found["title"])
+        _update(path, mission_id, stage="reviewing")
+    formats = [found["format"], *(fmt for fmt in found["formats"] if fmt != found["format"])]
+    if found["followups"]:
+        # The other formats made before the follow-up are written again from the grown ledger.
+        found = mission(path, mission_id) or found
+        for fmt in formats[1:]:
+            _write(path, found, fmt, False)
+    _update(path, mission_id, stage="delivered", formats=formats)
+    _tell(path, "research_done", mission_id, found["title"])
+    _suggest(path, mission_id)
+
+
+SUGGEST_SYSTEM = (
+    "You read what a piece of research covered and name the questions it leaves open for its "
+    "reader. Stay within the topic and the goal; never widen it."
+)
+SUGGEST_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "questions": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_SUGGESTIONS}
+    },
+    "required": ["questions"],
+}
+
+
+def _suggest(path: Path, mission_id: str) -> None:
+    """Questions the delivered mission may have missed, for the user to pick as a follow-up.
+    Best effort: none is shown when the call fails."""
+    found = mission(path, mission_id)
+    if found is None or len(found["outline"]) >= MAX_OUTLINE:
+        return
+    rounds = len(found["followups"])
+    facts = "\n".join(f"- {claim['text']}" for claim in found["ledger"]["claims"])
+    text = (
+        f"{_brief_text(found)}\nOutline:\n"
+        + "\n".join(f"- {point}" for point in found["outline"])
+        + f"\nFacts it found:\n{facts}"
+    )
+    instructions = (
+        f"Name up to {MAX_SUGGESTIONS} questions someone with this goal would still have after "
+        f"reading it: ones the outline and facts leave unanswered, not ones they already cover. "
+        f"Each a short plain question under 100 characters. Name none if nothing important is missing."
+    )
+    try:
+        answer = _structured("suggest", SUGGEST_SYSTEM, instructions, text, SUGGEST_SCHEMA, 800)
+    except ResearchError:
+        logger.debug("memento: no follow-up suggestions for %s", mission_id, exc_info=True)
+        return
+    covered = {point.casefold() for point in found["outline"]}
+    questions = [_clip(q, MAX_POINT) for q in answer.get("questions") or [] if isinstance(q, str)]
+    questions = list(dict.fromkeys(q for q in questions if q and q.casefold() not in covered))
+    latest = mission(path, mission_id)
+    # A follow-up asked meanwhile makes these stale.
+    if latest is None or latest["stage"] != "delivered" or len(latest["followups"]) != rounds:
+        return
+    _update(path, mission_id, suggestions=questions[:MAX_SUGGESTIONS])
 
 
 def _make(path: Path, found: Dict[str, Any]) -> None:
@@ -1139,16 +1268,24 @@ def finished_reading(path: Path, mission_id: str, status: Optional[str]) -> bool
     found = mission(path, mission_id)
     if found is None or found["stage"] != "reading" or found["error"]:
         return True
-    if found["claims"] < MIN_CLAIMS:
-        reason = (
-            "The researcher stopped before recording enough sources."
-            if status in ("failed", "cancelled", "interrupted")
-            else "The researcher found too few sources to write from. Check that web search works on the host."
-        )
+    rounds = found["followups"]
+    if rounds:
+        enough = found["claims"] > (rounds[-1].get("claims") or 0)
+    else:
+        enough = found["claims"] >= MIN_CLAIMS
+    if not enough:
+        stopped = status in ("failed", "cancelled", "interrupted")
+        if stopped:
+            reason = "The researcher stopped before recording enough sources."
+        elif rounds:
+            reason = "The researcher found nothing new on those questions."
+        else:
+            reason = "The researcher found too few sources to write from. Check that web search works on the host."
         _update(path, mission_id, error=reason)
         _tell(path, "research_failed", mission_id, found["title"])
         return True
-    _update(path, mission_id, stage="drafting", written=0)
+    # A follow-up round's guide keeps its sections, so drafting picks up after them.
+    _update(path, mission_id, stage="drafting", **({} if rounds else {"written": 0}))
     return True
 
 
