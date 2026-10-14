@@ -31,6 +31,11 @@ const FLOWS = {
     about: "A project session waits on an approval in the sidebar and its project, then goes idle",
     alsoPolling: true,
   },
+  "approval-missed": {
+    script: "e2e/approval-missed.mjs",
+    about: "An approval the host timed out, or refuses to take an answer for, leaves the composer",
+    alsoPolling: true,
+  },
   reattach: {
     script: "e2e/reattach.mjs",
     about: "A reply still streaming when the page reloads picks its run up again and finishes",
@@ -105,7 +110,7 @@ const HELP = `Usage: pnpm e2e <command> [options]      (or .agents/skills/e2e-te
 
 Commands:
   <flow> [<flow>...]   Run these flows (see list)
-  all                  Run every flow; approval and reattach again on the polling mock
+  all                  Run every flow; approval, approval-missed and reattach again on the polling mock
   list                 Name and describe every flow
   shot <path>          Screenshot a screen of the app, e.g. shot /code or shot /routines
   up                   Start the app and every mock, and leave them running

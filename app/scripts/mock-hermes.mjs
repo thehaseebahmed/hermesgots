@@ -1134,12 +1134,18 @@ function startRun(req, body) {
     approve(event) {
       run.status = "waiting_for_approval"
       noteEvent("runs", run.sessionId)
-      run.approval = { ...event, run_id: id, choices: ["once", "session", "always", "deny"] }
+      // The status and the event share the request's timestamp, as on Hermes.
+      run.approval = { ...event, run_id: id, timestamp: Date.now() / 1000, choices: ["once", "session", "always", "deny"] }
       push("approval.request", run.approval)
-      return waitForApproval(id).finally(() => {
+      return waitForApproval(id).then(async (choice) => {
         run.status = "running"
         run.approval = undefined
         noteEvent("runs", run.sessionId)
+        // Hermes's route says so for an answer, the plugin for a timeout or its own Auto answer.
+        if (!run.stopped) push("approval.responded", { choice })
+        // The agent takes a moment to carry on, so the card is seen to go before the reply ends.
+        if (choice === "timeout") await sleep(4000)
+        return choice
       })
     },
     async ask(questions) {
@@ -1690,6 +1696,17 @@ http
     // Dev only: POST { stage } moves every Theseus run (and the next ones) to that stage.
     if (url.pathname === "/__mock/dictation" && req.method === "GET") {
       return json(res, 200, { clips: dictationClips })
+    }
+    // Dev only: POST { outcome } ends every pending approval without the app. "timeout" is a host
+    // with the plugin (the run says so and carries on); "lost" one without it, which keeps the
+    // stale request on the run's status and refuses an answer with approval_not_pending.
+    if (url.pathname === "/__mock/approvals" && req.method === "POST") {
+      const { outcome } = await readBody(req)
+      for (const [id, resolve] of [...pendingApprovals]) {
+        if (outcome === "lost") pendingApprovals.delete(id)
+        else resolve("timeout")
+      }
+      return json(res, 200, { ok: true })
     }
     if (url.pathname === "/__mock/theseus" && req.method === "POST") {
       const { stage } = await readBody(req)

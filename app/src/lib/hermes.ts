@@ -52,6 +52,8 @@ export interface ApprovalRequestEvent {
   command?: string
   description?: string
   choices?: ApprovalChoice[]
+  /** When Hermes asked (Unix seconds); the stream's event and the run's status share it. */
+  timestamp?: number
 }
 
 /** The plugin's `clarify.request` run event: the agent's questions, one card's worth. */
@@ -67,6 +69,15 @@ export interface ClarifyRespondedEvent {
   clarify_id: string
   outcome?: string
   answers?: ClarifyAnswers
+}
+
+/**
+ * A run's `approval.responded` event: Hermes's when a client answered, the plugin's when the
+ * approval stopped waiting without one (`timeout`, `cancelled`, `notify_failed`).
+ */
+export interface ApprovalRespondedEvent {
+  run_id: string
+  choice?: string
 }
 
 /** The questions of a `clarify.request` event in the app's shape; none when the event has none. */
@@ -95,6 +106,7 @@ export interface StreamHandlers {
   onApproval?: (event: ApprovalRequestEvent) => void
   onClarify?: (event: ClarifyRequestEvent) => void
   onClarifyResolved?: (event: ClarifyRespondedEvent) => void
+  onApprovalResolved?: (event: ApprovalRespondedEvent) => void
 }
 
 /** Hermes sums these over every model call in the turn, tool loops included. */
@@ -110,11 +122,14 @@ export interface StreamResult {
 
 export class HermesError extends Error {
   readonly status?: number
+  /** The error envelope's `code`, such as `approval_not_pending`, when Hermes sent one. */
+  readonly code?: string
 
-  constructor(message: string, status?: number) {
+  constructor(message: string, status?: number, code?: string) {
     super(message)
     this.name = "HermesError"
     this.status = status
+    this.code = code
   }
 }
 
@@ -143,7 +158,8 @@ async function request(url: string, init: RequestInit) {
     throw new HermesError(networkHint(url))
   }
   if (!response.ok) {
-    throw new HermesError(await errorMessage(response), response.status)
+    const { message, code } = await errorBody(response)
+    throw new HermesError(message, response.status, code)
   }
   return response
 }
@@ -157,16 +173,18 @@ function networkHint(url: string) {
   return `Can't reach Hermes. Check it's running and that API_SERVER_CORS_ORIGINS includes ${window.location.origin}.`
 }
 
-async function errorMessage(response: Response) {
+async function errorBody(response: Response): Promise<{ message: string; code?: string }> {
+  let code: string | undefined
   try {
     const body = await response.json()
+    if (typeof body?.error?.code === "string") code = body.error.code
     const message = body?.error?.message ?? body?.message
-    if (message) return String(message)
+    if (message) return { message: String(message), code }
   } catch {
     // Not JSON; fall through.
   }
-  if (response.status === 401) return "Hermes rejected the API key."
-  return `Hermes returned ${response.status} ${response.statusText}`.trim()
+  if (response.status === 401) return { message: "Hermes rejected the API key.", code }
+  return { message: `Hermes returned ${response.status} ${response.statusText}`.trim(), code }
 }
 
 /** A read that doesn't settle within `ms` rejects with a `TimeoutError`. */
@@ -1994,6 +2012,9 @@ export async function followRun(
         break
       case "clarify.responded":
         handlers.onClarifyResolved?.(payload as ClarifyRespondedEvent)
+        break
+      case "approval.responded":
+        handlers.onApprovalResolved?.(payload as ApprovalRespondedEvent)
         break
       case "replay.truncated":
         handlers.onTruncated?.()

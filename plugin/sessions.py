@@ -30,7 +30,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
 
-from . import events, push
+from . import approvals, events, push
 from .store import connect
 
 logger = logging.getLogger(__name__)
@@ -935,7 +935,11 @@ def answer_waiting(session_id: str) -> int:
             continue
         if any(entry.get("smart_denied") for entry in list_gateway_approvals(run_id)):
             continue
-        answered += resolve_gateway_approval(run_id, "once", resolve_all=True)
+        count = resolve_gateway_approval(run_id, "once", resolve_all=True)
+        # Hermes's own route would tell the run's clients; this answer has to do it itself.
+        if count:
+            approvals.announce(run_id, "once")
+        answered += count
     return answered
 
 
