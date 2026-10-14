@@ -1,15 +1,12 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { useSearchParams } from "react-router"
-import { EyeIcon, EyeOffIcon, PlugZapIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react"
+import { EyeIcon, EyeOffIcon, PlugZapIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
-import { BotCard } from "@/components/bot-card"
 import { BOTS } from "@/components/bots"
 import { DefaultModelSetting } from "@/components/chat/model-picker"
-import { LinkSheet } from "@/components/link-bots"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,7 +20,6 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
@@ -45,8 +41,6 @@ import {
   deleteProfile,
   getActiveProfile,
   getSettings,
-  listProfiles,
-  saveSettings,
   setActiveProfile,
   updateProfile,
   type Profile,
@@ -57,7 +51,7 @@ import { setDefaultModel } from "@/lib/model-info"
 import { syncContextWindow } from "@/lib/models"
 import { setBotMuted } from "@/lib/push"
 import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
-import { useSyncState } from "@/lib/sync"
+import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { MIN_PLUGIN_VERSION, pluginOutdated } from "@/lib/version"
 
@@ -69,105 +63,6 @@ type Connection =
 
 /** Hermes's default model id; any other advertised id is the profile's name. */
 const UNNAMED_MODEL = "hermes-agent"
-
-/** A bot added by hand before linking, as opposed to the untouched seed of a fresh install. */
-function handAdded(profile: Profile) {
-  return !profile.hostId && (Boolean(profile.apiKey) || profile.updatedAt !== profile.createdAt)
-}
-
-/** Bots are Hermes profiles, linked from their hosts. Tap one to edit it. */
-export function BotSettings() {
-  const profiles = useLiveQuery(listProfiles, [])
-  const active = useLiveQuery(getActiveProfile, [])
-  const settings = useLiveQuery(getSettings, [])
-  const [editingId, setEditingId] = useState<string>()
-  const [params, setParams] = useSearchParams()
-  const editing = profiles?.find((p) => p.id === editingId) ?? active
-  const { chatStores, registryError } = useSyncState()
-  const now = useNow()
-  const linking = params.get("link") === "1"
-  const setLinking = (open: boolean) =>
-    setParams(open ? { link: "1" } : {}, { replace: true, state: { quiet: true } })
-  const unlinked = settings && !settings.linkNoticeSeen && profiles?.some(handAdded)
-
-  return (
-    <Card className="rounded-3xl">
-      <CardContent className="flex flex-col gap-6">
-        {registryError && <Banner tone="error">Couldn't refresh bots. {registryError}</Banner>}
-        {unlinked && (
-          <Banner
-            action={
-              <Button
-                variant="ghost"
-                size="icon-lg"
-                className="size-11"
-                aria-label="Dismiss"
-                onClick={() => void saveSettings({ linkNoticeSeen: true })}
-              >
-                <XIcon />
-              </Button>
-            }
-          >
-            Bots added by hand can't be added any more.{" "}
-            <button type="button" className="underline" onClick={() => setLinking(true)}>
-              Link them
-            </button>{" "}
-            to keep them up to date.
-          </Banner>
-        )}
-        <div className="-mx-6 flex [scrollbar-width:none] gap-2 overflow-x-auto px-6 py-1 [&::-webkit-scrollbar]:hidden">
-          {profiles?.map((profile) => (
-            <BotCard
-              key={profile.id}
-              botId={profile.botId}
-              name={profile.name}
-              selected={profile.id === editing?.id}
-              dimmed={profile.disabled}
-              online={profile.hostId && !profile.disabled ? isOnline(profile, now) : undefined}
-              warning={
-                profile.disabled
-                  ? undefined
-                  : !profile.hostId && handAdded(profile)
-                    ? "Not linked"
-                    : chatStores[profile.id] === "unreachable"
-                      ? "Can't reach its Memento plugin"
-                      : pluginOutdated(profile.pluginVersion)
-                        ? "Plugin out of date"
-                        : undefined
-              }
-              onClick={() => setEditingId(profile.id)}
-            />
-          ))}
-          <BotCard
-            name="Link a bot"
-            icon={<PlusIcon className="size-5" />}
-            className="border border-dashed border-foreground/25 bg-transparent ring-0"
-            onClick={() => setLinking(true)}
-          />
-        </div>
-        {editing && (
-          <BotEditor
-            key={editing.id}
-            profile={editing}
-            canDelete={(profiles?.length ?? 0) > 1}
-            onDeleted={() => setEditingId(undefined)}
-          />
-        )}
-      </CardContent>
-      <LinkSheet open={linking} onOpenChange={setLinking} />
-    </Card>
-  )
-}
-
-/** The time now, ticking each minute, for "last seen" and online dots. */
-function useNow() {
-  const [now, setNow] = useState(Date.now)
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 60_000)
-    return () => window.clearInterval(timer)
-  }, [])
-  return now
-}
 
 /** The registry's Enabled flag, with when the bot's host last checked in. */
 function EnabledSetting({ profile }: { profile: Profile }) {
