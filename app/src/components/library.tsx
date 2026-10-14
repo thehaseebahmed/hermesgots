@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react"
-import { FileIcon, FileTextIcon, FolderIcon, ImageIcon } from "lucide-react"
+import { ChevronDownIcon, FileIcon, FileTextIcon, FolderIcon, ImageIcon } from "lucide-react"
 
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { connectionKey } from "@/lib/connection"
 import { LIST_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
@@ -72,11 +73,46 @@ function sessionsOf(folder: LibraryFolder, titles: Map<string, string>) {
   return [...new Set(names)].join(", ")
 }
 
+/** One folder of the tree: its files, folded away until the folder itself is tapped. */
+function FolderSection({
+  config,
+  folder,
+  titles,
+}: {
+  config: HermesConfig
+  folder: LibraryFolder
+  titles: Map<string, string>
+}) {
+  return (
+    <Collapsible defaultOpen={false} render={<section />}>
+      <CollapsibleTrigger className="group flex min-h-11 w-full items-center gap-3 rounded-xl px-2 py-2 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted">
+          <FolderIcon className="size-5 text-muted-foreground" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-medium">{folder.name}</span>
+          <span className="block truncate text-sm text-muted-foreground">
+            {sessionsOf(folder, titles)}
+          </span>
+        </span>
+        <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-panel-open:rotate-180 motion-reduce:transition-none" />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="space-y-0.5 pl-[3.25rem]">
+          {folder.files.map((file) => (
+            <FileRow key={file.path} config={config} file={file} />
+          ))}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
 /**
  * The project's Library as a tree: each folder — named after the flow its files belong to — with
- * the session that filed it, its files beneath. Read from the plugin's library routes while the
- * tab is on screen, at most every minute; a plugin without them (an older one) is left alone for
- * five minutes.
+ * the session that filed it, folded away until it's tapped. Read from the plugin's library routes
+ * while the tab is on screen, at most every minute; a plugin without them (an older one) is left
+ * alone for five minutes.
  */
 export function LibraryTab({
   config,
@@ -118,24 +154,7 @@ export function LibraryTab({
   return (
     <div className="space-y-6 px-3 py-4 sm:px-4">
       {folders.map((folder) => (
-        <section key={folder.name}>
-          <div className="flex items-center gap-3 px-2 py-2">
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted">
-              <FolderIcon className="size-5 text-muted-foreground" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate font-medium">{folder.name}</span>
-              <span className="block truncate text-sm text-muted-foreground">
-                {sessionsOf(folder, titles)}
-              </span>
-            </span>
-          </div>
-          <div className="space-y-0.5 pl-[3.25rem]">
-            {folder.files.map((file) => (
-              <FileRow key={file.path} config={config} file={file} />
-            ))}
-          </div>
-        </section>
+        <FolderSection key={folder.name} config={config} folder={folder} titles={titles} />
       ))}
     </div>
   )
