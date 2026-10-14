@@ -1,0 +1,21 @@
+---
+interface Props {
+  shot: string
+  alt?: string
+  eager?: boolean
+}
+
+const { shot, alt = "", eager = false } = Astro.props
+---
+
+<picture class="shot">
+  <source media="(prefers-color-scheme: dark)" srcset={`/shots/${shot}-dark.webp`} />
+  <img
+    src={`/shots/${shot}-light.webp`}
+    alt={alt}
+    width="780"
+    height="1688"
+    loading={eager ? "eager" : "lazy"}
+    decoding="async"
+  />
+</picture>

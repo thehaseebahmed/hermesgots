@@ -16,6 +16,7 @@
   --usage-output: oklch(0.64 0.19 40);
   --usage-cache-write: oklch(0.62 0.14 165);
   --usage-cache-read: oklch(0.7 0.15 75);
+  --merged: oklch(0.55 0.2 300);
   color-scheme: light dark;
 }
 
@@ -35,6 +36,7 @@
     --usage-output: oklch(0.68 0.18 40);
     --usage-cache-write: oklch(0.68 0.14 165);
     --usage-cache-read: oklch(0.74 0.15 75);
+    --merged: oklch(0.68 0.18 300);
   }
 }
 
