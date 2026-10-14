@@ -69,7 +69,7 @@ async def cron_mark(profile: str) -> Any:
 
 
 def chat_session(db: Any, session_id: str) -> str:
-    """The session a chat started as. Compression moves a chat on to a child session, and Memento
+    """The session a chat started as. Compression moves a chat on to a child session, and Gots
     only knows the first."""
     get = getattr(db, "get_session", None)
     if not callable(get):

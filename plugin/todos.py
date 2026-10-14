@@ -1,4 +1,4 @@
-"""Each Memento chat's todo list: the agent's own plan, as its ``todo_list`` tool last wrote it.
+"""Each Gots chat's todo list: the agent's own plan, as its ``todo_list`` tool last wrote it.
 
 Hermes keeps the list in memory on the agent and rebuilds it from the transcript, where every call's
 result is stored as a tool row (flushed after each tool round, so mid-turn too). The run stream only

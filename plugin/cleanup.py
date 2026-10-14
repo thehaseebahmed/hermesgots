@@ -1,4 +1,4 @@
-"""Once a day, drops Memento sessions nothing was ever sent in.
+"""Once a day, drops Gots sessions nothing was ever sent in.
 
 A session counts as empty when its chat record shows no activity (``updatedAt`` never moved past
 ``createdAt``, the app's own test), it is a day old, and Hermes holds no message for it. Anything

@@ -1,4 +1,4 @@
-// Memento dashboard tab. Hand-written against window.__HERMES_PLUGIN_SDK__, so there's no build step.
+// Gots dashboard tab. Hand-written against window.__HERMES_PLUGIN_SDK__, so there's no build step.
 ;(function () {
   "use strict"
 
@@ -59,7 +59,7 @@
     )
   }
 
-  // Links this profile to a Memento account with a code from the app, like `hermes memento link`.
+  // Links this profile to a Gots account with a code from the app, like `hermes memento link`.
   function LinkCard() {
     var linkState = useState(null)
     var link = linkState[0]
@@ -110,14 +110,14 @@
         { className: "flex flex-col" },
         h(Row, { label: "Bot" }, link.name || link.profile),
         h(C.Separator, null),
-        h(Row, { label: "Memento" }, link.site),
+        h(Row, { label: "Gots" }, link.site),
         h(C.Separator, null),
         h(Row, { label: "API server URL" }, link.url),
         env.length > 0 &&
           h(
             "div",
             { className: "flex flex-col gap-2 pt-3 text-sm" },
-            h("p", null, "Memento needs these lines in this profile's .env:"),
+            h("p", null, "Gots needs these lines in this profile's .env:"),
             h(
               "pre",
               { className: "rounded bg-muted p-2 font-mono text-xs" },
@@ -166,7 +166,7 @@
           },
         },
         link.revoked &&
-          h("p", { className: "text-sm text-muted-foreground" }, "Removed in Memento. Link it again with a new code."),
+          h("p", { className: "text-sm text-muted-foreground" }, "Removed in Gots. Link it again with a new code."),
         h(Field, {
           id: "memento-code",
           label: "Link code",
@@ -176,7 +176,7 @@
         }),
         h(Field, {
           id: "memento-site",
-          label: "Memento address",
+          label: "Gots address",
           placeholder: "https://…",
           value: siteState[0],
           onChange: siteState[1],
@@ -202,7 +202,7 @@
     return h(
       C.Card,
       null,
-      h(C.CardHeader, null, h(C.CardTitle, null, "Link to Memento")),
+      h(C.CardHeader, null, h(C.CardTitle, null, "Link to Gots")),
       h(
         C.CardContent,
         { className: "flex flex-col gap-3" },
@@ -285,7 +285,7 @@
       h(
         C.Card,
         null,
-        h(C.CardHeader, null, h(C.CardTitle, null, "Memento")),
+        h(C.CardHeader, null, h(C.CardTitle, null, "Gots")),
         h(C.CardContent, null, body),
       ),
     )

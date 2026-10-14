@@ -1,4 +1,4 @@
-"""Hermes Projects for Memento's Code screen, read from the profile's ``projects.db``.
+"""Hermes Projects for Gots's Code screen, read from the profile's ``projects.db``.
 
 Hermes keeps no "last worked on" time for a project. The desktop app groups sessions under the
 project whose folder holds their cwd, so this does the same over the session store's cwds.

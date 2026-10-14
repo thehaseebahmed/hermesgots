@@ -68,10 +68,10 @@ class TranscribeTest(unittest.TestCase):
     def test_sends_the_clip_to_the_local_model_and_deletes_it(self) -> None:
         tt, patch = hermes()
         with patch:
-            result = dictation.transcribe(b"opus", "audio/webm;codecs=opus", "Memento Hermes")
+            result = dictation.transcribe(b"opus", "audio/webm;codecs=opus", "Gots Hermes")
         self.assertEqual(result["text"], "Hello there.")
         call = tt.calls[0]
-        self.assertEqual((call["model"], call["prompt"], call["data"]), ("small", "Memento Hermes", b"opus"))
+        self.assertEqual((call["model"], call["prompt"], call["data"]), ("small", "Gots Hermes", b"opus"))
         self.assertTrue(call["path"].endswith(".webm"))
         self.assertFalse(os.path.exists(call["path"]))
 
@@ -79,16 +79,16 @@ class TranscribeTest(unittest.TestCase):
         cfg = {"local": {"model": "base", "initial_prompt": "Haseeb"}}
         tt, patch = hermes(_load_stt_config=lambda: cfg)
         with patch:
-            dictation.transcribe(b"x", "audio/mp4", "Memento")
-        self.assertEqual(tt.calls[0]["prompt"], "Haseeb Memento")
+            dictation.transcribe(b"x", "audio/mp4", "Gots")
+        self.assertEqual(tt.calls[0]["prompt"], "Haseeb Gots")
         self.assertTrue(tt.calls[0]["path"].endswith(".mp4"))
 
     def test_the_text_before_the_clip_goes_last(self) -> None:
         cfg = {"local": {"model": "base", "initial_prompt": "Haseeb"}}
         tt, patch = hermes(_load_stt_config=lambda: cfg)
         with patch:
-            dictation.transcribe(b"x", "audio/webm", "Memento", "We should ship it")
-        self.assertEqual(tt.calls[0]["prompt"], "Haseeb Memento We should ship it")
+            dictation.transcribe(b"x", "audio/webm", "Gots", "We should ship it")
+        self.assertEqual(tt.calls[0]["prompt"], "Haseeb Gots We should ship it")
 
     def test_no_speech_is_empty_text(self) -> None:
         empty = lambda path, model, prompt=None: {"success": False, "error": "Empty transcript"}

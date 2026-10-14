@@ -1,4 +1,4 @@
-"""Memento dashboard plugin backend, mounted at /api/plugins/memento/ on the dashboard."""
+"""Gots dashboard plugin backend, mounted at /api/plugins/memento/ on the dashboard."""
 
 from __future__ import annotations
 
@@ -121,7 +121,7 @@ def link_profile(body: LinkBody) -> Dict[str, Any]:
         state = link.load_state(home)
         site = body.site.strip().rstrip("/")
         if not re.match(r"^https?://", site):
-            raise link.LinkError("Enter the address you open Memento at.")
+            raise link.LinkError("Enter the address you open Gots at.")
         if not link.is_linked(state):
             state = link.claim(home, state, body.code, site)
         url = link.set_url(home, state, body.url)

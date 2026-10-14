@@ -1,4 +1,4 @@
-"""Provenance test: verify Memento's plugin wrappers don't duplicate tool calls.
+"""Provenance test: verify Gots's plugin wrappers don't duplicate tool calls.
 
 Replays identical synthetic provider events with plugin wrappers disabled and
 enabled, comparing assembled calls and dispatched invocations. Also tests that
@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 
 
 class FakeAgent:
-    """Minimal agent with the attributes Memento's wrappers touch."""
+    """Minimal agent with the attributes Gots's wrappers touch."""
 
     def __init__(self) -> None:
         self.tools: List[Dict[str, Any]] = []
@@ -28,7 +28,7 @@ class FakeAgent:
 
 
 class FakeAdapter:
-    """Minimal adapter with the seams Memento's wrappers use."""
+    """Minimal adapter with the seams Gots's wrappers use."""
 
     def __init__(self, *, has_streams: bool = True, loop: Optional[asyncio.AbstractEventLoop] = None) -> None:
         self._create_agent_called = 0
