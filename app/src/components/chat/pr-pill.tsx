@@ -1,15 +1,8 @@
-import { Browser } from "@capacitor/browser"
-
 import { prLook } from "@/components/chat/pr-look"
 import { Button } from "@/components/ui/button"
 import type { PullRequestRef } from "@/lib/db"
-import { isNative } from "@/lib/native"
+import { openExternal } from "@/lib/native"
 import { cn } from "@/lib/utils"
-
-function openPr(url: string) {
-  if (isNative) void Browser.open({ url })
-  else window.open(url, "_blank", "noopener")
-}
 
 /**
  * A session's pull request as a pill above the composer, coloured by state (orange while its
@@ -33,7 +26,7 @@ export function PrPill({
       variant="secondary"
       className={cn("h-11 gap-2 rounded-full px-4 tabular-nums", look.className, className)}
       disabled={!pr.url}
-      onClick={() => pr.url && openPr(pr.url)}
+      onClick={() => pr.url && openExternal(pr.url)}
       aria-label={`Pull request ${pr.number} in ${pr.repo}, ${look.label}`}
     >
       <Icon className={cn("size-4", look.spin && "motion-safe:animate-spin")} />
@@ -50,7 +43,7 @@ export function PrRow({ pr }: { pr: PullRequestRef }) {
     <button
       type="button"
       disabled={!pr.url}
-      onClick={() => pr.url && openPr(pr.url)}
+      onClick={() => pr.url && openExternal(pr.url)}
       className="-mx-2 flex min-h-14 w-[calc(100%+1rem)] items-center gap-3 rounded-2xl px-2 py-3 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none"
     >
       <span

@@ -3,7 +3,7 @@ import { FileIcon, FileTextIcon, FolderIcon, ImageIcon } from "lucide-react"
 
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { connectionKey } from "@/lib/connection"
-import { LIST_MS } from "@/lib/freshness"
+import { LIST_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import {
   getLibraryFile,
   getProjectLibrary,
@@ -11,15 +11,17 @@ import {
   type LibraryFile,
   type LibraryFolder,
 } from "@/lib/hermes"
-import { openImageViewer } from "@/lib/native"
+import { openExternal, openImageViewer } from "@/lib/native"
 import { usePoll } from "@/lib/poll"
 import { quietly } from "@/lib/report"
 
 /** Bots whose plugin has no library routes (an older plugin). */
 const unsupported = cooldown()
 
+// The kind decides the icon and how a tap opens the file; the bytes come back with the content
+// type the plugin's route gives them (media.content_type), which covers the same extensions.
 const IMAGE_FILE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i
-const TEXT_FILE = /\.(md|markdown|txt|csv|json)$/i
+const TEXT_FILE = /\.(md|markdown|txt|csv|json|pdf)$/i
 
 /** A library file's kind, for its icon and how it opens. */
 function kindOf(name: string) {
@@ -30,11 +32,11 @@ function kindOf(name: string) {
 
 /** Opens a library file: an image in the system viewer, anything else in a new tab. */
 function openFile(config: HermesConfig, file: LibraryFile) {
-  void getLibraryFile(config, file.path)
+  void getLibraryFile(config, file.path, AbortSignal.timeout(READ_TIMEOUT_MS))
     .then(async (blob) => {
       const url = URL.createObjectURL(blob)
       if (kindOf(file.name) !== "image") {
-        window.open(url, "_blank", "noopener")
+        openExternal(url)
         // The tab reads the URL after this returns, so its object URL outlives the click.
         window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
         return
@@ -90,19 +92,23 @@ export function LibraryTab({
 }) {
   const [folders, setFolders] = useState<LibraryFolder[]>([])
   const key = connectionKey(config)
-  const read = useCallback(() => {
-    if (unsupported.cooling(key)) return
-    void getProjectLibrary(config, projectId)
-      .then((found) => {
-        unsupported.clear(key)
-        setFolders(found)
-      })
-      .catch((error: unknown) => {
-        void lacksRoute(config, error, "library").then((missing) => {
-          if (missing) unsupported.start(key)
+  const read = useCallback(
+    (signal: AbortSignal) => {
+      if (unsupported.cooling(key)) return
+      void getProjectLibrary(config, projectId, signal)
+        .then((found) => {
+          unsupported.clear(key)
+          if (signal.aborted) return
+          setFolders(found)
         })
-      })
-  }, [config, projectId, key])
+        .catch((error: unknown) => {
+          void lacksRoute(config, error, "library").then((missing) => {
+            if (missing) unsupported.start(key)
+          })
+        })
+    },
+    [config, projectId, key],
+  )
   usePoll(read, LIST_MS, [], { active })
   if (!folders.length) {
     return (

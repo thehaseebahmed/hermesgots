@@ -59,7 +59,6 @@ import { readProjects, useProjects } from "@/lib/projects"
 import {
   projectRepos,
   prChecksPending,
-  refreshLibrary,
   refreshPrs,
   refreshWorkspace,
   sessionGroup,
@@ -208,7 +207,6 @@ export function ProjectPage({
       const workspace = !c.worktree || last !== undefined
       void (workspace ? refreshWorkspace(c.id) : Promise.resolve()).then(() => {
         void refreshPrs(c.id)
-        void refreshLibrary(c.id)
       })
     }
   }, [sessions])

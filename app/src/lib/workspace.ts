@@ -29,6 +29,12 @@ import { syncNow } from "@/lib/sync"
 /** Bots whose plugin has no workspace routes (an older plugin). */
 const unsupported = cooldown()
 
+/**
+ * When each session's library was last read here: what `LIBRARY_MS` measures. Kept out of the row
+ * so a read that found the same count doesn't wake every query the conversation covers.
+ */
+const libraryRead = new Map<string, number>()
+
 /** Whether any of a session's pull requests still has checks running. */
 export const prChecksPending = (prs: PullRequestRef[] | undefined) =>
   (prs ?? []).some((pr) => pr.state !== "merged" && pr.checks === "pending")
@@ -138,7 +144,8 @@ export async function refreshLibrary(conversationId: string) {
   const found = await tracked(conversationId)
   if (!found?.conversation.worktree || unsupported.cooling(found.key)) return
   const { conversation, profile } = found
-  if (conversation.library && Date.now() - conversation.library.at < LIBRARY_MS) return
+  const readAt = libraryRead.get(conversationId) ?? conversation.library?.at ?? 0
+  if (Date.now() - readAt < LIBRARY_MS) return
   let library
   try {
     library = await getSessionLibrary(profile, conversation.hermesSessionId)
@@ -147,12 +154,12 @@ export async function refreshLibrary(conversationId: string) {
     if (await lacksRoute(profile, error, "sessions")) unsupported.start(found.key)
     return
   }
-  const count = library.folders.reduce((total, folder) => total + folder.files.length, 0)
   unsupported.clear(found.key)
-  const next = { worktree: library.worktree ?? "", count, at: Date.now() }
+  libraryRead.set(conversationId, Date.now())
+  const count = library.folders.reduce((total, folder) => total + folder.files.length, 0)
   const current = conversation.library
-  if (current && current.worktree === next.worktree && current.count === next.count) return
-  await db.conversations.update(conversationId, { library: next })
+  if (current && current.count === count) return
+  await db.conversations.update(conversationId, { library: { count, at: Date.now() } })
 }
 
 /** Reads the branch's pull request in each of the session's repos from the plugin. */

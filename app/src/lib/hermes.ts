@@ -1788,10 +1788,11 @@ function parseLibrary(body: unknown): LibraryFolder[] {
 export async function getProjectLibrary(
   config: HermesConfig,
   projectId: string,
+  signal?: AbortSignal,
 ): Promise<LibraryFolder[]> {
   const response = await request(
     `${pluginRoot(config.baseUrl)}/projects/${encodeURIComponent(projectId)}/library`,
-    { headers: headers(config) },
+    { headers: headers(config), signal },
   )
   return parseLibrary(await response.json())
 }
@@ -1803,9 +1804,11 @@ export async function getProjectLibrary(
 export async function getSessionLibrary(
   config: HermesConfig,
   sessionId: string,
+  signal?: AbortSignal,
 ): Promise<{ worktree: string | null; folders: LibraryFolder[] }> {
   const response = await request(pluginSession(config, sessionId, "/library"), {
     headers: headers(config),
+    signal,
   })
   const body = (await response.json()) as { worktree?: unknown; folders?: unknown }
   return {
@@ -1815,10 +1818,14 @@ export async function getSessionLibrary(
 }
 
 /** A library file's bytes, for opening it: an image in the system viewer, anything else in a tab. */
-export async function getLibraryFile(config: HermesConfig, path: string): Promise<Blob> {
+export async function getLibraryFile(
+  config: HermesConfig,
+  path: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
   const response = await request(
     `${pluginRoot(config.baseUrl)}/library/file?path=${encodeURIComponent(path)}`,
-    { headers: headers(config) },
+    { headers: headers(config), signal },
   )
   return response.blob()
 }
