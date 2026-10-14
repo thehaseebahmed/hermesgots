@@ -15,12 +15,16 @@ import {
 } from "@/lib/account"
 import { mergeChatList } from "@/lib/hermes"
 import {
+  APPEARANCE_FIELDS,
   DEFAULT_PROFILE,
+  DEFAULT_SETTINGS,
+  adoptAppearance,
   db,
   deleteConversation,
   deleteProfile,
   getSettings,
   saveSettings,
+  type Appearance,
   type Conversation,
   type Profile,
 } from "@/lib/db"
@@ -46,11 +50,12 @@ import {
 } from "@/lib/vault"
 
 /**
- * Syncs bots and the chat list (titles, Hermes session ids and context use, not messages). Bots come
- * from the registry and the sealed `bots` document; each bot's chat list lives with the Memento
- * plugin on its own Hermes server. Everything sent to Netlify is sealed with the account's data key,
- * and each document's associated data names its owner and slot, so the server can't swap one
- * document for another.
+ * Syncs bots, the appearance switches and the chat list (titles, Hermes session ids and context
+ * use, not messages). Bots come from the registry and the sealed `bots` document; the Appearance
+ * section's switches from the `settings` document, which every device merges on `appearanceAt`;
+ * each bot's chat list lives with the Memento plugin on its own Hermes server. Everything sent to
+ * Netlify is sealed with the account's data key, and each document's associated data names its
+ * owner and slot, so the server can't swap one document for another.
  */
 
 /**
@@ -377,6 +382,40 @@ async function syncBots(key: CryptoKey) {
   }
 }
 
+/**
+ * The appearance switches as the `settings` document's one record, each field of
+ * `APPEARANCE_FIELDS` named so adding one to the list fails to compile here. `appearanceAt` is 0
+ * until the user changes a switch here, so a choice made on another device wins until then; the
+ * defaults `DEFAULT_SETTINGS` holds are what a device that never touched them pushes.
+ */
+async function localAppearance(): Promise<Doc<Appearance>> {
+  const { appearanceAt, simplifiedChats, steerByDefault, breakReminders } = await getSettings()
+  return {
+    appearance: {
+      at: appearanceAt ?? 0,
+      value: {
+        simplifiedChats,
+        steerByDefault: steerByDefault ?? DEFAULT_SETTINGS.steerByDefault,
+        breakReminders: breakReminders ?? DEFAULT_SETTINGS.breakReminders,
+      },
+    },
+  }
+}
+
+async function syncAppearance(key: CryptoKey) {
+  try {
+    await syncDoc<Appearance>(key, "settings", localAppearance, async (pull) => {
+      for (const [, entry] of pull) {
+        if (entry.value) await adoptAppearance(entry.value, entry.at)
+      }
+    })
+  } catch (error) {
+    // The switches aren't worth the bots, the registry and every chat list this pass carries, so a
+    // settings document this deployment doesn't know yet, or a plain failure, is noted and goes by.
+    noteFailure("Syncing the appearance switches", error)
+  }
+}
+
 async function localChats(profileId: string): Promise<Doc<ChatValue>> {
   const doc: Doc<ChatValue> = {}
   for (const c of await db.conversations.where("profileId").equals(profileId).toArray()) {
@@ -459,7 +498,8 @@ async function fingerprint() {
     getSettings(),
   ])
   const bots = profiles.map((p) => `${p.id}@${p.updatedAt}`).join(",")
-  return `${bots}|${count}@${newest?.changedAt ?? 0}|${tombstones}|${settings.onboarded}`
+  const appearance = APPEARANCE_FIELDS.map((field) => `${settings[field] ? 1 : 0}`).join("")
+  return `${bots}|${count}@${newest?.changedAt ?? 0}|${tombstones}|${settings.onboarded}|${appearance}@${settings.appearanceAt ?? 0}`
 }
 
 let running: Promise<void> | undefined
@@ -470,7 +510,9 @@ async function runSync() {
   const key = state.vault === "unlocked" ? await localKey() : undefined
   try {
     if (key) await ensureInbox(key)
-    if (key) await syncBots(key)
+    // Bots and the appearance switches are separate documents, so they go side by side; the
+    // registry read follows, since it wants the inbox key.
+    if (key) await Promise.all([syncBots(key), syncAppearance(key)])
     if (key) await pullRegistry()
     await syncChatLists(key)
     syncedFingerprint = await fingerprint()
