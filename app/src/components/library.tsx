@@ -34,7 +34,7 @@ import {
 } from "@/lib/hermes"
 import { openExternal, openImageViewer } from "@/lib/native"
 import { usePoll } from "@/lib/poll"
-import { quietly } from "@/lib/report"
+import { noteFailure, quietly } from "@/lib/report"
 import { cn } from "@/lib/utils"
 
 /** Bots whose plugin has no library routes (an older plugin). */
@@ -144,7 +144,7 @@ function FolderSection({
   /** A session's own tree: folders close together, and room under one that's open. */
   own?: boolean
 }) {
-  const sessions = own ? "" : titles ? sessionsOf(folder, titles) : ""
+  const sessions = titles ? sessionsOf(folder, titles) : ""
   return (
     <Collapsible defaultOpen={false} render={<section />}>
       <CollapsibleTrigger className="group flex min-h-11 w-full items-center gap-3 rounded-xl px-2 py-2 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring">
@@ -193,6 +193,7 @@ function useLibraryRead(
           setFolders(found)
         })
         .catch((error: unknown) => {
+          noteFailure("Reading a library", error)
           void lacksRoute(config, error, "library").then((missing) => {
             if (missing) unsupported.start(key)
           })
