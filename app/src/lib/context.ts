@@ -11,8 +11,10 @@ const unsupported = cooldown()
 
 /**
  * What a session's context use is measured against: the model the next turn runs, since that is
- * what it will be spent on. A window Hermes recorded for a model the session has since left behind
- * never shows, so a switch is visible before the new model's first call lands.
+ * what it will be spent on. In order: the window the bot already holds for that model (so a screen
+ * paints a number at once, without a lookup), Hermes's own window for the call that ran it, then
+ * models.dev's for it. A window known for a model the session has since left behind never shows, so
+ * a switch is visible before the new model's first call lands.
  */
 export function contextWindow(
   live: Conversation["liveContext"],
@@ -20,13 +22,15 @@ export function contextWindow(
   current: ModelChoice | undefined,
   catalog: Catalog | undefined,
 ): number | undefined {
+  if (profile?.contextWindow && heldFor(profile, current)) return profile.contextWindow
   // Hermes's own window is this model's as long as its recorded call ran it.
   if (live?.window && (!current || sameModel(live.model ?? "", current.model))) return live.window
-  const found = current ? modelFacts(catalog, current).context : undefined
-  if (found) return found
-  // What the bot cached is this model's only when it was looked up for it (or for no pick at all).
-  if (current && profile?.contextModel !== fullModel(current)) return undefined
-  return profile?.contextSource === "models.dev" ? profile.contextWindow : undefined
+  return current ? modelFacts(catalog, current).context : undefined
+}
+
+/** Whether the window the bot holds was written for the model the chat runs next. */
+function heldFor(profile: Profile, current: ModelChoice | undefined) {
+  return !current || profile.contextModel === fullModel(current)
 }
 
 /**
