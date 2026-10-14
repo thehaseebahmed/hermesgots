@@ -51,6 +51,8 @@ export function PopupHeader({ className, children, ...props }: ComponentProps<ty
     <SheetHeader
       className={cn(
         "sticky top-0 z-10 bg-popover pb-4",
+        // The close button sits at the header's right, so a dialog or side sheet keeps that room
+        // clear; a phone sheet has no close button and keeps its own right padding.
         !sheet && "pr-14",
         sheet && "pt-0",
         className,
@@ -104,10 +106,21 @@ export function PopupContent({
   const focus = initialFocus === false ? popup : undefined
   const wide = useWide()
   const side = useContext(SideSheet)
+  // Every pop-up renders a header. Only an open one can be missing it: its children mount then, and
+  // the header reports through the context below. The check waits a frame, since Base UI puts the
+  // popup in the document after the commit that opens it, and clears the flag while it's closed so a
+  // later open is checked afresh.
   useEffect(() => {
-    if (import.meta.env.DEV && !headerSeen.current && children)
-      console.error("Every PopupContent must render a PopupHeader")
-  }, [children])
+    if (!import.meta.env.DEV || !children) return
+    const frame = requestAnimationFrame(() => {
+      if (!popup.current?.isConnected) {
+        headerSeen.current = false
+        return
+      }
+      if (!headerSeen.current) console.error("Every PopupContent must render a PopupHeader")
+    })
+    return () => cancelAnimationFrame(frame)
+  })
   if (side)
     return (
       <HeaderSeen.Provider value={markHeaderSeen}>
