@@ -1,3 +1,4 @@
+import { serverConfig } from "@/lib/connection"
 import {
   db,
   getMessages,
@@ -461,7 +462,7 @@ export async function liveTurn(
 async function connection(conversation: Conversation) {
   const profile = await db.profiles.get(conversation.profileId)
   // Hermes only keys a session by our id when a key is sent, so keyless chats have nothing to load.
-  return profile?.apiKey ? { baseUrl: profile.baseUrl, apiKey: profile.apiKey } : undefined
+  return profile?.apiKey ? serverConfig(profile) : undefined
 }
 
 const loading = new Set<string>()

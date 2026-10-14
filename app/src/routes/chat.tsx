@@ -102,6 +102,7 @@ import {
   getMessages,
   updateConversation,
 } from "@/lib/db"
+import { serverConfig } from "@/lib/connection"
 import { describeActivity } from "@/lib/format"
 import { supportsSteer, type HermesProject } from "@/lib/hermes"
 import { readProjects, useProjects } from "@/lib/projects"
@@ -852,7 +853,7 @@ export function ChatPage() {
             imagesAvailable={profile?.imageInput !== false}
             onStop={() => id && stopMessage(id)}
             onCommand={(command) => root(command === "new" ? (botPath ?? "/") : "/settings")}
-            connection={{ baseUrl: profile?.baseUrl ?? "", apiKey: profile?.apiKey ?? "" }}
+            connection={serverConfig(profile)}
             botName={profile?.name}
             dictationHint={[
               conversation?.title,
@@ -896,7 +897,7 @@ export function ChatPage() {
           open={outputsOpen}
           onOpenChange={setOutputsOpen}
           session={session}
-          config={{ baseUrl: baseUrl ?? "", apiKey: apiKey ?? "" }}
+          config={serverConfig(profile)}
         />
       )}
       {theseus && (

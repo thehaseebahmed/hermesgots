@@ -1,5 +1,6 @@
 import { toast } from "sonner"
 
+import { serverConfig } from "@/lib/connection"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import {
   db,
@@ -974,7 +975,7 @@ export async function sendMessage(
     .filter((m) => m.status === "done" || (m.role === "assistant" && m.content))
     .map((m) => ({ role: m.role, content: attachmentsText(m.content, m.attachments) }))
 
-  const config = { baseUrl: profile.baseUrl, apiKey: profile.apiKey }
+  const config = serverConfig(profile)
   const turn = openTurn(conversationId, config, reply, false, controller)
   let uploadFailed: AttachmentError | undefined
   const status = await runTurn(turn, async () => {
@@ -1065,9 +1066,7 @@ export async function reattachRun(conversationId: string) {
   // and only the plugin lists runs.
   // Read through the shared poll, so the sidebar and the project screen hear the same answer.
   const live =
-    profile.apiKey && !profile.disabled
-      ? await readLiveRuns({ baseUrl: profile.baseUrl, apiKey: profile.apiKey })
-      : undefined
+    profile.apiKey && !profile.disabled ? await readLiveRuns(serverConfig(profile)) : undefined
   const runId = stale.runId ?? live?.runIds[conversation.hermesSessionId]
   if (!runId) {
     // Nothing is running for it: a streamed chat completion died with the tab, or the run never
@@ -1091,7 +1090,7 @@ const RUN_START_SLACK_S = 5
  */
 async function adoptRun(conversation: Conversation, profile: Profile) {
   if (!profile.apiKey || profile.disabled) return
-  const server = { baseUrl: profile.baseUrl, apiKey: profile.apiKey }
+  const server = serverConfig(profile)
   const sessionId = conversation.hermesSessionId
   if (!knownLiveRun(server, sessionId)) return
   const id = conversation.id
@@ -1136,7 +1135,7 @@ async function resumeReply(reply: Message) {
     await db.messages.update(reply.id, { status: "stopped", statusText: undefined })
     return
   }
-  const config = { baseUrl: profile.baseUrl, apiKey: profile.apiKey }
+  const config = serverConfig(profile)
   const turn = openTurn(conversationId, config, reply, true, controller)
   const status = await runTurn(turn, () => followTurnRun(turn, runId))
   if (status === "done") await sendNextQueued(conversationId)
@@ -1158,7 +1157,7 @@ async function hostOf(conversationId: string) {
   const conversation = await db.conversations.get(conversationId)
   const profile = await profileFor(conversation?.profileId)
   if (!conversation || !profile) return undefined
-  const config = { baseUrl: profile.baseUrl, apiKey: profile.apiKey }
+  const config = serverConfig(profile)
   return { conversation, profile, config }
 }
 
@@ -1463,11 +1462,7 @@ export async function answerApproval(message: Message, choice: ApprovalChoice) {
   if (!profile) return
   let resolved: ApprovalChoice | "expired" = choice
   try {
-    await respondToApproval(
-      { baseUrl: profile.baseUrl, apiKey: profile.apiKey },
-      message.approval.runId,
-      choice,
-    )
+    await respondToApproval(serverConfig(profile), message.approval.runId, choice)
   } catch (error) {
     // Nothing waits for an answer any more (answered elsewhere, timed out, the run moved on).
     if (!(error instanceof HermesError && error.code && APPROVAL_GONE.has(error.code))) throw error
@@ -1495,7 +1490,7 @@ export async function answerClarify(
   const conversation = await db.conversations.get(message.conversationId)
   const profile = await profileFor(conversation?.profileId)
   if (!profile) return
-  await respondToClarify({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }, clarify.runId, {
+  await respondToClarify(serverConfig(profile), clarify.runId, {
     clarifyId: clarify.clarifyId,
     answers,
     outcome,
