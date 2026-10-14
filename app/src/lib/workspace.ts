@@ -2,7 +2,14 @@ import { LIBRARY_MS, PR_MS, PR_PENDING_MS } from "@/lib/freshness"
 import { noteFailure } from "@/lib/report"
 import { connectionKey } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
-import { db, type Conversation, type PullRequestRef, type SessionMode } from "@/lib/db"
+import {
+  db,
+  prIsLive,
+  prKey,
+  type Conversation,
+  type PullRequestRef,
+  type SessionMode,
+} from "@/lib/db"
 import {
   ensureWorkspace,
   getSessionLibrary,
@@ -37,7 +44,7 @@ const libraryRead = new Map<string, number>()
 
 /** Whether any of a session's live pull requests still has checks running. */
 export const prChecksPending = (prs: PullRequestRef[] | undefined) =>
-  (prs ?? []).some((pr) => (pr.state === "open" || pr.state === "draft") && pr.checks === "pending")
+  (prs ?? []).some((pr) => prIsLive(pr) && pr.checks === "pending")
 
 export type SessionState = "working" | "waiting" | "idle" | "resolved" | "discarded"
 
@@ -188,9 +195,11 @@ export async function refreshPrs(conversationId: string, { force = false } = {})
   const at = Date.now()
   await db.conversations.update(conversationId, { prs: prs.map((pr) => ({ ...pr, at })) })
   // The plugin resolves the session once its pull request merges; the chat list brings that here.
-  const merged = (pr: { repo: string; state: string }) =>
-    pr.state === "merged" &&
-    conversation.prs?.find((old) => old.repo === pr.repo)?.state !== "merged"
+  // Compared per pull request: a session keeps the ones it already finished, so one merge isn't
+  // "the newest of its repo became merged" but that pull request's own change.
+  const known = new Map((conversation.prs ?? []).map((pr) => [prKey(pr), pr.state]))
+  const merged = (pr: { repo: string; number: number; state: string }) =>
+    pr.state === "merged" && known.get(prKey(pr)) !== "merged"
   if (!conversation.resolvedAt && prs.some(merged)) void syncNow()
 }
 
@@ -273,7 +282,7 @@ export function sessionState(
 
 /** A pull request still open (a draft included) is a session waiting to be reviewed and merged. */
 export const hasOpenPr = (conversation: Pick<Conversation, "prs">) =>
-  (conversation.prs ?? []).some((pr) => pr.state === "open" || pr.state === "draft")
+  (conversation.prs ?? []).some(prIsLive)
 
 /**
  * Where a session stands as the project screen groups it: an idle session left with an open pull

@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import { PrRow } from "@/components/chat/pr-pill"
 import { SessionLibrary } from "@/components/library"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import type { Conversation } from "@/lib/db"
+import { byNewestPr, prKey, type Conversation } from "@/lib/db"
 import type { HermesConfig } from "@/lib/hermes"
 
 /**
@@ -23,9 +23,7 @@ export function OutputsDrawer({
   session: Conversation
   config: HermesConfig
 }) {
-  const prs = [...(session.prs ?? [])].sort(
-    (a, b) => b.number - a.number || a.repo.localeCompare(b.repo),
-  )
+  const prs = useMemo(() => [...(session.prs ?? [])].sort(byNewestPr), [session.prs])
   // A session with pull requests opens on them; one with only files opens on the files. Set on each
   // opening too: the drawer stays mounted between them, and its list only reaches the app later.
   const [tab, setTab] = useState(prs.length ? "prs" : "library")
@@ -55,7 +53,7 @@ export function OutputsDrawer({
             ) : (
               <ul className="pt-2">
                 {prs.map((pr) => (
-                  <li key={`${pr.repo}#${pr.number}`}>
+                  <li key={prKey(pr)}>
                     <PrRow pr={pr} />
                   </li>
                 ))}
