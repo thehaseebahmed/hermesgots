@@ -380,3 +380,17 @@
 .hljs-section {
   font-weight: 600;
 }
+
+/* A guide section the overview jumped to, lit up for a moment. */
+@keyframes section-flash {
+  0%,
+  40% {
+    background: color-mix(in oklab, var(--primary) 12%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
+}
+.section-flash {
+  animation: section-flash 1.6s ease-out forwards;
+}

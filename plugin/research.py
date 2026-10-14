@@ -18,6 +18,8 @@ it carries on with the app closed:
   claim, is flagged as having no source.
 
 Another format (a quiz, a glossary) is written later from the same ledger, without new reading.
+A delivered mission is written again, whole, when the user asks the questions it missed (read for
+first) or picks another model to write it; every delivery is kept as a revision with its reason.
 """
 
 from __future__ import annotations
@@ -37,7 +39,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import events, push, tools_common
+from . import events, push, theseus, tools_common
 from .store import connect
 
 logger = logging.getLogger(__name__)
@@ -65,6 +67,7 @@ MAX_POINT = 200
 MAX_FOLLOWUPS = 3
 MAX_OUTLINE = 12
 MAX_SUGGESTIONS = 3
+MAX_MODEL = 200
 MAX_CLAIMS = 120
 MAX_CLAIM = 600
 MIN_SNIPPET = 20
@@ -143,6 +146,8 @@ def _summary(row: Any, conn: Any) -> Dict[str, Any]:
         "written": row["written"],
         "followups": _loads(row["followups"], []),
         "suggestions": _loads(row["suggestions"], []),
+        "pending": _loads(row["pending"], None),
+        "writer": _loads(row["writer"], None),
         "found": counts[0],
         "claims": counts[1],
         "created_at": row["created_at"],
@@ -155,8 +160,8 @@ def _row(conn: Any, mission_id: str) -> Any:
 
 
 def _update(path: Path, mission_id: str, **fields: Any) -> None:
-    for key in ("outline", "source_kinds", "formats", "followups", "suggestions"):
-        if key in fields and not isinstance(fields[key], str):
+    for key in ("outline", "source_kinds", "formats", "followups", "suggestions", "pending", "writer"):
+        if key in fields and fields[key] is not None and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
     fields["updated_at"] = _now()
     columns = ", ".join(f"{key} = ?" for key in fields)
@@ -198,6 +203,20 @@ def mission(path: Path, mission_id: str) -> Optional[Dict[str, Any]]:
                 "SELECT format, content FROM research_outputs WHERE mission_id = ?", (mission_id,)
             )
         }
+        found["revisions"] = [
+            {
+                "number": rev["number"],
+                "reason": rev["reason"],
+                **_loads(rev["detail"], {}),
+                "claims": rev["claims"],
+                "at": rev["at"],
+                "outline": _loads(rev["outline"], []),
+                "outputs": _loads(rev["outputs"], {}),
+            }
+            for rev in conn.execute(
+                "SELECT * FROM research_revisions WHERE mission_id = ? ORDER BY number", (mission_id,)
+            )
+        ]
         return found
     finally:
         conn.close()
@@ -331,14 +350,17 @@ def approve_scope(path: Path, mission_id: str, body: Dict[str, Any]) -> Dict[str
     return mission(path, mission_id)  # type: ignore[return-value]
 
 
+RESEARCH_TABLES = ("research_sources", "research_claims", "research_outputs", "research_revisions")
+
+
 def _clear(path: Path, mission_id: str) -> None:
     conn = _open(path)
     try:
-        for table in ("research_sources", "research_claims", "research_outputs"):
+        for table in RESEARCH_TABLES:
             conn.execute(f"DELETE FROM {table} WHERE mission_id = ?", (mission_id,))
     finally:
         conn.close()
-    _update(path, mission_id, formats=[], making=None, written=0)
+    _update(path, mission_id, formats=[], making=None, written=0, pending=None)
 
 
 def make_format(path: Path, mission_id: str, fmt: Any) -> Dict[str, Any]:
@@ -353,8 +375,8 @@ def make_format(path: Path, mission_id: str, fmt: Any) -> Dict[str, Any]:
 
 
 def followup(path: Path, mission_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
-    """Questions the delivered mission missed: each becomes an outline point, the researcher reads
-    for them in the same session and ledger, and the made formats are written up again."""
+    """Questions the delivered mission missed: the researcher reads for them in the same session and
+    ledger, then the outline is planned again around them and everything made is written again."""
     found = _need(path, mission_id, ("delivered",))
     if found["making"]:
         raise ResearchError("Wait for the format being made.", 409)
@@ -376,20 +398,18 @@ def followup(path: Path, mission_id: str, body: Dict[str, Any]) -> Dict[str, Any
         raise ResearchError(f"Ask {MAX_FOLLOWUPS} questions at most at a time.")
     if len(found["outline"]) + len(questions) > MAX_OUTLINE:
         raise ResearchError("This mission can't take more questions. Start a new one.")
+    _first_revision(path, found)
     rounds = [
         *found["followups"],
         {"questions": questions, "from": len(found["outline"]), "claims": found["claims"], "at": _now()},
     ]
-    guide = (found["outputs"].get("guide") or {}).get("sections") or []
     _update(
         path,
         mission_id,
-        outline=[*found["outline"], *questions],
         followups=rounds,
         suggestions=[],
+        pending={"reason": "followup", "questions": questions},
         stage="reading",
-        # The guide keeps its sections and only gains the new ones; a quiz or glossary is rewritten.
-        written=len(guide) if found["format"] == "guide" else 0,
         busy=None,
         error=None,
         run_id=None,
@@ -397,10 +417,69 @@ def followup(path: Path, mission_id: str, body: Dict[str, Any]) -> Dict[str, Any
     return mission(path, mission_id)  # type: ignore[return-value]
 
 
-def _first_followup(found: Dict[str, Any]) -> Optional[int]:
-    """The index of the first outline point that came from a follow-up, if any did."""
-    rounds = found.get("followups") or []
-    return rounds[0].get("from") if rounds and isinstance(rounds[0].get("from"), int) else None
+def rewrite(path: Path, mission_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    """Writes a delivered Learn & understand mission again, whole, from the same ledger with another
+    model (``{ provider, model }``; none is the profile's own). Also takes over a rewrite that failed."""
+    found = mission(path, mission_id)
+    if found is None:
+        raise ResearchError("No such mission.", 404)
+    if found["type"] != "learn":
+        raise ResearchError("Only a Learn & understand mission can be rewritten with another model.")
+    failed = found["error"] and (found["pending"] or {}).get("reason") == "rewrite"
+    if found["stage"] != "delivered" and not failed:
+        raise ResearchError("The mission isn't delivered yet.", 409)
+    if found["making"]:
+        raise ResearchError("Wait for the format being made.", 409)
+    writer = None
+    if body.get("model") is not None or body.get("provider") is not None:
+        model = _text(body.get("model"), MAX_MODEL, "The model")
+        provider = _text(body.get("provider"), MAX_MODEL, "The provider", required=False)
+        allowed = theseus.llm_gate()
+        if not allowed["model"] or (provider and not allowed["provider"]):
+            raise ResearchError(
+                "This host doesn't let Memento pick the model. Allow it with "
+                "`hermes plugins enable memento`.",
+                403,
+            )
+        writer = {"provider": provider, "model": model} if provider else {"model": model}
+    _first_revision(path, found)
+    _update(
+        path,
+        mission_id,
+        writer=writer,
+        pending={"reason": "rewrite", "model": writer},
+        suggestions=[],
+        stage="drafting",
+        busy=None,
+        error=None,
+    )
+    return mission(path, mission_id)  # type: ignore[return-value]
+
+
+def _revision(path: Path, found: Dict[str, Any], reason: str, detail: Optional[Dict[str, Any]] = None) -> None:
+    """Keeps what the mission delivered as its next revision, with why it was written."""
+    conn = _open(path)
+    try:
+        number = conn.execute(
+            "SELECT COALESCE(MAX(number), 0) + 1 FROM research_revisions WHERE mission_id = ?",
+            (found["id"],),
+        ).fetchone()[0]
+        conn.execute(
+            """INSERT INTO research_revisions (mission_id, number, reason, detail, outline, outputs,
+                   claims, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                found["id"], number, reason, json.dumps(detail or {}), json.dumps(found["outline"]),
+                json.dumps(found["outputs"]), found["claims"], _now(),
+            ),
+        )
+    finally:
+        conn.close()
+
+
+def _first_revision(path: Path, found: Dict[str, Any]) -> None:
+    """A mission delivered before revisions were kept gets its first one before it's written again."""
+    if not found.get("revisions"):
+        _revision(path, found, "first")
 
 
 def remove(path: Path, mission_id: str) -> Optional[Dict[str, Any]]:
@@ -411,7 +490,7 @@ def remove(path: Path, mission_id: str) -> Optional[Dict[str, Any]]:
     conn = _open(path)
     try:
         row = _row(conn, mission_id)
-        for table in ("research_sources", "research_claims", "research_outputs"):
+        for table in RESEARCH_TABLES:
             conn.execute(f"DELETE FROM {table} WHERE mission_id = ?", (mission_id,))
         conn.execute("DELETE FROM research_missions WHERE id = ?", (mission_id,))
     finally:
@@ -472,9 +551,11 @@ def _llm():
 
 
 def _structured(purpose: str, system: str, instructions: str, text: str, schema: Dict[str, Any],
-                max_tokens: int = 4000) -> Dict[str, Any]:
-    """One JSON reply, tried twice: a reply that isn't the shape asked for is asked again."""
+                max_tokens: int = 4000, model: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    """One JSON reply, tried twice: a reply that isn't the shape asked for is asked again. ``model``
+    picks another provider and model than the profile's (the mission's writer)."""
     llm = _llm()
+    options = {key: value for key, value in (model or {}).items() if key in ("provider", "model") and value}
     problem = ""
     for _attempt in range(2):
         try:
@@ -486,12 +567,18 @@ def _structured(purpose: str, system: str, instructions: str, text: str, schema:
                 max_tokens=max_tokens,
                 temperature=0.3,
                 purpose=f"memento.research.{purpose}",
+                **options,
             )
         except ValueError as error:
             # Hermes validates the reply against the schema when it can.
             problem = str(error)
             continue
         except Exception as error:
+            name = type(error).__name__
+            if options and ("Trust" in name or "Override" in name or "Denied" in name):
+                raise ResearchError(
+                    f"{error} Allow it with `hermes plugins enable memento`, or pick Default.", 403
+                ) from None
             raise ResearchError(f"The model call failed: {error}", 502) from None
         parsed = getattr(result, "parsed", None)
         if isinstance(parsed, dict):
@@ -587,7 +674,7 @@ def researcher_prompt(found: Dict[str, Any]) -> str:
     per_point = "6 to 10" if found["depth"] == "deep" else "3 to 6"
     if found["followups"]:
         latest = found["followups"][-1]
-        covered = "\n".join(f"- {point}" for point in found["outline"][: latest["from"]])
+        covered = "\n".join(f"- {point}" for point in found["outline"])
         asked = "\n".join(f"- {question}" for question in latest["questions"])
         return (
             f"Mission: {found['title']}\nGoal: {found['goal']}\nAudience: {found['audience']}\n"
@@ -964,12 +1051,9 @@ def write_section(found: Dict[str, Any], index: int, done: List[str]) -> Dict[st
     point = found["outline"][index]
     known = {claim["id"] for claim in found["ledger"]["claims"]}
     paragraphs = "2 to 4" if found["depth"] == "deep" else "1 to 3"
-    first = _first_followup(found)
-    asked = first is not None and index >= first
-    covers = f"This section answers the reader's question: {point}" if asked else f"This section covers: {point}"
     instructions = (
         f"Write section {index + 1} of {len(found['outline'])} of a guide whose goal is: "
-        f"{found['goal']}\n{covers}\n"
+        f"{found['goal']}\nThis section covers: {point}\n"
         + (f"Sections already written: {'; '.join(done)}. Don't repeat them.\n" if done else "")
         + f"Write {paragraphs} paragraphs. End every sentence with the ids of the claims behind "
         f"it in square brackets, right after its full stop, like \"... the values. [c3]\" or "
@@ -978,7 +1062,7 @@ def write_section(found: Dict[str, Any], index: int, done: List[str]) -> Dict[st
     )
     answer = _structured(
         "section", _writer_system(found, "one section of a guide"), instructions,
-        _ledger_text(found["ledger"]), SECTION_SCHEMA, 3000,
+        _ledger_text(found["ledger"]), SECTION_SCHEMA, 3000, found.get("writer"),
     )
     paragraphs_out = [
         spans(text, known) for text in answer.get("paragraphs") or [] if isinstance(text, str) and text.strip()
@@ -986,10 +1070,7 @@ def write_section(found: Dict[str, Any], index: int, done: List[str]) -> Dict[st
     paragraphs_out = [paragraph for paragraph in paragraphs_out if paragraph]
     if not paragraphs_out:
         raise ResearchError("The writer returned an empty section.", 502)
-    section = {"title": _clip(answer.get("title"), MAX_POINT) or point, "paragraphs": paragraphs_out}
-    if asked:
-        section["question"] = point
-    return section
+    return {"title": _clip(answer.get("title"), MAX_POINT) or point, "paragraphs": paragraphs_out}
 
 
 def write_quiz(found: Dict[str, Any]) -> Dict[str, Any]:
@@ -1000,7 +1081,10 @@ def write_quiz(found: Dict[str, Any]) -> Dict[str, Any]:
         f"Cover the outline in order: {'; '.join(found['outline'])}. Each question has 4 choices, "
         f"one right (answer is its index from 0), and cite is the id of the claim that settles it."
     )
-    answer = _structured("quiz", _writer_system(found, "a quiz"), instructions, _ledger_text(found["ledger"]), QUIZ_SCHEMA, 4000)
+    answer = _structured(
+        "quiz", _writer_system(found, "a quiz"), instructions, _ledger_text(found["ledger"]), QUIZ_SCHEMA,
+        4000, found.get("writer"),
+    )
     questions = []
     for item in answer.get("questions") or []:
         choices = [c.strip() for c in item.get("choices") or [] if isinstance(c, str) and c.strip()]
@@ -1025,7 +1109,7 @@ def write_glossary(found: Dict[str, Any]) -> Dict[str, Any]:
     )
     answer = _structured(
         "glossary", _writer_system(found, "a glossary"), instructions,
-        _ledger_text(found["ledger"]), GLOSSARY_SCHEMA, 4000,
+        _ledger_text(found["ledger"]), GLOSSARY_SCHEMA, 4000, found.get("writer"),
     )
     terms = [
         {"term": item["term"].strip(), "definition": item["definition"].strip(), "cite": item["cite"]}
@@ -1053,11 +1137,12 @@ def _save_output(path: Path, mission_id: str, fmt: str, content: Dict[str, Any])
         conn.close()
 
 
-def _write(path: Path, found: Dict[str, Any], fmt: str, first: bool) -> None:
-    """Writes one format; the first one moves the mission through drafting, a section at a time."""
+def _write(path: Path, found: Dict[str, Any], fmt: str, first: bool, fresh: bool = False) -> None:
+    """Writes one format; the first one moves the mission through drafting, a section at a time.
+    A guide picks up after the sections already saved, unless it's ``fresh``."""
     mission_id = found["id"]
     if fmt == "guide":
-        sections = list((found["outputs"].get("guide") or {}).get("sections") or [])
+        sections = [] if fresh else list((found["outputs"].get("guide") or {}).get("sections") or [])
         for index in range(len(sections), len(found["outline"])):
             sections.append(write_section(found, index, [section["title"] for section in sections]))
             _save_output(path, mission_id, "guide", {"sections": sections})
@@ -1072,19 +1157,83 @@ def _write(path: Path, found: Dict[str, Any], fmt: str, first: bool) -> None:
             _update(path, mission_id, written=1)
 
 
+REPLAN_SYSTEM = (
+    "You revise the outline of a piece of writing that teaches one topic, so it answers questions "
+    "its reader says it missed. Each point becomes one section, in the order a learner should meet them."
+)
+REPLAN_SCHEMA = {
+    "type": "object",
+    "properties": {"outline": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": MAX_OUTLINE}},
+    "required": ["outline"],
+}
+
+
+def _replan(found: Dict[str, Any], questions: List[str]) -> List[str]:
+    """The outline with the reader's questions worked in where they belong, rather than tacked on at
+    the end. Falls back to adding them as points of their own."""
+    fallback = [*found["outline"], *questions][:MAX_OUTLINE]
+    text = (
+        f"{_brief_text(found)}\nOutline:\n"
+        + "\n".join(f"- {point}" for point in found["outline"])
+        + "\nQuestions it missed:\n"
+        + "\n".join(f"- {question}" for question in questions)
+    )
+    instructions = (
+        f"Revise the outline so the writing answers every question, each where it belongs in the "
+        f"flow: fold a question into the point it fits, or add a point for it in the right place. "
+        f"Keep the points that still fit. At most {MAX_OUTLINE} points, each a short heading-like "
+        f"phrase under 80 characters, in plain words. No numbering."
+    )
+    try:
+        answer = _structured("replan", REPLAN_SYSTEM, instructions, text, REPLAN_SCHEMA, 1500, found.get("writer"))
+    except ResearchError:
+        logger.debug("memento: couldn't plan %s again", found["id"], exc_info=True)
+        return fallback
+    points = [_clip(point, MAX_POINT) for point in answer.get("outline") or [] if isinstance(point, str)]
+    points = list(dict.fromkeys(point for point in points if point))[:MAX_OUTLINE]
+    return points or fallback
+
+
 def _draft(path: Path, found: Dict[str, Any]) -> None:
     mission_id = found["id"]
+    pending = found["pending"]
     if found["stage"] == "drafting":
+        if pending and not pending.get("planned"):
+            # Written again from the top: a follow-up's outline is planned around its questions first.
+            outline = found["outline"]
+            if pending.get("reason") == "followup":
+                outline = _replan(found, pending.get("questions") or [])
+            conn = _open(path)
+            try:
+                conn.execute(
+                    "DELETE FROM research_outputs WHERE mission_id = ? AND format = ?",
+                    (mission_id, found["format"]),
+                )
+            finally:
+                conn.close()
+            _update(path, mission_id, outline=outline, written=0, pending={**pending, "planned": True})
+            found = mission(path, mission_id) or found
         _write(path, found, found["format"], True)
         # Every span was checked against the ledger as it was written; the review is that check.
         _update(path, mission_id, stage="reviewing")
     formats = [found["format"], *(fmt for fmt in found["formats"] if fmt != found["format"])]
-    if found["followups"]:
-        # The other formats made before the follow-up are written again from the grown ledger.
+    if pending:
+        # The other formats made before are written again too, from the same outline and ledger.
         found = mission(path, mission_id) or found
         for fmt in formats[1:]:
-            _write(path, found, fmt, False)
-    _update(path, mission_id, stage="delivered", formats=formats)
+            _write(path, found, fmt, False, fresh=True)
+    found = mission(path, mission_id) or found
+    found["formats"] = formats
+    if pending:
+        detail = (
+            {"questions": pending.get("questions") or []}
+            if pending.get("reason") == "followup"
+            else {"model": pending.get("model")}
+        )
+        _revision(path, found, pending.get("reason") or "rewrite", detail)
+    elif not found["revisions"]:
+        _revision(path, found, "first")
+    _update(path, mission_id, stage="delivered", formats=formats, pending=None)
     _tell(path, "research_done", mission_id, found["title"])
     _suggest(path, mission_id)
 
@@ -1284,8 +1433,8 @@ def finished_reading(path: Path, mission_id: str, status: Optional[str]) -> bool
         _update(path, mission_id, error=reason)
         _tell(path, "research_failed", mission_id, found["title"])
         return True
-    # A follow-up round's guide keeps its sections, so drafting picks up after them.
-    _update(path, mission_id, stage="drafting", **({} if rounds else {"written": 0}))
+    # A follow-up round's write-up stays on show until drafting starts it again.
+    _update(path, mission_id, stage="drafting", **({} if found["pending"] else {"written": 0}))
     return True
 
 

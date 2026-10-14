@@ -17,3 +17,6 @@ export const useLarge = media("(min-width: 1024px)")
 
 /** Whether the screen is a laptop's or wider (Tailwind's `xl`), room for a session beside a list. */
 export const useXLarge = media("(min-width: 1280px)")
+
+/** Whether the main pointer can hover (a mouse or trackpad), so a hover can show more. */
+export const useHover = media("(hover: hover) and (pointer: fine)")

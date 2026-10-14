@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -222,9 +222,24 @@ def connect(path: Path) -> sqlite3.Connection:
         # v17: a mission's follow-up rounds (the questions the user said it missed) and the questions
         # the model thinks it still leaves open.
         mission_columns = {row[1] for row in conn.execute("PRAGMA table_info(research_missions)")}
-        for column in ("followups", "suggestions"):
+        # v18: the rewrite under way (a follow-up's or another model's) and the model it writes with.
+        for column in ("followups", "suggestions", "pending", "writer"):
             if column not in mission_columns:
                 conn.execute(f"ALTER TABLE research_missions ADD COLUMN {column} TEXT")
+        # v18: every version of what a mission delivered, and why it was written again.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS research_revisions (
+                   mission_id TEXT NOT NULL,
+                   number INTEGER NOT NULL,
+                   reason TEXT NOT NULL,
+                   detail TEXT,
+                   outline TEXT NOT NULL,
+                   outputs TEXT NOT NULL,
+                   claims INTEGER NOT NULL,
+                   at INTEGER NOT NULL,
+                   PRIMARY KEY (mission_id, number)
+               )"""
+        )
         # v4: a session has a worktree in every repo of its project. v5: its newest plan file. v10: its
         # Theseus settings (the reviewer models), as JSON. v15: the folder its generated files go to.
         columns = {row[1] for row in conn.execute("PRAGMA table_info(project_sessions)")}

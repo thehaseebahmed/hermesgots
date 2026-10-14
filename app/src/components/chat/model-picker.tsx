@@ -297,7 +297,7 @@ function hostChoice(info: ModelInfo | null | undefined): ModelChoice | undefined
 }
 
 // A fixed height, so the sheet doesn't grow and shrink between the lists.
-const PICKER_HEIGHT = "h-[min(36rem,85dvh)]"
+export const PICKER_HEIGHT = "h-[min(36rem,85dvh)]"
 
 const byName = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" })
 

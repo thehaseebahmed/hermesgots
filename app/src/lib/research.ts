@@ -12,7 +12,7 @@ import {
 import { useLiveQuery } from "dexie-react-hooks"
 
 import { connectionKey } from "@/lib/connection"
-import { db, listEnabledProfiles, type Profile } from "@/lib/db"
+import { db, listEnabledProfiles, type ModelChoice, type Profile } from "@/lib/db"
 import { HOST_WORK_MS, LIST_MS, SAFETY_MS } from "@/lib/freshness"
 import {
   createResearch,
@@ -119,7 +119,7 @@ export interface Span {
 export interface Section {
   title: string
   paragraphs: Span[][]
-  /** The follow-up question the section answers, when it came from one. */
+  /** The follow-up question the section answers, in a mission written before follow-ups rewrote it. */
   question?: string
 }
 
@@ -158,6 +158,20 @@ export interface Outputs {
   glossary?: GlossaryTerm[]
 }
 
+/** One version of what a mission delivered, kept by the plugin, and why it was written. */
+export interface Revision {
+  number: number
+  reason: "first" | "followup" | "rewrite"
+  /** A follow-up's questions. */
+  questions?: string[]
+  /** The model a rewrite used; absent for the profile's own. */
+  model?: ModelChoice
+  claims: number
+  at: number
+  outline: string[]
+  outputs: Outputs
+}
+
 export interface Mission {
   id: string
   /** The bot whose plugin runs it. */
@@ -190,6 +204,12 @@ export interface Mission {
   followups?: FollowUp[]
   /** Questions the model thinks the delivered mission leaves open. */
   suggestions: string[]
+  /** Every version delivered so far; absent when the bot's plugin keeps none. */
+  revisions?: Revision[]
+  /** A rewrite under way: a follow-up's (read for first) or another model's. */
+  pending?: { reason: "followup" | "rewrite"; questions?: string[] }
+  /** The model the mission writes with, when not the profile's own. */
+  writer?: ModelChoice
   /** Only once the mission itself has been read, not from the list. */
   ledger?: Ledger
   outputs?: Outputs
@@ -203,9 +223,44 @@ const STAGES = ["brief", "scope", "reading", "drafting", "reviewing", "delivered
 const FORMAT_IDS = ["guide", "quiz", "glossary"] as const
 const KIND_IDS = ["papers", "docs", "articles", "videos", "forums"] as const
 
+function toOutputs(raw: unknown): Outputs | undefined {
+  const outputs = raw as Record<string, Record<string, unknown>> | undefined
+  return (
+    outputs && {
+      guide: outputs.guide && (list(outputs.guide.sections) as Section[]),
+      quiz: outputs.quiz && (list(outputs.quiz.questions) as QuizQuestion[]),
+      glossary: outputs.glossary && (list(outputs.glossary.terms) as GlossaryTerm[]),
+    }
+  )
+}
+
+function toChoice(raw: unknown): ModelChoice | undefined {
+  const choice = raw as Record<string, unknown> | null | undefined
+  return choice && typeof choice.model === "string"
+    ? { provider: text(choice.provider), model: choice.model }
+    : undefined
+}
+
+const REASONS = ["first", "followup", "rewrite"] as const
+
+function toRevision(raw: Record<string, unknown>): Revision {
+  return {
+    number: Number(raw.number) || 1,
+    reason: pick(raw.reason, REASONS, "first"),
+    questions: Array.isArray(raw.questions)
+      ? raw.questions.filter((q): q is string => typeof q === "string")
+      : undefined,
+    model: toChoice(raw.model),
+    claims: Number(raw.claims) || 0,
+    at: Number(raw.at) || 0,
+    outline: list(raw.outline).filter((p): p is string => typeof p === "string"),
+    outputs: toOutputs(raw.outputs) ?? {},
+  }
+}
+
 function toMission(raw: Record<string, unknown>, profileId: string): Mission {
   const ledger = raw.ledger as Record<string, unknown> | undefined
-  const outputs = raw.outputs as Record<string, Record<string, unknown>> | undefined
+  const pending = raw.pending as Record<string, unknown> | null | undefined
   return {
     id: text(raw.id),
     profileId,
@@ -234,15 +289,22 @@ function toMission(raw: Record<string, unknown>, profileId: string): Mission {
         }))
       : undefined,
     suggestions: list(raw.suggestions).filter((q): q is string => typeof q === "string"),
+    revisions: Array.isArray(raw.revisions)
+      ? (raw.revisions as Record<string, unknown>[]).map(toRevision)
+      : undefined,
+    pending:
+      pending && (pending.reason === "followup" || pending.reason === "rewrite")
+        ? {
+            reason: pending.reason,
+            questions: list(pending.questions).filter((q): q is string => typeof q === "string"),
+          }
+        : undefined,
+    writer: toChoice(raw.writer),
     ledger: ledger && {
       sources: list(ledger.sources) as Source[],
       claims: list(ledger.claims) as Claim[],
     },
-    outputs: outputs && {
-      guide: outputs.guide && (list(outputs.guide.sections) as Section[]),
-      quiz: outputs.quiz && (list(outputs.quiz.questions) as QuizQuestion[]),
-      glossary: outputs.glossary && (list(outputs.glossary.terms) as GlossaryTerm[]),
-    },
+    outputs: toOutputs(raw.outputs),
   }
 }
 
@@ -272,7 +334,9 @@ function put(mission: Mission) {
   const own = state.lists[mission.profileId] ?? []
   const listed = own.some((m) => m.id === mission.id)
     ? own.map((m) =>
-        m.id === mission.id ? { ...mission, ledger: undefined, outputs: undefined } : m,
+        m.id === mission.id
+          ? { ...mission, ledger: undefined, outputs: undefined, revisions: undefined }
+          : m,
       )
     : [mission, ...own]
   store.set({
@@ -415,9 +479,22 @@ export const approveScope = (mission: Mission, outline: string[], sources: Sourc
 export const makeFormat = (mission: Mission, format: OutputFormat) =>
   act(mission, "formats", { format })
 
-/** Questions it missed: read for in the same ledger, then added to everything it made. */
+/** Questions it missed: read for in the same ledger, then everything it made is written again. */
 export const followUp = (mission: Mission, questions: string[]) =>
   act(mission, "followup", { questions })
+
+/** Writes the delivered mission again from the same ledger, with another model or the bot's own. */
+export const rewriteMission = (mission: Mission, choice?: ModelChoice) =>
+  act(mission, "rewrite", choice ? { ...choice } : {})
+
+/** How a revision came about, in a few words. */
+export function revisionReason(revision: Revision) {
+  if (revision.reason === "followup")
+    return `Answers ${revision.questions?.map((q) => `“${q}”`).join(", ") || "questions it missed"}`
+  if (revision.reason === "rewrite")
+    return `Rewritten with ${revision.model ? revision.model.model : "the default model"}`
+  return "First version"
+}
 
 export const retryMission = (mission: Mission) => act(mission, "retry")
 

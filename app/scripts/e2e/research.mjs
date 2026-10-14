@@ -1,7 +1,8 @@
 // A research mission end to end on the mock plugin: the question read back as a brief, the Scope
-// Gate, reading and drafting, delivered, another format, a citation opening its source, and
-// questions it missed read for and added. At phone and laptop widths, with no errors in the
-// console.
+// Gate, reading and drafting, delivered, another format, a citation opening its source (a sheet on
+// a phone, a card on hover with a mouse), the overview jumping to a section, questions it missed
+// read for and the guide written again around them, its revisions, and a rewrite with another
+// model. At phone and laptop widths, with no errors in the console.
 import { app, assert, flow, pass } from "./lib.mjs"
 
 const errors = []
@@ -43,12 +44,39 @@ for (const width of [390, 1440]) {
       await glossary.click()
       await page.getByText("Writing from the same").waitFor({ timeout: 5_000 })
       await page.getByText("Positional encoding").waitFor({ timeout: 15_000 })
-      await page.getByRole("button", { name: "Source 3" }).first().click()
-      await page.locator("#claim-c3").getByText("inject some information").waitFor({ timeout: 5_000 })
-      await shot("evidence")
+      const chip = page.getByRole("button", { name: "Source 3" }).first()
+      if (width < 768) {
+        await chip.click()
+        await page.getByRole("dialog").getByText("inject some information").waitFor({ timeout: 5_000 })
+        await page.waitForTimeout(500)
+        await shot("source")
+        await page.keyboard.press("Escape")
+        await page.getByRole("dialog").waitFor({ state: "hidden", timeout: 5_000 })
+      } else {
+        await chip.hover()
+        await page.locator("[data-slot=hover-card-content]").getByText("inject some information").waitFor({ timeout: 5_000 })
+        await shot("source-hover")
+        await chip.click()
+        await page.locator("#claim-c3").getByText("inject some information").waitFor({ timeout: 5_000 })
+        await shot("evidence")
+      }
       pass(`another format and a citation's source at ${width}px`)
 
-      if (width < 768) await page.keyboard.press("Escape")
+      if (width >= 1024) {
+        await page.getByRole("button", { name: "Guide" }).click()
+        await page.getByRole("radio", { name: "Overview" }).click()
+        await page.getByRole("complementary", { name: "Mission details" }).getByRole("button", { name: /^4/ }).click()
+        await page.locator("#section-3 .section-flash").waitFor({ timeout: 5_000 })
+        await page.waitForTimeout(700)
+        const top = await page.locator("#section-3").evaluate((el) => el.getBoundingClientRect().top)
+        assert.ok(top > 60 && top < 600, `the section is scrolled into view (${top}px)`)
+        await page.waitForFunction(
+          () => document.querySelector("aside[aria-label='Mission details'] [aria-current=location]")?.textContent?.startsWith("4"),
+        )
+        await shot("overview-jump")
+        pass("the overview jumps to a section and lights it up")
+      }
+
       await page.getByRole("button", { name: "Mission options" }).click()
       await page.getByRole("menuitem", { name: "Missed something?" }).click()
       await page.getByRole("button", { name: "How is a transformer trained?" }).click()
@@ -57,12 +85,44 @@ for (const width of [390, 1440]) {
       await page.getByRole("button", { name: "Research these" }).click()
       await page.getByRole("dialog").waitFor({ state: "hidden", timeout: 5_000 })
       await page.getByText("Reading sources").first().waitFor({ timeout: 5_000 })
-      await page.getByRole("button", { name: "Guide" }).waitFor({ timeout: 30_000 })
+      await page.getByRole("button", { name: "Guide" }).waitFor({ timeout: 45_000 })
       await page.getByRole("button", { name: "Guide" }).click()
-      await page.getByText("How it learns").first().waitFor({ timeout: 5_000 })
-      await page.getByText("Why does BERT mask words?").first().scrollIntoViewIfNeeded()
+      // Written again around the questions: they sit in the middle of the guide, not after it.
+      const headings = await page.locator("article h2").allTextContents()
+      assert.deepEqual(headings.slice(2, 4), ["How is a transformer trained?", "Why does BERT mask words?"])
+      assert.equal(headings.length, 7)
+      await page.locator("#section-2").scrollIntoViewIfNeeded()
       await shot("followed-up")
-      pass(`questions it missed are researched and added at ${width}px`)
+      pass(`questions it missed are researched and the guide written again at ${width}px`)
+
+      if (width < 1024) {
+        await page.getByRole("button", { name: "Overview and sources" }).click()
+      }
+      const revisions = width < 1024 ? page.getByRole("dialog") : page.getByRole("complementary", { name: "Mission details" })
+      await revisions.getByText("Answers “How is a transformer trained?”, “Why does BERT mask words?”").waitFor({ timeout: 5_000 })
+      await revisions.getByText(/^Current · 13 claims/).waitFor()
+      await page.waitForTimeout(500)
+      await shot("revisions")
+      await revisions.getByRole("button", { name: /First version/ }).click()
+      await page.getByText("Revision 1: First version").waitFor({ timeout: 5_000 })
+      assert.equal(await page.locator("article h2").count(), 5)
+      await shot("revision-1")
+      await page.getByRole("button", { name: "Latest" }).click()
+      await page.getByText("Revision 1: First version").waitFor({ state: "hidden" })
+      pass(`its revisions are kept and an earlier one opens at ${width}px`)
+
+      await page.getByRole("button", { name: "Mission options" }).click()
+      await page.getByRole("menuitem", { name: "Rewrite with another model" }).click()
+      await page.getByRole("button", { name: /^Anthropic/ }).click()
+      await page.getByRole("button", { name: /^claude-opus-4-1/ }).click()
+      await page.getByRole("dialog").first().waitFor({ state: "hidden", timeout: 5_000 })
+      await page.getByRole("button", { name: "Guide" }).waitFor({ timeout: 45_000 })
+      if (width < 1024) await page.getByRole("button", { name: "Overview and sources" }).click()
+      await revisions.getByText("Rewritten with claude-opus-4-1").waitFor({ timeout: 30_000 })
+      await page.waitForTimeout(500)
+      await shot("rewritten")
+      if (width < 1024) await page.keyboard.press("Escape")
+      pass(`a mission is rewritten with another model at ${width}px`)
     },
     { viewport: { width, height: width < 768 ? 844 : 900 } },
   )
