@@ -6,7 +6,7 @@ Guidance for AI coding agents (and humans) working on Memento: a playful, minima
 
 - `app/` is the web and Android app. Run every command below from `app/`; paths in the rest of this file are relative to it unless they start with `plugin/`.
 - `plugin/` is the Memento Hermes plugin (Python, no build step). See **Plugin** below. `plugin/skills/` holds the vendored Theseus skill (JavaScript, run by the host's Node 20+); don't edit it by hand.
-- `website/` is the public site (Astro, static, plain CSS on the app's tokens): the landing page at `/` (a sticky scroll story, design only: its waiting-list form stores nothing yet) and the leaderboard at `/community`;: its own Netlify site with the base directory set to `website/`, configured by `website/netlify.toml`. Run its commands (`pnpm dev`, `pnpm build`) from `website/`. Its leaderboard shows sample data until the community function exists (`src/lib/board.ts`).
+- `website/` is the public site (Astro, static, plain CSS on the app's tokens): the landing page at `/` (a sticky scroll story with a Galaxy Z Fold that unfolds a research mission from phone to tablet, design only: its waiting-list form stores nothing yet) and the leaderboard at `/community`;: its own Netlify site with the base directory set to `website/`, configured by `website/netlify.toml`. Run its commands (`pnpm dev`, `pnpm build`) from `website/`. Its leaderboard shows sample data until the community function exists (`src/lib/board.ts`).
 - `netlify.toml` stays at the root and sets `base = "app"`; it belongs to the app's site.
 
 ## Plugin first
