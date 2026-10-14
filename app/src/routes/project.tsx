@@ -38,9 +38,12 @@ import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { stopMessage } from "@/lib/chat"
 import {
+  byNewestPr,
   createConversation,
   db,
   deleteConversation,
+  prIsLive,
+  prKey,
   type Conversation,
   type PullRequestRef,
 } from "@/lib/db"
@@ -420,7 +423,7 @@ export function ProjectPage({
                       fold={group.fold}
                     >
                       {list.map((pr) => (
-                        <li key={`${pr.repo}#${pr.number}`}>
+                        <li key={prKey(pr)}>
                           <PrRow pr={pr} />
                         </li>
                       ))}
@@ -496,7 +499,7 @@ function formatWhen(at: number, now: number) {
 function prLine(session: Conversation) {
   const all = session.prs ?? []
   if (!all.length) return undefined
-  const live = all.filter((pr) => pr.state === "open" || pr.state === "draft")
+  const live = all.filter(prIsLive)
   const shown = live.length
     ? live
     : [all.reduce((newest, pr) => (pr.number > newest.number ? pr : newest))]
@@ -587,9 +590,9 @@ function SessionItem({
 function projectPrs(sessions: Conversation[]) {
   const byKey = new Map<string, PullRequestRef>()
   for (const pr of sessions.flatMap((c) => c.prs ?? [])) {
-    const key = `${pr.repo}#${pr.number}`
+    const key = prKey(pr)
     const known = byKey.get(key)
     if (!known || pr.at > known.at) byKey.set(key, pr)
   }
-  return [...byKey.values()].sort((a, b) => b.number - a.number || a.repo.localeCompare(b.repo))
+  return [...byKey.values()].sort(byNewestPr)
 }

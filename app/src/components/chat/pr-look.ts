@@ -7,7 +7,7 @@ import {
   Loader2Icon,
 } from "lucide-react"
 
-import type { PrState, PullRequestRef } from "@/lib/db"
+import { LIVE_PR_STATES, type PrState, type PullRequestRef } from "@/lib/db"
 
 interface PrLook {
   label: string
@@ -71,7 +71,7 @@ export function prLook(pr: PullRequestRef): PrLook {
 
 /** How a session's pull requests are grouped in a list: the live ones first, the finished folded. */
 export const PR_GROUPS: { label: string; states: PrState[]; fold?: boolean }[] = [
-  { label: "Open", states: ["open", "draft"] },
+  { label: "Open", states: LIVE_PR_STATES },
   { label: "Done", states: ["merged", "closed"], fold: true },
 ]
 
