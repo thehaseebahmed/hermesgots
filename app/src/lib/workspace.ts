@@ -239,10 +239,16 @@ export async function closeSessionWork(
   const named = conversation.worktree!.repos.length > 1
   try {
     const { kept, results } = await closeSession(profile, conversation.hermesSessionId)
-    const closed = new Set(results.filter((r) => r.closed !== null).map((r) => r.name))
+    // A close names one pull request ("name#number"): a session that shipped more than once keeps
+    // the ones already finished, so only the live one changes state here.
+    const closed = new Set(
+      results.filter((r) => r.closed !== null).map((r) => `${r.name}#${r.closed}`),
+    )
     if (closed.size && conversation.prs)
       await db.conversations.update(conversationId, {
-        prs: conversation.prs.map((pr) => (closed.has(pr.repo) ? { ...pr, state: "closed" } : pr)),
+        prs: conversation.prs.map((pr) =>
+          closed.has(prKey(pr)) ? { ...pr, state: "closed" } : pr,
+        ),
       })
     return {
       kept,
