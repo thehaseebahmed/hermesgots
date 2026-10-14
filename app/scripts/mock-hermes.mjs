@@ -1295,7 +1295,7 @@ http
       return json(res, 200, {
         name: "memento",
         version: PLUGIN_VERSION,
-        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "theseus", ...(EVENTS ? ["events"] : []), "push", "host_model", "queue", "dictation", ...(RESEARCH ? ["research"] : [])],
+        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "theseus", ...(EVENTS ? ["events"] : []), "push", "host_model", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup"] : [])],
         clarify: true,
         hooks: true,
         theseus: THESEUS_START === "unavailable"

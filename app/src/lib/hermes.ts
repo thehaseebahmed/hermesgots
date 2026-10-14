@@ -716,12 +716,13 @@ export async function getResearch(config: HermesConfig, id: string, signal?: Abo
 
 /**
  * `brief` confirms the brief, `edit` goes back to it, `start` passes the Scope Gate, `formats`
- * makes another format, `retry` runs a failed step again and `remove` deletes the mission.
+ * makes another format, `followup` reads again for questions it missed, `retry` runs a failed step
+ * again and `remove` deletes the mission.
  */
 export async function researchAction(
   config: HermesConfig,
   id: string,
-  action: "brief" | "edit" | "start" | "formats" | "retry" | "remove",
+  action: "brief" | "edit" | "start" | "formats" | "followup" | "retry" | "remove",
   body: Record<string, unknown> = {},
 ) {
   const response = await request(`${researchRoot(config, id)}/${action}`, {

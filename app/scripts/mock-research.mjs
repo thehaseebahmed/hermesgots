@@ -1,7 +1,8 @@
 // The Memento plugin's research missions (research.py), for the mock Hermes server. A mission reads
 // its question back after a moment, proposes an outline, then "researches": a claim from the
 // transformers ledger below every 0.7s, a guide section every 1.5s, a short review, delivered.
-// Another format takes 3s. MOCK_RESEARCH_FAIL=1 fails the reading once, to show Try again.
+// Another format takes 3s. A follow-up reads two more claims and adds a section per question.
+// MOCK_RESEARCH_FAIL=1 fails the reading once, to show Try again.
 
 const SOURCES = [
   {
@@ -124,6 +125,32 @@ const CLAIMS = [
     snippet: "We trained the base models for a total of 100,000 steps or 12 hours.",
     confidence: "uncertain",
   },
+]
+
+// What a follow-up round finds, whatever was asked.
+const MORE_CLAIMS = [
+  {
+    id: "c12",
+    text: "The model was trained with the Adam optimizer and a learning rate that warms up, then decays.",
+    source: "s1",
+    snippet:
+      "We used the Adam optimizer with β1 = 0.9, β2 = 0.98 and ϵ = 10−9. We varied the learning rate over the course of training.",
+    confidence: "supported",
+  },
+  {
+    id: "c13",
+    text: "BERT is pre-trained by predicting masked words from the words around them.",
+    source: "s5",
+    snippet:
+      "The masked language model randomly masks some of the tokens from the input, and the objective is to predict the original vocabulary id of the masked word based only on its context.",
+    confidence: "supported",
+  },
+]
+
+const SUGGESTIONS = [
+  "How is a transformer trained?",
+  "Why do transformers need so much data?",
+  "What limits how long the input can be?",
 ]
 
 const GUIDE = [
@@ -315,6 +342,8 @@ function mission(fields) {
     formats: [],
     making: null,
     written: 0,
+    followups: [],
+    suggestions: [],
     created_at: now,
     updated_at: now,
     ledger: { sources: [], claims: [] },
@@ -336,7 +365,8 @@ function delivered(id, fields, formats) {
       stage: "delivered",
       formats,
       written: GUIDE.length,
-      ledger: { sources: SOURCES, claims: CLAIMS },
+      suggestions: SUGGESTIONS,
+      ledger: { sources: SOURCES, claims: [...CLAIMS] },
       outputs,
     }),
   )
@@ -441,6 +471,8 @@ function proposeOutline(m, note) {
 }
 
 function research(m, note) {
+  const round = m.followups.at(-1)
+  const wanted = round ? [...CLAIMS, ...MORE_CLAIMS] : CLAIMS
   const step = () => {
     if (!missions.has(m.id) || m.stage !== "reading") return
     const claims = m.ledger.claims
@@ -448,15 +480,15 @@ function research(m, note) {
       failed = true
       return change(m, { error: "The researcher stopped before recording enough sources." }, note)
     }
-    if (claims.length < CLAIMS.length) {
-      const claim = CLAIMS[claims.length]
+    if (claims.length < wanted.length) {
+      const claim = wanted[claims.length]
       if (!m.ledger.sources.some((s) => s.id === claim.source))
         m.ledger.sources.push(SOURCES.find((s) => s.id === claim.source))
       claims.push(claim)
       change(m, {}, note)
       return later(700, step)
     }
-    change(m, { stage: "drafting", written: 0 }, note)
+    change(m, round ? { stage: "drafting" } : { stage: "drafting", written: 0 }, note)
     later(1500, draft)
   }
   const draft = () => {
@@ -467,7 +499,28 @@ function research(m, note) {
       return later(1000, finish)
     }
     const sections = (m.outputs.guide ??= { sections: [] }).sections
-    sections.push({ ...GUIDE[sections.length % GUIDE.length], title: m.outline[sections.length] ?? GUIDE[sections.length % GUIDE.length].title })
+    const index = sections.length
+    const asked = round && index >= m.followups[0].from
+    sections.push(
+      asked
+        ? {
+            title: "How it learns",
+            question: m.outline[index],
+            paragraphs: [
+              [
+                {
+                  text: "Training adjusts the weights with the Adam optimizer, with a learning rate that warms up and then decays.",
+                  cites: ["c12"],
+                },
+                {
+                  text: " Models like BERT first learn by filling in masked words from the words around them.",
+                  cites: ["c13"],
+                },
+              ],
+            ],
+          }
+        : { ...GUIDE[index % GUIDE.length], title: m.outline[index] ?? GUIDE[index % GUIDE.length].title },
+    )
     change(m, { written: sections.length }, note)
     if (sections.length < m.outline.length) return later(1500, draft)
     change(m, { stage: "reviewing" }, note)
@@ -475,7 +528,8 @@ function research(m, note) {
   }
   const finish = () => {
     if (!missions.has(m.id)) return
-    change(m, { stage: "delivered", formats: [m.format] }, note)
+    const formats = [m.format, ...m.formats.filter((f) => f !== m.format)]
+    change(m, { stage: "delivered", formats, suggestions: round ? [] : SUGGESTIONS }, note)
   }
   later(700, step)
 }
@@ -547,6 +601,20 @@ export async function handleResearch(req, res, path, { json, readBody, noteEvent
       change(m, { making: body.format, error: null }, note)
       makeFormat(m, note)
       break
+    case "followup": {
+      if (moved(["delivered"]) || m.making) return fail(409, "The mission has moved on; reload it."), true
+      const covered = new Set(m.outline.map((p) => p.toLowerCase()))
+      const questions = [...new Set((body.questions ?? []).filter((q) => typeof q === "string" && q.trim()).map((q) => q.trim()))]
+        .filter((q) => !covered.has(q.toLowerCase()))
+      if (!questions.length) return fail(400, "Ask at least one question it hasn't covered."), true
+      if (questions.length > 3) return fail(400, "Ask 3 questions at most at a time."), true
+      if (m.outline.length + questions.length > 12) return fail(400, "This mission can't take more questions. Start a new one."), true
+      const followups = [...m.followups, { questions, from: m.outline.length, claims: m.ledger.claims.length, at: Date.now() }]
+      const written = m.format === "guide" ? (m.outputs.guide?.sections.length ?? 0) : 0
+      change(m, { outline: [...m.outline, ...questions], followups, suggestions: [], stage: "reading", written, error: null }, note)
+      research(m, note)
+      break
+    }
     case "retry":
       if (!m.error) return fail(409, "Nothing failed."), true
       change(m, { error: null }, note)

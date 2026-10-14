@@ -53,6 +53,8 @@ class FakeLlm:
                     {"question": "Made up?", "choices": ["A", "B"], "answer": 0, "cite": "c99"},
                 ]
             }
+        elif purpose == "suggest":
+            parsed = {"questions": ["Why attention", "How is it trained?", "How is it trained?"]}
         else:
             parsed = {"terms": [{"term": "Head", "definition": "One attention.", "cite": "c2"}]}
         return SimpleNamespace(parsed=parsed, text="")
@@ -156,7 +158,8 @@ class MissionTest(unittest.TestCase):
         self.assertEqual(len(sections), 2)
         self.assertEqual(sections[0]["paragraphs"][0][-1], {"text": " It is fast.", "flagged": True})
         # The writer saw the ledger, passages included.
-        self.assertIn('[c1] A fact.', self.llm.calls[-1]["input"][0]["text"])
+        writer = [call for call in self.llm.calls if call["purpose"].endswith(".section")][-1]
+        self.assertIn('[c1] A fact.', writer["input"][0]["text"])
 
         research.make_format(self.path, found["id"], "quiz")
         research._job(self.path, found["id"])
@@ -181,6 +184,72 @@ class MissionTest(unittest.TestCase):
         research._job(self.path, self.mission["id"])
         self.assertEqual(len(self.told()), 3)
         self.assertEqual(self.notify.call_args.args[1], self.mission["id"])
+
+    def deliver(self) -> dict:
+        self.reach_reading()
+        for snippet in ("based solely on attention mechanisms", "Multi-head attention allows the model", "dispensing with recurrence"):
+            self.claim(snippet)
+        research.finished_reading(self.path, self.mission["id"], "completed")
+        research._job(self.path, self.mission["id"])
+        research.make_format(self.path, self.mission["id"], "quiz")
+        research._job(self.path, self.mission["id"])
+        return research.mission(self.path, self.mission["id"])
+
+    def test_questions_it_missed_are_read_for_and_added_to_what_it_made(self) -> None:
+        found = self.deliver()
+        # What it still leaves open, without what the outline already covers or repeats.
+        self.assertEqual(found["suggestions"], ["How is it trained?"])
+        quizzes = sum(1 for call in self.llm.calls if call["purpose"].endswith(".quiz"))
+
+        found = research.followup(self.path, found["id"], {"questions": ["How is it trained?", " ", "why attention"]})
+        self.assertEqual(found["stage"], "reading")
+        self.assertEqual(found["outline"], ["Why attention", "Many heads", "How is it trained?"])
+        self.assertEqual((found["written"], found["suggestions"], found["claims"]), (2, [], 3))
+        self.assertEqual([r["questions"] for r in found["followups"]], [["How is it trained?"]])
+        prompt = research.researcher_prompt(found)
+        self.assertIn("missed these questions:\n- How is it trained?", prompt)
+        self.assertIn("already holds 3 claims", prompt)
+        self.assertEqual(research.run_body(found)["session_id"], f"research-{found['id']}")
+
+        # Nothing new is a failure of the round, not of the mission's ledger.
+        research.finished_reading(self.path, found["id"], "completed")
+        found = research.mission(self.path, found["id"])
+        self.assertEqual(found["error"], "The researcher found nothing new on those questions.")
+        research.retry(self.path, found["id"])
+        self.claim("jointly attend to information from different representation subspaces")
+        research.finished_reading(self.path, found["id"], "completed")
+        self.assertEqual(research.mission(self.path, found["id"])["written"], 2)
+        research._job(self.path, found["id"])
+
+        found = research.mission(self.path, found["id"])
+        self.assertEqual((found["stage"], found["formats"]), ("delivered", ["guide", "quiz"]))
+        sections = found["outputs"]["guide"]["sections"]
+        self.assertEqual(len(sections), 3)
+        self.assertNotIn("question", sections[1])
+        self.assertEqual(sections[2]["question"], "How is it trained?")
+        section_call = [c for c in self.llm.calls if c["purpose"].endswith(".section")][-1]
+        self.assertIn("answers the reader's question: How is it trained?", section_call["instructions"])
+        # The quiz was written again from the grown ledger.
+        self.assertEqual(sum(1 for c in self.llm.calls if c["purpose"].endswith(".quiz")), quizzes + 1)
+        self.assertEqual(self.told()[-1], ("research_done", "How transformers work"))
+
+    def test_follow_up_questions_are_checked(self) -> None:
+        self.reach_reading()
+        with self.assertRaises(research.ResearchError) as moved:
+            research.followup(self.path, self.mission["id"], {"questions": ["Anything?"]})
+        self.assertEqual(moved.exception.status, 409)
+        found = self.deliver()
+        for questions, message in (
+            ("Why?", "at least one"),
+            (["many heads"], "hasn't covered"),
+            (["A?", "B?", "C?", "D?"], "3 questions at most"),
+            (["x" * 201], "too long"),
+        ):
+            with self.assertRaisesRegex(research.ResearchError, message):
+                research.followup(self.path, found["id"], {"questions": questions})
+        research._update(self.path, found["id"], outline=[f"Point {n}" for n in range(research.MAX_OUTLINE)])
+        with self.assertRaisesRegex(research.ResearchError, "Start a new one"):
+            research.followup(self.path, found["id"], {"questions": ["One more?"]})
 
     def test_a_failed_step_is_told(self) -> None:
         self.reach_reading()

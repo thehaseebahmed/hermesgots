@@ -263,6 +263,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "dictation",
                     "usage",
                     "research",
+                    "research_followup",
                 ],
                 "clarify": asks,
                 "todo_tool": todo_tool,
@@ -1317,6 +1318,19 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             research.spawn(store_path(), request.match_info["mission_id"], request_profile())
         return answer
 
+    async def research_followup(request: "web.Request") -> "web.Response":
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        answer = await research_step(request, research.followup, body)
+        if answer.status != 200:
+            return answer
+        path, mission_id = store_path(), request.match_info["mission_id"]
+        found = await asyncio.to_thread(research.mission, path, mission_id)
+        # The same session, so the researcher knows what it already read.
+        await start_researcher(request, path, found)
+        return await research_view(path, mission_id)
+
     async def research_retry(request: "web.Request") -> "web.Response":
         answer = await research_step(request, research.retry)
         if answer.status != 200:
@@ -1358,6 +1372,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/edit", research_edit)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/start", research_start)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/formats", research_format)
+    app.router.add_post(f"{PREFIX}/research/{{mission_id}}/followup", research_followup)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/retry", research_retry)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/remove", remove_research)
     mirror_for_profiles(app, web)

@@ -119,7 +119,20 @@ export interface Span {
 export interface Section {
   title: string
   paragraphs: Span[][]
+  /** The follow-up question the section answers, when it came from one. */
+  question?: string
 }
+
+/** Questions the user said a delivered mission missed, read for in one round. */
+export interface FollowUp {
+  questions: string[]
+  /** The outline point the round's questions start at. */
+  from: number
+}
+
+/** Questions one round can add, and how long the outline can grow (`research.py`). */
+export const MAX_FOLLOWUPS = 3
+export const MAX_OUTLINE = 12
 
 export interface QuizQuestion {
   question: string
@@ -173,6 +186,10 @@ export interface Mission {
   /** Formats made from the ledger, in order, and the one being made. */
   formats: OutputFormat[]
   making?: OutputFormat
+  /** Follow-up rounds so far; absent when the bot's plugin can't take follow-ups. */
+  followups?: FollowUp[]
+  /** Questions the model thinks the delivered mission leaves open. */
+  suggestions: string[]
   /** Only once the mission itself has been read, not from the list. */
   ledger?: Ledger
   outputs?: Outputs
@@ -210,6 +227,13 @@ function toMission(raw: Record<string, unknown>, profileId: string): Mission {
     written: Number(raw.written) || 0,
     formats: list(raw.formats).filter((f): f is OutputFormat => FORMAT_IDS.includes(f)),
     making: FORMAT_IDS.find((f) => f === raw.making),
+    followups: Array.isArray(raw.followups)
+      ? (raw.followups as Record<string, unknown>[]).map((round) => ({
+          questions: list(round.questions).filter((q): q is string => typeof q === "string"),
+          from: Number(round.from) || 0,
+        }))
+      : undefined,
+    suggestions: list(raw.suggestions).filter((q): q is string => typeof q === "string"),
     ledger: ledger && {
       sources: list(ledger.sources) as Source[],
       claims: list(ledger.claims) as Claim[],
@@ -390,6 +414,10 @@ export const approveScope = (mission: Mission, outline: string[], sources: Sourc
 /** Another format from the same ledger: no new reading, only writing. */
 export const makeFormat = (mission: Mission, format: OutputFormat) =>
   act(mission, "formats", { format })
+
+/** Questions it missed: read for in the same ledger, then added to everything it made. */
+export const followUp = (mission: Mission, questions: string[]) =>
+  act(mission, "followup", { questions })
 
 export const retryMission = (mission: Mission) => act(mission, "retry")
 
