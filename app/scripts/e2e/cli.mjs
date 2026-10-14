@@ -96,6 +96,11 @@ const FLOWS = {
     script: "regression-code-sessions.mjs",
     about: "Project sessions stay out of Recents and open from their project",
   },
+  prs: {
+    script: "e2e/prs.mjs",
+    about:
+      "A shipped pull request lists in its project's PRs tab; a host that can't reach GitHub keeps the ones it knows",
+  },
   dictation: {
     script: "regression-dictation.mjs",
     extra: { OFF_MOCK_URL: "no-dictation" },

@@ -48,7 +48,9 @@
 // (GET …/sessions/{id}/prs reads them; "draft" in that turn drafts them): "merge" or "close" in a
 // turn sets their state, a merge resolves the session in the chat list, and "break" fails their
 // checks while "pending" runs them for a while before they pass. POST …/close (delete or discard)
-// closes them and removes the trees like …/workspace/remove. GET /api/plugins/memento/runs/live lists the sessions with
+// closes them and removes the trees like …/workspace/remove. MOCK_PRS_FAIL=1 (or
+// POST /__mock/prs { fail }) is a host that can't reach GitHub: …/prs answers an error rather than
+// a list, so the app keeps the pull requests it already knows. GET /api/plugins/memento/runs/live lists the sessions with
 // a run in flight, and why each one waiting on the user waits. …/sessions/{id}/queue holds what
 // the app queued and starts it when the session's run ends, like plugin/outbox.py. The agent asks the user questions
 // with Hermes's clarify tool, which the plugin serves on runs: say "ask" for one, or "ask five" for
@@ -1045,6 +1047,9 @@ async function streamCompletion(req, res, body) {
 const runs = new Map()
 const PLUGIN_VERSION = process.env.MOCK_PLUGIN_VERSION || "0.29.1"
 const DICTATION = process.env.MOCK_DICTATION ?? "on"
+// MOCK_PRS_FAIL=1 is a host that can't reach GitHub: the plugin's read of a session's pull requests
+// answers an error instead of a list, so the app must keep the pull requests it already knows.
+let PRS_FAIL = process.env.MOCK_PRS_FAIL === "1"
 const dictationClips = []
 const EVENTS = process.env.MOCK_NO_EVENTS !== "1"
 const RUNS = process.env.MOCK_NO_RUNS !== "1"
@@ -1788,6 +1793,13 @@ http
       }
       return json(res, 200, { ok: true })
     }
+    // Dev only: POST { fail } makes the plugin's read of a session's pull requests fail, like a
+    // host that can't reach GitHub (also from the start, with MOCK_PRS_FAIL=1).
+    if (url.pathname === "/__mock/prs" && req.method === "POST") {
+      const { fail } = await readBody(req)
+      PRS_FAIL = !!fail
+      return json(res, 200, { ok: true })
+    }
     if (url.pathname === "/__mock/theseus" && req.method === "POST") {
       const { stage } = await readBody(req)
       if (!THESEUS_STAGES.includes(stage)) return json(res, 400, { error: { message: "No such stage." } })
@@ -1923,6 +1935,9 @@ http
         })
       }
       if (route === "prs" && req.method === "GET") {
+        // A host that can't reach GitHub answers an error, never an empty list: the app reads an
+        // empty one as "no pull requests" and stores it over the ones it already knows.
+        if (PRS_FAIL) return json(res, 502, { error: { message: "Couldn't reach GitHub from the server." } })
         // A PR per repo once the agent opened them; "merge" merges them, "break" fails their
         // checks, and "pending" runs them for a while before they pass.
         const turns = userTurns(id)
