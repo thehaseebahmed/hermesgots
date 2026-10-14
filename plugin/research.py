@@ -9,7 +9,7 @@ it carries on with the app closed:
   and approves. Nothing is researched before that: it is the mission's one designed pause.
 - **Reading.** The researcher is an ordinary Hermes run in a session of its own
   (``research-<mission>``), started over loopback like the queue's runs (``outbox.post``). It finds
-  sources with Hermes's web tools and records every fact with the ``record_claim`` tool, which
+  sources with Hermes's web tools and records every fact with the ``claim_add`` tool, which
   fetches the page again and refuses a passage the page doesn't hold. Those claims are the ledger.
 - **Drafting.** The writer is ``ctx.llm`` again, one call per outline point, and sees only the
   ledger. Each sentence ends with the ids of the claims behind it (``[c3]``), saved section by
@@ -71,7 +71,7 @@ FETCH_MAX_BYTES = 6 * 1024 * 1024
 PAGE_CACHE = 24
 MONITOR_SECONDS = 2.0
 ACTIVE = {"queued", "running", "waiting_for_approval", "stopping"}
-TOOL = "record_claim"
+TOOL = "claim_add"
 
 # Set by register() and _wire_api_server.
 ctx: Any = None
@@ -518,7 +518,7 @@ def _brief_text(row: Dict[str, Any]) -> str:
 
 RESEARCHER_INSTRUCTIONS = """You are the researcher of a Memento research mission. Your output is the evidence ledger, not the write-up: someone else writes from the claims you record, and from nothing else.
 - For each outline point, find sources with web_search and read the best ones in full with web_extract.
-- Call record_claim once for every fact a writer would need: the claim in your own plain words, the page's URL and title, the kind of source, and the passage that says so copied word for word from the page (one to three whole sentences, no ellipses, no paraphrase). The tool fetches the page and refuses a passage it can't find there; copy it again exactly, or pick another passage.
+- Call claim_add once for every fact a writer would need: the claim in your own plain words, the page's URL and title, the kind of source, and the passage that says so copied word for word from the page (one to three whole sentences, no ellipses, no paraphrase). The tool fetches the page and refuses a passage it can't find there; copy it again exactly, or pick another passage.
 - Cover every point, from at least two different sources where you can, preferring the kinds of source the mission names. Mark a claim uncertain when sources disagree or the source is weak.
 - Never use the terminal, write files or ask the user anything. When the outline is covered, reply with one line saying how many claims you recorded."""
 
@@ -706,7 +706,7 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
     args = args if isinstance(args, dict) else {}
     mission_id = mission_of_session(task_id) or mission_of_session(session_id)
     if not mission_id:
-        return json.dumps({"error": "record_claim only works in a research mission."})
+        return json.dumps({"error": "claim_add only works in a research mission."})
     path, _home = sessions._paths()
     try:
         return json.dumps(record(path, mission_id, args))
@@ -737,7 +737,7 @@ def before_tool(**kwargs: Any) -> Optional[Dict[str, str]]:
     if mission_of_session(session) and kwargs.get("tool_name") in BLOCKED_TOOLS:
         return {
             "action": "block",
-            "message": "This is a research mission: search, read and record claims with record_claim only.",
+            "message": "This is a research mission: search, read and record claims with claim_add only.",
         }
     return None
 
@@ -752,7 +752,7 @@ def register(plugin_ctx: Any) -> bool:
     try:
         return register_tool(name=TOOL, toolset="memento", schema=SCHEMA, handler=handle, emoji="📌") is not False
     except Exception:
-        logger.warning("memento: couldn't register the record_claim tool", exc_info=True)
+        logger.warning("memento: couldn't register the claim_add tool", exc_info=True)
         return False
 
 
@@ -772,7 +772,7 @@ def wire(api_adapter: Any) -> bool:
             try:
                 tools_common.equip_tool(agent, TOOL, SCHEMA)
             except Exception:
-                logger.debug("memento: couldn't add the record_claim tool to an agent", exc_info=True)
+                logger.debug("memento: couldn't add the claim_add tool to an agent", exc_info=True)
         return agent
 
     api_adapter._create_agent = create_agent
