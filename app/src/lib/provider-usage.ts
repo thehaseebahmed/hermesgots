@@ -2,6 +2,7 @@ import { noteFailure } from "@/lib/report"
 import { connectionKey } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { db, type Conversation, type Profile } from "@/lib/db"
+import { JUST_FOLLOWED_UP_MS } from "@/lib/freshness"
 import {
   getProviderUsage,
   type HermesConfig,
@@ -10,6 +11,8 @@ import {
 
 /** Bots whose plugin has no usage route (an older plugin). */
 const unsupported = cooldown()
+/** When each server's figure for a provider was last asked for, so a chat opening asks once. */
+const asked = new Map<string, number>()
 /** Show the banner when this much or less of a window is left. */
 export const NOTICE_REMAINING_PERCENT = 20
 
@@ -93,6 +96,9 @@ export async function refreshProviderUsage(profileId: string, provider: string |
   if (!profile || !profile.apiKey || profile.disabled) return
   const key = connectionKey(profile)
   if (unsupported.cooling(key)) return
+  const at = asked.get(`${key} ${provider}`) ?? -Infinity
+  if (Date.now() - at < JUST_FOLLOWED_UP_MS) return
+  asked.set(`${key} ${provider}`, Date.now())
   const config: HermesConfig = { baseUrl: profile.baseUrl, apiKey: profile.apiKey }
   let usage: ProviderUsageData | null
   try {
@@ -109,4 +115,11 @@ export async function refreshProviderUsage(profileId: string, provider: string |
   if (!usage || sameWindows(profile.providerUsage, usage)) return
   // Not through updateProfile: this is local, so it mustn't move the sync clock.
   await db.profiles.update(profileId, { providerUsage: usage })
+}
+
+/** `refreshProviderUsage` for the provider a chat runs on. */
+export async function refreshChatProviderUsage(conversationId: string) {
+  const conversation = await db.conversations.get(conversationId)
+  const profile = conversation && (await db.profiles.get(conversation.profileId))
+  if (profile) await refreshProviderUsage(profile.id, effectiveProvider(conversation, profile))
 }
