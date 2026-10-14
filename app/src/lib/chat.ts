@@ -54,7 +54,12 @@ import { quietly } from "@/lib/report"
 import { randomId } from "@/lib/utils"
 import { readLiveRuns } from "@/lib/waiting"
 import { onWake } from "@/lib/wake"
-import { ensureSessionWorkspace, refreshPrs, refreshWorkspace } from "@/lib/workspace"
+import {
+  ensureSessionWorkspace,
+  refreshLibrary,
+  refreshPrs,
+  refreshWorkspace,
+} from "@/lib/workspace"
 
 /**
  * Sends a turn to Hermes and persists the streamed reply into IndexedDB as it arrives.
@@ -661,6 +666,7 @@ async function finishTurn(turn: Turn, usage: TurnUsage | undefined) {
     setTimeout(() => {
       void refreshWorkspace(conversationId)
       void refreshPrs(conversationId, { force: true })
+      void refreshLibrary(conversationId)
     }, PLUGIN_SETTLE_MS)
   }
 }

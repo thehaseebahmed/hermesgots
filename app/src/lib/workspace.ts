@@ -1,10 +1,11 @@
-import { PR_MS, PR_PENDING_MS } from "@/lib/freshness"
+import { LIBRARY_MS, PR_MS, PR_PENDING_MS } from "@/lib/freshness"
 import { noteFailure } from "@/lib/report"
 import { connectionKey } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { db, type Conversation, type PullRequestRef, type SessionMode } from "@/lib/db"
 import {
   ensureWorkspace,
+  getSessionLibrary,
   getSessionPrs,
   getWorkspace,
   HermesError,
@@ -27,6 +28,12 @@ import { syncNow } from "@/lib/sync"
 
 /** Bots whose plugin has no workspace routes (an older plugin). */
 const unsupported = cooldown()
+
+/**
+ * When each session's library was last read here: what `LIBRARY_MS` measures. Kept out of the row
+ * so a read that found the same count doesn't wake every query the conversation covers.
+ */
+const libraryRead = new Map<string, number>()
 
 /** Whether any of a session's pull requests still has checks running. */
 export const prChecksPending = (prs: PullRequestRef[] | undefined) =>
@@ -127,6 +134,32 @@ export async function refreshWorkspace(conversationId: string) {
   }
   unsupported.clear(found.key)
   await store(conversationId, workspace)
+}
+
+/**
+ * Reads the session's filed files from the plugin: the count its pill shows. A session with no
+ * worktree has no library folder yet, so there is nothing to count.
+ */
+export async function refreshLibrary(conversationId: string) {
+  const found = await tracked(conversationId)
+  if (!found?.conversation.worktree || unsupported.cooling(found.key)) return
+  const { conversation, profile } = found
+  const readAt = libraryRead.get(conversationId) ?? conversation.library?.at ?? 0
+  if (Date.now() - readAt < LIBRARY_MS) return
+  let library
+  try {
+    library = await getSessionLibrary(profile, conversation.hermesSessionId)
+  } catch (error) {
+    noteFailure("Reading a session's library", error)
+    if (await lacksRoute(profile, error, "sessions")) unsupported.start(found.key)
+    return
+  }
+  unsupported.clear(found.key)
+  libraryRead.set(conversationId, Date.now())
+  const count = library.folders.reduce((total, folder) => total + folder.files.length, 0)
+  const current = conversation.library
+  if (current && current.count === count) return
+  await db.conversations.update(conversationId, { library: { count, at: Date.now() } })
 }
 
 /** Reads the branch's pull request in each of the session's repos from the plugin. */

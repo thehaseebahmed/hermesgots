@@ -53,6 +53,15 @@ export async function openImageViewer(url: string) {
   window.open(url, "_blank")
 }
 
+/** A URL opened outside the app: the platform's browser in the Android app, a new tab on the web. */
+export function openExternal(url: string) {
+  if (isNative) {
+    void Browser.open({ url })
+    return
+  }
+  window.open(url, "_blank", "noopener")
+}
+
 /** The Netlify deploy the app signs in and syncs through, baked in by `pnpm build:android`. */
 export const SITE_URL = (import.meta.env.VITE_SITE_URL ?? "").replace(/\/+$/, "")
 

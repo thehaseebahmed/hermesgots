@@ -885,7 +885,7 @@ BLOCKED_TOOLS = {
     "delegate_task",
     "clarify",
     "open_pull_request",
-    "add_to_library",
+    "library_add",
     "skill_manage",
     "cronjob_manage",
 }

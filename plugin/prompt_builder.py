@@ -105,9 +105,14 @@ def _files_line(record: Dict[str, Any]) -> str:
     return (
         f"Files you make for the user — screenshots, images, charts, reports, markdown — belong in "
         f"this session's library at {folder}, not in the worktree. File each one with the "
-        f"add_to_library tool (its path, absolute or relative): it creates the folder if it needs "
-        f"to, moves the file there and answers with its new path. Return an image's new path in a "
-        f"MEDIA:<path> tag so the user sees it. Source edits stay in the worktree."
+        f"library_add tool (its path and a folder name, one level): name folders after the flow "
+        f"or change the files belong to, kebab-case — library-tab for work on the library tab, "
+        f"library-tab-tree-view for a follow-up change to it — not the file type, and file names "
+        f"kebab-case with their extension (dashboard-light.png). The tool makes {folder}/<folder> "
+        f"if it needs to, moves the file there and answers with its new path; a name that isn't "
+        f"kebab-case, or a file of that name already in the folder, is an error — fix the name "
+        f"and call again. Return an image's new path in a MEDIA:<path> tag so the user sees it. "
+        f"Source edits stay in the worktree."
     )
 
 

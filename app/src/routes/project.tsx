@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import Dexie from "dexie"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
@@ -21,6 +21,7 @@ import { quietly } from "@/lib/report"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { prLabel, prLook } from "@/components/chat/pr-look"
 import { PrRow } from "@/components/chat/pr-pill"
+import { LibraryTab } from "@/components/library"
 import { ProjectSettings } from "@/components/project-settings"
 import {
   AlertDialog,
@@ -116,6 +117,7 @@ export function ProjectPage({
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [tab, setTab] = useState("sessions")
   const [reads, setReads] = useState(0)
   const reload = () => setReads((n) => n + 1)
   const live = useLiveRuns(profile)
@@ -173,6 +175,16 @@ export function ProjectPage({
   const rows = listed?.rows
   const local = listed?.local
   const now = listed?.now ?? 0
+  // Each session's title by its worktree's name, so a library file can say which filed it.
+  const titles = useMemo(
+    () =>
+      new Map(
+        (rows ?? [])
+          .filter((c) => c.worktree?.branch)
+          .map((c) => [c.worktree!.branch.replace(/^hermes\//, ""), c.title]),
+      ),
+    [rows],
+  )
 
   // What the server says waits on the user, including a Theseus run's plan, checkpoints or approval.
   const waits = useWaiting()
@@ -193,7 +205,9 @@ export function ProjectPage({
       if (last !== undefined && now - last < SESSION_REREAD_MS) continue
       read.current.set(c.id, now)
       const workspace = !c.worktree || last !== undefined
-      void (workspace ? refreshWorkspace(c.id) : Promise.resolve()).then(() => refreshPrs(c.id))
+      void (workspace ? refreshWorkspace(c.id) : Promise.resolve()).then(() => {
+        void refreshPrs(c.id)
+      })
     }
   }, [sessions])
   // The open session's chat pane polls its own PR; exclude it here to avoid duplicate reads.
@@ -317,7 +331,7 @@ export function ProjectPage({
           )
         }
       />
-      <Tabs defaultValue="sessions" className="flex-1">
+      <Tabs value={tab} onValueChange={setTab} className="flex-1">
         <TabsList>
           <TabsTrigger value="sessions">Sessions</TabsTrigger>
           <TabsTrigger value="library">Library</TabsTrigger>
@@ -380,7 +394,18 @@ export function ProjectPage({
             )
           )}
         </TabsContent>
-        <TabsContent value="library" />
+        <TabsContent value="library" className="flex-1 overflow-y-auto">
+          {server && (
+            <div className="mx-auto w-full max-w-2xl">
+              <LibraryTab
+                config={server}
+                projectId={projectId}
+                titles={titles}
+                active={tab === "library"}
+              />
+            </div>
+          )}
+        </TabsContent>
         <TabsContent value="prs" className="overflow-y-auto">
           <div className="mx-auto w-full max-w-2xl px-4 py-6">
             {sessions && prs.length === 0 ? (

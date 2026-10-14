@@ -7,6 +7,7 @@ Run: python3 -m unittest plugin.tests.test_library -v
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import sys
 import tempfile
@@ -87,7 +88,7 @@ class FilesDirTest(unittest.TestCase):
         self.assertEqual(stored["files_dir"], record["files_dir"])
 
 
-class AddToLibraryTest(unittest.TestCase):
+class LibraryAddTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name)
@@ -122,38 +123,99 @@ class AddToLibraryTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
-    def _call(self, path: str, task_id: str = "memento-1") -> dict:
-        return json.loads(library.handle({"path": path}, task_id=task_id))
+    def _call(self, path: str, folder: str = "screenshots", task_id: str = "memento-1") -> dict:
+        return json.loads(library.handle({"path": path, "folder": folder}, task_id=task_id))
 
     def test_a_relative_path_moves_out_of_the_worktree(self) -> None:
         result = self._call("shot.png")
         self.assertEqual(result["name"], "shot.png")
-        self.assertEqual(result["path"], str(self.files_dir / "shot.png"))
-        self.assertTrue((self.files_dir / "shot.png").is_file())
+        self.assertEqual(result["path"], str(self.files_dir / "screenshots" / "shot.png"))
+        self.assertTrue((self.files_dir / "screenshots" / "shot.png").is_file())
         self.assertFalse((self.worktree / "shot.png").exists())
 
     def test_an_absolute_path_outside_the_worktree_works(self) -> None:
         outside = self.home / "elsewhere" / "report.md"
         outside.parent.mkdir()
         outside.write_text("report", encoding="utf-8")
-        result = self._call(str(outside))
-        self.assertEqual(result["path"], str(self.files_dir / "report.md"))
+        result = self._call(str(outside), "reports")
+        self.assertEqual(result["path"], str(self.files_dir / "reports" / "report.md"))
         self.assertFalse(outside.exists())
 
     def test_the_folder_is_made_and_kept_out_of_git(self) -> None:
         self.assertFalse(self.files_dir.exists())
-        self._call("shot.png")
-        self.assertTrue(self.files_dir.is_dir())
+        self._call("shot.png", "reports")
+        self.assertTrue((self.files_dir / "reports").is_dir())
         exclude = self.project / ".git" / "info" / "exclude"
         self.assertIn("files/", exclude.read_text(encoding="utf-8").splitlines())
 
-    def test_a_second_file_of_the_same_name_gets_a_suffix(self) -> None:
-        self.files_dir.mkdir(parents=True)
-        (self.files_dir / "shot.png").write_bytes(b"older")
-        result = self._call("shot.png")
-        self.assertEqual(result["path"], str(self.files_dir / "shot-2.png"))
-        self.assertEqual((self.files_dir / "shot.png").read_bytes(), b"older")
-        self.assertEqual((self.files_dir / "shot-2.png").read_bytes(), b"png")
+    def test_a_name_already_in_the_folder_is_an_error(self) -> None:
+        self.files_dir.joinpath("library-tab").mkdir(parents=True)
+        self.files_dir.joinpath("library-tab", "shot.png").write_bytes(b"older")
+        result = self._call("shot.png", "library-tab")
+        self.assertIn("shot.png is already in library-tab", result["error"])
+        self.assertIn("Rename the file", result["error"])
+        # Nothing moved and nothing was renamed: the agent renames the file itself.
+        self.assertEqual(
+            self.files_dir.joinpath("library-tab", "shot.png").read_bytes(), b"older"
+        )
+        self.assertTrue((self.worktree / "shot.png").is_file())
+
+    def test_a_folder_is_required(self) -> None:
+        result = json.loads(library.handle({"path": "shot.png"}, task_id="memento-1"))
+        self.assertEqual(result, {"error": "folder is required."})
+
+    def test_a_folder_must_be_a_kebab_case_slug(self) -> None:
+        result = self._call("shot.png", "Library Tab")
+        self.assertIn("'Library Tab' is not a slug", result["error"])
+        self.assertIn("kebab-case: lowercase words joined by single hyphens", result["error"])
+        # The naming rule and the correction, so the next call is right the first time.
+        self.assertIn("name the folder after the flow", result["error"])
+        self.assertIn("Call again with folder 'library-tab'.", result["error"])
+        # Nothing was filed and no folder was made for a rejected name.
+        self.assertFalse(self.files_dir.exists())
+        self.assertTrue((self.worktree / "shot.png").is_file())
+
+    def test_bad_folders_are_rejected_with_the_correction(self) -> None:
+        for bad, fixed in [
+            ("Screenshots", "screenshots"),
+            ("library_tab", "library-tab"),
+            ("libraryTab", "library-tab"),
+            ("a/b", "a-b"),
+            ("..", None),
+            (".hidden", "hidden"),
+            ("--leading", "leading"),
+        ]:
+            result = self._call("shot.png", bad)
+            self.assertIn(f"{bad!r} is not a slug", result["error"])
+            if fixed:
+                self.assertIn(f"Call again with folder '{fixed}'.", result["error"])
+            else:
+                self.assertNotIn("Call again with", result["error"])
+
+    def test_a_folder_over_the_name_limit_is_rejected(self) -> None:
+        result = self._call("shot.png", "a" * 121)
+        self.assertEqual(result, {"error": "folder must be at most 120 characters."})
+
+    def test_a_file_name_must_be_a_slug_with_an_extension(self) -> None:
+        (self.worktree / "Dashboard Light.png").write_bytes(b"png")
+        result = self._call("Dashboard Light.png")
+        self.assertIn("'Dashboard Light.png' is not a slug with an extension", result["error"])
+        self.assertIn("dashboard-light.png", result["error"])
+        self.assertIn("Rename the file on disk", result["error"])
+        self.assertFalse(self.files_dir.exists())
+
+    def test_a_file_name_needs_exactly_one_extension(self) -> None:
+        for name in ("noext", "report.final.md", ".png"):
+            (self.worktree / name).write_bytes(b"x")
+            result = self._call(name)
+            self.assertIn(f"{name!r} is not a slug with an extension", result["error"])
+
+    def test_a_kebab_file_name_files_fine(self) -> None:
+        (self.worktree / "dashboard-light.png").write_bytes(b"png")
+        result = self._call("dashboard-light.png", "library-tab")
+        self.assertEqual(
+            result["path"], str(self.files_dir / "library-tab" / "dashboard-light.png")
+        )
 
     def test_a_missing_file_is_an_error(self) -> None:
         self.assertEqual(self._call("nope.png"), {"error": "No such file."})
@@ -162,14 +224,77 @@ class AddToLibraryTest(unittest.TestCase):
     def test_a_record_from_before_the_column_still_files_it(self) -> None:
         with sqlite3.connect(self.db) as conn:
             conn.execute("UPDATE project_sessions SET files_dir = NULL WHERE session_id = 'memento-1'")
-        result = self._call("shot.png")
-        self.assertEqual(result["path"], str(self.files_dir / "shot.png"))
+        result = self._call("shot.png", "screenshots")
+        self.assertEqual(result["path"], str(self.files_dir / "screenshots" / "shot.png"))
 
     def test_no_session_is_an_error(self) -> None:
         self.assertEqual(
-            json.loads(library.handle({"path": "shot.png"}, task_id="nope")),
+            json.loads(library.handle({"path": "shot.png", "folder": "screenshots"}, task_id="nope")),
             {"error": "This session has no library to file in."},
         )
+
+
+class TreeTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "files"
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write(self, relative: str, at: int) -> Path:
+        path = self.root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x")
+        os.utime(path, (at / 1000, at / 1000))
+        return path
+
+    def test_files_group_by_folder_newest_first(self) -> None:
+        older = self._write("jazzy-quokka-7bfe/screenshots/old.png", 1000)
+        newer = self._write("jazzy-quokka-7bfe/screenshots/new.png", 2000)
+        self._write("jazzy-quokka-7bfe/reports/notes.md", 1500)
+        tree = library.tree(self.root)
+        self.assertEqual([folder["name"] for folder in tree], ["reports", "screenshots"])
+        shots = tree[1]["files"]
+        self.assertEqual([f["name"] for f in shots], ["new.png", "old.png"])
+        self.assertEqual(shots[0]["path"], str(newer))
+        self.assertEqual(shots[0]["worktree"], "jazzy-quokka-7bfe")
+        self.assertEqual(shots[0]["folder"], "screenshots")
+        self.assertEqual(shots[0]["size"], 1)
+        # Epoch ms, the unit the app's formatRelative reads.
+        self.assertEqual(shots[0]["at"], 2000)
+        self.assertEqual(older.parent, newer.parent)
+
+    def test_a_file_with_no_folder_groups_under_its_worktree(self) -> None:
+        # Filed before folders existed: it keeps its worktree's name as the group.
+        self._write("jazzy-quokka-7bfe/legacy.png", 1000)
+        tree = library.tree(self.root)
+        self.assertEqual([folder["name"] for folder in tree], ["jazzy-quokka-7bfe"])
+        self.assertIsNone(tree[0]["files"][0]["folder"])
+
+    def test_a_worktree_filters_to_its_own_files(self) -> None:
+        self._write("jazzy-quokka-7bfe/screenshots/a.png", 1000)
+        self._write("cosmic-otter-9f2e/screenshots/a.png", 1000)
+        tree = library.tree(self.root, "cosmic-otter-9f2e")
+        self.assertEqual([folder["name"] for folder in tree], ["screenshots"])
+        self.assertEqual(tree[0]["files"][0]["worktree"], "cosmic-otter-9f2e")
+
+    def test_the_walk_is_capped(self) -> None:
+        for n in range(library.MAX_FILES + 5):
+            self._write(f"jazzy-quokka-7bfe/screenshots/{n}.png", n)
+        tree = library.tree(self.root)
+        self.assertEqual(sum(len(folder["files"]) for folder in tree), library.MAX_FILES)
+
+    def test_a_worktree_walk_caps_its_own_files(self) -> None:
+        # Another session's files are never walked, so they can't push this one's out of the cap.
+        for n in range(library.MAX_FILES + 5):
+            self._write(f"jazzy-quokka-7bfe/screenshots/{n}.png", n)
+        self._write("cosmic-otter-9f2e/library-tab/only.png", 1)
+        tree = library.tree(self.root, "cosmic-otter-9f2e")
+        self.assertEqual([[f["name"] for f in folder["files"]] for folder in tree], [["only.png"]])
+
+    def test_an_empty_root_is_an_empty_tree(self) -> None:
+        self.assertEqual(library.tree(self.root), [])
 
 
 class InstructionsTest(unittest.TestCase):
@@ -199,8 +324,15 @@ class InstructionsTest(unittest.TestCase):
     def test_the_line_names_the_folder_right_after_the_worktree_line(self) -> None:
         text = prompt_builder.session_prompt(self.record)
         self.assertIn(f"this session's library at {self.record['files_dir']}", text)
-        self.assertIn("add_to_library tool", text)
+        self.assertIn("library_add tool", text)
         self.assertLess(text.index("library at"), text.index("open_pull_request tool"))
+
+    def test_the_line_teaches_the_naming_convention(self) -> None:
+        text = prompt_builder.session_prompt(self.record)
+        # Folders are named after the flow, kebab-case, and file names too.
+        self.assertIn("library-tab-tree-view", text)
+        self.assertIn("kebab-case", text)
+        self.assertIn("dashboard-light.png", text)
 
     def test_a_record_without_the_folder_has_no_line(self) -> None:
         legacy = {**self.record, "files_dir": None}

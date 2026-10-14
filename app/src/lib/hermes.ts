@@ -1729,6 +1729,107 @@ export async function getSessionPrs(
     }))
 }
 
+export interface LibraryFile {
+  /** The file's name, with its extension. */
+  name: string
+  /** Its absolute path on the host, for the library file route. */
+  path: string
+  /** The folder it was filed in, one level; null when filed before folders existed. */
+  folder: string | null
+  /** The session that filed it, by its worktree's name. */
+  worktree: string
+  /** Bytes. */
+  size: number
+  /** Epoch ms, when the file was last written. */
+  at: number
+}
+
+/** One folder of a library: the files filed in it, newest first. */
+export interface LibraryFolder {
+  name: string
+  files: LibraryFile[]
+}
+
+function parseLibraryFile(file: unknown): LibraryFile | null {
+  if (!file || typeof file !== "object") return null
+  const found = file as Record<string, unknown>
+  return typeof found.name === "string" &&
+    typeof found.path === "string" &&
+    typeof found.at === "number"
+    ? {
+        name: found.name,
+        path: found.path,
+        folder: typeof found.folder === "string" ? found.folder : null,
+        worktree: typeof found.worktree === "string" ? found.worktree : "",
+        size: typeof found.size === "number" ? found.size : 0,
+        at: found.at,
+      }
+    : null
+}
+
+function parseLibrary(body: unknown): LibraryFolder[] {
+  const folders: unknown = (body as { folders?: unknown } | null)?.folders
+  if (!Array.isArray(folders)) return []
+  return folders
+    .map((folder) => {
+      const found = (folder ?? {}) as Record<string, unknown>
+      const files: unknown = found.files
+      return {
+        name: typeof found.name === "string" ? found.name : "",
+        files: Array.isArray(files)
+          ? files.map(parseLibraryFile).filter((file): file is LibraryFile => file !== null)
+          : [],
+      }
+    })
+    .filter((folder) => folder.name)
+}
+
+/** A project's library: every session's filed files, grouped by folder. Needs plugin 0.38. */
+export async function getProjectLibrary(
+  config: HermesConfig,
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<LibraryFolder[]> {
+  const response = await request(
+    `${pluginRoot(config.baseUrl)}/projects/${encodeURIComponent(projectId)}/library`,
+    { headers: headers(config), signal },
+  )
+  return parseLibrary(await response.json())
+}
+
+/**
+ * A session's own filed files, grouped by folder, and its worktree's name. Needs plugin 0.38.
+ * An unknown session answers an empty tree, never a 404.
+ */
+export async function getSessionLibrary(
+  config: HermesConfig,
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<{ worktree: string | null; folders: LibraryFolder[] }> {
+  const response = await request(pluginSession(config, sessionId, "/library"), {
+    headers: headers(config),
+    signal,
+  })
+  const body = (await response.json()) as { worktree?: unknown; folders?: unknown }
+  return {
+    worktree: typeof body?.worktree === "string" ? body.worktree : null,
+    folders: parseLibrary(body),
+  }
+}
+
+/** A library file's bytes, for opening it: an image in the system viewer, anything else in a tab. */
+export async function getLibraryFile(
+  config: HermesConfig,
+  path: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const response = await request(
+    `${pluginRoot(config.baseUrl)}/library/file?path=${encodeURIComponent(path)}`,
+    { headers: headers(config), signal },
+  )
+  return response.blob()
+}
+
 export type LiveRunStatus = "running" | "waiting_for_approval"
 
 /** Why a session waits on the user. */

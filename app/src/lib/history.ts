@@ -12,7 +12,7 @@ import { quietly } from "@/lib/report"
 import { refreshContext } from "@/lib/context"
 import { refreshChatProviderUsage } from "@/lib/provider-usage"
 import { refreshTodos } from "@/lib/todos"
-import { refreshPrs, refreshWorkspace } from "@/lib/workspace"
+import { refreshLibrary, refreshPrs, refreshWorkspace } from "@/lib/workspace"
 import {
   getSessionTitle,
   listSessionMessages,
@@ -510,6 +510,7 @@ function followUps(conversationId: string, moved: boolean) {
     refreshChatProviderUsage(conversationId),
     refreshTodos(conversationId),
     refreshWorkspace(conversationId),
+    refreshLibrary(conversationId),
     refreshPrs(conversationId),
   ]).catch(quietly("Reading a chat's details"))
 }

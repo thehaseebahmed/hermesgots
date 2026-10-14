@@ -38,6 +38,9 @@ export const PR_PENDING_MS = 10_000
 /** The project screen reads a session's worktree and pull requests again, at most this often. */
 export const SESSION_REREAD_MS = 60_000
 
+/** How long a known library count is trusted before it's read again. */
+export const LIBRARY_MS = 60_000
+
 /** The Code and Routines lists. */
 export const LIST_MS = 60_000
 /** Whether the host can run Theseus. */
