@@ -37,7 +37,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import events, tools_common
+from . import events, push, tools_common
 from .store import connect
 
 logger = logging.getLogger(__name__)
@@ -487,6 +487,7 @@ def _brief(path: Path, row: Dict[str, Any]) -> None:
         "depth": answer.get("depth") if answer.get("depth") in DEPTHS else "overview",
     }
     _update(path, row["id"], **fields, busy=None)
+    _tell(path, "research_brief", row["id"], fields["title"])
 
 
 def _outline(path: Path, row: Dict[str, Any]) -> None:
@@ -501,6 +502,7 @@ def _outline(path: Path, row: Dict[str, Any]) -> None:
     if not points:
         raise ResearchError("The model proposed no outline.", 502)
     _update(path, row["id"], outline=points, busy=None)
+    _tell(path, "research_scope", row["id"], row["title"])
 
 
 def _clip(value: Any, limit: int) -> str:
@@ -1001,6 +1003,7 @@ def _draft(path: Path, found: Dict[str, Any]) -> None:
         # Every span was checked against the ledger as it was written; the review is that check.
         _update(path, found["id"], stage="reviewing")
     _update(path, found["id"], stage="delivered", formats=[found["format"]])
+    _tell(path, "research_done", found["id"], found["title"])
 
 
 def _make(path: Path, found: Dict[str, Any]) -> None:
@@ -1047,6 +1050,15 @@ def _job(path: Path, mission_id: str) -> None:
         _make(path, found)
 
 
+def _tell(path: Path, kind: str, mission_id: str, title: Optional[str] = None) -> None:
+    """A push for a mission that needs the user, is ready or failed, so it doesn't wait unseen
+    until the app is opened. Best effort, like every push."""
+    if title is None:
+        found = mission(path, mission_id)
+        title = found["title"] if found else None
+    push.notify(kind, mission_id, path, title=title)
+
+
 def spawn(path: Path, mission_id: str, profile: Optional[str] = None) -> None:
     """Does the mission's next step on a thread of its own, once at a time."""
     key = (str(path), mission_id)
@@ -1075,6 +1087,7 @@ def _fail(path: Path, mission_id: str, message: str) -> None:
     try:
         if mission(path, mission_id) is not None:
             _update(path, mission_id, busy=None, error=message)
+            _tell(path, "research_failed", mission_id)
     except Exception:
         logger.debug("memento: couldn't record the failure of %s", mission_id, exc_info=True)
 
@@ -1133,6 +1146,7 @@ def finished_reading(path: Path, mission_id: str, status: Optional[str]) -> bool
             else "The researcher found too few sources to write from. Check that web search works on the host."
         )
         _update(path, mission_id, error=reason)
+        _tell(path, "research_failed", mission_id, found["title"])
         return True
     _update(path, mission_id, stage="drafting", written=0)
     return True

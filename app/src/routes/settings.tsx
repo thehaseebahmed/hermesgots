@@ -7,8 +7,10 @@ import {
   BotIcon,
   BellIcon,
   BellRingIcon,
+  BookOpenCheckIcon,
   CalendarXIcon,
   CheckIcon,
+  ClipboardCheckIcon,
   CircleAlertIcon,
   CircleCheckIcon,
   CodeXmlIcon,
@@ -30,6 +32,7 @@ import {
   PaletteIcon,
   SailboatIcon,
   SunIcon,
+  TelescopeIcon,
   TimerIcon,
   UserIcon,
   type LucideIcon,
@@ -269,12 +272,16 @@ const CATEGORY_ICONS: Record<PushCategory, LucideIcon> = {
   code_pr_merged: GitMergeIcon,
   code_setup_failed: FolderXIcon,
   routine_failed: CalendarXIcon,
+  research_input: ClipboardCheckIcon,
+  research_done: BookOpenCheckIcon,
+  research_failed: CircleAlertIcon,
 }
 
 const FEATURE_ICONS: Record<PushFeature, LucideIcon> = {
   chats: MessagesSquareIcon,
   code: CodeXmlIcon,
   routines: TimerIcon,
+  research: TelescopeIcon,
 }
 
 /**

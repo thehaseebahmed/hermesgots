@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -103,6 +104,12 @@ class MissionTest(unittest.TestCase):
         self.path = Path(self.dir.name) / "memento.db"
         self.llm = FakeLlm()
         research.ctx = SimpleNamespace(llm=self.llm)
+        notify = mock.patch.object(research.push, "notify")
+        self.notify = notify.start()
+        self.addCleanup(notify.stop)
+
+    def told(self) -> list:
+        return [(call.args[0], call.kwargs.get("title")) for call in self.notify.call_args_list]
 
     def tearDown(self) -> None:
         research.ctx = None
@@ -157,6 +164,30 @@ class MissionTest(unittest.TestCase):
         self.assertEqual((found["formats"], found["making"]), (["guide", "quiz"], None))
         # A question citing a claim that isn't in the ledger is dropped.
         self.assertEqual([q["cite"] for q in found["outputs"]["quiz"]["questions"]], ["c1"])
+
+    def test_the_user_is_told_when_a_mission_needs_them_or_is_ready(self) -> None:
+        self.reach_reading()
+        self.assertEqual(
+            self.told(),
+            [("research_brief", "How transformers work"), ("research_scope", "How transformers work")],
+        )
+        for snippet in ("based solely on attention mechanisms", "Multi-head attention allows the model", "dispensing with recurrence"):
+            self.claim(snippet)
+        research.finished_reading(self.path, self.mission["id"], "completed")
+        research._job(self.path, self.mission["id"])
+        self.assertEqual(self.told()[-1], ("research_done", "How transformers work"))
+        # Another format the user just asked for isn't news.
+        research.make_format(self.path, self.mission["id"], "quiz")
+        research._job(self.path, self.mission["id"])
+        self.assertEqual(len(self.told()), 3)
+        self.assertEqual(self.notify.call_args.args[1], self.mission["id"])
+
+    def test_a_failed_step_is_told(self) -> None:
+        self.reach_reading()
+        research.finished_reading(self.path, self.mission["id"], "completed")
+        self.assertEqual(self.told()[-1], ("research_failed", "How transformers work"))
+        research._fail(self.path, self.mission["id"], "The model is down.")
+        self.assertEqual(self.told()[-1], ("research_failed", "How transformers work"))
 
     def test_a_passage_the_page_doesnt_hold_is_refused(self) -> None:
         self.reach_reading()

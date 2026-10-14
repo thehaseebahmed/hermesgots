@@ -22,6 +22,10 @@ export const PUSH_KINDS = [
   "pr_merged",
   "clone_failed",
   "routine_failed",
+  "research_brief",
+  "research_scope",
+  "research_done",
+  "research_failed",
 ] as const
 export type PushKind = (typeof PUSH_KINDS)[number] | "test"
 export type SendResult = "ok" | "gone" | "error"
@@ -38,6 +42,9 @@ export const PUSH_CATEGORIES = [
   "code_pr_merged",
   "code_setup_failed",
   "routine_failed",
+  "research_input",
+  "research_done",
+  "research_failed",
 ] as const
 export type PushCategory = (typeof PUSH_CATEGORIES)[number]
 /** What a device that never said which it wants gets: what pushed before there were more. */
@@ -50,6 +57,8 @@ export function categoryOf(kind: PushKind): PushCategory | "test" {
   if (kind === "plan") return "code_input"
   if (kind === "clone_failed") return "code_setup_failed"
   if (kind === "routine_failed") return "routine_failed"
+  if (kind === "research_brief" || kind === "research_scope") return "research_input"
+  if (kind === "research_done" || kind === "research_failed") return kind
   return `code_${kind}`
 }
 
@@ -90,6 +99,10 @@ const WORDS: Record<PushKind, string> = {
   pr_merged: "Your pull request was merged",
   clone_failed: "This project couldn't be set up",
   routine_failed: "The last run failed",
+  research_brief: "The brief is ready for your review",
+  research_scope: "The scope is ready for your approval",
+  research_done: "Your research is ready",
+  research_failed: "The mission stopped with an error",
   test: "This is a test notification",
 }
 
@@ -104,6 +117,10 @@ const THESEUS_WORDS: Record<string, string> = {
 const UNTITLED: Partial<Record<PushKind, string>> = {
   routine_failed: "A routine",
   clone_failed: "A project",
+  research_brief: "A research mission",
+  research_scope: "A research mission",
+  research_done: "A research mission",
+  research_failed: "A research mission",
 }
 
 /** The notification's title and body. */
