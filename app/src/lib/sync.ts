@@ -510,8 +510,9 @@ async function runSync() {
   const key = state.vault === "unlocked" ? await localKey() : undefined
   try {
     if (key) await ensureInbox(key)
-    if (key) await syncBots(key)
-    if (key) await syncAppearance(key)
+    // Bots and the appearance switches are separate documents, so they go side by side; the
+    // registry read follows, since it wants the inbox key.
+    if (key) await Promise.all([syncBots(key), syncAppearance(key)])
     if (key) await pullRegistry()
     await syncChatLists(key)
     syncedFingerprint = await fingerprint()
