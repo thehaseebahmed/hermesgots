@@ -27,6 +27,7 @@ import { LIST_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import {
   getLibraryFile,
   getProjectLibrary,
+  getSessionLibrary,
   type HermesConfig,
   type LibraryFile,
   type LibraryFolder,
@@ -164,30 +165,21 @@ function FolderSection({
 }
 
 /**
- * The project's Library as a tree: each folder — named after the flow its files belong to — with
- * the session that filed it, folded away until it's tapped and ordered by the sort menu. Read from
- * the plugin's library routes while the tab is on screen, at most every minute; a plugin without
- * them (an older one) is left alone for five minutes.
+ * Reads a library while it's on screen, at most every minute; a plugin without the routes (an older
+ * one) is left alone for five minutes. Shared by a project's Library tab and a session's outputs,
+ * which read the same tree from the project's route and the session's.
  */
-export function LibraryTab({
-  config,
-  projectId,
-  titles,
-  active,
-}: {
-  config: HermesConfig
-  projectId: string
-  /** Each session's title by its worktree's name, for a folder's second line. */
-  titles: Map<string, string>
-  active: boolean
-}) {
+function useLibraryRead(
+  config: HermesConfig,
+  load: (signal: AbortSignal) => Promise<LibraryFolder[]>,
+  active: boolean,
+) {
   const [folders, setFolders] = useState<LibraryFolder[]>([])
-  const [sort, setSort] = useLibrarySort()
   const key = connectionKey(config)
   const read = useCallback(
     (signal: AbortSignal) => {
       if (unsupported.cooling(key)) return
-      void getProjectLibrary(config, projectId, signal)
+      void load(signal)
         .then((found) => {
           unsupported.clear(key)
           if (signal.aborted) return
@@ -199,9 +191,27 @@ export function LibraryTab({
           })
         })
     },
-    [config, projectId, key],
+    [config, key, load],
   )
   usePoll(read, LIST_MS, [], { active })
+  return folders
+}
+
+/**
+ * A library as a tree: each folder — named after the flow its files belong to — with the sessions
+ * that filed it, folded away until it's tapped and ordered by the sort menu.
+ */
+export function LibraryTree({
+  config,
+  folders,
+  titles,
+}: {
+  config: HermesConfig
+  folders: LibraryFolder[]
+  /** Each session's title by its worktree's name, for a folder's second line. */
+  titles: Map<string, string>
+}) {
+  const [sort, setSort] = useLibrarySort()
   const ordered = useMemo(() => sortFolders(folders, sort), [folders, sort])
   if (!folders.length) {
     return (
@@ -253,4 +263,58 @@ export function LibraryTab({
       </div>
     </div>
   )
+}
+
+/**
+ * A project's Library tab: every session's filed files as a tree, read from the plugin's project
+ * route while the tab is on screen.
+ */
+export function LibraryTab({
+  config,
+  projectId,
+  titles,
+  active,
+}: {
+  config: HermesConfig
+  projectId: string
+  /** Each session's title by its worktree's name, for a folder's second line. */
+  titles: Map<string, string>
+  active: boolean
+}) {
+  const load = useCallback(
+    (signal: AbortSignal) => getProjectLibrary(config, projectId, signal),
+    [config, projectId],
+  )
+  const folders = useLibraryRead(config, load, active)
+  return <LibraryTree config={config} folders={folders} titles={titles} />
+}
+
+/**
+ * One session's own filed files, read from the plugin's session route while the drawer is open:
+ * only the folders that session filed into, each naming the session itself below its name.
+ */
+export function SessionLibrary({
+  config,
+  sessionId,
+  branch,
+  title,
+  active,
+}: {
+  config: HermesConfig
+  sessionId: string
+  /** The session's worktree, as `hermes/<slug>`, which is how its files are filed. */
+  branch?: string
+  title: string
+  active: boolean
+}) {
+  const load = useCallback(
+    async (signal: AbortSignal) => (await getSessionLibrary(config, sessionId, signal)).folders,
+    [config, sessionId],
+  )
+  const folders = useLibraryRead(config, load, active)
+  const titles = useMemo(
+    () => new Map(branch ? [[branch.replace(/^hermes\//, ""), title]] : []),
+    [branch, title],
+  )
+  return <LibraryTree config={config} folders={folders} titles={titles} />
 }
