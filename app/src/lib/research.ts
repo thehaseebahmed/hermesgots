@@ -208,6 +208,8 @@ export interface Mission {
   revisions?: Revision[]
   /** A rewrite under way: a follow-up's (read for first) or another model's. */
   pending?: { reason: "followup" | "rewrite"; questions?: string[] }
+  /** The model the main agent ran the research on; absent when the plugin doesn't say. */
+  researcher?: ModelChoice
   /** The model the mission writes with, when not the profile's own. */
   writer?: ModelChoice
   /** Only once the mission itself has been read, not from the list. */
@@ -299,6 +301,7 @@ function toMission(raw: Record<string, unknown>, profileId: string): Mission {
             questions: list(pending.questions).filter((q): q is string => typeof q === "string"),
           }
         : undefined,
+    researcher: toChoice(raw.researcher),
     writer: toChoice(raw.writer),
     ledger: ledger && {
       sources: list(ledger.sources) as Source[],

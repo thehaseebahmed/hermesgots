@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -226,6 +226,9 @@ def connect(path: Path) -> sqlite3.Connection:
         for column in ("followups", "suggestions", "pending", "writer"):
             if column not in mission_columns:
                 conn.execute(f"ALTER TABLE research_missions ADD COLUMN {column} TEXT")
+        # v19: the model the main agent ran the research on, read from its session once it stopped.
+        if "researcher" not in mission_columns:
+            conn.execute("ALTER TABLE research_missions ADD COLUMN researcher TEXT")
         # v18: every version of what a mission delivered, and why it was written again.
         conn.execute(
             """CREATE TABLE IF NOT EXISTS research_revisions (

@@ -29,6 +29,7 @@ import html
 import json
 import logging
 import re
+import sqlite3
 import threading
 import time
 import urllib.error
@@ -148,6 +149,7 @@ def _summary(row: Any, conn: Any) -> Dict[str, Any]:
         "suggestions": _loads(row["suggestions"], []),
         "pending": _loads(row["pending"], None),
         "writer": _loads(row["writer"], None),
+        "researcher": _loads(row["researcher"], None),
         "found": counts[0],
         "claims": counts[1],
         "created_at": row["created_at"],
@@ -160,7 +162,7 @@ def _row(conn: Any, mission_id: str) -> Any:
 
 
 def _update(path: Path, mission_id: str, **fields: Any) -> None:
-    for key in ("outline", "source_kinds", "formats", "followups", "suggestions", "pending", "writer"):
+    for key in ("outline", "source_kinds", "formats", "followups", "suggestions", "pending", "writer", "researcher"):
         if key in fields and fields[key] is not None and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
     fields["updated_at"] = _now()
@@ -1409,6 +1411,30 @@ def _run_status(run_id: Optional[str]) -> Optional[str]:
     return status.get("status") if isinstance(status, dict) else None
 
 
+def _record_researcher(path: Path, mission_id: str) -> None:
+    """Notes the model the researcher ran on, from its Hermes session once it has stopped. Best
+    effort: a session the store can't be read for leaves the mission without one."""
+    state = path.parent.parent / "state.db"
+    if not state.exists():
+        return
+    try:
+        # Read-only, so a lookup can never lock the gateway out of its own store.
+        with sqlite3.connect(f"{state.as_uri()}?mode=ro", uri=True, timeout=2) as conn:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
+            if "model" not in columns:
+                return
+            provider = "billing_provider" if "billing_provider" in columns else "NULL"
+            row = conn.execute(
+                f"SELECT model, {provider} FROM sessions WHERE id = ?",
+                (f"{SESSION_PREFIX}{mission_id}",),
+            ).fetchone()
+    except sqlite3.Error:
+        logger.debug("memento: couldn't read mission %s's researcher", mission_id, exc_info=True)
+        return
+    if row and row[0]:
+        _update(path, mission_id, researcher={"provider": row[1] or "", "model": row[0]})
+
+
 def finished_reading(path: Path, mission_id: str, status: Optional[str]) -> bool:
     """Moves a mission whose researcher stopped on to drafting, or fails it when it found too
     little. False while the researcher is still going."""
@@ -1433,6 +1459,7 @@ def finished_reading(path: Path, mission_id: str, status: Optional[str]) -> bool
         _update(path, mission_id, error=reason)
         _tell(path, "research_failed", mission_id, found["title"])
         return True
+    _record_researcher(path, mission_id)
     # A follow-up round's write-up stays on show until drafting starts it again.
     _update(path, mission_id, stage="drafting", **({} if found["pending"] else {"written": 0}))
     return True

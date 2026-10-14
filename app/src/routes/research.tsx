@@ -308,6 +308,7 @@ function missionLine(mission: Mission) {
 function MissionGroup({ title, missions }: { title: string; missions: Mission[] }) {
   const navigate = useNavigate()
   const now = useNow()
+  const profiles = useLiveQuery(() => db.profiles.toArray(), [])
   if (!missions.length) return null
   return (
     <section className="flex flex-col gap-2">
@@ -327,6 +328,7 @@ function MissionGroup({ title, missions }: { title: string; missions: Mission[] 
           const Icon = FORMAT_ICONS[mission.format]
           const waiting = needsYou(mission)
           const busy = isWorking(mission)
+          const botId = profiles?.find((p) => p.id === mission.profileId)?.botId
           return (
             <li key={mission.id}>
               <button
@@ -334,13 +336,19 @@ function MissionGroup({ title, missions }: { title: string; missions: Mission[] 
                 onClick={() => navigate(`/research/${mission.id}`)}
                 className="flex min-h-16 w-full items-center gap-3 rounded-3xl border bg-card px-4 py-3 text-left transition-colors hover:bg-muted"
               >
-                <span
-                  className={cn(
-                    "flex size-10 shrink-0 items-center justify-center rounded-2xl",
-                    waiting ? "bg-warning/15 text-warning" : "bg-muted text-muted-foreground",
-                  )}
-                >
-                  {busy ? <Spinner className="size-5" /> : <Icon className="size-5" />}
+                <span className="relative shrink-0">
+                  <span
+                    className={cn(
+                      "flex size-10 items-center justify-center rounded-2xl",
+                      waiting ? "bg-warning/15 text-warning" : "bg-muted text-muted-foreground",
+                    )}
+                  >
+                    {busy ? <Spinner className="size-5" /> : <Icon className="size-5" />}
+                  </span>
+                  <Bot
+                    id={botId}
+                    className="absolute -right-1.5 -bottom-1.5 size-6 rounded-full bg-card p-px ring-2 ring-card"
+                  />
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate font-medium">{mission.title}</span>
@@ -659,6 +667,8 @@ function MissionHeader({
   actions?: ReactNode
 }) {
   const type = MISSION_TYPES.find((t) => t.id === mission.type)!
+  const profile = useLiveQuery(() => db.profiles.get(mission.profileId), [mission.profileId])
+  const by = [profile?.name, mission.researcher?.model].filter(Boolean).join(" · ")
   return (
     <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
       <div className="flex items-center gap-3">
@@ -673,7 +683,9 @@ function MissionHeader({
         </Button>
         <div className="flex min-w-0 flex-1 flex-col">
           <h1 className="truncate text-base font-semibold tracking-tight">{mission.title}</h1>
-          <p className="truncate text-xs text-muted-foreground">{type.name}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {[type.name, by].filter(Boolean).join(" · ")}
+          </p>
         </div>
         {actions}
       </div>

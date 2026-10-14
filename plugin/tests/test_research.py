@@ -5,6 +5,7 @@ Run: python3 -m unittest plugin.tests.test_research -v
 
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 import unittest
 from unittest import mock
@@ -143,6 +144,28 @@ class MissionTest(unittest.TestCase):
             self.path, found["id"], {"outline": found["outline"], "source_kinds": ["papers"]}
         )
         self.assertEqual(found["stage"], "reading")
+
+    def test_the_model_the_researcher_ran_on_is_kept(self) -> None:
+        # The store sits in the profile's memento folder, beside Hermes's own state.db.
+        self.path = Path(self.dir.name) / "memento" / "memento.db"
+        state = sqlite3.connect(Path(self.dir.name) / "state.db")
+        state.execute("CREATE TABLE sessions (id TEXT PRIMARY KEY, model TEXT, billing_provider TEXT)")
+        self.reach_reading()
+        state.execute(
+            "INSERT INTO sessions VALUES (?, 'claude-opus-5-5', 'anthropic')",
+            (f"research-{self.mission['id']}",),
+        )
+        state.commit()
+        state.close()
+        self.assertIsNone(research.mission(self.path, self.mission["id"])["researcher"])
+        self.claim("based solely on attention mechanisms, dispensing with recurrence and convolutions entirely.")
+        self.claim("Multi-head attention allows the model to jointly attend to information")
+        self.claim("A passage from a PDF that can't be read.", "https://example.com/a.pdf", lambda _u: None)
+        research.finished_reading(self.path, self.mission["id"], "completed")
+        self.assertEqual(
+            research.mission(self.path, self.mission["id"])["researcher"],
+            {"provider": "anthropic", "model": "claude-opus-5-5"},
+        )
 
     def test_a_mission_from_question_to_guide_and_quiz(self) -> None:
         self.reach_reading()
