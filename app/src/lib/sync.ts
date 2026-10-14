@@ -650,7 +650,10 @@ export async function startSync() {
   liveQuery(fingerprint).subscribe((value) => {
     if (value === syncedFingerprint) return
     window.clearTimeout(timer)
-    timer = window.setTimeout(() => void syncNow(), 1500)
+    // A pull writes the fingerprint this fires on, so it's checked again before syncing it back.
+    timer = window.setTimeout(() => {
+      if (value !== syncedFingerprint) void syncNow()
+    }, 1500)
   })
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") void syncNow()
