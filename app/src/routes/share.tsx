@@ -81,7 +81,7 @@ function SharedImages({ images, onRemove }: { images: File[]; onRemove: (index: 
 }
 
 /**
- * What another app shared into Memento: add a note, pick the bot and a chat (or thread) of it, or a
+ * What another app shared into Gots: add a note, pick the bot and a chat (or thread) of it, or a
  * new one, and send. The message goes like one typed in that chat, images as its attachments.
  */
 export function SharePage() {

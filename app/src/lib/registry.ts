@@ -16,7 +16,7 @@ import { inboxKey, inboxPublic } from "@/lib/sync"
 import { inboxFingerprint, openFromInbox, toBase32, type SealedToInbox } from "@/lib/vault"
 
 /**
- * The bot registry (`netlify/lib/registry.ts`): Memento plugins register their Hermes profiles there,
+ * The bot registry (`netlify/lib/registry.ts`): Gots plugins register their Hermes profiles there,
  * sealed to the account's inbox, and every device turns the records into bots.
  */
 

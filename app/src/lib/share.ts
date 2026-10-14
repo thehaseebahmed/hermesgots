@@ -7,7 +7,7 @@ import { skipLaunchRestore } from "@/lib/launch"
 import { isNative } from "@/lib/native"
 import { randomId } from "@/lib/utils"
 
-/** What another app shared into Memento, through Android's share sheet or the PWA's share target. */
+/** What another app shared into Gots, through Android's share sheet or the PWA's share target. */
 export interface IncomingShare {
   id: string
   /** The page or item's title, when the sender gave one. */

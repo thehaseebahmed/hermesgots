@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The e2e CLI: runs Memento's browser flows against the mock Hermes, starting the app and the
+// The e2e CLI: runs Gots's browser flows against the mock Hermes, starting the app and the
 // mocks each flow needs and stopping them afterwards. `pnpm e2e help` lists what it does.
 import { spawn, spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, openSync } from "node:fs"

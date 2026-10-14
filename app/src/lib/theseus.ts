@@ -30,7 +30,7 @@ import { usePoll } from "@/lib/poll"
 /**
  * Theseus: a session mode that runs the THA Theseus skill end to end in Auto. The work is split
  * into checkpoints, and each passes four gates (tests, a visual match, code review, the user's
- * approval) before the next one starts. The skill lives in the Memento plugin on the Hermes host,
+ * approval) before the next one starts. The skill lives in the Gots plugin on the Hermes host,
  * which keeps the run in the session's worktree and records the user's answers as the skill does;
  * this reads the run from the plugin and sends those answers back.
  */

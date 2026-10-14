@@ -53,7 +53,7 @@ import {
  * Syncs bots, the appearance switches and the chat list (titles, Hermes session ids and context
  * use, not messages). Bots come from the registry and the sealed `bots` document; the Appearance
  * section's switches from the `settings` document, which every device merges on `appearanceAt`;
- * each bot's chat list lives with the Memento plugin on its own Hermes server. Everything sent to
+ * each bot's chat list lives with the Gots plugin on its own Hermes server. Everything sent to
  * Netlify is sealed with the account's data key, and each document's associated data names its
  * owner and slot, so the server can't swap one document for another.
  */
@@ -86,7 +86,7 @@ const CHAT_FIELDS = [
 ] as const
 type ChatValue = Pick<Conversation, (typeof CHAT_FIELDS)[number]>
 
-/** Whether the bot's Memento plugin answered the last chat list sync. */
+/** Whether the bot's Gots plugin answered the last chat list sync. */
 export type ChatStore = "plugin" | "unreachable"
 
 export interface SyncState {
@@ -197,7 +197,7 @@ async function keep(dataKey: CryptoKey) {
 function passkeyUser() {
   if (state.account.status !== "signed-in") throw new Error("Sign in first.")
   const { user } = state.account
-  const name = user.email ?? user.name ?? "Memento"
+  const name = user.email ?? user.name ?? "Gots"
   return { id: user.id, name, displayName: user.name ?? name }
 }
 
@@ -476,7 +476,7 @@ async function pullFallbackChats(key: CryptoKey, profileId: string) {
   return true
 }
 
-/** Syncs a bot's chats with its server's Memento plugin; false when it didn't answer. */
+/** Syncs a bot's chats with its server's Gots plugin; false when it didn't answer. */
 /** Merges the bot's chat list with its plugin's; the merged list, or undefined when it didn't answer. */
 async function mergePluginChats(profile: Profile) {
   const local = await localChats(profile.id)

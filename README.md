@@ -1,4 +1,4 @@
-# Memento
+# Gots
 
 <p align="center">
   <a href="https://app.netlify.com/projects/hermes-companion/deploys"><img alt="Netlify Status" src="https://api.netlify.com/api/v1/badges/5e7733ce-e51d-4d60-adc3-c0e5b8fdb5e5/deploy-status"></a>
@@ -8,12 +8,12 @@
 A playful, minimal companion app for [Hermes Agent](https://github.com/NousResearch/hermes-agent). It's an installable PWA for phones and tablets, with light and dark themes.
 
 - **Chat** streams replies from Hermes's OpenAI-compatible API, with live tool cards. When Hermes asks to run a dangerous command, an **approval** card (Once / Session / Always / Deny) takes the place of the message bar. Once you answer, the card moves into the thread at the point where Hermes asked.
-- **Todos**: when the agent plans multi-step work, a "2/5 todos" pill above the message bar shows its progress, and tapping it opens the list. The agent keeps the list; it needs the [Memento plugin](plugin/README.md).
-- **Voice**: the mic button records you and the bot's own Hermes host turns it into text with its local faster-whisper model. Tap to start and stop, or hold and let go. Cancel discards the recording, Stop drops the text into the message bar to edit, and Send sends it straight away. The button only appears for a bot whose host has faster-whisper installed (`hermes tools`, then Local Whisper under Speech-to-Text) and the Memento plugin 0.34 or newer.
+- **Todos**: when the agent plans multi-step work, a "2/5 todos" pill above the message bar shows its progress, and tapping it opens the list. The agent keeps the list; it needs the [Gots plugin](plugin/README.md).
+- **Voice**: the mic button records you and the bot's own Hermes host turns it into text with its local faster-whisper model. Tap to start and stop, or hold and let go. Cancel discards the recording, Stop drops the text into the message bar to edit, and Send sends it straight away. The button only appears for a bot whose host has faster-whisper installed (`hermes tools`, then Local Whisper under Speech-to-Text) and the Gots plugin 0.34 or newer.
 - **Bots**: each bot is a Hermes profile with its own API URL, key and model. Bots sit in a horizontal strip at the top of the sidebar. Tap one to open its latest chat (or a new one if it has none), and new chats go to it. A new bot gets a random image from the 8 glassy SVG characters (soft shapes with an accessory each; see `/bots`), unique until all 8 are taken, and you can change it in Settings. The header bot is animated, and the bots next to messages stay still.
-- **Routines** (`/routines`): every Hermes cron job, grouped by bot, with its last 24 runs as status bars and Run now / Pause / Resume. Run history comes from the [Memento plugin](plugin/README.md) on your Hermes server, so every device sees the same runs. Bots fold away, and the header flags failing and recently failed routines.
-- **Settings**: sync, bots (name, image, API URL and key, model picker, whether its Memento plugin is in use), theme, reply stats, and clearing local data.
-- **Sync**: each bot's chat list (titles, Hermes session ids and context use) is saved on its Hermes server by the [Memento plugin](plugin/README.md). On a deploy with Netlify Identity, you sign in with GitHub and turn on (or unlock) sync before the app opens. It syncs bots across devices, and the chat list of any bot whose server doesn't have the plugin (Settings flags those bots). It's end-to-end encrypted, so Netlify only ever stores ciphertext. Messages come from Hermes: an open chat picks up turns sent from your other devices, and older messages load on request.
+- **Routines** (`/routines`): every Hermes cron job, grouped by bot, with its last 24 runs as status bars and Run now / Pause / Resume. Run history comes from the [Gots plugin](plugin/README.md) on your Hermes server, so every device sees the same runs. Bots fold away, and the header flags failing and recently failed routines.
+- **Settings**: sync, bots (name, image, API URL and key, model picker, whether its Gots plugin is in use), theme, reply stats, and clearing local data.
+- **Sync**: each bot's chat list (titles, Hermes session ids and context use) is saved on its Hermes server by the [Gots plugin](plugin/README.md). On a deploy with Netlify Identity, you sign in with GitHub and turn on (or unlock) sync before the app opens. It syncs bots across devices, and the chat list of any bot whose server doesn't have the plugin (Settings flags those bots). It's end-to-end encrypted, so Netlify only ever stores ciphertext. Messages come from Hermes: an open chat picks up turns sent from your other devices, and older messages load on request.
 - **First-run setup** walks through signing in, turning on sync, enabling Hermes's API server (from its `.env` file or the Hermes Dashboard) and connecting the first bot. A device whose bots arrive through sync skips the Hermes steps.
 - Bots, chats and settings are stored on the device in **IndexedDB** (via Dexie). Theme preference lives in `localStorage` so the first paint doesn't flash.
 
@@ -31,9 +31,9 @@ API_SERVER_CORS_ORIGINS=https://<your-site>.netlify.app
 
 Or, in the Hermes Dashboard (`hermes dashboard`): **Channels → API server → Configure**, turn it on, set the auth key, and **Restart gateway**. The dashboard has no CORS field, so `API_SERVER_CORS_ORIGINS` still goes in `~/.hermes/.env`.
 
-Memento's first-run setup shows both routes, with this site's origin filled in, then connects your first bot (`http://localhost:8642/v1` or your server's URL) with **Test connection**. Add more bots later in **Settings**.
+Gots's first-run setup shows both routes, with this site's origin filled in, then connects your first bot (`http://localhost:8642/v1` or your server's URL) with **Test connection**. Add more bots later in **Settings**.
 
-Also install the [Memento plugin](plugin/README.md). It keeps each bot's chat list on its Hermes server, serves **Routines**, and labels your chats **Memento** in the Hermes dashboard:
+Also install the [Gots plugin](plugin/README.md). It keeps each bot's chat list on its Hermes server, serves **Routines**, and labels your chats **Gots** in the Hermes dashboard:
 
 ```bash
 hermes plugins install thehaseebahmed/memento/plugin --enable
@@ -46,11 +46,11 @@ hermes gateway restart
 
 ### How it uses the API
 
-- `POST /v1/chat/completions` with `stream: true`. Memento parses Hermes's extra SSE events (`hermes.tool.progress`, `hermes.status`, `approval.request`) alongside the normal chunks.
-- Each chat mints its own `X-Hermes-Session-Id` (`memento-<uuid>`), so Hermes keeps one session per chat. Hermes only honours this header when `API_SERVER_KEY` is set. Without a key, Memento sends the full transcript on every turn.
+- `POST /v1/chat/completions` with `stream: true`. Gots parses Hermes's extra SSE events (`hermes.tool.progress`, `hermes.status`, `approval.request`) alongside the normal chunks.
+- Each chat mints its own `X-Hermes-Session-Id` (`memento-<uuid>`), so Hermes keeps one session per chat. Hermes only honours this header when `API_SERVER_KEY` is set. Without a key, Gots sends the full transcript on every turn.
 - Approvals are answered with `POST /v1/runs/{completion_id}/approval`.
-- Routines use `GET /api/jobs` and `POST /api/jobs/{id}/pause | resume | run`. The API server only reports each job's latest run, so the run history comes from the Memento plugin's `GET /api/plugins/memento/cron/runs`, which reads Hermes's cron execution ledger.
-- With the plugin, Memento marks each chat's session as `memento` (`POST /api/plugins/memento/sessions/{id}/label`) after its first turns, so the Hermes dashboard labels it **Memento** instead of **API server**.
+- Routines use `GET /api/jobs` and `POST /api/jobs/{id}/pause | resume | run`. The API server only reports each job's latest run, so the run history comes from the Gots plugin's `GET /api/plugins/memento/cron/runs`, which reads Hermes's cron execution ledger.
+- With the plugin, Gots marks each chat's session as `memento` (`POST /api/plugins/memento/sessions/{id}/label`) after its first turns, so the Hermes dashboard labels it **Gots** instead of **API server**.
 - Hermes's tool events carry the tool name and a preview of its arguments, but not its output. Tool cards show what ran and for how long.
 - Chats load and catch up from `GET /api/sessions/{id}/messages?order=latest`, 50 rows at a time, so turns sent from another device appear on this one.
 - The reply stats line is an estimate (about 4 characters per token, measured over the visible reply).
@@ -86,7 +86,7 @@ The function stores data in Netlify Blobs (store `memento-sync`), which needs no
 
 ### How sync is encrypted
 
-- One random AES-256-GCM key per account encrypts everything sync uploads: bots (API keys included) and the chat list of each bot without the Memento plugin. Messages, and the chat lists the plugin keeps, stay on your Hermes server.
+- One random AES-256-GCM key per account encrypts everything sync uploads: bots (API keys included) and the chat list of each bot without the Gots plugin. Messages, and the chat lists the plugin keeps, stay on your Hermes server.
 - The server only keeps that key wrapped by secrets it never sees:
   - a passkey's WebAuthn PRF output, through HKDF
   - a 25-character recovery code, through PBKDF2

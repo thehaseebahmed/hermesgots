@@ -1,5 +1,5 @@
 /**
- * The bot registry: Memento plugins register their Hermes profiles here, and the app reads them back.
+ * The bot registry: Gots plugins register their Hermes profiles here, and the app reads them back.
  * A plugin joins an account by claiming a link code the app minted, which hands it a host token.
  * Bot records arrive sealed to the account's inbox key (`vault.ts`), so this only sees ids, flags
  * and times; chats never pass through here.
@@ -214,7 +214,7 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
     if (!code) return error("Unknown code", 404)
     const { data } = code
     if (now > data.expiresAt || data.claims >= MAX_CLAIMS || data.failures >= MAX_FAILURES) {
-      return error("This link code has expired. Copy a new one from Memento.", 410)
+      return error("This link code has expired. Copy a new one from Gots.", 410)
     }
     if ((await sha256(secret)) !== data.secretHash) {
       await update<Code>(store, `codes/${codeId}`, (c) => c && { ...c, failures: c.failures + 1 })
@@ -226,9 +226,9 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
       used = true
       return null
     })
-    if (used) return error("This link code has expired. Copy a new one from Memento.", 410)
+    if (used) return error("This link code has expired. Copy a new one from Gots.", 410)
     const inbox = await ctx.inbox(data.userId)
-    if (!inbox) return error("Turn on sync in Memento first.", 409)
+    if (!inbox) return error("Turn on sync in Gots first.", 409)
     const hostId = crypto.randomUUID()
     const token = randomToken()
     const tokenHash = await sha256(token)

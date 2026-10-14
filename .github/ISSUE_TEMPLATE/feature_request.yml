@@ -1,12 +1,12 @@
 name: Feature request
-description: An idea for Memento or its Hermes plugin
+description: An idea for Gots or its Hermes plugin
 labels: ["enhancement"]
 body:
   - type: textarea
     id: problem
     attributes:
       label: What are you trying to do
-      description: The problem or the moment you wished Memento did something else.
+      description: The problem or the moment you wished Gots did something else.
     validations:
       required: true
   - type: textarea

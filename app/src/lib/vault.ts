@@ -1,7 +1,7 @@
 import { isNative } from "@/lib/native"
 
 /**
- * End-to-end encryption for sync. One random data key encrypts everything Memento uploads; the
+ * End-to-end encryption for sync. One random data key encrypts everything Gots uploads; the
  * server only ever holds that key wrapped by secrets it never sees: a passkey's PRF output or a
  * recovery code. Web Crypto only.
  */
@@ -17,7 +17,7 @@ export interface Vault {
 }
 
 /**
- * The account's inbox: Memento plugins seal their bot records to its public half, so the registry
+ * The account's inbox: Gots plugins seal their bot records to its public half, so the registry
  * passes along URLs and API keys it can't read. The private half is sealed with the data key.
  */
 export interface Inbox {
@@ -253,7 +253,7 @@ export async function passkeyWrapper(
   if (!supportsPasskeys()) throw new PrfUnsupportedError()
   const credential = (await navigator.credentials.create({
     publicKey: {
-      rp: { name: "Memento" },
+      rp: { name: "Gots" },
       user: { id: encoder.encode(user.id), name: user.name, displayName: user.displayName },
       challenge: random(32),
       pubKeyCredParams: [
@@ -292,7 +292,7 @@ export async function unlockWithPasskey(vault: Vault) {
     passkeys.map((w) => w.credentialId),
   )
   const wrapper = passkeys.find((w) => w.credentialId === credentialId)
-  if (!wrapper) throw new Error("That passkey isn't set up for Memento.")
+  if (!wrapper) throw new Error("That passkey isn't set up for Gots.")
   return unwrap(wrapper, await prfKey(secret, vault.prfSalt), true)
 }
 

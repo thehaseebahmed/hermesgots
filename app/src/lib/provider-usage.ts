@@ -84,7 +84,7 @@ export function resetsAtText(ms: number) {
 }
 
 /**
- * Reads the provider's account-usage windows from its server's Memento plugin.
+ * Reads the provider's account-usage windows from its server's Gots plugin.
  * Stored on the profile (local only, never synced) so each device sees the same
  * figure. Skips keyless or disabled bots, and backs off a failed server for 5
  * minutes so a missing plugin doesn't poll on every catch-up.

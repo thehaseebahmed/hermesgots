@@ -25,7 +25,7 @@ import { useAllLive, useAnyChange, useChanges, useLive } from "@/lib/live"
 import { usePoll } from "@/lib/poll"
 import { createStore } from "@/lib/store"
 
-// Missions live on each bot's Memento plugin (`research.py`), which runs them with the app closed.
+// Missions live on each bot's Gots plugin (`research.py`), which runs them with the app closed.
 
 export type MissionType =
   "learn" | "compare" | "verify" | "literature" | "prepare" | "investigate" | "brainstorm"
@@ -372,7 +372,7 @@ export function refreshMissions() {
       (await targets()).map(async (profile) => {
         try {
           if (!(await hasPluginFeature(profile, "research"))) {
-            unsupported[profile.id] = "Its Memento plugin needs an update for Research."
+            unsupported[profile.id] = "Its Gots plugin needs an update for Research."
             return
           }
           const found = await listResearch(profile)

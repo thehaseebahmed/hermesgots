@@ -34,7 +34,7 @@ function heldFor(profile: Profile, current: ModelChoice | undefined) {
 }
 
 /**
- * Reads a chat's context use from its server's Memento plugin, which sees every model call, so each
+ * Reads a chat's context use from its server's Gots plugin, which sees every model call, so each
  * device shows the same exact figure. Hermes's API has nothing to work it out from, so chats without
  * the plugin aren't tracked.
  */

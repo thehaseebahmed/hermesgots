@@ -14,7 +14,7 @@ function describe({ error, componentStack }: Crash) {
       ? (error.stack ?? `${error.name}: ${error.message}`)
       : `Thrown: ${String(error)}`
   return [
-    `Memento v${__APP_VERSION__}`,
+    `Gots v${__APP_VERSION__}`,
     new Date().toISOString(),
     window.location.pathname,
     navigator.userAgent,

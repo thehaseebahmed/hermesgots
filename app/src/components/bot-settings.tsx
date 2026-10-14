@@ -78,7 +78,7 @@ function EnabledSetting({ profile }: { profile: Profile }) {
     <Field orientation="horizontal">
       <div className="flex-1 space-y-1">
         <FieldLabel htmlFor="enabled">Enabled</FieldLabel>
-        <FieldDescription>{profile.disabled ? "Hidden in Memento" : seen}</FieldDescription>
+        <FieldDescription>{profile.disabled ? "Hidden in Gots" : seen}</FieldDescription>
       </div>
       <Switch
         id="enabled"
@@ -222,7 +222,7 @@ export function BotEditor({
     <FieldGroup>
       {!profile.disabled && pluginOutdated(profile.pluginVersion) && (
         <Banner tone="warning">
-          {profile.name}'s Memento plugin is out of date! Update it to {MIN_PLUGIN_VERSION} or
+          {profile.name}'s Gots plugin is out of date! Update it to {MIN_PLUGIN_VERSION} or
           newer.
         </Banner>
       )}

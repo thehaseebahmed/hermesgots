@@ -33,8 +33,8 @@ export default defineConfig(({ mode }) => ({
       registerType: "autoUpdate",
       includeAssets: ["favicon.png", "apple-touch-icon.png", "bots/*.png"],
       manifest: {
-        name: "Memento",
-        short_name: "Memento",
+        name: "Gots",
+        short_name: "Gots",
         description: "A playful companion app for your Hermes Agent.",
         start_url: "/",
         scope: "/",

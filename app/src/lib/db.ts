@@ -37,7 +37,7 @@ export interface Settings {
   onboarded?: boolean
   /** Soft-wrap in tool output; unset until the user flips it (wrapped by default). */
   wrapToolOutput?: boolean
-  /** Bots whose old Netlify chat list was moved onto their Memento plugin and deleted. */
+  /** Bots whose old Netlify chat list was moved onto their Gots plugin and deleted. */
   movedChats?: string[]
   /** This device's Web Push identity, local only: its id, its VAPID key pair and whether it's on. */
   push?: { device: string; vapidKey: string; vapidPublic: string; on: boolean }
@@ -57,7 +57,7 @@ export const APPEARANCE_FIELDS = ["simplifiedChats", "steerByDefault", "breakRem
 /** Those switches as sync reads them, present rather than optional, so a read needs no fallback. */
 export type Appearance = Required<Pick<Settings, (typeof APPEARANCE_FIELDS)[number]>>
 
-/** A Hermes profile Memento can talk to. Its Memento plugin registers it (see `registry.ts`). */
+/** A Hermes profile Gots can talk to. Its Gots plugin registers it (see `registry.ts`). */
 export interface Profile {
   id: string
   name: string
@@ -84,11 +84,11 @@ export interface Profile {
   disabled?: boolean
   /** When its host last checked in with the registry. Local only. */
   seenAt?: number
-  /** The Memento plugin version its host last reported. Local only. */
+  /** The Gots plugin version its host last reported. Local only. */
   pluginVersion?: string
   /** The host's main model as last read by any device, shown while it's read again. */
   hostModel?: ModelChoice
-  /** The provider's account-usage windows, local only; read from the Memento plugin. */
+  /** The provider's account-usage windows, local only; read from the Gots plugin. */
   providerUsage?: ProviderUsage
   /** A dismissed limit-notice key (provider + window label + reset), local only. */
   limitDismissed?: string
@@ -121,7 +121,7 @@ export interface Conversation {
    */
   olderThan?: { id: number; offset: number }
   /**
-   * The session's latest model call, as the Memento plugin recorded it: its prompt tokens, the
+   * The session's latest model call, as the Gots plugin recorded it: its prompt tokens, the
    * model that ran it, and the window Hermes compresses against. Local only; every device reads it
    * from the plugin.
    */
@@ -130,7 +130,7 @@ export interface Conversation {
   hermesTip?: number
   /**
    * The agent's own todo list (its `todo_list` tool) and when this device last set it. Local only;
-   * every device reads it from the Memento plugin.
+   * every device reads it from the Gots plugin.
    */
   todos?: { revision: number; items: Todo[]; at: number }
   /** A model the user picked for this chat from its host's configured ones; unset runs the bot's. */
@@ -168,7 +168,7 @@ export interface Conversation {
   prs?: PullRequestRef[]
   /**
    * How many files the session filed in its library, and when they were counted. Local only;
-   * every device reads them from the Memento plugin.
+   * every device reads them from the Gots plugin.
    */
   library?: { count: number; at: number }
 }
@@ -263,7 +263,7 @@ export interface ClarifyQuestion {
 /** A choice or typed text per question id, a list for multi-select, null for a skipped one. */
 export type ClarifyAnswers = Record<string, string | string[] | null>
 
-/** The agent's questions (Hermes's `clarify` tool, served by the Memento plugin). */
+/** The agent's questions (Hermes's `clarify` tool, served by the Gots plugin). */
 export interface ClarifyRequest {
   runId: string
   clarifyId: string
@@ -296,7 +296,7 @@ export interface Attachment {
   image: boolean
   /** The file (an image downscaled), on this device only: Hermes's transcript doesn't keep it. */
   blob?: Blob
-  /** Where the Memento plugin saved it on the Hermes host. */
+  /** Where the Gots plugin saved it on the Hermes host. */
   path?: string
 }
 
@@ -334,7 +334,7 @@ export interface Message {
   /** The run behind a reply and its last event seen, so a dropped stream can pick up again. */
   runId?: string
   runSeq?: number
-  /** A queued message the Memento plugin holds, which starts it on the host when the run ends. */
+  /** A queued message the Gots plugin holds, which starts it on the host when the run ends. */
   hostQueued?: boolean
   /** The plugin holds the queue until the user sends: a stopped or refused run came before it. */
   queuePaused?: boolean
@@ -525,13 +525,13 @@ db.version(5)
       })
   })
 
-// v6: run history comes from the Memento plugin on the Hermes server, not from each device.
+// v6: run history comes from the Gots plugin on the Hermes server, not from each device.
 db.version(6).stores({ cronRuns: null })
 
 // v7: project sessions, listed per project.
 db.version(7).stores({ conversations: "id, updatedAt, [profileId+updatedAt], projectId" })
 
-// v8: every bot keeps its chats on its Memento plugin, so the per-bot flag for it goes.
+// v8: every bot keeps its chats on its Gots plugin, so the per-bot flag for it goes.
 db.version(8).upgrade((tx) =>
   tx
     .table("profiles")

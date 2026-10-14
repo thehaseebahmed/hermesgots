@@ -95,7 +95,7 @@ export function Composer({
   model?: ReactNode
   /** A project session: its permission mode, picked in the `+` menu. */
   session?: ModeSettings
-  /** Whether files can be attached (they need the Memento plugin); photos always can. */
+  /** Whether files can be attached (they need the Gots plugin); photos always can. */
   filesAvailable: boolean
   /** False when the model doesn't take images. */
   imagesAvailable: boolean

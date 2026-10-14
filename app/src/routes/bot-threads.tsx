@@ -262,7 +262,7 @@ export function BotThreadsPage({
             <p className="max-w-sm text-sm text-muted-foreground">
               {configured
                 ? "Ask me anything. I can run tools on your machine and I'll ask before doing anything risky."
-                : "Point Memento at your Hermes Agent API server to start chatting."}
+                : "Point Gots at your Hermes Agent API server to start chatting."}
             </p>
           </div>
           {configured && (

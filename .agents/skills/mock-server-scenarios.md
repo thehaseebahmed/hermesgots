@@ -1,19 +1,19 @@
 ---
 name: mock-server-scenarios
-description: Use when testing the Memento mock Hermes server (pnpm mock).
+description: Use when testing the Gots mock Hermes server (pnpm mock).
 category: devops
 ---
 
 # Mock Hermes Server Scenarios
 
-The mock server (`pnpm mock` from `app/`) is a dev-only stand-in for the Hermes Agent API server on port 8642. It speaks the same wire format as `gateway/platforms/api_server*.py` and is used by the Memento app during development.
+The mock server (`pnpm mock` from `app/`) is a dev-only stand-in for the Hermes Agent API server on port 8642. It speaks the same wire format as `gateway/platforms/api_server*.py` and is used by the Gots app during development.
 
 ```bash
 cd app
 pnpm mock            # starts on http://localhost:8642/v1
 ```
 
-Point Memento Settings at `http://localhost:8642/v1` to use it.
+Point Gots Settings at `http://localhost:8642/v1` to use it.
 
 ---
 
@@ -23,7 +23,7 @@ Point Memento Settings at `http://localhost:8642/v1` to use it.
 |----------|---------|---------|
 | `PORT` | `8642` | Port to listen on |
 | `MOCK_NO_GITHUB` | unset | Set to `1` to simulate no GitHub account on host (signed out) |
-| `MOCK_NO_PLUGIN` | unset | Set to `1` to disable Memento plugin endpoints (`/api/plugins/memento/*`) |
+| `MOCK_NO_PLUGIN` | unset | Set to `1` to disable Gots plugin endpoints (`/api/plugins/memento/*`) |
 | `MOCK_NO_RUNS` | unset | Set to `1` to disable `/v1/runs` endpoints (like older Hermes) |
 | `MOCK_RUN_BACKLOG` | `1000` | Event buffer size per run; shrink to exercise `replay.truncated` |
 | `MOCK_DROP_EVENTS_MS` | `0` | Cut every event stream after N ms (simulates phone screen off) |
@@ -108,7 +108,7 @@ http://localhost:8642/p/bob/v1        # profile "bob"
 pnpm mock
 
 # Terminal 2: not needed — same server handles all /p/<profile>/ routes
-# Just configure Memento with two bots:
+# Just configure Gots with two bots:
 # Bot 1: http://localhost:8642/v1
 # Bot 2: http://localhost:8642/p/alice/v1
 ```
@@ -150,7 +150,7 @@ pnpm mock
 | GET | `/api/jobs?include_disabled=true` | 3 jobs per profile (Inbox triage 60m, Uptime 15m, Morning digest daily+paused) |
 | POST | `/api/jobs/{id}/pause\|resume\|run` | Control a job |
 
-### Memento Plugin Endpoints (default profile only, requires `MOCK_NO_PLUGIN` unset)
+### Gots Plugin Endpoints (default profile only, requires `MOCK_NO_PLUGIN` unset)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -163,7 +163,7 @@ pnpm mock
 | POST | `/api/plugins/memento/projects/{id}/remove` | Delete project |
 | GET | `/api/plugins/memento/projects` | List all projects with activity |
 | GET/POST | `/api/plugins/memento/chats` | Chat list sync (newer record wins) |
-| POST | `/api/plugins/memento/sessions/{id}/label` | Mark session as Memento-owned |
+| POST | `/api/plugins/memento/sessions/{id}/label` | Mark session as Gots-owned |
 | GET | `/api/plugins/memento/sessions/{id}/context` | Latest model call prompt/output tokens |
 | GET | `/api/plugins/memento/sessions/{id}/todos` | Todo list from transcript |
 | POST | `/api/plugins/memento/runs/{id}/clarify` | Answer clarify questions |

@@ -44,7 +44,7 @@ async function tracked(conversationId: string) {
 }
 
 /**
- * Reads the agent's todo list for a chat from its server's Memento plugin. Keyless chats and bots
+ * Reads the agent's todo list for a chat from its server's Gots plugin. Keyless chats and bots
  * without the plugin have no list.
  */
 export async function refreshTodos(conversationId: string) {

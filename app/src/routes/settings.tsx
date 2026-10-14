@@ -442,7 +442,7 @@ function VersionLabel({ developer }: { developer: boolean }) {
       onClick={tap}
       className="min-h-11 text-center text-xs text-muted-foreground select-none"
     >
-      Memento v{APP_VERSION}
+      Gots v{APP_VERSION}
       <br />
       Built {new Date(__BUILD_TIME__).toLocaleString()}
     </button>
