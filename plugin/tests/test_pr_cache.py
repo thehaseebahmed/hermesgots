@@ -1,10 +1,24 @@
-"""A pull request whose checks are still running is read again sooner than a settled one."""
+"""A pull request whose checks are still running is read again sooner than a settled one, and a
+branch's whole history comes back — its finished pull requests without checks."""
 
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from plugin import github
+
+
+def pr_row(number, state="open", merged=False, draft=False):
+    """A pulls-list row as GitHub answers one."""
+    return {
+        "number": number,
+        "title": f"#{number}",
+        "html_url": f"u{number}",
+        "state": state,
+        "draft": draft,
+        "merged_at": "2026-01-01T00:00:00Z" if merged else None,
+        "head": {"sha": f"sha{number}"},
+    }
 
 
 class FakeClock:
@@ -84,6 +98,47 @@ class PrCacheTests(unittest.TestCase):
             raise github.GitHubError("Couldn't reach GitHub from the server.")
 
         return patch.object(github, "_get", get)
+
+    def _rows(self, rows):
+        """``_get`` serving a branch's pulls as GitHub answers them; counts every read."""
+
+        def get(path, auth):
+            self.reads += 1
+            if "/check-runs" in path:
+                return {"check_runs": [{"status": "completed", "conclusion": "success"}]}
+            if path.endswith("/status"):
+                return {"total_count": 0}
+            return rows
+
+        return patch.object(github, "_get", get)
+
+    def test_a_branchs_pull_requests_all_come_back(self):
+        rows = [pr_row(28), pr_row(27, state="closed", merged=True)]
+        with self._rows(rows):
+            found = github.pull_requests(Path("/fake/home"), "/repo", "branch")
+        self.assertEqual(
+            [pr["number"] for pr in found], [28, 27], "every one of them, newest first"
+        )
+        self.assertEqual(found[1]["state"], "merged", "a finished one keeps its state")
+
+    def test_only_a_live_pull_request_has_its_checks_read(self):
+        rows = [pr_row(28), pr_row(27, state="closed", merged=True)]
+        with self._rows(rows):
+            found = github.pull_requests(Path("/fake/home"), "/repo", "branch")
+        self.assertEqual(found[0]["checks"], "success", "the open one's checks are read")
+        self.assertIsNone(found[1]["checks"], "a merged one's aren't: they don't matter any more")
+
+    def test_the_newest_pull_request_is_the_one_a_caller_gets(self):
+        rows = [pr_row(28), pr_row(27, state="closed", merged=True)]
+        with self._rows(rows):
+            newest = github.pull_request(Path("/fake/home"), "/repo", "branch")
+        assert newest is not None
+        self.assertEqual(newest["number"], 28)
+
+    def test_a_branch_with_no_pull_requests_answers_nothing(self):
+        with self._rows([]):
+            self.assertEqual(github.pull_requests(Path("/fake/home"), "/repo", "branch"), [])
+            self.assertIsNone(github.pull_request(Path("/fake/home"), "/repo", "branch"))
 
     def test_a_failure_answers_none_unless_strict(self):
         with self._failing():

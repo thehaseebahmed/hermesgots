@@ -797,22 +797,25 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         record = await asyncio.to_thread(sessions.record_for, path, home, request.match_info["session_id"])
 
         def lookup():
+            """Every pull request of each repo, newest first; the newest one each is what resolves."""
             found = []
+            newest = []
             for repo in (record or {}).get("repos", []):
                 if not repo.get("path") or not repo.get("branch"):
                     continue
                 # Strict: a GitHub failure must not come back as "no pull requests", which the app
                 # stores over the ones it already knows and the PRs tab empties out.
-                pr = github.pull_request(home, repo["repo_root"], repo["branch"], strict=True)
-                if pr:
-                    found.append(pr)
-            return found
+                prs = github.pull_requests(home, repo["repo_root"], repo["branch"], strict=True)
+                found.extend(prs)
+                if prs:
+                    newest.append(prs[0])
+            return found, newest
 
         try:
-            prs = await asyncio.to_thread(lookup) if record else []
+            prs, newest = await asyncio.to_thread(lookup) if record else ([], [])
         except github.GitHubError as error:
             return _error(web, str(error), error.status)
-        if any(pr["state"] == "merged" for pr in prs):
+        if any(pr["state"] == "merged" for pr in newest):
             try:
                 await asyncio.to_thread(merges.check, home, {request.match_info["session_id"]})
             except Exception:
