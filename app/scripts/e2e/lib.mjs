@@ -96,6 +96,13 @@ function helpers(page) {
           : null
       }, chatId)
     },
+    /** The pull requests the app has stored for a chat. */
+    stored(chatId) {
+      return page.evaluate(async (id) => {
+        const { db } = await import("/src/lib/db.ts")
+        return (await db.conversations.get(id))?.prs ?? null
+      }, chatId)
+    },
     /**
      * Polls `check` until it answers something truthy. Use it over `page.waitForFunction` with an
      * async predicate, whose promise is truthy and so ends the wait at once.
