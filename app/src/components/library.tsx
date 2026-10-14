@@ -1,8 +1,28 @@
-import { useCallback, useState } from "react"
-import { FileIcon, FileTextIcon, FolderIcon, ImageIcon } from "lucide-react"
+import { useCallback, useMemo, useState } from "react"
+import { useLiveQuery } from "dexie-react-hooks"
+import {
+  ArrowDownUpIcon,
+  ChevronDownIcon,
+  FileIcon,
+  FileTextIcon,
+  FolderIcon,
+  ImageIcon,
+} from "lucide-react"
 
+import { Button } from "@/components/ui/button"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { connectionKey } from "@/lib/connection"
+import { getSettings, saveSettings, type LibrarySort } from "@/lib/db"
 import { LIST_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import {
   getLibraryFile,
@@ -22,6 +42,19 @@ const unsupported = cooldown()
 // type the plugin's route gives them (media.content_type), which covers the same extensions.
 const IMAGE_FILE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i
 const TEXT_FILE = /\.(md|markdown|txt|csv|json|pdf)$/i
+
+const LIBRARY_SORTS: Record<LibrarySort, string> = {
+  new: "Newest",
+  old: "Oldest",
+  az: "A–Z",
+  za: "Z–A",
+}
+
+/** The Library tab's order, kept on this device. */
+function useLibrarySort(): [LibrarySort, (sort: LibrarySort) => void] {
+  const sort = useLiveQuery(async () => (await getSettings()).librarySort, []) ?? "new"
+  return [sort, (librarySort) => void saveSettings({ librarySort })]
+}
 
 /** A library file's kind, for its icon and how it opens. */
 function kindOf(name: string) {
@@ -72,11 +105,69 @@ function sessionsOf(folder: LibraryFolder, titles: Map<string, string>) {
   return [...new Set(names)].join(", ")
 }
 
+/** A folder's date: its newest file's. */
+function newestAt(folder: LibraryFolder) {
+  return folder.files.reduce((newest, file) => Math.max(newest, file.at), -Infinity)
+}
+
+/**
+ * The tree in the chosen order: folders by their newest file or their name, and each folder's own
+ * files the same way. Names compare the way the sidebar's do — case-blind, digits as numbers.
+ */
+function sortFolders(folders: LibraryFolder[], sort: LibrarySort): LibraryFolder[] {
+  const byName = sort === "az" || sort === "za"
+  const desc = sort === "new" || sort === "za"
+  const name = (a: string, b: string) =>
+    a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }) * (desc ? -1 : 1)
+  const files = (folder: LibraryFolder) =>
+    [...folder.files].sort((a, b) =>
+      byName ? name(a.name, b.name) : (a.at - b.at) * (desc ? -1 : 1),
+    )
+  return [...folders]
+    .sort((a, b) => (byName ? name(a.name, b.name) : (newestAt(a) - newestAt(b)) * (desc ? -1 : 1)))
+    .map((folder) => ({ ...folder, files: files(folder) }))
+}
+
+/** One folder of the tree: its files, folded away until the folder itself is tapped. */
+function FolderSection({
+  config,
+  folder,
+  titles,
+}: {
+  config: HermesConfig
+  folder: LibraryFolder
+  titles: Map<string, string>
+}) {
+  return (
+    <Collapsible defaultOpen={false} render={<section />}>
+      <CollapsibleTrigger className="group flex min-h-11 w-full items-center gap-3 rounded-xl px-2 py-2 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted">
+          <FolderIcon className="size-5 text-muted-foreground" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-medium">{folder.name}</span>
+          <span className="block truncate text-sm text-muted-foreground">
+            {sessionsOf(folder, titles)}
+          </span>
+        </span>
+        <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-panel-open:rotate-180 motion-reduce:transition-none" />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="space-y-0.5 pl-[3.25rem]">
+          {folder.files.map((file) => (
+            <FileRow key={file.path} config={config} file={file} />
+          ))}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
 /**
  * The project's Library as a tree: each folder — named after the flow its files belong to — with
- * the session that filed it, its files beneath. Read from the plugin's library routes while the
- * tab is on screen, at most every minute; a plugin without them (an older one) is left alone for
- * five minutes.
+ * the session that filed it, folded away until it's tapped and ordered by the sort menu. Read from
+ * the plugin's library routes while the tab is on screen, at most every minute; a plugin without
+ * them (an older one) is left alone for five minutes.
  */
 export function LibraryTab({
   config,
@@ -91,6 +182,7 @@ export function LibraryTab({
   active: boolean
 }) {
   const [folders, setFolders] = useState<LibraryFolder[]>([])
+  const [sort, setSort] = useLibrarySort()
   const key = connectionKey(config)
   const read = useCallback(
     (signal: AbortSignal) => {
@@ -110,33 +202,55 @@ export function LibraryTab({
     [config, projectId, key],
   )
   usePoll(read, LIST_MS, [], { active })
+  const ordered = useMemo(() => sortFolders(folders, sort), [folders, sort])
   if (!folders.length) {
     return (
       <p className="px-3 py-8 text-center text-sm text-muted-foreground sm:px-4">No files yet.</p>
     )
   }
   return (
-    <div className="space-y-6 px-3 py-4 sm:px-4">
-      {folders.map((folder) => (
-        <section key={folder.name}>
-          <div className="flex items-center gap-3 px-2 py-2">
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted">
-              <FolderIcon className="size-5 text-muted-foreground" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate font-medium">{folder.name}</span>
-              <span className="block truncate text-sm text-muted-foreground">
-                {sessionsOf(folder, titles)}
-              </span>
-            </span>
-          </div>
-          <div className="space-y-0.5 pl-[3.25rem]">
-            {folder.files.map((file) => (
-              <FileRow key={file.path} config={config} file={file} />
-            ))}
-          </div>
-        </section>
-      ))}
+    <div className="px-3 pb-4 sm:px-4">
+      <div className="sticky top-0 z-10 flex justify-end bg-background py-2">
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                className="h-11 gap-1.5 rounded-full px-3 text-xs text-muted-foreground"
+                aria-label={`Sort the library by ${LIBRARY_SORTS[sort]}`}
+              />
+            }
+          >
+            <ArrowDownUpIcon />
+            {LIBRARY_SORTS[sort]}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-40">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={sort}
+                onValueChange={(value) => setSort(value as LibrarySort)}
+              >
+                {(Object.keys(LIBRARY_SORTS) as LibrarySort[]).map((option) => (
+                  <DropdownMenuRadioItem
+                    key={option}
+                    value={option}
+                    className="min-h-11"
+                    closeOnClick
+                  >
+                    {LIBRARY_SORTS[option]}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      <div className="space-y-6">
+        {ordered.map((folder) => (
+          <FolderSection key={folder.name} config={config} folder={folder} titles={titles} />
+        ))}
+      </div>
     </div>
   )
 }

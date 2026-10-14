@@ -511,11 +511,18 @@ const sessionLibrary = (record) => {
       files: [
         file("library-tab", "dashboard-light.png", 20480, 4),
         file("library-tab", "dashboard-dark.png", 19456, 2),
+        file("library-tab", "chart.png", 8192, 3),
       ],
     },
     {
       name: "log-cleanup",
       files: [file("log-cleanup", "cleanup-report.md", 1843, 9)],
+    },
+    // Named so the Library tab's date and name orders disagree: the oldest folder sorts first by
+    // name, and this folder's one file sits between the two dashboards in age but ahead of both.
+    {
+      name: "alpha-report",
+      files: [file("alpha-report", "weekly-summary.md", 2048, 20)],
     },
   ]
 }
