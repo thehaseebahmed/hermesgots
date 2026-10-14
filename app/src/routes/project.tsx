@@ -6,6 +6,7 @@ import {
   ArchiveXIcon,
   ArrowLeftIcon,
   CheckIcon,
+  ChevronUpIcon,
   CircleAlertIcon,
   GitPullRequestArrowIcon,
   LockIcon,
@@ -20,7 +21,6 @@ import { quietly } from "@/lib/report"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { PR_GROUPS, prLabel, prLook } from "@/components/chat/pr-look"
 import { PrRow } from "@/components/chat/pr-pill"
-import { Group } from "@/components/group"
 import { LibraryTab } from "@/components/library"
 import { ProjectSettings } from "@/components/project-settings"
 import {
@@ -34,6 +34,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { stopMessage } from "@/lib/chat"
@@ -581,6 +582,42 @@ function SessionItem({
         {line2 && <span className="block truncate text-sm text-muted-foreground">{line2}</span>}
       </span>
     </Link>
+  )
+}
+
+/** A finished group longer than this starts folded. */
+const FOLD_OVER = 5
+
+/**
+ * A titled list that folds away; a finished one (`fold`) longer than `FOLD_OVER` starts folded, and
+ * an `"always"` one always does. It's mounted once its first item is known, so that count decides.
+ */
+function Group({
+  label,
+  count,
+  fold,
+  children,
+}: {
+  label: string
+  count: number
+  fold?: boolean | "always"
+  children: ReactNode
+}) {
+  return (
+    <Collapsible
+      defaultOpen={!fold || (fold !== "always" && count <= FOLD_OVER)}
+      render={<section aria-label={label} />}
+    >
+      <h2>
+        <CollapsibleTrigger className="group -mx-1 flex min-h-11 items-center gap-1.5 rounded-xl px-2 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+          {label} ({count})
+          <ChevronUpIcon className="size-4 rotate-180 transition-transform group-data-panel-open:rotate-0 motion-reduce:transition-none" />
+        </CollapsibleTrigger>
+      </h2>
+      <CollapsibleContent>
+        <ul>{children}</ul>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 
