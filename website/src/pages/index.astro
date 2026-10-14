@@ -1,0 +1,289 @@
+---
+import Phone from "../components/Phone.astro"
+import Base from "../layouts/Base.astro"
+
+const slides = [
+  {
+    tag: "Chat",
+    title: "Chats that actually do things.",
+    body: "Your Hermes agent runs commands, edits files and asks before anything risky. Approve it from the couch.",
+    chips: ["Live tool cards", "Allow once or always", "Deny with a tap"],
+    shot: "approve",
+    bot: "gem",
+    glow: "var(--usage-input)",
+  },
+  {
+    tag: "Away",
+    title: "Close the app. It keeps going.",
+    body: "Ask for something, put your phone down, and come back to it done. The work runs on your Hermes host, so queued messages, steering and pushes all happen with Gots closed.",
+    chips: ["Queue and steer", "Pushes when it needs you", "Waiting for input"],
+    shot: "away",
+    bot: "orbi",
+    glow: "var(--usage-cache-write)",
+  },
+  {
+    tag: "Code",
+    title: "Code from your pocket.",
+    body: "Point a project at your GitHub repos. Every session works in its own git worktree, opens its own pull request, and tidies itself up when it merges.",
+    chips: ["Accept edits, Auto or Plan", "Checks at a glance", "A library of what it made"],
+    shot: "code",
+    bot: "hex",
+    glow: "var(--usage-cache-read)",
+  },
+  {
+    tag: "Experimental",
+    title: "One tiny checkpoint at a time.",
+    body: "Theseus builds big changes in small steps. Each checkpoint has to pass real tests, a visual match, independent AI reviewers and your approval before the next one starts.",
+    chips: ["Four gates", "Reviewed by other models", "You hold the last word"],
+    shot: "theseus",
+    bot: "stella",
+    glow: "var(--merged)",
+  },
+  {
+    tag: "Routines",
+    title: "Routines with a pulse.",
+    body: "Every scheduled job across your bots, with its last 24 runs as little bars. See what failed, when it runs next, then run it now, pause it or bring it back.",
+    chips: ["Run history", "Failing at the top", "Run now"],
+    shot: "routines",
+    bot: "tri",
+    glow: "var(--usage-output)",
+  },
+  {
+    tag: "Everywhere",
+    title: "Share it. Say it. Done.",
+    body: "Send links and images from any app straight into a chat. Talk instead of typing: your host's own Whisper model turns it into text, with no cloud speech service in between.",
+    chips: ["Share sheet", "Dictation on your host", "Photos and files"],
+    shot: "share",
+    bot: "penny",
+    glow: "var(--primary)",
+  },
+]
+
+const extras = [
+  "Research missions",
+  "Per-chat model picker",
+  "Todo pills",
+  "Encrypted sync",
+  "Eight bots",
+  "Notifications by type",
+  "Light and dark",
+  "Bring your own Hermes",
+]
+
+const coming = [
+  {
+    bot: "bloom",
+    status: "In the works",
+    title: "Community leaderboard",
+    body: "Tokens used today, this week and this month. Opt in, pick a handle, climb.",
+  },
+  {
+    bot: "penny",
+    status: "In the works",
+    title: "Model picks",
+    body: "Model combinations that work well for coding, recommended by people who ran them.",
+  },
+  {
+    bot: "cubby",
+    status: "Try it early",
+    title: "Bot threads",
+    body: "Each bot as one chat, with its threads laid out like a group chat.",
+  },
+  {
+    bot: "stella",
+    status: "Next up",
+    title: "More research missions",
+    body: "Learn and understand is ready. Six more mission types are lining up behind it.",
+  },
+  {
+    bot: "hex",
+    status: "After the beta",
+    title: "Google Play",
+    body: "The Android app, straight from the store.",
+  },
+  {
+    bot: "tri",
+    status: "Wishlist",
+    title: "An iOS app",
+    body: "Share into Gots from the iPhone share sheet, like Android does.",
+  },
+]
+
+const floaters = [
+  { bot: "gem", style: "--x:-6%;--y:18%;--s:5.5rem;--r:-8deg;--k:60;--t:0s" },
+  { bot: "bloom", style: "--x:92%;--y:8%;--s:6.5rem;--r:10deg;--k:-40;--t:-2s" },
+  { bot: "orbi", style: "--x:8%;--y:62%;--s:4.5rem;--r:6deg;--k:-70;--t:-4s" },
+  { bot: "stella", style: "--x:88%;--y:56%;--s:5rem;--r:-12deg;--k:50;--t:-1s" },
+  { bot: "hex", style: "--x:22%;--y:-6%;--s:3.75rem;--r:14deg;--k:80;--t:-3s" },
+]
+---
+
+<Base
+  title="Gots: Hermes Bots that got your back"
+  description="Gots gives you Hermes Bots that got your back. Chat, code, research and schedule with your Hermes Agent from your phone, and come back to find it done."
+>
+  <main>
+    <section class="lp-hero" data-hero>
+      <div class="wrap hero-copy">
+        <h1 class="mega" data-reveal="pop" style="--d:80ms">
+          Hermes Bots that<br />got your <em>back!</em>
+        </h1>
+        <p class="lede-xl" data-reveal="rise" style="--d:180ms">
+          Gots is the playful companion for your Hermes Agent: chat, code, research and schedule from your phone. Ask for something, close the app, and
+          come back later to find it done.
+        </p>
+        <div class="cta" data-reveal="rise" style="--d:280ms">
+          <a class="btn" href="#waitlist">Join the waiting list</a>
+          <a class="btn btn-ghost" href="#pricing">Self-host it</a>
+        </div>
+      </div>
+
+      <div class="hero-stage">
+        {
+          floaters.map((f) => (
+            <img class="floater" src={`/bots/${f.bot}.png`} alt="" width="96" height="96" style={f.style} />
+          ))
+        }
+        <div class="hero-phone">
+          <div class="phone"><Phone shot="bots" eager alt="The list of Hermes Bots in Gots" /></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features" class="story" data-story data-count={slides.length} data-active="0" style={`--n:${slides.length}`}>
+      <div class="story-sticky">
+        <div class="wrap story-head">
+          <span class="eyebrow">New</span>
+        </div>
+        <div class="wrap story-grid">
+          <div class="story-copy">
+            {
+              slides.map((s, i) => (
+                <article class="copy" data-i={i}>
+                  <span class="tag">{s.tag}</span>
+                  <h2>{s.title}</h2>
+                  <p>{s.body}</p>
+                  <ul class="chips">
+                    {s.chips.map((chip) => <li>{chip}</li>)}
+                  </ul>
+                </article>
+              ))
+            }
+          </div>
+
+          <div class="story-device">
+            {
+              slides.map((s, i) => (
+                <span class="glow" data-i={i} style={`--glow:${s.glow}`} />
+              ))
+            }
+            <div class="phone">
+              {
+                slides.map((s, i) => (
+                  <div class="slide" data-i={i}>
+                    <Phone shot={s.shot} alt={s.title} />
+                  </div>
+                ))
+              }
+            </div>
+            {
+              slides.map((s, i) => (
+                <img
+                  class="mascot"
+                  data-i={i}
+                  src={`/bots/${s.bot}.png`}
+                  alt=""
+                  width="96"
+                  height="96"
+                />
+              ))
+            }
+          </div>
+        </div>
+        <ol class="dots" aria-label="Features">
+          {
+            slides.map((s, i) => (
+              <li>
+                <button type="button" data-dot={i} aria-label={s.tag} aria-current={i === 0}>
+                  <span></span>
+                </button>
+              </li>
+            ))
+          }
+        </ol>
+      </div>
+    </section>
+
+    <section class="extras">
+      <div class="wrap">
+        <h2 class="section-title" data-reveal="rise">And a pocketful more.</h2>
+        <ul class="pills">
+          {
+            extras.map((name, i) => (
+              <li data-reveal="pop" style={`--d:${i * 60}ms`}>{name}</li>
+            ))
+          }
+        </ul>
+      </div>
+    </section>
+
+    <section id="coming" class="coming">
+      <div class="wrap">
+        <span class="eyebrow" data-reveal="pop">Coming soon</span>
+        <h2 class="section-title" data-reveal="rise">What's cooking.</h2>
+      </div>
+      <ul class="deck" tabindex="0" aria-label="Coming soon">
+        {
+          coming.map((card, i) => (
+            <li class="card" data-reveal="pop" style={`--d:${i * 80}ms;--tilt:${i % 2 ? 1.5 : -1.5}deg`}>
+              <span class="sticker">{card.status}</span>
+              <h3>{card.title}</h3>
+              <p>{card.body}</p>
+              <img src={`/bots/${card.bot}.png`} alt="" width="96" height="96" loading="lazy" />
+            </li>
+          ))
+        }
+      </ul>
+    </section>
+
+    <section id="pricing" class="pricing">
+      <div class="wrap">
+        <span class="eyebrow" data-reveal="pop">Pricing</span>
+        <h2 class="section-title" data-reveal="rise">Two ways in. Both simple.</h2>
+
+        <div class="plans">
+          <article class="plan" data-reveal="rise">
+            <span class="tag">Self-host</span>
+            <p class="price">Free</p>
+            <p class="plan-lede">Run it on your own Hermes host. Your chats, runs and keys stay with you.</p>
+            <pre class="code"><code>hermes plugins install thehaseebahmed/memento/plugin --enable
+hermes gateway restart</code></pre>
+            <ul class="ticks">
+              <li>Every feature on this page</li>
+              <li>Open source, MIT licensed</li>
+              <li>End-to-end encrypted sync</li>
+            </ul>
+          </article>
+
+          <article id="waitlist" class="plan plan-featured" data-reveal="rise" style="--d:120ms">
+            <span class="tag">Hosted</span>
+            <p class="price">Waiting list</p>
+            <p class="plan-lede">
+              Gots, run for you. Leave your email and you're first in when the doors open.
+            </p>
+            <form class="waitlist" data-waitlist>
+              <label class="sr-only" for="email">Email</label>
+              <input id="email" type="email" name="email" placeholder="you@example.com" required autocomplete="email" />
+              <button class="btn" type="submit">Count me in</button>
+              <p class="thanks" role="status">You're on the list. We'll be in touch.</p>
+            </form>
+            <ul class="ticks">
+              <li>One email when your spot opens</li>
+              <li>First look at new features</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+</Base>
