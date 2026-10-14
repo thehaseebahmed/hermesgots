@@ -23,12 +23,47 @@ MEDIA_TYPES: Dict[str, str] = {
 }
 # A generous cap: the response streams from disk, and generated images (charts, renders) get big.
 MAX_BYTES = 25 * 1024 * 1024
+# What a library file is served as, beyond the image types: text a browser shows, and a few
+# viewers. Anything else is an octet-stream, which the browser downloads rather than shows.
+LIBRARY_TYPES: Dict[str, str] = {
+    ".md": "text/markdown",
+    ".markdown": "text/markdown",
+    ".txt": "text/plain",
+    ".csv": "text/csv",
+    ".json": "application/json",
+    ".pdf": "application/pdf",
+    ".svg": "image/svg+xml",
+}
 
 
 class MediaError(Exception):
     def __init__(self, message: str, status: int = 400):
         super().__init__(message)
         self.status = status
+
+
+def content_type(path: Path) -> str:
+    return LIBRARY_TYPES.get(path.suffix.lower(), "application/octet-stream")
+
+
+def library_file(path_str: str) -> Path:
+    """A safe absolute path to a file a library row names, or raises :class:`MediaError`.
+
+    The same safety work as :func:`image_file` — Hermes's ``validate_media_delivery_path`` — but
+    any file, not only an image: the Library tab opens reports and charts too. The route checks
+    the path really is under a project's library before serving it.
+    """
+    try:
+        from gateway.platforms.base import validate_media_delivery_path
+    except ImportError:
+        raise MediaError("This Hermes version can't validate media paths.", 501)
+    safe = validate_media_delivery_path(path_str or "")
+    if not safe:
+        raise MediaError("No such file.", 404)
+    path = Path(safe)
+    if not path.is_file():
+        raise MediaError("No such file.", 404)
+    return path
 
 
 def image_file(path_str: str) -> Path:

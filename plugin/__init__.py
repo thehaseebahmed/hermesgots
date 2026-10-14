@@ -660,6 +660,30 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "No such project.", 404)
         return web.json_response({"object": "memento.project.usage", **found})
 
+    async def project_library(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        project_id = request.match_info["project_id"]
+        # A project still being cloned has no library to list yet.
+        if clones.is_pending_id(project_id):
+            return web.json_response(
+                {"object": "memento.library", "project_id": project_id, "folders": []}
+            )
+        try:
+            project = await asyncio.to_thread(
+                sessions._project, hermes_home() / "projects.db", project_id
+            )
+        except ValueError:
+            return _error(web, "No such project.", 404)
+        except ImportError:
+            return _error(web, "This Hermes version has no Projects.", 501)
+        root = Path(sessions._project_folders(project)[0]) / sessions.FILES_DIR
+        folders = await asyncio.to_thread(library.tree, root)
+        return web.json_response(
+            {"object": "memento.library", "project_id": project_id, "folders": folders}
+        )
+
     async def session_db():
         open_db = getattr(adapter, "_ensure_session_db_async", None)
         return await open_db() if callable(open_db) else None
@@ -789,6 +813,35 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             except Exception:
                 logger.debug("memento: resolving a merged session failed", exc_info=True)
         return web.json_response({"object": "memento.prs", "prs": prs})
+
+    async def session_library(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        session_id = request.match_info["session_id"]
+        record = await asyncio.to_thread(
+            sessions.record_for, store_path(), hermes_home(), session_id
+        )
+        # Never a 404 for an unknown session: the app reads a 404 as a missing plugin.
+        if not record:
+            return web.json_response(
+                {
+                    "object": "memento.library",
+                    "session_id": session_id,
+                    "worktree": None,
+                    "folders": [],
+                }
+            )
+        root, slug = await asyncio.to_thread(library.folder_and_worktree, hermes_home(), record)
+        folders = await asyncio.to_thread(library.tree, root, slug)
+        return web.json_response(
+            {
+                "object": "memento.library",
+                "session_id": session_id,
+                "worktree": slug,
+                "folders": folders,
+            }
+        )
 
     async def close_session(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -979,6 +1032,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/projects/{{project_id}}/repos", add_repo)
     app.router.add_post(f"{PREFIX}/projects/{{project_id}}/repos/remove", remove_repo)
     app.router.add_get(f"{PREFIX}/projects/{{project_id}}/usage", project_usage)
+    app.router.add_get(f"{PREFIX}/projects/{{project_id}}/library", project_library)
     app.router.add_post(f"{PREFIX}/model", set_host_model)
     app.router.add_get(f"{PREFIX}/github", github_status)
     app.router.add_get(f"{PREFIX}/github/repos", github_repos)
@@ -992,6 +1046,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/workspace/remove", remove_workspace)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/mode", post_mode)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/prs", session_pr)
+    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/library", session_library)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/close", close_session)
     async def answer_clarify(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1081,6 +1136,20 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return web.FileResponse(file, headers={"content-type": media.MEDIA_TYPES[file.suffix.lower()]})
 
     app.router.add_get(f"{PREFIX}/media", serve_media)
+
+    async def serve_library_file(request: "web.Request") -> "web.StreamResponse":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            file = await asyncio.to_thread(media.library_file, request.query.get("path", ""))
+        except media.MediaError as error:
+            return _error(web, str(error), error.status)
+        if not await asyncio.to_thread(library.holds, hermes_home(), file):
+            return _error(web, "Not a library file.", 404)
+        return web.FileResponse(file, headers={"content-type": media.content_type(file)})
+
+    app.router.add_get(f"{PREFIX}/library/file", serve_library_file)
     app.router.add_post(f"{PREFIX}/dictation", dictate)
     app.router.add_post(f"{PREFIX}/dictation/warm", warm_dictation)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/attachments", upload_attachment)

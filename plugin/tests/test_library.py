@@ -7,6 +7,7 @@ Run: python3 -m unittest plugin.tests.test_library -v
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import sys
 import tempfile
@@ -186,6 +187,61 @@ class LibraryAddTest(unittest.TestCase):
             json.loads(library.handle({"path": "shot.png", "folder": "screenshots"}, task_id="nope")),
             {"error": "This session has no library to file in."},
         )
+
+
+class TreeTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "files"
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _write(self, relative: str, at: int) -> Path:
+        path = self.root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x")
+        os.utime(path, (at / 1000, at / 1000))
+        return path
+
+    def test_files_group_by_folder_newest_first(self) -> None:
+        older = self._write("jazzy-quokka-7bfe/screenshots/old.png", 1000)
+        newer = self._write("jazzy-quokka-7bfe/screenshots/new.png", 2000)
+        self._write("jazzy-quokka-7bfe/reports/notes.md", 1500)
+        tree = library.tree(self.root)
+        self.assertEqual([folder["name"] for folder in tree], ["reports", "screenshots"])
+        shots = tree[1]["files"]
+        self.assertEqual([f["name"] for f in shots], ["new.png", "old.png"])
+        self.assertEqual(shots[0]["path"], str(newer))
+        self.assertEqual(shots[0]["worktree"], "jazzy-quokka-7bfe")
+        self.assertEqual(shots[0]["folder"], "screenshots")
+        self.assertEqual(shots[0]["size"], 1)
+        # Epoch ms, the unit the app's formatRelative reads.
+        self.assertEqual(shots[0]["at"], 2000)
+        self.assertEqual(older.parent, newer.parent)
+
+    def test_a_file_with_no_folder_groups_under_its_worktree(self) -> None:
+        # Filed before folders existed: it keeps its worktree's name as the group.
+        self._write("jazzy-quokka-7bfe/legacy.png", 1000)
+        tree = library.tree(self.root)
+        self.assertEqual([folder["name"] for folder in tree], ["jazzy-quokka-7bfe"])
+        self.assertIsNone(tree[0]["files"][0]["folder"])
+
+    def test_a_worktree_filters_to_its_own_files(self) -> None:
+        self._write("jazzy-quokka-7bfe/screenshots/a.png", 1000)
+        self._write("cosmic-otter-9f2e/screenshots/a.png", 1000)
+        tree = library.tree(self.root, "cosmic-otter-9f2e")
+        self.assertEqual([folder["name"] for folder in tree], ["screenshots"])
+        self.assertEqual(tree[0]["files"][0]["worktree"], "cosmic-otter-9f2e")
+
+    def test_the_walk_is_capped(self) -> None:
+        for n in range(library.MAX_FILES + 5):
+            self._write(f"jazzy-quokka-7bfe/screenshots/{n}.png", n)
+        tree = library.tree(self.root)
+        self.assertEqual(sum(len(folder["files"]) for folder in tree), library.MAX_FILES)
+
+    def test_an_empty_root_is_an_empty_tree(self) -> None:
+        self.assertEqual(library.tree(self.root), [])
 
 
 class InstructionsTest(unittest.TestCase):
