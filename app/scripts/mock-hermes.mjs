@@ -1278,7 +1278,7 @@ http
       return json(res, 200, { object: "list", data: [{ id, object: "model", owned_by: "hermes" }] })
     }
     if (url.pathname === "/api/model/options") {
-      // Named profiles report a model models.dev doesn't know, to exercise manual entry.
+      // Named profiles report a model models.dev doesn't know, so no window is found for it.
       const configured = profile ? `mock-model-${profile}` : "anthropic/claude-sonnet-4.5"
       const set = hostModels.get(profile ?? "")
       const model = set?.model ?? configured

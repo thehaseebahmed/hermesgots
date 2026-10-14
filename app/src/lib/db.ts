@@ -50,12 +50,10 @@ export interface Profile {
   model: string
   /** Which of the bot characters represents this profile. */
   botId: string
-  /** The model's context window in tokens, from models.dev (Hermes's API doesn't report it). */
+  /** The window the bot holds for its model, written automatically when the model is looked up. */
   contextWindow?: number
-  /** `provider/model` Hermes reported when the window was set; a different one resets it. */
+  /** `provider/model` the held window is for; another model's window is never shown for it. */
   contextModel?: string
-  /** `manual` is a window set by hand on an older version; it is ignored and looked up again. */
-  contextSource?: "models.dev" | "manual"
   /** Whether the model takes images, per models.dev; unset when it doesn't list the model. */
   imageInput?: boolean
   /** The model new turns run on when a chat hasn't picked its own; unset runs the host's. */

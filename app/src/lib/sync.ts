@@ -63,7 +63,6 @@ const LOCAL_BOT_FIELDS = [
   "pluginVersion",
   "contextWindow",
   "contextModel",
-  "contextSource",
   "imageInput",
 ] as const
 type BotValue = Omit<Profile, "id" | "updatedAt" | (typeof LOCAL_BOT_FIELDS)[number]>
