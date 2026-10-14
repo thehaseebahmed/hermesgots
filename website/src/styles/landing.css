@@ -52,6 +52,9 @@ input:focus-visible,
 }
 
 .wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
   color: inherit;
   text-decoration: none;
   font-size: 1.35rem;
@@ -883,6 +886,9 @@ html:not(.js) .dots {
 }
 
 .footer .wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
   color: var(--foreground);
 }
 
@@ -911,4 +917,9 @@ html:not(.js) .dots {
   .hero-phone {
     translate: none;
   }
+}
+
+.logo {
+  width: 2rem;
+  height: 2rem;
 }
