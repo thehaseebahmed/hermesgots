@@ -863,7 +863,7 @@ async function playTurn(req, body, last, out) {
       return { repo: repo.name, number, title, url: `https://github.com/${repo.name}/pull/${number}`, draft, state: null }
     })
     workspace.prs = [...opened, ...(workspace.prs ?? [])]
-    workspace.opened = { title, draft }
+    workspace.opened = true
     const prResult = JSON.stringify({ results: opened.map((pr) => ({ name: pr.repo, committed: randomUUID().slice(0, 7), pushed: true, pr: { repo: pr.repo, number: pr.number, title: pr.title, url: pr.url, state: draft ? "draft" : "open", checks: null } })) })
     out.tool({ tool: "open_pull_request", toolCallId: prId, status: "completed", result: prResult })
     record(req, { role: "assistant", content: null, tool_calls: [{ id: prId, type: "function", function: { name: "open_pull_request", arguments: JSON.stringify(prArgs) } }] })
