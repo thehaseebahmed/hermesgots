@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from "react"
 
-import { Group } from "@/components/group"
-import { PR_GROUPS } from "@/components/chat/pr-look"
 import { PrRow } from "@/components/chat/pr-pill"
 import { SessionLibrary } from "@/components/library"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
@@ -10,9 +8,9 @@ import type { Conversation } from "@/lib/db"
 import type { HermesConfig } from "@/lib/hermes"
 
 /**
- * A session's outputs as a drawer above the composer: every pull request it has — the live ones
- * first, the finished ones folded into their own group — and the files it filed, as the project's
- * Library shows them but only for this session. Opened by the pill above the composer.
+ * A session's outputs as a drawer above the composer: every pull request it has, newest first as one
+ * list, and the files it filed, as the project's Library shows them but only for this session.
+ * Opened by the pill above the composer.
  */
 export function OutputsDrawer({
   open,
@@ -55,34 +53,19 @@ export function OutputsDrawer({
                 No pull requests yet.
               </p>
             ) : (
-              <div className="flex flex-col gap-6 pt-4">
-                {PR_GROUPS.map((group) => {
-                  const list = prs.filter((pr) => group.states.includes(pr.state))
-                  if (!list.length) return null
-                  return (
-                    <Group
-                      key={group.label}
-                      label={group.label}
-                      count={list.length}
-                      fold={group.fold}
-                    >
-                      {list.map((pr) => (
-                        <li key={`${pr.repo}#${pr.number}`}>
-                          <PrRow pr={pr} />
-                        </li>
-                      ))}
-                    </Group>
-                  )
-                })}
-              </div>
+              <ul className="pt-2">
+                {prs.map((pr) => (
+                  <li key={`${pr.repo}#${pr.number}`}>
+                    <PrRow pr={pr} />
+                  </li>
+                ))}
+              </ul>
             )}
           </TabsContent>
           <TabsContent value="library">
             <SessionLibrary
               config={config}
               sessionId={session.hermesSessionId}
-              branch={session.worktree?.branch}
-              title={session.title}
               active={open && tab === "library"}
             />
           </TabsContent>

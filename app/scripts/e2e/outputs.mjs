@@ -51,13 +51,19 @@ await flow("outputs", async ({ page, seed, send, until, shot }) => {
   await pill.click()
   const drawer = page.getByRole("dialog")
   await drawer.waitFor({ timeout: 15_000 })
-  // It opens on the pull requests, since the session has them.
-  await drawer.getByText("Open (1)").waitFor({ timeout: 15_000 })
-  await drawer.getByText("#28").waitFor({ timeout: 5_000 })
-  await drawer.getByText("Done (1)").waitFor({ timeout: 5_000 })
-  await drawer.getByText("#27").waitFor({ timeout: 5_000 })
+  // It opens on the pull requests, since the session has them: one cozy list, newest at the top.
+  await drawer.getByText("#28").waitFor({ timeout: 15_000 })
+  const listed = await drawer.locator("ul > li").allInnerTexts()
+  assert.equal(listed.length, 2, "both pull requests, listed")
+  assert.match(listed[0], /Open · #28/, "the live one at the top")
+  assert.match(listed[1], /Merged · #27/, "the finished one below it, newest to oldest")
+  assert.equal(
+    await drawer.getByText(/^(Open|Done) \(/).count(),
+    0,
+    "no groups: the drawer lists them straight down",
+  )
   await shot("prs")
-  pass("the drawer lists the session's pull requests, the live one and the finished one")
+  pass("the drawer lists the session's pull requests newest first, live and finished in one list")
 
   // The Library tab is the project Library's tree, this session's own folders only.
   await drawer.getByRole("tab", { name: "Library" }).click()
@@ -66,6 +72,16 @@ await flow("outputs", async ({ page, seed, send, until, shot }) => {
     await drawer.getByText("library-tab").count(),
     1,
     "the session's own folders, one row each",
+  )
+  assert.equal(
+    await drawer.getByText("Rotate the logs").count(),
+    0,
+    "no session name under a folder: this tree is one session's",
+  )
+  assert.equal(
+    await drawer.getByRole("button", { name: /^Sort the library by/ }).count(),
+    0,
+    "no sort menu: a session's own tree keeps the newest first",
   )
   await drawer.getByText("library-tab").click()
   await drawer.getByText("dashboard-light.png").waitFor({ timeout: 5_000 })
@@ -90,6 +106,11 @@ await flow("outputs", async ({ page, seed, send, until, shot }) => {
     const shown = page.getByRole("dialog")
     await shown.getByRole("tab", { name: "Library" }).click()
     await shown.getByText("log-cleanup").waitFor({ timeout: 15_000 })
+    // One folder open, so the room under an open folder shows at every width.
+    if (!(await shown.getByText("dashboard-light.png").count())) {
+      await shown.getByText("library-tab").click()
+    }
+    await shown.getByText("dashboard-light.png").waitFor({ timeout: 5_000 })
     await shot(`library-${look}`)
     await shown.getByRole("tab", { name: "PRs" }).click()
   }
