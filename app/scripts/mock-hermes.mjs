@@ -1140,7 +1140,7 @@ function startRun(req, body) {
   const replay = key && [...runs.values()].find((run) => run.key === key)
   if (replay) return replay
   const id = `run_${randomUUID().replace(/-/g, "")}`
-  const run = { id, key, sessionId: body.session_id, status: "running", events: [], seq: 0, listeners: new Set(), stopped: false }
+  const run = { id, key, sessionId: body.session_id, status: "running", createdAt: Date.now() / 1000, events: [], seq: 0, listeners: new Set(), stopped: false }
   runs.set(id, run)
   noteEvent("runs", run.sessionId)
   const push = (name, fields = {}) => {
@@ -1251,6 +1251,7 @@ const runStatus = (run) => ({
   object: "hermes.run",
   run_id: run.id,
   status: run.status,
+  created_at: run.createdAt,
   ...(run.status === "waiting_for_approval" && run.approval ? { approval: run.approval } : {}),
   ...(run.clarify ? { clarify: run.clarify } : {}),
   ...(run.output !== undefined ? { output: run.output, usage: run.usage } : {}),

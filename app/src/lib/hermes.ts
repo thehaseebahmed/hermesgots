@@ -2144,6 +2144,8 @@ export async function getRun(config: HermesConfig, runId: string, signal?: Abort
   const clarify = body?.clarify
   return {
     status: String(body?.status ?? ""),
+    /** When the run started, in the host's Unix seconds. */
+    createdAt: typeof body?.created_at === "number" ? body.created_at : undefined,
     /** The approval the run is waiting on; Hermes keeps it on the status for clients that can't read the events. */
     approval: pending
       ? ({ ...pending, run_id: String(pending.run_id ?? runId) } as ApprovalRequestEvent)

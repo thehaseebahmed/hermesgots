@@ -150,6 +150,25 @@ export function useLiveRuns(profile: Server | undefined) {
   return useSyncExternalStore(subscribe, () => (key && answers.get(key)?.sessions) || NO_RUNS)
 }
 
+/** A session's run in flight on its server, from the shared poll's last answer. */
+export function knownLiveRun(server: Server, sessionId: string) {
+  const answer = answers.get(connectionKey(server))
+  const runId = answer?.runIds[sessionId]
+  return runId ? { runId, status: answer?.sessions[sessionId] } : undefined
+}
+
+/**
+ * Whether the host runs this session, read from the shared poll like the project screen's: an open
+ * chat asks nothing of its own. Needs the plugin.
+ */
+export function useSessionRunning(profile: Server | undefined, sessionId: string | undefined) {
+  useWaiting()
+  const key = profile?.baseUrl && profile.apiKey ? connectionKey(profile as Server) : undefined
+  return useSyncExternalStore(subscribe, () =>
+    Boolean(key && sessionId && answers.get(key)?.sessions[sessionId]),
+  )
+}
+
 /** Project sessions, across every bot, waiting on the user, newest first. Needs the plugin. */
 export function useWaitingSessions(): WaitingSession[] {
   const waiting = useWaiting()

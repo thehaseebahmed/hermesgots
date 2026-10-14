@@ -52,7 +52,7 @@ import { isLive } from "@/lib/live"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { quietly } from "@/lib/report"
 import { randomId } from "@/lib/utils"
-import { readLiveRuns } from "@/lib/waiting"
+import { knownLiveRun, readLiveRuns } from "@/lib/waiting"
 import { onWake } from "@/lib/wake"
 import {
   ensureSessionWorkspace,
@@ -1060,7 +1060,7 @@ export async function reattachRun(conversationId: string) {
   const stale = (await getMessages(conversationId)).findLast(
     (m) => m.role === "assistant" && m.status === "streaming",
   )
-  if (!stale) return
+  if (!stale) return adoptRun(conversation, profile)
   // Hermes only keys the session by our id with an API key, so only then can the run be looked up,
   // and only the plugin lists runs.
   // Read through the shared poll, so the sidebar and the project screen hear the same answer.
@@ -1077,6 +1077,50 @@ export async function reattachRun(conversationId: string) {
   }
   if (!stale.runId) await db.messages.update(stale.id, { runId })
   await resumeReply({ ...stale, runId })
+}
+
+// How far apart the host's and the transcript's clocks may read for one turn.
+const RUN_START_SLACK_S = 5
+
+/**
+ * Follows a run this device didn't start (another device's, the plugin's queue), once the host's
+ * shared `runs/live` answer names it for this chat, so the session screen shows what its project
+ * does. The turn has to be in the transcript with a reply row already, so the live reply is the
+ * one the transcript will hold when the run ends; a turn the host hasn't written yet waits for the
+ * next catch-up.
+ */
+async function adoptRun(conversation: Conversation, profile: Profile) {
+  if (!profile.apiKey || profile.disabled) return
+  const server = { baseUrl: profile.baseUrl, apiKey: profile.apiKey }
+  const sessionId = conversation.hermesSessionId
+  if (!knownLiveRun(server, sessionId)) return
+  const id = conversation.id
+  await reconcileHistory(id)
+  // Asked again after the catch-up: the run may have ended meanwhile, and a finished one of this
+  // device's own is not to be followed twice.
+  const live = knownLiveRun(server, sessionId)
+  if (!live || controllers.has(id)) return
+  const run = await getRun(server, live.runId, AbortSignal.timeout(READ_TIMEOUT_MS))
+  if (!ACTIVE_RUN.has(run.status) || run.createdAt === undefined) return
+  const messages = await getMessages(id)
+  const at = messages.findLastIndex((m) => m.role === "user" && m.hermesRowId !== undefined)
+  const reply = messages[at + 1]
+  if (at < 0 || reply?.role !== "assistant" || reply.status === "streaming") return
+  // The turn of this run, not an earlier one: the host wrote it after the run started.
+  if (messages[at].createdAt / 1000 < run.createdAt - RUN_START_SLACK_S) return
+  // The replay of the run's events builds the reply again from its start.
+  const adopted: Message = {
+    ...reply,
+    content: "",
+    tools: [],
+    steers: undefined,
+    reasoning: undefined,
+    status: "streaming",
+    runId: live.runId,
+    runSeq: undefined,
+  }
+  await db.messages.put(adopted)
+  await resumeReply(adopted)
 }
 
 /** Picks up a reply whose run was still going when the app was closed or reloaded. */
