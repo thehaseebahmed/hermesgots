@@ -76,6 +76,34 @@ class PrCacheTests(unittest.TestCase):
         assert pr is not None
         return pr
 
+    def _failing(self):
+        """``_get`` refusing: the server can't reach GitHub."""
+
+        def get(path, auth):
+            self.reads += 1
+            raise github.GitHubError("Couldn't reach GitHub from the server.")
+
+        return patch.object(github, "_get", get)
+
+    def test_a_failure_answers_none_unless_strict(self):
+        with self._failing():
+            self.assertIsNone(
+                github.pull_request(Path("/fake/home"), "/repo", "branch"),
+                "the lenient read still answers None",
+            )
+            with self.assertRaises(github.GitHubError):
+                github.pull_request(Path("/fake/home"), "/repo", "branch", strict=True)
+
+    def test_a_failure_is_never_cached(self):
+        with self._failing():
+            self.assertIsNone(github.pull_request(Path("/fake/home"), "/repo", "branch"))
+            with self.assertRaises(github.GitHubError):
+                github.pull_request(Path("/fake/home"), "/repo", "branch", strict=True)
+        self.assertEqual(github._pr_cache, {}, "a failure must not be cached as an answer")
+        self.assertEqual(
+            self._read("success")["number"], 27, "the read after it still goes out and finds the PR"
+        )
+
     def test_pending_checks_expire_at_the_short_window(self):
         self.assertEqual(self._read("pending")["checks"], "pending")
         reads = self.reads

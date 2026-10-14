@@ -801,12 +801,17 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             for repo in (record or {}).get("repos", []):
                 if not repo.get("path") or not repo.get("branch"):
                     continue
-                pr = github.pull_request(home, repo["repo_root"], repo["branch"])
+                # Strict: a GitHub failure must not come back as "no pull requests", which the app
+                # stores over the ones it already knows and the PRs tab empties out.
+                pr = github.pull_request(home, repo["repo_root"], repo["branch"], strict=True)
                 if pr:
                     found.append(pr)
             return found
 
-        prs = await asyncio.to_thread(lookup) if record else []
+        try:
+            prs = await asyncio.to_thread(lookup) if record else []
+        except github.GitHubError as error:
+            return _error(web, str(error), error.status)
         if any(pr["state"] == "merged" for pr in prs):
             try:
                 await asyncio.to_thread(merges.check, home, {request.match_info["session_id"]})
