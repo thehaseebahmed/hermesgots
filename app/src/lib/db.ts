@@ -8,6 +8,8 @@ export type ThemePreference = "system" | "light" | "dark"
 
 export type BotSort = "recent" | "waiting" | "name" | "added"
 
+export type LibrarySort = "new" | "old" | "az" | "za"
+
 export interface Settings {
   id: "settings"
   /** Plain chats leave out context use, reply stats and tool calls; project sessions show them. */
@@ -24,6 +26,8 @@ export interface Settings {
   botThreads?: boolean
   /** How the bot-threads sidebar orders the bots; unset is `recent`. Local. */
   botSort?: BotSort
+  /** How the Library tab orders folders and files; unset is `new`. Local. */
+  librarySort?: LibrarySort
   activeProfileId?: string
   /** When sync last finished without an error. */
   syncedAt?: number
