@@ -71,6 +71,7 @@ import {
   saveSettings,
   type Profile,
 } from "@/lib/db"
+import { formatRelative } from "@/lib/format"
 import { useLiveStatus, type LiveStatus } from "@/lib/live"
 import { useLarge } from "@/lib/media"
 import { isNative, setBackGuard } from "@/lib/native"
@@ -90,7 +91,7 @@ import { isOnline } from "@/lib/registry"
 import { forgetLocalKey, useSyncState } from "@/lib/sync"
 import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
-import { APP_VERSION } from "@/lib/version"
+import { APP_VERSION, pluginOutdated } from "@/lib/version"
 
 const THEMES = [
   { value: "system", label: "System", icon: MonitorIcon },
@@ -274,8 +275,19 @@ function BotRow({ profile }: { profile: Profile }) {
         </>
       }
       title={profile.name}
+      subtitle={botStatus(profile, now)}
     />
   )
+}
+
+/** A bot's row subtext: a warning first, else when its host last checked in. */
+function botStatus(profile: Profile, now: number): string | undefined {
+  if (profile.disabled) return undefined
+  if (pluginOutdated(profile.pluginVersion)) return "Plugin out of date"
+  if (!profile.seenAt) return undefined
+  return isOnline(profile, now)
+    ? "Online"
+    : `Last seen ${formatRelative(profile.seenAt, Math.max(now, profile.seenAt))}`
 }
 
 /** The row that opens the link sheet, at the end of the bots. */
