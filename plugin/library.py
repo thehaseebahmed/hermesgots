@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shutil
 from pathlib import Path
@@ -71,19 +72,18 @@ def _file_name(name: str) -> str:
     can rename it on disk before it calls again.
     """
     stem, dot, extension = name.rpartition(".")
-    if not dot or not stem:
-        raise ValueError(
-            f"{name!r} is not a slug with an extension ({SLUG_RULE}), like "
-            f"dashboard-light.png. Rename the file on disk to kebab-case, keeping its extension, "
-            f"then call again with its new path."
-        )
-    if not SLUG.match(stem) or not EXTENSION.match(f".{extension}"):
+    if not dot or not stem or not SLUG.match(stem) or not EXTENSION.match(f".{extension}"):
         raise ValueError(
             f"{name!r} is not a slug with an extension ({SLUG_RULE}), like "
             f"dashboard-light.png. Rename the file on disk to kebab-case, keeping its extension, "
             f"then call again with its new path."
         )
     return name
+
+
+def library_root(project: Any) -> Path:
+    """A project's library folder (``<primary folder>/files/``): the only place the tool files."""
+    return Path(sessions._project_folders(project)[0]) / sessions.FILES_DIR
 
 
 def _library_dir(hermes_home: Path, record: Dict[str, Any]) -> Tuple[Path, Path]:
@@ -93,17 +93,18 @@ def _library_dir(hermes_home: Path, record: Dict[str, Any]) -> Tuple[Path, Path]
     v15) and a row written before it always agree.
     """
     project = sessions._project(hermes_home / "projects.db", record["project_id"])
-    root = Path(sessions._project_folders(project)[0])
+    files = library_root(project)
+    root = files.parent
     folder = record.get("files_dir")
     if folder:
         return root, Path(folder)
-    return root, root / sessions.FILES_DIR / sessions._branch_slug(record.get("branch"))
+    return root, files / sessions._branch_slug(record.get("branch"))
 
 
-def worktree(record: Dict[str, Any]) -> str:
-    """The session's worktree name: the folder under the project's ``files/`` its files live in."""
-    folder = record.get("files_dir")
-    return Path(folder).name if folder else sessions._branch_slug(record.get("branch"))
+def folder_and_worktree(hermes_home: Path, record: Dict[str, Any]) -> Tuple[Path, str]:
+    """The project's library root and the session's worktree name, for listing its files."""
+    root, folder = _library_dir(hermes_home, record)
+    return root / sessions.FILES_DIR, folder.name
 
 
 def _folder(folder: Any) -> str:
@@ -161,32 +162,34 @@ def entries(root: Path) -> List[Dict[str, Any]]:
 
     The tool writes ``files/<worktree>/<folder>/<file>``; a file with no folder was filed before
     folders existed and keeps ``folder: None``. Capped at ``MAX_FILES``, so a huge library answers
-    with what it has rather than an enormous list.
+    with what it has rather than an enormous list. ``os.walk`` gives the directory split from the
+    directory entry itself, so each file is statted once.
     """
     found: List[Dict[str, Any]] = []
-    for path in root.rglob("*"):
-        if not path.is_file():
+    for current, _, names in os.walk(root):
+        parts = Path(current).relative_to(root).parts
+        # A file directly under files/ belongs to no session's library folder.
+        if not parts:
             continue
-        parts = path.relative_to(root).parts
-        if len(parts) < 2:
-            continue
-        try:
-            stat = path.stat()
-        except OSError:
-            continue
-        found.append(
-            {
-                "worktree": parts[0],
-                "folder": "/".join(parts[1:-1]) or None,
-                "name": parts[-1],
-                "path": str(path),
-                "size": stat.st_size,
-                # Epoch ms, like every other time the app reads (formatRelative works in ms).
-                "at": int(stat.st_mtime * 1000),
-            }
-        )
-        if len(found) >= MAX_FILES:
-            break
+        for name in names:
+            path = Path(current) / name
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            found.append(
+                {
+                    "worktree": parts[0],
+                    "folder": "/".join(parts[1:]) or None,
+                    "name": name,
+                    "path": str(path),
+                    "size": stat.st_size,
+                    # Epoch ms, like every other time the app reads (formatRelative works in ms).
+                    "at": int(stat.st_mtime * 1000),
+                }
+            )
+            if len(found) >= MAX_FILES:
+                return found
     return found
 
 
@@ -205,12 +208,6 @@ def tree(root: Path, worktree: Optional[str] = None) -> List[Dict[str, Any]]:
     ]
 
 
-def folder_and_worktree(hermes_home: Path, record: Dict[str, Any]) -> Tuple[Path, str]:
-    """The project's library root and the session's worktree name, for listing its files."""
-    root, _ = _library_dir(hermes_home, record)
-    return root / sessions.FILES_DIR, worktree(record)
-
-
 def library_roots(hermes_home: Path) -> List[Path]:
     """Every project's library folder (``<primary folder>/files/``): the only place the tool files."""
     projects_db = hermes_home / "projects.db"
@@ -220,9 +217,7 @@ def library_roots(hermes_home: Path) -> List[Path]:
 
     with pdb.connect_closing(db_path=projects_db) as conn:
         projects = pdb.list_projects(conn, include_archived=True)
-    return [
-        Path(sessions._project_folders(project)[0]) / sessions.FILES_DIR for project in projects
-    ]
+    return [library_root(project) for project in projects]
 
 
 def holds(hermes_home: Path, path: Path) -> bool:

@@ -678,7 +678,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "No such project.", 404)
         except ImportError:
             return _error(web, "This Hermes version has no Projects.", 501)
-        root = Path(sessions._project_folders(project)[0]) / sessions.FILES_DIR
+        root = library.library_root(project)
         folders = await asyncio.to_thread(library.tree, root)
         return web.json_response(
             {"object": "memento.library", "project_id": project_id, "folders": folders}
@@ -1125,29 +1125,29 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         result = await asyncio.to_thread(dictation.warm)
         return web.json_response({"object": "memento.dictation_warm", **result})
 
-    async def serve_media(request: "web.Request") -> "web.StreamResponse":
+    async def served_file(request: "web.Request", resolve: Any, allowed: Any = None) -> "web.StreamResponse":
+        """Serves the file a query's ``path`` names: ``resolve`` validates it, ``allowed`` may refuse
+        it (a library file has to sit under a project's library folder)."""
         denied = unauthorized(request)
         if denied is not None:
             return denied
         try:
-            file = await asyncio.to_thread(media.image_file, request.query.get("path", ""))
+            file = await asyncio.to_thread(resolve, request.query.get("path", ""))
         except media.MediaError as error:
             return _error(web, str(error), error.status)
-        return web.FileResponse(file, headers={"content-type": media.MEDIA_TYPES[file.suffix.lower()]})
+        if allowed is not None and not await asyncio.to_thread(allowed, file):
+            return _error(web, "Not a library file.", 404)
+        return web.FileResponse(file, headers={"content-type": media.content_type(file)})
+
+    async def serve_media(request: "web.Request") -> "web.StreamResponse":
+        return await served_file(request, media.image_file)
 
     app.router.add_get(f"{PREFIX}/media", serve_media)
 
     async def serve_library_file(request: "web.Request") -> "web.StreamResponse":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        try:
-            file = await asyncio.to_thread(media.library_file, request.query.get("path", ""))
-        except media.MediaError as error:
-            return _error(web, str(error), error.status)
-        if not await asyncio.to_thread(library.holds, hermes_home(), file):
-            return _error(web, "Not a library file.", 404)
-        return web.FileResponse(file, headers={"content-type": media.content_type(file)})
+        return await served_file(
+            request, media.library_file, lambda file: library.holds(hermes_home(), file)
+        )
 
     app.router.add_get(f"{PREFIX}/library/file", serve_library_file)
     app.router.add_post(f"{PREFIX}/dictation", dictate)

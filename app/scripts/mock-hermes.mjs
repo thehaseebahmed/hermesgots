@@ -43,7 +43,7 @@
 // plan mode the agent reads a little, writes a structured plan, leaves it pending and the workspace
 // names the file the plugin would have saved it to (plan_file). Every session also gets a library
 // folder (files_dir) the instructions tell the agent to file its generated files in, with the
-// plugin's add_to_library tool. From its second turn, or one that
+// plugin's library_add tool. From its second turn, or one that
 // says "ship", the agent opens the branch's PRs with the plugin's open_pull_request tool
 // (GET …/sessions/{id}/prs reads them; "draft" in that turn drafts them): "merge" or "close" in a
 // turn sets their state, a merge resolves the session in the chat list, and "break" fails their

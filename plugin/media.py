@@ -43,7 +43,8 @@ class MediaError(Exception):
 
 
 def content_type(path: Path) -> str:
-    return LIBRARY_TYPES.get(path.suffix.lower(), "application/octet-stream")
+    """What a library file is served as: the image types, then the library's own, else a download."""
+    return {**MEDIA_TYPES, **LIBRARY_TYPES}.get(path.suffix.lower(), "application/octet-stream")
 
 
 def library_file(path_str: str) -> Path:

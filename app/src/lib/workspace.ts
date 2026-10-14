@@ -134,11 +134,11 @@ export async function refreshWorkspace(conversationId: string) {
  * Reads the session's filed files from the plugin: the count its pill shows. A session with no
  * worktree has no library folder yet, so there is nothing to count.
  */
-export async function refreshLibrary(conversationId: string, { force = false } = {}) {
+export async function refreshLibrary(conversationId: string) {
   const found = await tracked(conversationId)
   if (!found?.conversation.worktree || unsupported.cooling(found.key)) return
   const { conversation, profile } = found
-  if (!force && conversation.library && Date.now() - conversation.library.at < LIBRARY_MS) return
+  if (conversation.library && Date.now() - conversation.library.at < LIBRARY_MS) return
   let library
   try {
     library = await getSessionLibrary(profile, conversation.hermesSessionId)
@@ -148,6 +148,7 @@ export async function refreshLibrary(conversationId: string, { force = false } =
     return
   }
   const count = library.folders.reduce((total, folder) => total + folder.files.length, 0)
+  unsupported.clear(found.key)
   const next = { worktree: library.worktree ?? "", count, at: Date.now() }
   const current = conversation.library
   if (current && current.worktree === next.worktree && current.count === next.count) return

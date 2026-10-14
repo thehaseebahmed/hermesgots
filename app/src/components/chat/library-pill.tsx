@@ -1,5 +1,6 @@
 import { FolderOpenIcon } from "lucide-react"
 
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 /**
@@ -8,14 +9,13 @@ import { cn } from "@/lib/utils"
  */
 export function LibraryPill({ count, className }: { count: number; className?: string }) {
   return (
-    <span
-      className={cn(
-        "inline-flex h-11 shrink-0 items-center gap-2 rounded-full bg-secondary px-4 text-sm font-medium tabular-nums text-secondary-foreground",
-        className,
-      )}
+    <Button
+      type="button"
+      variant="secondary"
+      className={cn("h-11 shrink-0 gap-2 rounded-full px-4 tabular-nums", className)}
     >
       <FolderOpenIcon className="size-4" />
       {count} {count === 1 ? "output" : "outputs"}
-    </span>
+    </Button>
   )
 }

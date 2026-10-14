@@ -207,7 +207,7 @@ export function ProjectPage({
       read.current.set(c.id, now)
       const workspace = !c.worktree || last !== undefined
       void (workspace ? refreshWorkspace(c.id) : Promise.resolve()).then(() => {
-        refreshPrs(c.id)
+        void refreshPrs(c.id)
         void refreshLibrary(c.id)
       })
     }

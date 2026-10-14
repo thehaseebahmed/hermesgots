@@ -13,6 +13,7 @@ import {
 } from "@/lib/hermes"
 import { openImageViewer } from "@/lib/native"
 import { usePoll } from "@/lib/poll"
+import { quietly } from "@/lib/report"
 
 /** Bots whose plugin has no library routes (an older plugin). */
 const unsupported = cooldown()
@@ -34,13 +35,17 @@ function openFile(config: HermesConfig, file: LibraryFile) {
       const url = URL.createObjectURL(blob)
       if (kindOf(file.name) !== "image") {
         window.open(url, "_blank", "noopener")
+        // The tab reads the URL after this returns, so its object URL outlives the click.
         window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
         return
       }
-      await openImageViewer(url)
-      URL.revokeObjectURL(url)
+      try {
+        await openImageViewer(url)
+      } finally {
+        URL.revokeObjectURL(url)
+      }
     })
-    .catch(() => undefined)
+    .catch(quietly("Opening a library file"))
 }
 
 /** One file under a folder: its kind's icon and its name, nothing more. */
