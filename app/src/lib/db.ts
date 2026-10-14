@@ -24,8 +24,6 @@ export interface Settings {
   botThreads?: boolean
   /** How the bot-threads sidebar orders the bots; unset is `recent`. Local. */
   botSort?: BotSort
-  /** Research missions in the sidebar; a mock so far. Developer, local. */
-  research?: boolean
   activeProfileId?: string
   /** When sync last finished without an error. */
   syncedAt?: number

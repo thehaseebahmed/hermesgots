@@ -33,7 +33,6 @@ import type { BotSort, Message } from "@/lib/db"
 import { db } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useNav } from "@/lib/nav"
-import { useResearchEnabled } from "@/lib/research-flag"
 import { useSyncState } from "@/lib/sync"
 import {
   BOT_SORTS,
@@ -351,7 +350,6 @@ function ProfileButton({ onNavigate }: { onNavigate?: () => void }) {
 export function ConversationList({ onNavigate }: { onNavigate?: () => void }) {
   const { root } = useNav()
   const botThreads = useBotThreads()
-  const research = useResearchEnabled()
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -368,16 +366,14 @@ export function ConversationList({ onNavigate }: { onNavigate?: () => void }) {
             <CodeXmlIcon className="size-5 text-muted-foreground" />
             Code
           </RootLink>
+          <RootLink to="/research" onClick={onNavigate} className={rowClass}>
+            <TelescopeIcon className="size-5 text-muted-foreground" />
+            Research
+          </RootLink>
           <RootLink to="/routines" onClick={onNavigate} className={rowClass}>
             <TimerIcon className="size-5 text-muted-foreground" />
             Routines
           </RootLink>
-          {research && (
-            <RootLink to="/research" onClick={onNavigate} className={rowClass}>
-              <TelescopeIcon className="size-5 text-muted-foreground" />
-              Research
-            </RootLink>
-          )}
         </nav>
         <Separator className="mx-1 my-3 data-horizontal:w-auto" />
         <Waiting onNavigate={onNavigate} />

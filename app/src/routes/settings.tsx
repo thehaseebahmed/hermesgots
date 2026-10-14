@@ -30,7 +30,6 @@ import {
   PaletteIcon,
   SailboatIcon,
   SunIcon,
-  TelescopeIcon,
   TimerIcon,
   UserIcon,
   type LucideIcon,
@@ -391,19 +390,6 @@ function DeveloperSettings() {
           subtitle="Bots in the sidebar, chats as threads"
           checked={Boolean(settings?.botThreads)}
           onCheckedChange={(checked) => saveSettings({ botThreads: checked })}
-        />
-        <SwitchRow
-          id="research"
-          icon={TelescopeIcon}
-          title={
-            <span className="flex items-center gap-2">
-              Research
-              <ExperimentalBadge />
-            </span>
-          }
-          subtitle="Missions with sourced answers"
-          checked={Boolean(settings?.research)}
-          onCheckedChange={(checked) => saveSettings({ research: checked })}
         />
       </Group>
       {isNative && pushAvailable() && <TestPushRow />}

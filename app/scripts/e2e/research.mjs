@@ -12,10 +12,6 @@ for (const width of [390, 1440]) {
       page.on("console", (message) => {
         if (message.type() === "error") errors.push(`${width}: ${message.text()}`)
       })
-      await page.evaluate(async () => {
-        const { db } = await import("/src/lib/db.ts")
-        await db.settings.update("settings", { developer: true, research: true })
-      })
       await page.goto(`${app}/research`)
       await page.getByText("How transformers work").first().waitFor({ timeout: 15_000 })
       await shot("list")
