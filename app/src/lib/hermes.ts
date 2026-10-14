@@ -1163,6 +1163,8 @@ export interface SessionContext {
   tokens: number
   /** The context window Hermes runs that model with. */
   window?: number
+  /** The model that ran the call, as Hermes names it, so the app can tell a switch from it. */
+  model?: string
 }
 
 /**
@@ -1181,7 +1183,8 @@ export async function getSessionContext(
   const count = (value: unknown) =>
     typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined
   const tokens = count(body?.prompt_tokens)
-  return tokens ? { tokens, window: count(body?.context_length) } : null
+  const model = typeof body?.model === "string" && body.model ? body.model : undefined
+  return tokens ? { tokens, window: count(body?.context_length), model } : null
 }
 
 export interface UsageWindow {

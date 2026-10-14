@@ -107,10 +107,11 @@ export interface Conversation {
    */
   olderThan?: { id: number; offset: number }
   /**
-   * The session's latest model call, as the Memento plugin recorded it, and the window Hermes
-   * compresses against. Local only; every device reads it from the plugin.
+   * The session's latest model call, as the Memento plugin recorded it: its prompt tokens, the
+   * model that ran it, and the window Hermes compresses against. Local only; every device reads it
+   * from the plugin.
    */
-  liveContext?: { tokens: number; window?: number }
+  liveContext?: { tokens: number; window?: number; model?: string }
   /** Newest Hermes transcript row this device has caught up to. Local only; never synced. */
   hermesTip?: number
   /**

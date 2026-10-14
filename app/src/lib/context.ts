@@ -34,7 +34,12 @@ export async function refreshContext(conversationId: string) {
   }
   unsupported.clear(key)
   const current = conversation.liveContext
-  if (!live || (current?.tokens === live.tokens && current.window === live.window)) return
+  // The model counts too: a switch that lands with the same tokens and window still has to show.
+  const unchanged =
+    current?.tokens === live?.tokens &&
+    current?.window === live?.window &&
+    current?.model === live?.model
+  if (!live || unchanged) return
   // Not through updateConversation: this is local, so it mustn't move the sync clock.
   await db.conversations.update(conversationId, { liveContext: live })
 }
