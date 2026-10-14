@@ -1566,11 +1566,12 @@ http
     if (PLUGIN && !profile && req.method === "GET" && usageRoute) {
       const provider = url.searchParams.get("provider") || ""
       const pct = Number(process.env.MOCK_USAGE_PERCENT ?? 94)
-      const now = Date.now()
+      // Like a provider's, a window resets at a fixed time, so reading it again changes nothing.
+      const next = (ms) => new Date(Math.ceil((Date.now() + 1) / ms) * ms).toISOString()
       const windows = pct > 0
         ? [
-            { label: "Session", used_percent: pct, resets_at: new Date(now + 2 * 3600_000).toISOString(), detail: null },
-            { label: "Weekly", used_percent: Math.min(100, pct * 0.8), resets_at: new Date(now + 5 * 86400_000).toISOString(), detail: null },
+            { label: "Session", used_percent: pct, resets_at: next(2 * 3600_000), detail: null },
+            { label: "Weekly", used_percent: Math.min(100, pct * 0.8), resets_at: next(7 * 86400_000), detail: null },
           ]
         : []
       return json(res, 200, { object: "memento.usage", provider, plan: "Pro", windows })

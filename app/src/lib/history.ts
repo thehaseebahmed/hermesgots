@@ -10,6 +10,7 @@ import { refreshQueue } from "@/lib/chat"
 import { FOLLOW_UP_MS, JUST_FOLLOWED_UP_MS } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
 import { refreshContext } from "@/lib/context"
+import { refreshChatProviderUsage } from "@/lib/provider-usage"
 import { refreshTodos } from "@/lib/todos"
 import { refreshPrs, refreshWorkspace } from "@/lib/workspace"
 import {
@@ -494,10 +495,10 @@ export const caughtUpWithin = (conversationId: string, ms: number) =>
   Date.now() - (caughtUp.get(conversationId) ?? -Infinity) < ms
 
 /**
- * The reads that follow a catch-up: the title, context use, todos, and a session's workspace and
- * pull requests. They run when the transcript moved or the server said the session changed (a mode
- * or a plan moves without a row), the first time, and otherwise every `FOLLOW_UP_MS`, not on every
- * catch-up of an idle chat. A turn that ended just now read them.
+ * The reads that follow a catch-up: the title, context use, the provider's limits, todos, and a
+ * session's workspace and pull requests. They run when the transcript moved or the server said the
+ * session changed (a mode or a plan moves without a row), the first time, and otherwise every
+ * `FOLLOW_UP_MS`, not on every catch-up of an idle chat. A turn that ended just now read them.
  */
 function followUps(conversationId: string, moved: boolean) {
   const since = Date.now() - (followedUp.get(conversationId) ?? -Infinity)
@@ -506,6 +507,7 @@ function followUps(conversationId: string, moved: boolean) {
   void Promise.all([
     refreshTitle(conversationId),
     refreshContext(conversationId),
+    refreshChatProviderUsage(conversationId),
     refreshTodos(conversationId),
     refreshWorkspace(conversationId),
     refreshPrs(conversationId),

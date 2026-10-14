@@ -338,9 +338,8 @@ export function ChatPage() {
     void db.profiles.get(profileId).then((current) => current && syncContextWindow(current))
   }, [profileId, baseUrl, apiKey])
 
-  // The provider's limits are read once per connection and provider, then refreshed
-  // with every catch-up. usePoll covers a chat that already has turns; this covers
-  // the new chat, which has no session to catch up yet.
+  // The provider's limits are read when the chat opens and when its provider changes; after that,
+  // with the chat's other details at the end of a turn and when it catches up (`followUps`).
   useEffect(() => {
     if (!profileId) return
     void refreshProviderUsage(profileId, provider).catch(quietly("Reading provider limits"))
@@ -411,11 +410,9 @@ export function ChatPage() {
       if (!id) return
       reattachRun(id).catch(quietly("Reattaching a run"))
       reconcileHistory(id).catch(quietly("Catching up a chat"))
-      if (profileId)
-        void refreshProviderUsage(profileId, provider).catch(quietly("Reading provider limits"))
     },
     streamOpen ? SAFETY_MS : CATCH_UP_MS,
-    [id, updatedAt, profileId, provider],
+    [id, updatedAt],
     { active: Boolean(id && hasMessages) },
   )
 

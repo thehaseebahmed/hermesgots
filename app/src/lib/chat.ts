@@ -46,6 +46,7 @@ import {
 } from "@/lib/hermes"
 import { attachmentsText, setUploading, wireContent } from "@/lib/attachments"
 import { refreshContext } from "@/lib/context"
+import { refreshChatProviderUsage } from "@/lib/provider-usage"
 import { liveTurn, noteFollowUps, patchStats, reconcileHistory } from "@/lib/history"
 import { isLive } from "@/lib/live"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
@@ -650,6 +651,7 @@ async function finishTurn(turn: Turn, usage: TurnUsage | undefined) {
   noteFollowUps(conversationId)
   await updateConversation(conversationId, { updatedAt: endedAt })
   void refreshContext(conversationId)
+  void refreshChatProviderUsage(conversationId).catch(quietly("Reading provider limits"))
   void refreshTodos(conversationId)
   const conversation = await db.conversations.get(conversationId)
   if (conversation?.projectId) {

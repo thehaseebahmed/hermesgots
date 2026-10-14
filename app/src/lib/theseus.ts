@@ -245,10 +245,13 @@ export async function readTheseusInfo(profile: Pick<Profile, "baseUrl" | "apiKey
 export function useTheseusInfo(profile?: Pick<Profile, "baseUrl" | "apiKey" | "disabled"> | null) {
   const key = profile?.apiKey && !profile.disabled ? connectionKey(profile) : ""
   const read = useSyncExternalStore(subscribe, () => infos.get(key)?.info)
+  const baseUrl = profile?.baseUrl
+  const apiKey = profile?.apiKey
+  // On the connection, not the profile: a live query hands back a new one on every write to it.
   useEffect(() => {
-    if (!key || !profile) return
-    void readTheseusInfo(profile).then(notify)
-  }, [key, profile])
+    if (!key || !baseUrl || !apiKey) return
+    void readTheseusInfo({ baseUrl, apiKey }).then(notify)
+  }, [key, baseUrl, apiKey])
   return key ? read : null
 }
 
