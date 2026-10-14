@@ -304,6 +304,15 @@ def _checks(repo: str, sha: str, auth: Optional[str]) -> Optional[str]:
     return "pending" if "pending" in outcomes else "success"
 
 
+def _state(row: Any) -> str:
+    """A pulls-list row's state, the way the app reads it: merged, draft, closed or open."""
+    if row.get("merged_at"):
+        return "merged"
+    if row.get("draft"):
+        return "draft"
+    return "closed" if row.get("state") == "closed" else "open"
+
+
 def _pr(repo: str, row: Any, auth: Optional[str], checks: bool = True) -> Optional[Dict[str, Any]]:
     if not isinstance(row, dict) or not isinstance(row.get("number"), int):
         return None
@@ -313,11 +322,7 @@ def _pr(repo: str, row: Any, auth: Optional[str], checks: bool = True) -> Option
         "number": row["number"],
         "title": row.get("title") if isinstance(row.get("title"), str) else "",
         "url": row.get("html_url") if isinstance(row.get("html_url"), str) else None,
-        "state": "merged"
-        if row.get("merged_at")
-        else "draft"
-        if row.get("draft")
-        else ("closed" if row.get("state") == "closed" else "open"),
+        "state": _state(row),
         "checks": _checks(repo, sha, auth) if checks and isinstance(sha, str) and sha else None,
     }
 
@@ -328,8 +333,12 @@ def _cache_ttl(value: List[Dict[str, Any]]) -> float:
 
 
 def _live(row: Any) -> bool:
-    """Whether a pull request's checks are worth asking after: it's open, a draft included."""
-    return isinstance(row, dict) and row.get("state") == "open" and not row.get("merged_at")
+    """Whether a pull request's checks are worth asking after: it's open, a draft included.
+
+    Reads the row's state through :func:`_state`, so liveness and the state the app is told are the
+    same ladder read once — a draft is open on GitHub's row and a draft in the app either way.
+    """
+    return isinstance(row, dict) and _state(row) in ("open", "draft")
 
 
 def pull_requests(
