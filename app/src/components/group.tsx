@@ -7,9 +7,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 const FOLD_OVER = 5
 
 /**
- * A titled list that folds away; a finished one (`fold`) longer than `FOLD_OVER` starts folded,
- * and an `"always"` one always does.
- * It's mounted once its first item is known, so that count decides.
+ * A titled list that folds away; a finished one (`fold`) longer than `FOLD_OVER` starts folded, and
+ * an `"always"` one always does. It's mounted once its first item is known, so that count decides.
  */
 export function Group({
   label,
