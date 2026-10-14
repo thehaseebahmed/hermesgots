@@ -1,7 +1,7 @@
 import { lazy, useEffect } from "react"
 import { useTheme } from "next-themes"
 import { useLiveQuery } from "dexie-react-hooks"
-import { Navigate, Route, Routes } from "react-router"
+import { Navigate, Route, Routes, useLocation } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
 import { getActiveProfile } from "@/lib/db"
@@ -11,6 +11,7 @@ import { warmRankings } from "@/lib/rankings"
 import { useShareReceiver } from "@/lib/share"
 import { useBotThreads } from "@/lib/threads"
 import { ChatPage } from "@/routes/chat"
+import { PrivacyPage } from "@/routes/privacy"
 import { SetupGate } from "@/routes/setup"
 
 // Only a chat is on the startup path; every other screen loads when it's first opened.
@@ -102,12 +103,18 @@ function AppRoutes() {
 }
 
 export default function App() {
+  // Readable before signing in, and by anyone sent the link.
+  const privacy = useLocation().pathname === "/privacy"
   return (
     <>
       <ThemeColor />
-      <SetupGate>
-        <AppRoutes />
-      </SetupGate>
+      {privacy ? (
+        <PrivacyPage />
+      ) : (
+        <SetupGate>
+          <AppRoutes />
+        </SetupGate>
+      )}
     </>
   )
 }
