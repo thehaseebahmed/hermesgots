@@ -32,8 +32,8 @@ const BROWSED: Kind = {
   doing: "Browsing",
   title: { one: "a page", many: "pages" },
 }
-const PLANNED: Kind = { id: "plan", verb: "Updated", doing: "Updating", title: "the plan" }
-const CHECKED_PLAN: Kind = { id: "plan", verb: "Checked", doing: "Checking", title: "the plan" }
+const PLANNED: Kind = { id: "plan", verb: "Updated", doing: "Updating", title: "todos" }
+const CHECKED_PLAN: Kind = { id: "plan", verb: "Checked", doing: "Checking", title: "todos" }
 const OPENED_PR: Kind = { id: "pr", verb: "Opened", doing: "Opening", title: "a pull request" }
 const USED: Kind = {
   id: "used",

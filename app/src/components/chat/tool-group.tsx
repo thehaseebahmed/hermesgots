@@ -203,18 +203,22 @@ function ToolList({ tools, onSelect }: { tools: ToolEvent[]; onSelect: (index: n
               >
                 <span className="flex min-w-0 flex-1 flex-col py-2">
                   <span className="truncate">
-                    <span>{tool.status === "running" ? kind.doing : kind.verb}</span>{" "}
                     {kind.id === "plan" ? (
                       <>
-                        the plan
+                        {tool.status === "running"
+                          ? `${kind.doing} todos`
+                          : `Todos ${kind.verb.toLowerCase()}`}
                         {targetOf(tool) && (
                           <span className="text-muted-foreground">, {targetOf(tool)}</span>
                         )}
                       </>
                     ) : (
-                      <span className="font-mono text-[13px] text-muted-foreground">
-                        {targetOf(tool)}
-                      </span>
+                      <>
+                        <span>{tool.status === "running" ? kind.doing : kind.verb}</span>{" "}
+                        <span className="font-mono text-[13px] text-muted-foreground">
+                          {targetOf(tool)}
+                        </span>
+                      </>
                     )}
                   </span>
                   {reason && <span className="truncate text-sm text-destructive">{reason}</span>}

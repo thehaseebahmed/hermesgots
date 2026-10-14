@@ -396,6 +396,9 @@ async function transcriptReader(turn: Turn) {
       () => undefined,
     )
     if (!reply) return
+    const done = new Set(
+      draft.tools.filter((t) => t.status === "completed").map((t) => t.toolCallId),
+    )
     // Not through onTool: these carry Hermes's own call ids, which history matches later.
     draft.tools = (reply.tools ?? []).map((tool) => {
       if (tool.tool !== "clarify" || tool.result) return tool
@@ -403,6 +406,10 @@ async function transcriptReader(turn: Turn) {
       // The answer can arrive here before Hermes persists the tool's result row.
       return settled?.result ? { ...tool, result: settled.result } : tool
     })
+    // The transcript holds a todo call's whole result, so its list shows while the turn runs.
+    for (const tool of draft.tools)
+      if (tool.status === "completed" && !done.has(tool.toolCallId))
+        void onTodoTool(conversationId, tool.tool, tool.result)
     if (reply.reasoning) draft.reasoning = reply.reasoning
     if (reply.content) draft.content = reply.content
     touch()
