@@ -1,11 +1,33 @@
 import { noteFailure } from "@/lib/report"
 import { connectionKey } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
-import { db } from "@/lib/db"
+import { db, type Conversation, type ModelChoice, type Profile } from "@/lib/db"
+import { fullModel } from "@/lib/model-info"
+import { modelFacts, sameModel, type Catalog } from "@/lib/models"
 import { getSessionContext } from "@/lib/hermes"
 
 /** Bots whose plugin has no context route (an older plugin). */
 const unsupported = cooldown()
+
+/**
+ * What a session's context use is measured against: the model the next turn runs, since that is
+ * what it will be spent on. A window Hermes recorded for a model the session has since left behind
+ * never shows, so a switch is visible before the new model's first call lands.
+ */
+export function contextWindow(
+  live: Conversation["liveContext"],
+  profile: Profile | undefined,
+  current: ModelChoice | undefined,
+  catalog: Catalog | undefined,
+): number | undefined {
+  // Hermes's own window is this model's as long as its recorded call ran it.
+  if (live?.window && (!current || sameModel(live.model ?? "", current.model))) return live.window
+  const found = current ? modelFacts(catalog, current).context : undefined
+  if (found) return found
+  // What the bot cached is this model's only when it was looked up for it (or for no pick at all).
+  if (current && profile?.contextModel !== fullModel(current)) return undefined
+  return profile?.contextSource === "models.dev" ? profile.contextWindow : undefined
+}
 
 /**
  * Reads a chat's context use from its server's Memento plugin, which sees every model call, so each

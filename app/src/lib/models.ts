@@ -126,6 +126,12 @@ export function warmCatalog() {
 export const normalise = (id: string) => id.toLowerCase().replace(/\./g, "-")
 export const lastSegment = (id: string) => id.slice(id.lastIndexOf("/") + 1)
 
+/** Whether two ids name the same model: Hermes vendors the ids it reports, a pick is bare. */
+export function sameModel(a: string, b: string) {
+  if (!a || !b) return false
+  return normalise(lastSegment(a)) === normalise(lastSegment(b))
+}
+
 function contextOf(entry: CatalogModel | undefined) {
   const context = entry?.limit?.context
   return typeof context === "number" && context > 0 ? context : undefined
