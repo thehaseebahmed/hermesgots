@@ -46,6 +46,7 @@ from . import (
     stream,
     theseus,
     todos,
+    usage,
 )
 from .store import db_path
 
@@ -255,6 +256,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "host_model",
                     "queue",
                     "dictation",
+                    "usage",
                 ],
                 "clarify": asks,
                 "todo_tool": todo_tool,
@@ -391,6 +393,24 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 **{field: found.get(field) for field in context.FIELDS},
             }
         )
+
+    async def account_usage(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        provider = (request.query.get("provider") or "").strip().lower()
+        if not provider:
+            return _error(web, "Missing provider", 400)
+        scope = profile_scope()
+
+        def run():
+            with scope():
+                return usage.fetch(provider)
+
+        result = await asyncio.to_thread(run)
+        if result is None:
+            result = {"provider": provider, "plan": None, "windows": []}
+        return web.json_response({"object": "memento.usage", **result})
 
     async def session_agents(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -946,6 +966,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/github/repos", github_repos)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/label", label_session)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/context", session_context)
+    app.router.add_get(f"{PREFIX}/usage", account_usage)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/todos", session_todos)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/agents", session_agents)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/workspace", post_workspace)

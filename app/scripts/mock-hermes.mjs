@@ -10,6 +10,8 @@
 // The plugin also keeps the chat list (GET and POST /api/plugins/memento/chats, newer record wins) and
 // labels a chat as Memento's on POST /api/plugins/memento/sessions/{id}/label. Its
 // GET /api/plugins/memento/sessions/{id}/context reports a keyed session's latest model call.
+// GET /api/plugins/memento/usage?provider=… serves two windows (Session + Weekly) whose
+// used_percent is MOCK_USAGE_PERCENT (default 94 so the composer banner shows; 0 → no windows).
 // Images the agent returns come from GET /api/plugins/memento/media?path=… (a .png path, unless it
 // names something missing), and saying "image" has the agent answer with a MEDIA tag: one for the
 // chart it serves and one for a file that isn't there.
@@ -1542,6 +1544,19 @@ http
         provider: call ? "openrouter" : null,
         at: call ? Date.now() : null,
       })
+    }
+    const usageRoute = /^\/api\/plugins\/memento\/usage$/.exec(url.pathname)
+    if (PLUGIN && !profile && req.method === "GET" && usageRoute) {
+      const provider = url.searchParams.get("provider") || ""
+      const pct = Number(process.env.MOCK_USAGE_PERCENT ?? 94)
+      const now = Date.now()
+      const windows = pct > 0
+        ? [
+            { label: "Session", used_percent: pct, resets_at: new Date(now + 2 * 3600_000).toISOString(), detail: null },
+            { label: "Weekly", used_percent: Math.min(100, pct * 0.8), resets_at: new Date(now + 5 * 86400_000).toISOString(), detail: null },
+          ]
+        : []
+      return json(res, 200, { object: "memento.usage", provider, plan: "Pro", windows })
     }
     const sessionTodos = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/todos$/.exec(url.pathname)
     if (PLUGIN && !profile && req.method === "GET" && sessionTodos) {

@@ -43,6 +43,7 @@ import type { SheetView } from "@/components/chat/theseus"
 import { TodosPill, TodosSheet } from "@/components/chat/todos"
 import { ModelMenu } from "@/components/chat/model-picker"
 import {
+  LimitBanner,
   ContextIcon,
   ContextPercent,
   UsageSheet,
@@ -110,6 +111,12 @@ import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { setThreadMuted } from "@/lib/push"
 import { syncContextWindow } from "@/lib/models"
+import {
+  effectiveProvider,
+  limitNotice,
+  limitNoticeKey,
+  refreshProviderUsage,
+} from "@/lib/provider-usage"
 import {
   planApprovalMessage,
   projectRepos,
@@ -314,6 +321,14 @@ export function ChatPage() {
     window:
       live?.window ?? (profile?.contextSource === "models.dev" ? profile.contextWindow : undefined),
   }
+  const provider = effectiveProvider(conversation ?? undefined, profile ?? undefined)
+  const providerUsage =
+    profile?.providerUsage && profile.providerUsage.provider === provider
+      ? profile.providerUsage
+      : undefined
+  const notice = limitNotice(providerUsage)
+  const noticeDismissed =
+    Boolean(notice && provider) && profile?.limitDismissed === limitNoticeKey(provider!, notice!)
 
   // Picks up a model changed on the server (only when the connection does, not on every write);
   // the ring follows via the live query.
@@ -322,6 +337,14 @@ export function ChatPage() {
     if (!profileId) return
     void db.profiles.get(profileId).then((current) => current && syncContextWindow(current))
   }, [profileId, baseUrl, apiKey])
+
+  // The provider's limits are read once per connection and provider, then refreshed
+  // with every catch-up. usePoll covers a chat that already has turns; this covers
+  // the new chat, which has no session to catch up yet.
+  useEffect(() => {
+    if (!profileId) return
+    void refreshProviderUsage(profileId, provider).catch(quietly("Reading provider limits"))
+  }, [profileId, baseUrl, apiKey, provider])
 
   // The plugin holds a session's mode and pending plan; an empty session never catches up below.
   const sessionId = session?.id
@@ -388,9 +411,11 @@ export function ChatPage() {
       if (!id) return
       reattachRun(id).catch(quietly("Reattaching a run"))
       reconcileHistory(id).catch(quietly("Catching up a chat"))
+      if (profileId)
+        void refreshProviderUsage(profileId, provider).catch(quietly("Reading provider limits"))
     },
     streamOpen ? SAFETY_MS : CATCH_UP_MS,
-    [id, updatedAt],
+    [id, updatedAt, profileId, provider],
     { active: Boolean(id && hasMessages) },
   )
 
@@ -719,6 +744,20 @@ export function ChatPage() {
             <BotPicker profile={profile} />
           </div>
         )}
+        {notice && provider && !noticeDismissed && (
+          <div className="mx-auto w-full max-w-3xl pb-2" data-toast-above>
+            <LimitBanner
+              notice={notice}
+              onDismiss={() =>
+                profileId &&
+                void db.profiles
+                  .update(profileId, { limitDismissed: limitNoticeKey(provider, notice) })
+                  .catch(() => undefined)
+              }
+              onView={() => setUsageOpen(true)}
+            />
+          </div>
+        )}
         {session?.discardedAt ? (
           <div className="mx-auto w-full max-w-3xl">
             <DiscardedCard />
@@ -810,7 +849,12 @@ export function ChatPage() {
         )}
       </div>
 
-      <UsageSheet open={usageOpen} onOpenChange={setUsageOpen} usage={usage} />
+      <UsageSheet
+        open={usageOpen}
+        onOpenChange={setUsageOpen}
+        usage={usage}
+        providerUsage={providerUsage}
+      />
       <TodosSheet open={todosOpen} onOpenChange={setTodosOpen} items={todos} live={busy} />
       {theseus && (
         <Suspense fallback={null}>

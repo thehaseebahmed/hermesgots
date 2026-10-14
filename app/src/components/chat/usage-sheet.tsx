@@ -1,9 +1,19 @@
+import { XIcon } from "lucide-react"
 import { Meter } from "@base-ui/react/meter"
 
 import { Banner } from "@/components/banner"
+import { Button } from "@/components/ui/button"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { formatTokens } from "@/lib/format"
 import { useModelsDevUnreachable } from "@/lib/models"
+import {
+  NOTICE_REMAINING_PERCENT,
+  resetsAtText,
+  resetsInText,
+  windowViews,
+  type UsageWindowView,
+} from "@/lib/provider-usage"
+import type { ProviderUsage } from "@/lib/hermes"
 
 export interface ContextUsage {
   /** The bot's server has the Memento plugin, which is what records context use. */
@@ -64,17 +74,87 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
+function WindowRow({ window }: { window: UsageWindowView }) {
+  const pct = window.usedPercent
+  const near = pct >= 100 - NOTICE_REMAINING_PERCENT
+  return (
+    <Meter.Root value={pct} className="flex flex-col gap-2.5">
+      <div className="flex items-baseline justify-between gap-4">
+        <Meter.Label className="font-medium">{window.label}</Meter.Label>
+        <span className="text-muted-foreground tabular-nums">{Math.round(pct)}% used</span>
+      </div>
+      <Meter.Track className="h-2 overflow-hidden rounded-full bg-background">
+        <Meter.Indicator
+          className={near ? "rounded-full bg-destructive" : "rounded-full bg-primary"}
+        />
+      </Meter.Track>
+      {window.resetsAt && (
+        <span className="text-sm text-muted-foreground tabular-nums">
+          Resets in {resetsInText(window.resetsAt)} ({resetsAtText(window.resetsAt)})
+        </span>
+      )}
+      {window.detail && <span className="text-sm text-muted-foreground">{window.detail}</span>}
+    </Meter.Root>
+  )
+}
+
+/** The warning shown above the composer when the provider's plan is near its limit. */
+export function LimitBanner({
+  notice,
+  onDismiss,
+  onView,
+}: {
+  notice: UsageWindowView
+  onDismiss: () => void
+  onView: () => void
+}) {
+  const exhausted = notice.remaining <= 0
+  return (
+    <Banner
+      tone={exhausted ? "error" : "warning"}
+      action={
+        <div className="flex items-center gap-1">
+          <Button variant="outline" size="sm" onClick={onView}>
+            View usage
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="size-8 shrink-0"
+            onClick={onDismiss}
+            aria-label="Dismiss"
+          >
+            <XIcon />
+          </Button>
+        </div>
+      }
+    >
+      <div className="flex flex-col">
+        <span>
+          {exhausted ? `${notice.label} limit reached` : `Approaching ${notice.label} limit`}
+        </span>
+        {notice.resetsAt && (
+          <span className="text-muted-foreground">Resets at {resetsAtText(notice.resetsAt)}</span>
+        )}
+      </div>
+    </Banner>
+  )
+}
+
 export function UsageSheet({
   open,
   onOpenChange,
   usage,
+  providerUsage,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   usage: ContextUsage
+  providerUsage?: ProviderUsage
 }) {
   const unreachable = useModelsDevUnreachable()
   const filled = fraction(usage)
+  const windows = windowViews(providerUsage)
 
   return (
     <Popup side open={open} onOpenChange={onOpenChange}>
@@ -118,6 +198,13 @@ export function UsageSheet({
               </p>
             )}
           </Section>
+          {windows.length > 0 && (
+            <Section title="Limits">
+              {windows.map((w) => (
+                <WindowRow key={w.label} window={w} />
+              ))}
+            </Section>
+          )}
         </div>
       </PopupContent>
     </Popup>
