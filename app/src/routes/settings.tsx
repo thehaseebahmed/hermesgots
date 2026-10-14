@@ -791,7 +791,7 @@ function AppearanceSettings() {
           icon={CornerDownRightIcon}
           title="Steer by default"
           subtitle="Messages sent mid-reply go straight to it"
-          checked={chatSettings?.steerByDefault ?? false}
+          checked={chatSettings?.steerByDefault ?? DEFAULT_SETTINGS.steerByDefault}
           onCheckedChange={(checked) => saveAppearance({ steerByDefault: checked })}
         />
         <SwitchRow
@@ -799,7 +799,7 @@ function AppearanceSettings() {
           icon={TimerIcon}
           title="Take-a-break reminders"
           subtitle="Remind me to put the phone away while a task runs"
-          checked={chatSettings?.breakReminders ?? DEFAULT_SETTINGS.breakReminders ?? true}
+          checked={chatSettings?.breakReminders ?? DEFAULT_SETTINGS.breakReminders}
           onCheckedChange={(checked) => saveAppearance({ breakReminders: checked })}
         />
       </Group>

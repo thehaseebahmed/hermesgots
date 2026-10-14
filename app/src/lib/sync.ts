@@ -15,6 +15,7 @@ import {
 } from "@/lib/account"
 import { mergeChatList } from "@/lib/hermes"
 import {
+  APPEARANCE_FIELDS,
   DEFAULT_PROFILE,
   DEFAULT_SETTINGS,
   db,
@@ -22,6 +23,7 @@ import {
   deleteProfile,
   getSettings,
   saveSettings,
+  type Appearance,
   type Conversation,
   type Profile,
 } from "@/lib/db"
@@ -379,34 +381,28 @@ async function syncBots(key: CryptoKey) {
   }
 }
 
-/** What sync carries for the Appearance section's switches: everything there but the colour mode. */
-type AppearanceValue = {
-  simplifiedChats: boolean
-  steerByDefault: boolean
-  breakReminders: boolean
-}
-
 /**
- * The appearance switches as the `settings` document's one record. `appearanceAt` is 0 until the
- * user changes one here, so a choice made on another device wins until then; the defaults
- * `getSettings` fills in are what a device that never touched them pushes.
+ * The appearance switches as the `settings` document's one record, each field of
+ * `APPEARANCE_FIELDS` named so adding one to the list fails to compile here. `appearanceAt` is 0
+ * until the user changes a switch here, so a choice made on another device wins until then; the
+ * defaults `DEFAULT_SETTINGS` holds are what a device that never touched them pushes.
  */
-async function localAppearance(): Promise<Doc<AppearanceValue>> {
+async function localAppearance(): Promise<Doc<Appearance>> {
   const { appearanceAt, simplifiedChats, steerByDefault, breakReminders } = await getSettings()
   return {
     appearance: {
       at: appearanceAt ?? 0,
       value: {
         simplifiedChats,
-        steerByDefault: steerByDefault ?? false,
-        breakReminders: breakReminders ?? DEFAULT_SETTINGS.breakReminders ?? true,
+        steerByDefault: steerByDefault ?? DEFAULT_SETTINGS.steerByDefault,
+        breakReminders: breakReminders ?? DEFAULT_SETTINGS.breakReminders,
       },
     },
   }
 }
 
 async function syncAppearance(key: CryptoKey) {
-  await syncDoc<AppearanceValue>(key, "settings", localAppearance, async (pull) => {
+  await syncDoc<Appearance>(key, "settings", localAppearance, async (pull) => {
     for (const [, entry] of pull) {
       if (entry.value) await saveSettings({ ...entry.value, appearanceAt: entry.at })
     }
@@ -495,7 +491,8 @@ async function fingerprint() {
     getSettings(),
   ])
   const bots = profiles.map((p) => `${p.id}@${p.updatedAt}`).join(",")
-  return `${bots}|${count}@${newest?.changedAt ?? 0}|${tombstones}|${settings.onboarded}|${settings.appearanceAt ?? 0}`
+  const appearance = APPEARANCE_FIELDS.map((field) => `${settings[field] ? 1 : 0}`).join("")
+  return `${bots}|${count}@${newest?.changedAt ?? 0}|${tombstones}|${settings.onboarded}|${appearance}@${settings.appearanceAt ?? 0}`
 }
 
 let running: Promise<void> | undefined

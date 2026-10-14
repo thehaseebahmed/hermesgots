@@ -47,6 +47,16 @@ export interface Settings {
   pushCategories?: Partial<Record<string, boolean>>
 }
 
+/**
+ * The Appearance section's switches, which follow the account; the colour mode isn't one of them,
+ * since next-themes keeps it on the device. Sync carries them as the `settings` document's one
+ * record and the fingerprint watches them, so this list is the one place that says what syncs.
+ */
+export const APPEARANCE_FIELDS = ["simplifiedChats", "steerByDefault", "breakReminders"] as const
+
+/** Those switches as sync reads them, present rather than optional, so a read needs no fallback. */
+export type Appearance = Required<Pick<Settings, (typeof APPEARANCE_FIELDS)[number]>>
+
 /** A Hermes profile Memento can talk to. Its Memento plugin registers it (see `registry.ts`). */
 export interface Profile {
   id: string
@@ -376,9 +386,11 @@ export interface CodingRankings {
   fetchedAt: number
 }
 
-export const DEFAULT_SETTINGS: Settings = {
+/** Carries a default for every appearance switch, so reading one never needs a fallback. */
+export const DEFAULT_SETTINGS: Settings & Appearance = {
   id: "settings",
   simplifiedChats: true,
+  steerByDefault: false,
   breakReminders: true,
 }
 
@@ -567,9 +579,7 @@ export async function saveSettings(patch: Partial<Omit<Settings, "id">>) {
 }
 
 /** Saves an appearance switch; the clock moves so sync carries the change to the account's devices. */
-export async function saveAppearance(
-  patch: Partial<Pick<Settings, "simplifiedChats" | "steerByDefault" | "breakReminders">>,
-) {
+export async function saveAppearance(patch: Partial<Appearance>) {
   await saveSettings({ ...patch, appearanceAt: Date.now() })
 }
 
