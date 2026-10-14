@@ -105,7 +105,7 @@ PR titles follow the same format. Fill in `.github/pull_request_template.md` for
 | `src/lib/media.ts` | `useWide`: whether the screen is tablet-sized (768px) or wider; `useLarge`: wider than a tablet (1024px); `useXLarge`: a laptop's width (1280px) |
 | `src/lib/pane.ts` | `useProjectPane`: from 1280px, the project to keep on screen beside an open session (the app shell lays them out) |
 | `src/lib/highlight.ts` | Formats and highlights tool input and output (highlight.js, loaded on first use) |
-| `src/lib/tools.ts` | What a tool call did in words ("Ran a command", "Running a command", "Updated the plan"), and reading its JSON result, whole or cut short: the body, exit code and why it failed |
+| `src/lib/tools.ts` | What a tool call did in words ("Ran a command", "Running a command", "Updated todos"), and reading its JSON result, whole or cut short: the body, exit code and why it failed |
 | `netlify/functions/sync.mts`, `netlify/lib/docs.ts` | The opaque per-user document store (Netlify Blobs) |
 | `netlify/functions/registry.mts`, `netlify/lib/registry.ts` | The bot registry: link codes, the hosts that claimed them and their sealed bot records (see **Linking bots**) |
 | `netlify/lib/identity.ts` | `requireUser`: the signed-in user behind a function call (cookie or Bearer) and the origin check |
