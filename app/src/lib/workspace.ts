@@ -1,4 +1,4 @@
-import { LIBRARY_MS, PR_MS, PR_PENDING_MS } from "@/lib/freshness"
+import { LIBRARY_MS, PR_MS, PR_PENDING_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import { noteFailure } from "@/lib/report"
 import { connectionKey } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
@@ -133,7 +133,11 @@ export async function refreshWorkspace(conversationId: string) {
   if (!found || unsupported.cooling(found.key)) return
   let workspace
   try {
-    workspace = await getWorkspace(found.profile, found.conversation.hermesSessionId)
+    workspace = await getWorkspace(
+      found.profile,
+      found.conversation.hermesSessionId,
+      AbortSignal.timeout(READ_TIMEOUT_MS),
+    )
   } catch (error) {
     noteFailure("Reading a session's workspace", error)
     if (await lacksRoute(found.profile, error, "sessions")) unsupported.start(found.key)
@@ -155,7 +159,11 @@ export async function refreshLibrary(conversationId: string) {
   if (Date.now() - readAt < LIBRARY_MS) return
   let library
   try {
-    library = await getSessionLibrary(profile, conversation.hermesSessionId)
+    library = await getSessionLibrary(
+      profile,
+      conversation.hermesSessionId,
+      AbortSignal.timeout(READ_TIMEOUT_MS),
+    )
   } catch (error) {
     noteFailure("Reading a session's library", error)
     if (await lacksRoute(profile, error, "sessions")) unsupported.start(found.key)
@@ -185,7 +193,11 @@ export async function refreshPrs(conversationId: string, { force = false } = {})
   if (!force && conversation.prs?.length && Date.now() - newest < trusted) return
   let prs
   try {
-    prs = await getSessionPrs(profile, conversation.hermesSessionId)
+    prs = await getSessionPrs(
+      profile,
+      conversation.hermesSessionId,
+      AbortSignal.timeout(READ_TIMEOUT_MS),
+    )
   } catch (error) {
     noteFailure("Reading a session's pull requests", error)
     if (await lacksRoute(profile, error, "prs")) unsupported.start(found.key)

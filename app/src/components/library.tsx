@@ -185,7 +185,8 @@ function useLibraryRead(
   const read = useCallback(
     (signal: AbortSignal) => {
       if (unsupported.cooling(key)) return
-      void load(signal)
+      // A read that never answers is treated as lost rather than left hanging on the host.
+      void load(AbortSignal.any([signal, AbortSignal.timeout(READ_TIMEOUT_MS)]))
         .then((found) => {
           unsupported.clear(key)
           if (signal.aborted) return

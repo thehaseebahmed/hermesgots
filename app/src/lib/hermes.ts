@@ -1454,9 +1454,11 @@ export async function transcribeClip(
 export async function getWorkspace(
   config: HermesConfig,
   sessionId: string,
+  signal?: AbortSignal,
 ): Promise<SessionWorkspace | null> {
   const response = await request(pluginSession(config, sessionId, "/workspace"), {
     headers: headers(config),
+    signal,
   })
   return parseWorkspace(await response.json())
 }
@@ -1714,9 +1716,11 @@ const PR_CHECKS = new Set<string>(["success", "failure", "pending"])
 export async function getSessionPrs(
   config: HermesConfig,
   sessionId: string,
+  signal?: AbortSignal,
 ): Promise<PullRequest[]> {
   const response = await request(pluginSession(config, sessionId, "/prs"), {
     headers: headers(config),
+    signal,
   })
   const prs: unknown = (await response.json())?.prs
   if (!Array.isArray(prs)) return []
