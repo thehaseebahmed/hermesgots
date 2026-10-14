@@ -157,7 +157,7 @@ export function UsageSheet({
   const windows = windowViews(providerUsage)
 
   return (
-    <Popup side open={open} onOpenChange={onOpenChange}>
+    <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent>
         <PopupHeader className="pb-2">
           <PopupTitle>Usage</PopupTitle>
