@@ -142,7 +142,7 @@ function ToolDetail({ tool, onBack }: { tool: ToolEvent; onBack: () => void }) {
     tool.status === "running" ? "Running" : tool.status === "failed" ? "Failed" : "Completed"
   return (
     <>
-      <PopupHeader className="items-center px-6 pb-3 text-center md:px-16">
+      <PopupHeader className="items-center pb-3 pl-6 text-center md:pl-16">
         {wide && (
           <Button
             variant="ghost"
