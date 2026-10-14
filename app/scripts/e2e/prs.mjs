@@ -3,14 +3,7 @@
 // already knows instead of storing "no pull requests" over them (see plugin/github.py's `strict`).
 import { app, assert, flow, mock, pass, runId } from "./lib.mjs"
 
-/** The pull requests the app has stored for a chat. */
-const stored = (page, id) =>
-  page.evaluate(async (id) => {
-    const { db } = await import("/src/lib/db.ts")
-    return (await db.conversations.get(id))?.prs ?? null
-  }, id)
-
-await flow("prs", async ({ page, profileId, seed, send, until, shot }) => {
+await flow("prs", async ({ page, profileId, seed, send, stored, until, shot }) => {
   // A run that failed mid-way leaves the mock failing; every run starts from a host that answers.
   await fetch(`${mock}/__mock/prs`, { method: "POST", body: JSON.stringify({ fail: false }) })
   const statuses = []
@@ -25,7 +18,7 @@ await flow("prs", async ({ page, profileId, seed, send, until, shot }) => {
   await page.goto(`${app}/c/${shipped}`)
   await send("ship it")
   await until(
-    async () => (await stored(page, shipped))?.length,
+    async () => (await stored(shipped))?.length,
     30_000,
     "the shipped pull request to arrive",
   )
@@ -66,7 +59,7 @@ await flow("prs", async ({ page, profileId, seed, send, until, shot }) => {
   await page.goto(project)
   await until(async () => statuses.includes(502), 20_000, "the failing read of the session's PRs")
   assert.equal(
-    (await stored(page, known))?.length,
+    (await stored(known))?.length,
     1,
     "a failed read must not empty the session's pull requests",
   )

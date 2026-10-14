@@ -3,13 +3,6 @@
 // and the finished ones, and the project Library's tree restricted to the session's own folders.
 import { app, assert, flow, pass, runId } from "./lib.mjs"
 
-/** The pull requests the app has stored for a chat. */
-const stored = (page, id) =>
-  page.evaluate(async (id) => {
-    const { db } = await import("/src/lib/db.ts")
-    return (await db.conversations.get(id))?.prs ?? null
-  }, id)
-
 /** A chat's stored outputs, as the pill above its composer counts them. */
 const outputs = (page, id) =>
   page.evaluate(async (id) => {
@@ -17,22 +10,22 @@ const outputs = (page, id) =>
     return (await db.conversations.get(id))?.library?.count ?? null
   }, id)
 
-await flow("outputs", async ({ page, seed, send, until, shot }) => {
+await flow("outputs", async ({ page, seed, send, stored, until, shot }) => {
   // A session that ships twice: the pull request it opened first is merged by the second, so the
   // drawer has a live one and a finished one behind it.
   const id = `outputs-${runId()}`
   await seed([{ id, title: "Rotate the logs", projectId: "p_1a2b3c4d" }])
   await page.goto(`${app}/c/${id}`)
   await send("ship it")
-  await until(async () => (await stored(page, id))?.length, 30_000, "the first pull request")
+  await until(async () => (await stored(id))?.length, 30_000, "the first pull request")
   await send("ship it again")
   await until(
-    async () => (await stored(page, id))?.length === 2,
+    async () => (await stored(id))?.length === 2,
     30_000,
     "the second pull request, with the first merged behind it",
   )
   assert.deepEqual(
-    (await stored(page, id)).map((pr) => [pr.number, pr.state]),
+    (await stored(id)).map((pr) => [pr.number, pr.state]),
     [
       [28, "open"],
       [27, "merged"],
