@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { Group } from "@/components/group"
 import { PR_GROUPS } from "@/components/chat/pr-look"
@@ -12,7 +12,7 @@ import type { HermesConfig } from "@/lib/hermes"
 /**
  * A session's outputs as a drawer above the composer: every pull request it has — the live ones
  * first, the finished ones folded into their own group — and the files it filed, as the project's
- * Library shows them but only for this session. Opened by the outputs pill, or the PR pill.
+ * Library shows them but only for this session. Opened by the pill above the composer.
  */
 export function OutputsDrawer({
   open,
@@ -28,8 +28,14 @@ export function OutputsDrawer({
   const prs = [...(session.prs ?? [])].sort(
     (a, b) => b.number - a.number || a.repo.localeCompare(b.repo),
   )
-  // A session with pull requests opens on them; one with only files opens on the files.
+  // A session with pull requests opens on them; one with only files opens on the files. Set on each
+  // opening too: the drawer stays mounted between them, and its list only reaches the app later.
   const [tab, setTab] = useState(prs.length ? "prs" : "library")
+  const wasOpen = useRef(open)
+  useEffect(() => {
+    if (open && !wasOpen.current) setTab(prs.length ? "prs" : "library")
+    wasOpen.current = open
+  }, [open, prs.length])
   return (
     <Popup side open={open} onOpenChange={onOpenChange}>
       <PopupContent>
