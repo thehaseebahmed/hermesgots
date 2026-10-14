@@ -114,7 +114,7 @@ import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { setThreadMuted } from "@/lib/push"
-import { hostChoice, useModelInfo } from "@/lib/model-info"
+import { hostChoice, shortModel, useModelInfo } from "@/lib/model-info"
 import { syncContextWindow, useModelCatalog } from "@/lib/models"
 import {
   effectiveProvider,
@@ -334,6 +334,7 @@ export function ChatPage() {
     // The window belongs to the model the next turn runs, not the one the last call did: a switch
     // shows at once, rather than after the new model's first call.
     window: contextWindow(live, profile ?? undefined, currentModel, catalog),
+    model: currentModel ? shortModel(currentModel.model) : undefined,
   }
   const provider = effectiveProvider(conversation ?? undefined, profile ?? undefined)
   const providerUsage =
