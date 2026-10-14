@@ -36,6 +36,7 @@ import {
   streamChat,
   supportsRuns,
   uploadAttachment,
+  type ApprovalRequestEvent,
   type ChatMessage,
   type HermesConfig,
   type QueueItem,
@@ -244,13 +245,16 @@ function settledClarify(
   return { clarify, tools }
 }
 
-function raiseApproval(
-  turn: Turn,
-  event: { run_id: string; command?: string; description?: string; choices?: ApprovalChoice[] },
-) {
+const APPROVAL_CHOICES: ApprovalChoice[] = ["once", "session", "always", "deny"]
+
+/** Hermes's error codes for an approval answered too late: nothing waits on it any more. */
+const APPROVAL_GONE = new Set(["approval_not_pending", "approval_not_active", "run_not_found"])
+
+function raiseApproval(turn: Turn, event: ApprovalRequestEvent) {
   const { draft, touch } = turn
   draft.approval = {
     runId: event.run_id,
+    askedAt: typeof event.timestamp === "number" ? event.timestamp : undefined,
     command: event.command,
     description: event.description,
     choices: event.choices?.length ? event.choices : ["once", "deny"],
@@ -339,6 +343,16 @@ function streamHandlers(turn: Turn): StreamHandlers {
         ? (event.outcome as Outcome)
         : "submitted"
       Object.assign(draft, settledClarify(draft, event.answers ?? {}, outcome))
+      touch()
+    },
+    // Answered on another device, or it stopped waiting (timed out, withdrawn) with no answer.
+    onApprovalResolved(event) {
+      const shown = draft.approval
+      if (!shown || shown.runId !== event.run_id) return
+      if (shown.resolved && shown.resolved !== "expired") return
+      const choice = APPROVAL_CHOICES.find((c) => c === event.choice) ?? "expired"
+      if (shown.resolved === choice) return
+      draft.approval = { ...shown, resolved: choice }
       touch()
     },
   }
@@ -449,14 +463,25 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
     if (outcome) return { ...outcome, replaceContent: lost } as RunOutcome
     if (approval) {
       const shown = draft.approval
-      const same =
-        shown?.command === approval.command && shown?.description === approval.description
-      if (!same || (shown?.resolved && shown === before)) raiseApproval(turn, approval)
-    } else {
-      if (polling && draft.approval && !draft.approval.resolved) {
-        draft.approval = { ...draft.approval, resolved: "expired" }
-        touch()
+      // Hermes leaves a request that timed out on the status until the run moves on, so one
+      // already settled here is never raised again; only a new request is.
+      const exact = shown?.askedAt !== undefined && typeof approval.timestamp === "number"
+      if (exact) {
+        if (shown.askedAt !== approval.timestamp) raiseApproval(turn, approval)
+      } else {
+        const same =
+          shown?.command === approval.command && shown?.description === approval.description
+        if (!same || (shown?.resolved && shown === before)) raiseApproval(turn, approval)
       }
+    } else if (
+      draft.approval &&
+      !draft.approval.resolved &&
+      (polling || draft.approval === before)
+    ) {
+      // Hermes parks the status before it sends the request, so a status read after the card
+      // went up that no longer waits means the approval went without this device.
+      draft.approval = { ...draft.approval, resolved: "expired" }
+      touch()
     }
     // A client that can only poll still gets the question: the plugin keeps it on the status.
     if (clarify) handlers.onClarify?.(clarify)
@@ -1384,17 +1409,26 @@ export async function answerApproval(message: Message, choice: ApprovalChoice) {
   const conversation = await db.conversations.get(message.conversationId)
   const profile = await profileFor(conversation?.profileId)
   if (!profile) return
-  await respondToApproval(
-    { baseUrl: profile.baseUrl, apiKey: profile.apiKey },
-    message.approval.runId,
-    choice,
-  )
+  let resolved: ApprovalChoice | "expired" = choice
+  try {
+    await respondToApproval(
+      { baseUrl: profile.baseUrl, apiKey: profile.apiKey },
+      message.approval.runId,
+      choice,
+    )
+  } catch (error) {
+    // Nothing waits for an answer any more (answered elsewhere, timed out, the run moved on).
+    if (!(error instanceof HermesError && error.code && APPROVAL_GONE.has(error.code))) throw error
+    resolved = "expired"
+  }
   const active = activeDrafts.get(message.id)
   if (active?.draft.approval) {
-    active.draft.approval = { ...active.draft.approval, resolved: choice }
+    // An answer from another device may have landed meanwhile; it says what really happened.
+    if (resolved === "expired" && active.draft.approval.resolved) return
+    active.draft.approval = { ...active.draft.approval, resolved }
     active.touch()
   } else {
-    await db.messages.update(message.id, { approval: { ...message.approval, resolved: choice } })
+    await db.messages.update(message.id, { approval: { ...message.approval, resolved } })
   }
 }
 

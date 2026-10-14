@@ -210,6 +210,8 @@ export interface ApprovalRequest {
   /** Reply length and time when Hermes asked, so the thread can place the card where it happened. */
   contentOffset?: number
   requestedAt?: number
+  /** Hermes's own time for the request, which tells one request from an identical later one. */
+  askedAt?: number
   /** Set once the user answers (or the turn ends without an answer). */
   resolved?: ApprovalChoice | "expired"
 }

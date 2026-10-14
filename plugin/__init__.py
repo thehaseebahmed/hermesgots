@@ -21,6 +21,7 @@ from typing import Any, Dict, List
 
 from . import (
     alerts,
+    approvals,
     attachments,
     chats,
     clarify,
@@ -144,6 +145,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
     # The hooks have no other way to the session store.
     sessions.adapter = adapter
+    # Approvals that end without an answer leave the run looking stuck; see approvals.py.
+    approvals.adapter = adapter
     # The API server's agents can't ask questions on their own; see clarify.py.
     asks = clarify.wire(adapter)
     # Hermes defers todo_list behind tool_search, where the agent can't always find it; see todos.py.
@@ -163,6 +166,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         from hermes_constants import get_hermes_home
 
         home = Path(get_hermes_home())
+        approvals.loop = asyncio.get_running_loop()
         try:
             # A restart can leave projects mid-clone.
             await asyncio.to_thread(clones.resume, home)
@@ -1414,6 +1418,7 @@ def register(ctx) -> None:
         register_hook("post_tool_call", events.on_tool)
         register_hook("pre_approval_request", events.on_approval_request)
         register_hook("post_approval_response", events.on_approval)
+        register_hook("post_approval_response", approvals.settled)
         register_hook("on_session_end", events.on_turn_end)
         # The run is over, so a queued message can go now rather than at the next tick.
         register_hook("on_session_end", lambda **_kwargs: outbox.wake())
