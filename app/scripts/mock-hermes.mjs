@@ -15,6 +15,9 @@
 // Images the agent returns come from GET /api/plugins/memento/media?path=… (a .png path, unless it
 // names something missing), and saying "image" has the agent answer with a MEDIA tag: one for the
 // chart it serves and one for a file that isn't there.
+// The Library tab reads a project's filed files from GET projects/{id}/library (every session's,
+// merged by folder) and a session's own from GET sessions/{id}/library (the outputs pill counts
+// them); tapping a file opens it from GET library/file?path=… (a .png or .md path).
 // It lists Hermes Projects on GET /api/plugins/memento/projects. GET /api/plugins/memento/github and
 // github/repos stand in for the host's GitHub account (MOCK_NO_GITHUB=1 leaves it signed out), and
 // POST /api/plugins/memento/projects answers at once with a project that clones its repos in the
@@ -489,6 +492,46 @@ How to test the whole change end to end: commands, what to look at, expected res
 ## Risks and assumptions
 What could go wrong, and each decision you made without the user: what you chose and why. Nothing here is left for the user to decide.`
 const userTurns = (sessionId) => (transcripts.get(sessionId) ?? []).filter((r) => r.role === "user")
+// A session's filed files as the plugin's library routes would list them: in-memory stand-ins,
+// newest first within each folder, so the Library tab and the outputs pill have something to show.
+const sessionLibrary = (record) => {
+  const worktree = record.files_dir.split("/").pop()
+  const at = (minutesAgo) => Date.now() - minutesAgo * 60_000
+  const file = (folder, name, size, minutesAgo) => ({
+    worktree,
+    folder,
+    name,
+    path: `${record.files_dir}/${folder}/${name}`,
+    size,
+    at: at(minutesAgo),
+  })
+  return [
+    {
+      name: "screenshots",
+      files: [
+        file("screenshots", "dashboard-light.png", 20480, 4),
+        file("screenshots", "dashboard-dark.png", 19456, 2),
+      ],
+    },
+    {
+      name: "reports",
+      files: [file("reports", "cleanup-report.md", 1843, 9)],
+    },
+  ]
+}
+// Every session's files in one project, merged by folder, as the plugin's project route walks it.
+const projectLibrary = (projectId) => {
+  const folders = new Map()
+  for (const record of projectSessions.values()) {
+    if (record.project_id !== projectId) continue
+    for (const folder of sessionLibrary(record)) {
+      folders.set(folder.name, [...(folders.get(folder.name) ?? []), ...folder.files])
+    }
+  }
+  return [...folders.entries()]
+    .map(([name, files]) => ({ name, files: files.sort((a, b) => b.at - a.at) }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
 const RUN_ERROR = "Timed out waiting for https://status.example.com"
 
 /** A run as a row of Hermes's cron execution ledger. */
@@ -1347,6 +1390,20 @@ http
       }
       return json(res, 404, { error: { message: "No such image." } })
     }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/library/file") {
+      // A filed file for opening it: an image as png bytes, markdown as text, anything else as
+      // an octet-stream the browser downloads.
+      const path = url.searchParams.get("path") ?? ""
+      if (/\.png$/i.test(path)) {
+        res.writeHead(200, { "Content-Type": "image/png", ...cors })
+        return res.end(MOCK_PNG)
+      }
+      if (/\.md$/i.test(path)) {
+        res.writeHead(200, { "Content-Type": "text/markdown", ...cors })
+        return res.end("# Cleanup report\n\nEverything tidied, nothing renamed.\n")
+      }
+      return json(res, 404, { error: { message: "No such file." } })
+    }
     if (PLUGIN && EVENTS && !profile && url.pathname === "/api/plugins/memento/events") {
       const since = url.searchParams.get("since")
       return streamEvents(req, res, pluginProfile ?? "", since === null ? undefined : Number(since))
@@ -1410,7 +1467,18 @@ http
       cloneProject(project, root)
       return json(res, 202, { object: "memento.project", ...project })
     }
-    const projectRoute = /^\/api\/plugins\/memento\/projects\/([^/]+)(\/remove|\/retry|\/repos|\/repos\/remove|\/usage)?$/.exec(url.pathname)
+    const projectRoute = /^\/api\/plugins\/memento\/projects\/([^/]+)(\/remove|\/retry|\/repos|\/repos\/remove|\/usage|\/library)?$/.exec(url.pathname)
+    if (PLUGIN && !profile && projectRoute?.[2] === "/library") {
+      // The project's filed files, every session's merged by folder; a missing project 404s.
+      const found = mockProjects().find((p) => p.id === decodeURIComponent(projectRoute[1]))
+      if (!found || found.status === "cloning" || found.status === "failed")
+        return json(res, 404, { error: { message: "No such project." } })
+      return json(res, 200, {
+        object: "memento.library",
+        project_id: found.id,
+        folders: projectLibrary(found.id),
+      })
+    }
     if (PLUGIN && !profile && projectRoute?.[2] === "/usage") {
       const found = mockProjects().find((p) => p.id === decodeURIComponent(projectRoute[1]))
       if (!found || found.status === "cloning" || found.status === "failed")
@@ -1716,7 +1784,7 @@ http
       for (const run of theseusRuns.values()) run.stage = stage
       return json(res, 200, { ok: true })
     }
-    const sessionRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/(workspace|workspace\/remove|mode|prs|close|theseus|theseus\/models|theseus\/evidence\/[^/]+\/[^/]+)$/.exec(url.pathname)
+    const sessionRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/(workspace|workspace\/remove|mode|prs|library|close|theseus|theseus\/models|theseus\/evidence\/[^/]+\/[^/]+)$/.exec(url.pathname)
     if (PLUGIN && !profile && sessionRoute) {
       const id = decodeURIComponent(sessionRoute[1])
       const route = sessionRoute[2]
@@ -1729,7 +1797,9 @@ http
           : `You are working in git worktrees of this project's repos, all on branch ${record.branch}:\n${record.repos.map((r, i) => `- ${r.name} at ${r.path}${i === 0 ? " (your current directory)" : ""}`).join("\n")}\nKeep all work inside them.`
       // The plugin's library line (sessions._files_line), word for word, with the session's path.
       const filesLine = (record) =>
-        `Files you make for the user — screenshots, images, charts, reports, markdown — belong in this session's library at ${record.files_dir}, not in the worktree. File each one with the add_to_library tool (its path, absolute or relative): it creates the folder if it needs to, moves the file there and answers with its new path. Return an image's new path in a MEDIA:<path> tag so the user sees it. Source edits stay in the worktree.`
+        `Files you make for the user — screenshots, images, charts, reports, markdown — belong in this session's library at ${record.files_dir}, not in the worktree. File each one with the library_add tool (its path and a folder name, one level, such as screenshots): it makes ${record.files_dir}/<folder> if it needs to, moves the file there and answers with its new path. A file of that name already in the folder is an error — rename it and call again. Return an image's new path in a MEDIA:<path> tag so the user sees it. Source edits stay in the worktree.`
+      // A session's filed files, as the plugin's library routes would list them (see
+      // `sessionLibrary` at module scope, shared with the project route).
       const instructions = (record) =>
         [worktreeLine(record), filesLine(record), PR_INSTRUCTIONS, DONE_INSTRUCTIONS, record.mode === "plan" ? PLAN_INSTRUCTIONS : "", record.mode === "theseus" ? THESEUS_INSTRUCTIONS : ""].filter(Boolean).join("\n")
       const answer = (record) =>
@@ -1831,6 +1901,15 @@ http
           return json(res, 200, { object: "memento.closed", removed: false, kept: [{ name: workspace.repos[0].name, reason: "unpushed" }], results })
         projectSessions.delete(id)
         return json(res, 200, { object: "memento.closed", removed: true, kept: [], results })
+      }
+      if (route === "library" && req.method === "GET") {
+        // One worktree's filed files; an unknown session answers an empty tree, never a 404.
+        return json(res, 200, {
+          object: "memento.library",
+          session_id: id,
+          worktree: workspace ? workspace.files_dir.split("/").pop() : null,
+          folders: workspace ? sessionLibrary(workspace) : [],
+        })
       }
       if (route === "prs" && req.method === "GET") {
         // A PR per repo once the agent opened them; "merge" merges them, "break" fails their
