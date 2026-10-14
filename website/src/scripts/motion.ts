@@ -27,17 +27,6 @@ if (!reduced && "IntersectionObserver" in window) {
 
 const hero = document.querySelector<HTMLElement>("[data-hero]")
 const stories = [...document.querySelectorAll<HTMLElement>("[data-story]")]
-const folds = [...document.querySelectorAll<HTMLElement>("[data-fold]")]
-const ease = (t: number) => t * t * (3 - 2 * t)
-
-// The foldable stays shut for the first fifth of its section, opens over the next half and then rests.
-function fold(element: HTMLElement) {
-  const total = element.offsetHeight - innerHeight
-  const progress = total > 0 ? clamp(-element.getBoundingClientRect().top / total) : 1
-  const open = ease(clamp((progress - 0.18) / 0.5))
-  element.style.setProperty("--f", open.toFixed(3))
-  element.dataset.open = String(open > 0.5)
-}
 
 function story(element: HTMLElement) {
   const count = Number(element.dataset.count)
@@ -63,7 +52,6 @@ function update() {
     hero.style.setProperty("--hero", progress.toFixed(3))
   }
   stories.forEach(story)
-  if (root.classList.contains("motion")) folds.forEach(fold)
 }
 
 function schedule() {

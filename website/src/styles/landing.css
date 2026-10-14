@@ -178,43 +178,17 @@ html.motion [data-reveal].is-in {
   transform: none;
 }
 
-/* Phone frame: the closed cover screen of a Galaxy Z Fold, with its camera in the top bezel */
+/* Phone frame */
 .phone {
-  --bz: 1.5%;
-  --bz-t: 3.4%;
   position: relative;
   aspect-ratio: 780 / 1688;
   border-radius: 12% / 5.5%;
-  padding: var(--bz-t) var(--bz) var(--bz);
-  background: linear-gradient(160deg, oklch(0.27 0.01 260), oklch(0.17 0.005 260));
+  padding: 1.6%;
+  background: oklch(0.2 0 0);
   box-shadow:
-    0 0 0 1px oklch(1 0 0 / 16%) inset,
-    0 0 0 0.12rem oklch(0.3 0.01 260),
+    0 0 0 1px oklch(1 0 0 / 14%) inset,
     0 2.5rem 5rem -1.5rem oklch(0 0 0 / 45%),
     0 0.5rem 1.25rem oklch(0 0 0 / 18%);
-}
-
-.phone::before {
-  content: "";
-  position: absolute;
-  top: calc(var(--bz-t) * 0.22);
-  left: 50%;
-  width: 3.4%;
-  aspect-ratio: 1;
-  translate: -50% 0;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, oklch(0.4 0.05 260), oklch(0.08 0 0) 60%);
-}
-
-.phone::after {
-  content: "";
-  position: absolute;
-  right: -1.1%;
-  top: 24%;
-  width: 1%;
-  height: 12%;
-  border-radius: 0 999px 999px 0;
-  background: oklch(0.32 0.01 260);
 }
 
 .shot,
@@ -419,8 +393,7 @@ html.js .story-sticky {
 
 .slide {
   position: absolute;
-  inset: 0;
-  padding: var(--bz-t) var(--bz) var(--bz);
+  inset: 1.6%;
 }
 
 .slide .phone-fill,
@@ -617,226 +590,6 @@ html:not(.js) .dots {
   .chips {
     display: none;
   }
-}
-
-/* The foldable: a sticky stage whose hinge follows the scroll (--f: 0 shut, 1 open). Without the
-   script, or with reduced motion, it rests open. */
-.unfold {
-  --f: 1;
-  padding-block: clamp(3rem, 8vw, 6rem);
-}
-
-html.motion .unfold {
-  height: 300svh;
-  padding-block: 0;
-}
-
-.unfold-sticky {
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  justify-items: center;
-  gap: 1rem;
-}
-
-html.motion .unfold-sticky {
-  position: sticky;
-  top: var(--nav-h);
-  height: calc(100svh - var(--nav-h));
-  padding-block: 1.5rem 1rem;
-}
-
-.unfold-head {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-  text-align: center;
-}
-
-.unfold-words {
-  display: grid;
-}
-
-.unfold-words > * {
-  grid-area: 1 / 1;
-  margin: 0;
-  max-width: 28ch;
-}
-
-.unfold-a,
-.unfold-b {
-  transition:
-    opacity 0.5s var(--ease),
-    transform 0.8s var(--spring);
-}
-
-.unfold[data-open="true"] .unfold-a,
-.unfold:not([data-open]) .unfold-a {
-  opacity: 0;
-  transform: translateY(-1rem);
-}
-
-.unfold[data-open="false"] .unfold-b {
-  opacity: 0;
-  transform: translateY(1rem);
-}
-
-.unfold-stage {
-  --h: min(70svh, 44rem, calc((100vw - 2rem) / 0.922));
-  --w: calc(var(--h) * 0.922);
-  --bz: calc(var(--w) * 0.014);
-  --r: calc(var(--w) * 0.06);
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 100%;
-  min-height: 0;
-}
-
-.fold {
-  position: relative;
-  width: var(--w);
-  height: var(--h);
-  perspective: calc(var(--w) * 2.2);
-  translate: calc((1 - var(--f)) * var(--w) * 0.25) 0;
-}
-
-.fold-body {
-  position: absolute;
-  inset: 0;
-}
-
-.half {
-  position: absolute;
-  top: 0;
-  width: 50%;
-  height: 100%;
-}
-
-.half-l {
-  left: 0;
-  padding: var(--bz) 0 var(--bz) var(--bz);
-  border-radius: var(--r) 0 0 var(--r);
-  background: linear-gradient(160deg, oklch(0.27 0.01 260), oklch(0.17 0.005 260));
-  box-shadow: 0 2.5rem 5rem -1.5rem oklch(0 0 0 / 45%);
-}
-
-.half-r {
-  left: 50%;
-  transform-origin: 0 50%;
-  transform-style: preserve-3d;
-  transform: rotateY(calc((1 - var(--f)) * -180deg));
-}
-
-.face {
-  position: absolute;
-  inset: 0;
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
-  background: linear-gradient(200deg, oklch(0.27 0.01 260), oklch(0.17 0.005 260));
-}
-
-.front {
-  padding: var(--bz) var(--bz) var(--bz) 0;
-  border-radius: 0 var(--r) var(--r) 0;
-}
-
-.back {
-  padding: calc(var(--bz) * 2.4) var(--bz) var(--bz);
-  border-radius: var(--r);
-  transform: rotateY(180deg);
-  box-shadow: 0 0 0 0.12rem oklch(0.3 0.01 260);
-}
-
-.inner,
-.cover {
-  display: block;
-  position: relative;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-}
-
-.inner img {
-  position: absolute;
-  top: 0;
-  width: 200%;
-  height: 100%;
-  max-width: none;
-  object-fit: cover;
-}
-
-.inner-l {
-  border-radius: calc(var(--r) * 0.8) 0 0 calc(var(--r) * 0.8);
-}
-
-.inner-l img {
-  left: 0;
-}
-
-.inner-r {
-  border-radius: 0 calc(var(--r) * 0.8) calc(var(--r) * 0.8) 0;
-}
-
-.inner-r img {
-  left: -100%;
-}
-
-.cover {
-  border-radius: calc(var(--r) * 0.8);
-}
-
-.cover img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.cam {
-  position: absolute;
-  top: calc(var(--bz) * 0.7);
-  left: 50%;
-  width: calc(var(--bz) * 1.1);
-  aspect-ratio: 1;
-  translate: -50% 0;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, oklch(0.4 0.05 260), oklch(0.08 0 0) 60%);
-}
-
-.crease {
-  position: absolute;
-  top: var(--bz);
-  bottom: var(--bz);
-  left: 50%;
-  width: calc(var(--w) * 0.05);
-  translate: -50% 0;
-  background: linear-gradient(90deg, transparent, oklch(0 0 0 / 22%) 45%, oklch(1 0 0 / 10%) 55%, transparent);
-  opacity: var(--f);
-  pointer-events: none;
-}
-
-.unfold-bot {
-  position: absolute;
-  right: max(0.5rem, calc(50% - var(--w) / 2 - 3.5rem));
-  bottom: 6%;
-  width: clamp(3.75rem, 8vw, 6rem);
-  height: auto;
-  filter: drop-shadow(0 0.75rem 0.75rem oklch(0 0 0 / 22%));
-  rotate: calc(var(--f) * 12deg - 6deg);
-  scale: calc(0.8 + var(--f) * 0.3);
-}
-
-.unfold-note {
-  display: grid;
-  margin: 0;
-  color: var(--muted-foreground);
-  font-size: 0.9rem;
-  font-weight: 600;
-  text-align: center;
-}
-
-.unfold-note > * {
-  grid-area: 1 / 1;
 }
 
 /* Extras */
