@@ -52,7 +52,7 @@ input:focus-visible,
 }
 
 .wordmark {
-  color: inherit;
+  color: var(--foreground);
   text-decoration: none;
   font-size: 1.5rem;
   font-weight: 800;
@@ -909,10 +909,3 @@ html:not(.js) .dots {
   }
 }
 
-.nav .wordmark,
-.footer .wordmark {
-  background: linear-gradient(100deg, var(--primary), var(--usage-cache-write) 55%, var(--usage-input));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
