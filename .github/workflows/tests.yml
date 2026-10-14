@@ -45,3 +45,22 @@ jobs:
       - name: Build
         run: pnpm build
         working-directory: app
+
+  website:
+    name: Website build
+    runs-on: ubuntu-latest
+    env:
+      ASTRO_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install pnpm
+        run: npm install -g pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+        working-directory: website
+      - name: Typecheck and build
+        run: pnpm build
+        working-directory: website

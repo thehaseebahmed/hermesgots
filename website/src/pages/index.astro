@@ -1,0 +1,33 @@
+---
+import Board from "../components/Board.astro"
+import Base from "../layouts/Base.astro"
+import { BOT_NAMES, loadBoard } from "../lib/board"
+
+const board = loadBoard()
+---
+
+<Base
+  title="Memento Community"
+  description="Tokens used by people running Memento, today, this week and this month."
+>
+  <div class="shell">
+    <header class="site">
+      <a class="brand" href="/">Memento <span>Community</span></a>
+      <span class="badge">Sample data</span>
+    </header>
+
+    <main>
+      <div class="hero">
+        <div>
+          <h1>Token leaderboard</h1>
+          <p class="lede">Tokens used by people who chose to share their count.</p>
+        </div>
+        <ul class="crew" aria-hidden="true">
+          {Object.keys(BOT_NAMES).slice(0, 5).map((id) => <li><img src={`/bots/${id}.png`} alt="" width="36" height="36" /></li>)}
+        </ul>
+      </div>
+      <Board board={board} />
+      <p class="note">Days run on UTC. Counts are reported by each person's Hermes host.</p>
+    </main>
+  </div>
+</Base>
