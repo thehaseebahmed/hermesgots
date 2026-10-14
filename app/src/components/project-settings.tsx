@@ -96,7 +96,9 @@ export function ProjectSettings({
       onOpenChangeComplete={(next) => !next && setView("settings")}
     >
       <PopupContent className="max-h-[92dvh] pb-0 md:max-h-[85dvh] md:pb-0">
-        <PopupHeader className="relative items-center pb-2">
+        {/* The back button floats over the header's left from tablet width up, where this is a
+            dialog; a phone sheet centres its heading, so it reserves no room on that side. */}
+        <PopupHeader className={cn("relative pb-2", view === "usage" && "md:pl-16")}>
           {view === "usage" && (
             <Button
               variant="ghost"

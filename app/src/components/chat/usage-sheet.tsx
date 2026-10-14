@@ -159,7 +159,7 @@ export function UsageSheet({
   return (
     <Popup side open={open} onOpenChange={onOpenChange}>
       <PopupContent>
-        <PopupHeader className="items-center pb-2">
+        <PopupHeader className="pb-2">
           <PopupTitle>Usage</PopupTitle>
         </PopupHeader>
         <div className="flex flex-col gap-6 px-6 text-[15px]">

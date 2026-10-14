@@ -117,7 +117,7 @@ export function AttachMenu({
       />
       <Popup open={open} onOpenChange={setOpen}>
         <PopupContent>
-          <PopupHeader className="items-center pb-2">
+          <PopupHeader className="pb-2">
             <PopupTitle>Add context</PopupTitle>
           </PopupHeader>
           {!filesAvailable && (

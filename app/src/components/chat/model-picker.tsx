@@ -8,7 +8,7 @@ import {
 } from "lucide-react"
 
 import { MODEL_SORTS, sortByFacts, type ModelSort } from "@/components/chat/model-sort"
-import { Popup, PopupContent, PopupTitle } from "@/components/popup"
+import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -90,8 +90,10 @@ export function ModelPicker({
 
   return (
     <>
-      <PopupTitle className="sr-only">{drilled ? drilled.name : "Model"}</PopupTitle>
-      <div className="flex flex-col gap-5 px-6 pt-5 text-[15px]">
+      <PopupHeader>
+        <PopupTitle>{drilled ? drilled.name : "Select Model"}</PopupTitle>
+      </PopupHeader>
+      <div className="flex flex-col gap-5 px-6 pt-2 text-[15px]">
         {(total > 8 || flat) && (
           <div className="flex items-center gap-2">
             {total > 8 && (
@@ -227,8 +229,10 @@ function ProviderModels({
   }, [provider, query, sort, catalog, rankings])
   return (
     <>
-      <PopupTitle className="sr-only">{provider.name}</PopupTitle>
-      <div className="flex flex-col gap-5 px-6 pt-5 text-[15px]">
+      <PopupHeader>
+        <PopupTitle className="truncate">{provider.name}</PopupTitle>
+      </PopupHeader>
+      <div className="flex flex-col gap-5 px-6 pt-2 text-[15px]">
         <div className="flex items-center gap-2">
           <InputGroup className="h-11 min-w-0 flex-1">
             <InputGroupAddon>

@@ -285,6 +285,7 @@ Bots register themselves instead of being typed in (design: https://claude.ai/co
 - **If you change the schema, bump the Dexie version** in `src/lib/db.ts` and keep existing data loading.
 - **Every screen must work at phone (390px) and tablet (≥768px) widths, in light and dark mode.**
 - **Pop-ups are sheets on phones and dialogs on bigger screens.** Build them with `Popup` / `PopupContent` (`src/components/popup.tsx`), which picks with `useWide`, rather than a bare `Sheet` or dialog. Side drawers (the sidebar) and the tool-details drawer are not pop-ups.
+  - Every pop-up renders a `PopupHeader` with a title — it's pinned, reserves room for the close button, and keeps content from ever sitting against it. The heading is centred on a phone sheet and keeps its own alignment on a dialog or side sheet. The close button lives in the header (dialogs and side sheets only; phone sheets have none — swipe, the scrim or the handle dismisses). `PopupContent` reports to the dev console when a pop-up renders with no `PopupHeader`.
   - Use the theme tokens. Don't hard-code colours, except for the fixed character palettes in the bots.
   - Respect safe-area insets.
   - Keep touch targets at 44px or larger.

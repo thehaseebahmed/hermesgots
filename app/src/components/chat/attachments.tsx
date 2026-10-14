@@ -148,7 +148,7 @@ export function AttachmentViewer({
   return (
     <Popup open={index !== null} onOpenChange={(open) => !open && onIndex(null)}>
       <PopupContent className="md:max-w-2xl">
-        <PopupHeader className="pr-14">
+        <PopupHeader>
           <PopupTitle className="truncate">{shown?.name}</PopupTitle>
           <p className="text-sm text-muted-foreground tabular-nums">
             {details?.filter(Boolean).join(" · ")}

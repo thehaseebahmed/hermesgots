@@ -86,7 +86,7 @@ export function FeedbackSheet({
   return (
     <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent>
-        <PopupHeader className="items-center pb-2">
+        <PopupHeader className="pb-2">
           <PopupTitle>Send feedback</PopupTitle>
         </PopupHeader>
         <div className="flex flex-col gap-1 px-4 pb-4 sm:px-6">
