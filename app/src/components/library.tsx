@@ -1,10 +1,8 @@
 import { useCallback, useState } from "react"
-import { FileIcon, FileTextIcon, ImageIcon } from "lucide-react"
+import { FileIcon, FileTextIcon, FolderIcon, ImageIcon } from "lucide-react"
 
-import { formatBytes } from "@/lib/attachments"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { connectionKey } from "@/lib/connection"
-import { formatRelative } from "@/lib/format"
 import { LIST_MS } from "@/lib/freshness"
 import {
   getLibraryFile,
@@ -45,43 +43,33 @@ function openFile(config: HermesConfig, file: LibraryFile) {
     .catch(() => undefined)
 }
 
-function FileRow({
-  config,
-  file,
-  title,
-  now,
-}: {
-  config: HermesConfig
-  file: LibraryFile
-  title?: string
-  now: number
-}) {
+/** One file under a folder: its kind's icon and its name, nothing more. */
+function FileRow({ config, file }: { config: HermesConfig; file: LibraryFile }) {
   const kind = kindOf(file.name)
   const Icon = kind === "image" ? ImageIcon : kind === "text" ? FileTextIcon : FileIcon
-  const secondary = [title, formatBytes(file.size), formatRelative(file.at, now)]
-    .filter(Boolean)
-    .join(" · ")
   return (
     <button
       type="button"
       onClick={() => openFile(config, file)}
-      className="-mx-2 flex min-h-14 w-[calc(100%+1rem)] items-center gap-3 rounded-2xl px-2 py-3 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
+      className="-mx-2 flex min-h-11 w-[calc(100%+1rem)] items-center gap-3 rounded-xl px-2 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
     >
-      <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-muted">
-        <Icon className="size-5 text-muted-foreground" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate font-medium">{file.name}</span>
-        <span className="block truncate text-sm text-muted-foreground">{secondary}</span>
-      </span>
+      <Icon className="size-4 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 flex-1 truncate text-sm">{file.name}</span>
     </button>
   )
 }
 
+/** The sessions that filed a folder's files, by their worktree's name. */
+function sessionsOf(folder: LibraryFolder, titles: Map<string, string>) {
+  const names = folder.files.map((file) => titles.get(file.worktree) ?? file.worktree)
+  return [...new Set(names)].join(", ")
+}
+
 /**
- * The project's Library: the files its sessions filed, as folders of files. Read from the plugin's
- * library routes while the tab is on screen, at most every minute; a plugin without them (an
- * older one) is left alone for five minutes.
+ * The project's Library as a tree: each folder — named after the flow its files belong to — with
+ * the session that filed it, its files beneath. Read from the plugin's library routes while the
+ * tab is on screen, at most every minute; a plugin without them (an older one) is left alone for
+ * five minutes.
  */
 export function LibraryTab({
   config,
@@ -91,21 +79,18 @@ export function LibraryTab({
 }: {
   config: HermesConfig
   projectId: string
-  /** Each session's title by its worktree's name, for a file's second line. */
+  /** Each session's title by its worktree's name, for a folder's second line. */
   titles: Map<string, string>
   active: boolean
 }) {
-  const [tree, setTree] = useState<{ folders: LibraryFolder[]; at: number }>({
-    folders: [],
-    at: 0,
-  })
+  const [folders, setFolders] = useState<LibraryFolder[]>([])
   const key = connectionKey(config)
   const read = useCallback(() => {
     if (unsupported.cooling(key)) return
     void getProjectLibrary(config, projectId)
       .then((found) => {
         unsupported.clear(key)
-        setTree({ folders: found, at: Date.now() })
+        setFolders(found)
       })
       .catch((error: unknown) => {
         void lacksRoute(config, error, "library").then((missing) => {
@@ -114,27 +99,29 @@ export function LibraryTab({
       })
   }, [config, projectId, key])
   usePoll(read, LIST_MS, [], { active })
-  if (!tree.folders.length) {
+  if (!folders.length) {
     return (
       <p className="px-3 py-8 text-center text-sm text-muted-foreground sm:px-4">No files yet.</p>
     )
   }
   return (
     <div className="space-y-6 px-3 py-4 sm:px-4">
-      {tree.folders.map((folder) => (
+      {folders.map((folder) => (
         <section key={folder.name}>
-          <h2 className="px-2 pb-1 text-sm font-medium text-muted-foreground">
-            {folder.name} · {folder.files.length}
-          </h2>
-          <div>
+          <div className="flex items-center gap-3 px-2 py-2">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted">
+              <FolderIcon className="size-5 text-muted-foreground" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-medium">{folder.name}</span>
+              <span className="block truncate text-sm text-muted-foreground">
+                {sessionsOf(folder, titles)}
+              </span>
+            </span>
+          </div>
+          <div className="space-y-0.5 pl-[3.25rem]">
             {folder.files.map((file) => (
-              <FileRow
-                key={file.path}
-                config={config}
-                file={file}
-                title={titles.get(file.worktree)}
-                now={tree.at}
-              />
+              <FileRow key={file.path} config={config} file={file} />
             ))}
           </div>
         </section>
