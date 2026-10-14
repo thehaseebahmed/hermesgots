@@ -18,6 +18,7 @@ import {
   APPEARANCE_FIELDS,
   DEFAULT_PROFILE,
   DEFAULT_SETTINGS,
+  adoptAppearance,
   db,
   deleteConversation,
   deleteProfile,
@@ -404,7 +405,7 @@ async function localAppearance(): Promise<Doc<Appearance>> {
 async function syncAppearance(key: CryptoKey) {
   await syncDoc<Appearance>(key, "settings", localAppearance, async (pull) => {
     for (const [, entry] of pull) {
-      if (entry.value) await saveSettings({ ...entry.value, appearanceAt: entry.at })
+      if (entry.value) await adoptAppearance(entry.value, entry.at)
     }
   })
 }

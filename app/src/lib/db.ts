@@ -18,7 +18,7 @@ export interface Settings {
   steerByDefault?: boolean
   /** Reminds phone users to put the app away while a bot chat or code session runs. On by default. */
   breakReminders?: boolean
-  /** When this device last changed an appearance switch, the clock sync merges on. */
+  /** The clock on this device's copy of the appearance record: a change made here, or one pulled. */
   appearanceAt?: number
   /** Shows the Developer section in Settings (tapping the version five times). */
   developer?: boolean
@@ -581,6 +581,11 @@ export async function saveSettings(patch: Partial<Omit<Settings, "id">>) {
 /** Saves an appearance switch; the clock moves so sync carries the change to the account's devices. */
 export async function saveAppearance(patch: Partial<Appearance>) {
   await saveSettings({ ...patch, appearanceAt: Date.now() })
+}
+
+/** Takes the appearance record another device wrote, clock and all, so this one doesn't push it back. */
+export async function adoptAppearance(value: Appearance, at: number) {
+  await saveSettings({ ...value, appearanceAt: at })
 }
 
 export async function listProfiles() {
