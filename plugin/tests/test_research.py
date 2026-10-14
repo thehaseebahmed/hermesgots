@@ -53,6 +53,8 @@ class FakeLlm:
                     {"question": "Made up?", "choices": ["A", "B"], "answer": 0, "cite": "c99"},
                 ]
             }
+        elif purpose == "replan":
+            parsed = {"outline": ["Why attention", "How is it trained?", "Many heads"]}
         elif purpose == "suggest":
             parsed = {"questions": ["Why attention", "How is it trained?", "How is it trained?"]}
         else:
@@ -195,17 +197,22 @@ class MissionTest(unittest.TestCase):
         research._job(self.path, self.mission["id"])
         return research.mission(self.path, self.mission["id"])
 
-    def test_questions_it_missed_are_read_for_and_added_to_what_it_made(self) -> None:
+    def test_questions_it_missed_are_read_for_and_the_whole_mission_written_again(self) -> None:
         found = self.deliver()
         # What it still leaves open, without what the outline already covers or repeats.
         self.assertEqual(found["suggestions"], ["How is it trained?"])
+        self.assertEqual([(r["number"], r["reason"]) for r in found["revisions"]], [(1, "first")])
+        first = found["outputs"]["guide"]["sections"]
         quizzes = sum(1 for call in self.llm.calls if call["purpose"].endswith(".quiz"))
 
         found = research.followup(self.path, found["id"], {"questions": ["How is it trained?", " ", "why attention"]})
         self.assertEqual(found["stage"], "reading")
-        self.assertEqual(found["outline"], ["Why attention", "Many heads", "How is it trained?"])
+        # The write-up stays as it was while the researcher reads.
+        self.assertEqual(found["outline"], ["Why attention", "Many heads"])
+        self.assertEqual(found["outputs"]["guide"]["sections"], first)
         self.assertEqual((found["written"], found["suggestions"], found["claims"]), (2, [], 3))
         self.assertEqual([r["questions"] for r in found["followups"]], [["How is it trained?"]])
+        self.assertEqual(found["pending"], {"reason": "followup", "questions": ["How is it trained?"]})
         prompt = research.researcher_prompt(found)
         self.assertIn("missed these questions:\n- How is it trained?", prompt)
         self.assertIn("already holds 3 claims", prompt)
@@ -222,16 +229,61 @@ class MissionTest(unittest.TestCase):
         research._job(self.path, found["id"])
 
         found = research.mission(self.path, found["id"])
-        self.assertEqual((found["stage"], found["formats"]), ("delivered", ["guide", "quiz"]))
-        sections = found["outputs"]["guide"]["sections"]
-        self.assertEqual(len(sections), 3)
-        self.assertNotIn("question", sections[1])
-        self.assertEqual(sections[2]["question"], "How is it trained?")
-        section_call = [c for c in self.llm.calls if c["purpose"].endswith(".section")][-1]
-        self.assertIn("answers the reader's question: How is it trained?", section_call["instructions"])
+        self.assertEqual((found["stage"], found["formats"], found["pending"]), ("delivered", ["guide", "quiz"], None))
+        # Planned again with the question worked in, and every section written again.
+        self.assertEqual(found["outline"], ["Why attention", "How is it trained?", "Many heads"])
+        self.assertEqual((len(found["outputs"]["guide"]["sections"]), found["written"]), (3, 3))
+        sections = [c for c in self.llm.calls if c["purpose"].endswith(".section")]
+        self.assertIn("This section covers: How is it trained?", sections[-2]["instructions"])
+        self.assertEqual(len(sections), 5)
         # The quiz was written again from the grown ledger.
         self.assertEqual(sum(1 for c in self.llm.calls if c["purpose"].endswith(".quiz")), quizzes + 1)
         self.assertEqual(self.told()[-1], ("research_done", "How transformers work"))
+        revisions = found["revisions"]
+        self.assertEqual(
+            [(r["number"], r["reason"], r.get("questions"), r["claims"]) for r in revisions],
+            [(1, "first", None, 3), (2, "followup", ["How is it trained?"], 4)],
+        )
+        # Each revision keeps what it delivered.
+        self.assertEqual(revisions[0]["outputs"]["guide"]["sections"], first)
+        self.assertEqual(revisions[0]["outline"], ["Why attention", "Many heads"])
+        self.assertEqual(len(revisions[1]["outputs"]["guide"]["sections"]), 3)
+
+    def test_a_mission_is_rewritten_with_another_model(self) -> None:
+        found = self.deliver()
+        with mock.patch.object(research.theseus, "llm_gate", return_value={"model": False, "provider": False}):
+            with self.assertRaises(research.ResearchError) as refused:
+                research.rewrite(self.path, found["id"], {"provider": "openrouter", "model": "x/y"})
+        self.assertEqual(refused.exception.status, 403)
+
+        with mock.patch.object(research.theseus, "llm_gate", return_value={"model": True, "provider": True}):
+            found = research.rewrite(self.path, found["id"], {"provider": "openrouter", "model": "x/y"})
+        self.assertEqual((found["stage"], found["writer"]), ("drafting", {"provider": "openrouter", "model": "x/y"}))
+        before = len(self.llm.calls)
+        research._job(self.path, found["id"])
+        found = research.mission(self.path, found["id"])
+        self.assertEqual((found["stage"], found["formats"], found["pending"]), ("delivered", ["guide", "quiz"], None))
+        written = [c for c in self.llm.calls[before:] if c["purpose"].rsplit(".", 1)[-1] in ("section", "quiz")]
+        self.assertEqual(len(written), 3)
+        self.assertTrue(all((c["provider"], c["model"]) == ("openrouter", "x/y") for c in written))
+        self.assertEqual(
+            [(r["reason"], r.get("model")) for r in found["revisions"]],
+            [("first", None), ("rewrite", {"provider": "openrouter", "model": "x/y"})],
+        )
+
+        # Default goes back to the profile's own model, with no override.
+        found = research.rewrite(self.path, found["id"], {})
+        self.assertIsNone(found["writer"])
+        before = len(self.llm.calls)
+        research._job(self.path, found["id"])
+        self.assertTrue(all("model" not in c for c in self.llm.calls[before:]))
+        self.assertEqual(len(research.mission(self.path, found["id"])["revisions"]), 3)
+
+    def test_only_a_delivered_mission_is_rewritten(self) -> None:
+        self.reach_reading()
+        with self.assertRaises(research.ResearchError) as early:
+            research.rewrite(self.path, self.mission["id"], {})
+        self.assertEqual(early.exception.status, 409)
 
     def test_follow_up_questions_are_checked(self) -> None:
         self.reach_reading()
