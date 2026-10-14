@@ -716,13 +716,13 @@ export async function getResearch(config: HermesConfig, id: string, signal?: Abo
 
 /**
  * `brief` confirms the brief, `edit` goes back to it, `start` passes the Scope Gate, `formats`
- * makes another format, `followup` reads again for questions it missed, `retry` runs a failed step
- * again and `remove` deletes the mission.
+ * makes another format, `followup` reads again for questions it missed, `rewrite` writes it again
+ * with another model, `retry` runs a failed step again and `remove` deletes the mission.
  */
 export async function researchAction(
   config: HermesConfig,
   id: string,
-  action: "brief" | "edit" | "start" | "formats" | "followup" | "retry" | "remove",
+  action: "brief" | "edit" | "start" | "formats" | "followup" | "rewrite" | "retry" | "remove",
   body: Record<string, unknown> = {},
 ) {
   const response = await request(`${researchRoot(config, id)}/${action}`, {
@@ -731,6 +731,13 @@ export async function researchAction(
     body: JSON.stringify(body),
   })
   return (await response.json())?.mission as Record<string, unknown> | undefined
+}
+
+/** Whether the host lets a mission be written with another model (`info`'s `research.writers`). */
+export async function getResearchWriters(config: HermesConfig) {
+  const response = await request(`${pluginRoot(config.baseUrl)}/info`, { headers: headers(config) })
+  const writers = (await response.json())?.research?.writers
+  return { model: Boolean(writers?.model), provider: Boolean(writers?.provider) }
 }
 
 /** An image the agent named with a `MEDIA:<path>` tag, from the plugin's media route. */

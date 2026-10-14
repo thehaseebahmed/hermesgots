@@ -310,8 +310,10 @@ function jobRecord(job) {
 }
 
 const PLUGIN = process.env.MOCK_NO_PLUGIN !== "1"
-// Research missions (mock-research.mjs); MOCK_RESEARCH=0 serves a plugin without them.
+// Research missions (mock-research.mjs); MOCK_RESEARCH=0 serves a plugin without them, and
+// MOCK_RESEARCH_WRITERS=off a host that doesn't let a mission be rewritten with another model.
 const RESEARCH = process.env.MOCK_RESEARCH !== "0"
+const RESEARCH_WRITERS = process.env.MOCK_RESEARCH_WRITERS !== "off"
 
 /** How long a pull request's checks run after a turn says "pending", before they pass. */
 const PENDING_CHECK_S = 12
@@ -1295,13 +1297,13 @@ http
       return json(res, 200, {
         name: "memento",
         version: PLUGIN_VERSION,
-        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "theseus", ...(EVENTS ? ["events"] : []), "push", "host_model", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup"] : [])],
+        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "theseus", ...(EVENTS ? ["events"] : []), "push", "host_model", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : [])],
         clarify: true,
         hooks: true,
         theseus: THESEUS_START === "unavailable"
           ? { skill: "mock", api: 1, node: null, ready: false, reason: "Theseus needs Node 20 or newer on the Hermes host, and there is none.", reviewers: { llm: true, model: true, provider: true } }
           : { skill: "mock", api: 1, node: "22.0.0", ready: true, reason: null, reviewers: { llm: true, model: process.env.MOCK_THESEUS_MODELS !== "0", provider: process.env.MOCK_THESEUS_MODELS !== "0" } },
-        research: { ready: true, reason: null },
+        research: { ready: true, reason: null, writers: { model: RESEARCH_WRITERS, provider: RESEARCH_WRITERS } },
         dictation: DICTATION === "off"
           ? { ready: false, reason: "faster-whisper isn't installed on the host. Run `hermes tools` and pick Local Whisper.", model: "base" }
           : { ready: true, model: "base", language: "en" },

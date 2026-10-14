@@ -1,8 +1,10 @@
 // The Memento plugin's research missions (research.py), for the mock Hermes server. A mission reads
 // its question back after a moment, proposes an outline, then "researches": a claim from the
 // transformers ledger below every 0.7s, a guide section every 1.5s, a short review, delivered.
-// Another format takes 3s. A follow-up reads two more claims and adds a section per question.
-// MOCK_RESEARCH_FAIL=1 fails the reading once, to show Try again.
+// Another format takes 3s. A follow-up reads two more claims, works its questions into the outline
+// and writes the whole guide again; a rewrite with another model writes it again from the ledger.
+// Each delivery is kept as a revision. MOCK_RESEARCH_FAIL=1 fails the reading once, to show Try
+// again; MOCK_RESEARCH_WRITERS=off refuses another model.
 
 const SOURCES = [
   {
@@ -322,6 +324,7 @@ const OUTLINE = [
 
 const SOURCE_KINDS = ["papers", "docs", "articles", "videos", "forums"]
 const FAIL_ONCE = process.env.MOCK_RESEARCH_FAIL === "1"
+const WRITERS = process.env.MOCK_RESEARCH_WRITERS !== "off"
 const HOUR = 3_600_000
 const missions = new Map()
 let failed = false
@@ -344,6 +347,9 @@ function mission(fields) {
     written: 0,
     followups: [],
     suggestions: [],
+    revisions: [],
+    pending: null,
+    writer: null,
     created_at: now,
     updated_at: now,
     ledger: { sources: [], claims: [] },
@@ -370,6 +376,44 @@ function delivered(id, fields, formats) {
       outputs,
     }),
   )
+  const m = missions.get(id)
+  revise(m, "first", {}, m.created_at + 0.4 * HOUR)
+}
+
+/** Keeps what the mission delivers now as its next revision. */
+function revise(m, reason, detail = {}, at = Date.now()) {
+  m.revisions.push({
+    number: m.revisions.length + 1,
+    reason,
+    ...detail,
+    claims: m.ledger.claims.length,
+    at,
+    outline: [...m.outline],
+    outputs: structuredClone(m.outputs),
+  })
+}
+
+/** A guide section for an outline point: the canned one it matches, or the follow-up's answer. */
+function section(point, index) {
+  const known = OUTLINE.indexOf(point)
+  if (known >= 0) return GUIDE[known]
+  if (/learn|train|mask/i.test(point))
+    return {
+      title: point,
+      paragraphs: [
+        [
+          {
+            text: "Training adjusts the weights with the Adam optimizer, with a learning rate that warms up and then decays.",
+            cites: ["c12"],
+          },
+          {
+            text: " Models like BERT first learn by filling in masked words from the words around them.",
+            cites: ["c13"],
+          },
+        ],
+      ],
+    }
+  return { ...GUIDE[index % GUIDE.length], title: point }
 }
 
 delivered(
@@ -419,12 +463,12 @@ missions.set(
 )
 
 function summary(m) {
-  const { ledger, outputs: _outputs, ...rest } = m
+  const { ledger, outputs: _outputs, revisions: _revisions, ...rest } = m
   return { ...rest, found: ledger.sources.length, claims: ledger.claims.length }
 }
 
 function full(m) {
-  return { ...summary(m), ledger: m.ledger, outputs: m.outputs }
+  return { ...summary(m), ledger: m.ledger, outputs: m.outputs, revisions: m.revisions }
 }
 
 function change(m, fields, note) {
@@ -471,7 +515,7 @@ function proposeOutline(m, note) {
 }
 
 function research(m, note) {
-  const round = m.followups.at(-1)
+  const round = m.pending?.reason === "followup"
   const wanted = round ? [...CLAIMS, ...MORE_CLAIMS] : CLAIMS
   const step = () => {
     if (!missions.has(m.id) || m.stage !== "reading") return
@@ -489,10 +533,24 @@ function research(m, note) {
       return later(700, step)
     }
     change(m, round ? { stage: "drafting" } : { stage: "drafting", written: 0 }, note)
-    later(1500, draft)
+    write(m, note)
   }
+  later(700, step)
+}
+
+/** Drafting, a section at a time; a rewrite starts the guide again, a follow-up's planned anew. */
+function write(m, note) {
   const draft = () => {
     if (!missions.has(m.id)) return
+    if (m.pending && !m.pending.planned) {
+      let outline = m.outline
+      if (m.pending.reason === "followup") {
+        // Each question goes where it belongs: here, after the second point.
+        outline = [...m.outline.slice(0, 2), ...m.pending.questions, ...m.outline.slice(2)].slice(0, 12)
+      }
+      delete m.outputs[m.format]
+      change(m, { outline, written: 0, pending: { ...m.pending, planned: true } }, note)
+    }
     if (m.format !== "guide") {
       m.outputs[m.format] = m.format === "quiz" ? { questions: QUIZ } : { terms: GLOSSARY }
       change(m, { written: 1, stage: "reviewing" }, note)
@@ -500,27 +558,7 @@ function research(m, note) {
     }
     const sections = (m.outputs.guide ??= { sections: [] }).sections
     const index = sections.length
-    const asked = round && index >= m.followups[0].from
-    sections.push(
-      asked
-        ? {
-            title: "How it learns",
-            question: m.outline[index],
-            paragraphs: [
-              [
-                {
-                  text: "Training adjusts the weights with the Adam optimizer, with a learning rate that warms up and then decays.",
-                  cites: ["c12"],
-                },
-                {
-                  text: " Models like BERT first learn by filling in masked words from the words around them.",
-                  cites: ["c13"],
-                },
-              ],
-            ],
-          }
-        : { ...GUIDE[index % GUIDE.length], title: m.outline[index] ?? GUIDE[index % GUIDE.length].title },
-    )
+    sections.push(section(m.outline[index], index))
     change(m, { written: sections.length }, note)
     if (sections.length < m.outline.length) return later(1500, draft)
     change(m, { stage: "reviewing" }, note)
@@ -529,9 +567,18 @@ function research(m, note) {
   const finish = () => {
     if (!missions.has(m.id)) return
     const formats = [m.format, ...m.formats.filter((f) => f !== m.format)]
-    change(m, { stage: "delivered", formats, suggestions: round ? [] : SUGGESTIONS }, note)
+    const { pending } = m
+    m.formats = formats
+    if (pending)
+      revise(
+        m,
+        pending.reason,
+        pending.reason === "followup" ? { questions: pending.questions } : { model: pending.model },
+      )
+    else if (!m.revisions.length) revise(m, "first")
+    change(m, { stage: "delivered", pending: null, suggestions: pending ? [] : SUGGESTIONS }, note)
   }
-  later(700, step)
+  later(1500, draft)
 }
 
 function makeFormat(m, note) {
@@ -610,15 +657,27 @@ export async function handleResearch(req, res, path, { json, readBody, noteEvent
       if (questions.length > 3) return fail(400, "Ask 3 questions at most at a time."), true
       if (m.outline.length + questions.length > 12) return fail(400, "This mission can't take more questions. Start a new one."), true
       const followups = [...m.followups, { questions, from: m.outline.length, claims: m.ledger.claims.length, at: Date.now() }]
-      const written = m.format === "guide" ? (m.outputs.guide?.sections.length ?? 0) : 0
-      change(m, { outline: [...m.outline, ...questions], followups, suggestions: [], stage: "reading", written, error: null }, note)
+      if (!m.revisions.length) revise(m, "first")
+      change(m, { followups, suggestions: [], pending: { reason: "followup", questions }, stage: "reading", error: null }, note)
       research(m, note)
+      break
+    }
+    case "rewrite": {
+      const failedRewrite = m.error && m.pending?.reason === "rewrite"
+      if ((moved(["delivered"]) && !failedRewrite) || m.making) return fail(409, "The mission isn't delivered yet."), true
+      const model = typeof body.model === "string" && body.model ? { provider: body.provider ?? "", model: body.model } : null
+      if (model && !WRITERS)
+        return fail(403, "This host doesn't let Memento pick the model. Allow it with `hermes plugins enable memento`."), true
+      if (!m.revisions.length) revise(m, "first")
+      change(m, { writer: model, pending: { reason: "rewrite", model }, suggestions: [], stage: "drafting", error: null }, note)
+      write(m, note)
       break
     }
     case "retry":
       if (!m.error) return fail(409, "Nothing failed."), true
       change(m, { error: null }, note)
       if (m.stage === "reading") research(m, note)
+      else if (m.stage === "drafting") write(m, note)
       break
     case "remove":
       missions.delete(m.id)

@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { createContext, useContext, useMemo, useState, type ReactNode } from "react"
 import {
   CheckIcon,
   CircleIcon,
@@ -10,6 +10,7 @@ import {
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { Spinner } from "@/components/ui/spinner"
 import {
   RESEARCH_STAGES,
@@ -25,19 +26,65 @@ import {
   type Source,
   type Span,
 } from "@/lib/research"
+import { useHover } from "@/lib/media"
 import { cn } from "@/lib/utils"
 
-/** A claim's number, as a chip after the sentence it backs; opens it in the evidence. */
+interface LedgerIndex {
+  claims: Map<string, Claim>
+  sources: Map<string, Source>
+}
+
+const LedgerContext = createContext<LedgerIndex>({ claims: new Map(), sources: new Map() })
+
+/** The ledger the citation chips inside show their claims from. */
+export function LedgerProvider({ ledger, children }: { ledger?: Ledger; children: ReactNode }) {
+  const index = useMemo(
+    () => ({
+      claims: new Map(ledger?.claims.map((claim) => [claim.id, claim])),
+      sources: new Map(ledger?.sources.map((source) => [source.id, source])),
+    }),
+    [ledger],
+  )
+  return <LedgerContext value={index}>{children}</LedgerContext>
+}
+
+/**
+ * A claim's number, as a chip after the sentence it backs. Tapping it opens the claim; with a mouse,
+ * hovering shows it in a card like the evidence's.
+ */
 export function CiteChip({ id, onCite }: { id: string; onCite: (id: string) => void }) {
+  const hover = useHover()
+  const { claims, sources } = useContext(LedgerContext)
+  const claim = claims.get(id)
+  const chip = {
+    type: "button" as const,
+    onClick: () => onCite(id),
+    className:
+      "relative mx-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-muted px-1.5 align-[0.15em] text-[11px] leading-none font-semibold text-muted-foreground tabular-nums transition-colors before:absolute before:-inset-3 hover:bg-primary hover:text-primary-foreground data-popup-open:bg-primary data-popup-open:text-primary-foreground",
+    "aria-label": `Source ${claimNumber(id)}`,
+  }
+  if (!hover || !claim) return <button {...chip}>{claimNumber(id)}</button>
   return (
-    <button
-      type="button"
-      onClick={() => onCite(id)}
-      className="relative mx-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-muted px-1.5 align-[0.15em] text-[11px] leading-none font-semibold text-muted-foreground tabular-nums transition-colors before:absolute before:-inset-3 hover:bg-primary hover:text-primary-foreground"
-      aria-label={`Source ${claimNumber(id)}`}
-    >
-      {claimNumber(id)}
-    </button>
+    <HoverCard>
+      <HoverCardTrigger delay={200} closeDelay={150} render={<button {...chip} />}>
+        {claimNumber(id)}
+      </HoverCardTrigger>
+      <HoverCardContent side="top" className="w-80 rounded-3xl p-4">
+        <ClaimBody claim={claim} source={sources.get(claim.source)} />
+      </HoverCardContent>
+    </HoverCard>
+  )
+}
+
+/** One claim as the evidence shows it, for the sheet a tapped citation opens. */
+export function SourceCard({ id }: { id: string }) {
+  const { claims, sources } = useContext(LedgerContext)
+  const claim = claims.get(id)
+  if (!claim) return null
+  return (
+    <div className="rounded-3xl border bg-card p-4">
+      <ClaimBody claim={claim} source={sources.get(claim.source)} />
+    </div>
   )
 }
 
@@ -88,9 +135,12 @@ function Bars({ lines = 3 }: { lines?: number }) {
 export function GuideCanvas({
   mission,
   onCite,
+  focus,
 }: {
   mission: Mission
   onCite: (id: string) => void
+  /** A section the overview just jumped to, lit up for a moment; `at` makes a jump again light it again. */
+  focus?: { index: number; at: number }
 }) {
   const sections = mission.outputs?.guide ?? []
   const writing = mission.stage === "drafting" || mission.making === "guide"
@@ -98,7 +148,7 @@ export function GuideCanvas({
   const points = Math.max(mission.outline.length, sections.length)
 
   return (
-    <article className="flex flex-col gap-7">
+    <article className="flex flex-col gap-4">
       {mission.stage === "delivered" && flagged > 0 && (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <FlagIcon className="size-4 text-warning" />
@@ -110,7 +160,18 @@ export function GuideCanvas({
         const section = sections[index]
         const now = !section && writing && index === sections.length
         return (
-          <section key={index} className="flex flex-col gap-3">
+          <section
+            key={index}
+            id={`section-${index}`}
+            className="relative isolate -mx-4 flex scroll-mt-4 flex-col gap-3 rounded-3xl px-4 py-3"
+          >
+            {focus?.index === index && (
+              <span
+                key={focus.at}
+                aria-hidden
+                className="section-flash pointer-events-none absolute inset-0 -z-10 rounded-3xl"
+              />
+            )}
             {section?.question && (
               <span className="-mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                 <MessageCircleQuestionIcon className="size-3.5 shrink-0" />
@@ -251,37 +312,44 @@ function ClaimCard({ claim, source, active }: { claim: Claim; source?: Source; a
         active && "ring-2 ring-primary",
       )}
     >
-      <div className="flex items-start gap-3">
-        <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold tabular-nums">
-          {claimNumber(claim.id)}
-        </span>
-        <div className="flex min-w-0 flex-1 flex-col gap-2">
-          <p className="text-sm font-medium">{claim.text}</p>
-          {claim.confidence === "uncertain" && (
-            <Badge className="bg-warning/15 text-warning">Uncertain</Badge>
-          )}
-          <blockquote className="border-l-2 pl-3 text-sm leading-6 text-muted-foreground">
-            {claim.snippet}
-          </blockquote>
-          {source && (
-            <a
-              href={source.url}
-              target="_blank"
-              rel="noreferrer"
-              className="-mx-2 flex min-h-11 items-center gap-2 rounded-2xl px-2 text-sm hover:bg-muted"
-            >
-              <span className="min-w-0 flex-1">
-                <span className="block truncate font-medium">{source.title}</span>
-                <span className="block truncate text-xs text-muted-foreground">
-                  {hostOf(source.url)}
-                </span>
-              </span>
-              <ExternalLinkIcon className="size-4 shrink-0 text-muted-foreground" />
-            </a>
-          )}
-        </div>
-      </div>
+      <ClaimBody claim={claim} source={source} />
     </li>
+  )
+}
+
+/** A claim's number, what it says, the passage behind it and its source. */
+function ClaimBody({ claim, source }: { claim: Claim; source?: Source }) {
+  return (
+    <div className="flex items-start gap-3">
+      <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold tabular-nums">
+        {claimNumber(claim.id)}
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <p className="text-sm font-medium">{claim.text}</p>
+        {claim.confidence === "uncertain" && (
+          <Badge className="bg-warning/15 text-warning">Uncertain</Badge>
+        )}
+        <blockquote className="border-l-2 pl-3 text-sm leading-6 text-muted-foreground">
+          {claim.snippet}
+        </blockquote>
+        {source && (
+          <a
+            href={source.url}
+            target="_blank"
+            rel="noreferrer"
+            className="-mx-2 flex min-h-11 items-center gap-2 rounded-2xl px-2 text-sm hover:bg-muted"
+          >
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-medium">{source.title}</span>
+              <span className="block truncate text-xs text-muted-foreground">
+                {hostOf(source.url)}
+              </span>
+            </span>
+            <ExternalLinkIcon className="size-4 shrink-0 text-muted-foreground" />
+          </a>
+        )}
+      </div>
+    </div>
   )
 }
 
