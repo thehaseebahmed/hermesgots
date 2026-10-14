@@ -326,18 +326,28 @@ def _cache_ttl(value: Optional[Dict[str, Any]]) -> float:
 
 
 def pull_request(
-    hermes_home: Path, repo_root: str, branch: str, fresh: bool = False, checks: bool = True
+    hermes_home: Path,
+    repo_root: str,
+    branch: str,
+    fresh: bool = False,
+    checks: bool = True,
+    strict: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """The newest pull request from ``branch`` of the checkout's GitHub repo, with its checks, or None.
 
     Cached for a short while per branch: the app asks after every turn and on every catch-up. A
     cached answer serves a call without ``checks`` too; one without them isn't cached.
+
+    ``strict`` lets the GitHub failure out instead of answering None, so a caller that must tell "no
+    pull request" from "couldn't ask GitHub" — the app's read of a session's pull requests — never
+    reads one as the other. Either way a failed lookup isn't cached: a failure isn't an answer.
     """
     key = (repo_root, branch)
     cached = _pr_cache.get(key)
     if not fresh and cached and time.time() - cached[0] < _cache_ttl(cached[1]):
         return cached[1]
     value = None
+    failed = False
     repo = origin_repo(repo_root)
     if repo:
         head = urllib.parse.quote(f"{repo.split('/')[0]}:{branch}", safe=":")
@@ -345,9 +355,11 @@ def pull_request(
         try:
             rows = _get(f"/repos/{repo}/pulls?head={head}&state=all&per_page=1", auth)
         except GitHubError:
-            rows = []
+            if strict:
+                raise
+            failed, rows = True, []
         value = _pr(repo, rows[0], auth, checks) if isinstance(rows, list) and rows else None
-    if checks:
+    if checks and not failed:
         _pr_cache[key] = (time.time(), value)
     return value
 
