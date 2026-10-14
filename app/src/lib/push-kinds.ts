@@ -2,11 +2,11 @@
  * What a push can be about, and which of it a device wants. A push has a kind (`plugin/push.py`
  * and `netlify/lib/fcm.ts` keep the same lists), and the plugin puts it in a category: the kind
  * within the feature it belongs to (a session's kinds are Code's when it is a project session, else
- * Chats'). The user switches categories, alone or a whole feature at once, and each is an Android
+ * Chats'; a research mission's are Research's). The user switches categories, alone or a whole feature at once, and each is an Android
  * notification channel of its own, so Android's settings can turn it off too.
  */
 
-export type PushFeature = "chats" | "code" | "routines"
+export type PushFeature = "chats" | "code" | "routines" | "research"
 
 export type PushCategory =
   | "chat_input"
@@ -20,6 +20,9 @@ export type PushCategory =
   | "code_pr_merged"
   | "code_setup_failed"
   | "routine_failed"
+  | "research_input"
+  | "research_done"
+  | "research_failed"
 
 export interface PushCategoryInfo {
   id: PushCategory
@@ -35,6 +38,7 @@ export const PUSH_FEATURES: { id: PushFeature; title: string }[] = [
   { id: "chats", title: "Chats" },
   { id: "code", title: "Code" },
   { id: "routines", title: "Routines" },
+  { id: "research", title: "Research" },
 ]
 
 export const PUSH_CATEGORIES: PushCategoryInfo[] = [
@@ -79,6 +83,15 @@ export const PUSH_CATEGORIES: PushCategoryInfo[] = [
     importance: 3,
   },
   { id: "routine_failed", feature: "routines", title: "Routine failed", on: true, importance: 3 },
+  {
+    id: "research_input",
+    feature: "research",
+    title: "Brief and scope to review",
+    on: true,
+    importance: 4,
+  },
+  { id: "research_done", feature: "research", title: "Mission ready", on: true, importance: 3 },
+  { id: "research_failed", feature: "research", title: "Mission failed", on: true, importance: 3 },
 ]
 
 export type PushPrefs = Partial<Record<string, boolean>>
@@ -106,5 +119,7 @@ export function channelName(category: PushCategoryInfo) {
 export function pushPath(kind: unknown, id: unknown) {
   if (kind === "routine_failed") return "/routines"
   if (kind === "clone_failed") return "/code"
+  if (typeof kind === "string" && kind.startsWith("research_"))
+    return typeof id === "string" && id ? `/research/${encodeURIComponent(id)}` : "/research"
   return typeof id === "string" && id ? `/s/${encodeURIComponent(id)}` : null
 }

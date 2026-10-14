@@ -51,11 +51,31 @@ class Categories(unittest.TestCase):
         self.assertEqual(push.category_of("pr_checks"), "code_pr_checks")
         self.assertEqual(push.category_of("clone_failed"), "code_setup_failed")
         self.assertEqual(push.category_of("routine_failed"), "routine_failed")
+        self.assertEqual(push.category_of("research_brief"), "research_input")
+        self.assertEqual(push.category_of("research_scope"), "research_input")
+        self.assertEqual(push.category_of("research_done", project=True), "research_done")
+        self.assertEqual(push.category_of("research_failed"), "research_failed")
 
     def test_every_kind_lands_in_a_category_that_exists(self):
         for kind in push.KINDS:
             for project in (False, True):
                 self.assertIn(push.category_of(kind, project), push.CATEGORIES)
+
+    def test_the_registry_and_the_app_keep_the_same_lists(self):
+        import re
+
+        app = Path(__file__).resolve().parents[2] / "app"
+        fcm = (app / "netlify" / "lib" / "fcm.ts").read_text()
+        kinds = re.search(r"PUSH_KINDS = \[(.*?)\]", fcm, re.S).group(1)
+        categories = re.search(r"PUSH_CATEGORIES = \[(.*?)\]", fcm, re.S).group(1)
+        self.assertEqual(tuple(re.findall(r'"(\w+)"', kinds)), push.KINDS)
+        self.assertEqual(tuple(re.findall(r'"(\w+)"', categories)), push.CATEGORIES)
+        kinds_ts = (app / "src" / "lib" / "push-kinds.ts").read_text()
+        listed = re.search(r"export type PushCategory =(.*?)\n\n", kinds_ts, re.S).group(1)
+        self.assertEqual(tuple(re.findall(r'"(\w+)"', listed)), push.CATEGORIES)
+        worker = (app / "public" / "push-sw.js").read_text()
+        words = re.search(r"const WORDS = \{(.*?)\}", worker, re.S).group(1)
+        self.assertEqual(tuple(re.findall(r"^\s*(\w+):", words, re.M)), push.KINDS)
 
     def test_a_database_from_before_categories_gains_the_column(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -14,6 +14,10 @@ const WORDS = {
   pr_merged: "Your pull request was merged",
   clone_failed: "This project couldn't be set up",
   routine_failed: "The last run failed",
+  research_brief: "The brief is ready for your review",
+  research_scope: "The scope is ready for your approval",
+  research_done: "Your research is ready",
+  research_failed: "The mission stopped with an error",
 }
 
 const THESEUS_WORDS = {
@@ -24,7 +28,14 @@ const THESEUS_WORDS = {
 }
 
 // When the plugin is older or couldn't find a name.
-const UNTITLED = { routine_failed: "A routine", clone_failed: "A project" }
+const UNTITLED = {
+  routine_failed: "A routine",
+  clone_failed: "A project",
+  research_brief: "A research mission",
+  research_scope: "A research mission",
+  research_done: "A research mission",
+  research_failed: "A research mission",
+}
 
 // What the push is about when it isn't a session.
 const SCREENS = { routine_failed: "/routines", clone_failed: "/code" }
@@ -41,7 +52,11 @@ self.addEventListener("push", (event) => {
 
 async function show(data) {
   const sessionId = typeof data.session_id === "string" ? data.session_id : ""
-  const screen = SCREENS[data.kind]
+  const screen =
+    SCREENS[data.kind] ||
+    (String(data.kind).startsWith("research_")
+      ? `/research${sessionId ? `/${encodeURIComponent(sessionId)}` : ""}`
+      : undefined)
   // A newer push about the same thing replaces one still showing; what waits on the user is one
   // thing, whichever way.
   const group = ["approval", "question", "plan"].includes(data.kind) ? "session" : data.kind

@@ -71,9 +71,13 @@ KINDS = (
     "pr_merged",
     "clone_failed",
     "routine_failed",
+    "research_brief",
+    "research_scope",
+    "research_done",
+    "research_failed",
 )
-# What a device switches: a kind within a feature (chats, code, routines). A session's kinds belong
-# to Code when it is a project session, else to Chats.
+# What a device switches: a kind within a feature (chats, code, routines, research). A session's
+# kinds belong to Code when it is a project session, else to Chats.
 CATEGORIES = (
     "chat_input",
     "chat_run_failed",
@@ -86,6 +90,9 @@ CATEGORIES = (
     "code_pr_merged",
     "code_setup_failed",
     "routine_failed",
+    "research_input",
+    "research_done",
+    "research_failed",
 )
 # What a device that never said which it wants gets: what pushed before there were more.
 LEGACY_CATEGORIES = ("chat_input", "code_input")
@@ -99,6 +106,10 @@ def category_of(kind: str, project: bool = False) -> str:
         return "routine_failed"
     if kind == "clone_failed":
         return "code_setup_failed"
+    if kind in ("research_brief", "research_scope"):
+        return "research_input"
+    if kind.startswith("research_"):
+        return kind
     if kind in ("theseus", "pr_checks", "pr_merged"):
         return f"code_{kind}"
     feature = "code" if project or kind == "plan" else "chat"
@@ -429,8 +440,8 @@ def notify(
     stage: Optional[str] = None,
 ) -> None:
     """Something a device should hear about. ``session_id`` is the session it is about, or for the
-    kinds that aren't about one the routine's job id (``routine_failed``) or the project's id
-    (``clone_failed``); it only picks what a tap opens. ``title`` names what it is about when that
+    kinds that aren't about one the routine's job id (``routine_failed``), the project's id
+    (``clone_failed``) or the research mission's id (``research_*``); it only picks what a tap opens. ``title`` names what it is about when that
     isn't a session (whose chat title is looked up), and ``stage`` is a Theseus run's. Never raises:
     it runs inside Hermes's hooks."""
     try:
