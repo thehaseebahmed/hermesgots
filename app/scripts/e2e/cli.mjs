@@ -41,6 +41,11 @@ const FLOWS = {
     about: "A reply still streaming when the page reloads picks its run up again and finishes",
     alsoPolling: true,
   },
+  "foreign-run": {
+    script: "e2e/foreign-run.mjs",
+    about: "A run started elsewhere shows as running in its project and on the open session screen",
+    alsoPolling: true,
+  },
   "live-poll": {
     script: "e2e/live-poll.mjs",
     mock: "polling",

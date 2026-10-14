@@ -20,6 +20,7 @@ import {
   CATCH_UP_MS,
   HOST_QUEUE_MS,
   PR_PENDING_MS,
+  RUNS_MS,
   SAFETY_MS,
   SEND_CAUGHT_UP_MS,
 } from "@/lib/freshness"
@@ -105,6 +106,7 @@ import { supportsSteer, type HermesProject } from "@/lib/hermes"
 import { readProjects, useProjects } from "@/lib/projects"
 import { caughtUpWithin, loadEarlierHistory, reconcileHistory } from "@/lib/history"
 import { useLive, watchChat } from "@/lib/live"
+import { useSessionRunning } from "@/lib/waiting"
 import { usePoll } from "@/lib/poll"
 import { useXLarge } from "@/lib/media"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
@@ -412,6 +414,17 @@ export function ChatPage() {
   // A server that streams its changes says when this chat's session moves; the timer is a net.
   const streamOpen = useLive(profile)
   useEffect(() => (id ? watchChat(id) : undefined), [id])
+  // The host's shared answer says at once when a run started elsewhere, which the timer would find
+  // only at its next round.
+  const hostRuns = useSessionRunning(
+    tracked && baseUrl && apiKey ? { baseUrl, apiKey } : undefined,
+    conversation?.hermesSessionId,
+  )
+  // Until the host has written the running turn to its transcript there is nothing to show yet.
+  usePoll(() => id && void reattachRun(id).catch(quietly("Following a run")), RUNS_MS, [id], {
+    active: Boolean(id && hasMessages && hostRuns && !busy),
+    immediate: false,
+  })
   usePoll(
     () => {
       if (!id) return
@@ -419,7 +432,7 @@ export function ChatPage() {
       reconcileHistory(id).catch(quietly("Catching up a chat"))
     },
     streamOpen ? SAFETY_MS : CATCH_UP_MS,
-    [id, updatedAt],
+    [id, updatedAt, hostRuns, hostRuns && messages?.length],
     { active: Boolean(id && hasMessages) },
   )
 
