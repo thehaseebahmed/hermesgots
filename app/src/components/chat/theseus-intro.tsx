@@ -109,7 +109,7 @@ export function TheseusIntro({
       }}
     >
       <PopupContent>
-        <PopupHeader className="items-center gap-3 pt-8 text-center">
+        <PopupHeader className="gap-3 pt-8">
           <span className="flex size-16 items-center justify-center rounded-full bg-primary/15 text-primary">
             <SailboatIcon className="size-8" />
           </span>

@@ -142,7 +142,7 @@ function ToolDetail({ tool, onBack }: { tool: ToolEvent; onBack: () => void }) {
     tool.status === "running" ? "Running" : tool.status === "failed" ? "Failed" : "Completed"
   return (
     <>
-      <PopupHeader className="items-center pb-3 pl-6 text-center md:pl-16">
+      <PopupHeader className="pb-3 pl-6 md:pl-16">
         {wide && (
           <Button
             variant="ghost"
@@ -175,7 +175,7 @@ function ToolList({ tools, onSelect }: { tools: ToolEvent[]; onSelect: (index: n
   const { row, text, ruler, shown } = useFittingPhrases<HTMLHeadingElement>(parts)
   return (
     <>
-      <PopupHeader className="px-14 pb-2 text-center">
+      <PopupHeader className="pb-2">
         <PopupTitle ref={row} className="relative truncate" title={summary(parts)}>
           <span ref={text}>{summary(parts, shown)}</span>
           <span ref={ruler} className="invisible absolute w-max whitespace-nowrap" aria-hidden />

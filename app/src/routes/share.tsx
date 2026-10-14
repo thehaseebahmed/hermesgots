@@ -231,7 +231,7 @@ export function SharePage() {
   return (
     <Popup open onOpenChange={(open) => !open && close()}>
       <PopupContent className="max-h-[90dvh]">
-        <PopupHeader className="items-center pb-2">
+        <PopupHeader className="pb-2">
           <PopupTitle>Share</PopupTitle>
         </PopupHeader>
         <div className="flex flex-col gap-6 px-6 pt-2">

@@ -54,7 +54,10 @@ export function PopupHeader({ className, children, ...props }: ComponentProps<ty
         // The close button sits at the header's right, so a dialog or side sheet keeps that room
         // clear; a phone sheet has no close button and keeps its own right padding.
         !sheet && "pr-14",
-        sheet && "pt-0",
+        // A phone sheet's heading is centred, Material's bottom-sheet title; a dialog or side sheet
+        // keeps its own alignment, left, set by each header's own classes (a header with a back
+        // button of its own passes `text-left` to keep its title beside it).
+        sheet && "items-center pt-0 text-center",
         className,
       )}
       {...props}

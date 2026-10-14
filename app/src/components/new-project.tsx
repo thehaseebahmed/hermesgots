@@ -49,7 +49,7 @@ export function NewProjectPopup({
   return (
     <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent className="max-h-[90dvh]">
-        <PopupHeader className="items-center pb-2">
+        <PopupHeader className="pb-2">
           <PopupTitle>New project</PopupTitle>
         </PopupHeader>
         {profile && (

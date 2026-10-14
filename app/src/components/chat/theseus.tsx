@@ -486,7 +486,7 @@ export function TheseusSheet({
           <PlanView run={run} onBack={() => onView({ kind: "run" })} />
         ) : view?.kind === "setting" ? (
           <>
-            <PopupHeader className="flex-row items-center gap-1 pb-2">
+            <PopupHeader className="flex-row items-center gap-1 pb-2 text-left">
               <Back onClick={() => onView({ kind: "run" })} label="Back to the run" />
               <PopupTitle className="min-w-0 flex-1 truncate">
                 {SETTING_QUESTIONS[view.key].label}
@@ -701,7 +701,7 @@ function CheckpointView({
   const rounds = [...(cp.reviews ?? [])].sort((a, b) => b.round - a.round)
   return (
     <>
-      <PopupHeader className="flex-row items-center gap-1 pb-2">
+      <PopupHeader className="flex-row items-center gap-1 pb-2 text-left">
         <Back onClick={onBack} label="Back to the run" />
         <PopupTitle className="min-w-0 flex-1 truncate">
           {cp.id} · {cp.title}
@@ -895,7 +895,7 @@ function ModelsView({
   const blocked = info && !info.reviewers.model
   return (
     <>
-      <PopupHeader className="flex-row items-center gap-1 pb-2">
+      <PopupHeader className="flex-row items-center gap-1 pb-2 text-left">
         <Back onClick={onBack} label="Back to the run" />
         <PopupTitle className="min-w-0 flex-1 truncate">Reviewer models</PopupTitle>
       </PopupHeader>
@@ -962,7 +962,7 @@ function PlanView({ run, onBack }: { run: TheseusRun; onBack: () => void }) {
   const { plan } = run
   return (
     <>
-      <PopupHeader className="flex-row items-center gap-1 pb-2">
+      <PopupHeader className="flex-row items-center gap-1 pb-2 text-left">
         <Back onClick={onBack} label="Back to the run" />
         <PopupTitle className="min-w-0 flex-1 truncate">Plan</PopupTitle>
       </PopupHeader>
