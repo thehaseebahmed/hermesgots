@@ -44,6 +44,7 @@ import { AccountSettings } from "@/components/account-settings"
 import { BotEditor } from "@/components/bot-settings"
 import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
+import { OnlineDot } from "@/components/bot-card"
 import { LinkSheet } from "@/components/link-bots"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { ExperimentalBadge } from "@/components/experimental-badge"
@@ -111,6 +112,12 @@ function handAdded(profile: Profile) {
   return !profile.hostId && (Boolean(profile.apiKey) || profile.updatedAt !== profile.createdAt)
 }
 
+/** The title of an open section screen; a bot's screen is named after the bot. */
+function sectionTitle(section: string, botName?: string) {
+  const page = SECTIONS[section]
+  return page ? page.title : (botName ?? "Bot")
+}
+
 /** Which section the menu shows as open, and whether picking one swaps it in place. */
 const MenuContext = createContext<{ active?: string; replace: boolean }>({ replace: false })
 
@@ -124,10 +131,11 @@ export function SettingsPage() {
   const large = useLarge()
   const { up, root } = useNav()
   const { account } = useSyncState()
+  const profiles = useLiveQuery(listProfiles, [])
   // The bots live on the menu itself now, so /settings/bots without a bot is the menu.
   const screen = section === "bots" && !botId ? undefined : section
   const separate = !large && Boolean(screen)
-  const botName = useBotName(botId)
+  const botName = botId ? profiles?.find((p) => p.id === botId)?.name : undefined
   // On its own screen, a section sits under the Settings menu.
   useEffect(() => {
     if (!separate) return
@@ -139,7 +147,12 @@ export function SettingsPage() {
 
   if (section && section !== "bots" && !SECTIONS[section])
     return <Navigate to="/settings" replace />
-  if (!large) return screen ? <SectionScreen section={screen} botName={botName} /> : <MenuScreen />
+  if (!large)
+    return screen ? (
+      <SectionScreen section={screen} botId={botId} botName={botName} profiles={profiles} />
+    ) : (
+      <MenuScreen profiles={profiles} />
+    )
 
   const open =
     screen ??
@@ -147,15 +160,15 @@ export function SettingsPage() {
   return (
     <div className="flex min-h-0 flex-1">
       <MenuContext.Provider value={{ active: open, replace: true }}>
-        <MenuScreen className="w-90 flex-none border-r min-[1200px]:w-103" />
+        <MenuScreen className="w-90 flex-none border-r min-[1200px]:w-103" profiles={profiles} />
       </MenuContext.Provider>
       <Screen
         key={open}
-        title={open === "bots" ? (botName ?? "Bot") : SECTIONS[open].title}
+        title={sectionTitle(open, botName)}
         className="duration-200 ease-out motion-safe:animate-in motion-safe:fade-in-0"
       >
         {open === "bots" ? (
-          <BotSection botId={botId!} onDeleted={() => root("/settings")} />
+          <BotSection profiles={profiles} botId={botId} onDeleted={() => root("/settings")} />
         ) : (
           SECTIONS[open].render()
         )}
@@ -164,36 +177,36 @@ export function SettingsPage() {
   )
 }
 
-/** The name of the bot whose settings are open, for the screen's title. */
-function useBotName(botId: string | undefined) {
-  const profiles = useLiveQuery(listProfiles, [])
-  return botId ? profiles?.find((p) => p.id === botId)?.name : undefined
-}
-
 /** One bot's settings, as a section screen's content or the side pane's. */
-function BotSection({ botId, onDeleted }: { botId: string; onDeleted: () => void }) {
-  const profiles = useLiveQuery(listProfiles, [])
+function BotSection({
+  profiles,
+  botId,
+  onDeleted,
+}: {
+  profiles: Profile[] | undefined
+  botId?: string
+  onDeleted: () => void
+}) {
   const bot = profiles?.find((p) => p.id === botId)
   if (profiles === undefined) return null
   if (!bot) return <Navigate to="/settings" replace />
   return (
-    <BotEditor
-      key={bot.id}
-      profile={bot}
-      canDelete={profiles.length > 1}
-      onDeleted={onDeleted}
-    />
+    <BotEditor key={bot.id} profile={bot} canDelete={profiles.length > 1} onDeleted={onDeleted} />
   )
 }
 
-function MenuScreen({ className }: { className?: string }) {
+function MenuScreen({
+  className,
+  profiles,
+}: {
+  className?: string
+  profiles: Profile[] | undefined
+}) {
   const openDrawer = useOpenDrawer()
   const settings = useLiveQuery(
     async () => ({ ...DEFAULT_SETTINGS, ...(await db.settings.get("settings")) }),
     [],
   )
-  const profiles = useLiveQuery(listProfiles, [])
-  const now = useNow()
   const { registryError } = useSyncState()
   const { theme } = useTheme()
   const [params, setParams] = useSearchParams()
@@ -243,7 +256,7 @@ function MenuScreen({ className }: { className?: string }) {
       )}
       <Group>
         {profiles?.map((profile) => (
-          <BotRow key={profile.id} profile={profile} now={now} />
+          <BotRow key={profile.id} profile={profile} />
         ))}
         <AddBotRow onAdd={() => setLinking(true)} />
       </Group>
@@ -271,44 +284,32 @@ function MenuScreen({ className }: { className?: string }) {
 }
 
 /** A bot in the menu: its connectivity dot, then the bot itself, then its name. */
-function BotRow({ profile, now }: { profile: Profile; now: number }) {
+function BotRow({ profile }: { profile: Profile }) {
+  const now = useNow()
   const online = profile.hostId && !profile.disabled ? isOnline(profile, now) : undefined
-  const { replace } = useContext(MenuContext)
   return (
-    <Link
-      to={`/settings/bots/${profile.id}`}
-      replace={replace}
-      className={cn(rowClass, "transition-colors hover:bg-muted")}
-    >
-      <span className="flex size-3 shrink-0 items-center justify-center">
-        {online !== undefined && (
-          <>
-            <span
-              aria-hidden
-              className={cn(
-                "size-2.5 rounded-full",
-                online ? "bg-success" : "bg-muted-foreground/40",
-              )}
-            />
-            <span className="sr-only">{online ? "Online" : "Offline"}</span>
-          </>
-        )}
-      </span>
-      <Bot id={profile.botId} className={cn("size-8 shrink-0", profile.disabled && "opacity-40")} />
-      <RowText title={profile.name} />
-      <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
-    </Link>
+    <Row
+      to={`bots/${profile.id}`}
+      leading={
+        <>
+          <span className="flex size-3 shrink-0 items-center justify-center">
+            <OnlineDot online={online} />
+          </span>
+          <Bot
+            id={profile.botId}
+            className={cn("size-8 shrink-0", profile.disabled && "opacity-40")}
+          />
+        </>
+      }
+      title={profile.name}
+    />
   )
 }
 
 /** The row that opens the link sheet, at the end of the bots. */
 function AddBotRow({ onAdd }: { onAdd: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onAdd}
-      className={cn(rowClass, "transition-colors hover:bg-muted")}
-    >
+    <button type="button" onClick={onAdd} className={linkRowClass}>
       <PlusIcon className="size-5 shrink-0 text-muted-foreground" />
       <RowText title="Add bot" />
     </button>
@@ -562,13 +563,22 @@ function LiveRow({ bot }: { bot: Profile }) {
   )
 }
 
-function SectionScreen({ section, botName }: { section: string; botName?: string }) {
-  const { botId } = useParams()
+function SectionScreen({
+  section,
+  botId,
+  botName,
+  profiles,
+}: {
+  section: string
+  botId?: string
+  botName?: string
+  profiles: Profile[] | undefined
+}) {
   const { up, root } = useNav()
   const page = SECTIONS[section]
   return (
     <Screen
-      title={page ? page.title : (botName ?? "Bot")}
+      title={sectionTitle(section, botName)}
       leading={
         <Button
           variant="outline"
@@ -581,11 +591,11 @@ function SectionScreen({ section, botName }: { section: string; botName?: string
         </Button>
       }
     >
-      {page ? (
-        page.render()
-      ) : (
-        botId && <BotSection botId={botId} onDeleted={() => root("/settings")} />
-      )}
+      {page
+        ? page.render()
+        : botId && (
+            <BotSection profiles={profiles} botId={botId} onDeleted={() => root("/settings")} />
+          )}
     </Screen>
   )
 }
@@ -626,6 +636,7 @@ function Group({ children }: { children: ReactNode }) {
 
 const rowClass =
   "flex min-h-14 w-full items-center gap-4 bg-card px-5 py-3 text-left text-card-foreground"
+const linkRowClass = cn(rowClass, "transition-colors hover:bg-muted")
 
 function RowText({ title, subtitle }: { title: ReactNode; subtitle?: ReactNode }) {
   return (
@@ -640,12 +651,14 @@ function Row({
   to,
   icon: Icon,
   image,
+  leading,
   title,
   subtitle,
 }: {
   to: string
-  icon: LucideIcon
+  icon?: LucideIcon
   image?: string
+  leading?: ReactNode
   title: ReactNode
   subtitle?: ReactNode
 }) {
@@ -655,17 +668,18 @@ function Row({
       to={`/settings/${to}`}
       replace={replace}
       aria-current={active === to ? "page" : undefined}
-      className={cn(rowClass, "transition-colors hover:bg-muted aria-[current=page]:bg-muted")}
+      className={cn(linkRowClass, "aria-[current=page]:bg-muted")}
     >
-      {image ? (
-        <img
-          src={image}
-          alt=""
-          className="size-8 shrink-0 rounded-full ring-1 ring-foreground/10"
-        />
-      ) : (
-        <Icon className="size-5 shrink-0 text-muted-foreground" />
-      )}
+      {leading ??
+        (image ? (
+          <img
+            src={image}
+            alt=""
+            className="size-8 shrink-0 rounded-full ring-1 ring-foreground/10"
+          />
+        ) : Icon ? (
+          <Icon className="size-5 shrink-0 text-muted-foreground" />
+        ) : null)}
       <RowText title={title} subtitle={subtitle} />
       <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
     </Link>
@@ -718,11 +732,7 @@ function FeedbackRow() {
   const [open, setOpen] = useState(false)
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className={cn(rowClass, "transition-colors hover:bg-muted")}
-      >
+      <button type="button" onClick={() => setOpen(true)} className={linkRowClass}>
         <MessageSquareTextIcon className="size-5 shrink-0 text-muted-foreground" />
         <RowText title="Send feedback" />
       </button>

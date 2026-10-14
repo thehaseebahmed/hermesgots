@@ -4,6 +4,23 @@ import { TriangleAlertIcon } from "lucide-react"
 import { Bot } from "@/components/bot"
 import { cn } from "@/lib/utils"
 
+/** A connectivity dot: green while its host checks in, grey once it goes stale. */
+export function OnlineDot({ online }: { online?: boolean }) {
+  if (online === undefined) return null
+  return (
+    <>
+      <span
+        aria-hidden
+        className={cn(
+          "block size-2.5 rounded-full",
+          online ? "bg-success" : "bg-muted-foreground/40",
+        )}
+      />
+      <span className="sr-only">{online ? "Online" : "Offline"}</span>
+    </>
+  )
+}
+
 /** A bot (Hermes profile) as a small tappable card: its image over its name. */
 export function BotCard({
   botId,
@@ -50,14 +67,7 @@ export function BotCard({
     >
       {online !== undefined && !warning && (
         <span className="absolute top-1.5 right-1.5">
-          <span
-            aria-hidden
-            className={cn(
-              "block size-2 rounded-full",
-              online ? "bg-success" : "bg-muted-foreground/40",
-            )}
-          />
-          <span className="sr-only">{online ? "Online" : "Offline"}</span>
+          <OnlineDot online={online} />
         </span>
       )}
       {warning && (

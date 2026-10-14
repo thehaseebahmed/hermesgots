@@ -133,7 +133,7 @@ PR titles follow the same format. Fill in `.github/pull_request_template.md` for
 | `src/components/new-project.tsx` | The Code screen's pop-up for creating a project with its GitHub repos |
 | `src/components/project-settings.tsx` | A project's settings pop-up: name, goal and repos (saved together, with a confirm before a repo's clone is deleted), Usage, Pin, Archive and Delete |
 | `src/components/project-usage.tsx` | The settings pop-up's Usage view: Sessions, Tokens, Cache hit and Est. cost, the token split by kind, and each session's tokens and share (sorted by share, cost or recency) |
-| `src/components/bot-card.tsx`, `bot-settings.tsx` | Bot cards (the share screen's bot strip, with an online dot) and the bot editor: Enabled, name, image, default model and Remove for a linked bot; address and key for one added by hand before linking |
+| `src/components/bot-card.tsx`, `bot-settings.tsx` | Bot cards (the share screen's bot strip, with its `OnlineDot`) and the bot editor: Enabled, name, image, default model and Remove for a linked bot; address and key for one added by hand before linking |
 | `src/components/link-bots.tsx` | `LinkBots`: the link commands with a fresh code and the bots linked so far, each checked from this device (onboarding's last step); `LinkSheet`: the same in a pop-up (`/settings/bots?link=1`) |
 | `src/lib/registry.ts` | The app's side of the bot registry: link codes, turning records into bots (`syncRegistry`), Enabled and Remove, online and reachable checks |
 | `src/index.css` | Theme tokens (light and dark) and bot/typing animations |
