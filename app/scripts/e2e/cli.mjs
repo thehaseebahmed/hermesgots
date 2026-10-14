@@ -46,6 +46,15 @@ const FLOWS = {
     mock: "legacy",
     about: "A message with a photo shows its reply's tool calls while it runs, from the transcript",
   },
+  todos: {
+    script: "e2e/todos.mjs",
+    about: "The todo list shows while the reply that wrote it runs, from events or the transcript",
+  },
+  "todos-legacy": {
+    script: "e2e/todos.mjs",
+    mock: "legacy",
+    about: "The same on a Hermes whose events stream the browser can't read",
+  },
   "stream-writes": {
     script: "e2e/stream-writes.mjs",
     about:
