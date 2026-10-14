@@ -49,9 +49,9 @@ class PlanModeTest(unittest.TestCase):
         )
 
     def test_a_mutating_tool_is_blocked(self) -> None:
-        # add_to_library moves a file out of the worktree, so plan mode blocks it like the rest.
+        # library_add moves a file out of the worktree, so plan mode blocks it like the rest.
         self.assertEqual(
-            self._before_tool("add_to_library", "plan"),
+            self._before_tool("library_add", "plan"),
             {"action": "block", "message": sessions.PLAN_BLOCK},
         )
 
@@ -59,4 +59,4 @@ class PlanModeTest(unittest.TestCase):
         self.assertIsNone(self._before_tool("read_file", "plan"))
 
     def test_outside_plan_mode_nothing_is_blocked(self) -> None:
-        self.assertIsNone(self._before_tool("add_to_library", "accept_edits"))
+        self.assertIsNone(self._before_tool("library_add", "accept_edits"))

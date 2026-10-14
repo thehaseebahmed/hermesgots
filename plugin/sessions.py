@@ -62,7 +62,7 @@ NOUNS = (
 )
 GIT_TIMEOUT_S = 60
 MUTATING_TOOLS = frozenset(
-    {"write_file", "patch", "execute_code", "delegate_task", "open_pull_request", "add_to_library"}
+    {"write_file", "patch", "execute_code", "delegate_task", "open_pull_request", "library_add"}
 )
 READ_ONLY_COMMANDS = frozenset(
     "ls cat head tail grep rg find fd pwd wc tree stat file which echo printf env du df diff sort "
@@ -79,7 +79,7 @@ PLANS_DIR = "plans"
 # A plan-mode reply is saved only when it is a plan: the heading the instructions ask for.
 PLAN_HEADING = "# Plan:"
 # Where the session's generated files (screenshots, images, reports) are filed, under the project's
-# primary folder, in a folder named after the session's worktree. The add_to_library tool makes it.
+# primary folder, in a folder named after the session's worktree. The library_add tool makes it.
 FILES_DIR = "files"
 LIVE_STATUSES = {
     "queued": "running",

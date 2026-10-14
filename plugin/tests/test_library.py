@@ -87,7 +87,7 @@ class FilesDirTest(unittest.TestCase):
         self.assertEqual(stored["files_dir"], record["files_dir"])
 
 
-class AddToLibraryTest(unittest.TestCase):
+class LibraryAddTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name)
@@ -122,38 +122,54 @@ class AddToLibraryTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
-    def _call(self, path: str, task_id: str = "memento-1") -> dict:
-        return json.loads(library.handle({"path": path}, task_id=task_id))
+    def _call(self, path: str, folder: str = "screenshots", task_id: str = "memento-1") -> dict:
+        return json.loads(library.handle({"path": path, "folder": folder}, task_id=task_id))
 
     def test_a_relative_path_moves_out_of_the_worktree(self) -> None:
         result = self._call("shot.png")
         self.assertEqual(result["name"], "shot.png")
-        self.assertEqual(result["path"], str(self.files_dir / "shot.png"))
-        self.assertTrue((self.files_dir / "shot.png").is_file())
+        self.assertEqual(result["path"], str(self.files_dir / "screenshots" / "shot.png"))
+        self.assertTrue((self.files_dir / "screenshots" / "shot.png").is_file())
         self.assertFalse((self.worktree / "shot.png").exists())
 
     def test_an_absolute_path_outside_the_worktree_works(self) -> None:
         outside = self.home / "elsewhere" / "report.md"
         outside.parent.mkdir()
         outside.write_text("report", encoding="utf-8")
-        result = self._call(str(outside))
-        self.assertEqual(result["path"], str(self.files_dir / "report.md"))
+        result = self._call(str(outside), "reports")
+        self.assertEqual(result["path"], str(self.files_dir / "reports" / "report.md"))
         self.assertFalse(outside.exists())
 
     def test_the_folder_is_made_and_kept_out_of_git(self) -> None:
         self.assertFalse(self.files_dir.exists())
-        self._call("shot.png")
-        self.assertTrue(self.files_dir.is_dir())
+        self._call("shot.png", "reports")
+        self.assertTrue((self.files_dir / "reports").is_dir())
         exclude = self.project / ".git" / "info" / "exclude"
         self.assertIn("files/", exclude.read_text(encoding="utf-8").splitlines())
 
-    def test_a_second_file_of_the_same_name_gets_a_suffix(self) -> None:
-        self.files_dir.mkdir(parents=True)
-        (self.files_dir / "shot.png").write_bytes(b"older")
-        result = self._call("shot.png")
-        self.assertEqual(result["path"], str(self.files_dir / "shot-2.png"))
-        self.assertEqual((self.files_dir / "shot.png").read_bytes(), b"older")
-        self.assertEqual((self.files_dir / "shot-2.png").read_bytes(), b"png")
+    def test_a_name_already_in_the_folder_is_an_error(self) -> None:
+        self.files_dir.joinpath("screenshots").mkdir(parents=True)
+        self.files_dir.joinpath("screenshots", "shot.png").write_bytes(b"older")
+        self.assertEqual(
+            self._call("shot.png"),
+            {"error": "shot.png is already in screenshots; rename the file and call again."},
+        )
+        # Nothing moved and nothing was renamed: the agent renames the file itself.
+        self.assertEqual(
+            self.files_dir.joinpath("screenshots", "shot.png").read_bytes(), b"older"
+        )
+        self.assertTrue((self.worktree / "shot.png").is_file())
+
+    def test_a_folder_is_required(self) -> None:
+        result = json.loads(library.handle({"path": "shot.png"}, task_id="memento-1"))
+        self.assertEqual(result, {"error": "folder is required."})
+
+    def test_a_folder_with_a_path_separator_is_rejected(self) -> None:
+        for bad in ("a/b", "..", ".hidden", "a" * 121):
+            result = self._call("shot.png", bad)
+            self.assertEqual(
+                result, {"error": "folder must be a single folder name (no path separators)."}
+            )
 
     def test_a_missing_file_is_an_error(self) -> None:
         self.assertEqual(self._call("nope.png"), {"error": "No such file."})
@@ -162,12 +178,12 @@ class AddToLibraryTest(unittest.TestCase):
     def test_a_record_from_before_the_column_still_files_it(self) -> None:
         with sqlite3.connect(self.db) as conn:
             conn.execute("UPDATE project_sessions SET files_dir = NULL WHERE session_id = 'memento-1'")
-        result = self._call("shot.png")
-        self.assertEqual(result["path"], str(self.files_dir / "shot.png"))
+        result = self._call("shot.png", "screenshots")
+        self.assertEqual(result["path"], str(self.files_dir / "screenshots" / "shot.png"))
 
     def test_no_session_is_an_error(self) -> None:
         self.assertEqual(
-            json.loads(library.handle({"path": "shot.png"}, task_id="nope")),
+            json.loads(library.handle({"path": "shot.png", "folder": "screenshots"}, task_id="nope")),
             {"error": "This session has no library to file in."},
         )
 
@@ -199,7 +215,7 @@ class InstructionsTest(unittest.TestCase):
     def test_the_line_names_the_folder_right_after_the_worktree_line(self) -> None:
         text = prompt_builder.session_prompt(self.record)
         self.assertIn(f"this session's library at {self.record['files_dir']}", text)
-        self.assertIn("add_to_library tool", text)
+        self.assertIn("library_add tool", text)
         self.assertLess(text.index("library at"), text.index("open_pull_request tool"))
 
     def test_a_record_without_the_folder_has_no_line(self) -> None:
