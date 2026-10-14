@@ -69,6 +69,12 @@ export function prLook(pr: PullRequestRef): PrLook {
   return PR_LOOKS[pr.state]
 }
 
+/** How a session's pull requests are grouped in a list: the live ones first, the finished folded. */
+export const PR_GROUPS: { label: string; states: PrState[]; fold?: boolean }[] = [
+  { label: "Open", states: ["open", "draft"] },
+  { label: "Done", states: ["merged", "closed"], fold: true },
+]
+
 /**
  * A pull request's name among a session's: "PR #142" when it's the only one, "repo #142" when they
  * all share an owner, else "owner/repo #142".

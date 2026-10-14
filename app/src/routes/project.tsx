@@ -6,7 +6,6 @@ import {
   ArchiveXIcon,
   ArrowLeftIcon,
   CheckIcon,
-  ChevronUpIcon,
   CircleAlertIcon,
   GitPullRequestArrowIcon,
   LockIcon,
@@ -19,8 +18,9 @@ import { toast } from "sonner"
 import { HOST_WORK_MS, PR_PENDING_MS, SAFETY_MS, SESSION_REREAD_MS } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
 import { ChatHeader } from "@/components/chat/chat-header"
-import { prLabel, prLook } from "@/components/chat/pr-look"
+import { PR_GROUPS, prLabel, prLook } from "@/components/chat/pr-look"
 import { PrRow } from "@/components/chat/pr-pill"
+import { Group } from "@/components/group"
 import { LibraryTab } from "@/components/library"
 import { ProjectSettings } from "@/components/project-settings"
 import {
@@ -34,7 +34,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { stopMessage } from "@/lib/chat"
@@ -73,8 +72,6 @@ const GROUPS: { state: SessionState; label: string }[] = [
   { state: "resolved", label: "Resolved" },
   { state: "discarded", label: "Discarded" },
 ]
-/** A finished group longer than this starts collapsed. */
-const FOLD_OVER = 5
 
 function serverKey(baseUrl: string) {
   return baseUrl.trim().replace(/\/+$/, "").replace(/\/v1$/, "")
@@ -491,14 +488,22 @@ function formatWhen(at: number, now: number) {
   return new Date(at).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })
 }
 
-/** `user/repo #27 · Open`, naming the repo when the session spans more than one. */
+/**
+ * `user/repo #27 · Open`, naming the repo when the session spans more than one. Only the live
+ * pull requests show: a session keeps the ones it already finished, and its row is for what it
+ * still has open — a session left with only finished ones shows its newest.
+ */
 function prLine(session: Conversation) {
-  const prs = session.prs ?? []
-  if (!prs.length) return undefined
-  return prs
+  const all = session.prs ?? []
+  if (!all.length) return undefined
+  const live = all.filter((pr) => pr.state === "open" || pr.state === "draft")
+  const shown = live.length
+    ? live
+    : [all.reduce((newest, pr) => (pr.number > newest.number ? pr : newest))]
+  return shown
     .map((pr) => {
       const state = prLook(pr).label
-      return `${prLabel(pr, prs)} · ${state[0].toUpperCase() + state.slice(1)}`
+      return `${prLabel(pr, all)} · ${state[0].toUpperCase() + state.slice(1)}`
     })
     .join(", ")
 }
@@ -577,45 +582,8 @@ function SessionItem({
 }
 
 /**
- * A titled list that folds away; a finished one (`fold`) longer than `FOLD_OVER` starts folded,
- * and an `"always"` one always does.
- * It's mounted once its first item is known, so that count decides.
+ * Every session's pull requests, each once, newest number first.
  */
-function Group({
-  label,
-  count,
-  fold,
-  children,
-}: {
-  label: string
-  count: number
-  fold?: boolean | "always"
-  children: ReactNode
-}) {
-  return (
-    <Collapsible
-      defaultOpen={!fold || (fold !== "always" && count <= FOLD_OVER)}
-      render={<section aria-label={label} />}
-    >
-      <h2>
-        <CollapsibleTrigger className="group -mx-1 flex min-h-11 items-center gap-1.5 rounded-xl px-2 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-          {label} ({count})
-          <ChevronUpIcon className="size-4 rotate-180 transition-transform group-data-panel-open:rotate-0 motion-reduce:transition-none" />
-        </CollapsibleTrigger>
-      </h2>
-      <CollapsibleContent>
-        <ul>{children}</ul>
-      </CollapsibleContent>
-    </Collapsible>
-  )
-}
-
-const PR_GROUPS: { label: string; states: PullRequestRef["state"][]; fold?: boolean }[] = [
-  { label: "Open", states: ["open", "draft"] },
-  { label: "Done", states: ["merged", "closed"], fold: true },
-]
-
-/** Every session's pull requests, each once, newest number first. */
 function projectPrs(sessions: Conversation[]) {
   const byKey = new Map<string, PullRequestRef>()
   for (const pr of sessions.flatMap((c) => c.prs ?? [])) {
