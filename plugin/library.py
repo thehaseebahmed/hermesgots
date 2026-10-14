@@ -144,29 +144,37 @@ def file(
     # The project's folder is often itself a repo: keep files/ out of its git status, like plans/.
     sessions._exclude_from_git(str(root), sessions.FILES_DIR)
     dest = dest_dir / source.name
-    if dest.exists():
+    try:
+        # Claim the name exclusively, so two racing calls can't pick the same one and a file of
+        # that name is caught without a gap between the check and the move.
+        open(dest, "xb").close()
+    except FileExistsError:
         raise LibraryError(
             f"{source.name} is already in {name}. Rename the file on disk — a distinguishing "
             f"suffix or a more specific name — then call library_add again with its new path; "
             f"nothing was moved."
-        )
+        ) from None
+    except OSError as error:
+        raise LibraryError(f"Couldn't file {source.name}: {error}.") from None
     try:
         shutil.move(str(source), str(dest))
     except OSError as error:
+        dest.unlink(missing_ok=True)  # the claim is ours; don't leave an empty file behind
         raise LibraryError(f"Couldn't move the file: {error.strerror or error}.") from None
     return {"name": dest.name, "path": str(dest)}
 
 
-def entries(root: Path) -> List[Dict[str, Any]]:
+def entries(root: Path, worktree: Optional[str] = None) -> List[Dict[str, Any]]:
     """Every file under a library root as ``{ worktree, folder, name, path, size, at }``.
 
     The tool writes ``files/<worktree>/<folder>/<file>``; a file with no folder was filed before
     folders existed and keeps ``folder: None``. Capped at ``MAX_FILES``, so a huge library answers
     with what it has rather than an enormous list. ``os.walk`` gives the directory split from the
-    directory entry itself, so each file is statted once.
+    directory entry itself, so each file is statted once. With ``worktree``, only that session's
+    folder is walked, so the cap counts the files that were asked for.
     """
     found: List[Dict[str, Any]] = []
-    for current, _, names in os.walk(root):
+    for current, _, names in os.walk(root / worktree if worktree else root):
         parts = Path(current).relative_to(root).parts
         # A file directly under files/ belongs to no session's library folder.
         if not parts:
@@ -198,9 +206,7 @@ def tree(root: Path, worktree: Optional[str] = None) -> List[Dict[str, Any]]:
     no folder (filed before folders existed) groups under its worktree's name — each folder's
     files newest first. With ``worktree``, only that session's files."""
     groups: Dict[str, List[Dict[str, Any]]] = {}
-    for entry in entries(root):
-        if worktree is not None and entry["worktree"] != worktree:
-            continue
+    for entry in entries(root, worktree):
         groups.setdefault(entry["folder"] or entry["worktree"], []).append(entry)
     return [
         {"name": name, "files": sorted(files, key=lambda entry: entry["at"], reverse=True)}
@@ -209,20 +215,32 @@ def tree(root: Path, worktree: Optional[str] = None) -> List[Dict[str, Any]]:
 
 
 def library_roots(hermes_home: Path) -> List[Path]:
-    """Every project's library folder (``<primary folder>/files/``): the only place the tool files."""
-    projects_db = hermes_home / "projects.db"
-    if not projects_db.exists():
-        return []
-    from hermes_cli import projects_db as pdb
+    """Every project's library folder (``<primary folder>/files/``): the only place the tool files.
 
-    with pdb.connect_closing(db_path=projects_db) as conn:
-        projects = pdb.list_projects(conn, include_archived=True)
-    return [library_root(project) for project in projects]
+    A host without Projects, or with a project row that can't be read, holds no library file, so
+    the walk answers nothing rather than failing the route.
+    """
+    projects_db = hermes_home / "projects.db"
+    try:
+        from hermes_cli import projects_db as pdb
+
+        if not projects_db.exists():
+            return []
+        with pdb.connect_closing(db_path=projects_db) as conn:
+            projects = pdb.list_projects(conn, include_archived=True)
+        return [library_root(project) for project in projects]
+    except Exception:
+        logger.debug("memento: couldn't read projects' library folders", exc_info=True)
+        return []
 
 
 def holds(hermes_home: Path, path: Path) -> bool:
-    """Whether ``path`` sits under a project's library folder."""
-    return any(path.is_relative_to(root) for root in library_roots(hermes_home))
+    """Whether ``path`` sits under a project's library folder.
+
+    Both sides are resolved: the path comes from Hermes's media check with its symlinks already
+    resolved, so a project folder that is itself a symlink has to be resolved to match it.
+    """
+    return any(path.is_relative_to(root.resolve()) for root in library_roots(hermes_home))
 
 
 TOOL = "library_add"

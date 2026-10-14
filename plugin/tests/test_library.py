@@ -285,6 +285,14 @@ class TreeTest(unittest.TestCase):
         tree = library.tree(self.root)
         self.assertEqual(sum(len(folder["files"]) for folder in tree), library.MAX_FILES)
 
+    def test_a_worktree_walk_caps_its_own_files(self) -> None:
+        # Another session's files are never walked, so they can't push this one's out of the cap.
+        for n in range(library.MAX_FILES + 5):
+            self._write(f"jazzy-quokka-7bfe/screenshots/{n}.png", n)
+        self._write("cosmic-otter-9f2e/library-tab/only.png", 1)
+        tree = library.tree(self.root, "cosmic-otter-9f2e")
+        self.assertEqual([[f["name"] for f in folder["files"]] for folder in tree], [["only.png"]])
+
     def test_an_empty_root_is_an_empty_tree(self) -> None:
         self.assertEqual(library.tree(self.root), [])
 
