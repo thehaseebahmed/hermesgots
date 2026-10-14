@@ -105,6 +105,7 @@ import { describeActivity } from "@/lib/format"
 import { supportsSteer, type HermesProject } from "@/lib/hermes"
 import { readProjects, useProjects } from "@/lib/projects"
 import { caughtUpWithin, loadEarlierHistory, reconcileHistory } from "@/lib/history"
+import { contextWindow } from "@/lib/context"
 import { useLive, watchChat } from "@/lib/live"
 import { useSessionRunning } from "@/lib/waiting"
 import { usePoll } from "@/lib/poll"
@@ -113,7 +114,8 @@ import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { setThreadMuted } from "@/lib/push"
-import { syncContextWindow } from "@/lib/models"
+import { hostChoice, shortModel, useModelInfo } from "@/lib/model-info"
+import { syncContextWindow, useModelCatalog } from "@/lib/models"
 import {
   effectiveProvider,
   limitNotice,
@@ -321,11 +323,18 @@ export function ChatPage() {
     configured && (
       <ModelMenu profile={profile} choice={modelChoice} onChoose={chooseModel} {...extra} />
     )
+  // What this chat runs next: its own pick, the bot's default, else what the host last reported.
+  const hostInfo = useModelInfo(profile)
+  const catalog = useModelCatalog()
+  const currentModel =
+    modelChoice ?? profile?.modelChoice ?? hostChoice(hostInfo) ?? profile?.hostModel
   const usage: ContextUsage = {
     tracked,
     tokens: tracked ? live?.tokens : undefined,
-    window:
-      live?.window ?? (profile?.contextSource === "models.dev" ? profile.contextWindow : undefined),
+    // The window belongs to the model the next turn runs, not the one the last call did: a switch
+    // shows at once, rather than after the new model's first call.
+    window: contextWindow(live, profile ?? undefined, currentModel, catalog),
+    model: currentModel ? shortModel(currentModel.model) : undefined,
   }
   const provider = effectiveProvider(conversation ?? undefined, profile ?? undefined)
   const providerUsage =

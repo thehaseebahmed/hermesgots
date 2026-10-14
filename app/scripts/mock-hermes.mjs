@@ -976,6 +976,9 @@ async function playTurn(req, body, last, out) {
       prompt_tokens: 6000 + Math.round(transcript / 4),
       output_tokens: pieces,
       context_length: 200000,
+      // What the turn asked for, so a switched model reads back as the one that ran.
+      model: typeof body.model === "string" ? body.model : null,
+      provider: typeof body.provider === "string" ? body.provider : null,
     })
   }
   record(req, { role: "assistant", content: spoken, finish_reason: "stop" })
@@ -1275,7 +1278,7 @@ http
       return json(res, 200, { object: "list", data: [{ id, object: "model", owned_by: "hermes" }] })
     }
     if (url.pathname === "/api/model/options") {
-      // Named profiles report a model models.dev doesn't know, to exercise manual entry.
+      // Named profiles report a model models.dev doesn't know, so no window is found for it.
       const configured = profile ? `mock-model-${profile}` : "anthropic/claude-sonnet-4.5"
       const set = hostModels.get(profile ?? "")
       const model = set?.model ?? configured
@@ -1626,8 +1629,8 @@ http
         prompt_tokens: call?.prompt_tokens ?? null,
         output_tokens: call?.output_tokens ?? null,
         context_length: call?.context_length ?? null,
-        model: call ? "anthropic/claude-sonnet-4.5" : null,
-        provider: call ? "openrouter" : null,
+        model: call?.model ?? null,
+        provider: call?.provider ?? null,
         at: call ? Date.now() : null,
       })
     }

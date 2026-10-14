@@ -20,8 +20,8 @@ import {
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { rememberModel, type ModelChoice, type Profile } from "@/lib/db"
 import { formatTokens } from "@/lib/format"
-import type { ModelInfo, ModelProvider } from "@/lib/hermes"
-import { fullModel, shortModel, useModelInfo } from "@/lib/model-info"
+import type { ModelProvider } from "@/lib/hermes"
+import { fullModel, hostChoice, shortModel, useModelInfo } from "@/lib/model-info"
 import { modelFacts, useModelCatalog, type Catalog } from "@/lib/models"
 import { codingScoreOf, useCodingRankings, type RankingsPayload } from "@/lib/rankings"
 import { cn } from "@/lib/utils"
@@ -294,10 +294,6 @@ function SortMenu({ sort, onSort }: { sort: ModelSort; onSort: (sort: ModelSort)
       </DropdownMenuContent>
     </DropdownMenu>
   )
-}
-
-function hostChoice(info: ModelInfo | null | undefined): ModelChoice | undefined {
-  return info?.model ? { provider: info.provider ?? "", model: info.model } : undefined
 }
 
 // A fixed height, so the sheet doesn't grow and shrink between the lists.

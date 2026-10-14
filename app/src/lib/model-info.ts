@@ -106,3 +106,8 @@ export function shortModel(model: string) {
 export function fullModel({ provider, model }: { provider?: string; model: string }) {
   return provider ? `${provider}/${model}` : model
 }
+
+/** The model the host reports behind a bot, as the choice a pick would be. */
+export function hostChoice(info: ModelInfo | null | undefined): ModelChoice | undefined {
+  return info?.model ? { provider: info.provider ?? "", model: info.model } : undefined
+}

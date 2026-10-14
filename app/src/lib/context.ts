@@ -1,11 +1,37 @@
 import { noteFailure } from "@/lib/report"
 import { connectionKey } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
-import { db } from "@/lib/db"
+import { db, type Conversation, type ModelChoice, type Profile } from "@/lib/db"
+import { fullModel } from "@/lib/model-info"
+import { modelFacts, sameModel, type Catalog } from "@/lib/models"
 import { getSessionContext } from "@/lib/hermes"
 
 /** Bots whose plugin has no context route (an older plugin). */
 const unsupported = cooldown()
+
+/**
+ * What a session's context use is measured against: the model the next turn runs, since that is
+ * what it will be spent on. In order: the window the bot already holds for that model (so a screen
+ * paints a number at once, without a lookup), Hermes's own window for the call that ran it, then
+ * models.dev's for it. A window known for a model the session has since left behind never shows, so
+ * a switch is visible before the new model's first call lands.
+ */
+export function contextWindow(
+  live: Conversation["liveContext"],
+  profile: Profile | undefined,
+  current: ModelChoice | undefined,
+  catalog: Catalog | undefined,
+): number | undefined {
+  if (profile?.contextWindow && heldFor(profile, current)) return profile.contextWindow
+  // Hermes's own window is this model's as long as its recorded call ran it.
+  if (live?.window && (!current || sameModel(live.model ?? "", current.model))) return live.window
+  return current ? modelFacts(catalog, current).context : undefined
+}
+
+/** Whether the window the bot holds was written for the model the chat runs next. */
+function heldFor(profile: Profile, current: ModelChoice | undefined) {
+  return !current || profile.contextModel === fullModel(current)
+}
 
 /**
  * Reads a chat's context use from its server's Memento plugin, which sees every model call, so each
@@ -34,7 +60,12 @@ export async function refreshContext(conversationId: string) {
   }
   unsupported.clear(key)
   const current = conversation.liveContext
-  if (!live || (current?.tokens === live.tokens && current.window === live.window)) return
+  // The model counts too: a switch that lands with the same tokens and window still has to show.
+  const unchanged =
+    current?.tokens === live?.tokens &&
+    current?.window === live?.window &&
+    current?.model === live?.model
+  if (!live || unchanged) return
   // Not through updateConversation: this is local, so it mustn't move the sync clock.
   await db.conversations.update(conversationId, { liveContext: live })
 }

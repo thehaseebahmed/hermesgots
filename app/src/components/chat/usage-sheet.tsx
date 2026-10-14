@@ -21,6 +21,8 @@ export interface ContextUsage {
   /** Prompt tokens of the session's latest model call. */
   tokens?: number
   window?: number
+  /** The model the window is for: the one the chat runs next, as its pill names it. */
+  model?: string
 }
 
 function fraction({ tokens, window }: ContextUsage) {
@@ -157,7 +159,7 @@ export function UsageSheet({
   const windows = windowViews(providerUsage)
 
   return (
-    <Popup side open={open} onOpenChange={onOpenChange}>
+    <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent>
         <PopupHeader className="pb-2">
           <PopupTitle>Usage</PopupTitle>
@@ -183,6 +185,7 @@ export function UsageSheet({
                   />
                 </Meter.Track>
                 <span className="text-sm text-muted-foreground tabular-nums">
+                  {usage.model ? `${usage.model} · ` : ""}
                   {formatTokens(usage.tokens ?? 0)} of{" "}
                   {usage.window ? formatTokens(usage.window) : "—"} tokens
                 </span>

@@ -126,6 +126,12 @@ export function warmCatalog() {
 export const normalise = (id: string) => id.toLowerCase().replace(/\./g, "-")
 export const lastSegment = (id: string) => id.slice(id.lastIndexOf("/") + 1)
 
+/** Whether two ids name the same model: Hermes vendors the ids it reports, a pick is bare. */
+export function sameModel(a: string, b: string) {
+  if (!a || !b) return false
+  return normalise(lastSegment(a)) === normalise(lastSegment(b))
+}
+
 function contextOf(entry: CatalogModel | undefined) {
   const context = entry?.limit?.context
   return typeof context === "number" && context > 0 ? context : undefined
@@ -267,8 +273,7 @@ export async function syncContextWindow(profile: Profile) {
   const info = await getModelInfo(profile)
   if (!info?.model) return
   const key = fullModel({ provider: info.provider, model: info.model })
-  // A window set by hand (no longer offered) is looked up again.
-  if (key === profile.contextModel && profile.contextSource !== "manual") {
+  if (key === profile.contextModel) {
     // Bots from before image detection learn it once.
     if (profile.imageInput === undefined) {
       const imageInput = await findImageInput(info).catch(() => undefined)
@@ -282,18 +287,9 @@ export async function syncContextWindow(profile: Profile) {
   } catch {
     // The old model's window would be wrong for this one; the next sync looks the new one up.
     if (profile.contextModel) {
-      await db.profiles.update(profile.id, {
-        contextModel: undefined,
-        contextWindow: undefined,
-        contextSource: undefined,
-      })
+      await db.profiles.update(profile.id, { contextModel: undefined, contextWindow: undefined })
     }
     return
   }
-  await db.profiles.update(profile.id, {
-    contextModel: key,
-    contextWindow: found,
-    contextSource: found ? "models.dev" : undefined,
-    imageInput,
-  })
+  await db.profiles.update(profile.id, { contextModel: key, contextWindow: found, imageInput })
 }
