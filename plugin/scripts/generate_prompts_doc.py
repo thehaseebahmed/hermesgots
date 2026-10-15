@@ -106,8 +106,9 @@ HEADER = """# Session prompts
 > request when the doc moves).
 
 Every project session's run carries the prompt `prompt_builder.session_prompt(record)` builds for
-its record: where its worktrees are, where its generated files are filed, how it opens its pull
-request and which templates it follows. Plan and Theseus sessions get their mode's segment on top.
+its record: where its worktrees are, where its generated files are filed, how it keeps the user in
+the loop while it works, how it opens its pull request and which templates it follows. Plan and
+Theseus sessions get their mode's segment on top.
 """
 
 

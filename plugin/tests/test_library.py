@@ -338,6 +338,47 @@ class InstructionsTest(unittest.TestCase):
         legacy = {**self.record, "files_dir": None}
         self.assertNotIn("library", prompt_builder.session_prompt(legacy))
 
+    def test_the_working_rhythm_block_sits_between_the_files_and_the_ship_instructions(self) -> None:
+        # How to work rides between where the files go and how the run ships, so a long stretch of
+        # tool calls reads as work in progress rather than a hang.
+        text = prompt_builder.session_prompt(self.record)
+        self.assertIn("Keep the user in the loop as you work", text)
+        self.assertLess(text.index("library at"), text.index("Keep the user in the loop"))
+        self.assertLess(text.index("Keep the user in the loop"), text.index("open_pull_request tool"))
+
+    def test_the_block_names_the_rhythm_rules(self) -> None:
+        text = prompt_builder.session_prompt(self.record)
+        self.assertIn("short update between checkpoints", text)
+        self.assertIn("todo list current", text)
+        self.assertIn("Don't narrate each edit", text)
+
+    def test_a_record_without_worktrees_has_no_block(self) -> None:
+        # The same gate as the ship instructions: a record with no repos gets neither.
+        no_repos = {**self.record, "repos": []}
+        text = prompt_builder.session_prompt(no_repos)
+        self.assertNotIn("Keep the user in the loop", text)
+        self.assertNotIn("open_pull_request tool", text)
+
+    def test_the_mock_repeats_the_instructions_word_for_word(self) -> None:
+        # The mock is a standalone Node process, so its copy can't be imported; the e2e flows read
+        # the text it serves, so a drift there tests a prompt no session gets. Compared the way
+        # test_push_kinds compares its lists to the app's. Only the blocks meant to be verbatim:
+        # Theseus is deliberately shortened (the paths are the host's) and the plan is a template.
+        import re
+
+        app = Path(__file__).resolve().parents[2] / "app"
+        mock_js = (app / "scripts" / "mock-hermes.mjs").read_text()
+        for name, block in (
+            ("PR_INSTRUCTIONS", prompt_builder._PR_INSTRUCTIONS),
+            ("DONE_INSTRUCTIONS", prompt_builder._DONE_INSTRUCTIONS),
+            ("PROGRESS_UPDATES_INSTRUCTIONS", prompt_builder._PROGRESS_UPDATES_INSTRUCTIONS),
+        ):
+            with self.subTest(block=name):
+                found = re.search(rf'^const {name} = "(.*)"$', mock_js, re.M)
+                if found is None:
+                    self.fail(f"{name} is not in the mock")
+                self.assertEqual(found.group(1), block)
+
 
 if __name__ == "__main__":
     unittest.main()
