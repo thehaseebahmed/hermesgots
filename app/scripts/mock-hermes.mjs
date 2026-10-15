@@ -45,8 +45,10 @@
 // folder (files_dir) the instructions tell the agent to file its generated files in, with the
 // plugin's library_add tool. From its second turn, or one that
 // says "ship", the agent opens the branch's PRs with the plugin's open_pull_request tool
-// (GET …/sessions/{id}/prs reads them; "draft" in that turn drafts them): "merge" or "close" in a
-// turn sets their state, a merge resolves the session in the chat list, and "break" fails their
+// (GET …/sessions/{id}/prs reads them, newest first and the finished ones included; "draft" in that
+// turn drafts them, and a later turn that says "ship" again opens another, its predecessor merged by
+// then): "merge" or "close" in a turn sets the live one's state, a merge resolves the session in the
+// chat list, and "break" fails their
 // checks while "pending" runs them for a while before they pass. POST …/close (delete or discard)
 // closes them and removes the trees like …/workspace/remove. MOCK_PRS_FAIL=1 (or
 // POST /__mock/prs { fail }) is a host that can't reach GitHub: …/prs answers an error rather than
@@ -840,16 +842,29 @@ async function playTurn(req, body, last, out) {
   record(req, { role: "assistant", content: null, tool_calls: [{ id: writeId, type: "function", function: { name: "write_file", arguments: JSON.stringify({ path: notesPath, content: notes }) } }] })
   record(req, { role: "tool", tool_call_id: writeId, tool_name: "write_file", content: writeOutput })
 
-  // From its second turn, or when told to "ship", the agent opens the pull request with the plugin's tool.
+  // From its second turn, or when told to "ship", the agent opens the pull request with the plugin's
+  // tool. A later turn that says "ship" again opens another one — a session keeps shipping as it
+  // works — and the one it replaces is merged by then: both stay in the session's history.
   const sid = sessionOf(req, body)
-  if (workspace && !workspace.opened && !workspace.closed && (/ship/i.test(last) || userTurns(sid).length >= 2)) {
+  const shipping = /ship/i.test(last) || (userTurns(sid).length >= 2 && !workspace?.opened)
+  if (workspace && !workspace.closed && shipping) {
     const prId = `call_${randomUUID().slice(0, 8)}`
     const title = "feat: add a dry-run flag to log rotation"
+    const draft = /draft/i.test(last)
     const prArgs = { title, body: "## Summary\n\nAdds `--dry-run` to the rotation script.\n\n## Changes\n\n- rotate.py\n\n## How to test\n\nRun it with `--dry-run`.", commit_message: title }
     out.tool({ tool: "open_pull_request", emoji: "🚀", label: title, toolCallId: prId, status: "running" })
     await sleep(900)
-    workspace.opened = { title, draft: /draft/i.test(last) }
-    const prResult = JSON.stringify({ results: workspace.repos.map((repo, i) => ({ name: repo.name, committed: randomUUID().slice(0, 7), pushed: true, pr: { repo: repo.name, number: 27 + i, title, url: `https://github.com/${repo.name}/pull/${27 + i}`, state: workspace.opened.draft ? "draft" : "open", checks: null } })) })
+    // A branch's new pull request replaces the open one, which is merged by the time it lands.
+    workspace.nextPr ??= {}
+    for (const pr of workspace.prs ?? []) if (!pr.state) pr.state = "merged"
+    const opened = workspace.repos.map((repo, i) => {
+      const number = workspace.nextPr[repo.name] ?? 27 + i
+      workspace.nextPr[repo.name] = number + 1
+      return { repo: repo.name, number, title, url: `https://github.com/${repo.name}/pull/${number}`, draft, state: null }
+    })
+    workspace.prs = [...opened, ...(workspace.prs ?? [])]
+    workspace.opened = true
+    const prResult = JSON.stringify({ results: opened.map((pr) => ({ name: pr.repo, committed: randomUUID().slice(0, 7), pushed: true, pr: { repo: pr.repo, number: pr.number, title: pr.title, url: pr.url, state: draft ? "draft" : "open", checks: null } })) })
     out.tool({ tool: "open_pull_request", toolCallId: prId, status: "completed", result: prResult })
     record(req, { role: "assistant", content: null, tool_calls: [{ id: prId, type: "function", function: { name: "open_pull_request", arguments: JSON.stringify(prArgs) } }] })
     record(req, { role: "tool", tool_call_id: prId, tool_name: "open_pull_request", content: prResult })
@@ -1916,8 +1931,9 @@ http
       }
       if (route === "close" && req.method === "POST") {
         if (!workspace) return json(res, 200, { object: "memento.closed", removed: true, kept: [], results: [] })
-        const open = workspace.opened && !workspace.closed && !userTurns(id).some((r) => /merge|close/i.test(r.content))
-        const results = workspace.opened ? workspace.repos.map((repo, i) => ({ name: repo.name, closed: open ? 27 + i : null, branch_deleted: true })) : []
+        const live = (workspace.prs ?? []).filter((pr) => !pr.state)
+        const open = live.length > 0 && !workspace.closed && !userTurns(id).some((r) => /merge|close/i.test(r.content))
+        const results = live.map((pr) => ({ name: pr.repo, closed: open ? pr.number : null, branch_deleted: true }))
         workspace.closed = true
         // The first repo keeps its tree after a turn that said "commit" (unpushed work).
         if (userTurns(id).some((r) => /commit/i.test(r.content)))
@@ -1938,27 +1954,37 @@ http
         // A host that can't reach GitHub answers an error, never an empty list: the app reads an
         // empty one as "no pull requests" and stores it over the ones it already knows.
         if (PRS_FAIL) return json(res, 502, { error: { message: "Couldn't reach GitHub from the server." } })
-        // A PR per repo once the agent opened them; "merge" merges them, "break" fails their
-        // checks, and "pending" runs them for a while before they pass.
+        // Every pull request the session opened, newest first, the ones it already finished
+        // included, as the plugin answers them. The live one's state follows the turns: "merge"
+        // merges it, "close" closes it, "draft" drafted it; "break" fails its checks and "pending"
+        // runs them for a while before they pass.
         const turns = userTurns(id)
         const said = (word) => turns.some((r) => new RegExp(word, "i").test(r.content))
-        const state = workspace?.closed || said("close") ? "closed" : said("merge") ? "merged" : workspace?.opened?.draft ? "draft" : "open"
         const pendingTurn = turns.findLast((r) => /pending/i.test(r.content))
         const checksRunning =
           pendingTurn && Date.now() / 1000 - pendingTurn.timestamp < PENDING_CHECK_S
+        const live = (workspace?.prs ?? []).find((pr) => !pr.state)
+        const state = !live
+          ? null
+          : workspace.closed || said("close")
+            ? "closed"
+            : said("merge")
+              ? "merged"
+              : live.draft
+                ? "draft"
+                : "open"
 
-        const prs = workspace?.opened
-          ? workspace.repos.map((repo, i) => ({
-              repo: repo.name,
-              number: 27 + i,
-              title: workspace.opened.title,
-              url: `https://github.com/${repo.name}/pull/${27 + i}`,
-              state,
-              checks: said("break") ? "failure" : checksRunning ? "pending" : "success",
-            }))
-          : []
-        // Like the plugin: a merge resolves the session in the chat list, once.
-        if (prs.length && prs.every((pr) => pr.state === "merged") && !workspace.mergeResolved) {
+        const prs = (workspace?.prs ?? []).map((pr) => ({
+          repo: pr.repo,
+          number: pr.number,
+          title: pr.title,
+          url: pr.url,
+          state: pr.state ?? state,
+          // A finished pull request's checks don't matter any more, so only the live one has them.
+          checks: pr.state ? null : said("break") ? "failure" : checksRunning ? "pending" : "success",
+        }))
+        // Like the plugin: a merge of the live one resolves the session in the chat list, once.
+        if (state === "merged" && !workspace.mergeResolved) {
           workspace.mergeResolved = true
           for (const [chatId, entry] of pluginChats)
             if (entry.value?.hermesSessionId === id && !entry.value.resolvedAt)

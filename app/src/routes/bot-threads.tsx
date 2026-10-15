@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Spinner } from "@/components/ui/spinner"
 import { sendMessage } from "@/lib/chat"
+import { serverConfig } from "@/lib/connection"
 import {
   createConversation,
   db,
@@ -293,7 +294,7 @@ export function BotThreadsPage({
           onCommand={(command) => root(command === "new" ? `/b/${profileId}` : "/settings")}
           filesAvailable={Boolean(profile?.apiKey)}
           imagesAvailable={profile?.imageInput !== false}
-          connection={{ baseUrl: profile?.baseUrl ?? "", apiKey: profile?.apiKey ?? "" }}
+          connection={serverConfig(profile)}
           botName={profile?.name}
           model={
             configured && (

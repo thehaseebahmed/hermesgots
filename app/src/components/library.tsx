@@ -27,13 +27,15 @@ import { LIST_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import {
   getLibraryFile,
   getProjectLibrary,
+  getSessionLibrary,
   type HermesConfig,
   type LibraryFile,
   type LibraryFolder,
 } from "@/lib/hermes"
 import { openExternal, openImageViewer } from "@/lib/native"
 import { usePoll } from "@/lib/poll"
-import { quietly } from "@/lib/report"
+import { noteFailure, quietly } from "@/lib/report"
+import { cn } from "@/lib/utils"
 
 /** Bots whose plugin has no library routes (an older plugin). */
 const unsupported = cooldown()
@@ -133,11 +135,16 @@ function FolderSection({
   config,
   folder,
   titles,
+  own,
 }: {
   config: HermesConfig
   folder: LibraryFolder
-  titles: Map<string, string>
+  /** Each session's title by its worktree's name; left out for a session's own tree, one session's. */
+  titles?: Map<string, string>
+  /** A session's own tree: folders close together, and room under one that's open. */
+  own?: boolean
 }) {
+  const sessions = titles ? sessionsOf(folder, titles) : ""
   return (
     <Collapsible defaultOpen={false} render={<section />}>
       <CollapsibleTrigger className="group flex min-h-11 w-full items-center gap-3 rounded-xl px-2 py-2 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring">
@@ -146,14 +153,14 @@ function FolderSection({
         </span>
         <span className="min-w-0 flex-1">
           <span className="block truncate font-medium">{folder.name}</span>
-          <span className="block truncate text-sm text-muted-foreground">
-            {sessionsOf(folder, titles)}
-          </span>
+          {sessions && (
+            <span className="block truncate text-sm text-muted-foreground">{sessions}</span>
+          )}
         </span>
         <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-panel-open:rotate-180 motion-reduce:transition-none" />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="space-y-0.5 pl-[3.25rem]">
+        <div className={cn("space-y-0.5 pl-[3.25rem]", own && "pb-3")}>
           {folder.files.map((file) => (
             <FileRow key={file.path} config={config} file={file} />
           ))}
@@ -164,10 +171,129 @@ function FolderSection({
 }
 
 /**
- * The project's Library as a tree: each folder — named after the flow its files belong to — with
- * the session that filed it, folded away until it's tapped and ordered by the sort menu. Read from
- * the plugin's library routes while the tab is on screen, at most every minute; a plugin without
- * them (an older one) is left alone for five minutes.
+ * Reads a library while it's on screen, at most every minute; a plugin without the routes (an older
+ * one) is left alone for five minutes. Shared by a project's Library tab and a session's outputs,
+ * which read the same tree from the project's route and the session's.
+ */
+function useLibraryRead(
+  config: HermesConfig,
+  load: (signal: AbortSignal) => Promise<LibraryFolder[]>,
+  active: boolean,
+) {
+  const [folders, setFolders] = useState<LibraryFolder[]>([])
+  const key = connectionKey(config)
+  const read = useCallback(
+    (signal: AbortSignal) => {
+      if (unsupported.cooling(key)) return
+      // A read that never answers is treated as lost rather than left hanging on the host.
+      void load(AbortSignal.any([signal, AbortSignal.timeout(READ_TIMEOUT_MS)]))
+        .then((found) => {
+          unsupported.clear(key)
+          if (signal.aborted) return
+          setFolders(found)
+        })
+        .catch((error: unknown) => {
+          noteFailure("Reading a library", error)
+          void lacksRoute(config, error, "library").then((missing) => {
+            if (missing) unsupported.start(key)
+          })
+        })
+    },
+    [config, key, load],
+  )
+  usePoll(read, LIST_MS, [], { active })
+  return folders
+}
+
+/**
+ * A library as a tree: each folder — named after the flow its files belong to — with the sessions
+ * that filed it, folded away until it's tapped, in the `order` it is handed. A session's own tree
+ * (`own`) is one session's files: no second line, its folders close together with room under an open
+ * one, and no sort menu of its own.
+ */
+export function LibraryTree({
+  config,
+  folders,
+  titles,
+  own,
+  order,
+  onSort,
+}: {
+  config: HermesConfig
+  folders: LibraryFolder[]
+  /** Each session's title by its worktree's name, for a folder's second line. */
+  titles?: Map<string, string>
+  /** A session's own files, rather than a project's across its sessions. */
+  own?: boolean
+  /** The order its folders and files are shown in. */
+  order: LibrarySort
+  /** Changes the order; left out, the tree carries no sort menu. */
+  onSort?: (sort: LibrarySort) => void
+}) {
+  const ordered = useMemo(() => sortFolders(folders, order), [folders, order])
+  if (!folders.length) {
+    return (
+      <p className="px-3 py-8 text-center text-sm text-muted-foreground sm:px-4">No files yet.</p>
+    )
+  }
+  return (
+    <div className="px-3 pb-4 sm:px-4">
+      {onSort && (
+        <div className="sticky top-0 z-10 flex justify-end bg-background py-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  className="h-11 gap-1.5 rounded-full px-3 text-xs text-muted-foreground"
+                  aria-label={`Sort the library by ${LIBRARY_SORTS[order]}`}
+                />
+              }
+            >
+              <ArrowDownUpIcon />
+              {LIBRARY_SORTS[order]}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-40">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={order}
+                  onValueChange={(value) => onSort(value as LibrarySort)}
+                >
+                  {(Object.keys(LIBRARY_SORTS) as LibrarySort[]).map((option) => (
+                    <DropdownMenuRadioItem
+                      key={option}
+                      value={option}
+                      className="min-h-11"
+                      closeOnClick
+                    >
+                      {LIBRARY_SORTS[option]}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
+      <div className={cn("space-y-6", own && "space-y-1 pt-2")}>
+        {ordered.map((folder) => (
+          <FolderSection
+            key={folder.name}
+            config={config}
+            folder={folder}
+            titles={titles}
+            own={own}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * A project's Library tab: every session's filed files as a tree, read from the plugin's project
+ * route while the tab is on screen.
  */
 export function LibraryTab({
   config,
@@ -181,76 +307,34 @@ export function LibraryTab({
   titles: Map<string, string>
   active: boolean
 }) {
-  const [folders, setFolders] = useState<LibraryFolder[]>([])
+  const load = useCallback(
+    (signal: AbortSignal) => getProjectLibrary(config, projectId, signal),
+    [config, projectId],
+  )
+  const folders = useLibraryRead(config, load, active)
   const [sort, setSort] = useLibrarySort()
-  const key = connectionKey(config)
-  const read = useCallback(
-    (signal: AbortSignal) => {
-      if (unsupported.cooling(key)) return
-      void getProjectLibrary(config, projectId, signal)
-        .then((found) => {
-          unsupported.clear(key)
-          if (signal.aborted) return
-          setFolders(found)
-        })
-        .catch((error: unknown) => {
-          void lacksRoute(config, error, "library").then((missing) => {
-            if (missing) unsupported.start(key)
-          })
-        })
-    },
-    [config, projectId, key],
-  )
-  usePoll(read, LIST_MS, [], { active })
-  const ordered = useMemo(() => sortFolders(folders, sort), [folders, sort])
-  if (!folders.length) {
-    return (
-      <p className="px-3 py-8 text-center text-sm text-muted-foreground sm:px-4">No files yet.</p>
-    )
-  }
   return (
-    <div className="px-3 pb-4 sm:px-4">
-      <div className="sticky top-0 z-10 flex justify-end bg-background py-2">
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                variant="ghost"
-                className="h-11 gap-1.5 rounded-full px-3 text-xs text-muted-foreground"
-                aria-label={`Sort the library by ${LIBRARY_SORTS[sort]}`}
-              />
-            }
-          >
-            <ArrowDownUpIcon />
-            {LIBRARY_SORTS[sort]}
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-40">
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>Sort by</DropdownMenuLabel>
-              <DropdownMenuRadioGroup
-                value={sort}
-                onValueChange={(value) => setSort(value as LibrarySort)}
-              >
-                {(Object.keys(LIBRARY_SORTS) as LibrarySort[]).map((option) => (
-                  <DropdownMenuRadioItem
-                    key={option}
-                    value={option}
-                    className="min-h-11"
-                    closeOnClick
-                  >
-                    {LIBRARY_SORTS[option]}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-      <div className="space-y-6">
-        {ordered.map((folder) => (
-          <FolderSection key={folder.name} config={config} folder={folder} titles={titles} />
-        ))}
-      </div>
-    </div>
+    <LibraryTree config={config} folders={folders} titles={titles} order={sort} onSort={setSort} />
   )
+}
+
+/**
+ * One session's own filed files, read from the plugin's session route while the drawer is open: only
+ * the folders that session filed into, listed newest first with nothing else on the row.
+ */
+export function SessionLibrary({
+  config,
+  sessionId,
+  active,
+}: {
+  config: HermesConfig
+  sessionId: string
+  active: boolean
+}) {
+  const load = useCallback(
+    async (signal: AbortSignal) => (await getSessionLibrary(config, sessionId, signal)).folders,
+    [config, sessionId],
+  )
+  const folders = useLibraryRead(config, load, active)
+  return <LibraryTree config={config} folders={folders} own order="new" />
 }

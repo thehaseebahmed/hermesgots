@@ -1,13 +1,9 @@
 import { noteFailure } from "@/lib/report"
-import { connectionKey } from "@/lib/connection"
+import { connectionKey, serverConfig } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { db, type Conversation, type Profile } from "@/lib/db"
 import { JUST_FOLLOWED_UP_MS } from "@/lib/freshness"
-import {
-  getProviderUsage,
-  type HermesConfig,
-  type ProviderUsage as ProviderUsageData,
-} from "@/lib/hermes"
+import { getProviderUsage, type ProviderUsage as ProviderUsageData } from "@/lib/hermes"
 
 /** Bots whose plugin has no usage route (an older plugin). */
 const unsupported = cooldown()
@@ -99,7 +95,7 @@ export async function refreshProviderUsage(profileId: string, provider: string |
   const at = asked.get(`${key} ${provider}`) ?? -Infinity
   if (Date.now() - at < JUST_FOLLOWED_UP_MS) return
   asked.set(`${key} ${provider}`, Date.now())
-  const config: HermesConfig = { baseUrl: profile.baseUrl, apiKey: profile.apiKey }
+  const config = serverConfig(profile)
   let usage: ProviderUsageData | null
   try {
     usage = await getProviderUsage(config, provider)

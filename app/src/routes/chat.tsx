@@ -34,6 +34,7 @@ import { MessageItem } from "@/components/chat/message-item"
 import { prLabel } from "@/components/chat/pr-look"
 import { PrPill } from "@/components/chat/pr-pill"
 import { LibraryPill } from "@/components/chat/library-pill"
+import { OutputsDrawer } from "@/components/chat/outputs-drawer"
 import { QuestionCard } from "@/components/chat/question-card"
 import {
   BlockedCard,
@@ -101,6 +102,7 @@ import {
   getMessages,
   updateConversation,
 } from "@/lib/db"
+import { serverConfig } from "@/lib/connection"
 import { describeActivity } from "@/lib/format"
 import { supportsSteer, type HermesProject } from "@/lib/hermes"
 import { readProjects, useProjects } from "@/lib/projects"
@@ -249,6 +251,7 @@ export function ChatPage() {
   // A new chat's pick, held until its first message makes the chat; it follows the chosen bot.
   const [pendingModel, setPendingModel] = useState<{ profileId?: string; choice?: ModelChoice }>()
   const [todosOpen, setTodosOpen] = useState(false)
+  const [outputsOpen, setOutputsOpen] = useState(false)
   const [theseusView, setTheseusView] = useState<SheetView | null>(null)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const [historyMissing, setHistoryMissing] = useState<string>()
@@ -294,6 +297,8 @@ export function ChatPage() {
   const session = conversation?.projectId ? conversation : undefined
   // The files the session filed in its library, as the pill above the composer counts them.
   const outputs = session?.library?.count ?? 0
+  // Every pull request the session has, the ones it already finished included, as the drawer lists.
+  const prs = session?.prs ?? []
   // While a pull request's checks run, read them again every few seconds so the pill turns
   // green (or orange) as soon as they do. Forced, so the freshness gate doesn't skip a tick that
   // lands just inside its window.
@@ -741,7 +746,7 @@ export function ChatPage() {
       )}
 
       <div data-toast-above className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
-        {(todos.length > 0 || theseus || (session?.prs?.length ?? 0) > 0 || outputs > 0) && (
+        {(todos.length > 0 || theseus || prs.length > 0 || outputs > 0) && (
           // One line, centred; wider than the screen it scrolls, from the first pill.
           <div className="-mx-3 flex [scrollbar-width:none] overflow-x-auto px-3 pb-2 sm:-mx-4 sm:px-4 [&::-webkit-scrollbar]:hidden">
             <div className="mx-auto flex w-max max-w-none min-w-full shrink-0 justify-center gap-2">
@@ -754,15 +759,19 @@ export function ChatPage() {
                   <TodosPill items={todos} live={busy} onClick={() => setTodosOpen(true)} />
                 )
               )}
-              {outputs > 0 && <LibraryPill count={outputs} className="shrink-0" />}
-              {session?.prs?.map((pr) => (
-                <PrPill
-                  key={pr.repo + "#" + pr.number}
-                  pr={pr}
-                  label={prLabel(pr, session.prs ?? [])}
-                  className="shrink-0"
-                />
-              ))}
+              {outputs === 0 && prs.length === 1 ? (
+                // One pull request and nothing filed: the pill itself, opening it on GitHub.
+                <PrPill pr={prs[0]} label={prLabel(prs[0], prs)} className="shrink-0" />
+              ) : (
+                // Anything else there opens the session's outputs drawer, counting both.
+                (outputs > 0 || prs.length > 1) && (
+                  <LibraryPill
+                    count={outputs + prs.length}
+                    onClick={() => setOutputsOpen(true)}
+                    className="shrink-0"
+                  />
+                )
+              )}
             </div>
           </div>
         )}
@@ -844,7 +853,7 @@ export function ChatPage() {
             imagesAvailable={profile?.imageInput !== false}
             onStop={() => id && stopMessage(id)}
             onCommand={(command) => root(command === "new" ? (botPath ?? "/") : "/settings")}
-            connection={{ baseUrl: profile?.baseUrl ?? "", apiKey: profile?.apiKey ?? "" }}
+            connection={serverConfig(profile)}
             botName={profile?.name}
             dictationHint={[
               conversation?.title,
@@ -883,6 +892,14 @@ export function ChatPage() {
         providerUsage={providerUsage}
       />
       <TodosSheet open={todosOpen} onOpenChange={setTodosOpen} items={todos} live={busy} />
+      {session && (
+        <OutputsDrawer
+          open={outputsOpen}
+          onOpenChange={setOutputsOpen}
+          session={session}
+          config={serverConfig(profile)}
+        />
+      )}
       {theseus && (
         <Suspense fallback={null}>
           <TheseusSheet

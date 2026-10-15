@@ -3,7 +3,7 @@ import { liveQuery } from "dexie"
 
 import { MISSING_ROUTE_MS } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
-import { connectionKey } from "@/lib/connection"
+import { connectionKey, serverConfig } from "@/lib/connection"
 import { cooldown } from "@/lib/cooldown"
 import { db, getSettings, updateConversation, type Profile } from "@/lib/db"
 import {
@@ -321,7 +321,7 @@ function reconcileStreams() {
     const controller = new AbortController()
     streams.set(key, { controller })
     notify()
-    void follow({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }, key, controller.signal)
+    void follow(serverConfig(profile), key, controller.signal)
   }
 }
 

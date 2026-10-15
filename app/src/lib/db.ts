@@ -161,7 +161,10 @@ export interface Conversation {
    * the project is archived), from the plugin. Local only.
    */
   blocked?: string
-  /** The branch's pull request in each repo, and when they were last read. Local only. */
+  /**
+   * Every pull request from the session's branches, newest first, the ones it already finished
+   * included, and when they were last read. Local only.
+   */
   prs?: PullRequestRef[]
   /**
    * How many files the session filed in its library, and when they were counted. Local only;
@@ -188,6 +191,19 @@ export interface PullRequestRef {
   url: string | null
   at: number
 }
+
+/** The states a pull request is still live in: open, or a draft waiting for review. */
+export const LIVE_PR_STATES: PrState[] = ["open", "draft"]
+
+/** Whether a pull request is one of a session's live ones. */
+export const prIsLive = (pr: Pick<PullRequestRef, "state">) => LIVE_PR_STATES.includes(pr.state)
+
+/** A pull request's identity among a session's: what GitHub closes, and what a list keys it by. */
+export const prKey = (pr: Pick<PullRequestRef, "repo" | "number">) => `${pr.repo}#${pr.number}`
+
+/** A session's pull requests, newest number first. */
+export const byNewestPr = (a: PullRequestRef, b: PullRequestRef) =>
+  b.number - a.number || a.repo.localeCompare(b.repo)
 
 export type TodoStatus = "pending" | "in_progress" | "completed" | "cancelled"
 

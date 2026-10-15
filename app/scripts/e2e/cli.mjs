@@ -101,6 +101,11 @@ const FLOWS = {
     about:
       "A shipped pull request lists in its project's PRs tab; a host that can't reach GitHub keeps the ones it knows",
   },
+  outputs: {
+    script: "e2e/outputs.mjs",
+    about:
+      "The outputs pill opens a drawer: a session's pull requests, live and finished, beside its library",
+  },
   dictation: {
     script: "regression-dictation.mjs",
     extra: { OFF_MOCK_URL: "no-dictation" },
