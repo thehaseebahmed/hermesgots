@@ -1,0 +1,57 @@
+name: Plugin install scan
+
+# Hermes scans a plugin before `hermes plugins install` and `update`: a dangerous verdict blocks the
+# install even with --force, and a caution one asks for confirmation. This runs the same scanner.
+on:
+  pull_request:
+    paths:
+      - "plugin/**"
+      - ".github/scripts/scan-plugin.py"
+      - ".github/workflows/plugin-scan.yml"
+  push:
+    branches: [main]
+    paths:
+      - "plugin/**"
+  # Weekly, so a scanner change in Hermes shows up before a user's install hits it.
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: plugin-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: Scan (Hermes ${{ matrix.hermes }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The latest release is what users install; main is what the next release will scan with.
+        hermes: [release, main]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pick the Hermes ref
+        id: ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ matrix.hermes }}" = release ]; then
+            ref=$(gh api repos/NousResearch/hermes-agent/releases/latest --jq .tag_name)
+          else
+            ref=main
+          fi
+          echo "Scanning with NousResearch/hermes-agent@$ref"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: ${{ steps.ref.outputs.ref }}
+          path: .hermes
+          sparse-checkout: tools
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Scan the plugin
+        run: python3 .github/scripts/scan-plugin.py .hermes plugin
