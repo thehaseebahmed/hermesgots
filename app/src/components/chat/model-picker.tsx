@@ -1,7 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react"
 import {
   ArrowUpDownIcon,
-  ArrowUpIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -23,7 +22,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { rememberModel, type ModelChoice, type Profile } from "@/lib/db"
-import { MAX_FALLBACKS, moveFallbackUp, withFallback } from "@/lib/fallback-list"
+import { MAX_FALLBACKS, withFallback } from "@/lib/fallback-list"
 import { useFallbackModels } from "@/lib/fallbacks"
 import { formatTokens } from "@/lib/format"
 import type { Fallback, ModelProvider } from "@/lib/hermes"
@@ -548,18 +547,6 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
               <span className="truncate">{fullModel(fallback)}</span>
               <ChevronDownIcon className="shrink-0 text-muted-foreground" />
             </Button>
-            {index > 0 && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-lg"
-                className="size-11 shrink-0"
-                aria-label={`Move fallback ${index + 1} up`}
-                onClick={() => write(moveFallbackUp(list, index))}
-              >
-                <ArrowUpIcon />
-              </Button>
-            )}
             <Button
               type="button"
               variant="ghost"

@@ -19,10 +19,3 @@ export function withFallback(
   return list.map((entry, at) => (at === index ? next : entry))
 }
 
-/** `list` with the entry at `index` one place earlier; the first slot has nowhere to go. */
-export function moveFallbackUp(list: Fallback[], index: number): Fallback[] {
-  if (index < 1 || index >= list.length) return list
-  const moved = [...list]
-  ;[moved[index - 1], moved[index]] = [moved[index], moved[index - 1]]
-  return moved
-}

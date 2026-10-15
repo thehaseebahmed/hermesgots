@@ -1,5 +1,5 @@
-// A bot's fallback models: its settings screen records them on the host, in order, moves one up,
-// takes one away, and never offers a third.
+// A bot's fallback models: its settings screen records them on the host, in order, takes one away,
+// and never offers a third.
 import { app, assert, flow, mock, pass } from "./lib.mjs"
 
 await flow("fallback-models", async ({ page, profileId, until, shot }) => {
@@ -42,23 +42,14 @@ await flow("fallback-models", async ({ page, profileId, until, shot }) => {
   ])
   await page.locator("#fallback-2").getByText("anthropic/claude-opus-4-1").waitFor()
   await shot("two")
-  // Two is what a bot takes: with both recorded there is no row to add a third.
+  // Two is what a bot takes: with both recorded there is no row to add a third, and no arrow to
+  // reorder them.
   assert.equal(await add.count(), 0)
-
-  await page.getByRole("button", { name: "Move fallback 2 up" }).click()
-  await until(
-    async () => (await hosted())[0]?.model === "claude-opus-4-1",
-    10_000,
-    "the host to hold the two the other way round",
-  )
-  assert.deepEqual(await hosted(), [
-    { provider: "anthropic", model: "claude-opus-4-1" },
-    { provider: "openrouter", model: "openai/gpt-5-mini" },
-  ])
+  assert.equal(await page.getByRole("button", { name: /Move fallback/ }).count(), 0)
 
   await page.getByRole("button", { name: "Remove fallback 1" }).click()
   await until(async () => (await hosted()).length === 1, 10_000, "the host to drop the one that was removed")
-  assert.deepEqual(await hosted(), [{ provider: "openrouter", model: "openai/gpt-5-mini" }])
+  assert.deepEqual(await hosted(), [{ provider: "anthropic", model: "claude-opus-4-1" }])
   await shot("removed")
-  pass("the host recorded two fallbacks in order, the move and the removal")
+  pass("the host recorded two fallbacks in order, and the removal")
 })

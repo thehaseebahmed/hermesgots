@@ -4,10 +4,10 @@ import { connectionKey } from "@/lib/connection"
 import type { Profile } from "@/lib/db"
 import { getFallbackModels, hasPluginFeature, setFallbackModels, type Fallback } from "@/lib/hermes"
 
-/** What a bot's host holds as its fallback models, and whether it can hold any at all. */
+/** What a bot's host holds as its fallback chain, and whether it can hold one at all. */
 export interface Fallbacks {
   fallbacks: Fallback[]
-  /** A host whose Gots plugin offers the route; an older one can't record fallbacks. */
+  /** A host whose Gots plugin offers the route; an older one can't hold fallbacks. */
   supported: boolean
 }
 

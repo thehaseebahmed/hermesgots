@@ -444,8 +444,9 @@ export interface Fallback {
 }
 
 /**
- * The fallback models the bot's host has recorded for its profile, in the order it holds them (the
- * Gots plugin's `fallbacks`). Newer plugin only; a host without the route answers 404.
+ * The bot's fallback models on its host, in the order it would try them after the main model (the
+ * Gots plugin's `fallbacks`, which is Hermes's own failover chain). Newer plugin only; a host
+ * without the route answers 404.
  */
 export async function getFallbackModels(config: HermesConfig): Promise<Fallback[]> {
   const response = await request(`${pluginRoot(config.baseUrl)}/fallbacks`, {
@@ -454,7 +455,7 @@ export async function getFallbackModels(config: HermesConfig): Promise<Fallback[
   return fallbackList((await response.json())?.fallbacks)
 }
 
-/** Records the bot's fallback models on its host, in order; an empty list clears them. Answers with
+/** Makes `fallbacks` the bot's chain on its host, in order; an empty list clears it. Answers with
  * the list the host holds, and throws with its reason when it refuses a pick. */
 export async function setFallbackModels(config: HermesConfig, fallbacks: Fallback[]) {
   const response = await request(`${pluginRoot(config.baseUrl)}/fallbacks`, {

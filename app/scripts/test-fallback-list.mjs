@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { MAX_FALLBACKS, moveFallbackUp, withFallback } from "../src/lib/fallback-list.ts"
+import { MAX_FALLBACKS, withFallback } from "../src/lib/fallback-list.ts"
 
 const sonnet = { provider: "openrouter", model: "anthropic/claude-sonnet-4.5" }
 const deepseek = { provider: "deepseek", model: "deepseek-v4-pro" }
@@ -46,14 +46,3 @@ test("an index outside the list leaves it as it was", () => {
   assert.deepEqual(withFallback([sonnet], -1, deepseek), [sonnet])
 })
 
-test("moving a fallback up swaps it with the one before", () => {
-  assert.deepEqual(moveFallbackUp([sonnet, deepseek], 1), [deepseek, sonnet])
-  assert.deepEqual(moveFallbackUp([sonnet], 1), [sonnet])
-  assert.deepEqual(moveFallbackUp([sonnet, deepseek], 0), [sonnet, deepseek])
-  assert.deepEqual(moveFallbackUp([], 0), [])
-})
-
-test("moving up twice is a return trip", () => {
-  const moved = moveFallbackUp(moveFallbackUp([sonnet, deepseek], 1), 1)
-  assert.deepEqual(moved, [sonnet, deepseek])
-})
