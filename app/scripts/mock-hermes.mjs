@@ -36,7 +36,8 @@
 // GET /api/plugins/memento/sessions/{id}/todos reads back from a keyed session's transcript.
 // Turns also run on POST /v1/runs, whose events replay from GET /v1/runs/{id}/events?last_seq=N and
 // which keep going when the client drops, unlike a chat completion. Say "long" for a slow reply, and
-// "fail" for a tool call that fails. Say "tool placement" to replay a real turn whose tool rows
+// "fail" for a tool call that fails, or "fail the turn" for a run that ends with an error instead of
+// an answer. Say "tool placement" to replay a real turn whose tool rows
 // rendered in the wrong place (add "report" for the longer work-log turn):
 // scripts/fixtures/tool-placement.json holds both, with the placement each call really had. Say
 // "marathon" for a turn longer than a transcript page: 40 steps of text and a tool call, quick at
@@ -62,7 +63,8 @@
 // the app queued and starts it when the session's run ends, like plugin/outbox.py. The agent asks the user questions
 // with Hermes's clarify tool, which the plugin serves on runs: say "ask" for one, or "ask five" for
 // five (plan mode asks before planning), the run carries
-// `clarify.request` and waits, and POST /api/plugins/memento/runs/{id}/clarify answers it.
+// `clarify.request` and waits, and POST /api/plugins/memento/runs/{id}/clarify answers it. POST
+// /__mock/clarify ends every pending question with no answer, like a window that closed on the user.
 // POST /v1/runs/{id}/steer hands a running turn more from the user: like Hermes, it lands as a
 // `display_kind: "steer"` user row after the next tool result, and one still unread when the turn
 // ends comes back as the run's `pending_steer`. Say "long" for a turn with a tool call every few steps.
@@ -644,6 +646,12 @@ async function playTurn(req, body, last, out) {
     out.tool({ tool: "clarify", toolCallId: id, status: "completed", result })
     record(req, { role: "tool", tool_call_id: id, tool_name: "clarify", content: result })
     return { answers, outcome }
+  }
+
+  // A turn that dies before it says anything, as a host that refuses the call or drops the
+  // connection does: the run ends with an error and the transcript holds no answer.
+  if (/fail the turn/i.test(last)) {
+    return { spoken: "", prompt_tokens: 6000, completion_tokens: 0, failed: true }
   }
 
   // In plan mode the plugin blocks every tool that changes anything, so the agent reads and plans.
@@ -1273,9 +1281,10 @@ function startRun(req, body) {
       push("clarify.responded", { clarify_id, outcome, answers })
       return { answers, outcome }
     },
-  }).then(({ spoken, output, prompt_tokens, completion_tokens }) => {
+  }).then(({ spoken, output, prompt_tokens, completion_tokens, failed }) => {
     if (steerPoints.get(run.sessionId)) steerPoints.delete(run.sessionId)
-    run.status = run.stopped ? "cancelled" : "completed"
+    run.status = run.stopped ? "cancelled" : failed ? "failed" : "completed"
+    if (failed) run.error = "The model provider didn't respond."
     run.endedAt = Date.now()
     // A scenario can name the final message alone, as Hermes's `final_response` carries it.
     const final = output ?? spoken
@@ -1285,7 +1294,7 @@ function startRun(req, body) {
     if (run.stopped) run.pendingSteer = undefined
     noteEvent("session", run.sessionId)
     noteEvent("runs", run.sessionId)
-    push(`run.${run.status}`, { completed: !run.stopped, interrupted: run.stopped, output: final, usage: run.usage, ...(run.pendingSteer ? { pending_steer: run.pendingSteer } : {}) })
+    push(`run.${run.status}`, { completed: !run.stopped && !failed, interrupted: run.stopped, ...(run.error ? { error: run.error } : {}), output: final, usage: run.usage, ...(run.pendingSteer ? { pending_steer: run.pendingSteer } : {}) })
     for (const listener of run.listeners) listener(null)
     setTimeout(() => pumpQueue(run.sessionId), 300)
   })
@@ -1303,7 +1312,8 @@ function streamRunEvents(req, res, run, lastSeq) {
     res.write(`data: ${JSON.stringify({ event: "replay.truncated", run_id: run.id, oldest_retained_seq: replay[0].seq })}\n\n`)
   }
   replay.forEach(send)
-  if (run.status === "completed" || run.status === "cancelled") return res.end(": stream closed\n\n")
+  // A finished run's stream ends at once, the way Hermes's does, however it finished.
+  if (["completed", "cancelled", "failed"].includes(run.status)) return res.end(": stream closed\n\n")
   const listener = (event) => (event ? send(event) : res.end(": stream closed\n\n"))
   run.listeners.add(listener)
   // Like Hermes, a comment every 10s while nothing else is sent, so the app can tell a live stream from a dead one.
@@ -1324,6 +1334,7 @@ const runStatus = (run) => ({
   ...(run.status === "waiting_for_approval" && run.approval ? { approval: run.approval } : {}),
   ...(run.clarify ? { clarify: run.clarify } : {}),
   ...(run.output !== undefined ? { output: run.output, usage: run.usage } : {}),
+  ...(run.error ? { error: run.error } : {}),
   ...(run.pendingSteer && run.output !== undefined ? { pending_steer: run.pendingSteer } : {}),
 })
 
@@ -1899,6 +1910,13 @@ http
         if (outcome === "lost") pendingApprovals.delete(id)
         else resolve("timeout")
       }
+      return json(res, 200, { ok: true })
+    }
+    // Dev only: POST { outcome } ends every run's pending question without the app. Its window
+    // closed on the user ("timed_out"), so the run carries on with no answer.
+    if (url.pathname === "/__mock/clarify" && req.method === "POST") {
+      const { outcome = "timed_out" } = await readBody(req)
+      for (const { resolve } of [...pendingClarifies.values()]) resolve({ answers: {}, outcome })
       return json(res, 200, { ok: true })
     }
     // Dev only: POST { fail } makes the plugin's read of a session's pull requests fail, like a

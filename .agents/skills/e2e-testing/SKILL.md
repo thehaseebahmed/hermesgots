@@ -167,7 +167,24 @@ Projects, attach it to your reply, or describe what it shows. Never commit scree
   `seed` does.
 - Cloud containers block `models.dev`, so the proxy reports failed connections to it. That's
   harmless: context windows are just unknown.
+- A send from the composer while a reply is still streaming *queues* the message instead of sending it,
+  so a flow that needs a send to fail — no host, a refusal — waits for the chat to be idle first: poll
+  Dexie until no message is `streaming` and none is `queued`.
+- A computed style read from the wrong element lies: a bubble's colour sits on its content
+  (`[data-slot=bubble-content]`, which takes it from the frame's variant) while its dimming sits on
+  the frame (`[data-slot=bubble]`, the `opacity-*` class). A child's own `opacity` is `1` whatever its
+  parent wears, so probe the element that carries the property.
 - When a selector stops matching, check whether the app renamed it before you blame your change.
   The sidebar's chat list went from "Conversations" to "Recents".
 - Don't `pkill -f` with a pattern from your own command line, because it kills your shell. Use
-  `pnpm e2e down`, or `fuser -k <port>/tcp`.
+  `pnpm e2e down`, or a bracketed pattern that can't match itself (`pkill -f 'mock-herme[s]'`).
+  `fuser` isn't installed everywhere, so `fuser -k <port>/tcp` can no-op silently: an old server
+  then keeps the port *and* its state, which reads as a regression in your change. Check with
+  `pgrep -af <name>` and kill by pid.
+- A dev server that was already running when the tree changed (a rebase, a checkout, a peer's
+  commits) can hold a stale dependency graph: a lazily imported route then fails to load and the
+  flow reports a missing control — `504 (Outdated Optimize Dep)` in the browser console is the tell.
+  Restart the app (clear `node_modules/.vite` first) before reading the failure as a regression.
+- A regression that seeds a fixed chat id — `regression-submission.mjs` uses `overlap-test` — reads
+  that session's transcript off the mock, so it passes only against a mock that hasn't served it
+  before. Restart the mock between runs of one.

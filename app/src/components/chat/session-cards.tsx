@@ -6,6 +6,7 @@ import {
   MapIcon,
   MessageCircleQuestionIcon,
   PencilLineIcon,
+  RotateCcwIcon,
   ZapIcon,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -13,6 +14,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Spinner } from "@/components/ui/spinner"
+import { sendMessage } from "@/lib/chat"
 import type { ToolEvent } from "@/lib/db"
 
 const CARD = "w-full rounded-3xl border shadow-xl ring-0 shadow-black/10 dark:shadow-black/40"
@@ -210,20 +212,50 @@ function readClarify(tool: ToolEvent): { asked: Asked[]; outcome?: string } {
   }
 }
 
+/** What the user says to have the agent ask a question it never got an answer for again. */
+const ASK_AGAIN = "Ask me that again."
+
+/**
+ * How a clarify call ended: what the card calls it, and whether an answer was still owed. Everything
+ * else Hermes says — an outcome this app doesn't know, or none at all — reads as no answer.
+ */
+const CLARIFY_ENDED: Record<string, { title: string; owed: boolean }> = {
+  submitted: { title: "Skipped", owed: false },
+  cancelled: { title: "Not answered", owed: false },
+  undelivered: { title: "Not answered", owed: false },
+  timed_out: { title: "No answer", owed: true },
+}
+
 /** A clarify call in the thread: its questions and the answers, or that it's waiting for them. */
-export function ClarifyCard({ tool }: { tool: ToolEvent }) {
+export function ClarifyCard({
+  tool,
+  conversationId,
+  busy,
+}: {
+  tool: ToolEvent
+  conversationId: string
+  /** A reply is streaming in this chat, so nothing can be sent right now. */
+  busy?: boolean
+}) {
   const running = tool.status === "running"
+  const [asking, setAsking] = useState(false)
   const { asked, outcome } = readClarify(tool)
   const answered = asked.some((a) => a.answers.length > 0)
-  const title = running
-    ? "Question"
-    : answered
-      ? "Answered"
-      : outcome === "submitted"
-        ? "Skipped"
-        : outcome === "cancelled" || outcome === "undelivered"
-          ? "Not answered"
-          : "No answer"
+  const ended = CLARIFY_ENDED[outcome ?? ""] ?? { title: "No answer", owed: true }
+  // The window closed on this question: it was neither answered nor skipped, so it can be asked
+  // again. Nothing resumes the expired call — the agent asks afresh, in a new turn.
+  const missed = !running && !answered && ended.owed
+  const title = running ? "Question" : answered ? "Answered" : ended.title
+  const askAgain = async () => {
+    setAsking(true)
+    try {
+      await sendMessage(conversationId, ASK_AGAIN)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't ask that again.")
+    } finally {
+      setAsking(false)
+    }
+  }
   return (
     <CentredCard icon={<MessageCircleQuestionIcon className="size-4" />} title={title}>
       {running ? (
@@ -233,6 +265,20 @@ export function ClarifyCard({ tool }: { tool: ToolEvent }) {
             <Spinner className="size-3.5" />
             Waiting for an answer…
           </p>
+        </>
+      ) : missed ? (
+        <>
+          {asked[0]?.question && <p>{asked[0].question}</p>}
+          <Button
+            variant="outline"
+            size="lg"
+            className="h-11"
+            disabled={asking || busy}
+            onClick={() => void askAgain()}
+          >
+            <RotateCcwIcon className="size-4" data-icon="inline-start" />
+            Ask again
+          </Button>
         </>
       ) : (
         answered &&

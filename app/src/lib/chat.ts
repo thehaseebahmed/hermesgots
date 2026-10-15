@@ -13,6 +13,7 @@ import {
   type Conversation,
   type Message,
   type MessageStats,
+  type MessageStatus,
   type Profile,
   type ToolEvent,
   updateConversation,
@@ -617,8 +618,12 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
   }
 }
 
-/** Settles a finished, stopped or failed reply: closes running tools, adds stats, saves it. */
-async function finishTurn(turn: Turn, usage: TurnUsage | undefined) {
+/**
+ * Settles a finished, stopped or failed reply: closes running tools, adds stats, saves it. A send
+ * that never reached Hermes leaves nothing on the host to read again, so its follow-ups — context,
+ * provider limits, todos, a session's workspace and pull requests — are left alone.
+ */
+async function finishTurn(turn: Turn, usage: TurnUsage | undefined, sendFailed = false) {
   const { draft, conversationId } = turn
   const endedAt = Date.now()
   draft.tools = draft.tools.map((t) =>
@@ -654,13 +659,15 @@ async function finishTurn(turn: Turn, usage: TurnUsage | undefined) {
   draft.runId = undefined
   draft.runSeq = undefined
   await turn.close()
-  noteFollowUps(conversationId)
+  if (!sendFailed) {
+    noteFollowUps(conversationId)
+    void refreshContext(conversationId)
+    void refreshChatProviderUsage(conversationId).catch(quietly("Reading provider limits"))
+    void refreshTodos(conversationId)
+  }
   await updateConversation(conversationId, { updatedAt: endedAt })
-  void refreshContext(conversationId)
-  void refreshChatProviderUsage(conversationId).catch(quietly("Reading provider limits"))
-  void refreshTodos(conversationId)
   const conversation = await db.conversations.get(conversationId)
-  if (conversation?.projectId) {
+  if (conversation?.projectId && !sendFailed) {
     if (draft.status === "done" && conversation.mode === "plan")
       await db.conversations.update(conversationId, { planPending: true })
     // A moment later: the plugin's own hook records the finished plan-mode turn.
@@ -714,10 +721,12 @@ function reattachLater(conversationId: string) {
 async function runTurn(
   turn: Turn,
   start: () => Promise<{ usage?: TurnUsage; pendingSteer?: string }>,
-) {
+): Promise<{ status: MessageStatus; sendFailed: boolean }> {
   const { draft, controller } = turn
   let usage: TurnUsage | undefined
   let pendingSteer: string | undefined
+  // The turn failed before anything reached Hermes, so the message can be sent again.
+  let sendFailed = false
   try {
     const result = await start()
     usage = result.usage
@@ -733,19 +742,23 @@ async function runTurn(
       draft.statusText = undefined
       await turn.close()
       reattachLater(turn.conversationId)
-      return draft.status
+      return { status: draft.status, sendFailed }
     } else {
       draft.status = "error"
       draft.statusText =
         error instanceof HermesError ? error.message : "Something went wrong talking to Hermes."
+      // A run that never started and nothing streamed: the message didn't reach Hermes at all, so it
+      // can go again. A reply that failed part-way through has something to keep, and its turn did
+      // reach the host.
+      if (!draft.runId && !draft.content && !draft.tools.length) sendFailed = true
     }
   }
   reattachTries.delete(turn.conversationId)
-  await finishTurn(turn, usage)
+  await finishTurn(turn, usage, sendFailed)
   // The plugin puts a leftover steer first in its own queue, and starts what waits there.
   if (await hostQueue(turn.config)) followHostQueue(turn.conversationId)
   else if (pendingSteer) await requeueSteer(turn.conversationId, pendingSteer)
-  return draft.status
+  return { status: draft.status, sendFailed }
 }
 
 /**
@@ -988,8 +1001,7 @@ export async function sendMessage(
 
   const config = serverConfig(profile)
   const turn = openTurn(conversationId, config, reply, false, controller)
-  let uploadFailed: AttachmentError | undefined
-  const status = await runTurn(turn, async () => {
+  const { status, sendFailed } = await runTurn(turn, async () => {
     // Without a key Hermes keeps no session under our id, so nothing would sync or resume.
     if (!config.apiKey) throw new HermesError("This bot has no API key. Link it in Settings.")
     // A project session works in its worktree; the plugin can't be told about it any other way.
@@ -997,17 +1009,12 @@ export async function sendMessage(
     stopIfAborted(turn)
     let sent = attachments
     if (attachments.length) {
-      try {
-        sent = await uploadAttachments(
-          config,
-          conversation.hermesSessionId,
-          attachments,
-          Boolean(profile.apiKey),
-        )
-      } catch (error) {
-        if (error instanceof AttachmentError) uploadFailed = error
-        throw error
-      }
+      sent = await uploadAttachments(
+        config,
+        conversation.hermesSessionId,
+        attachments,
+        Boolean(profile.apiKey),
+      )
       await db.messages.update(userMessage.id, { attachments: sent })
       stopIfAborted(turn)
     }
@@ -1040,14 +1047,17 @@ export async function sendMessage(
     return followTurnRun(turn, runId)
   })
 
-  if (uploadFailed && status === "error") {
-    // Nothing reached Hermes, so the message goes back where it came from to be sent again.
+  if (sendFailed) {
+    // Nothing reached Hermes, so the message keeps its place, its text and its attachments, and
+    // waits to be sent again or dropped. The empty reply row that recorded the failure goes, and the
+    // reason is kept on the message.
     await db.transaction("rw", db.messages, async () => {
       await db.messages.delete(reply.id)
-      if (queuedId) await db.messages.update(queuedId, { status: "queued" })
-      else await db.messages.delete(userMessage.id)
+      await db.messages.update(userMessage.id, {
+        status: "error",
+        statusText: turn.draft.statusText,
+      })
     })
-    throw uploadFailed
   }
   if (status !== "done") return
   // Hermes only keys the session by our id when the profile has an API key.
@@ -1148,7 +1158,7 @@ async function resumeReply(reply: Message) {
   }
   const config = serverConfig(profile)
   const turn = openTurn(conversationId, config, reply, true, controller)
-  const status = await runTurn(turn, () => followTurnRun(turn, runId))
+  const { status } = await runTurn(turn, () => followTurnRun(turn, runId))
   if (status === "done") await sendNextQueued(conversationId)
 }
 
@@ -1373,7 +1383,10 @@ export async function sendNextQueued(conversationId: string) {
   if (next) await sendQueued(next)
 }
 
-/** Sends a queued message now; one whose attachments couldn't be saved stays queued. */
+/**
+ * Sends a message this device is still holding — one waiting in the queue, or a send the user asked
+ * to try again. One that fails stays where it is, to send again or drop.
+ */
 export async function sendQueued(message: Message) {
   if (message.hostQueued) {
     const host = await hostOf(message.conversationId)
@@ -1383,17 +1396,22 @@ export async function sendQueued(message: Message) {
     followHostQueue(message.conversationId)
     return
   }
-  try {
-    await sendMessage(message.conversationId, message.content, {
-      queuedId: message.id,
-      attachments: message.attachments,
-    })
-  } catch (error) {
-    if (!(error instanceof AttachmentError)) throw error
-    toast.error(error.message)
+  // A reply is still streaming, so no turn can start: the message waits its turn like any other
+  // send does, keeping the id it has, instead of the control refusing to work. `sendMessage` would
+  // return without a word here.
+  if (controllers.has(message.conversationId)) {
+    const held: Message = { ...message, status: "queued", queuePaused: false }
+    delete held.statusText
+    await db.messages.put(held)
+    return
   }
+  await sendMessage(message.conversationId, message.content, {
+    queuedId: message.id,
+    attachments: message.attachments,
+  })
 }
 
+/** Drops a message this device is still holding, queued or failed, with the text it kept. */
 export async function removeQueued(message: Message) {
   if (message.hostQueued) {
     const host = await hostOf(message.conversationId)

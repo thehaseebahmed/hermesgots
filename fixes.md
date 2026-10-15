@@ -156,3 +156,147 @@ correctness was out of scope — and none of the three blocks the pull request. 
 effect of hiding the field when the host can't record fallbacks has no entry: the heading now
 appears only once the plugin probe has answered, so the settings card grows a moment after it opens,
 which only a skeleton would avoid.
+
+---
+
+# Deferred fixes from the simplify pass on the chat's retry and failed sends
+
+A cleanup review of `feat(chat): retry missed questions and failed sends, and show errors plainly`
+(four parallel reviewers: reuse, quality, efficiency, altitude) turned up eight changes worth making
+that are too wide for a cleanup pass. They are recorded here instead of applied: each touches a
+second module, a state the app shares with the host, or a surface that does not exist yet.
+
+Everything else the review found is applied on this branch: the failed send's retry and drop reuse
+`sendQueued`/`removeQueued` instead of copying their bodies, the queued and failed action rows share
+one component, a clarify outcome's title and whether an answer was owed come from one table, the
+send-failed outcome is returned by `runTurn` rather than parked on the turn, its host follow-ups are
+skipped when nothing reached Hermes, the double no longer carries a flag it never sets and ends a
+replayed failed run's stream, and an e2e helper stopped sharing a name with `lib.mjs`'s.
+
+## Risky
+
+### 1. A retry mints a new idempotency key
+
+`app/src/lib/chat.ts:1038` keys the POST to `/v1/runs` off the reply row's id, which
+`app/src/lib/hermes.ts:2098` documents as what makes a retried POST return the run it already
+started; the plugin's queue keys its own re-dispatch off the queue item id for the same reason. A
+failed send's Retry re-sends with a fresh reply id, so a send the host accepted whose answer was
+lost (a dropped connection, a 5xx from a proxy after the run began) is started again. The catch-up
+reconcile then only pairs local user rows with `status === "done"` (`app/src/lib/history.ts:699`),
+so the row this branch leaves as `error` is never matched and the turn can be inserted beside it.
+
+- Cost: duplicate agent work — tool calls, a pull request — and two user bubbles for one message
+  after a catch-up, on exactly the flaky networks the state exists for.
+- Suggested fix: key the POST off something stable for the message (`userMessage.id`, or an id kept
+  on the row) so Hermes's own dedupe covers a retry; and in the reconcile, match a failed row by
+  content and time and promote it — clear the failure, keep its id, attach its reply — instead of
+  inserting the turn again.
+- Why it is risky: it changes the request shape in `hermes.ts` and the reconcile in `history.ts`,
+  two modules this branch does not otherwise touch, and the promotion is a focused change of its
+  own. The flows cannot see it: `blockSends` aborts before the request leaves.
+
+### 2. A failed send is a second "not sent" state
+
+`status: "error"` on a user row, with its own control row (`message-item.tsx`'s `FailedActions`)
+and no reason shown, sits beside the state the app already had: `status: "queued"` with
+`queuePaused` and `statusText` (`app/src/lib/chat.ts:1300-1302`), whose `QueuedActions` row prints
+the reason the new one drops. The host and another device know only the queued one.
+`app/src/lib/threads.ts:103-104` reads a thread's failure from its newest assistant row, so a chat
+whose only turn failed to send reads idle in that screen's sidebar.
+
+- Cost: two states, two control rows and two reason treatments for one situation, kept in step by
+  hand, and every later reader of a message's status has to learn the new one.
+- Suggested fix: give "not sent yet" one home — mark the row queued and paused with the host's
+  wording and make `sendNextQueued` (`chat.ts:1381`) skip a paused row, or add an explicit
+  `MessageStatus` for it and move the message row, threads, history and chat onto it together.
+- Why it is risky: `MessageStatus` is switched on in four modules, and the queued state carries
+  host-side meaning (the plugin sends it) that a local failure must not claim before
+  `sendNextQueued` learns to leave a paused row alone.
+
+### 3. "It never reached Hermes" is inferred from an empty draft
+
+`app/src/lib/chat.ts:753` decides it from `!draft.runId && !draft.content && !draft.tools.length`,
+and `runId` is only ever set on the `/v1/runs` path (`chat.ts:1038`). On a host without runs, every
+failure looks like one that never left the device: a chat-completion turn the host accepted and then
+failed (a 5xx, a timeout after the POST) keeps its message retryable, drops the reply row
+(`chat.ts:1050`) and can be sent a second time.
+
+- Cost: a retry can put the same turn on the host twice, and the reason the host gave for the
+  failure goes with the reply row.
+- Suggested fix: decide it where the failure is known — a throw before the request can have been
+  accepted (no API key, an attachment upload) or a fetch-level network error is "never left", while
+  an HTTP answer from the host is a failed turn that keeps its row, as it did before this branch.
+- Why it is risky: it splits the failure handling in `sendMessage` and changes what a host's 5xx
+  leaves behind, on a path the flows only exercise one way (a blocked or refused request).
+
+## Careful
+
+### 4. A failed send writes the reply row it is about to delete
+
+`chat.ts:1055` deletes the empty reply row in a transaction, but `turn.close()` (`chat.ts:205`) sets
+`dirty = true` and flushes unconditionally, so the draft — status `error`, its tools — reaches Dexie
+and wakes every live query over the chat a beat before it goes.
+
+- Cost: one wasted write and one live-query wake per failed send and per retry of an unreachable
+  host, on the path the write budget exists to protect (`pnpm e2e stream-writes`).
+- Suggested fix: mark the doomed reply where the failure is known and let `close()` skip its last
+  flush, awaiting the flush the delete needs.
+- Why it is risky: it moves `openTurn`'s flush lifecycle, which every turn shares, to save one write
+  on one path.
+
+### 5. The reason a send failed is stored and never read
+
+`chat.ts:1058` writes the host's wording into the message's `statusText`, and nothing reads a user
+row's `statusText`: `FailedActions` shows none by design, and the reply row that used to carry it is
+deleted.
+
+- Cost: the one place the app kept the host's answer to "why didn't it go" — rate limit, offline, no
+  API key — reaches nobody, while the queue's own row still shows its reason.
+- Suggested fix: a chat-level error line near the composer, reading the field the message already
+  holds — the design keeps a reason out of the message row and separate in the chat.
+- Why it is risky: it is new UI in `routes/chat.tsx` rather than a cleanup, and `failed-send.mjs`
+  asserts the reason is not repeated under the message, so the surface has to be its own line.
+
+### 6. "Ask again" names no question
+
+`app/src/components/chat/session-cards.tsx:216` sends a fixed sentence, while the card holds the
+question it means (`asked[0].question`, rendered beside the button). Nothing checks that the agent
+asked anything again.
+
+- Cost: the button promises a particular question is asked again and cannot deliver that, and the
+  transcript gains a message the user never typed.
+- Suggested fix: carry the question into the retry (`Ask me again: <question>`), or have the plugin
+  re-raise the pending question from the clarify id it stored — that route does not exist yet.
+- Why it is risky: it changes copy the user chose and what the transcript shows, and the plugin
+  route is a new feature rather than a cleanup.
+
+### 7. The double's failed turn records nothing
+
+`app/scripts/mock-hermes.mjs:653` returns before `record`, so the failed turn leaves no transcript
+row, while the host persists a `failed_turn` row that `history.ts:315-317` maps.
+
+- Cost: the reload and catch-up path for a bare error row — the case `bareError` exists for — is
+  never exercised, so a change to that row's shape passes CI.
+- Suggested fix: record the failed turn as the host does, and extend `plain-error.mjs` to reload and
+  assert the row still reads as plain text with no bot beside it.
+- Why it is risky: test-only, but the double then has to match the host's row shape, which is
+  exactly what it simplified away.
+
+### 8. Three flows keep their own copy of the same page-side helpers
+
+`app/scripts/e2e/failed-send.mjs:42` sends a photo from the page the way `photo-progress.mjs` and
+`image-viewer.mjs` already do; the row locator is written twice (`failed-send.mjs:62`,
+`plain-error.mjs:12`); and the laptop/phone-dark pair is restated in each flow this branch adds,
+though `cli.mjs` already owns the height convention.
+
+- Cost: the next flow copies a fourth time, and a change to the app's module paths or to the
+  message slot name breaks three files.
+- Suggested fix: one `photo(...)`, `row(...)` and `LOOKS` in `lib.mjs`'s `helpers(page)`, with the
+  three flows using them.
+- Why it is risky: it edits two pre-existing flows for a test-only gain, and each has to be re-run
+  at both widths to show the move changed nothing.
+
+---
+
+Found by the `/simplify-code` pass on this branch. It was a cleanup review, not a bug hunt —
+correctness was out of scope — and none of the eight blocks the pull request.
