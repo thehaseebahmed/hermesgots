@@ -65,7 +65,16 @@ async function tracked(conversationId: string) {
 }
 
 async function store(conversationId: string, workspace: SessionWorkspace | null) {
-  if (!workspace) return
+  const current = await db.conversations.get(conversationId)
+  if (!current) return
+  if (!workspace) {
+    // The read came back with no workspace of this session's own — the plugin has no record for it,
+    // or answered with another session's. A plan already taken from that other session stays on the
+    // row otherwise, and the card it draws would approve a file this session never planned.
+    if (current.planPending || current.planFile)
+      await db.conversations.update(conversationId, { planPending: false, planFile: undefined })
+    return
+  }
   const next: Partial<Conversation> = {
     mode: workspace.mode,
     worktree: {
@@ -78,8 +87,6 @@ async function store(conversationId: string, workspace: SessionWorkspace | null)
     blocked: workspace.blocked ?? undefined,
   }
   // Read after every turn and catch-up; a write that changes nothing still wakes every query.
-  const current = await db.conversations.get(conversationId)
-  if (!current) return
   const same = (Object.keys(next) as (keyof Conversation)[]).every(
     (key) => JSON.stringify(current[key]) === JSON.stringify(next[key]),
   )

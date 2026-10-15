@@ -234,16 +234,26 @@ export function ChatPage() {
   const navigate = useNavigate()
   const { root, up } = useNav()
   const settings = useLiveQuery(() => db.settings.get("settings"), [])
-  const conversation = useLiveQuery(
+  const found = useLiveQuery(
     async () => (id ? ((await db.conversations.get(id)) ?? null) : undefined),
     [id],
   )
-  // A chat talks to its own bot; a new chat goes to the selected one.
-  const profile = useLiveQuery(async () => {
+  // The route is the chat on screen. The live query keeps its last result until the next one is in,
+  // so a session swapped in place beside its project can still hand back the one before it: nothing
+  // of that session may render or be acted on here — its plan card's Approve would send its plan.
+  const conversation = found && found.id !== id ? undefined : found
+  // A chat talks to its own bot; a new chat goes to the selected one. Same rule as the row above:
+  // the query answers with the id it ran for, so a stale answer can't pass for this route's.
+  const owners = useLiveQuery(async () => {
     const owner = id ? (await db.conversations.get(id))?.profileId : undefined
-    return ((owner && (await db.profiles.get(owner))) || (await getActiveProfile())) ?? null
+    return {
+      id,
+      profile: ((owner && (await db.profiles.get(owner))) || (await getActiveProfile())) ?? null,
+    }
   }, [id])
-  const messages = useLiveQuery(() => (id ? getMessages(id) : []), [id])
+  const profile = owners && owners.id === id ? owners.profile : undefined
+  const threads = useLiveQuery(async () => ({ id, rows: id ? await getMessages(id) : [] }), [id])
+  const messages = threads && threads.id === id ? threads.rows : undefined
   const [renaming, setRenaming] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [discarding, setDiscarding] = useState(false)
