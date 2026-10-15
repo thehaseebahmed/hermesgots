@@ -16,18 +16,20 @@ const waitForWidth = (page, width) =>
     { timeout: 5_000 },
   )
 
-/** The rail's rows, as boxes, to prove each one is still a 44px touch target. */
+/** The rail's rows, as boxes, to prove each one is still a 44px touch target on the rail's centre. */
 const railRows = (page) =>
-  page.locator("aside a, aside button").evaluateAll((rows) =>
-    rows.map((row) => {
+  page.locator("aside a, aside button").evaluateAll((rows) => {
+    const rail = document.querySelector("aside").getBoundingClientRect()
+    return rows.map((row) => {
       const box = row.getBoundingClientRect()
       return {
         name: row.getAttribute("aria-label") ?? row.textContent.trim(),
         width: Math.round(box.width),
         height: Math.round(box.height),
+        offCentre: Math.round(box.left + box.width / 2 - (rail.left + rail.width / 2)),
       }
-    }),
-  )
+    })
+  })
 
 for (const dark of [false, true]) {
   const look = dark ? "dark" : "light"
@@ -82,7 +84,14 @@ for (const dark of [false, true]) {
           row.width >= 44 && row.height >= 44,
           `row ${row.name} is 44px: ${JSON.stringify(row)}`,
         )
+        // Every row sits on the rail's own centre line, whichever group it belongs to.
+        assert.ok(
+          Math.abs(row.offCentre) <= 1,
+          `row ${row.name} is centred: ${JSON.stringify(row)}`,
+        )
       }
+      // The collapse control leads the rail, above Search.
+      assert.equal((await railRows(page))[0].name, "Expand sidebar", "the toggle is the top row")
       await shot("collapsed")
 
       // The choice is kept on the device: a reload comes back collapsed.

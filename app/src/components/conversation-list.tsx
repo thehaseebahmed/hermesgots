@@ -153,7 +153,7 @@ function Recents({
       {!collapsed && recents?.length === 0 && (
         <p className="px-3 py-2 text-sm text-muted-foreground">No chats yet. Say hi to Hermes!</p>
       )}
-      <ul className="flex flex-col gap-0.5">
+      <ul className={cn("flex flex-col gap-0.5", collapsed && "items-center")}>
         {recents?.map(({ chat, bot, local }) => {
           const reason = local ?? live[chat.hermesSessionId]
           return (
@@ -253,7 +253,7 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
           </DropdownMenu>
         </div>
       )}
-      <ul className="flex flex-col gap-0.5">
+      <ul className={cn("flex flex-col gap-0.5", collapsed && "items-center")}>
         {bots?.map(({ bot, latest, waiting }) => (
           <li key={bot.id}>
             <RootLink
@@ -351,7 +351,7 @@ function Waiting({
             </span>
           </h2>
         )}
-        <ul className="flex flex-col gap-0.5">
+        <ul className={cn("flex flex-col gap-0.5", collapsed && "items-center")}>
           {waiting.map(({ sessionId, title, reason, project }) => {
             const Icon = REASON_ICONS[reason.kind]
             return (
@@ -443,25 +443,30 @@ export function ConversationList({
         {!collapsed && (
           <span className="flex-1 pl-1 text-xl font-semibold tracking-tight">Gots</span>
         )}
-        <Button variant="ghost" size="icon-lg" className="size-11 rounded-full" aria-label="Search">
-          <SearchIcon />
-        </Button>
         {onToggleCollapsed && (
           <Button
             variant="ghost"
             size="icon-lg"
-            className="size-11 rounded-full"
+            className={cn("size-11 rounded-full", collapsed && "text-muted-foreground")}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             aria-expanded={!collapsed}
             onClick={onToggleCollapsed}
           >
-            {collapsed ? <PanelLeftOpenIcon /> : <PanelLeftCloseIcon />}
+            {collapsed ? <PanelLeftOpenIcon className="size-5" /> : <PanelLeftCloseIcon />}
           </Button>
         )}
+        <Button
+          variant="ghost"
+          size="icon-lg"
+          className={cn("size-11 rounded-full", collapsed && "text-muted-foreground")}
+          aria-label="Search"
+        >
+          <SearchIcon className={collapsed ? "size-5" : undefined} />
+        </Button>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-        <nav className="flex flex-col gap-0.5" aria-label="Main">
+        <nav className={cn("flex flex-col gap-0.5", collapsed && "items-center")} aria-label="Main">
           <RootLink
             to="/code"
             onClick={onNavigate}
