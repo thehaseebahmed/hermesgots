@@ -1,7 +1,8 @@
 import { connectionKey } from "@/lib/connection"
 import { cooldown } from "@/lib/cooldown"
 import { db } from "@/lib/db"
-import { getPluginFeatures, getPluginMedia, type HermesConfig } from "@/lib/hermes"
+import { READ_TIMEOUT_MS } from "@/lib/freshness"
+import { getPluginMedia, hasPluginFeature, type HermesConfig } from "@/lib/hermes"
 
 export type MediaPart =
   { kind: "text"; at: number; text: string } | { kind: "media"; at: number; paths: string[] }
@@ -105,7 +106,8 @@ export function getMediaImage(config: HermesConfig, path: string): Promise<strin
   const key = `${config.baseUrl}\n${path}`
   let pending = images.get(key)
   if (!pending) {
-    pending = getPluginMedia(config, path)
+    // A host that goes quiet must not leave the image's place pulsing: the read is bounded.
+    pending = getPluginMedia(config, path, AbortSignal.timeout(READ_TIMEOUT_MS))
       .then((blob) => URL.createObjectURL(blob))
       .catch(() => null)
     images.set(key, pending)
@@ -126,14 +128,9 @@ export async function loadMediaImage(conversationId: string, path: string): Prom
   if (!profile) return null
   const key = connectionKey(profile)
   if (unsupported.cooling(key)) return null
-  let features: string[]
-  try {
-    features = await getPluginFeatures(profile)
-  } catch {
-    unsupported.start(key)
-    return null
-  }
-  if (!features.includes("media")) {
+  // One ask per server, kept for the page's life (and asked again when it fails), not one per
+  // image: a gallery's images would otherwise ask about the plugin once each, as a reply streams.
+  if (!(await hasPluginFeature(profile, "media"))) {
     unsupported.start(key)
     return null
   }
