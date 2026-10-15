@@ -170,6 +170,10 @@ Projects, attach it to your reply, or describe what it shows. Never commit scree
 - A send from the composer while a reply is still streaming *queues* the message instead of sending it,
   so a flow that needs a send to fail — no host, a refusal — waits for the chat to be idle first: poll
   Dexie until no message is `streaming` and none is `queued`.
+- A computed style read from the wrong element lies: a bubble's colour sits on its content
+  (`[data-slot=bubble-content]`, which takes it from the frame's variant) while its dimming sits on
+  the frame (`[data-slot=bubble]`, the `opacity-*` class). A child's own `opacity` is `1` whatever its
+  parent wears, so probe the element that carries the property.
 - When a selector stops matching, check whether the app renamed it before you blame your change.
   The sidebar's chat list went from "Conversations" to "Recents".
 - Don't `pkill -f` with a pattern from your own command line, because it kills your shell. Use
