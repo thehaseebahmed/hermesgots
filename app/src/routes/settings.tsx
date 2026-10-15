@@ -33,6 +33,7 @@ import {
   PlusIcon,
   SailboatIcon,
   SunIcon,
+  TrophyIcon,
   TelescopeIcon,
   TimerIcon,
   UserIcon,
@@ -41,6 +42,7 @@ import {
 import { toast } from "sonner"
 
 import { AccountSettings } from "@/components/account-settings"
+import { CommunitySettings } from "@/components/community-settings"
 import { BotEditor } from "@/components/bot-settings"
 import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
@@ -104,6 +106,7 @@ const THEMES = [
 const SECTIONS: Record<string, { title: string; render: () => ReactNode }> = {
   account: { title: "Account", render: () => <AccountSettings /> },
   appearance: { title: "Appearance", render: () => <AppearanceSettings /> },
+  community: { title: "Community", render: () => <CommunitySettings /> },
   notifications: { title: "Notification types", render: () => <NotificationTypes /> },
   data: { title: "Local data", render: () => <DataSettings /> },
   developer: { title: "Developer", render: () => <DeveloperSettings /> },
@@ -245,6 +248,7 @@ function MenuScreen({
         <NotificationsRow />
         <NotificationTypesRow />
       </Group>
+      <CommunityRow />
       <Group>
         <FeedbackRow />
       </Group>
@@ -342,6 +346,16 @@ function NotificationsRow() {
       disabled={busy}
       onCheckedChange={toggle}
     />
+  )
+}
+
+function CommunityRow() {
+  const { account } = useSyncState()
+  if (account.status !== "signed-in") return null
+  return (
+    <Group>
+      <Row to="community" icon={TrophyIcon} title="Community" />
+    </Group>
   )
 }
 

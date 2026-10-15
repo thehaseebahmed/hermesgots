@@ -1,29 +1,30 @@
 ---
 import Board from "../components/Board.astro"
 import Base from "../layouts/Base.astro"
-import { BOT_NAMES, loadBoard } from "../lib/board"
-
-const board = loadBoard()
 ---
 
 <Base
   title="Gots Community"
-  description="Tokens used by people running Gots, today, this week and this month."
+  description="Who spends the most tokens and which models carry them, from people running Gots."
 >
   <div class="shell board-page">
     <main>
-      <span class="badge">Sample data</span>
+      <span class="badge" id="sample-badge">Sample data</span>
       <div class="hero">
         <div>
-          <h1>Token leaderboard</h1>
+          <h1>Community</h1>
           <p class="lede">Tokens used by people who chose to share their count.</p>
         </div>
-        <ul class="crew" aria-hidden="true">
-          {Object.keys(BOT_NAMES).slice(0, 5).map((id) => <li><img src={`/bots/${id}.png`} alt="" width="36" height="36" /></li>)}
-        </ul>
       </div>
-      <Board board={board} />
-      <p class="note">Days run on UTC. Counts are reported by each person's Hermes host.</p>
+      <Board />
+      <p class="note">
+        Days run on UTC. Counts are reported by each person's Hermes host and only cover Gots.
+      </p>
     </main>
   </div>
+  <script>
+    document.addEventListener("board:live", () => {
+      document.getElementById("sample-badge")?.remove()
+    })
+  </script>
 </Base>
