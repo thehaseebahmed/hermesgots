@@ -56,6 +56,10 @@ for (const [width, dark] of [
       page.on("console", (message) => {
         if (message.type() === "error") errors.push(`${width}: ${message.text()}`)
       })
+      // Beside the meeting from 1280px, the list needs no way back to it.
+      const toList = async () => {
+        if (width < 1280) await page.getByRole("button", { name: "Back to Meetings" }).click()
+      }
       const setSwitch = (meetings) =>
         page.evaluate(async (meetings) => {
           const { db } = await import("/src/lib/db.ts")
@@ -103,6 +107,23 @@ for (const [width, dark] of [
       await shot("2-recap")
       pass(`${width}: a ready meeting opens on its recap and timeline`)
 
+      // From 1280px the list stays beside the meeting, with the open one marked.
+      const listed = page.getByRole("searchbox", { name: "Search meetings" })
+      if (width >= 1280) {
+        assert.ok(await listed.isVisible(), "list stays beside the meeting")
+        assert.equal(
+          await page.locator("[aria-current]").filter({ hasText: "Weekly product sync" }).count(),
+          1,
+        )
+        assert.equal(await page.getByRole("button", { name: "Back to Meetings" }).count(), 0)
+        const box = await listed.boundingBox()
+        assert.ok(box && box.x > 300 && box.x < 400, "list is a pane right of the sidebar")
+        await shot("2b-panes")
+      } else assert.equal(await listed.count(), 0, "list is replaced below 1280px")
+      pass(
+        `${width}: ${width >= 1280 ? "the list stays beside the meeting" : "the meeting replaces the list"}`,
+      )
+
       // A time opens its topic with the transcript at that line.
       await page.getByRole("button", { name: "Play from 1:52" }).first().click()
       await page.getByRole("heading", { name: "The beta date" }).waitFor({ timeout: 5_000 })
@@ -133,7 +154,7 @@ for (const [width, dark] of [
       pass(`${width}: an action starts and the bot answers a question`)
 
       // Record: mark a moment, write a note, end it and follow it to its recap.
-      await page.getByRole("button", { name: "Back to Meetings" }).click()
+      await toList()
       await page.getByRole("button", { name: "Record", exact: true }).click()
       await page.getByText("Recording", { exact: true }).waitFor({ timeout: 5_000 })
       await page.getByRole("textbox", { name: "Title" }).fill("Plan for the import flow")
@@ -161,7 +182,7 @@ for (const [width, dark] of [
       pass(`${width}: a recording with a marked moment is written up`)
 
       // An audio file from the device.
-      await page.getByRole("button", { name: "Back to Meetings" }).click()
+      await toList()
       await page.getByRole("button", { name: "Upload", exact: true }).click()
       await page
         .locator("input[type=file]")
@@ -176,7 +197,7 @@ for (const [width, dark] of [
       pass(`${width}: an added file is written up as notes`)
 
       // A transcript file fills the box; one pasted is read as it's typed.
-      await page.getByRole("button", { name: "Back to Meetings" }).click()
+      await toList()
       await page.getByRole("button", { name: "Upload", exact: true }).click()
       await page.getByRole("tab", { name: "Transcript" }).click()
       await page
@@ -198,12 +219,14 @@ for (const [width, dark] of [
       await page.getByRole("button", { name: "Add", exact: true }).click()
       await page.waitForURL("**/meetings/m_*", { timeout: 5_000 })
       await page.getByText("Pricing chat").first().waitFor()
-      assert.equal(await page.getByText(/Uploading|Transcribing/).count(), 0, "no upload step")
+      // Beside the list, the earlier upload's row says Transcribing, so only look when it's alone.
+      if (width < 1280)
+        assert.equal(await page.getByText(/Uploading|Transcribing/).count(), 0, "no upload step")
       await page.getByRole("heading", { name: "To do" }).waitFor({ timeout: 10_000 })
       pass(`${width}: a transcript skips straight to the write-up`)
 
       // The failed sample, tried again.
-      await page.getByRole("button", { name: "Back to Meetings" }).click()
+      await toList()
       await page.getByText("Call with an early tester").click()
       await page.getByRole("button", { name: "Try again" }).waitFor({ timeout: 5_000 })
       await shot("8-failed")

@@ -102,6 +102,7 @@ import {
 } from "@/lib/meetings"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
+import { useMeetingsPane, type MeetingsPane as PaneState } from "@/lib/pane"
 import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 
@@ -207,11 +208,28 @@ export function MeetingsPage() {
   )
 }
 
-function MeetingsList() {
-  const openDrawer = useOpenDrawer()
+/** The list kept on screen beside the open meeting, from `xl` (see `useMeetingsPane`). */
+export function MeetingsPane({ pane }: { pane: PaneState }) {
+  return (
+    <Gate>
+      <MeetingsList pane={pane} />
+    </Gate>
+  )
+}
+
+/** Opening something from the list while one is already open takes its place in the history. */
+function useSwap() {
   const navigate = useNavigate()
+  const swap = Boolean(useMeetingsPane()?.open)
+  return (to: string) => navigate(to, { replace: swap })
+}
+
+function MeetingsList({ pane }: { pane?: PaneState }) {
+  const openDrawer = useOpenDrawer()
+  const open = useSwap()
   const meetings = useMeetings()
   const bot = useMeetingBot()
+  const compact = Boolean(pane?.open)
   const [adding, setAdding] = useState(false)
   // A fresh form each time it opens.
   const [form, setForm] = useState(0)
@@ -250,26 +268,15 @@ function MeetingsList() {
       />
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
-        <section className="relative overflow-hidden rounded-[2rem] border bg-radial-[at_25%_20%] from-primary/15 to-card to-70% p-5">
-          <div className="flex items-center gap-4">
-            <Bot id={bot.botId} animate className="size-20" />
-            <p className="min-w-0 flex-1 text-lg leading-snug font-semibold tracking-tight">
-              {bot.name} is ready when you are.
-            </p>
-          </div>
-          <div className="mt-5 grid grid-cols-2 gap-3">
-            <Button
-              size="lg"
-              className="h-12 rounded-full text-base"
-              onClick={() => navigate("/meetings/record")}
-            >
+        {compact ? (
+          <div className="grid grid-cols-2 gap-3">
+            <Button className="h-11 rounded-full" onClick={() => open("/meetings/record")}>
               <MicIcon data-icon="inline-start" />
               Record
             </Button>
             <Button
               variant="outline"
-              size="lg"
-              className="h-12 rounded-full bg-background/70 text-base"
+              className="h-11 rounded-full"
               onClick={() => {
                 setForm((n) => n + 1)
                 setAdding(true)
@@ -279,7 +286,38 @@ function MeetingsList() {
               Upload
             </Button>
           </div>
-        </section>
+        ) : (
+          <section className="relative overflow-hidden rounded-[2rem] border bg-radial-[at_25%_20%] from-primary/15 to-card to-70% p-5">
+            <div className="flex items-center gap-4">
+              <Bot id={bot.botId} animate className="size-20" />
+              <p className="min-w-0 flex-1 text-lg leading-snug font-semibold tracking-tight">
+                {bot.name} is ready when you are.
+              </p>
+            </div>
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <Button
+                size="lg"
+                className="h-12 rounded-full text-base"
+                onClick={() => open("/meetings/record")}
+              >
+                <MicIcon data-icon="inline-start" />
+                Record
+              </Button>
+              <Button
+                variant="outline"
+                size="lg"
+                className="h-12 rounded-full bg-background/70 text-base"
+                onClick={() => {
+                  setForm((n) => n + 1)
+                  setAdding(true)
+                }}
+              >
+                <UploadIcon data-icon="inline-start" />
+                Upload
+              </Button>
+            </div>
+          </section>
+        )}
 
         {meetings.length > 0 && (
           <div className="flex flex-col gap-3">
@@ -364,7 +402,8 @@ function MeetingsList() {
                     meeting={meeting}
                     now={now}
                     showProject={!project}
-                    onOpen={() => navigate(`/meetings/${meeting.id}`)}
+                    selected={meeting.id === pane?.selected}
+                    onOpen={() => open(`/meetings/${meeting.id}`)}
                   />
                 </li>
               ))}
@@ -458,11 +497,13 @@ function MeetingRow({
   meeting,
   now,
   showProject,
+  selected,
   onOpen,
 }: {
   meeting: Meeting
   now: number
   showProject: boolean
+  selected: boolean
   onOpen: () => void
 }) {
   const failed = meeting.stage === "failed"
@@ -471,7 +512,11 @@ function MeetingRow({
     <button
       type="button"
       onClick={onOpen}
-      className="flex min-h-16 w-full items-start gap-3 px-4 py-3.5 text-left transition-colors hover:bg-muted"
+      aria-current={selected || undefined}
+      className={cn(
+        "flex min-h-16 w-full items-start gap-3 px-4 py-3.5 text-left transition-colors hover:bg-muted",
+        selected && "bg-muted",
+      )}
     >
       <span className="relative mt-0.5 shrink-0">
         <BotAvatar botId={meeting.bot.botId} className="size-10" />
@@ -655,7 +700,7 @@ type UploadKind = "recording" | "transcript"
 
 /** A recording or a transcript from the device, its title and the project it's filed under. */
 function Upload({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
-  const navigate = useNavigate()
+  const go = useSwap()
   const bot = useMeetingBot()
   const { projects, project, pick } = usePickedProject()
   const [kind, setKind] = useState<UploadKind>("recording")
@@ -708,7 +753,7 @@ function Upload({ open, onOpenChange }: { open: boolean; onOpenChange: (open: bo
             transcript: parsed?.lines,
           })
     onOpenChange(false)
-    navigate(`/meetings/${meeting.id}`)
+    go(`/meetings/${meeting.id}`)
   }
 
   return (
@@ -1167,6 +1212,7 @@ function MeetingView() {
   const meeting = useMeeting(id)
   const navigate = useNavigate()
   const { up } = useNav()
+  const beside = Boolean(useMeetingsPane())
   const now = useNow()
   const scroller = useRef<HTMLDivElement>(null)
   const back = useCallback(() => up("/meetings"), [up])
@@ -1191,7 +1237,7 @@ function MeetingView() {
     <div className="flex min-h-0 flex-1 flex-col">
       <div ref={scroller} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <Header
-          leading={<BackButton onClick={back} label="Back to Meetings" />}
+          leading={beside ? null : <BackButton onClick={back} label="Back to Meetings" />}
           title={
             <h1 className="truncate text-base font-semibold tracking-tight">{meeting.title}</h1>
           }
