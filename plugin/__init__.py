@@ -797,8 +797,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         denied = unauthorized(request)
         if denied is not None:
             return denied
+        # The session's own record: one reached through the parent walk is another session's, whose
+        # pending plan must never read as this one's (the app would approve its file).
         record = await asyncio.to_thread(
-            sessions.record_for, store_path(), hermes_home(), request.match_info["session_id"]
+            sessions.record_of, store_path(), request.match_info["session_id"]
         )
         # Never a 404 for an unknown session: the app reads a 404 as a missing plugin.
         return await workspace_response(record)

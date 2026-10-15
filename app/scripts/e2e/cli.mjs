@@ -59,6 +59,12 @@ const FLOWS = {
     about: "A run started elsewhere shows as running in its project and on the open session screen",
     alsoPolling: true,
   },
+  "plan-mode": {
+    script: "e2e/plan-mode.mjs",
+    about:
+      "A plan a session finishes stays with it: opening another session as it lands shows no plan card",
+    alsoPolling: true,
+  },
   "history-pages": {
     script: "e2e/history-pages.mjs",
     about:
