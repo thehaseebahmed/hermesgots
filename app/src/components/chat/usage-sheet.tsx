@@ -112,16 +112,16 @@ export function LimitBanner({
   onView: () => void
 }) {
   const exhausted = notice.remaining <= 0
-  // A phone's banner leaves out the window's name: "Approaching limit…" is enough to send the
+  // A phone's banner leaves out the window's name: "Approaching Limit" is enough to send the
   // reader to the sheet, which names every window.
   const wide = useWide()
   const text = exhausted
     ? wide
-      ? `${notice.label} limit reached`
-      : "Limit reached"
+      ? `${notice.label} Limit Reached`
+      : "Limit Reached"
     : wide
-      ? `Approaching ${notice.label} limit`
-      : "Approaching limit…"
+      ? `Approaching ${notice.label} Limit`
+      : "Approaching Limit"
   return (
     <Banner
       tone={exhausted ? "error" : "warning"}
