@@ -138,6 +138,8 @@ interface Turn {
   firstTokenAt: number | null
   /** Set when a reply is picked up after a reload, so its timings can't be trusted. */
   resumed: boolean
+  /** Set when the turn failed before anything reached Hermes, so the message can be sent again. */
+  sendFailed: boolean
   /** Stops flushing and saves the draft one last time. */
   close: () => Promise<void>
 }
@@ -212,6 +214,7 @@ function openTurn(
     touch,
     firstTokenAt: null,
     resumed,
+    sendFailed: false,
     close,
   }
   controllers.set(conversationId, controller)
@@ -738,6 +741,10 @@ async function runTurn(
       draft.status = "error"
       draft.statusText =
         error instanceof HermesError ? error.message : "Something went wrong talking to Hermes."
+      // A run that never started and nothing streamed: the message didn't reach Hermes at all, so it
+      // can go again. A reply that failed part-way through has something to keep, and its turn did
+      // reach the host.
+      if (!draft.runId && !draft.content && !draft.tools.length) turn.sendFailed = true
     }
   }
   reattachTries.delete(turn.conversationId)
@@ -988,7 +995,6 @@ export async function sendMessage(
 
   const config = serverConfig(profile)
   const turn = openTurn(conversationId, config, reply, false, controller)
-  let uploadFailed: AttachmentError | undefined
   const status = await runTurn(turn, async () => {
     // Without a key Hermes keeps no session under our id, so nothing would sync or resume.
     if (!config.apiKey) throw new HermesError("This bot has no API key. Link it in Settings.")
@@ -997,17 +1003,12 @@ export async function sendMessage(
     stopIfAborted(turn)
     let sent = attachments
     if (attachments.length) {
-      try {
-        sent = await uploadAttachments(
-          config,
-          conversation.hermesSessionId,
-          attachments,
-          Boolean(profile.apiKey),
-        )
-      } catch (error) {
-        if (error instanceof AttachmentError) uploadFailed = error
-        throw error
-      }
+      sent = await uploadAttachments(
+        config,
+        conversation.hermesSessionId,
+        attachments,
+        Boolean(profile.apiKey),
+      )
       await db.messages.update(userMessage.id, { attachments: sent })
       stopIfAborted(turn)
     }
@@ -1040,14 +1041,17 @@ export async function sendMessage(
     return followTurnRun(turn, runId)
   })
 
-  if (uploadFailed && status === "error") {
-    // Nothing reached Hermes, so the message goes back where it came from to be sent again.
+  if (status === "error" && turn.sendFailed) {
+    // Nothing reached Hermes, so the message keeps its place, its text and its attachments, and
+    // waits to be sent again or dropped. The empty reply row that recorded the failure goes: the
+    // message itself carries the reason.
     await db.transaction("rw", db.messages, async () => {
       await db.messages.delete(reply.id)
-      if (queuedId) await db.messages.update(queuedId, { status: "queued" })
-      else await db.messages.delete(userMessage.id)
+      await db.messages.update(userMessage.id, {
+        status: "error",
+        statusText: turn.draft.statusText,
+      })
     })
-    throw uploadFailed
   }
   if (status !== "done") return
   // Hermes only keys the session by our id when the profile has an API key.
@@ -1373,7 +1377,7 @@ export async function sendNextQueued(conversationId: string) {
   if (next) await sendQueued(next)
 }
 
-/** Sends a queued message now; one whose attachments couldn't be saved stays queued. */
+/** Sends a queued message now; one whose send fails stays there, to send again or drop. */
 export async function sendQueued(message: Message) {
   if (message.hostQueued) {
     const host = await hostOf(message.conversationId)
@@ -1383,15 +1387,10 @@ export async function sendQueued(message: Message) {
     followHostQueue(message.conversationId)
     return
   }
-  try {
-    await sendMessage(message.conversationId, message.content, {
-      queuedId: message.id,
-      attachments: message.attachments,
-    })
-  } catch (error) {
-    if (!(error instanceof AttachmentError)) throw error
-    toast.error(error.message)
-  }
+  await sendMessage(message.conversationId, message.content, {
+    queuedId: message.id,
+    attachments: message.attachments,
+  })
 }
 
 export async function removeQueued(message: Message) {
@@ -1405,6 +1404,19 @@ export async function removeQueued(message: Message) {
       return
     }
   }
+  await db.messages.delete(message.id)
+}
+
+/** Sends a message whose send failed again, with the text and attachments it kept. */
+export async function resendFailed(message: Message) {
+  await sendMessage(message.conversationId, message.content, {
+    queuedId: message.id,
+    attachments: message.attachments,
+  })
+}
+
+/** Drops a message whose send failed; its text and attachments go with it. */
+export async function discardFailed(message: Message) {
   await db.messages.delete(message.id)
 }
 

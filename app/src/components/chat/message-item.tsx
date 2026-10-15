@@ -3,6 +3,7 @@ import {
   AlertCircleIcon,
   ClockIcon,
   CornerDownRightIcon,
+  RotateCcwIcon,
   SendHorizontalIcon,
   XIcon,
 } from "lucide-react"
@@ -22,7 +23,7 @@ import { Message as MessageRow, MessageAvatar, MessageContent } from "@/componen
 import { Spinner } from "@/components/ui/spinner"
 import { DELEGATE_TOOL } from "@/lib/agents"
 import { openable } from "@/lib/attachments"
-import { removeQueued, sendQueued } from "@/lib/chat"
+import { discardFailed, removeQueued, resendFailed, sendQueued } from "@/lib/chat"
 import type { Attachment, Message, ToolEvent } from "@/lib/db"
 import { describeActivity, formatDuration } from "@/lib/format"
 import { mediaImages } from "@/lib/media-tags"
@@ -163,6 +164,41 @@ function QueuedActions({ message, paused }: { message: Message; paused: boolean 
   )
 }
 
+/** Under a message whose send failed: why it did, and the way to send it again or drop it. */
+function FailedActions({ message, busy }: { message: Message; busy?: boolean }) {
+  return (
+    <div className="-my-2 flex items-center gap-1 text-xs text-muted-foreground">
+      <AlertCircleIcon className="size-3.5 text-destructive" />
+      <span className="min-w-0 flex-1 truncate pr-1" title={message.statusText}>
+        Failed
+      </span>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="min-h-11 text-xs"
+        disabled={busy}
+        onClick={() =>
+          void resendFailed(message).catch((error) =>
+            toast.error(error instanceof Error ? error.message : "Couldn't send your message."),
+          )
+        }
+      >
+        <RotateCcwIcon data-icon="inline-start" />
+        Retry
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="size-11"
+        aria-label="Discard failed message"
+        onClick={() => void discardFailed(message)}
+      >
+        <XIcon />
+      </Button>
+    </div>
+  )
+}
+
 export function TypingBubble() {
   return (
     <Bubble variant="muted">
@@ -216,6 +252,7 @@ export const MessageItem = memo(function MessageItem({
   if (message.role === "user") {
     if (plain && isPlanApproval(message.content)) return <PlanApprovedCard />
     const queued = message.status === "queued"
+    const failed = message.status === "error"
     // The plugin starts a host-queued message itself, so it only waits for a Send when paused.
     const paused = message.hostQueued ? Boolean(message.queuePaused) : !busy
     return (
@@ -232,6 +269,7 @@ export const MessageItem = memo(function MessageItem({
             </Bubble>
           )}
           {queued && <QueuedActions message={message} paused={paused} />}
+          {failed && <FailedActions message={message} busy={busy} />}
         </MessageContent>
       </MessageRow>
     )

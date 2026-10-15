@@ -41,6 +41,10 @@ const FLOWS = {
     script: "e2e/clarify-missed.mjs",
     about: "A question the host timed out stays in the thread, and asking again has the agent ask afresh",
   },
+  "failed-send": {
+    script: "e2e/failed-send.mjs",
+    about: "A message the host never received stays in the thread, marked Failed, to send again or drop",
+  },
   reattach: {
     script: "e2e/reattach.mjs",
     about: "A reply still streaming when the page reloads picks its run up again and finishes",
