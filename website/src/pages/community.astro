@@ -9,7 +9,7 @@ import Base from "../layouts/Base.astro"
 >
   <div class="shell board-page">
     <main>
-      <span class="badge" id="sample-badge">Sample data</span>
+      <span class="badge" id="sample-badge" hidden>Sample data</span>
       <div class="hero">
         <div>
           <h1>Community</h1>
@@ -22,9 +22,4 @@ import Base from "../layouts/Base.astro"
       </p>
     </main>
   </div>
-  <script>
-    document.addEventListener("board:live", () => {
-      document.getElementById("sample-badge")?.remove()
-    })
-  </script>
 </Base>
