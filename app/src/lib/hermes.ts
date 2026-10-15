@@ -1,4 +1,5 @@
 import { connectionKey } from "@/lib/connection"
+import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import type {
   ApprovalChoice,
   ClarifyAnswers,
@@ -613,8 +614,14 @@ export async function getPluginVersion(config: HermesConfig): Promise<string | n
 }
 
 /** What the Gots plugin on the bot's server offers (`info`'s `features`). */
-export async function getPluginFeatures(config: HermesConfig): Promise<string[]> {
-  const response = await request(`${pluginRoot(config.baseUrl)}/info`, { headers: headers(config) })
+export async function getPluginFeatures(
+  config: HermesConfig,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/info`, {
+    headers: headers(config),
+    signal,
+  })
   const features: unknown = (await response.json())?.features
   return Array.isArray(features) ? features.filter((f): f is string => typeof f === "string") : []
 }
@@ -626,7 +633,7 @@ export async function hasPluginFeature(config: HermesConfig, feature: string) {
   const key = connectionKey(config)
   let pending = pluginFeatures.get(key)
   if (!pending) {
-    pending = getPluginFeatures(config).catch(() => null)
+    pending = getPluginFeatures(config, AbortSignal.timeout(READ_TIMEOUT_MS)).catch(() => null)
     pluginFeatures.set(key, pending)
     void pending.then((found) => found || pluginFeatures.delete(key))
   }
@@ -759,11 +766,16 @@ export async function getResearchWriters(config: HermesConfig) {
 }
 
 /** An image the agent named with a `MEDIA:<path>` tag, from the plugin's media route. */
-export async function getPluginMedia(config: HermesConfig, path: string): Promise<Blob> {
+export async function getPluginMedia(
+  config: HermesConfig,
+  path: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
   const response = await request(
     `${pluginRoot(config.baseUrl)}/media?path=${encodeURIComponent(path)}`,
     {
       headers: headers(config),
+      signal,
     },
   )
   return response.blob()

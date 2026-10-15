@@ -11,9 +11,11 @@ import {
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { formatBytes, useUploading } from "@/lib/attachments"
 import type { Attachment } from "@/lib/db"
+import { useImageReady } from "@/lib/image"
 import { isNative } from "@/lib/native"
 import { cn } from "@/lib/utils"
 
@@ -63,7 +65,7 @@ export function AttachmentTile({
       draggable={false}
     />
   ) : preparing ? (
-    <div className="size-16 animate-pulse rounded-xl border bg-muted" />
+    <Skeleton className="size-16 border" />
   ) : (
     <div
       className={cn(
@@ -116,6 +118,42 @@ export function AttachmentTile({
   )
 }
 
+/** A photo at full size, holding the box it lands in while it's read. */
+function LoadedImage({
+  url,
+  name,
+  width,
+  height,
+}: {
+  url: string
+  name: string
+  width?: number
+  height?: number
+}) {
+  const { ready, onLoad, onError } = useImageReady(url)
+  // The photo's own shape, kept on the record, so its box is right from the first frame and the
+  // pop-up doesn't shrink when the photo paints. A photo with no size on it (one the host sent
+  // back, which this device never read) keeps the full-height band.
+  const shape = width && height ? `${width} / ${height}` : undefined
+  return (
+    <div
+      className={cn("relative w-full", shape ? "max-h-[55dvh]" : "h-[55dvh]")}
+      style={shape ? { aspectRatio: shape } : undefined}
+      aria-busy={!ready || undefined}
+    >
+      {!ready && <Skeleton className="absolute inset-0 rounded-2xl" />}
+      <img
+        src={url}
+        alt={name}
+        onLoad={onLoad}
+        onError={onError}
+        className={cn("h-full w-full rounded-2xl bg-muted object-contain", !ready && "invisible")}
+        draggable={false}
+      />
+    </div>
+  )
+}
+
 /** A message's attachments, one at a time: a photo full size, a file with a way to open it. */
 export function AttachmentViewer({
   attachments,
@@ -163,12 +201,7 @@ export function AttachmentViewer({
           }}
         >
           {image ? (
-            <img
-              src={url}
-              alt={shown.name}
-              className="max-h-[55dvh] w-full rounded-2xl bg-muted object-contain"
-              draggable={false}
-            />
+            <LoadedImage url={url} name={shown.name} width={shown.width} height={shown.height} />
           ) : (
             <div className="flex flex-col items-center gap-3 rounded-2xl bg-muted/50 px-4 py-10 text-center">
               <FileIcon className="size-10 text-muted-foreground" />

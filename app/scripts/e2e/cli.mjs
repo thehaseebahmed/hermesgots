@@ -16,6 +16,7 @@ const MOCKS = {
   polling: { port: 18643, env: { MOCK_NO_EVENTS: "1" } },
   legacy: { port: 18644, env: { MOCK_BLOCK_RUN_EVENTS: "1" } },
   "no-dictation": { port: 18645, env: { MOCK_DICTATION: "off" } },
+  theseus: { port: 18646, env: { MOCK_THESEUS: "building" } },
 }
 const APP_PORT = 15173
 
@@ -55,6 +56,21 @@ const FLOWS = {
     script: "e2e/photo-progress.mjs",
     mock: "legacy",
     about: "A message with a photo shows its reply's tool calls while it runs, from the transcript",
+  },
+  "image-skeleton": {
+    script: "e2e/image-skeleton.mjs",
+    about:
+      "An agent's images hold their place with a skeleton while they load, in a chat and a project session",
+  },
+  "image-captures": {
+    script: "e2e/image-captures.mjs",
+    mock: "theseus",
+    about:
+      "A checkpoint's capture screenshots hold their place while they load, and say so when one can't",
+  },
+  "image-viewer": {
+    script: "e2e/image-viewer.mjs",
+    about: "A photo opened from a message holds its place while it decodes, then paints",
   },
   todos: {
     script: "e2e/todos.mjs",
