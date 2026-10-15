@@ -61,7 +61,7 @@ export function ContextIcon({ usage }: { usage: ContextUsage }) {
 /** A full-size context button for the chat header, opening its usage sheet. */
 export function ContextRing({ usage, onClick }: { usage: ContextUsage; onClick: () => void }) {
   const filled = fraction(usage)
-  const radius = 16
+  const radius = 20.5
   const circumference = 2 * Math.PI * radius
   const percent = usage.tracked && usage.window ? `${Math.round(filled * 100)}%` : undefined
 
@@ -69,17 +69,17 @@ export function ContextRing({ usage, onClick }: { usage: ContextUsage; onClick: 
     <Button
       variant="outline"
       size="icon-lg"
-      className="size-11 rounded-full bg-background/80 backdrop-blur"
+      className="size-11 rounded-full border-0 bg-background/80 backdrop-blur"
       onClick={onClick}
       aria-label={percent ? `Context, ${percent}` : "Context"}
     >
-      <svg viewBox="0 0 40 40" className="size-8" aria-hidden>
-        <g transform="rotate(-90 20 20)">
-          <circle cx="20" cy="20" r={radius} fill="none" strokeWidth="2" className="stroke-muted" />
+      <svg viewBox="0 0 44 44" className="size-11" aria-hidden>
+        <g transform="rotate(-90 22 22)">
+          <circle cx="22" cy="22" r={radius} fill="none" strokeWidth="2" className="stroke-muted" />
           {filled > 0 && (
             <circle
-              cx="20"
-              cy="20"
+              cx="22"
+              cy="22"
               r={radius}
               fill="none"
               strokeWidth="2"
@@ -92,8 +92,8 @@ export function ContextRing({ usage, onClick }: { usage: ContextUsage; onClick: 
         </g>
         {percent && (
           <text
-            x="20"
-            y="20"
+            x="22"
+            y="22"
             textAnchor="middle"
             dominantBaseline="central"
             className="fill-foreground text-[10px] font-medium"
