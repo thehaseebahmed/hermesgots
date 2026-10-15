@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import type { ReviewerModel, TheseusInfo, TheseusModels } from "@/lib/hermes"
 import {
@@ -838,10 +839,11 @@ function Capture({
   return (
     <div
       className={cn(
-        "flex aspect-[3/4] items-center justify-center overflow-hidden rounded-xl border bg-muted/40",
+        "relative flex aspect-[3/4] items-center justify-center overflow-hidden rounded-xl border bg-muted/40",
         shot.tone === "reference" && "border-dashed",
       )}
     >
+      {url === undefined && <Skeleton className="absolute inset-0 rounded-xl" />}
       {url ? (
         <img src={url} alt={shot.label} className="size-full object-contain" />
       ) : url === null ? (
