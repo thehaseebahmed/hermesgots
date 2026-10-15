@@ -1,29 +1,44 @@
 import { useEffect, useState } from "react"
 
+import { Skeleton } from "@/components/ui/skeleton"
 import { loadMediaImage } from "@/lib/media-tags"
 import { openImageViewer } from "@/lib/native"
 import { cn } from "@/lib/utils"
 
+// The box an image takes before it paints, so the reply doesn't jump when it arrives. Kept in step
+// with the loaded image's own sizing below.
+const FRAME = "h-[320px] w-[min(100%,42rem)] rounded-xl border md:h-[440px] xl:h-[560px]"
+const CELL = "h-24 w-full rounded-xl border md:h-32 xl:h-40"
+
 /** An image in a reply; tapping it opens the larger view. `cell` sizes it for a gallery grid. */
 export function MediaImage({ src, alt, cell }: { src: string; alt?: string; cell?: boolean }) {
+  // The image reserves its place through the skeleton, and the real one loads behind it: `src` is
+  // already set, so an <img> that isn't displayed yet still fetches, decodes and fires `load`.
+  const [ready, setReady] = useState(false)
   return (
     <button
       type="button"
       onClick={() => void openImageViewer(src)}
       aria-label={alt || "Open image"}
       className={cn(
-        "block cursor-pointer overflow-hidden rounded-xl border bg-muted/40",
+        "relative block cursor-pointer overflow-hidden rounded-xl border bg-muted/40",
         cell ? "h-24 w-full md:h-32 xl:h-40" : "w-fit max-w-[min(100%,42rem)]",
       )}
     >
+      {!ready &&
+        (cell ? <Skeleton className="absolute inset-0" /> : <Skeleton className={FRAME} />)}
       <img
         src={src}
         alt={alt ?? ""}
-        className={
+        onLoad={() => setReady(true)}
+        // A broken image must not leave the pulse running: show what there is.
+        onError={() => setReady(true)}
+        className={cn(
           cell
             ? "h-full w-full object-cover"
-            : "h-[320px] w-auto max-w-full object-contain md:h-[440px] xl:h-[560px]"
-        }
+            : "h-[320px] w-auto max-w-full object-contain md:h-[440px] xl:h-[560px]",
+          !ready && "invisible absolute top-0 left-0",
+        )}
         draggable={false}
       />
     </button>
@@ -41,7 +56,8 @@ function Tag({ path }: { path: string }) {
 
 /**
  * The images behind a reply's `MEDIA:<path>` tags: one image, or the tags it sent together as a
- * small gallery. A tag that can't load stays visible as its text.
+ * small gallery. An image still being read holds its place with a skeleton; a tag that can't load
+ * stays visible as its text.
  */
 export function MediaTag({ conversationId, paths }: { conversationId: string; paths: string[] }) {
   // The list's identity moves on every render (it comes from splitting a streaming reply), so the
@@ -61,10 +77,9 @@ export function MediaTag({ conversationId, paths }: { conversationId: string; pa
       stale = true
     }
   }, [conversationId, joined])
-  if (!loaded) return null
   if (list.length === 1) {
-    const url = loaded.get(list[0])
-    if (url === undefined) return null
+    const url = loaded?.get(list[0])
+    if (url === undefined) return <Skeleton className={FRAME} />
     return url ? <MediaImage src={url} /> : <Tag path={list[0]} />
   }
   return (
@@ -75,11 +90,8 @@ export function MediaTag({ conversationId, paths }: { conversationId: string; pa
       )}
     >
       {list.map((path, i) => {
-        const url = loaded.get(path)
-        if (url === undefined)
-          return (
-            <div key={i} className="h-24 w-full rounded-xl border bg-muted/40 md:h-32 xl:h-40" />
-          )
+        const url = loaded?.get(path)
+        if (url === undefined) return <Skeleton key={i} className={CELL} />
         return url ? <MediaImage key={i} src={url} cell /> : <Tag key={i} path={path} />
       })}
     </div>

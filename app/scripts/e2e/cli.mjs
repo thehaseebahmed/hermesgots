@@ -56,6 +56,11 @@ const FLOWS = {
     mock: "legacy",
     about: "A message with a photo shows its reply's tool calls while it runs, from the transcript",
   },
+  "image-skeleton": {
+    script: "e2e/image-skeleton.mjs",
+    about:
+      "An agent's images hold their place with a skeleton while they load, in a chat and a project session",
+  },
   todos: {
     script: "e2e/todos.mjs",
     about: "The todo list shows while the reply that wrote it runs, from events or the transcript",
