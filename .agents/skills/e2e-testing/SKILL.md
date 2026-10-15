@@ -167,6 +167,9 @@ Projects, attach it to your reply, or describe what it shows. Never commit scree
   `seed` does.
 - Cloud containers block `models.dev`, so the proxy reports failed connections to it. That's
   harmless: context windows are just unknown.
+- A send from the composer while a reply is still streaming *queues* the message instead of sending it,
+  so a flow that needs a send to fail — no host, a refusal — waits for the chat to be idle first: poll
+  Dexie until no message is `streaming` and none is `queued`.
 - When a selector stops matching, check whether the app renamed it before you blame your change.
   The sidebar's chat list went from "Conversations" to "Recents".
 - Don't `pkill -f` with a pattern from your own command line, because it kills your shell. Use
