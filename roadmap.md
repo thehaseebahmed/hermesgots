@@ -1,4 +1,4 @@
-# Roadmap: a "Code" section for Memento
+# Roadmap: a "Code" section for Gots
 
 Status: proposal, not yet scheduled. Source: a feature audit comparing Hermes
 Agent's built-in capabilities (worktrees, kanban, checkpoints, delegation,
@@ -7,9 +7,9 @@ from a remote PWA client.
 
 ## Constraint that shapes every phase
 
-Memento is a thin client to one already-running Hermes server. It can only
+Gots is a thin client to one already-running Hermes server. It can only
 reach Hermes's deliberately narrow HTTP API server (`/v1/*`, a handful of
-`/api/*` routes) and whatever the Memento plugin adds to it
+`/api/*` routes) and whatever the Gots plugin adds to it
 (`/api/plugins/memento/...`, same pattern as the existing cron-runs route).
 
 Everything interesting on the Hermes side — git worktrees (`hermes -w`,
@@ -19,14 +19,14 @@ today. None of it has HTTP routes (confirmed by grepping
 `gateway/platforms/api_server*.py` in NousResearch/hermes-agent). The
 Kanban board's own REST routes exist but live on `hermes dashboard`
 (port 9119, localhost-only, rotating session token) — the same wall
-Memento's own `AGENTS.md` already documents for the Memento plugin.
+Gots's own `AGENTS.md` already documents for the Gots plugin.
 
 So almost every phase below is "add a plugin route," not "wire up a
 frontend." Phases are ordered by that cost, cheapest first.
 
 ## Phase 1 — Wire up what already has an API
 
-No new Hermes-side work. Pure Memento frontend.
+No new Hermes-side work. Pure Gots frontend.
 
 - [x] Add pause / resume / run-now buttons to `/routines`, calling the
       already-documented `POST /api/jobs/{id}/pause|resume|run`. Already
@@ -34,13 +34,13 @@ No new Hermes-side work. Pure Memento frontend.
 
 ## Phase 2 — Read-only Project and Kanban visibility
 
-New Memento plugin routes, read-only, mirroring the existing
+New Gots plugin routes, read-only, mirroring the existing
 `cron/runs` route shape.
 
 - [x] `GET /api/plugins/memento/projects` — list the user's configured
       Hermes Projects (name, description, folders and which are git repos,
       last session time), read from `projects.db`.
-- [x] Memento UI: a "Code" nav item listing every bot's Projects in one
+- [x] Gots UI: a "Code" nav item listing every bot's Projects in one
       list, most recently worked on first (title, then description or git
       repos, with the bot as the icon).
 - [x] Create a project with its GitHub repos, cloned on the Hermes host into
@@ -51,7 +51,7 @@ New Memento plugin routes, read-only, mirroring the existing
 - [ ] `GET /api/plugins/memento/checkpoints?project=<slug>` — list
       checkpoints with change stats, and a diff endpoint
       (`GET /api/plugins/memento/checkpoints/:id/diff`).
-- [ ] New Memento frontend surface: a diff viewer (file list + unified
+- [ ] New Gots frontend surface: a diff viewer (file list + unified
       diff), read-only to start.
 
 ## Phase 4 — The agent's todos in chat
@@ -78,7 +78,7 @@ that works in its own git worktree of a project's repo.
       Hermes's terminal tool has a per-task cwd override keyed by the
       session id). Posted before every turn, restored by a hook after a
       gateway restart.
-- [x] Run events come through Memento's existing SSE/resume machinery in
+- [x] Run events come through Gots's existing SSE/resume machinery in
       `chat.ts`; nothing new there.
 - [x] UI: "New session" on a project opens a chat with a two-line composer:
       the text, then `+`, the permission mode, the context ring, voice and
@@ -105,7 +105,7 @@ Bigger: Hermes itself has no "clone this GitHub URL for me" primitive —
 worktrees assume the repo is already checked out on the host. This phase
 needs new ground on both sides:
 
-- [ ] GitHub OAuth scoped to repo listing in Memento (separate from the
+- [ ] GitHub OAuth scoped to repo listing in Gots (separate from the
       existing Netlify Identity GitHub sign-in, which only identifies the
       account owner today).
 - [ ] A plugin route that clones a chosen repo onto the Hermes host before
@@ -134,13 +134,13 @@ already exists elsewhere — worth tracking, not worth building yet.
   `approval.request`, `replay.truncated`, `run.*`). Needs a change to
   Hermes's own gateway event schema — which, per Hermes's own contribution
   rubric ("the core is a narrow waist"), is the hardest kind of change to
-  get accepted upstream, independent of Memento-side effort.
-- **Kanban from Memento** (a read-only task list, then status changes and a
+  get accepted upstream, independent of Gots-side effort.
+- **Kanban from Gots** (a read-only task list, then status changes and a
   create-task sheet through `kanban_db`). Kanban cards are shared, dispatched
   work on a board every profile sees, not a session's plan, so Phase 4 shows
   the agent's `todo_list` instead.
 - **Full remote Kanban board parity** (drag-drop, auto-decompose, PR
-  acceptance gating) rebuilt natively in Memento at phone width. Kanban
+  acceptance gating) rebuilt natively in Gots at phone width. Kanban
   already has a complete dashboard SPA for this; duplicating it in a PWA is
   a lot of rework for something that already exists one layer away. If
   this is ever wanted, revisit whether linking out to `hermes dashboard`
@@ -149,13 +149,13 @@ already exists elsewhere — worth tracking, not worth building yet.
   (ephemeral, fully server-managed sessions per task/repo, independent of
   one long-running host). Hermes's model is "one persistent gateway on a
   host, worktrees inside it," or the separate Hermes Cloud product (Nous
-  Portal), which Memento has no hooks into. Matching Claude Code's model
-  here is closer to a new product than a Memento feature — don't schedule
+  Portal), which Gots has no hooks into. Matching Claude Code's model
+  here is closer to a new product than a Gots feature — don't schedule
   without a separate scoping pass.
 
 ## Notes for whoever picks this up
 
-- Every new HTTP route in Phases 2–6 goes in the Memento plugin
+- Every new HTTP route in Phases 2–6 goes in the Gots plugin
   (`plugin/`), following the existing `register_platform_handler("api_server", ...)`
   pattern — not into Hermes core, and not onto the dashboard.
 - Update `app/scripts/mock-hermes.mjs` whenever a new route is added, per
