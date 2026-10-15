@@ -10,6 +10,7 @@ import {
   DiamondIcon,
   EllipsisIcon,
   FileAudioIcon,
+  FileTextIcon,
   FlagIcon,
   FolderIcon,
   GitBranchIcon,
@@ -20,6 +21,7 @@ import {
   PauseIcon,
   PlayIcon,
   RotateCcwIcon,
+  SearchIcon,
   SparklesIcon,
   SquareIcon,
   Trash2Icon,
@@ -53,6 +55,12 @@ import {
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group"
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -70,8 +78,10 @@ import {
   heardAt,
   isWorking,
   length,
+  matchesMeeting,
   meetingLine,
   MOMENT_TITLES,
+  parseTranscript,
   removeMeeting,
   retryMeeting,
   startAction,
@@ -205,10 +215,17 @@ function MeetingsList() {
   const [adding, setAdding] = useState(false)
   // A fresh form each time it opens.
   const [form, setForm] = useState(0)
+  const [query, setQuery] = useState("")
+  const [project, setProject] = useState<string>()
   const now = useNow()
 
   // Each project once, in the order of its newest meeting.
   const projects = [...new Map(meetings.map((m) => [m.projectId, m.projectName])).entries()]
+  const shown = meetings.filter(
+    (m) => (!project || m.projectId === project) && matchesMeeting(m, query),
+  )
+  const groups = meetingGroups(shown, now)
+  const filtering = Boolean(query.trim() || project)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -232,7 +249,7 @@ function MeetingsList() {
         }
       />
 
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
         <section className="relative overflow-hidden rounded-[2rem] border bg-radial-[at_25%_20%] from-primary/15 to-card to-70% p-5">
           <div className="flex items-center gap-4">
             <Bot id={bot.botId} animate className="size-20" />
@@ -259,42 +276,160 @@ function MeetingsList() {
               }}
             >
               <UploadIcon data-icon="inline-start" />
-              Add recording
+              Upload
             </Button>
           </div>
         </section>
 
+        {meetings.length > 0 && (
+          <div className="flex flex-col gap-3">
+            <InputGroup className="h-11 rounded-full bg-background dark:bg-input/30">
+              <InputGroupAddon>
+                <SearchIcon />
+              </InputGroupAddon>
+              <InputGroupInput
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search meetings"
+                aria-label="Search meetings"
+                autoComplete="off"
+                className="[&::-webkit-search-cancel-button]:hidden"
+              />
+              {query && (
+                <InputGroupAddon align="inline-end">
+                  <InputGroupButton
+                    size="icon-sm"
+                    className="size-8 rounded-full"
+                    onClick={() => setQuery("")}
+                    aria-label="Clear search"
+                  >
+                    <XIcon />
+                  </InputGroupButton>
+                </InputGroupAddon>
+              )}
+            </InputGroup>
+            {projects.length > 1 && (
+              <div
+                className="-mx-4 flex [scrollbar-width:none] gap-2 overflow-x-auto px-4"
+                role="group"
+                aria-label="Projects"
+              >
+                <Chip active={!project} onClick={() => setProject(undefined)}>
+                  All
+                </Chip>
+                {projects.map(([id, name]) => (
+                  <Chip
+                    key={id}
+                    active={project === id}
+                    onClick={() => setProject(project === id ? undefined : id)}
+                  >
+                    <FolderIcon className="size-4" />
+                    {name}
+                  </Chip>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {meetings.length === 0 && (
           <p className="py-8 text-center text-sm text-muted-foreground">No meetings yet.</p>
         )}
+        {meetings.length > 0 && shown.length === 0 && (
+          <div className="flex flex-col items-center gap-3 py-8 text-center">
+            <p className="text-sm text-muted-foreground">No meetings match.</p>
+            {filtering && (
+              <Button
+                variant="outline"
+                className="h-11 rounded-full"
+                onClick={() => {
+                  setQuery("")
+                  setProject(undefined)
+                }}
+              >
+                Show all
+              </Button>
+            )}
+          </div>
+        )}
 
-        {projects.map(([projectId, projectName]) => {
-          const rows = meetings.filter((m) => m.projectId === projectId)
-          return (
-            <section key={projectId} className="flex flex-col gap-2">
-              <h2 className="flex items-center gap-2 px-1 text-sm font-medium text-muted-foreground">
-                <FolderIcon className="size-4" />
-                {projectName}
-              </h2>
-              <ul className="flex flex-col divide-y overflow-hidden rounded-3xl border bg-card">
-                {rows.map((meeting) => (
-                  <li key={meeting.id}>
-                    <MeetingRow
-                      meeting={meeting}
-                      now={now}
-                      onOpen={() => navigate(`/meetings/${meeting.id}`)}
-                    />
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )
-        })}
+        {groups.map((group) => (
+          <section key={group.label} className="flex flex-col gap-2" aria-label={group.label}>
+            <h2 className="px-1 text-sm font-medium text-muted-foreground">{group.label}</h2>
+            <ul className="flex flex-col divide-y overflow-hidden rounded-3xl border bg-card">
+              {group.meetings.map((meeting) => (
+                <li key={meeting.id}>
+                  <MeetingRow
+                    meeting={meeting}
+                    now={now}
+                    showProject={!project}
+                    onOpen={() => navigate(`/meetings/${meeting.id}`)}
+                  />
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
       </div>
 
-      <AddRecording key={form} open={adding} onOpenChange={setAdding} />
+      <Upload key={form} open={adding} onOpenChange={setAdding} />
     </div>
   )
+}
+
+function Chip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        "flex h-11 shrink-0 items-center gap-1.5 rounded-full border px-4 text-sm font-medium transition-colors",
+        active
+          ? "border-foreground bg-foreground text-background"
+          : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+/**
+ * Meetings by what they need: a failed one first, then any still being written up, then the rest
+ * by when they happened.
+ */
+function meetingGroups(meetings: Meeting[], now: number) {
+  const day = new Date(now)
+  day.setHours(0, 0, 0, 0)
+  const today = day.getTime()
+  const yesterday = today - 86_400_000
+  const week = today - 6 * 86_400_000
+  const labels = ["Needs you", "In progress", "Today", "Yesterday", "This week", "Earlier"]
+  const of = (m: Meeting) =>
+    m.stage === "failed"
+      ? 0
+      : isWorking(m)
+        ? 1
+        : m.createdAt >= today
+          ? 2
+          : m.createdAt >= yesterday
+            ? 3
+            : m.createdAt >= week
+              ? 4
+              : 5
+  return labels
+    .map((label, index) => ({ label, meetings: meetings.filter((m) => of(m) === index) }))
+    .filter((g) => g.meetings.length)
 }
 
 /** A meeting's topics as one thin strip, each as long as it ran. */
@@ -312,16 +447,26 @@ function MiniStrip({ recap }: { recap: Recap }) {
   )
 }
 
+const SOURCE_ICONS = { recording: MicIcon, upload: FileAudioIcon, transcript: FileTextIcon }
+const SOURCE_LABELS = {
+  recording: "Recorded",
+  upload: "Uploaded recording",
+  transcript: "Transcript",
+}
+
 function MeetingRow({
   meeting,
   now,
+  showProject,
   onOpen,
 }: {
   meeting: Meeting
   now: number
+  showProject: boolean
   onOpen: () => void
 }) {
   const failed = meeting.stage === "failed"
+  const Source = SOURCE_ICONS[meeting.source]
   return (
     <button
       type="button"
@@ -348,8 +493,16 @@ function MeetingRow({
             {formatRelative(meeting.createdAt, now)}
           </span>
         </span>
-        <span className={cn("truncate text-sm text-muted-foreground", failed && "text-warning")}>
-          {meetingLine(meeting)}
+        <span
+          className={cn(
+            "flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground",
+            failed && "text-warning",
+          )}
+        >
+          <Source className="size-3.5 shrink-0" aria-label={SOURCE_LABELS[meeting.source]} />
+          <span className="truncate">
+            {[showProject && meeting.projectName, meetingLine(meeting)].filter(Boolean).join(" · ")}
+          </span>
         </span>
         {meeting.recap && (
           <span className="mt-1 block">
@@ -421,38 +574,139 @@ function audioLength(file: File) {
 const sizeText = (bytes: number) =>
   bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB`
 
-/** An audio file from the device, its title and the project it's filed under. */
-function AddRecording({
-  open,
-  onOpenChange,
+const RECORDING_TYPES = "audio/*,video/mp4,video/webm"
+const TRANSCRIPT_TYPES = ".txt,.vtt,.srt,.md,text/plain,text/vtt,text/markdown"
+/** Transcripts are text; anything bigger than this isn't one. */
+const MAX_TRANSCRIPT_BYTES = 2_000_000
+
+const isTranscript = (file: File) =>
+  /\.(txt|vtt|srt|md)$/i.test(file.name) || file.type.startsWith("text/")
+
+const baseName = (name: string) => name.replace(/\.[^.]+$/, "")
+
+/** A place to drop a file, or tap to choose one. */
+function DropZone({
+  accept,
+  icon: Icon,
+  label,
+  file,
+  detail,
+  onFile,
 }: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
+  accept: string
+  icon: typeof FileAudioIcon
+  label: string
+  file?: string
+  detail?: string
+  onFile: (file: File) => void
 }) {
-  const navigate = useNavigate()
   const input = useRef<HTMLInputElement>(null)
+  const [over, setOver] = useState(false)
+  return (
+    <>
+      <input
+        ref={input}
+        type="file"
+        accept={accept}
+        className="hidden"
+        onChange={(event) => {
+          const picked = event.target.files?.[0]
+          if (picked) onFile(picked)
+          event.target.value = ""
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => input.current?.click()}
+        onDragOver={(event) => {
+          event.preventDefault()
+          setOver(true)
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(event) => {
+          event.preventDefault()
+          setOver(false)
+          const dropped = event.dataTransfer.files[0]
+          if (dropped) onFile(dropped)
+        }}
+        className={cn(
+          "flex min-h-20 w-full items-center gap-3 rounded-3xl border px-4 py-3 text-left transition-colors hover:bg-muted",
+          !file && "border-dashed",
+          over && "border-primary bg-primary/5",
+        )}
+      >
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
+          <Icon className="size-5" />
+        </span>
+        {file ? (
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate font-medium">{file}</span>
+            {detail && <span className="text-sm text-muted-foreground">{detail}</span>}
+          </span>
+        ) : (
+          <span className="flex-1 font-medium">{label}</span>
+        )}
+      </button>
+    </>
+  )
+}
+
+type UploadKind = "recording" | "transcript"
+
+/** A recording or a transcript from the device, its title and the project it's filed under. */
+function Upload({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  const navigate = useNavigate()
   const bot = useMeetingBot()
   const { projects, project, pick } = usePickedProject()
-  const [file, setFile] = useState<{ file: File; seconds: number }>()
+  const [kind, setKind] = useState<UploadKind>("recording")
+  const [recording, setRecording] = useState<{ file: File; seconds: number }>()
+  const [transcriptFile, setTranscriptFile] = useState<File>()
+  const [text, setText] = useState("")
   const [title, setTitle] = useState("")
+  const parsed = text.trim() ? parseTranscript(text) : undefined
 
-  const choose = async (picked: File | undefined) => {
-    if (!picked) return
-    const seconds = await audioLength(picked)
-    setFile({ file: picked, seconds })
-    setTitle((current) => current || picked.name.replace(/\.[^.]+$/, ""))
+  const named = (name: string) => setTitle((current) => current || baseName(name))
+
+  const choose = async (file: File) => {
+    if (isTranscript(file)) {
+      setKind("transcript")
+      if (file.size > MAX_TRANSCRIPT_BYTES) {
+        toast.error("That file is too big for a transcript.")
+        return
+      }
+      setTranscriptFile(file)
+      setText(await file.text())
+      named(file.name)
+      return
+    }
+    setKind("recording")
+    setRecording({ file, seconds: await audioLength(file) })
+    named(file.name)
   }
 
+  const ready = kind === "recording" ? Boolean(recording) : Boolean(parsed?.lines.length)
+
   const add = () => {
-    if (!file || !project) return
-    const meeting = createMeeting({
-      title: title.trim() || file.file.name,
-      project,
-      bot,
-      source: "upload",
-      fileName: file.file.name,
-      duration: file.seconds,
-    })
+    if (!project || !ready) return
+    const meeting =
+      kind === "recording" && recording
+        ? createMeeting({
+            title: title.trim() || recording.file.name,
+            project,
+            bot,
+            source: "upload",
+            fileName: recording.file.name,
+            duration: recording.seconds,
+          })
+        : createMeeting({
+            title: title.trim() || defaultTitle(),
+            project,
+            bot,
+            source: "transcript",
+            fileName: transcriptFile?.name,
+            duration: parsed?.duration ?? 0,
+            transcript: parsed?.lines,
+          })
     onOpenChange(false)
     navigate(`/meetings/${meeting.id}`)
   }
@@ -461,7 +715,7 @@ function AddRecording({
     <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent size="md">
         <PopupHeader className="pb-2">
-          <PopupTitle>Add recording</PopupTitle>
+          <PopupTitle>Upload a meeting</PopupTitle>
         </PopupHeader>
         <form
           className="flex flex-col gap-5 px-6"
@@ -470,37 +724,66 @@ function AddRecording({
             add()
           }}
         >
-          <input
-            ref={input}
-            type="file"
-            accept="audio/*,video/mp4,video/webm"
-            className="hidden"
-            onChange={(event) => void choose(event.target.files?.[0])}
-          />
-          <button
-            type="button"
-            onClick={() => input.current?.click()}
-            className={cn(
-              "flex min-h-20 items-center gap-3 rounded-3xl border px-4 py-3 text-left transition-colors hover:bg-muted",
-              !file && "border-dashed",
-            )}
-          >
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
-              <FileAudioIcon className="size-5" />
-            </span>
-            {file ? (
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate font-medium">{file.file.name}</span>
-                <span className="text-sm text-muted-foreground">
-                  {[file.seconds ? length(file.seconds) : null, sizeText(file.file.size)]
+          <Tabs value={kind} onValueChange={(value) => setKind(value as UploadKind)}>
+            <TabsList className="w-full">
+              <TabsTrigger value="recording" className="min-h-9">
+                <FileAudioIcon />
+                Recording
+              </TabsTrigger>
+              <TabsTrigger value="transcript" className="min-h-9">
+                <FileTextIcon />
+                Transcript
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="recording" className="pt-4">
+              <DropZone
+                accept={RECORDING_TYPES}
+                icon={FileAudioIcon}
+                label="Choose an audio or video file"
+                file={recording?.file.name}
+                detail={
+                  recording &&
+                  [
+                    recording.seconds ? length(recording.seconds) : null,
+                    sizeText(recording.file.size),
+                  ]
                     .filter(Boolean)
-                    .join(" · ")}
-                </span>
-              </span>
-            ) : (
-              <span className="flex-1 font-medium">Choose an audio file</span>
-            )}
-          </button>
+                    .join(" · ")
+                }
+                onFile={(file) => void choose(file)}
+              />
+            </TabsContent>
+            <TabsContent value="transcript" className="flex flex-col gap-3 pt-4">
+              <DropZone
+                accept={TRANSCRIPT_TYPES}
+                icon={FileTextIcon}
+                label="Choose a transcript"
+                file={transcriptFile?.name}
+                detail={transcriptFile && sizeText(transcriptFile.size)}
+                onFile={(file) => void choose(file)}
+              />
+              <Textarea
+                value={text}
+                onChange={(event) => {
+                  setText(event.target.value)
+                  if (!event.target.value) setTranscriptFile(undefined)
+                }}
+                placeholder="Or paste it here"
+                aria-label="Transcript"
+                className="max-h-56 min-h-32 font-mono text-[13px] leading-relaxed"
+              />
+              {parsed && (
+                <p className="px-1 text-sm text-muted-foreground" aria-live="polite">
+                  {parsed.lines.length
+                    ? [
+                        `${parsed.lines.length} ${parsed.lines.length === 1 ? "line" : "lines"}`,
+                        `${parsed.timed ? "" : "about "}${length(parsed.duration)}`,
+                      ].join(" · ")
+                    : "No lines found"}
+                </p>
+              )}
+            </TabsContent>
+          </Tabs>
 
           <Field>
             <FieldLabel htmlFor="meeting-title">Title</FieldLabel>
@@ -525,7 +808,7 @@ function AddRecording({
             </Field>
           )}
 
-          <Button type="submit" size="lg" className="h-11 rounded-full" disabled={!file}>
+          <Button type="submit" size="lg" className="h-11 rounded-full" disabled={!ready}>
             Add
           </Button>
         </form>
@@ -804,21 +1087,30 @@ function Recorder() {
 }
 
 const STEPS = ["Upload", "Transcribe", "Write", "Ready"]
+// A transcript skips the upload and the transcription.
+const TRANSCRIPT_STEPS = ["Transcript", "Write", "Ready"]
 
 function stepOf(meeting: Meeting) {
-  if (meeting.stage === "uploading") return 0
-  if (meeting.stage === "writing") return 2
-  if (meeting.stage === "ready") return 3
-  return 1
+  const step =
+    meeting.stage === "uploading"
+      ? 0
+      : meeting.stage === "writing"
+        ? 2
+        : meeting.stage === "ready"
+          ? 3
+          : 1
+  if (meeting.source !== "transcript") return step
+  return meeting.stage === "ready" ? 2 : 1
 }
 
 /** Upload, Transcribe, Write, Ready, as dots joined by lines; a failed step is marked. */
 function Steps({ meeting }: { meeting: Meeting }) {
   const at = stepOf(meeting)
+  const steps = meeting.source === "transcript" ? TRANSCRIPT_STEPS : STEPS
   const failed = meeting.stage === "failed"
   return (
     <ol className="flex w-full items-center gap-2" aria-label="Progress">
-      {STEPS.map((step, index) => (
+      {steps.map((step, index) => (
         <li key={step} className="flex flex-1 items-center gap-2 last:flex-none">
           <span
             className={cn(
@@ -842,7 +1134,7 @@ function Steps({ meeting }: { meeting: Meeting }) {
             </span>
             <span className={cn(index !== at && "max-sm:sr-only")}>{step}</span>
           </span>
-          {index < STEPS.length - 1 && (
+          {index < steps.length - 1 && (
             <span
               className={cn("h-0.5 flex-1 rounded-full", index < at ? "bg-primary" : "bg-border")}
             />

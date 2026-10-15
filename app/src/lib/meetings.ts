@@ -16,6 +16,8 @@ import { randomId } from "@/lib/utils"
  * one walks through the pipeline's stages on timers, and the bot's answers are canned.
  */
 
+export type MeetingSource = "recording" | "upload" | "transcript"
+
 export type MeetingStage = "uploading" | "transcribing" | "writing" | "ready" | "failed"
 
 export interface TranscriptLine {
@@ -76,7 +78,8 @@ export interface Meeting {
   projectName: string
   /** The bot that sat in, as it was then. */
   bot: { name: string; botId: string }
-  source: "recording" | "upload"
+  /** Recorded here, an uploaded recording, or a transcript made elsewhere. */
+  source: MeetingSource
   fileName?: string
   createdAt: number
   /** Seconds. */
@@ -326,8 +329,35 @@ function samples(now: number): Meeting[] {
       transcript: LAUNCH_TRANSCRIPT,
       recap: LAUNCH_RECAP,
     },
+    ready({
+      id: "m_crit",
+      title: "Design crit: onboarding",
+      projectId: "sample-website",
+      projectName: "Website",
+      bot: { name: "Hex", botId: "hex" },
+      source: "transcript",
+      fileName: "design-crit.vtt",
+      createdAt: now - 5 * DAY,
+      duration: 1_520,
+      stage: "ready",
+      transcript: [],
+    }),
+    ready({
+      id: "m_sprint",
+      title: "Sprint planning",
+      projectId: "sample-gots",
+      projectName: "Gots",
+      bot,
+      source: "recording",
+      createdAt: now - 9 * DAY,
+      duration: 2_710,
+      stage: "ready",
+      transcript: [],
+    }),
   ]
 }
+
+const ready = (meeting: Meeting): Meeting => ({ ...meeting, ...generated(meeting) })
 
 const store = createStore<Meeting[]>(samples(Date.now()))
 
@@ -397,7 +427,9 @@ function generated(meeting: Meeting): Pick<Meeting, "transcript" | "recap"> {
     marked: true,
   }))
   return {
-    transcript: GENERATED_TRANSCRIPT.map((line) => ({ ...line, at: fit(line.at) })),
+    transcript: meeting.transcript.length
+      ? meeting.transcript
+      : GENERATED_TRANSCRIPT.map((line) => ({ ...line, at: fit(line.at) })),
     recap: {
       lead: GENERATED_RECAP.lead,
       topics: GENERATED_RECAP.topics.map((topic) => ({
@@ -455,7 +487,10 @@ export function createMeeting(input: {
   fileName?: string
   typed?: string
   marks?: Mark[]
+  /** A transcript made elsewhere, which skips the upload and the transcription. */
+  transcript?: TranscriptLine[]
 }): Meeting {
+  const first: MeetingStage = input.transcript?.length ? "writing" : "uploading"
   const meeting: Meeting = {
     id: `m_${randomId()}`,
     title: input.title,
@@ -466,19 +501,19 @@ export function createMeeting(input: {
     fileName: input.fileName,
     createdAt: Date.now(),
     duration: input.duration,
-    stage: "uploading",
+    stage: first,
     typed: input.typed?.trim() || undefined,
     marks: input.marks?.length ? input.marks : undefined,
-    transcript: [],
+    transcript: input.transcript ?? [],
   }
   store.set([meeting, ...store.get()])
-  void run(meeting.id, "uploading")
+  void run(meeting.id, first)
   return meeting
 }
 
 /** Runs a failed meeting again from the part that failed. */
 export function retryMeeting(meeting: Meeting) {
-  void run(meeting.id, "transcribing")
+  void run(meeting.id, meeting.source === "transcript" ? "writing" : "transcribing")
 }
 
 export function removeMeeting(id: string) {
@@ -491,6 +526,80 @@ export function startAction(meetingId: string, momentId: string) {
 }
 
 const words = (text: string) => new Set(text.toLowerCase().match(/[a-z]{4,}/g) ?? [])
+
+const TIME = /(?:(\d{1,2}):)?(\d{1,2}):(\d{2})(?:[.,]\d{1,3})?/
+const CUE = new RegExp(`^${TIME.source}\\s*-->\\s*${TIME.source}`)
+const STAMPED = new RegExp(`^\\[?${TIME.source}\\]?\\s*[-–—]?\\s*(.*)$`)
+/** The time in `match`'s groups from `first` on: hours (optional), minutes, seconds. */
+const seconds = (match: RegExpMatchArray, first = 1) =>
+  Number(match[first] ?? 0) * 3600 + Number(match[first + 1]) * 60 + Number(match[first + 2])
+
+/**
+ * A transcript's lines and length, from WebVTT, SubRip, or text whose lines start with a time
+ * (`0:42`, `[00:01:15]`). Text without times is spread out at a speaking pace.
+ */
+export function parseTranscript(text: string): {
+  lines: TranscriptLine[]
+  duration: number
+  /** Whether the text carried its own times, rather than a guess at the pace. */
+  timed: boolean
+} {
+  const rows: { at?: number; text: string }[] = []
+  let cue: number | undefined
+  let end = 0
+  for (const raw of text.replace(/\r\n?/g, "\n").split("\n")) {
+    const line = raw.trim()
+    if (!line || line === "WEBVTT" || /^(NOTE|STYLE|REGION)\b/.test(line)) {
+      cue = undefined
+      continue
+    }
+    const timing = line.match(CUE)
+    if (timing) {
+      cue = seconds(timing)
+      end = Math.max(end, seconds(timing, 4))
+      continue
+    }
+    // A SubRip cue's number, or a WebVTT cue's id, on the line before its timing.
+    if (/^\d+$/.test(line)) continue
+    const stamped = line.match(STAMPED)
+    const body = (stamped ? stamped[4] : line).replace(/<[^>]+>/g, "").trim()
+    if (!body) continue
+    const at = stamped ? seconds(stamped) : cue
+    if (cue !== undefined && !stamped && rows.at(-1)?.at === cue) {
+      rows[rows.length - 1].text += ` ${body}`
+      continue
+    }
+    rows.push({ at, text: body })
+  }
+  const timed = rows.some((row) => row.at !== undefined)
+  let clockAt = 0
+  const out = rows.map((row, index) => {
+    const at = timed ? (row.at ?? clockAt) : clockAt
+    clockAt = at + Math.max(2, row.text.split(/\s+/).length / 2.5)
+    return { id: `l${index}`, at: Math.round(at * 10) / 10, text: row.text }
+  })
+  return { lines: out, duration: Math.round(Math.max(clockAt, end)), timed }
+}
+
+/** Whether a meeting matches a search: its title, project, write-up or transcript. */
+export function matchesMeeting(meeting: Meeting, query: string) {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
+  if (!terms.length) return true
+  const recap = meeting.recap
+  const haystack = [
+    meeting.title,
+    meeting.projectName,
+    meeting.fileName,
+    recap?.lead,
+    ...(recap?.topics.map((t) => `${t.title} ${t.summary}`) ?? []),
+    ...(recap?.moments.map((m) => m.text) ?? []),
+    ...meeting.transcript.map((l) => l.text),
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase()
+  return terms.every((term) => haystack.includes(term))
+}
 
 /** The bot's canned answer to a question about the meeting, from its recap. */
 function answer(meeting: Meeting, question: string) {
@@ -568,7 +677,10 @@ export function meetingLine(meeting: Meeting) {
       return meeting.error ?? "Failed"
     default: {
       const topics = meeting.recap?.topics.length ?? 0
-      return [length(meeting.duration), topics && `${topics} topics`].filter(Boolean).join(" · ")
+      const todo = meeting.recap?.moments.filter((m) => m.kind === "action").length ?? 0
+      return [length(meeting.duration), topics && `${topics} topics`, todo && `${todo} to do`]
+        .filter(Boolean)
+        .join(" · ")
     }
   }
 }
