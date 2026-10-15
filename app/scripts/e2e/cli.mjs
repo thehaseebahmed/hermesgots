@@ -68,6 +68,10 @@ const FLOWS = {
     about:
       "A checkpoint's capture screenshots hold their place while they load, and say so when one can't",
   },
+  "image-viewer": {
+    script: "e2e/image-viewer.mjs",
+    about: "A photo opened from a message holds its place while it decodes, then paints",
+  },
   todos: {
     script: "e2e/todos.mjs",
     about: "The todo list shows while the reply that wrote it runs, from events or the transcript",
