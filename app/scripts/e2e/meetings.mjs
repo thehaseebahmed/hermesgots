@@ -1,7 +1,7 @@
 // Meetings, the Developer-gated design mock: the sidebar row only with the switch on, the sample
-// meetings by project, a recap's timeline and a time opening its topic at that line, an action
+// meetings by when they happened, searched and filtered by project, a recap's timeline and a time opening its topic at that line, an action
 // started and a question answered, a recording with a marked moment walked through to its recap,
-// an added file, a failed meeting tried again, and Delete. At phone,
+// an uploaded recording, a transcript file and a pasted one, a failed meeting tried again, and Delete. At phone,
 // tablet (dark) and laptop widths, with no errors in the console.
 import { app, assert, flow, pass } from "./lib.mjs"
 
@@ -24,6 +24,19 @@ function silence() {
   header.writeUInt32LE(data.length, 40)
   return Buffer.concat([header, data])
 }
+
+const SRT = `1
+00:00:01,000 --> 00:00:04,000
+Welcome to the retro.
+
+2
+00:00:05,500 --> 00:00:09,000
+What went well this sprint?
+`
+
+const PASTED = `[00:03] Alex: Should the free plan keep three bots?
+[00:21] Sam: Two, and a third once you link a host.
+[00:47] Alex: Fine, let's try that for the beta.`
 
 const errors = []
 for (const [width, dark] of [
@@ -58,12 +71,30 @@ for (const [width, dark] of [
       await setSwitch(true)
       await page.goto(`${app}/meetings`)
       await page.getByText("Weekly product sync").waitFor({ timeout: 15_000 })
-      assert.ok(await page.getByRole("heading", { name: "Gots" }).isVisible())
-      assert.ok(await page.getByRole("heading", { name: "Website" }).isVisible())
+      for (const group of ["Needs you", "Today", "Earlier"])
+        assert.ok(await page.getByRole("heading", { name: group }).isVisible(), group)
       if (width >= 1024)
         assert.ok(await page.getByRole("link", { name: "Meetings" }).isVisible(), "sidebar row")
       await shot("1-list")
-      pass(`${width}: the sample meetings show by project`)
+      pass(`${width}: the sample meetings show by when they happened`)
+
+      // Search reads the write-ups too, and a project chip narrows the list.
+      const search = page.getByRole("searchbox", { name: "Search meetings" })
+      await search.fill("tagline")
+      await page.getByText("Weekly product sync").waitFor({ state: "detached", timeout: 2_000 })
+      assert.ok(await page.getByText("Landing page review").isVisible())
+      await shot("1b-search")
+      await search.fill("nothing like this")
+      await page.getByText("No meetings match.").waitFor()
+      await page.getByRole("button", { name: "Show all" }).click()
+      await page.getByText("Weekly product sync").waitFor()
+      const projects = page.getByRole("group", { name: "Projects" })
+      await projects.getByRole("button", { name: "Website" }).click()
+      await page.getByText("Weekly product sync").waitFor({ state: "detached", timeout: 2_000 })
+      assert.ok(await page.getByText("Design crit: onboarding").isVisible())
+      await projects.getByRole("button", { name: "All" }).click()
+      await page.getByText("Weekly product sync").waitFor()
+      pass(`${width}: search and the project chips narrow the list`)
 
       // A ready meeting: the bot's recap, the timeline and what to do.
       await page.getByText("Weekly product sync").click()
@@ -131,9 +162,10 @@ for (const [width, dark] of [
 
       // An audio file from the device.
       await page.getByRole("button", { name: "Back to Meetings" }).click()
-      await page.getByRole("button", { name: "Add recording" }).click()
+      await page.getByRole("button", { name: "Upload", exact: true }).click()
       await page
         .locator("input[type=file]")
+        .first()
         .setInputFiles({ name: "standup.wav", mimeType: "audio/wav", buffer: silence() })
       await page.getByText("standup.wav").waitFor({ timeout: 5_000 })
       assert.equal(await page.getByLabel("Title").inputValue(), "standup")
@@ -142,6 +174,33 @@ for (const [width, dark] of [
       await page.waitForURL("**/meetings/m_*", { timeout: 5_000 })
       await page.getByRole("heading", { name: "To do" }).waitFor({ timeout: 20_000 })
       pass(`${width}: an added file is written up as notes`)
+
+      // A transcript file fills the box; one pasted is read as it's typed.
+      await page.getByRole("button", { name: "Back to Meetings" }).click()
+      await page.getByRole("button", { name: "Upload", exact: true }).click()
+      await page.getByRole("tab", { name: "Transcript" }).click()
+      await page
+        .locator("input[type=file]")
+        .first()
+        .setInputFiles({
+          name: "retro.srt",
+          mimeType: "application/x-subrip",
+          buffer: Buffer.from(SRT),
+        })
+      await page.getByText("retro.srt").waitFor({ timeout: 5_000 })
+      assert.match(await page.getByRole("textbox", { name: "Transcript" }).inputValue(), /retro/)
+      await page.getByText("2 lines · 9 s").waitFor()
+      assert.equal(await page.getByLabel("Title").inputValue(), "retro")
+      await page.getByRole("textbox", { name: "Transcript" }).fill(PASTED)
+      await page.getByText("3 lines · 50 s").waitFor()
+      await page.getByLabel("Title").fill("Pricing chat")
+      await shot("7b-transcript")
+      await page.getByRole("button", { name: "Add", exact: true }).click()
+      await page.waitForURL("**/meetings/m_*", { timeout: 5_000 })
+      await page.getByText("Pricing chat").first().waitFor()
+      assert.equal(await page.getByText(/Uploading|Transcribing/).count(), 0, "no upload step")
+      await page.getByRole("heading", { name: "To do" }).waitFor({ timeout: 10_000 })
+      pass(`${width}: a transcript skips straight to the write-up`)
 
       // The failed sample, tried again.
       await page.getByRole("button", { name: "Back to Meetings" }).click()
