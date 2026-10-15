@@ -842,13 +842,15 @@ function Capture({
         "relative flex aspect-[3/4] items-center justify-center overflow-hidden rounded-xl border bg-muted/40",
         shot.tone === "reference" && "border-dashed",
       )}
+      aria-busy={url === undefined || undefined}
     >
-      {url === undefined && <Skeleton className="absolute inset-0 rounded-xl" />}
       {url ? (
         <img src={url} alt={shot.label} className="size-full object-contain" />
       ) : url === null ? (
         <span className="px-2 text-center text-xs text-muted-foreground">Couldn't load</span>
-      ) : null}
+      ) : (
+        <Skeleton className="absolute inset-0 rounded-xl" />
+      )}
     </div>
   )
 }

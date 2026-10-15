@@ -296,6 +296,9 @@ export interface Attachment {
   image: boolean
   /** The file (an image downscaled), on this device only: Hermes's transcript doesn't keep it. */
   blob?: Blob
+  /** A photo's own size, so a viewer can hold its box before it's read. */
+  width?: number
+  height?: number
   /** Where the Gots plugin saved it on the Hermes host. */
   path?: string
 }

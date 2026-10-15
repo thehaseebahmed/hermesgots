@@ -16,7 +16,10 @@ const KEEP_AS_IS_BYTES = 1024 * 1024
 // SVG isn't something providers take as an image, so it goes as a file.
 const IMAGE_TYPES = /^image\/(jpeg|png|webp|gif|heic|heif|avif|bmp)$/
 
-async function scaled(file: File): Promise<Blob | null> {
+/** A photo on its way to storage: the file to keep, and its own size. */
+type Photo = { blob: Blob; width: number; height: number }
+
+async function scaled(file: File): Promise<Photo | null> {
   let bitmap: ImageBitmap
   try {
     bitmap = await createImageBitmap(file)
@@ -27,14 +30,18 @@ async function scaled(file: File): Promise<Blob | null> {
     const { width, height } = bitmap
     const scale = Math.min(1, MAX_EDGE / Math.max(width, height))
     const sendable = /^image\/(jpeg|png|webp|gif)$/.test(file.type)
-    if (scale === 1 && sendable && file.size <= KEEP_AS_IS_BYTES) return file
+    if (scale === 1 && sendable && file.size <= KEEP_AS_IS_BYTES)
+      return { blob: file, width, height }
     const canvas = document.createElement("canvas")
     canvas.width = Math.round(width * scale)
     canvas.height = Math.round(height * scale)
     const context = canvas.getContext("2d")
     if (!context) return null
     context.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
-    return await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85))
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", 0.85),
+    )
+    return blob && { blob, width: canvas.width, height: canvas.height }
   } finally {
     bitmap.close()
   }
@@ -51,8 +58,9 @@ function jpegName(name: string) {
 export async function prepareAttachment(file: File, inline = true): Promise<Attachment> {
   const name = file.name || "file"
   if (inline && IMAGE_TYPES.test(file.type)) {
-    const blob = await scaled(file)
-    if (blob) {
+    const photo = await scaled(file)
+    if (photo) {
+      const { blob, width, height } = photo
       const reencoded = blob !== file
       return {
         id: randomId(),
@@ -61,6 +69,8 @@ export async function prepareAttachment(file: File, inline = true): Promise<Atta
         size: blob.size,
         image: true,
         blob,
+        width,
+        height,
       }
     }
   }
