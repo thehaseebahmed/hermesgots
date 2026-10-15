@@ -1,0 +1,170 @@
+// Two sessions of one project in plan mode: the plan a session finishes belongs to that session
+// alone. The report this covers: the user was in the first session, went back and opened the
+// second one just as the first one's plan-mode reply landed, and the first session's plan-ready
+// card showed on the second one's screen — where approving it would have run the wrong plan.
+// The switch is the phone's own: the project screen, then the session's row, no reload.
+import { app, assert, flow, mock, pass, runId } from "./lib.mjs"
+
+const PROJECT = "p_1a2b3c4d"
+
+/** Records every time the plan-ready card renders, from now on: a card can live a single commit. */
+function watchPlanCard(page) {
+  return page.evaluate(() => {
+    window.__planCards = []
+    window.__planObserver?.disconnect()
+    const look = () => {
+      const cards = [...document.querySelectorAll("button")].filter(
+        (button) => button.textContent?.trim() === "Keep planning",
+      )
+      if (cards.length) window.__planCards.push(Date.now())
+    }
+    window.__planObserver = new MutationObserver(look)
+    window.__planObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    })
+    look()
+  })
+}
+
+const cardsSeen = (page) => page.evaluate(() => window.__planCards.length)
+const clearCards = (page) =>
+  page.evaluate(() => {
+    window.__planCards = []
+  })
+
+await flow(
+  "plan-mode",
+  async ({ page, profileId, seed, send, until, shot }) => {
+    const a = `plan-a-${runId()}`
+    const b = `plan-b-${runId()}`
+    // The mock keeps its chat list between runs, so the titles carry the run's tag.
+    const titleA = `Rotate the logs ${a.slice(-6)}`
+    const titleB = `Later session ${b.slice(-6)}`
+    await seed([
+      { id: a, title: titleA, projectId: PROJECT },
+      { id: b, title: titleB, projectId: PROJECT },
+    ])
+
+    const project = `${app}/code/${profileId}/${PROJECT}`
+    const group = (label) => page.getByRole("region", { name: label })
+    const backToProject = () => page.getByRole("button", { name: "Back to project" }).click()
+    const openSession = async (id, title) => {
+      await group("Idle").getByText(title).click()
+      await page.waitForURL(`**/c/${id}`)
+    }
+
+    // Session A plans, as the mode menu sets it: the mode on the row here, on the plugin with the
+    // first turn.
+    await page.goto(project)
+    await group("Idle").getByText(titleA).click()
+    await page.waitForURL(`**/c/${a}`)
+    await page.evaluate(async (id) => {
+      const { setSessionMode } = await import("/src/lib/workspace.ts")
+      await setSessionMode(id, "plan")
+    }, a)
+    const [sessionA, apiKey] = await page.evaluate(async (id) => {
+      const { db } = await import("/src/lib/db.ts")
+      const profile = (await db.profiles.toArray())[0]
+      return [(await db.conversations.get(id)).hermesSessionId, profile.apiKey]
+    }, a)
+    const headers = { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }
+    const host = (path) =>
+      fetch(`${mock}/api/plugins/memento${path}`, { headers }).then((response) => response.json())
+    const workspace = () => host(`/sessions/${sessionA}/workspace`)
+    const row = (id) =>
+      page.evaluate(async (conversationId) => {
+        const { db } = await import("/src/lib/db.ts")
+        const found = await db.conversations.get(conversationId)
+        return {
+          planPending: Boolean(found?.planPending),
+          planFile: found?.planFile ?? null,
+        }
+      }, id)
+
+    await watchPlanCard(page)
+    await send("add a dry run to the log rotation")
+    // Plan mode settles its questions before it writes the plan; the plan follows the answers.
+    await until(
+      async () => (await host("/runs/live")).waiting?.[sessionA]?.kind === "question",
+      30_000,
+      "session A to be planning and waiting on its questions",
+    )
+    pass("session A is planning, waiting on the questions its plan needs")
+
+    // Back to the project and into the other session, while A is still planning.
+    await backToProject()
+    await page.waitForURL(`**/code/${profileId}/${PROJECT}`)
+    await clearCards(page)
+    await openSession(b, titleB)
+    await shot("other-session")
+
+    // The plan lands now, with the other session on screen — the moment the report describes.
+    await fetch(`${mock}/__mock/clarify`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ outcome: "timed_out" }),
+    })
+    const planned = await until(
+      async () => {
+        const record = (await workspace()).workspace
+        return record?.plan_pending ? record : null
+      },
+      40_000,
+      "session A's plan to be saved and left waiting",
+    )
+    await page.waitForTimeout(3000)
+    pass(`session A's plan is waiting (${planned.plan_file})`)
+
+    // Nothing of it reaches the other session: not its screen, not its row.
+    const seenWhileLanding = await cardsSeen(page)
+    const bRow = await row(b)
+    console.log(
+      `plan-mode: the other session's row is ${JSON.stringify(bRow)}; cards seen: ${seenWhileLanding}`,
+    )
+    assert.equal(seenWhileLanding, 0, "the plan-ready card never rendered on the other session")
+    assert.equal(bRow.planPending, false, "the other session's row holds no plan")
+    assert.equal(bRow.planFile, null, "the other session's row names no plan file")
+    assert.equal(
+      await page.getByRole("button", { name: "Keep planning" }).count(),
+      0,
+      "the other session still shows its composer",
+    )
+    await shot("clean")
+    pass("the plan stays with the session that finished it")
+
+    // The other order the report could have been: A's card already on screen, then back, then in.
+    await backToProject()
+    await page.waitForURL(`**/code/${profileId}/${PROJECT}`)
+    await group("Waiting on you").getByText(titleA).click()
+    await page.waitForURL(`**/c/${a}`)
+    await page.getByRole("button", { name: "Keep planning" }).waitFor({ timeout: 20_000 })
+    await shot("plan-ready")
+    pass("session A shows its own plan-ready card")
+
+    await backToProject()
+    await page.waitForURL(`**/code/${profileId}/${PROJECT}`)
+    await clearCards(page)
+    await openSession(b, titleB)
+    await page.waitForTimeout(3000)
+    const seenWhileSwitching = await cardsSeen(page)
+    const bAgain = await row(b)
+    console.log(
+      `plan-mode: after the switch, the other session's row is ${JSON.stringify(bAgain)}; cards seen: ${seenWhileSwitching}`,
+    )
+    assert.equal(seenWhileSwitching, 0, "A's card never renders under the other session")
+    assert.equal(bAgain.planPending, false, "still no plan on the other session")
+    assert.equal(bAgain.planFile, null, "still no plan file on the other session")
+    pass("switching in with A's card on screen leaves the other session clean")
+
+    // And A keeps its own.
+    await backToProject()
+    await group("Waiting on you").getByText(titleA).click()
+    await page
+      .getByRole("button", { name: "Keep planning" })
+      .waitFor({ timeout: 20_000 })
+    pass("session A's plan is still there")
+  },
+  { viewport: { width: 390, height: 844 } },
+)
