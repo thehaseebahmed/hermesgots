@@ -86,8 +86,8 @@ function useFittingPhrases(parts: string[], deps: unknown[] = []) {
     // `parts` is rebuilt every render; its content is what `key` stands for.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, ...deps])
-  // The row's width is what the phrases are fitted to, so it is observed once, not per phrase: a
-  // streaming reply changes `parts` every flush, and re-observing each time would force a layout.
+  // A fresh observer delivers the button's size once, so re-creating one per phrase change ran the
+  // fit twice; observing once keeps a change to a single fit.
   useLayoutEffect(() => {
     const button = row.current
     if (!button) return
