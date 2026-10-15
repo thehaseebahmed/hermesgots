@@ -893,6 +893,17 @@ function modelOf(conversation: Conversation, profile: Profile) {
   return { model: chosen?.model ?? profile.model, provider: chosen?.provider }
 }
 
+/**
+ * When a new turn starts: now, or just after the chat's last message when the host's clock, which
+ * stamped the turns loaded from it, runs ahead of this device's. Queued messages wait after it.
+ */
+function nextAt(messages: Message[]) {
+  return messages.reduce(
+    (at, m) => (m.status === "queued" ? at : Math.max(at, m.createdAt + 1)),
+    Date.now(),
+  )
+}
+
 /** Writes the user's message and the empty reply, before the turn opens. */
 async function prepareSend(
   conversationId: string,
@@ -905,7 +916,7 @@ async function prepareSend(
   const profile = await profileFor(conversation.profileId)
   if (!profile) return undefined
   const history = await getMessages(conversationId)
-  const now = Date.now()
+  const now = nextAt(history)
   const userMessage: Message = {
     id: queuedId ?? randomId(),
     conversationId,
@@ -1300,7 +1311,7 @@ async function syncQueue(conversationId: string) {
       if (inThread) continue
       if (running && item.runId) {
         if (controllers.has(conversationId)) continue
-        const now = Date.now()
+        const now = nextAt(local)
         await db.messages.put({
           id: item.id,
           conversationId,
