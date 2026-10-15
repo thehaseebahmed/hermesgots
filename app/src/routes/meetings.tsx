@@ -35,7 +35,7 @@ import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { ExperimentalBadge } from "@/components/experimental-badge"
-import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { FullscreenPopup, Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -231,6 +231,7 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
   const bot = useMeetingBot()
   const compact = Boolean(pane?.open)
   const [adding, setAdding] = useState(false)
+  const [recording, setRecording] = useState(false)
   // A fresh form each time it opens.
   const [form, setForm] = useState(0)
   const [query, setQuery] = useState("")
@@ -270,7 +271,7 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
         {compact ? (
           <div className="grid grid-cols-2 gap-3">
-            <Button className="h-11 rounded-full" onClick={() => open("/meetings/record")}>
+            <Button className="h-11 rounded-full" onClick={() => setRecording(true)}>
               <MicIcon data-icon="inline-start" />
               Record
             </Button>
@@ -298,7 +299,7 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
               <Button
                 size="lg"
                 className="h-12 rounded-full text-base"
-                onClick={() => open("/meetings/record")}
+                onClick={() => setRecording(true)}
               >
                 <MicIcon data-icon="inline-start" />
                 Record
@@ -413,6 +414,15 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
       </div>
 
       <Upload key={form} open={adding} onOpenChange={setAdding} />
+      {recording && (
+        <Recorder
+          onClose={() => setRecording(false)}
+          onDone={(id) => {
+            setRecording(false)
+            open(`/meetings/${id}`)
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -696,65 +706,70 @@ function DropZone({
   )
 }
 
-type UploadKind = "recording" | "transcript"
-
-/** A recording or a transcript from the device, its title and the project it's filed under. */
+/** A recording or a transcript from the device, by its extension, and the project it's filed under. */
 function Upload({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const go = useSwap()
   const bot = useMeetingBot()
   const { projects, project, pick } = usePickedProject()
-  const [kind, setKind] = useState<UploadKind>("recording")
-  const [recording, setRecording] = useState<{ file: File; seconds: number }>()
-  const [transcriptFile, setTranscriptFile] = useState<File>()
-  const [text, setText] = useState("")
-  const [title, setTitle] = useState("")
-  const parsed = text.trim() ? parseTranscript(text) : undefined
-
-  const named = (name: string) => setTitle((current) => current || baseName(name))
+  const [picked, setPicked] = useState<
+    { file: File; seconds: number } | { file: File; text: string }
+  >()
+  const parsed = picked && "text" in picked ? parseTranscript(picked.text) : undefined
 
   const choose = async (file: File) => {
-    if (isTranscript(file)) {
-      setKind("transcript")
-      if (file.size > MAX_TRANSCRIPT_BYTES) {
-        toast.error("That file is too big for a transcript.")
-        return
-      }
-      setTranscriptFile(file)
-      setText(await file.text())
-      named(file.name)
+    if (!isTranscript(file)) {
+      setPicked({ file, seconds: await audioLength(file) })
       return
     }
-    setKind("recording")
-    setRecording({ file, seconds: await audioLength(file) })
-    named(file.name)
+    if (file.size > MAX_TRANSCRIPT_BYTES) {
+      toast.error("That file is too big for a transcript.")
+      return
+    }
+    setPicked({ file, text: await file.text() })
   }
 
-  const ready = kind === "recording" ? Boolean(recording) : Boolean(parsed?.lines.length)
+  const ready = picked && (!parsed || parsed.lines.length > 0)
 
   const add = () => {
-    if (!project || !ready) return
-    const meeting =
-      kind === "recording" && recording
-        ? createMeeting({
-            title: title.trim() || recording.file.name,
-            project,
-            bot,
-            source: "upload",
-            fileName: recording.file.name,
-            duration: recording.seconds,
-          })
-        : createMeeting({
-            title: title.trim() || defaultTitle(),
-            project,
-            bot,
-            source: "transcript",
-            fileName: transcriptFile?.name,
-            duration: parsed?.duration ?? 0,
-            transcript: parsed?.lines,
-          })
+    if (!project || !picked || !ready) return
+    const title = baseName(picked.file.name)
+    const meeting = parsed
+      ? createMeeting({
+          title,
+          project,
+          bot,
+          source: "transcript",
+          fileName: picked.file.name,
+          duration: parsed.duration,
+          transcript: parsed.lines,
+        })
+      : createMeeting({
+          title,
+          project,
+          bot,
+          source: "upload",
+          fileName: picked.file.name,
+          duration: "seconds" in picked ? picked.seconds : 0,
+        })
     onOpenChange(false)
     go(`/meetings/${meeting.id}`)
   }
+
+  const detail = !picked
+    ? undefined
+    : parsed
+      ? parsed.lines.length
+        ? [
+            `${parsed.lines.length} ${parsed.lines.length === 1 ? "line" : "lines"}`,
+            `${parsed.timed ? "" : "about "}${length(parsed.duration)}`,
+          ].join(" · ")
+        : "No lines found"
+      : [
+          "seconds" in picked && picked.seconds ? length(picked.seconds) : null,
+          sizeText(picked.file.size),
+        ]
+          .filter(Boolean)
+          .join(" · ")
 
   return (
     <Popup open={open} onOpenChange={onOpenChange}>
@@ -769,77 +784,14 @@ function Upload({ open, onOpenChange }: { open: boolean; onOpenChange: (open: bo
             add()
           }}
         >
-          <Tabs value={kind} onValueChange={(value) => setKind(value as UploadKind)}>
-            <TabsList className="w-full">
-              <TabsTrigger value="recording" className="min-h-9">
-                <FileAudioIcon />
-                Recording
-              </TabsTrigger>
-              <TabsTrigger value="transcript" className="min-h-9">
-                <FileTextIcon />
-                Transcript
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="recording" className="pt-4">
-              <DropZone
-                accept={RECORDING_TYPES}
-                icon={FileAudioIcon}
-                label="Choose an audio or video file"
-                file={recording?.file.name}
-                detail={
-                  recording &&
-                  [
-                    recording.seconds ? length(recording.seconds) : null,
-                    sizeText(recording.file.size),
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")
-                }
-                onFile={(file) => void choose(file)}
-              />
-            </TabsContent>
-            <TabsContent value="transcript" className="flex flex-col gap-3 pt-4">
-              <DropZone
-                accept={TRANSCRIPT_TYPES}
-                icon={FileTextIcon}
-                label="Choose a transcript"
-                file={transcriptFile?.name}
-                detail={transcriptFile && sizeText(transcriptFile.size)}
-                onFile={(file) => void choose(file)}
-              />
-              <Textarea
-                value={text}
-                onChange={(event) => {
-                  setText(event.target.value)
-                  if (!event.target.value) setTranscriptFile(undefined)
-                }}
-                placeholder="Or paste it here"
-                aria-label="Transcript"
-                className="max-h-56 min-h-32 font-mono text-[13px] leading-relaxed"
-              />
-              {parsed && (
-                <p className="px-1 text-sm text-muted-foreground" aria-live="polite">
-                  {parsed.lines.length
-                    ? [
-                        `${parsed.lines.length} ${parsed.lines.length === 1 ? "line" : "lines"}`,
-                        `${parsed.timed ? "" : "about "}${length(parsed.duration)}`,
-                      ].join(" · ")
-                    : "No lines found"}
-                </p>
-              )}
-            </TabsContent>
-          </Tabs>
-
-          <Field>
-            <FieldLabel htmlFor="meeting-title">Title</FieldLabel>
-            <Input
-              id="meeting-title"
-              className="h-11"
-              autoComplete="off"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-            />
-          </Field>
+          <DropZone
+            accept={`${RECORDING_TYPES},${TRANSCRIPT_TYPES}`}
+            icon={picked && "text" in picked ? FileTextIcon : FileAudioIcon}
+            label="Choose a recording or transcript"
+            file={picked?.file.name}
+            detail={detail}
+            onFile={(file) => void choose(file)}
+          />
 
           {project && (
             <Field>
@@ -876,18 +828,11 @@ function useLevel(live: boolean) {
   return live ? level : 0
 }
 
-/** Recording a meeting: the bot listening, what it last heard, and moments marked as they happen. */
-export function RecordPage() {
-  return (
-    <Gate>
-      <Recorder />
-    </Gate>
-  )
-}
-
-function Recorder() {
-  const navigate = useNavigate()
-  const { up } = useNav()
+/**
+ * Recording a meeting, full screen: the bot listening, what it last heard, and moments marked as
+ * they happen. Only mounted while it's open, so every recording starts fresh.
+ */
+function Recorder({ onClose, onDone }: { onClose: () => void; onDone: (id: string) => void }) {
   const bot = useMeetingBot()
   const { projects, project, pick } = usePickedProject()
   const [placeholder] = useState(defaultTitle)
@@ -908,8 +853,8 @@ function Recorder() {
 
   const leave = useCallback(() => {
     if (elapsed > 0) setConfirming(true)
-    else up("/meetings")
-  }, [elapsed, up])
+    else onClose()
+  }, [elapsed, onClose])
   useEffect(() => setBackGuard(() => (leave(), true)), [leave])
 
   const mark = (kind: MomentKind) => {
@@ -928,13 +873,17 @@ function Recorder() {
       typed,
       marks,
     })
-    navigate(`/meetings/${meeting.id}`, { replace: true })
+    onDone(meeting.id)
   }
 
   const heard = heardAt(elapsed)
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-radial-[at_50%_35%] from-primary/15 via-background via-60% to-background">
+    <FullscreenPopup
+      open
+      onOpenChange={(open) => !open && leave()}
+      className="bg-radial-[at_50%_35%] from-primary/15 via-background via-60% to-background"
+    >
       <Header
         className="bg-transparent backdrop-blur-none"
         leading={
@@ -1121,13 +1070,13 @@ function Recorder() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep recording</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={() => up("/meetings")}>
+            <AlertDialogAction variant="destructive" onClick={onClose}>
               Discard
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </FullscreenPopup>
   )
 }
 

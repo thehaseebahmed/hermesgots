@@ -155,8 +155,13 @@ for (const [width, dark] of [
 
       // Record: mark a moment, write a note, end it and follow it to its recap.
       await toList()
+      const listUrl = page.url()
       await page.getByRole("button", { name: "Record", exact: true }).click()
       await page.getByText("Recording", { exact: true }).waitFor({ timeout: 5_000 })
+      // A full-screen popup over the list, not a screen of its own.
+      assert.equal(page.url(), listUrl, "recording is a popup, not a route")
+      const cover = await page.getByRole("dialog").boundingBox()
+      assert.ok(cover && cover.width >= width - 1 && cover.height >= (width < 768 ? 843 : 899))
       await page.getByRole("textbox", { name: "Title" }).fill("Plan for the import flow")
       await page.waitForTimeout(1_200)
       await page.getByRole("button", { name: "Decision" }).click()
@@ -189,41 +194,39 @@ for (const [width, dark] of [
         .first()
         .setInputFiles({ name: "standup.wav", mimeType: "audio/wav", buffer: silence() })
       await page.getByText("standup.wav").waitFor({ timeout: 5_000 })
-      assert.equal(await page.getByLabel("Title").inputValue(), "standup")
+      assert.equal(await page.getByLabel("Title").count(), 0, "just a file and a project")
       await shot("7-add")
       await page.getByRole("button", { name: "Add", exact: true }).click()
       await page.waitForURL("**/meetings/m_*", { timeout: 5_000 })
       await page.getByRole("heading", { name: "To do" }).waitFor({ timeout: 20_000 })
       pass(`${width}: an added file is written up as notes`)
 
-      // A transcript file fills the box; one pasted is read as it's typed.
+      // A transcript is told by its extension: one file and a project, no mode to pick.
       await toList()
       await page.getByRole("button", { name: "Upload", exact: true }).click()
-      await page.getByRole("tab", { name: "Transcript" }).click()
-      await page
-        .locator("input[type=file]")
-        .first()
-        .setInputFiles({
-          name: "retro.srt",
-          mimeType: "application/x-subrip",
-          buffer: Buffer.from(SRT),
-        })
-      await page.getByText("retro.srt").waitFor({ timeout: 5_000 })
-      assert.match(await page.getByRole("textbox", { name: "Transcript" }).inputValue(), /retro/)
-      await page.getByText("2 lines · 9 s").waitFor()
-      assert.equal(await page.getByLabel("Title").inputValue(), "retro")
-      await page.getByRole("textbox", { name: "Transcript" }).fill(PASTED)
+      assert.equal(await page.getByRole("tab").count(), 0, "no recording or transcript switch")
+      const picker = page.locator("input[type=file]").first()
+      await picker.setInputFiles({
+        name: "retro.srt",
+        mimeType: "application/x-subrip",
+        buffer: Buffer.from(SRT),
+      })
+      await page.getByText("2 lines · 9 s").waitFor({ timeout: 5_000 })
+      await picker.setInputFiles({
+        name: "pricing-chat.txt",
+        mimeType: "text/plain",
+        buffer: Buffer.from(PASTED),
+      })
       await page.getByText("3 lines · 50 s").waitFor()
-      await page.getByLabel("Title").fill("Pricing chat")
       await shot("7b-transcript")
       await page.getByRole("button", { name: "Add", exact: true }).click()
       await page.waitForURL("**/meetings/m_*", { timeout: 5_000 })
-      await page.getByText("Pricing chat").first().waitFor()
+      await page.getByText("pricing-chat").first().waitFor()
       // Beside the list, the earlier upload's row says Transcribing, so only look when it's alone.
       if (width < 1280)
         assert.equal(await page.getByText(/Uploading|Transcribing/).count(), 0, "no upload step")
       await page.getByRole("heading", { name: "To do" }).waitFor({ timeout: 10_000 })
-      pass(`${width}: a transcript skips straight to the write-up`)
+      pass(`${width}: a transcript file skips straight to the write-up`)
 
       // The failed sample, tried again.
       await toList()

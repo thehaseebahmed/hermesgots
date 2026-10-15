@@ -43,22 +43,21 @@ export function useProjectPane(): ProjectPane | undefined {
 }
 
 export interface MeetingsPane {
-  /** A meeting (or the recorder) is open beside the list. */
+  /** A meeting is open beside the list. */
   open: boolean
   /** The meeting open beside the list. */
   selected?: string
 }
 
 /**
- * From `xl` the Meetings list stays on screen as a pane to the left of the meeting, a topic or the
- * recorder it opened, the way a project stays beside its session.
+ * From `xl` the Meetings list stays on screen as a pane to the left of the meeting or a topic it
+ * opened, the way a project stays beside its session.
  */
 export function useMeetingsPane(): MeetingsPane | undefined {
   const large = useXLarge()
   const { pathname } = useLocation()
   if (!large) return undefined
   if (matchPath("/meetings", pathname)) return { open: false }
-  if (matchPath("/meetings/record", pathname)) return { open: true }
   const id = matchPath("/meetings/:id/*", pathname)?.params.id
   return id ? { open: true, selected: id } : undefined
 }

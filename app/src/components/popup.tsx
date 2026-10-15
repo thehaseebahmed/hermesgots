@@ -248,3 +248,35 @@ export function PopupContent({
     </HeaderSeen.Provider>
   )
 }
+
+/**
+ * A focused, full-screen pop-up for something that shouldn't be dismissed by accident (a live
+ * recording): it covers the app on every screen size, has no drag handle or scrim to dismiss it, and
+ * leaves the way out to its content, which gets Escape and Android's back through `onOpenChange`.
+ */
+export function FullscreenPopup({
+  open,
+  onOpenChange,
+  className,
+  children,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  className?: string
+  children: ReactNode
+}) {
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Popup
+          className={cn(
+            "fixed inset-0 z-50 flex flex-col bg-background text-foreground transition duration-200 outline-none data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0 motion-reduce:transition-none",
+            className,
+          )}
+        >
+          {children}
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
+  )
+}
