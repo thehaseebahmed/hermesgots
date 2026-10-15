@@ -36,11 +36,12 @@ export function Popup({ side, ...props }: ComponentProps<typeof Drawer.Root> & {
   )
 }
 /**
- * A pop-up's heading: centred by the header, bounded to its width so a long one cuts with an
- * ellipsis rather than running under the close button.
+ * A pop-up's heading: centred in every form, like a Material bottom sheet's, and bounded so a long
+ * one cuts with an ellipsis rather than running under the close button. A heading that sits beside
+ * a control of the header's own passes `text-left`.
  */
 export function PopupTitle({ className, ...props }: ComponentProps<typeof SheetTitle>) {
-  return <SheetTitle className={cn("max-w-full truncate", className)} {...props} />
+  return <SheetTitle className={cn("max-w-full truncate text-center", className)} {...props} />
 }
 export const PopupDescription = SheetDescription
 
@@ -61,11 +62,10 @@ export function PopupHeader({ className, children, ...props }: ComponentProps<ty
         // The close button sits at the header's right, so a dialog or side sheet keeps that room
         // clear; a phone sheet has no close button and keeps its own right padding.
         !sheet && "pr-14",
-        // The heading is centred in every form, Material's bottom-sheet title; a phone sheet has
-        // the drag handle above it, so it keeps no top padding of its own. A header with a back
-        // button in the row passes `text-left` to keep its title beside it.
-        "items-center text-center",
-        sheet && "pt-0",
+        // A phone sheet centres its whole header, as a Material bottom sheet does, and has the
+        // drag handle above the heading, so it takes no top padding. The heading centres itself in
+        // every form (PopupTitle), leaving a dialog's or side sheet's other header rows as they were.
+        sheet && "items-center pt-0 text-center",
         className,
       )}
       {...props}
