@@ -22,7 +22,7 @@ import { usePoll } from "@/lib/poll"
 
 /**
  * Dictation: the clip is recorded here and turned into text by the bot's own faster-whisper,
- * through the Memento plugin (`plugin/dictation.py`). Hermes's local model doesn't stream, so the
+ * through the Gots plugin (`plugin/dictation.py`). Hermes's local model doesn't stream, so the
  * recording is cut at the speaker's pauses and each piece is sent while they keep talking: on Stop
  * only the last piece is left to wait for. Until its text is in, a recording is kept on the device
  * (`db.dictations`, under the composer's draft key). The mic is greyed out until the host says it can.

@@ -150,7 +150,7 @@ function PluginMissing() {
   return (
     <Card className="gap-3 rounded-3xl px-4 py-4">
       <p className="text-sm">
-        Routines need the Memento plugin on this Hermes server. Install it from the Hermes CLI:
+        Routines need the Gots plugin on this Hermes server. Install it from the Hermes CLI:
       </p>
       <CopyBlock label="Copy install commands" text={INSTALL_PLUGIN} />
     </Card>

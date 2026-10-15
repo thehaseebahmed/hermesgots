@@ -1,4 +1,4 @@
-"""GitHub for Memento's Code screen: the host's GitHub account, its repos, and cloning one into a
+"""GitHub for Gots's Code screen: the host's GitHub account, its repos, and cloning one into a
 Hermes Project.
 
 The token never leaves the Hermes host. It's resolved through Hermes's own

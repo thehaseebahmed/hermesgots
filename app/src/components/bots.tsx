@@ -1,5 +1,5 @@
 /**
- * Memento's bot characters. The artwork lives in public/bots/<id>.png and <Bot> (bot.tsx) renders
+ * Gots's bot characters. The artwork lives in public/bots/<id>.png and <Bot> (bot.tsx) renders
  * it; each one's motion is `.bot-anim-<id>` in index.css, which only runs under `.bot-animate`.
  */
 
@@ -66,5 +66,5 @@ export const LEGACY_BOT_IDS: Record<string, string> = {
   mochi: "bloom",
 }
 
-/** The bot Memento uses wherever no profile is in play. */
+/** The bot Gots uses wherever no profile is in play. */
 export const DEFAULT_BOT_ID = "cubby"

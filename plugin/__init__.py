@@ -1,12 +1,12 @@
-"""Memento's Hermes plugin.
+"""Gots's Hermes plugin.
 
-Adds routes to the API server, so the Memento app (which only talks to the API server, with its key)
+Adds routes to the API server, so the Gots app (which only talks to the API server, with its key)
 can read cron run history from Hermes's execution ledger instead of piecing it together on each
 device, keep its chat list on the server (``chats.py``), report each chat's context use
 (``context.py``) and the agent's todo list (``todos.py``), list and create Hermes Projects (``projects.py``) with GitHub repos cloned into
 them in the background (``clones.py``, ``github.py``), add and remove a project's repos (``repos.py``), run project sessions in their own worktrees with a permission mode and save their plans
 (``sessions.py``), let the agent push and open its pull requests, close them when a session is dropped (``ship.py``), file the files it generates in the project's library (``library.py``) and resolve a session once its pull request merges (``merges.py``), run a session end to end with the Theseus skill (``theseus.py``), research a question into a cited guide, quiz or glossary (``research.py``), let the agent ask the user questions with Hermes's ``clarify`` tool (``clarify.py``), keep its delegations in the turn that made them (``delegation.py``) and
-set the profile's main model from a bot's Default model (``host_model.py``), label its chats as Memento's, tell the app what changed as it happens (``events.py``, ``stream.py``), and links the profile to a Memento account (``link.py``). The dashboard half lives in ``dashboard/``.
+set the profile's main model from a bot's Default model (``host_model.py``), label its chats as Gots's, tell the app what changed as it happens (``events.py``, ``stream.py``), and links the profile to a Gots account (``link.py``). The dashboard half lives in ``dashboard/``.
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ from .store import db_path
 logger = logging.getLogger(__name__)
 
 PREFIX = "/api/plugins/memento"
-# Memento shows 24 runs per job.
+# Gots shows 24 runs per job.
 DEFAULT_PER_JOB = 24
 MAX_PER_JOB = 200
 
@@ -175,7 +175,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             logger.debug("memento: couldn't resume project clones", exc_info=True)
         tasks = [
             asyncio.ensure_future(cleanup.run_daily(adapter, home)),
-            # Linked profiles keep their bot record current in the Memento registry; see link.py.
+            # Linked profiles keep their bot record current in the Gots registry; see link.py.
             asyncio.ensure_future(link.run(adapter)),
             asyncio.ensure_future(merges.run(home)),
             # Queued messages start their turn once the session's run is over; see outbox.py.
@@ -1503,7 +1503,7 @@ def register(ctx) -> None:
     if register_cli is not None:
         register_cli(
             name="memento",
-            help="Link this profile to the Memento app",
+            help="Link this profile to the Gots app",
             setup_fn=link.setup_cli,
             description="hermes memento link <code> --site <url>, unlink or status",
         )

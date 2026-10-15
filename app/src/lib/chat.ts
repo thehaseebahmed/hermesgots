@@ -852,7 +852,7 @@ async function uploadAttachments(
     .filter(({ attachment }) => plugin || !attachment.image)
   const missing = pending.find(({ attachment }) => !plugin && !attachment.image)
   if (missing)
-    throw new AttachmentError(`Attaching ${missing.attachment.name} needs the Memento plugin.`)
+    throw new AttachmentError(`Attaching ${missing.attachment.name} needs the Gots plugin.`)
   for (const { attachment } of pending) setUploading(attachment.id, true)
   try {
     const upload = async ({ attachment, index }: (typeof pending)[number]) => {
@@ -1142,7 +1142,7 @@ async function resumeReply(reply: Message) {
 }
 
 /**
- * Whether queued messages wait on the Hermes host, where the Memento plugin starts each once the
+ * Whether queued messages wait on the Hermes host, where the Gots plugin starts each once the
  * run before it is over, with the app closed too. Without it they wait here.
  */
 async function hostQueue(config: HermesConfig) {

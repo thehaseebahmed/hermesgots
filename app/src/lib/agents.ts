@@ -15,7 +15,7 @@ import { usePoll } from "@/lib/poll"
 
 /**
  * The agents a chat's agent delegated to with `delegate_task`. Hermes keeps each as a session of
- * its own; the Memento plugin lists them, and their transcripts come from Hermes like any chat's.
+ * its own; the Gots plugin lists them, and their transcripts come from Hermes like any chat's.
  */
 
 export const DELEGATE_TOOL = "delegate_task"

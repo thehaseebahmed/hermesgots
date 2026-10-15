@@ -142,7 +142,7 @@ def read_since(path: Path, cursor: int, limit: int = 500) -> Tuple[List[Dict[str
     return [{"id": r[0], "kind": r[1], "session_id": r[2]} for r in rows], gap
 
 
-# Hooks. Memento only talks to the API server, so other surfaces' sessions are skipped.
+# Hooks. Gots only talks to the API server, so other surfaces' sessions are skipped.
 
 
 def on_turn_start(**kwargs: Any) -> None:

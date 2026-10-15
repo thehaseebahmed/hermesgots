@@ -18,7 +18,7 @@ import java.util.ArrayList;
 import java.util.UUID;
 
 /**
- * Hands what another app shares into Memento (text, links and images) to the page as a "share"
+ * Hands what another app shares into Gots (text, links and images) to the page as a "share"
  * event. Shared images are copied into the cache, since the sender's permission to read them ends
  * with the intent; the page reads the copies through the WebView's file route.
  */

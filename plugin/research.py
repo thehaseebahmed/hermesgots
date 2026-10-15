@@ -439,7 +439,7 @@ def rewrite(path: Path, mission_id: str, body: Dict[str, Any]) -> Dict[str, Any]
         allowed = theseus.llm_gate()
         if not allowed["model"] or (provider and not allowed["provider"]):
             raise ResearchError(
-                "This host doesn't let Memento pick the model. Allow it with "
+                "This host doesn't let Gots pick the model. Allow it with "
                 "`hermes plugins enable memento`.",
                 403,
             )
@@ -665,7 +665,7 @@ def _brief_text(row: Dict[str, Any]) -> str:
 
 # --- the researcher ------------------------------------------------------------------------------
 
-RESEARCHER_INSTRUCTIONS = """You are the researcher of a Memento research mission. Your output is the evidence ledger, not the write-up: someone else writes from the claims you record, and from nothing else.
+RESEARCHER_INSTRUCTIONS = """You are the researcher of a Gots research mission. Your output is the evidence ledger, not the write-up: someone else writes from the claims you record, and from nothing else.
 - For each outline point, find sources with web_search and read the best ones in full with web_extract.
 - Call claim_add once for every fact a writer would need: the claim in your own plain words, the page's URL and title, the kind of source, and the passage that says so copied word for word from the page (one to three whole sentences, no ellipses, no paraphrase). The tool fetches the page and refuses a passage it can't find there; copy it again exactly, or pick another passage.
 - Cover every point, from at least two different sources where you can, preferring the kinds of source the mission names. Mark a claim uncertain when sources disagree or the source is weak.
@@ -737,7 +737,7 @@ def _fetch_words(url: str) -> Optional[str]:
     request = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "Mozilla/5.0 (compatible; Memento research; +https://github.com/thehaseebahmed/memento)",
+            "User-Agent": "Mozilla/5.0 (compatible; Gots research; +https://github.com/thehaseebahmed/memento)",
             "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5",
         },
     )

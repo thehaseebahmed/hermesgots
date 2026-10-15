@@ -111,7 +111,7 @@ function SetupPage({
         </div>
 
         {step === "sign-in" && (
-          <Section title="Welcome to Memento" description="Sign in to get started.">
+          <Section title="Welcome to Gots" description="Sign in to get started.">
             <Button size="lg" className="h-11 self-center" onClick={signIn}>
               <LogInIcon data-icon="inline-start" />
               Sign in with GitHub

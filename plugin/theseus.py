@@ -43,7 +43,7 @@ IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
 # Fixed text, so the prompt cache holds across a session's turns.
 INSTRUCTIONS = """This session is a Theseus run: the user decides, you build in small checkpoints that each pass four gates. Follow the tha-theseus skill. Read {skill}/SKILL.md first (api.md, gates.md and checkpoints.md sit next to it) and run its CLI as `node {script} <command>`, called `theseus` in the skill.
 How it works on this host:
-- {start} The user sees it in Memento and approves the plan, the checkpoints and each checkpoint there. Never run `theseus serve`: Memento serves it.
+- {start} The user sees it in Gots and approves the plan, the checkpoints and each checkpoint there. Never run `theseus serve`: Gots serves it.
 - Settle requirements with the user in chat, asking with the clarify tool. After that nobody answers for the user, so wait for them with `theseus wait --timeout 120` and run it again each time it times out.
 - Reviews are done by the theseus_review tool, which asks another model and records its verdict itself. Call it with gate `coverage` once the checkpoints are loaded (the user can't approve them until it is clean; on findings a fresh planner revises the list, you load it again and call it again), then once per reviewer a checkpoint needs (`a`, `b`; `look`, `behave` for visual). Never run `theseus coverage --verdict`, `theseus record ... review` or `visual --reviewer` yourself. `visual --skip` and `--carry` are still yours to record.
 - Everything runs in Auto: you are never asked to approve a command, and only the user approves checkpoints.

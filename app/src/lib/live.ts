@@ -17,7 +17,7 @@ import { reconcileHistory } from "@/lib/history"
 import { syncChatsOf, syncNow } from "@/lib/sync"
 
 /**
- * Hears from each server's Memento plugin as things change, instead of asking every so often: one
+ * Hears from each server's Gots plugin as things change, instead of asking every so often: one
  * stream per server while the app is on screen. Events only say what changed; the app then fetches
  * it the way it always has, so a missed event costs no more than the timer it replaces. Nothing
  * depends on this: a bot whose stream isn't open (an older plugin, a proxy that buffers it, a page

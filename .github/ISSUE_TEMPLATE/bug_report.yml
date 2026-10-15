@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in Memento or its Hermes plugin doesn't work as it should
+description: Something in Gots or its Hermes plugin doesn't work as it should
 labels: ["bug"]
 body:
   - type: textarea
@@ -30,7 +30,7 @@ body:
     id: plugin-version
     attributes:
       label: Plugin version
-      description: The Memento plugin on your Hermes host, if you know it.
+      description: The Gots plugin on your Hermes host, if you know it.
     validations:
       required: false
   - type: input

@@ -53,7 +53,7 @@ def turn_started(**kwargs: Any) -> None:
 
 
 def turn_finished(**kwargs: Any) -> None:
-    """``on_session_end``: a turn of one of Memento's chats ended. Never raises."""
+    """``on_session_end``: a turn of one of Gots's chats ended. Never raises."""
     try:
         session_id = _text(kwargs.get("session_id"))
         if not session_id or kwargs.get("platform") not in (None, "api_server"):

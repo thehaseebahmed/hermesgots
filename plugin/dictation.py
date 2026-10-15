@@ -1,4 +1,4 @@
-"""Dictation: a clip recorded in the Memento app, turned into text by the host's faster-whisper.
+"""Dictation: a clip recorded in the Gots app, turned into text by the host's faster-whisper.
 
 Hermes's own transcription route (``POST /api/audio/transcribe``) lives on the dashboard, which the
 app can't reach, so the clip comes here. It goes straight to Hermes's local faster-whisper path

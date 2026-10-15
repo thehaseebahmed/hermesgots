@@ -2,7 +2,7 @@
 export const APP_VERSION = __APP_VERSION__
 
 /**
- * The oldest Memento plugin this app works with. Raise it when the app starts relying on a route,
+ * The oldest Gots plugin this app works with. Raise it when the app starts relying on a route,
  * field or behaviour that only a newer plugin has.
  */
 export const MIN_PLUGIN_VERSION = "0.29.0"

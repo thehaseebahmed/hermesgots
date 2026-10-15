@@ -424,7 +424,7 @@ export async function getModelInfo(
   }
 }
 
-/** Makes a model the profile's main model in the host's config (the Memento plugin's `model`). */
+/** Makes a model the profile's main model in the host's config (the Gots plugin's `model`). */
 export async function setHostModel(
   config: HermesConfig,
   choice: { provider: string; model: string },
@@ -571,7 +571,7 @@ export async function controlCronJob(
   })
 }
 
-/** One run from Hermes's cron execution ledger, as the Memento plugin serves it. */
+/** One run from Hermes's cron execution ledger, as the Gots plugin serves it. */
 export interface CronExecutionRun extends CronExecution {
   id: string
   job_id: string
@@ -582,7 +582,7 @@ export interface CronExecutionRun extends CronExecution {
 const PLUGIN_ROOT = "/api/plugins/memento"
 
 /**
- * Where the Memento Hermes plugin serves its routes for this bot. Hermes registers its catch-all
+ * Where the Gots Hermes plugin serves its routes for this bot. Hermes registers its catch-all
  * for `/p/<profile>/...` before plugin routes, so a multiplexed profile's plugin is reached with
  * the profile inside the plugin's own prefix, which Hermes still scopes to that profile.
  */
@@ -597,7 +597,7 @@ export const INSTALL_PLUGIN = `hermes plugins install thehaseebahmed/memento/plu
 hermes gateway restart`
 
 /**
- * The Memento plugin's version on the bot's server, or null when it doesn't answer. Hermes's 404
+ * The Gots plugin's version on the bot's server, or null when it doesn't answer. Hermes's 404
  * for an unknown route skips CORS, so a missing plugin usually fails with no status at all.
  */
 export async function getPluginVersion(config: HermesConfig): Promise<string | null> {
@@ -612,7 +612,7 @@ export async function getPluginVersion(config: HermesConfig): Promise<string | n
   }
 }
 
-/** What the Memento plugin on the bot's server offers (`info`'s `features`). */
+/** What the Gots plugin on the bot's server offers (`info`'s `features`). */
 export async function getPluginFeatures(config: HermesConfig): Promise<string[]> {
   const response = await request(`${pluginRoot(config.baseUrl)}/info`, { headers: headers(config) })
   const features: unknown = (await response.json())?.features
@@ -773,7 +773,7 @@ export async function getPluginMedia(config: HermesConfig, path: string): Promis
 const EVENTS_IDLE_MS = 50_000
 
 /**
- * Follows the Memento plugin's change stream until it ends. `hello` and `reset` carry the cursor to
+ * Follows the Gots plugin's change stream until it ends. `hello` and `reset` carry the cursor to
  * resume from; `session`, `title`, `chats`, `cron`, `runs` and `projects` say what changed, never
  * the content. A stream that goes quiet rejects with a `TimeoutError`.
  */
@@ -855,7 +855,7 @@ function multiplexedProfile(baseUrl: string) {
   return serverRoot(baseUrl).match(/\/p\/([^/?#]+)$/)?.[1]
 }
 
-/** Each job's newest runs, newest first. A 404 means the Memento plugin isn't installed. */
+/** Each job's newest runs, newest first. A 404 means the Gots plugin isn't installed. */
 export async function listCronRuns(
   config: HermesConfig,
   perJob: number,
@@ -892,7 +892,7 @@ export interface HermesProjectFolder {
 
 export type ProjectStatus = "ready" | "cloning" | "failed"
 
-/** A Hermes Project (`hermes project create`), through the Memento plugin. */
+/** A Hermes Project (`hermes project create`), through the Gots plugin. */
 export interface HermesProject {
   id: string
   name: string
@@ -1139,7 +1139,7 @@ export async function deleteProject(config: HermesConfig, id: string): Promise<v
 }
 
 /**
- * Merges this device's chat list into the one the Memento plugin keeps, newer record winning, and
+ * Merges this device's chat list into the one the Gots plugin keeps, newer record winning, and
  * returns the merged list. A 404 (or a CORS-blocked one, with no status) means no plugin, or an older one.
  */
 export async function mergeChatList<T>(
@@ -1168,7 +1168,7 @@ export interface SessionContext {
 }
 
 /**
- * A session's context use as the Memento plugin recorded it, following compression to the live
+ * A session's context use as the Gots plugin recorded it, following compression to the live
  * session. Null when it has nothing for the session yet.
  */
 export async function getSessionContext(
@@ -1202,7 +1202,7 @@ export interface ProviderUsage {
 }
 
 /**
- * The provider's account-usage windows (plan quota), from the Memento plugin's
+ * The provider's account-usage windows (plan quota), from the Gots plugin's
  * route that calls Hermes core's fetch_account_usage. Null when the provider has
  * no live windows; a failed read throws, so the caller can tell a missing plugin
  * (an older one, no route) from a busy server.
@@ -1279,7 +1279,7 @@ export function parseTodos(value: unknown): SessionTodos | null {
 
 /**
  * The agent's todo list in a session (and the ones it was compressed from), read from the
- * transcript by the Memento plugin. Null when the agent hasn't written one.
+ * transcript by the Gots plugin. Null when the agent hasn't written one.
  */
 export async function getSessionTodos(
   config: HermesConfig,
@@ -1292,7 +1292,7 @@ export async function getSessionTodos(
   return parseTodos(await response.json())
 }
 
-/** A project session's worktrees and permission mode, as the Memento plugin keeps them. */
+/** A project session's worktrees and permission mode, as the Gots plugin keeps them. */
 export interface SessionWorkspace {
   projectId: string
   branch: string
@@ -1389,7 +1389,7 @@ export async function uploadAttachment(
     // An older plugin's 404 skips CORS, so it fails like an unreachable server.
     if (error instanceof HermesError && (error.status === 404 || error.status === undefined))
       throw new HermesError(
-        `Couldn't attach ${file.name}. Check that Hermes is reachable and its Memento plugin is up to date.`,
+        `Couldn't attach ${file.name}. Check that Hermes is reachable and its Gots plugin is up to date.`,
         error.status,
       )
     throw error
@@ -1411,7 +1411,7 @@ export async function getDictationInfo(config: HermesConfig): Promise<DictationI
   const response = await request(`${pluginRoot(config.baseUrl)}/info`, { headers: headers(config) })
   const raw = (await response.json())?.dictation
   if (!raw || typeof raw !== "object")
-    return { ready: false, reason: "The Memento plugin on this bot's host is too old to dictate." }
+    return { ready: false, reason: "The Gots plugin on this bot's host is too old to dictate." }
   return {
     ready: Boolean(raw.ready),
     reason: typeof raw.reason === "string" ? raw.reason : null,
@@ -1712,7 +1712,7 @@ export interface PullRequest {
 const PR_STATES = new Set<string>(["open", "draft", "merged", "closed"])
 const PR_CHECKS = new Set<string>(["success", "failure", "pending"])
 
-/** The pull request from the session's branch in each of its repos. Needs the Memento plugin. */
+/** The pull request from the session's branch in each of its repos. Needs the Gots plugin. */
 export async function getSessionPrs(
   config: HermesConfig,
   sessionId: string,
@@ -1857,7 +1857,7 @@ export interface LiveRuns {
   waiting: Record<string, WaitingReason & { project?: string }>
 }
 
-/** The server's runs in flight and what waits on the user. Needs the Memento plugin. */
+/** The server's runs in flight and what waits on the user. Needs the Gots plugin. */
 export async function getLiveRuns(config: HermesConfig, signal?: AbortSignal): Promise<LiveRuns> {
   const response = await request(`${pluginRoot(config.baseUrl)}/runs/live`, {
     headers: headers(config),
@@ -1903,7 +1903,7 @@ export async function getLiveRuns(config: HermesConfig, signal?: AbortSignal): P
   return { sessions, runIds, waiting }
 }
 
-/** Answers the agent's questions. Needs the Memento plugin, which serves the clarify tool on runs. */
+/** Answers the agent's questions. Needs the Gots plugin, which serves the clarify tool on runs. */
 export async function respondToClarify(
   config: HermesConfig,
   runId: string,
@@ -1920,7 +1920,7 @@ export async function respondToClarify(
   })
 }
 
-/** Marks a session as Memento's, so the Hermes dashboard labels it. Needs the Memento plugin. */
+/** Marks a session as Gots's, so the Hermes dashboard labels it. Needs the Gots plugin. */
 export async function labelSession(config: HermesConfig, sessionId: string) {
   try {
     await request(`${pluginRoot(config.baseUrl)}/sessions/${encodeURIComponent(sessionId)}/label`, {

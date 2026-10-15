@@ -354,7 +354,7 @@ export function ConversationList({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-2 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-2">
-        <span className="flex-1 pl-1 text-xl font-semibold tracking-tight">Memento</span>
+        <span className="flex-1 pl-1 text-xl font-semibold tracking-tight">Gots</span>
         <Button variant="ghost" size="icon-lg" className="size-11 rounded-full" aria-label="Search">
           <SearchIcon />
         </Button>

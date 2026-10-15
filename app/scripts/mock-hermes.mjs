@@ -3,12 +3,12 @@
 // `hermes.tool.progress`, `hermes.status` and `approval.request`, and answers approvals on
 // POST /v1/runs/{id}/approval. Mention "clean" or "delete" in a message to trigger an approval.
 // Cron jobs live on /api/jobs, and their past runs on GET /api/plugins/memento/cron/runs, like a
-// Hermes with the Memento plugin (MOCK_NO_PLUGIN=1 leaves it out). As on Hermes, the plugin isn't
+// Hermes with the Gots plugin (MOCK_NO_PLUGIN=1 leaves it out). As on Hermes, the plugin isn't
 // served under /p/<profile>/ (a profile's bot reaches it at /api/plugins/memento/p/<profile>/..., where
 // the chat list and the project list are the profile's own and the rest is shared), and an unknown
 // route's 404 carries no CORS headers.
 // The plugin also keeps the chat list (GET and POST /api/plugins/memento/chats, newer record wins) and
-// labels a chat as Memento's on POST /api/plugins/memento/sessions/{id}/label. Its
+// labels a chat as Gots's on POST /api/plugins/memento/sessions/{id}/label. Its
 // GET /api/plugins/memento/sessions/{id}/context reports a keyed session's latest model call.
 // GET /api/plugins/memento/usage?provider=… serves two windows (Session + Weekly) whose
 // used_percent is MOCK_USAGE_PERCENT (default 94 so the composer banner shows; 0 → no windows), and
@@ -90,7 +90,7 @@ const PORT = Number(process.env.PORT ?? 8642)
 const pendingApprovals = new Map()
 const pendingClarifies = new Map()
 const chatTitles = new Map()
-/** Sessions the Memento plugin has labelled, which then report `source: "Memento"` (`"Memento Code"` for a project session). */
+/** Sessions the Gots plugin has labelled, which then report `source: "Gots"` (`"Gots Code"` for a project session). */
 const labelledSessions = new Map()
 /** The plugin's chat list: id -> { at, deleted?, value? }. */
 const pluginChats = new Map()
@@ -188,7 +188,7 @@ function seedProjects() {
     {
       id: "p_1a2b3c4d",
       slug: "memento",
-      name: "Memento",
+      name: "Gots",
       description: null,
       created_at: now - 40 * 86_400,
       last_active: now - 15 * 60,
@@ -1647,7 +1647,7 @@ http
     if (PLUGIN && !profile && req.method === "POST" && sessionLabel) {
       const id = decodeURIComponent(sessionLabel[1])
       if (!chatTitles.has(id)) return json(res, 404, { error: { message: "Session not found" } })
-      const source = projectSessions.has(id) ? "Memento Code" : "Memento"
+      const source = projectSessions.has(id) ? "Gots Code" : "Gots"
       labelledSessions.set(id, source)
       return json(res, 200, { id, source })
     }

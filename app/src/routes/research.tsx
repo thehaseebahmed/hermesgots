@@ -642,7 +642,7 @@ function RewritePicker({ mission, onDone }: { mission: Mission; onDone: () => vo
     <>
       {writers && !writers.model && (
         <Banner className="mx-6 mt-5 mb-0">
-          This host doesn't let Memento pick the model. Allow it with{" "}
+          This host doesn't let Gots pick the model. Allow it with{" "}
           <code className="font-mono text-[13px]">hermes plugins enable memento</code>.
         </Banner>
       )}

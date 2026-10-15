@@ -1,4 +1,4 @@
-// The Memento plugin's research missions (research.py), for the mock Hermes server. A mission reads
+// The Gots plugin's research missions (research.py), for the mock Hermes server. A mission reads
 // its question back after a moment, proposes an outline, then "researches": a claim from the
 // transformers ledger below every 0.7s, a guide section every 1.5s, a short review, delivered.
 // Another format takes 3s. A follow-up reads two more claims, works its questions into the outline
@@ -668,7 +668,7 @@ export async function handleResearch(req, res, path, { json, readBody, noteEvent
       if ((moved(["delivered"]) && !failedRewrite) || m.making) return fail(409, "The mission isn't delivered yet."), true
       const model = typeof body.model === "string" && body.model ? { provider: body.provider ?? "", model: body.model } : null
       if (model && !WRITERS)
-        return fail(403, "This host doesn't let Memento pick the model. Allow it with `hermes plugins enable memento`."), true
+        return fail(403, "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable memento`."), true
       if (!m.revisions.length) revise(m, "first")
       change(m, { writer: model, pending: { reason: "rewrite", model }, suggestions: [], stage: "drafting", error: null }, note)
       write(m, note)

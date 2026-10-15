@@ -1,4 +1,4 @@
-"""The profile's main model, set from the Memento app.
+"""The profile's main model, set from the Gots app.
 
 Hermes's only route for it is the dashboard's ``POST /api/model/set``, which the app can't reach
 (localhost only, a token that changes on every start). So the bot editor's Default model comes here,

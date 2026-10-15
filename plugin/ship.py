@@ -313,7 +313,7 @@ SCHEMA = {
 
 
 def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any) -> str:
-    """The tool: ships the session the call belongs to (its task id is Memento's session id)."""
+    """The tool: ships the session the call belongs to (its task id is Gots's session id)."""
     from . import sessions
 
     args = args if isinstance(args, dict) else {}

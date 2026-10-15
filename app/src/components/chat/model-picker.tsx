@@ -394,7 +394,7 @@ export function ModelMenu({
   const info = useModelInfo(profile)
   const providers = info?.providers ?? []
   // The host's last reported model, shown greyed while it's read again. Only a bot whose host runs
-  // the Memento plugin shows it; one without the plugin keeps showing nothing until the host answers.
+  // the Gots plugin shows it; one without the plugin keeps showing nothing until the host answers.
   const remembered = profile?.pluginVersion ? profile.hostModel?.model : undefined
   // One pick, so the name and its provider can't come from different models.
   const shown = choice ?? profile?.modelChoice ?? hostChoice(info)

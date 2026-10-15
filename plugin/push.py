@@ -8,7 +8,7 @@ VAPID key (RFC 8292), through the push service the browser named. The message sa
 news, which session, its title (the chat's, the routine's or the project's name) and which bot
 character to show, never what was asked; the push service can't read it either.
 
-The Android app has no Push API, so for it the plugin asks the Memento registry (``link.py``) to send
+The Android app has no Push API, so for it the plugin asks the Gots registry (``link.py``) to send
 through Firebase, since the service account key can't live on every host: the message is the same, so
 the registry and Firebase see the title, never what was asked.
 

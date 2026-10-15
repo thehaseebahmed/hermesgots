@@ -284,7 +284,7 @@ SCHEMA = {
 
 def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any) -> str:
     """The tool: files a file in the library of the session the call belongs to (its task id is
-    Memento's session id)."""
+    Gots's session id)."""
     args = args if isinstance(args, dict) else {}
     path, home = sessions._paths()
     record = sessions.record_for_call(path, home, task_id, session_id)

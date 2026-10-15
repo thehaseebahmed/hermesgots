@@ -17,7 +17,7 @@ import {
 import type { ProviderUsage } from "@/lib/hermes"
 
 export interface ContextUsage {
-  /** The bot's server has the Memento plugin, which is what records context use. */
+  /** The bot's server has the Gots plugin, which is what records context use. */
   tracked: boolean
   /** Prompt tokens of the session's latest model call. */
   tokens?: number
@@ -174,7 +174,7 @@ export function UsageSheet({
           <PopupTitle>Usage</PopupTitle>
         </PopupHeader>
         <div className="flex flex-col gap-6 px-6 text-[15px]">
-          {!usage.tracked && <Banner>Context tracking needs the Memento plugin.</Banner>}
+          {!usage.tracked && <Banner>Context tracking needs the Gots plugin.</Banner>}
           <Section title="Context">
             {!usage.tracked || usage.window ? (
               <Meter.Root value={filled * 100} className="flex flex-col gap-2.5">

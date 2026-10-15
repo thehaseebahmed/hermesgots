@@ -316,7 +316,7 @@ function PluginNotice({ names: bots, onDismiss }: { names: string[]; onDismiss: 
         </Button>
       }
     >
-      Projects need the Memento plugin, installed on the bot's Hermes server and turned on in its
+      Projects need the Gots plugin, installed on the bot's Hermes server and turned on in its
       settings. It's missing for {names.format(bots)}, so {bots.length === 1 ? "its" : "their"}{" "}
       projects aren't listed here.
     </Banner>

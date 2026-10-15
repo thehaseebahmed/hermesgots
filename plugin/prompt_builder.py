@@ -1,4 +1,4 @@
-"""The prompt Memento injects into a project session's run.
+"""The prompt Gots injects into a project session's run.
 
 One module holds the whole thing: every paragraph of the run's instructions as a private string at
 the top, and ``session_prompt`` joining them for a session's record, so a reader sees exactly what

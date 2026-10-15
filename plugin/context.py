@@ -1,4 +1,4 @@
-"""Each Memento chat's context use: the prompt of its session's latest model call.
+"""Each Gots chat's context use: the prompt of its session's latest model call.
 
 The API server reports a turn's usage summed over every model call in it, so a turn that ran tools
 counts the prompt once per call, and it never reports the context window. ``post_api_request`` sees
@@ -40,7 +40,7 @@ def record(**kwargs: Any) -> None:
 
 
 def _record(kwargs: Dict[str, Any]) -> None:
-    # Memento only talks to the API server; other surfaces' sessions are none of its business.
+    # Gots only talks to the API server; other surfaces' sessions are none of its business.
     if kwargs.get("platform") != "api_server":
         return
     session_id = _text(kwargs.get("session_id"))

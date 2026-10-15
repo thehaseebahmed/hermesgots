@@ -28,7 +28,7 @@ import {
 import { syncNow } from "@/lib/sync"
 
 /**
- * A project session's workspace: the worktrees the Memento plugin made for it on the Hermes host
+ * A project session's workspace: the worktrees the Gots plugin made for it on the Hermes host
  * (one per repo of the project), its permission mode and its pull requests. The plugin holds all
  * of it; this keeps a local copy.
  */

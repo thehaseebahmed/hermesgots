@@ -1,12 +1,12 @@
 ---
 name: e2e-testing
-description: Use when verifying a Memento app change end to end in a real browser against the mock Hermes, taking screenshots of the app, or adding a browser flow.
+description: Use when verifying a Gots app change end to end in a real browser against the mock Hermes, taking screenshots of the app, or adding a browser flow.
 category: testing
 ---
 
-# End-to-end testing Memento
+# End-to-end testing Gots
 
-Memento's e2e flows drive the real app (Vite) in headless Chromium with Playwright against the mock
+Gots's e2e flows drive the real app (Vite) in headless Chromium with Playwright against the mock
 Hermes (`app/scripts/mock-hermes.mjs`). The `e2e` CLI starts the app and whichever mocks a flow
 needs, runs it, and stops them again. CI doesn't run these, so run the flows your change touches
 before you call a change to chats, sessions, polling or sync done. `pnpm lint`, `pnpm typecheck`
@@ -125,7 +125,7 @@ Projects, attach it to your reply, or describe what it shows. Never commit scree
 3. Drive the mock with words in a message: `clean up` asks for an approval, `long` streams slowly,
    `ask` asks a question, `plan` writes a plan. The header of `app/scripts/mock-hermes.mjs` lists
    its words and env vars, and `.agents/skills/mock-server-scenarios.md` has recipes. Seeded
-   projects include `p_1a2b3c4d` (Memento) and `p_9c0d1e2f` (Smart Home, two repos).
+   projects include `p_1a2b3c4d` (Gots) and `p_9c0d1e2f` (Smart Home, two repos).
 4. Assert on what the user sees. Use roles and names, such as
    `getByRole("region", { name: "Waiting on you" })` or `getByRole("navigation", { name: "Recents" })`,
    or Dexie rows for message state. Don't pass an async predicate to `page.waitForFunction`: its

@@ -30,7 +30,7 @@ export function AttachMenu({
   disabled?: boolean
   /** A project session's permission mode, picked in the same sheet. */
   session?: ModeSettings
-  /** Files only reach Hermes through the Memento plugin; photos also go inline. */
+  /** Files only reach Hermes through the Gots plugin; photos also go inline. */
   filesAvailable: boolean
   /** Camera and Photos send images the model has to read itself. */
   imagesAvailable: boolean
@@ -122,7 +122,7 @@ export function AttachMenu({
           </PopupHeader>
           {!filesAvailable && (
             <div className="px-4 pb-4 sm:px-6">
-              <Banner>File uploads need the Memento plugin.</Banner>
+              <Banner>File uploads need the Gots plugin.</Banner>
             </div>
           )}
           <div

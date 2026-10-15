@@ -39,7 +39,7 @@ export function NewProjectPopup({
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  /** Bots whose server has the Memento plugin. */
+  /** Bots whose server has the Gots plugin. */
   profiles: Profile[]
   onCreated: (profile: Profile, name: string) => void
 }) {

@@ -12,7 +12,7 @@ export const HISTORY_LENGTH = 24
 
 export type CronRunStatus = "ok" | "failed" | "running" | "unknown"
 
-/** One cron run from Hermes's execution ledger, through the Memento plugin. */
+/** One cron run from Hermes's execution ledger, through the Gots plugin. */
 export interface CronRun {
   id: string
   jobId: string
@@ -66,10 +66,10 @@ export interface CronState {
   runs: Record<string, CronRun[]>
 }
 
-/** The Hermes server behind a bot doesn't have the Memento plugin. */
+/** The Hermes server behind a bot doesn't have the Gots plugin. */
 export class PluginMissingError extends Error {
   constructor() {
-    super("The Memento plugin isn't installed on this Hermes server.")
+    super("The Gots plugin isn't installed on this Hermes server.")
     this.name = "PluginMissingError"
   }
 }

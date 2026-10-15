@@ -1,4 +1,4 @@
-"""Memento's chat list, stored on the Hermes server it belongs to.
+"""Gots's chat list, stored on the Hermes server it belongs to.
 
 Each record is ``{at, deleted?, value?}`` keyed by chat id, the same shape the app merges with:
 ``at`` is the chat's change clock, and the newer record wins, deletions included. Hermes keeps the

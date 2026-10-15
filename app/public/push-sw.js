@@ -64,7 +64,7 @@ async function show(data) {
   const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true })
   const looking = windows.some((client) => client.visibilityState === "visible")
   const title =
-    (typeof data.title === "string" && data.title.trim()) || UNTITLED[data.kind] || "Memento"
+    (typeof data.title === "string" && data.title.trim()) || UNTITLED[data.kind] || "Gots"
   const body =
     (data.kind === "theseus" && THESEUS_WORDS[data.stage]) || WORDS[data.kind] || "Waiting for you"
   // The bot's own picture, so it's plain which bot it is.

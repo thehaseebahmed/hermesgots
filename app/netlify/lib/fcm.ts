@@ -125,7 +125,7 @@ const UNTITLED: Partial<Record<PushKind, string>> = {
 
 /** The notification's title and body. */
 export function pushText(kind: PushKind, detail: PushDetail = {}) {
-  const title = detail.title?.trim() || UNTITLED[kind] || "Memento"
+  const title = detail.title?.trim() || UNTITLED[kind] || "Gots"
   const body = (kind === "theseus" && detail.stage && THESEUS_WORDS[detail.stage]) || WORDS[kind]
   return { title, body }
 }

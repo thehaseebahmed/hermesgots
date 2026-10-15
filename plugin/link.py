@@ -1,4 +1,4 @@
-"""Links a Hermes profile to a Memento account, so it shows up in the app as a bot by itself.
+"""Links a Hermes profile to a Gots account, so it shows up in the app as a bot by itself.
 
 ``hermes memento link <code> --site <app URL>`` claims a link code the app minted, which gives this
 profile a host token. The profile's bot record (name, URL, API key) is sealed to the account's inbox
@@ -65,7 +65,7 @@ def parse_code(code: str) -> Tuple[str, str, str]:
     normalized = code.strip().upper().replace("O", "0").replace("I", "1").replace("L", "1")
     match = CODE.match(normalized)
     if not match:
-        raise LinkError("That isn't a Memento link code. Copy the command from the app again.")
+        raise LinkError("That isn't a Gots link code. Copy the command from the app again.")
     return match.group(1), match.group(2), match.group(3)
 
 
@@ -127,9 +127,9 @@ def call(
             message = json.loads(error.read() or b"{}").get("error")
         except ValueError:
             message = None
-        raise LinkError(message or f"Memento answered {error.code}", error.code) from None
+        raise LinkError(message or f"Gots answered {error.code}", error.code) from None
     except (urllib.error.URLError, OSError) as error:
-        raise LinkError(f"Couldn't reach Memento at {site}: {error}") from None
+        raise LinkError(f"Couldn't reach Gots at {site}: {error}") from None
     return json.loads(raw) if raw else None
 
 
@@ -279,7 +279,7 @@ def check_in(home: Path, *, process_env: bool) -> Optional[str]:
             # Removed from the account in the app: stop until linked again.
             state["revoked"] = True
             save_state(home, state)
-            return "removed in Memento"
+            return "removed in Gots"
         logger.debug("memento: check-in failed for %s: %s", home, error)
         return str(error)
 
@@ -377,7 +377,7 @@ def _set_env(home: Path, key: str, value: str) -> None:
 
 
 def env_changes(home: Path, url: str, origins: List[str]) -> Dict[str, str]:
-    """Lines the profile's ``.env`` still needs for Memento to reach it at ``url``."""
+    """Lines the profile's ``.env`` still needs for Gots to reach it at ``url``."""
     env = read_env(home)
     changes: Dict[str, str] = {}
     if not env.get("API_SERVER_KEY") and not os.environ.get("API_SERVER_KEY"):
@@ -464,7 +464,7 @@ def cmd_link(args: Any) -> int:
     state = load_state(home)
     site = (args.site or state.get("site") or "").rstrip("/")
     if not site:
-        print("Add --site with the address you open Memento at, as the app's command does.")
+        print("Add --site with the address you open Gots at, as the app's command does.")
         return 2
     assume = bool(args.yes)
 
@@ -474,7 +474,7 @@ def cmd_link(args: Any) -> int:
                   "`hermes memento unlink` first.")
         else:
             if not args.code:
-                print("Paste the link code from Memento: hermes memento link <code> --site <url>")
+                print("Paste the link code from Gots: hermes memento link <code> --site <url>")
                 return 2
             state = claim(home, state, args.code, site)
 
@@ -485,7 +485,7 @@ def cmd_link(args: Any) -> int:
         changes = env_changes(home, url, state.get("origins") or [])
         restart = False
         if changes:
-            print(f"Memento needs these lines in {home / '.env'}:")
+            print(f"Gots needs these lines in {home / '.env'}:")
             for key, value in changes.items():
                 print(f"  {key}={shown_env(key, value)}")
             if _confirm("Add them?", assume):
@@ -497,7 +497,7 @@ def cmd_link(args: Any) -> int:
         if publish(home, state, process_env=True, force=True):
             # Checks in at once, so the app shows it online without waiting for the gateway.
             check_in(home, process_env=True)
-            print(f"Linked {record(home, state, process_env=True)['name']}. It shows up in Memento now.")
+            print(f"Linked {record(home, state, process_env=True)['name']}. It shows up in Gots now.")
         else:
             print("Linked, but this profile has no API_SERVER_KEY yet, so the app can't use it.")
         if restart:
@@ -523,7 +523,7 @@ def unlink(home: Path) -> Optional[str]:
         call(state["site"], "DELETE", "host", token=state["token"])
     except LinkError as error:
         if error.status != 401:
-            problem = f"{error} The link is forgotten here anyway; remove the bot in Memento too."
+            problem = f"{error} The link is forgotten here anyway; remove the bot in Gots too."
     # The next link to another account reuses them as its defaults.
     save_state(home, {key: state[key] for key in ("site", "url") if state.get(key)})
     return problem
@@ -539,7 +539,7 @@ def cmd_unlink(args: Any) -> int:
     problem = unlink(home)
     if problem:
         print(problem)
-    print("Unlinked. The bot is gone from Memento.")
+    print("Unlinked. The bot is gone from Gots.")
     return 0
 
 
@@ -549,10 +549,10 @@ def cmd_status(args: Any) -> int:
     home = Path(get_hermes_home())
     state = load_state(home)
     if not state.get("token"):
-        print("Not linked. Copy the command from Memento's Link your bots screen.")
+        print("Not linked. Copy the command from Gots's Link your bots screen.")
         return 1
     if state.get("revoked"):
-        print("Removed in Memento. Link again with a new code.")
+        print("Removed in Gots. Link again with a new code.")
         return 1
     print(f"Profile {profile_name(home)} is linked to {state['site']}")
     print(f"URL: {state.get('url') or 'not set'}")
@@ -563,13 +563,13 @@ def cmd_status(args: Any) -> int:
 
 def setup_cli(parser: Any) -> None:
     commands = parser.add_subparsers(dest="memento_command")
-    link = commands.add_parser("link", help="Link this profile to your Memento account")
+    link = commands.add_parser("link", help="Link this profile to your Gots account")
     link.add_argument("code", nargs="?", help="The link code from the app")
-    link.add_argument("--site", help="The address you open Memento at")
+    link.add_argument("--site", help="The address you open Gots at")
     link.add_argument("--url", help="The URL the app reaches this profile's API server at")
     link.add_argument("--yes", "-y", action="store_true", help="Accept the defaults")
     link.set_defaults(func=cmd_link)
-    unlink = commands.add_parser("unlink", help="Remove this profile from your Memento account")
+    unlink = commands.add_parser("unlink", help="Remove this profile from your Gots account")
     unlink.set_defaults(func=cmd_unlink)
     status = commands.add_parser("status", help="Show whether this profile is linked")
     status.set_defaults(func=cmd_status)
