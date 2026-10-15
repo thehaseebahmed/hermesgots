@@ -58,6 +58,54 @@ export function ContextIcon({ usage }: { usage: ContextUsage }) {
   )
 }
 
+/** A full-size context button for the chat header, opening its usage sheet. */
+export function ContextRing({ usage, onClick }: { usage: ContextUsage; onClick: () => void }) {
+  const filled = fraction(usage)
+  const radius = 16
+  const circumference = 2 * Math.PI * radius
+  const percent = usage.window ? `${Math.round(filled * 100)}%` : undefined
+
+  return (
+    <Button
+      variant="outline"
+      size="icon-lg"
+      className="size-11 rounded-full bg-background/80 backdrop-blur"
+      onClick={onClick}
+      aria-label={percent ? `Context, ${percent}` : "Context"}
+    >
+      <svg viewBox="0 0 40 40" className="size-8" aria-hidden>
+        <g transform="rotate(-90 20 20)">
+          <circle cx="20" cy="20" r={radius} fill="none" strokeWidth="2" className="stroke-muted" />
+          {filled > 0 && (
+            <circle
+              cx="20"
+              cy="20"
+              r={radius}
+              fill="none"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeDasharray={circumference}
+              strokeDashoffset={circumference * (1 - filled)}
+              className={filled >= 0.9 ? "stroke-destructive" : "stroke-primary"}
+            />
+          )}
+        </g>
+        {percent && (
+          <text
+            x="20"
+            y="20"
+            textAnchor="middle"
+            dominantBaseline="central"
+            className="fill-foreground text-[10px] font-medium"
+          >
+            {percent}
+          </text>
+        )}
+      </svg>
+    </Button>
+  )
+}
+
 /** How full the context is, e.g. "42%", or nothing while the window is unknown. */
 export function ContextPercent({ usage }: { usage: ContextUsage }) {
   if (!usage.window) return null
