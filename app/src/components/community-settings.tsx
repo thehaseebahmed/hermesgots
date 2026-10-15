@@ -4,6 +4,7 @@ import { toast } from "sonner"
 
 import { Banner } from "@/components/banner"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { LEADERBOARD_URL, joinCommunity, leaveCommunity, useCommunity } from "@/lib/community"
 
@@ -35,6 +36,8 @@ export function CommunitySettings() {
     }
   }
 
+  if (me === undefined) return <Skeleton className="h-14 rounded-3xl" />
+
   return (
     <div className="flex flex-col gap-4">
       {me === null && <Banner tone="error">Couldn't read your community status.</Banner>}
@@ -52,7 +55,7 @@ export function CommunitySettings() {
         <Switch
           id="community"
           checked={joined}
-          disabled={busy || me === undefined || me === null}
+          disabled={busy || me === null}
           onCheckedChange={(checked) => void change(checked)}
         />
       </label>
