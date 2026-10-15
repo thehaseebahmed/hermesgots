@@ -12,7 +12,7 @@ import urllib.error
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from types import ModuleType
-from typing import Optional
+from typing import Any, Optional
 from unittest import mock
 
 from plugin import usage, usage_ollama
@@ -147,18 +147,43 @@ class TestFetch(unittest.TestCase):
 
     # --- the ollama-cloud fallback: core answers first, the plugin's fetcher is the net ---
 
-    def _core_module(self, snapshot: object = None, error: Optional[Exception] = None):
-        """A stand-in agent.account_usage whose fetch answers `snapshot` or raises `error`."""
+    def _core_module(self, snapshot: object = None, error: Optional[Exception] = None,
+                     *, read_only: bool = True):
+        """A stand-in agent.account_usage whose fetch answers `snapshot` or raises `error`.
+
+        The fetch is a real function rather than a ``MagicMock``, because its signature is what
+        decides how the plugin reads it: ``read_only`` is passed only to a core that names the
+        kwarg, which Hermes gained after its first releases. Calls land on ``module.calls`` as
+        ``(provider, read_only)``, with ``None`` for a call that passed none.
+        """
+        calls: list = []
+
+        def read_with_read_only(provider, *, read_only=False, base_url=None, api_key=None):
+            calls.append((provider, read_only))
+            if error is not None:
+                raise error
+            return snapshot
+
+        def read_plainly(provider, *, base_url=None, api_key=None):
+            calls.append((provider, None))
+            if error is not None:
+                raise error
+            return snapshot
+
         module = mock.MagicMock()
-        module.fetch_account_usage = mock.MagicMock(
-            return_value=None if error else snapshot, side_effect=error
-        )
+        module.fetch_account_usage = read_with_read_only if read_only else read_plainly
+        module.calls = calls
         return module
 
     def _patched_core(self, module):
         return mock.patch.dict(
             "sys.modules", {"agent": mock.MagicMock(), "agent.account_usage": module}
         )
+
+    def test_a_core_that_cannot_be_inspected_is_read_plainly(self) -> None:
+        """Whatever the signature probe can't read, the read still happens."""
+        uninspectable: Any = object()
+        self.assertFalse(usage._accepts_read_only(uninspectable))
 
     def test_core_windows_win(self) -> None:
         """A provider core does fetch is never read a second time by the plugin."""
@@ -179,8 +204,49 @@ class TestFetch(unittest.TestCase):
         assert result is not None
         self.assertEqual("Session", result["windows"][0]["label"])
         self.assertEqual(42.0, result["windows"][0]["used_percent"])
-        module.fetch_account_usage.assert_called_once_with("ollama-cloud", read_only=True)
+        self.assertEqual([("ollama-cloud", True)], module.calls)
         plugin_fetch.assert_not_called()
+
+    def test_a_core_without_read_only_is_read_plainly(self) -> None:
+        """An older Hermes takes no ``read_only``; it must still answer, not fail the read."""
+        core = FakeSnapshot(
+            provider="anthropic",
+            windows=(
+                FakeWindow(
+                    label="Session",
+                    used_percent=12.0,
+                    reset_at=datetime(2030, 1, 1, tzinfo=timezone.utc),
+                ),
+            ),
+        )
+        module = self._core_module(core, read_only=False)
+        with self._patched_core(module):
+            result = usage.fetch("anthropic")
+        assert result is not None
+        self.assertEqual(12.0, result["windows"][0]["used_percent"])
+        self.assertEqual([("anthropic", None)], module.calls)
+
+    def test_a_core_without_read_only_still_falls_back_to_the_balance_read(self) -> None:
+        """Ollama Cloud on an older Hermes: core has no fetcher for it, so its plain answer
+        (None) must reach the plugin's balance read rather than fail open as no windows."""
+        snapshot = usage_ollama.Snapshot(
+            provider="ollama-cloud",
+            windows=(
+                usage_ollama.Window(
+                    label="Weekly",
+                    used_percent=56.8,
+                    reset_at=datetime(2030, 1, 1, tzinfo=timezone.utc),
+                ),
+            ),
+        )
+        module = self._core_module(None, read_only=False)
+        with self._patched_core(module):
+            with mock.patch.object(usage_ollama, "fetch_windows", return_value=snapshot) as plugin_fetch:
+                result = usage.fetch("ollama-cloud")
+        plugin_fetch.assert_called_once_with()
+        assert result is not None
+        self.assertEqual("Weekly", result["windows"][0]["label"])
+        self.assertEqual([("ollama-cloud", None)], module.calls)
 
     def test_falls_back_to_the_plugin_fetcher(self) -> None:
         """Core has no ollama-cloud fetcher, so the balance read answers instead."""
