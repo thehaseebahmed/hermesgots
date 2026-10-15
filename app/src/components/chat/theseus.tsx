@@ -541,7 +541,7 @@ function RunView({ run, onView }: { run: TheseusRun; onView: (view: SheetView) =
   return (
     <>
       <PopupHeader className="pb-2">
-        <PopupTitle className="flex items-center justify-center gap-2">
+        <PopupTitle className="flex items-center gap-2">
           <SailboatIcon className="size-5 text-primary" />
           Theseus
         </PopupTitle>

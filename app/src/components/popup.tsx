@@ -41,7 +41,12 @@ export function Popup({ side, ...props }: ComponentProps<typeof Drawer.Root> & {
  * a control of the header's own passes `text-left`.
  */
 export function PopupTitle({ className, ...props }: ComponentProps<typeof SheetTitle>) {
-  return <SheetTitle className={cn("max-w-full truncate text-center", className)} {...props} />
+  return (
+    <SheetTitle
+      className={cn("max-w-full justify-center truncate text-center", className)}
+      {...props}
+    />
+  )
 }
 export const PopupDescription = SheetDescription
 
