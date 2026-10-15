@@ -49,6 +49,7 @@ import {
   LimitBanner,
   ContextIcon,
   ContextPercent,
+  ContextRing,
   UsageSheet,
   type ContextUsage,
 } from "@/components/chat/usage-sheet"
@@ -111,7 +112,7 @@ import { contextWindow } from "@/lib/context"
 import { useLive, watchChat } from "@/lib/live"
 import { useSessionRunning } from "@/lib/waiting"
 import { usePoll } from "@/lib/poll"
-import { useXLarge } from "@/lib/media"
+import { useXLarge, useWide } from "@/lib/media"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
@@ -531,6 +532,7 @@ export function ChatPage() {
     botThreads && conversation && !session ? `/b/${conversation.profileId}` : undefined
   // From `xl` a session opens beside its project, and a thread beside its bot, which they close to.
   const xl = useXLarge()
+  const wide = useWide()
   const beside = xl && Boolean(session)
   // Beside its bot the header drops the picture, so the reply count sits under the title instead.
   const replyCount = messages?.filter((m) => m.role === "assistant").length ?? 0
@@ -588,73 +590,80 @@ export function ChatPage() {
   }
 
   const actions = conversation && (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button
-            variant="outline"
-            size="icon-lg"
-            className="size-11 rounded-full bg-background/80 backdrop-blur"
-            aria-label="Chat options"
-          />
-        }
-      >
-        <EllipsisIcon />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-44">
-        {configured && !simple && (
-          <>
-            <DropdownMenuItem onClick={() => setUsageOpen(true)}>
-              <ContextIcon usage={usage} />
-              Context
-              <ContextPercent usage={usage} />
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-          </>
-        )}
-        <DropdownMenuItem
-          onClick={() => {
-            setTitle(conversation.title)
-            setRenaming(true)
-          }}
+    <div className="flex items-center gap-2">
+      {wide && configured && !simple && (
+        <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="outline"
+              size="icon-lg"
+              className="size-11 rounded-full bg-background/80 backdrop-blur"
+              aria-label="Chat options"
+            />
+          }
         >
-          <PencilIcon />
-          {session ? "Edit" : "Rename"}
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => void setThreadMuted(conversation.id, !conversation.muted)}>
-          {conversation.muted ? <BellIcon /> : <BellOffIcon />}
-          {conversation.muted ? "Unmute notifications" : "Mute notifications"}
-        </DropdownMenuItem>
-        {session &&
-          !session.discardedAt &&
-          (session.resolvedAt ? (
-            <DropdownMenuItem
-              onClick={() => updateConversation(session.id, { resolvedAt: undefined })}
-            >
-              <RotateCcwIcon />
-              Reopen
-            </DropdownMenuItem>
-          ) : (
-            <DropdownMenuItem
-              onClick={() => updateConversation(session.id, { resolvedAt: Date.now() })}
-            >
-              <CheckIcon />
-              Resolve
-            </DropdownMenuItem>
-          ))}
-        <DropdownMenuSeparator />
-        {session && !session.discardedAt && (
-          <DropdownMenuItem onClick={() => setDiscarding(true)}>
-            <ArchiveXIcon />
-            Discard
+          <EllipsisIcon />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-44">
+          {configured && !simple && !wide && (
+            <>
+              <DropdownMenuItem onClick={() => setUsageOpen(true)}>
+                <ContextIcon usage={usage} />
+                Context
+                <ContextPercent usage={usage} />
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          )}
+          <DropdownMenuItem
+            onClick={() => {
+              setTitle(conversation.title)
+              setRenaming(true)
+            }}
+          >
+            <PencilIcon />
+            {session ? "Edit" : "Rename"}
           </DropdownMenuItem>
-        )}
-        <DropdownMenuItem variant="destructive" onClick={() => setDeleting(true)}>
-          <Trash2Icon />
-          Delete
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+          <DropdownMenuItem
+            onClick={() => void setThreadMuted(conversation.id, !conversation.muted)}
+          >
+            {conversation.muted ? <BellIcon /> : <BellOffIcon />}
+            {conversation.muted ? "Unmute notifications" : "Mute notifications"}
+          </DropdownMenuItem>
+          {session &&
+            !session.discardedAt &&
+            (session.resolvedAt ? (
+              <DropdownMenuItem
+                onClick={() => updateConversation(session.id, { resolvedAt: undefined })}
+              >
+                <RotateCcwIcon />
+                Reopen
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem
+                onClick={() => updateConversation(session.id, { resolvedAt: Date.now() })}
+              >
+                <CheckIcon />
+                Resolve
+              </DropdownMenuItem>
+            ))}
+          <DropdownMenuSeparator />
+          {session && !session.discardedAt && (
+            <DropdownMenuItem onClick={() => setDiscarding(true)}>
+              <ArchiveXIcon />
+              Discard
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuItem variant="destructive" onClick={() => setDeleting(true)}>
+            <Trash2Icon />
+            Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
   )
 
   return (

@@ -30,20 +30,43 @@ function fraction({ tokens, window }: ContextUsage) {
   return tokens && window ? Math.min(1, tokens / window) : 0
 }
 
-/** A small fill ring for the chat's options menu, where it opens the usage sheet. */
-export function ContextIcon({ usage }: { usage: ContextUsage }) {
+function contextPercent(usage: ContextUsage) {
+  return usage.tracked && usage.window ? `${Math.round(fraction(usage) * 100)}%` : undefined
+}
+
+function ContextMeter({
+  usage,
+  size,
+  percent,
+}: {
+  usage: ContextUsage
+  size: 16 | 44
+  percent?: string
+}) {
   const filled = fraction(usage)
-  const radius = 6.5
+  const center = size / 2
+  const radius = size === 16 ? 6.5 : 20.5
   const circumference = 2 * Math.PI * radius
 
   return (
-    <svg viewBox="0 0 16 16" aria-hidden>
-      <g transform="rotate(-90 8 8)">
-        <circle cx="8" cy="8" r={radius} fill="none" strokeWidth="2" className="stroke-muted" />
+    <svg
+      viewBox={`0 0 ${size} ${size}`}
+      className={size === 44 ? "size-11" : undefined}
+      aria-hidden
+    >
+      <g transform={`rotate(-90 ${center} ${center})`}>
+        <circle
+          cx={center}
+          cy={center}
+          r={radius}
+          fill="none"
+          strokeWidth="2"
+          className="stroke-muted"
+        />
         {filled > 0 && (
           <circle
-            cx="8"
-            cy="8"
+            cx={center}
+            cy={center}
             r={radius}
             fill="none"
             strokeWidth="2"
@@ -54,7 +77,40 @@ export function ContextIcon({ usage }: { usage: ContextUsage }) {
           />
         )}
       </g>
+      {percent && (
+        <text
+          x={center}
+          y={center}
+          textAnchor="middle"
+          dominantBaseline="central"
+          className="fill-foreground text-[10px] font-medium"
+        >
+          {percent}
+        </text>
+      )}
     </svg>
+  )
+}
+
+/** A small fill ring for the chat's options menu, where it opens the usage sheet. */
+export function ContextIcon({ usage }: { usage: ContextUsage }) {
+  return <ContextMeter usage={usage} size={16} />
+}
+
+/** A full-size context button for the chat header, opening its usage sheet. */
+export function ContextRing({ usage, onClick }: { usage: ContextUsage; onClick: () => void }) {
+  const percent = contextPercent(usage)
+
+  return (
+    <Button
+      variant="outline"
+      size="icon-lg"
+      className="size-11 rounded-full border-0 bg-background/80 backdrop-blur"
+      onClick={onClick}
+      aria-label={percent ? `Context, ${percent}` : "Context"}
+    >
+      <ContextMeter usage={usage} size={44} percent={percent} />
+    </Button>
   )
 }
 

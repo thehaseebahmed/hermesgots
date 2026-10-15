@@ -73,7 +73,7 @@ export function ChatHeader({
             )}
           </div>
         </div>
-        <div className="pointer-events-auto size-11 shrink-0">{actions}</div>
+        <div className="pointer-events-auto flex shrink-0 items-center gap-2">{actions}</div>
       </div>
     </header>
   )
