@@ -260,8 +260,16 @@ export function ChatPage() {
   const configured = Boolean(profile?.baseUrl.trim())
   const streaming = messages?.find((m) => m.status === "streaming")
   const busy = Boolean(streaming)
-  // Queued messages sit faded at the end of the thread until their turn.
-  const thread = messages
+  // Queued messages sit faded at the end of the thread until their turn, whichever clock stamped
+  // the turns before them.
+  const thread = useMemo(
+    () =>
+      messages && [
+        ...messages.filter((m) => m.status !== "queued"),
+        ...messages.filter((m) => m.status === "queued"),
+      ],
+    [messages],
+  )
   // Only a run can be steered, and only on a Hermes that has the route.
   const [steerRoute, setSteerRoute] = useState<{ baseUrl: string; ok: boolean }>()
   const runId = streaming?.runId
