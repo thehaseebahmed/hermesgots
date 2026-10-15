@@ -62,7 +62,7 @@ elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` l
 | `stream-writes` | A streaming reply is written to IndexedDB at most 6 times a second on the mock. Main wrote it 7.5 times |
 | `idle-requests` | An open chat with nothing happening makes at most 12 requests in 65s on the `polling` mock (6 of them the sidebar's `runs/live`). Main made 17 |
 | `screens` | Code, a project, Routines and a chat load at 390 and 1024px, light and dark, with no console errors |
-| `meetings` | Meetings stays hidden until its Developer switch is on; then the samples by project, a recording and an added file written up as notes, a timestamp opening the transcript, Try again and Delete, at 390, 1024 (dark) and 1440px |
+| `meetings` | Meetings stays hidden until its Developer switch is on; then the samples by project, a recap's timeline, a time opening its topic and playing from that line, Start on an action, a question to the bot, a recording with a marked moment and an added file written up, Try again and Delete, at 390, 1024 (dark) and 1440px |
 | `clarify-polling`, `clarify-transcript` | Answered questions survive stale polls, a reload and a fresh transcript |
 | `code-sessions` | Project sessions stay out of Recents and open from their project |
 | `dictation` | Dictation pieces, retries, the kept recording, and no mic where the host can't transcribe |

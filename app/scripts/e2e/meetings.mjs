@@ -1,6 +1,7 @@
 // Meetings, the Developer-gated design mock: the sidebar row only with the switch on, the sample
-// meetings by project, a recording with typed notes walked through to its notes, a timestamp opening
-// the transcript at its line, an added file, a failed meeting tried again, and Delete. At phone,
+// meetings by project, a recap's timeline and a time opening its topic at that line, an action
+// started and a question answered, a recording with a marked moment walked through to its recap,
+// an added file, a failed meeting tried again, and Delete. At phone,
 // tablet (dark) and laptop widths, with no errors in the console.
 import { app, assert, flow, pass } from "./lib.mjs"
 
@@ -64,43 +65,69 @@ for (const [width, dark] of [
       await shot("1-list")
       pass(`${width}: the sample meetings show by project`)
 
-      // A ready meeting: notes, then a timestamp opens the transcript at its line.
+      // A ready meeting: the bot's recap, the timeline and what to do.
       await page.getByText("Weekly product sync").click()
-      await page.getByRole("heading", { name: "Action items" }).waitFor({ timeout: 5_000 })
-      await shot("2-notes")
-      await page.getByRole("button", { name: "Open the transcript at 1:52" }).click()
+      await page.getByRole("heading", { name: "To do" }).waitFor({ timeout: 5_000 })
+      assert.ok(await page.getByRole("region", { name: "Timeline" }).isVisible())
+      await shot("2-recap")
+      pass(`${width}: a ready meeting opens on its recap and timeline`)
+
+      // A time opens its topic with the transcript at that line.
+      await page.getByRole("button", { name: "Play from 1:52" }).first().click()
+      await page.getByRole("heading", { name: "The beta date" }).waitFor({ timeout: 5_000 })
       const line = page.getByText("Yes, I'll send the tester link today.")
       await line.waitFor({ timeout: 5_000 })
       assert.equal(
         await page.getByRole("tab", { name: "Transcript" }).getAttribute("aria-selected"),
         "true",
       )
+      await page.getByRole("button", { name: "Play", exact: true }).click()
+      await page.getByRole("button", { name: "Pause", exact: true }).waitFor({ timeout: 2_000 })
       await page.waitForTimeout(600)
       assert.ok(await line.isVisible())
-      await shot("3-transcript")
-      await page.getByRole("tab", { name: "Your notes" }).click()
-      await page.getByText("android push untested!").waitFor({ timeout: 5_000 })
-      pass(`${width}: a timestamp opens the transcript at its line`)
+      await shot("3-topic")
+      await page.getByRole("tab", { name: "Summary" }).click()
+      await page.getByText("Firebase push still isn't tested on a real phone.").waitFor()
+      pass(`${width}: a time opens its topic, playing from that line`)
 
-      // Record, type notes, stop, and follow it to its notes.
+      // Start an action, and ask the bot about the meeting.
+      await page.getByRole("button", { name: "Back to Weekly product sync" }).click()
+      await page
+        .getByRole("button", { name: "Start a session: Send the Android tester link" })
+        .click()
+      await page.getByText("Started", { exact: true }).waitFor({ timeout: 5_000 })
+      await page.getByRole("button", { name: "What did we decide?" }).click()
+      await page.getByText("You decided:").waitFor({ timeout: 5_000 })
+      await shot("4-ask")
+      pass(`${width}: an action starts and the bot answers a question`)
+
+      // Record: mark a moment, write a note, end it and follow it to its recap.
       await page.getByRole("button", { name: "Back to Meetings" }).click()
       await page.getByRole("button", { name: "Record", exact: true }).click()
       await page.getByText("Recording", { exact: true }).waitFor({ timeout: 5_000 })
       await page.getByRole("textbox", { name: "Title" }).fill("Plan for the import flow")
-      await page.getByRole("textbox", { name: "Notes" }).fill("import first\nno speaker names yet")
-      await page.waitForTimeout(2_200)
-      await shot("4-recording")
+      await page.waitForTimeout(1_200)
+      await page.getByRole("button", { name: "Decision" }).click()
+      await page.getByText("1 marked").waitFor()
+      await page.getByRole("button", { name: "Notes" }).click()
+      await page
+        .getByRole("textbox", { name: "Your notes" })
+        .fill("import first\nno speaker names yet")
+      await page.getByRole("button", { name: "Done" }).click()
+      await page.waitForTimeout(1_000)
+      await shot("5-recording")
       await page.getByRole("button", { name: "Pause" }).click()
       await page.getByText("Paused", { exact: true }).waitFor()
-      await page.getByRole("button", { name: "Stop" }).click()
+      await page.getByRole("button", { name: "End meeting" }).click()
       await page.waitForURL("**/meetings/m_*", { timeout: 5_000 })
       await page
         .getByText(/Uploading|Transcribing/)
         .first()
         .waitFor({ timeout: 5_000 })
-      await shot("5-progress")
-      await page.getByRole("heading", { name: "Action items" }).waitFor({ timeout: 20_000 })
-      pass(`${width}: a recording is written up as notes`)
+      await shot("6-progress")
+      await page.getByRole("heading", { name: "To do" }).waitFor({ timeout: 20_000 })
+      assert.ok(await page.getByText("You marked").first().isVisible(), "the marked moment")
+      pass(`${width}: a recording with a marked moment is written up`)
 
       // An audio file from the device.
       await page.getByRole("button", { name: "Back to Meetings" }).click()
@@ -110,19 +137,19 @@ for (const [width, dark] of [
         .setInputFiles({ name: "standup.wav", mimeType: "audio/wav", buffer: silence() })
       await page.getByText("standup.wav").waitFor({ timeout: 5_000 })
       assert.equal(await page.getByLabel("Title").inputValue(), "standup")
-      await shot("6-add")
+      await shot("7-add")
       await page.getByRole("button", { name: "Add", exact: true }).click()
       await page.waitForURL("**/meetings/m_*", { timeout: 5_000 })
-      await page.getByRole("heading", { name: "Action items" }).waitFor({ timeout: 20_000 })
+      await page.getByRole("heading", { name: "To do" }).waitFor({ timeout: 20_000 })
       pass(`${width}: an added file is written up as notes`)
 
       // The failed sample, tried again.
       await page.getByRole("button", { name: "Back to Meetings" }).click()
       await page.getByText("Call with an early tester").click()
       await page.getByRole("button", { name: "Try again" }).waitFor({ timeout: 5_000 })
-      await shot("7-failed")
+      await shot("8-failed")
       await page.getByRole("button", { name: "Try again" }).click()
-      await page.getByRole("heading", { name: "Action items" }).waitFor({ timeout: 20_000 })
+      await page.getByRole("heading", { name: "To do" }).waitFor({ timeout: 20_000 })
       pass(`${width}: a failed meeting runs again`)
 
       await page.getByRole("button", { name: "Meeting options" }).click()
