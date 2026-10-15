@@ -47,6 +47,11 @@ const FLOWS = {
     about: "A run started elsewhere shows as running in its project and on the open session screen",
     alsoPolling: true,
   },
+  "history-pages": {
+    script: "e2e/history-pages.mjs",
+    about:
+      "A session opened mid-turn from another device loads whole turns, pages back twice and keeps one reply",
+  },
   "live-poll": {
     script: "e2e/live-poll.mjs",
     mock: "polling",

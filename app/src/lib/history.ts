@@ -465,8 +465,6 @@ async function connection(conversation: Conversation) {
   return profile?.apiKey ? serverConfig(profile) : undefined
 }
 
-const loading = new Set<string>()
-
 const reconciling = new Map<string, Promise<number>>()
 
 /**
@@ -554,19 +552,35 @@ function rowIdOf(message: Message, sessionId: string) {
   return message.id.startsWith(prefix) ? Number(message.id.slice(prefix.length)) : undefined
 }
 
-/** The rows from the start of the turn holding `tip` to the newest, or the newest page. */
+const byRowId = (rows: Map<number, SessionMessage>) =>
+  [...rows.values()].sort((a, b) => a.id - b.id)
+
+/** Whether a chat shows anything for a row: hidden and system rows aren't worth a "Load earlier". */
+const isShown = (row: SessionMessage) => row.display_kind !== "hidden" && row.role !== "system"
+
+/**
+ * The rows from the start of the turn holding `tip` to the newest, or for an empty chat the newest
+ * whole turns: a reply is named after its first row, so one cut by the page edge would load again,
+ * whole and under another id, once its start was read, and show twice.
+ */
 async function fetchTail(config: HermesConfig, sessionId: string, tip?: number) {
   const rows = new Map<number, SessionMessage>()
   for (let page = 0; page <= MAX_SKIPS; page++) {
     const batch = await listSessionMessages(config, sessionId, { limit: PAGE, offset: page * PAGE })
     for (const row of batch) rows.set(row.id, row)
-    const sorted = [...rows.values()].sort((a, b) => a.id - b.id)
-    if (tip === undefined) return { rows: sorted, full: batch.length === PAGE }
-    const start = sorted.findLastIndex((row) => row.id <= tip && isTurnStart(row))
-    if (start >= 0) return { rows: sorted.slice(start), full: false }
-    if (batch.length < PAGE) return { rows: sorted, full: false }
+    const sorted = byRowId(rows)
+    const start =
+      tip === undefined
+        ? sorted.findIndex(isTurnStart)
+        : sorted.findLastIndex((row) => row.id <= tip && isTurnStart(row))
+    const end = batch.length < PAGE
+    if (start >= 0 || end) {
+      const from = Math.max(start, 0)
+      const full = tip === undefined && (!end || sorted.slice(0, from).some(isShown))
+      return { rows: sorted.slice(from), full }
+    }
   }
-  return { rows: [...rows.values()].sort((a, b) => a.id - b.id), full: false }
+  return { rows: byRowId(rows), full: tip === undefined }
 }
 
 function turnsOf(conversationId: string, sessionId: string, rows: SessionMessage[]) {
@@ -580,8 +594,54 @@ function turnsOf(conversationId: string, sessionId: string, rows: SessionMessage
     return {
       user: messages.find((m) => m.role === "user"),
       reply: messages.find((m) => m.role === "assistant"),
+      rows: { first: group[0].id, last: group[group.length - 1].id },
     }
   })
+}
+
+/** The transcript row a reply loaded from Hermes is named after. */
+function replyRowOf(message: Message, sessionId: string) {
+  const prefix = `h-${sessionId}-`
+  if (message.role !== "assistant" || !message.id.startsWith(prefix)) return undefined
+  const id = Number(message.id.slice(prefix.length))
+  return Number.isInteger(id) ? id : undefined
+}
+
+/**
+ * Replies loaded from Hermes for rows `first` to `last`, other than `keep`: a turn's part loaded on
+ * its own when a page edge cut it, which the whole turn replaces. A streaming one is left alone.
+ */
+function partsOf(
+  current: Message[],
+  sessionId: string,
+  rows: { first: number; last: number },
+  keep?: string,
+) {
+  return current
+    .filter((m) => {
+      const row = replyRowOf(m, sessionId)
+      return (
+        row !== undefined &&
+        row >= rows.first &&
+        row <= rows.last &&
+        m.id !== keep &&
+        m.status !== "streaming"
+      )
+    })
+    .map((m) => m.id)
+}
+
+/**
+ * Keeps older messages before `ceiling` (the chat's first message), in their order: their times are
+ * the host's clock and the chat's may be this device's.
+ */
+function placeBefore(messages: Message[], ceiling?: number) {
+  if (ceiling === undefined) return messages
+  for (let i = messages.length - 1; i >= 0; i--) {
+    messages[i].createdAt = Math.min(messages[i].createdAt, ceiling - 1)
+    ceiling = messages[i].createdAt
+  }
+  return messages
 }
 
 async function reconcile(conversationId: string) {
@@ -598,131 +658,168 @@ async function reconcile(conversationId: string) {
     const [newest] = await listSessionMessages(config, sessionId, { limit: 1, offset: 0 })
     if (!newest || newest.id === tip) return 0
   }
-  loading.add(conversationId)
-  try {
-    const { rows, full } = await fetchTail(config, sessionId, tip)
-    if (!rows.length) return 0
-    const turns = turnsOf(conversationId, sessionId, rows)
-    return await db.transaction("rw", db.messages, db.conversations, async () => {
-      const current = await getMessages(conversationId)
-      if (isStreaming(current)) return null
-      const byId = new Map(current.map((m) => [m.id, m]))
-      const known = new Map<number, Message>()
-      for (const m of current) {
-        const rowId = m.role === "user" ? rowIdOf(m, sessionId) : undefined
-        if (rowId !== undefined) known.set(rowId, m)
+  const { rows, full } = await fetchTail(config, sessionId, tip)
+  if (!rows.length) return 0
+  const turns = turnsOf(conversationId, sessionId, rows)
+  return await db.transaction("rw", db.messages, db.conversations, async () => {
+    const current = await getMessages(conversationId)
+    if (isStreaming(current)) return null
+    const byId = new Map(current.map((m) => [m.id, m]))
+    const known = new Map<number, Message>()
+    for (const m of current) {
+      const rowId = m.role === "user" ? rowIdOf(m, sessionId) : undefined
+      if (rowId !== undefined) known.set(rowId, m)
+    }
+    const unmatched = current.filter(
+      (m) => m.role === "user" && m.status === "done" && rowIdOf(m, sessionId) === undefined,
+    )
+    let next = 0
+    // Inserted turns sort after what precedes them on Hermes, whatever this device's clock says.
+    let floor = 0
+    const turnEnd = (user: Message) => {
+      let end = current.indexOf(user)
+      while (current[end + 1] && current[end + 1].role !== "user") end++
+      return current[end].createdAt + 1
+    }
+    const writes: Message[] = []
+    const parts: string[] = []
+    for (const { user, reply, rows: range } of turns) {
+      if (!user) {
+        // A turn longer than every page fetchTail reads: only an empty chat shows its tail.
+        if (!current.length && reply) writes.push(reply)
+        continue
       }
-      const unmatched = current.filter(
-        (m) => m.role === "user" && m.status === "done" && rowIdOf(m, sessionId) === undefined,
-      )
-      let next = 0
-      // Inserted turns sort after what precedes them on Hermes, whatever this device's clock says.
-      let floor = 0
-      const turnEnd = (user: Message) => {
-        let end = current.indexOf(user)
-        while (current[end + 1] && current[end + 1].role !== "user") end++
-        return current[end].createdAt + 1
+      parts.push(...partsOf(current, sessionId, range, reply?.id))
+      const seen = known.get(user.hermesRowId!)
+      if (seen) {
+        floor = turnEnd(seen)
+        if (seen.id === user.id && reply) {
+          // A turn loaded from Hermes earlier, possibly before it finished: refresh its reply.
+          const createdAt = byId.get(reply.id)?.createdAt ?? Math.max(reply.createdAt, floor)
+          writes.push({ ...reply, createdAt })
+          floor = createdAt + 1
+        }
+        continue
       }
-      const writes: Message[] = []
-      for (const { user, reply } of turns) {
-        if (!user) {
-          // The tail of a turn whose start is on an older page; only an empty chat shows it.
-          if (!current.length && reply) writes.push(reply)
-          continue
+      const match = unmatched.findIndex((m, i) => i >= next && m.content === user.content)
+      if (match >= 0) {
+        next = match + 1
+        writes.push({ ...unmatched[match], hermesRowId: user.hermesRowId })
+        floor = turnEnd(unmatched[match])
+        // A turn streamed here without its events has no tool calls; the transcript's fill it in.
+        const local = current[current.indexOf(unmatched[match]) + 1]
+        if (local?.role === "assistant" && !local.tools?.length && reply?.tools?.length) {
+          const content =
+            local.content.trim() && reply.content.trimEnd().endsWith(local.content.trim())
+              ? reply.content
+              : local.content
+          const restored = { ...local, content }
+          writes.push({
+            ...restored,
+            tools: withTranscriptToolOffsets(restored, reply),
+            reasoning: local.reasoning ?? reply.reasoning,
+            steers: local.steers ?? reply.steers,
+          })
+        } else if (local?.role === "assistant" && local.tools?.length && reply?.tools?.length) {
+          const tools = withTranscriptDetails(local.tools, reply.tools)
+          if (tools) writes.push({ ...local, tools })
         }
-        const seen = known.get(user.hermesRowId!)
-        if (seen) {
-          floor = turnEnd(seen)
-          if (seen.id === user.id && reply) {
-            // A turn loaded from Hermes earlier, possibly before it finished: refresh its reply.
-            const createdAt = byId.get(reply.id)?.createdAt ?? Math.max(reply.createdAt, floor)
-            writes.push({ ...reply, createdAt })
-            floor = createdAt + 1
-          }
-          continue
-        }
-        const match = unmatched.findIndex((m, i) => i >= next && m.content === user.content)
-        if (match >= 0) {
-          next = match + 1
-          writes.push({ ...unmatched[match], hermesRowId: user.hermesRowId })
-          floor = turnEnd(unmatched[match])
-          // A turn streamed here without its events has no tool calls; the transcript's fill it in.
-          const local = current[current.indexOf(unmatched[match]) + 1]
-          if (local?.role === "assistant" && !local.tools?.length && reply?.tools?.length) {
-            const content =
-              local.content.trim() && reply.content.trimEnd().endsWith(local.content.trim())
-                ? reply.content
-                : local.content
-            const restored = { ...local, content }
-            writes.push({
-              ...restored,
-              tools: withTranscriptToolOffsets(restored, reply),
-              reasoning: local.reasoning ?? reply.reasoning,
-              steers: local.steers ?? reply.steers,
-            })
-          } else if (local?.role === "assistant" && local.tools?.length && reply?.tools?.length) {
-            const tools = withTranscriptDetails(local.tools, reply.tools)
-            if (tools) writes.push({ ...local, tools })
-          }
-          continue
-        }
-        user.createdAt = Math.max(user.createdAt, floor)
-        writes.push(user)
-        floor = user.createdAt + 1
-        if (reply) {
-          reply.createdAt = Math.max(reply.createdAt, floor)
-          writes.push(reply)
-          floor = reply.createdAt + 1
-        }
+        continue
       }
-      await db.messages.bulkPut(writes)
-      await db.conversations.update(conversationId, {
-        hermesTip: rows[rows.length - 1].id,
-        ...(current.length
-          ? {}
-          : { olderThan: full ? { id: rows[0].id, offset: rows.length } : undefined }),
-      })
-      return writes.filter((m) => !byId.has(m.id)).length
+      user.createdAt = Math.max(user.createdAt, floor)
+      writes.push(user)
+      floor = user.createdAt + 1
+      if (reply) {
+        reply.createdAt = Math.max(reply.createdAt, floor)
+        writes.push(reply)
+        floor = reply.createdAt + 1
+      }
+    }
+    await db.messages.bulkDelete(parts)
+    await db.messages.bulkPut(writes)
+    await db.conversations.update(conversationId, {
+      hermesTip: rows[rows.length - 1].id,
+      ...(current.length
+        ? {}
+        : { olderThan: full ? { id: rows[0].id, offset: rows.length } : undefined }),
     })
-  } finally {
-    loading.delete(conversationId)
-  }
+    return writes.filter((m) => !byId.has(m.id)).length
+  })
 }
 
-/** Loads the page before the oldest row loaded so far. */
-export async function loadEarlierHistory(conversationId: string) {
-  if (loading.has(conversationId)) return
-  loading.add(conversationId)
-  try {
-    const conversation = await db.conversations.get(conversationId)
-    const olderThan = conversation?.olderThan
-    if (!conversation || !olderThan) return
-    const config = await connection(conversation)
-    if (!config) return
-    // Turns sent since the last load push older rows further from the newest end; skip past them.
-    let offset = olderThan.offset
-    let rows: SessionMessage[] = []
-    let older: SessionMessage[] = []
-    for (let skip = 0; skip <= MAX_SKIPS; skip++) {
-      rows = await listSessionMessages(config, conversation.hermesSessionId, {
-        limit: PAGE,
-        offset,
-      })
-      older = rows.filter((row) => row.id < olderThan.id)
-      if (older.length || rows.length < PAGE) break
-      offset += rows.length
-    }
-    const messages = toMessages(conversationId, conversation.hermesSessionId, older)
-    await db.transaction("rw", db.messages, db.conversations, async () => {
-      await db.messages.bulkPut(messages)
-      await db.conversations.update(conversationId, {
-        olderThan:
-          older.length && rows.length === PAGE
-            ? { id: older[0].id, offset: offset + rows.length }
-            : undefined,
-      })
+const loadingEarlier = new Map<string, Promise<void>>()
+
+/**
+ * Loads the whole turns before the oldest row loaded so far, placed before the chat's first message.
+ * A chat opened before turns were loaded whole may start with a reply whose start was cut off by
+ * the page edge: that turn is loaded again, whole, in its place.
+ */
+export function loadEarlierHistory(conversationId: string) {
+  let pending = loadingEarlier.get(conversationId)
+  if (!pending) {
+    // After a catch-up under way, which may be setting where the chat's history starts: a tap while
+    // it runs isn't lost.
+    pending = Promise.resolve(reconciling.get(conversationId))
+      .catch(() => undefined)
+      .then(() => loadEarlier(conversationId))
+      .finally(() => loadingEarlier.delete(conversationId))
+    loadingEarlier.set(conversationId, pending)
+  }
+  return pending
+}
+
+async function loadEarlier(conversationId: string) {
+  const conversation = await db.conversations.get(conversationId)
+  const olderThan = conversation?.olderThan
+  if (!conversation || !olderThan) return
+  const config = await connection(conversation)
+  if (!config) return
+  const sessionId = conversation.hermesSessionId
+  const list = (offset: number) => listSessionMessages(config, sessionId, { limit: PAGE, offset })
+  // Turns sent since the last load push older rows further from the newest end; skip past them,
+  // then page back to the start of the oldest turn.
+  const rows = new Map<number, SessionMessage>()
+  let offset = olderThan.offset
+  let found: number | undefined
+  let end = false
+  for (let page = 0; page <= 2 * MAX_SKIPS; page++) {
+    const batch = await list(offset)
+    for (const row of batch) if (row.id < olderThan.id) rows.set(row.id, row)
+    if (rows.size) found ??= offset
+    offset += batch.length
+    end = batch.length < PAGE
+    if (end || byRowId(rows).some(isTurnStart)) break
+  }
+  const sorted = byRowId(rows)
+  const from = Math.max(sorted.findIndex(isTurnStart), 0)
+  const older = sorted.slice(from)
+  const local = await getMessages(conversationId)
+  const cut = local[0] && replyRowOf(local[0], sessionId) === olderThan.id ? local[0] : undefined
+  const rest =
+    cut && cut.status !== "streaming" ? await turnFrom(olderThan.id, (found ?? offset) + PAGE) : []
+  const messages = toMessages(conversationId, sessionId, [...older, ...rest])
+  const ceiling = (cut && rest.length ? local[1] : local[0])?.createdAt
+  await db.transaction("rw", db.messages, db.conversations, async () => {
+    if (cut && rest.length) await db.messages.delete(cut.id)
+    await db.messages.bulkPut(placeBefore(messages, ceiling))
+    await db.conversations.update(conversationId, {
+      olderThan:
+        older.length && (!end || sorted.slice(0, from).some(isShown))
+          ? { id: older[0].id, offset: offset - from }
+          : undefined,
     })
-  } finally {
-    loading.delete(conversationId)
+  })
+
+  /** The rows from `first` to the next turn's start, paging towards the newest before `offset`. */
+  async function turnFrom(first: number, offset: number) {
+    const rows = new Map<number, SessionMessage>()
+    for (let page = 0; page <= MAX_SKIPS && offset > 0; page++) {
+      offset = Math.max(0, offset - PAGE)
+      for (const row of await list(offset)) if (row.id >= first) rows.set(row.id, row)
+      if (byRowId(rows).some((row) => row.id > first && isTurnStart(row))) break
+    }
+    const sorted = byRowId(rows)
+    const next = sorted.findIndex((row) => row.id > first && isTurnStart(row))
+    return next < 0 ? sorted : sorted.slice(0, next)
   }
 }

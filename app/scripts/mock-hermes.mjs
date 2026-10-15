@@ -38,7 +38,10 @@
 // which keep going when the client drops, unlike a chat completion. Say "long" for a slow reply, and
 // "fail" for a tool call that fails. Say "tool placement" to replay a real turn whose tool rows
 // rendered in the wrong place (add "report" for the longer work-log turn):
-// scripts/fixtures/tool-placement.json holds both, with the placement each call really had.
+// scripts/fixtures/tool-placement.json holds both, with the placement each call really had. Say
+// "marathon" for a turn longer than a transcript page: 40 steps of text and a tool call, quick at
+// first and slow for the last 12, so a device can open the session while it runs ("sprint" and
+// "relay": all quick).
 // Project sessions get a worktree in each of the project's repos on
 // POST /api/plugins/memento/sessions/{id}/workspace (GET reads it back, POST …/mode changes the
 // permission mode, POST …/workspace/remove removes the trees unless a turn mentioned "commit"). In
@@ -744,6 +747,33 @@ async function playTurn(req, body, last, out) {
       prompt_tokens: 4000 + Math.round(spoken.length / 4),
       completion_tokens: pieces,
     }
+  }
+
+  // "marathon", "sprint" and "relay": one assistant row per step with its text and call, as Hermes
+  // stores a working turn, so the turn outgrows a transcript page while it runs. The run's output is
+  // the final message.
+  const race = /marathon|sprint|relay/i.exec(last)?.[0].toLowerCase()
+  if (race) {
+    const STEPS = 40
+    const slow = race === "marathon" ? 12 : 0
+    for (let i = 1; i <= STEPS && !out.closed(); i++) {
+      const text = `The ${race}'s step ${i} of ${STEPS}.`
+      await say(spoken ? `\n\n${text}` : text, 5)
+      const id = `call_${randomUUID().slice(0, 8)}`
+      const command = `echo step-${i}`
+      out.tool({ tool: "terminal", emoji: "💻", label: command, toolCallId: id, status: "running" })
+      record(req, { role: "assistant", content: text, tool_calls: [{ id, type: "function", function: { name: "terminal", arguments: JSON.stringify({ command }) } }] })
+      await sleep(i > STEPS - slow ? 1200 : 40)
+      const result = JSON.stringify({ output: `step-${i}`, exit_code: 0, error: null })
+      out.tool({ tool: "terminal", toolCallId: id, status: "completed", result })
+      record(req, { role: "tool", tool_call_id: id, tool_name: "terminal", content: result })
+    }
+    const output = `The ${race} is over.`
+    if (!out.closed()) {
+      await say(`\n\n${output}`, 5)
+      record(req, { role: "assistant", content: output, finish_reason: "stop" })
+    }
+    return { spoken, output: out.closed() ? spoken : output, prompt_tokens: 9000, completion_tokens: pieces }
   }
 
   // Like Hermes's todo_list: every call returns the whole list, and the result is a transcript row.

@@ -55,6 +55,7 @@ elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` l
 | `chat-message` | A new chat sends its message, gets the whole reply, and shows in Recents |
 | `approval` | A project session waiting on an approval shows in the sidebar's Waiting for input and its project's Waiting on you. Both move it to Idle once it's allowed |
 | `reattach` | A reply still streaming when the page reloads picks its run up again and finishes |
+| `history-pages` | A session opened mid-turn from another device loads the running turn whole, pages back a turn longer than a page twice, and keeps one reply per turn, at the end; a chat an older version split is mended by Load earlier. Main showed the running turn twice |
 | `live-poll` | `runs/live` is read by one shared poll: at most 3 times in 25s with the session, its project and the sidebar open. Main read it 4 times |
 | `photo-progress` | A message with a photo shows its reply's tool calls while it runs, on the `legacy` mock where the app follows the turn in the transcript. Main showed none |
 | `stream-writes` | A streaming reply is written to IndexedDB at most 6 times a second on the mock. Main wrote it 7.5 times |
