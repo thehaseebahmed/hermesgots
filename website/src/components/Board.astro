@@ -10,104 +10,110 @@ const loading = '<li class="empty">Loading…</li>'
 ---
 
 <div id="board" data-endpoint={endpoint}>
-  <div class="board-controls">
-    <div class="tabs" role="tablist" aria-label="Board">
-      <button type="button" role="tab" id="tab-tokens" aria-controls="panel-tokens" aria-selected="true" data-board="tokens">
-        Top tokens spent
-      </button>
-      <button type="button" role="tab" id="tab-models" aria-controls="panel-models" aria-selected="false" data-board="models" tabindex="-1">
-        Top models
-      </button>
-    </div>
-    <select id="period" aria-label="Period">
-      {PERIODS.map((period) => <option value={period.id} selected={period.id === "today"}>{period.label}</option>)}
-    </select>
+  <div class="tabs" role="tablist" aria-label="Period">
+    {
+      PERIODS.map((period, index) => (
+        <button
+          type="button"
+          role="tab"
+          id={`tab-${period.id}`}
+          aria-controls={`panel-${period.id}`}
+          aria-selected={index === 0 ? "true" : "false"}
+          data-period={period.id}
+        >
+          {period.label}
+        </button>
+      ))
+    }
   </div>
 
-  <section class="panel" role="tabpanel" id="panel-tokens" aria-labelledby="tab-tokens">
-    <ul class="legend" aria-label="Token types">
-      {KINDS.map((kind) => <li><span class={`dot ${kind.key}`} />{kind.label}</li>)}
-    </ul>
-    <ol class="rows" data-list="tokens" set:html={endpoint ? loading : tokensList(sample.periods.today, { live: false })} />
-  </section>
+  {
+    PERIODS.map((period, index) => (
+      <section
+        class="panel"
+        role="tabpanel"
+        id={`panel-${period.id}`}
+        aria-labelledby={`tab-${period.id}`}
+        hidden={index !== 0}
+      >
+        <h2>Top tokens spent</h2>
+        <ul class="legend" aria-label="Token types">
+          {KINDS.map((kind) => <li><span class={`dot ${kind.key}`} />{kind.label}</li>)}
+        </ul>
+        <ol class="rows" data-list="tokens" set:html={endpoint ? loading : tokensList(sample.periods[period.id], { live: false })} />
 
-  <section class="panel" role="tabpanel" id="panel-models" aria-labelledby="tab-models" hidden>
-    <ul class="legend" aria-label="Modes">
-      {MODES.map((mode) => <li><span class={`dot mode-${mode.key}`} />{mode.label}</li>)}
-    </ul>
-    <ol class="rows" data-list="models" set:html={endpoint ? loading : modelsList(sample.periods.today, { live: false })} />
-  </section>
+        <h2>Top models</h2>
+        <ul class="legend" aria-label="Modes">
+          {MODES.map((mode) => <li><span class={`dot mode-${mode.key}`} />{mode.label}</li>)}
+        </ul>
+        <ol class="rows" data-list="models" set:html={endpoint ? loading : modelsList(sample.periods[period.id], { live: false })} />
+      </section>
+    ))
+  }
 </div>
 
 <script>
-  import { readBoard, sampleBoard, type Board, type PeriodId } from "../lib/board"
+  import { PERIODS, readBoard, sampleBoard } from "../lib/board"
   import { modelsList, tokensList } from "../lib/render"
 
   const root = document.getElementById("board")!
   const badge = document.getElementById("sample-badge")
-  const period = document.getElementById("period") as HTMLSelectElement
   const tabs = Array.from(root.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
-  const panels = {
-    tokens: document.getElementById("panel-tokens")!,
-    models: document.getElementById("panel-models")!,
-  }
-  const lists = {
-    tokens: root.querySelector<HTMLElement>('[data-list="tokens"]')!,
-    models: root.querySelector<HTMLElement>('[data-list="models"]')!,
-  }
+  const panels = Array.from(root.querySelectorAll<HTMLElement>('[role="tabpanel"]'))
 
-  // null while the live board is loading; then the live board, or the sample if it can't be read.
-  let board: Board | null = root.dataset.endpoint ? null : sampleBoard()
-  let live = false
-
-  function paint() {
-    const id = period.value as PeriodId
-    lists.tokens.innerHTML = board ? tokensList(board.periods[id], { live }) : '<li class="empty">Loading…</li>'
-    lists.models.innerHTML = board ? modelsList(board.periods[id], { live }) : '<li class="empty">Loading…</li>'
-    // The sample is marked as one; a board that is still loading isn't a sample yet.
-    badge?.toggleAttribute("hidden", !board || live)
-  }
-
-  function selectBoard(name: "tokens" | "models", focus = false) {
+  function select(period: string, focus = false) {
     for (const tab of tabs) {
-      const on = tab.dataset.board === name
+      const on = tab.dataset.period === period
       tab.setAttribute("aria-selected", String(on))
       tab.tabIndex = on ? 0 : -1
       if (on && focus) tab.focus()
     }
-    panels.tokens.hidden = name !== "tokens"
-    panels.models.hidden = name !== "models"
+    for (const panel of panels) panel.hidden = panel.id !== `panel-${period}`
   }
 
   for (const tab of tabs) {
-    tab.addEventListener("click", () => selectBoard(tab.dataset.board as "tokens" | "models"))
+    tab.addEventListener("click", () => {
+      select(tab.dataset.period!)
+      history.replaceState(null, "", `#${tab.dataset.period}`)
+    })
     tab.addEventListener("keydown", (event) => {
-      if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return
+      const index = tabs.indexOf(tab)
+      const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0
+      if (!step) return
       event.preventDefault()
-      const next = tabs[tabs.indexOf(tab) === 0 ? 1 : 0]!
-      selectBoard(next.dataset.board as "tokens" | "models", true)
+      const next = tabs[(index + step + tabs.length) % tabs.length]!
+      select(next.dataset.period!, true)
     })
   }
-  period.addEventListener("change", paint)
 
-  paint()
+  const wanted = location.hash.slice(1)
+  select(tabs.some((tab) => tab.dataset.period === wanted) ? wanted : tabs[0]!.dataset.period!)
+
+  function show(board: ReturnType<typeof sampleBoard>, live: boolean) {
+    for (const { id } of PERIODS) {
+      const panel = document.getElementById(`panel-${id}`)!
+      panel.querySelector('[data-list="tokens"]')!.innerHTML = tokensList(board.periods[id], { live })
+      panel.querySelector('[data-list="models"]')!.innerHTML = modelsList(board.periods[id], { live })
+    }
+    badge?.toggleAttribute("hidden", live)
+  }
 
   // Only a board that can't be read falls back to the sample, and then says so.
   const endpoint = root.dataset.endpoint
-  if (endpoint) {
+  if (!endpoint) {
+    show(sampleBoard(), false)
+  } else {
     fetch(endpoint)
       .then((response) => (response.ok ? response.json() : null))
       .then((value) => {
-        const read = readBoard(value)
-        board = read ?? sampleBoard()
-        live = Boolean(read)
-        if (read) document.dispatchEvent(new CustomEvent("board:live", { detail: read.updatedAt }))
-        paint()
+        const board = readBoard(value)
+        if (board) {
+          show(board, true)
+          document.dispatchEvent(new CustomEvent("board:live", { detail: board.updatedAt }))
+        } else {
+          show(sampleBoard(), false)
+        }
       })
-      .catch(() => {
-        board = sampleBoard()
-        live = false
-        paint()
-      })
+      .catch(() => show(sampleBoard(), false))
   }
 </script>
