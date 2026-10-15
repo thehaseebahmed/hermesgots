@@ -5,6 +5,7 @@ import { Banner } from "@/components/banner"
 import { Button } from "@/components/ui/button"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { formatTokens } from "@/lib/format"
+import { useWide } from "@/lib/media"
 import { useModelsDevUnreachable } from "@/lib/models"
 import {
   NOTICE_REMAINING_PERCENT,
@@ -111,6 +112,16 @@ export function LimitBanner({
   onView: () => void
 }) {
   const exhausted = notice.remaining <= 0
+  // A phone's banner leaves out the window's name: "Approaching Limit" is enough to send the
+  // reader to the sheet, which names every window.
+  const wide = useWide()
+  const text = exhausted
+    ? wide
+      ? `${notice.label} Limit Reached`
+      : "Limit Reached"
+    : wide
+      ? `Approaching ${notice.label} Limit`
+      : "Approaching Limit"
   return (
     <Banner
       tone={exhausted ? "error" : "warning"}
@@ -132,9 +143,7 @@ export function LimitBanner({
       }
     >
       <div className="flex flex-col">
-        <span>
-          {exhausted ? `${notice.label} limit reached` : `Approaching ${notice.label} limit`}
-        </span>
+        <span>{text}</span>
         {notice.resetsAt && (
           <span className="text-muted-foreground">Resets at {resetsAtText(notice.resetsAt)}</span>
         )}
