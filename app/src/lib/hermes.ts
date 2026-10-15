@@ -4,6 +4,7 @@ import type {
   ApprovalChoice,
   ClarifyAnswers,
   ClarifyQuestion,
+  ModelChoice,
   PrChecks,
   PrState,
   SessionMode,
@@ -437,31 +438,38 @@ export async function setHostModel(
   })
 }
 
-/** A model a bot falls back to, as its host records it. */
-export interface Fallback {
-  provider: string
-  model: string
-}
+/** A model a bot falls back to, as its host records it: the same pick the rest of the app passes
+ * around (`ModelChoice`). */
+export type Fallback = ModelChoice
 
 /**
  * The bot's fallback models on its host, in the order it would try them after the main model (the
  * Gots plugin's `fallbacks`, which is Hermes's own failover chain). Newer plugin only; a host
  * without the route answers 404.
  */
-export async function getFallbackModels(config: HermesConfig): Promise<Fallback[]> {
+export async function getFallbackModels(
+  config: HermesConfig,
+  signal?: AbortSignal,
+): Promise<Fallback[]> {
   const response = await request(`${pluginRoot(config.baseUrl)}/fallbacks`, {
     headers: headers(config),
+    signal,
   })
   return fallbackList((await response.json())?.fallbacks)
 }
 
 /** Makes `fallbacks` the bot's chain on its host, in order; an empty list clears it. Answers with
  * the list the host holds, and throws with its reason when it refuses a pick. */
-export async function setFallbackModels(config: HermesConfig, fallbacks: Fallback[]) {
+export async function setFallbackModels(
+  config: HermesConfig,
+  fallbacks: Fallback[],
+  signal?: AbortSignal,
+) {
   const response = await request(`${pluginRoot(config.baseUrl)}/fallbacks`, {
     method: "POST",
     headers: headers(config),
     body: JSON.stringify({ fallbacks }),
+    signal,
   })
   return fallbackList((await response.json())?.fallbacks)
 }

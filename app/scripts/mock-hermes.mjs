@@ -1082,6 +1082,9 @@ const pushSubscriptions = new Map()
 const hostModels = new Map()
 // The fallback models the plugin's `fallbacks` route recorded, per profile.
 const fallbacksOf = new Map()
+// The providers the picker lists (see /api/model/options below): a model from one of these can
+// become the host's model or one of its fallbacks.
+const PICKER_PROVIDERS = ["openrouter", "anthropic", "ollama-cloud"]
 // Whether a refresh has probed the custom endpoint in /api/model/options.
 let customProbed = false
 const eventLogs = new Map()
@@ -1458,7 +1461,7 @@ http
       }
       // The providers the picker lists (see /api/model/options above): a model from one of these
       // can become the host's.
-      if (!["openrouter", "anthropic", "ollama-cloud"].includes(provider.trim())) {
+      if (!PICKER_PROVIDERS.includes(provider.trim())) {
         return json(res, 400, { error: { message: `Unknown provider '${provider}'.` } })
       }
       hostModels.set(pluginProfile ?? "", { provider: provider.trim(), model: model.trim() })
@@ -1476,6 +1479,8 @@ http
           return json(res, 400, { error: { message: "fallbacks must be a list" } })
         }
         if (entries.length > 2) {
+          // The mock only ever holds two, so the host's "or shorter than what is stored" allowance
+          // for trimming a longer chain never applies here.
           return json(res, 400, { error: { message: "A bot takes at most 2 fallback models" } })
         }
         // Each pick is checked the way the host's `model` route checks the main one.
@@ -1491,7 +1496,7 @@ http
               },
             })
           }
-          if (!["openrouter", "anthropic", "ollama-cloud"].includes(provider)) {
+          if (!PICKER_PROVIDERS.includes(provider)) {
             return json(res, 400, { error: { message: `Unknown provider '${provider}'.` } })
           }
         }

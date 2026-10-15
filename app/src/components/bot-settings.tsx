@@ -356,7 +356,7 @@ export function BotEditor({
       )}
 
       {profile.baseUrl.trim() && (
-        <Field>
+        <Field aria-labelledby="fallback-models-label">
           <FieldLabel id="fallback-models-label">Fallback models</FieldLabel>
           <FallbackModelsSetting profile={profile} />
         </Field>

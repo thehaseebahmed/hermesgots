@@ -150,11 +150,11 @@ class SetFallbacksTest(unittest.TestCase):
             saved,
             [{"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"}, {"provider": "deepseek", "model": "deepseek-v4-pro"}],
         )
-        # Hermes's own chain key, at the top of the file, and the legacy one let go: one source of
-        # truth. Every other key stays put.
+        # Hermes's own chain key, at the top of the file. There is no legacy key to drop, so the
+        # usual write is one pass over the file, and every other key stays put.
         self.assertEqual(
             calls["write"],
-            [(self.path, "fallback_providers", saved), (self.path, "fallback_model", None)],
+            [(self.path, "fallback_providers", saved)],
         )
         self.assertEqual(calls["switch"][0]["current_model"], "old")
         self.assertEqual(calls["switch"][0]["current_base_url"], "https://x")
@@ -164,10 +164,7 @@ class SetFallbacksTest(unittest.TestCase):
         patch, calls, config = hermes(self.config(fallback_providers=[{"provider": "openrouter", "model": "a/b"}]))
         with patch:
             self.assertEqual(host_model.set_fallbacks(self.path, []), [])
-        self.assertEqual(
-            calls["write"],
-            [(self.path, "fallback_providers", None), (self.path, "fallback_model", None)],
-        )
+        self.assertEqual(calls["write"], [(self.path, "fallback_providers", None)])
         self.assertEqual(calls["switch"], [])
         self.assertEqual(config.get("fallback_providers"), None)
 
@@ -218,6 +215,19 @@ class SetFallbacksTest(unittest.TestCase):
             )
         self.assertEqual(saved[0], relay)
         self.assertEqual(saved[1], {"provider": "deepseek", "model": "deepseek-v4-pro"})
+
+    def test_a_kept_pick_is_not_checked_again(self) -> None:
+        # A pick already in the chain is one Hermes resolved when it went in: re-checking it would
+        # spend a live provider probe on a pick that hasn't moved, and could refuse a chain that is
+        # already running. Only the new pick is checked.
+        stored = {"provider": "openrouter", "model": "a/b"}
+        patch, calls, _ = hermes(self.config(fallback_providers=[stored]))
+        with patch:
+            saved = host_model.set_fallbacks(
+                self.path, [dict(stored), {"provider": "deepseek", "model": "c/d"}]
+            )
+        self.assertEqual(saved, [stored, {"provider": "deepseek", "model": "c/d"}])
+        self.assertEqual([call["raw_input"] for call in calls["switch"]], ["c/d"])
 
     def test_the_legacy_key_is_dropped(self) -> None:
         legacy = {"provider": "openrouter", "model": "a/b", "base_url": "https://x"}

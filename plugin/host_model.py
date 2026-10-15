@@ -19,7 +19,7 @@ already open adopts the edit. The legacy single ``fallback_model`` key is droppe
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 # Gots gives a bot a main model and up to two fallbacks after it.
 MAX_FALLBACKS = 2
@@ -62,10 +62,11 @@ def _entry(value: Any, number: int) -> Dict[str, str]:
     return {"provider": provider, "model": model}
 
 
-def _pair(body: Any, needs_provider: str, needs_model: str) -> tuple[str, str]:
-    """``(provider, model)``, trimmed; ValueError with the matching message when one is missing."""
-    provider = body.get("provider") if isinstance(body, dict) else None
-    model = body.get("model") if isinstance(body, dict) else None
+def _pair(body: Dict[str, Any], needs_provider: str, needs_model: str) -> tuple[str, str]:
+    """``(provider, model)``, trimmed; ValueError with the matching message when one is missing.
+    Both callers have already refused a body that isn't an object."""
+    provider = body.get("provider")
+    model = body.get("model")
     if not isinstance(provider, str) or not provider.strip():
         raise ValueError(needs_provider)
     if not isinstance(model, str) or not model.strip():
@@ -117,10 +118,11 @@ def set_main(config_path: Path, provider: str, model: str) -> Dict[str, str]:
 
 def set_fallbacks(config_path: Path, entries: List[Dict[str, str]]) -> List[Dict[str, str]]:
     """Make ``entries`` the bot's fallback chain in ``config_path``, in order; an empty list clears
-    it. Every pick is checked by Hermes the way the main model is, and a refusal is a ValueError
-    carrying its reason. Gots adds up to ``MAX_FALLBACKS``, while a longer chain a user built with
-    ``hermes fallback`` can still be shortened from here. Hermes's key is written and the legacy one
-    dropped, so the chain has one source of truth, and the rest of the file and its comments stay."""
+    it. A new or edited pick is checked by Hermes the way the main model is, and a refusal is a
+    ValueError carrying its reason; a pick already in the chain is kept as Hermes resolved it. Gots
+    adds up to ``MAX_FALLBACKS``, while a longer chain a user built with ``hermes fallback`` can
+    still be shortened from here. Hermes's key is written and the legacy one dropped, so the chain
+    has one source of truth, and the rest of the file and its comments stay."""
     from gateway.run import _load_gateway_config
     from utils import atomic_roundtrip_yaml_update
 
@@ -130,11 +132,16 @@ def set_fallbacks(config_path: Path, entries: List[Dict[str, str]]) -> List[Dict
         raise ValueError(f"A bot takes at most {MAX_FALLBACKS} fallback models")
     resolved = []
     for entry in entries:
-        result = _switch(cfg, entry["provider"], entry["model"])
-        resolved.append(_routed(result, stored))
-    # ``None`` removes the key: a bot with no fallbacks keeps no empty list behind it.
+        kept = _kept(stored, entry)
+        if kept is None:
+            resolved.append(_routed(_switch(cfg, entry["provider"], entry["model"]), stored))
+        else:
+            resolved.append(kept)
+    # ``None`` removes the key: a bot with no fallbacks keeps no empty list behind it. The legacy key
+    # is only touched when it is there to drop, so the usual write is one pass over the file.
     atomic_roundtrip_yaml_update(config_path, FALLBACK_KEY, resolved or None)
-    atomic_roundtrip_yaml_update(config_path, LEGACY_FALLBACK_KEY, None)
+    if cfg.get(LEGACY_FALLBACK_KEY) is not None:
+        atomic_roundtrip_yaml_update(config_path, LEGACY_FALLBACK_KEY, None)
     return resolved
 
 
@@ -169,5 +176,12 @@ def _routed(result: Any, stored: List[Dict[str, Any]]) -> Dict[str, Any]:
     Hermes reads. A stored entry for the same route keeps whatever else it carried — an endpoint, a
     wire, a credential — so an edit in the app doesn't drop what a hand-written entry had."""
     entry: Dict[str, Any] = {"provider": result.target_provider, "model": result.new_model}
-    match = next((one for one in stored if _named(one) == entry), None)
+    match = _kept(stored, entry)
     return {**match, **entry} if match else entry
+
+
+def _kept(stored: List[Dict[str, Any]], entry: Dict[str, str]) -> Optional[Dict[str, Any]]:
+    """The stored entry for a route already in the chain, or None when it is not there. A kept entry
+    is one Hermes itself resolved when it went in, so there is nothing left to check — and checking
+    it again would spend a live provider probe on a pick that hasn't moved."""
+    return next((one for one in stored if _named(one) == entry), None)

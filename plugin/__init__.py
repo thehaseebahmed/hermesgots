@@ -325,11 +325,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             provider, model = host_model.clean(await json_body(request))
         except ValueError as error:
             return _error(web, str(error), 400)
-        from hermes_constants import get_hermes_home
 
         # Both on the loop thread, where the request's profile scope is visible: the worker
         # re-enters it, so switch_model reads this profile's credentials.
-        config_path = Path(get_hermes_home()) / "config.yaml"
+        config_path = host_config_path()
         scope = profile_scope()
 
         def run() -> Dict[str, str]:
@@ -348,9 +347,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         denied = unauthorized(request)
         if denied is not None:
             return denied
-        from hermes_constants import get_hermes_home
-
-        config_path = Path(get_hermes_home()) / "config.yaml"
+        config_path = host_config_path()
         scope = profile_scope()
 
         def run() -> List[Dict[str, str]]:
@@ -371,11 +368,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             entries = host_model.clean_fallbacks(await json_body(request))
         except ValueError as error:
             return _error(web, str(error), 400)
-        from hermes_constants import get_hermes_home
 
         # Both on the loop thread, where the request's profile scope is visible: the worker
         # re-enters it, so each pick is checked against this profile's credentials.
-        config_path = Path(get_hermes_home()) / "config.yaml"
+        config_path = host_config_path()
         scope = profile_scope()
 
         def run() -> List[Dict[str, str]]:
@@ -403,6 +399,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if not callable(enter):
             return contextlib.nullcontext
         return lambda: enter(profile)
+
+    def host_config_path() -> Path:
+        # On the loop thread, like store_path: the API server scopes get_hermes_home() to the
+        # request's profile, and that scope isn't visible inside to_thread.
+        from hermes_constants import get_hermes_home
+
+        return Path(get_hermes_home()) / "config.yaml"
 
     def store_path() -> Path:
         # On the loop thread: the API server scopes get_hermes_home() to the request's profile, and

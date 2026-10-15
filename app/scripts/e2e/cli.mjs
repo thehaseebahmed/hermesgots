@@ -79,7 +79,7 @@ const FLOWS = {
   "fallback-models": {
     script: "e2e/fallback-models.mjs",
     about:
-      "A bot's fallback models are recorded on its host: two picks, one moved up, one removed",
+      "A bot's fallback models are recorded on its host: two picks in order, one removed, no third",
   },
   "todos-legacy": {
     script: "e2e/todos.mjs",

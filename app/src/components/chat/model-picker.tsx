@@ -518,8 +518,9 @@ export function DefaultModelSetting({
  * order it holds them. A host whose plugin can't record them shows no rows at all.
  */
 export function FallbackModelsSetting({ profile }: { profile: Profile }) {
-  // The slot the picker is open on: a row's index, "new" for the add row, nothing while it's shut.
-  const [open, setOpen] = useState<number | "new">()
+  // The slot the picker is open on: a row's index, the add row's place at the end of the list,
+  // nothing while it's shut.
+  const [open, setOpen] = useState<number>()
   const { list, supported, save } = useFallbackModels(profile)
   const providers = useModelInfo(profile)?.providers ?? []
   if (!supported) return null
@@ -529,11 +530,11 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
       toast.error(error instanceof Error ? error.message : String(error))
     })
   }
-  const chosen = typeof open === "number" ? list[open] : undefined
+  const chosen = open === undefined ? undefined : list[open]
 
   return (
     <>
-      <div className="space-y-2" role="group" aria-labelledby="fallback-models-label">
+      <div className="space-y-2">
         {list.map((fallback, index) => (
           <div key={index} className="flex items-center gap-1">
             <Button
@@ -565,7 +566,7 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
             variant="outline"
             className="h-11 w-full gap-1.5 font-normal"
             disabled={!providers.length}
-            onClick={() => setOpen("new")}
+            onClick={() => setOpen(list.length)}
           >
             <PlusIcon />
             Add fallback
@@ -580,9 +581,10 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
             recent={profile.recentModels}
             choice={chosen}
             onChoose={(next) => {
-              // Picking None on the add row adds nothing; on a row it drops that fallback.
-              if (next || typeof open === "number") {
-                write(withFallback(list, typeof open === "number" ? open : list.length, next))
+              // Picking None on a row drops that fallback; on the add row it is nothing to add, so
+              // nothing is written either.
+              if (open !== undefined && (next !== undefined || open < list.length)) {
+                write(withFallback(list, open, next))
               }
               if (next) void rememberModel(profile.id, next)
               setOpen(undefined)

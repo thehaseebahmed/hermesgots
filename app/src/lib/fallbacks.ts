@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from "react"
 
 import { connectionKey } from "@/lib/connection"
 import type { Profile } from "@/lib/db"
+import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import { getFallbackModels, hasPluginFeature, setFallbackModels, type Fallback } from "@/lib/hermes"
+import { noteFailure } from "@/lib/report"
 
 /** What a bot's host holds as its fallback chain, and whether it can hold one at all. */
 export interface Fallbacks {
@@ -34,10 +36,14 @@ export function useFallbackModels(profile?: (Server & { id?: string }) | null) {
         return
       }
       try {
-        const fallbacks = await getFallbackModels({ baseUrl, apiKey })
+        const fallbacks = await getFallbackModels(
+          { baseUrl, apiKey },
+          AbortSignal.timeout(READ_TIMEOUT_MS),
+        )
         if (!cancelled) setState({ key, held: { fallbacks, supported: true } })
-      } catch {
+      } catch (error) {
         // A read that fails leaves the rows off; the rest of the bot's settings still work.
+        noteFailure("Reading the fallback models", error)
       }
     })()
     return () => {

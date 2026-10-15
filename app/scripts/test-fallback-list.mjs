@@ -46,3 +46,11 @@ test("an index outside the list leaves it as it was", () => {
   assert.deepEqual(withFallback([sonnet], -1, deepseek), [sonnet])
 })
 
+test("a chain longer than the cap can still be trimmed or edited", () => {
+  // A host can hold more than two (Hermes's own `fallback` command adds them), and the plugin lets
+  // a shorter list through, so the rows must still be editable.
+  const three = [sonnet, deepseek, opus]
+  assert.deepEqual(withFallback(three, 0, undefined), [deepseek, opus])
+  assert.deepEqual(withFallback(three, 2, undefined), [sonnet, deepseek])
+  assert.deepEqual(withFallback(three, 1, sonnet), [sonnet, sonnet, opus])
+})
