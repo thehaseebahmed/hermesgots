@@ -1396,6 +1396,15 @@ export async function sendQueued(message: Message) {
     followHostQueue(message.conversationId)
     return
   }
+  // A reply is still streaming, so no turn can start: the message waits its turn like any other
+  // send does, keeping the id it has, instead of the control refusing to work. `sendMessage` would
+  // return without a word here.
+  if (controllers.has(message.conversationId)) {
+    const held: Message = { ...message, status: "queued", queuePaused: false }
+    delete held.statusText
+    await db.messages.put(held)
+    return
+  }
   await sendMessage(message.conversationId, message.content, {
     queuedId: message.id,
     attachments: message.attachments,

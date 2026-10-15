@@ -224,7 +224,32 @@ async function body({ page, seed, send, lastReply, until, shot }) {
   const failedLook = await bubbleLook(stuck)
   assert.equal(queuedLook.colour, failedLook.colour, "the two bubbles wear the same colour")
   assert.equal(queuedLook.opacity, failedLook.opacity, "…and the same dimming")
+
+  // The controls read alike too: Retry works while the reply streams, the way the composer's send
+  // does, rather than sitting there greyed out — and it queues the message it carries.
+  const retry = stuck.getByRole("button", { name: "Retry" })
+  assert.equal(await retry.isDisabled(), false, "Retry isn't dead while a reply streams")
+  assert.equal(
+    await retry.evaluate((element) => getComputedStyle(element).opacity),
+    "1",
+    "…and isn't faded out",
+  )
   await shot("beside-queued")
+  await retry.click()
+  await until(
+    async () =>
+      (await messages(page, chat)).some(
+        (m) => m.content === "and this one as well" && m.status === "queued",
+      ),
+    20_000,
+    "the retried send to wait in the queue",
+  )
+  assert.equal(
+    await stuck.getByRole("img", { name: "Not sent" }).count(),
+    0,
+    "it waits as a queued send now, not a failed one",
+  )
+  await shot("retried-into-queue")
 }
 
 // The mark, the dim bubble and the two controls have to read right on a laptop and on a phone in

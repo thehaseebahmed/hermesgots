@@ -143,7 +143,7 @@ function HeldActions({
   /** What the row is, before the controls; a failed one is already marked beside its bubble. */
   lead?: ReactNode
   /** The control that sends it, when it waits for one. */
-  send?: { label: string; icon: ReactNode; disabled?: boolean }
+  send?: { label: string; icon: ReactNode }
   /** What the X does, for a screen reader. */
   dismiss: string
 }) {
@@ -155,7 +155,6 @@ function HeldActions({
           variant="ghost"
           size="sm"
           className="min-h-11 text-xs"
-          disabled={send.disabled}
           onClick={() =>
             void sendQueued(message).catch((error) =>
               toast.error(error instanceof Error ? error.message : "Couldn't send your message."),
@@ -207,12 +206,14 @@ function QueuedActions({ message, paused }: { message: Message; paused: boolean 
 }
 
 /** Under a message whose send failed: send it again, or take it back. The bubble itself says it
- * didn't go — it stays dim with the mark beside it — so nothing here repeats why. */
-function FailedActions({ message, busy }: { message: Message; busy?: boolean }) {
+ * didn't go — it stays dim with the mark beside it — so nothing here repeats why. Retry stays live
+ * while a reply streams: it queues the message to go next, the way a send from the composer does,
+ * rather than sitting there greyed out with nothing to say. */
+function FailedActions({ message }: { message: Message }) {
   return (
     <HeldActions
       message={message}
-      send={{ label: "Retry", icon: <RotateCcwIcon data-icon="inline-start" />, disabled: busy }}
+      send={{ label: "Retry", icon: <RotateCcwIcon data-icon="inline-start" /> }}
       dismiss="Cancel failed message"
     />
   )
@@ -309,7 +310,7 @@ export const MessageItem = memo(function MessageItem({
             </div>
           )}
           {queued && <QueuedActions message={message} paused={paused} />}
-          {failed && <FailedActions message={message} busy={busy} />}
+          {failed && <FailedActions message={message} />}
         </MessageContent>
       </MessageRow>
     )
