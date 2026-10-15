@@ -55,8 +55,8 @@ const summary = (parts: string[], shown = parts.length) =>
   sentence(parts.slice(0, shown)) + (shown < parts.length ? ` (+${parts.length - shown})` : "")
 
 /** How many phrases of the summary fit on the row's line, with "(+N)" standing in for the rest. */
-function useFittingPhrases<T extends HTMLElement>(parts: string[], deps: unknown[] = []) {
-  const row = useRef<T>(null)
+function useFittingPhrases(parts: string[], deps: unknown[] = []) {
+  const row = useRef<HTMLButtonElement>(null)
   const text = useRef<HTMLSpanElement>(null)
   const ruler = useRef<HTMLSpanElement>(null)
   const [shown, setShown] = useState(parts.length)
@@ -154,7 +154,7 @@ function ToolDetail({ tool, onBack }: { tool: ToolEvent; onBack: () => void }) {
             <span className="sr-only">Back</span>
           </Button>
         )}
-        <PopupTitle className="max-w-full truncate">
+        <PopupTitle>
           {tool.emoji ? `${tool.emoji} ` : ""}
           {tool.tool}
         </PopupTitle>
@@ -172,21 +172,21 @@ function ToolDetail({ tool, onBack }: { tool: ToolEvent; onBack: () => void }) {
 
 function ToolList({
   tools,
-  title,
-  fullTitle,
+  label,
+  tip,
   onSelect,
 }: {
   tools: ToolEvent[]
-  /** The row's own title, so the sheet names the run exactly as the row does. */
-  title: string
-  /** Every phrase, uncut, for the tooltip. */
-  fullTitle: string
+  /** The row's own line, so the pop-up names the run exactly as the row does. */
+  label: string
+  /** Every phrase, uncut, for the heading's tooltip. */
+  tip: string
   onSelect: (index: number) => void
 }) {
   return (
     <>
       <PopupHeader className="pb-2">
-        <PopupTitle title={fullTitle}>{title}</PopupTitle>
+        <PopupTitle title={tip}>{label}</PopupTitle>
       </PopupHeader>
       <ol className="flex flex-col px-6 pt-2">
         {tools.map((tool, index) => {
@@ -249,10 +249,10 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
   const failures = tools.filter((t) => t.status === "failed")
   const failed = failures.length > 0
   const parts = phrases(tools)
-  const { row, text, ruler, shown } = useFittingPhrases<HTMLButtonElement>(parts, [running, failed])
-  // One title for the row and the sheet it opens: the sheet shows the row's cut verbatim.
-  const title = summary(parts, shown)
-  const fullTitle = summary(parts)
+  const { row, text, ruler, shown } = useFittingPhrases(parts, [running, failed])
+  // One line for the row and the header of the pop-up it opens, so the two never disagree.
+  const full = sentence(parts)
+  const label = shown < parts.length ? summary(parts, shown) : full
   // From tablet width up the details open in the same sheet, behind a back button; on a phone they
   // open as a sheet stacked on the list's, dismissed back to it.
   const wide = useWide()
@@ -266,7 +266,7 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
       <button
         ref={row}
         type="button"
-        aria-label={fullTitle}
+        aria-label={full}
         className="relative flex min-h-11 w-full items-center gap-2 text-left text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         onClick={() => setOpen(true)}
       >
@@ -275,7 +275,7 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
           <XIcon className="size-4 shrink-0 text-destructive" strokeWidth={3} aria-label="Failed" />
         )}
         <span ref={text} className="min-w-0 truncate">
-          {title}
+          {label}
         </span>
         <span ref={ruler} className="invisible absolute w-max whitespace-nowrap" aria-hidden />
         <ChevronRightIcon className="size-4 shrink-0" />
@@ -311,12 +311,7 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
           {wide && selected ? (
             <ToolDetail tool={selected} onBack={() => setSelectedIndex(undefined)} />
           ) : (
-            <ToolList
-              tools={tools}
-              title={title}
-              fullTitle={fullTitle}
-              onSelect={setSelectedIndex}
-            />
+            <ToolList tools={tools} label={label} tip={full} onSelect={setSelectedIndex} />
           )}
         </PopupContent>
       </Popup>

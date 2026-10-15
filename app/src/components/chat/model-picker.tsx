@@ -230,7 +230,7 @@ function ProviderModels({
   return (
     <>
       <PopupHeader>
-        <PopupTitle className="truncate">{provider.name}</PopupTitle>
+        <PopupTitle>{provider.name}</PopupTitle>
       </PopupHeader>
       <div className="flex flex-col gap-5 px-6 pt-2 text-[15px]">
         <div className="flex items-center gap-2">

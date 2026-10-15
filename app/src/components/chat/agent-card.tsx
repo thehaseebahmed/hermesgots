@@ -178,7 +178,7 @@ function AgentView({ agent, server }: { agent: DelegatedAgent; server: HermesCon
   return (
     <>
       <PopupHeader className="gap-1 pb-3">
-        <PopupTitle className="truncate">{agentTitle(agent.goal)}</PopupTitle>
+        <PopupTitle>{agentTitle(agent.goal)}</PopupTitle>
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <StatusIcon agent={agent} />
           <span className="truncate">

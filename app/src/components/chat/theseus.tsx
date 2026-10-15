@@ -489,7 +489,7 @@ export function TheseusSheet({
           <>
             <PopupHeader className="flex-row items-center gap-1 pb-2 text-left">
               <Back onClick={() => onView({ kind: "run" })} label="Back to the run" />
-              <PopupTitle className="min-w-0 flex-1 truncate">
+              <PopupTitle className="min-w-0 flex-1">
                 {SETTING_QUESTIONS[view.key].label}
               </PopupTitle>
             </PopupHeader>
@@ -704,7 +704,7 @@ function CheckpointView({
     <>
       <PopupHeader className="flex-row items-center gap-1 pb-2 text-left">
         <Back onClick={onBack} label="Back to the run" />
-        <PopupTitle className="min-w-0 flex-1 truncate">
+        <PopupTitle className="min-w-0 flex-1">
           {cp.id} · {cp.title}
         </PopupTitle>
       </PopupHeader>
@@ -901,7 +901,7 @@ function ModelsView({
     <>
       <PopupHeader className="flex-row items-center gap-1 pb-2 text-left">
         <Back onClick={onBack} label="Back to the run" />
-        <PopupTitle className="min-w-0 flex-1 truncate">Reviewer models</PopupTitle>
+        <PopupTitle className="min-w-0 flex-1">Reviewer models</PopupTitle>
       </PopupHeader>
       {blocked && (
         <div className="px-6 pt-2">
@@ -968,7 +968,7 @@ function PlanView({ run, onBack }: { run: TheseusRun; onBack: () => void }) {
     <>
       <PopupHeader className="flex-row items-center gap-1 pb-2 text-left">
         <Back onClick={onBack} label="Back to the run" />
-        <PopupTitle className="min-w-0 flex-1 truncate">Plan</PopupTitle>
+        <PopupTitle className="min-w-0 flex-1">Plan</PopupTitle>
       </PopupHeader>
       <div className="flex flex-col gap-1 px-6">
         <p className="text-[15px] font-medium">{plan.task}</p>
