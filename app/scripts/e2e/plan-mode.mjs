@@ -64,11 +64,12 @@ await flow(
       const { setSessionMode } = await import("/src/lib/workspace.ts")
       await setSessionMode(id, "plan")
     }, a)
-    const [sessionA, apiKey] = await page.evaluate(async (id) => {
+    const [sessionA, sessionB, apiKey] = await page.evaluate(async (ids) => {
       const { db } = await import("/src/lib/db.ts")
       const profile = (await db.profiles.toArray())[0]
-      return [(await db.conversations.get(id)).hermesSessionId, profile.apiKey]
-    }, a)
+      const found = await db.conversations.bulkGet(ids)
+      return [...found.map((row) => row.hermesSessionId), profile.apiKey]
+    }, [a, b])
     const headers = { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }
     const host = (path) =>
       fetch(`${mock}/api/plugins/memento${path}`, { headers }).then((response) => response.json())
@@ -133,6 +134,51 @@ await flow(
     )
     await shot("clean")
     pass("the plan stays with the session that finished it")
+
+    // The one path a plan can take from one session to another: the plugin answering this session's
+    // read with the record of another (a parent walk, or a stale copy). Neither its plan nor its
+    // file may land here, on the row or on the screen.
+    await page.route(`**/sessions/${sessionB}/workspace`, (route) =>
+      route.fulfill({
+        json: {
+          object: "memento.workspace",
+          workspace: {
+            session_id: sessionA,
+            project_id: PROJECT,
+            branch: "hermes/another-session",
+            path: "/tmp/another-session",
+            repo_root: "/tmp",
+            mode: "plan",
+            plan_pending: 1,
+            plan_file: "plans/another-session-20261015-000000.md",
+            repos: [],
+            files_dir: null,
+            theseus: {},
+          },
+          instructions: null,
+          blocked: null,
+        },
+      }),
+    )
+    const stored = await page.evaluate(async (id) => {
+      const { refreshWorkspace } = await import("/src/lib/workspace.ts")
+      await refreshWorkspace(id)
+      const { db } = await import("/src/lib/db.ts")
+      const row = await db.conversations.get(id)
+      return {
+        planPending: Boolean(row.planPending),
+        planFile: row.planFile ?? null,
+        mode: row.mode ?? null,
+        branch: row.worktree?.branch ?? null,
+      }
+    }, b)
+    await page.waitForTimeout(1500)
+    console.log(`plan-mode: another session's record left ${JSON.stringify(stored)}`)
+    assert.equal(stored.planPending, false, "a record naming another session brings no plan")
+    assert.equal(stored.planFile, null, "a record naming another session brings no plan file")
+    assert.equal(await page.getByRole("button", { name: "Keep planning" }).count(), 0, "no card either")
+    await page.unroute(`**/sessions/${sessionB}/workspace`)
+    pass("another session's workspace record is refused")
 
     // The other order the report could have been: A's card already on screen, then back, then in.
     await backToProject()

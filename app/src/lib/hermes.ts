@@ -1370,7 +1370,7 @@ export interface SessionWorkspace {
 
 const MODES = new Set<string>(["accept_edits", "auto", "plan", "theseus"])
 
-function parseWorkspace(raw: unknown): SessionWorkspace | null {
+function parseWorkspace(raw: unknown, sessionId: string): SessionWorkspace | null {
   const body = raw as {
     workspace?: Record<string, unknown>
     instructions?: unknown
@@ -1378,6 +1378,10 @@ function parseWorkspace(raw: unknown): SessionWorkspace | null {
   } | null
   const record = body?.workspace
   if (!record || typeof record.branch !== "string") return null
+  // A record that names another session is that session's workspace: a plugin answering through a
+  // parent walk, or a stale copy. This session would show its pending plan and approve its file.
+  if (typeof record.session_id === "string" && record.session_id && record.session_id !== sessionId)
+    return null
   const mode =
     typeof record.mode === "string" && MODES.has(record.mode) ? record.mode : "accept_edits"
   const repos = Array.isArray(record.repos) ? record.repos : []
@@ -1421,7 +1425,7 @@ export async function ensureWorkspace(
       mode: options.mode,
     }),
   })
-  const workspace = parseWorkspace(await response.json())
+  const workspace = parseWorkspace(await response.json(), sessionId)
   if (!workspace) throw new HermesError("The plugin didn't return a workspace.")
   return workspace
 }
@@ -1520,7 +1524,7 @@ export async function getWorkspace(
     headers: headers(config),
     signal,
   })
-  return parseWorkspace(await response.json())
+  return parseWorkspace(await response.json(), sessionId)
 }
 
 /** Changes a session's permission mode; also clears a pending plan. 404 before the first turn. */
@@ -1534,7 +1538,7 @@ export async function setWorkspaceMode(
     headers: headers(config),
     body: JSON.stringify({ mode }),
   })
-  return parseWorkspace(await response.json())
+  return parseWorkspace(await response.json(), sessionId)
 }
 
 /** A reviewer model: a model on a provider; either unset means the user's own. */

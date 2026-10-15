@@ -173,6 +173,17 @@ def _parent_of(hermes_home: Path, session_id: str) -> Optional[str]:
     return row[0] if row and isinstance(row[0], str) and row[0] else None
 
 
+def record_of(path: Path, session_id: str) -> Optional[Dict[str, Any]]:
+    """The session's own record: what the app reads its workspace — and its pending plan — from.
+
+    Never ``record_for``: a record reached through the parent walk is another session's, and the
+    app would take that session's ``plan_pending``/``plan_file`` for this one's, show its plan
+    here and approve its file. The walk stays where a chat's own id has to find its worktree: the
+    hooks (see ``record_for_call``).
+    """
+    return read(path, session_id)
+
+
 def record_for(path: Path, hermes_home: Path, session_id: str) -> Optional[Dict[str, Any]]:
     """The session's record, or its nearest ancestor's: compression moves a chat to a child session."""
     seen = set()
