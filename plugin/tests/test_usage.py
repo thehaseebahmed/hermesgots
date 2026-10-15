@@ -35,6 +35,23 @@ class FakeSnapshot:
     details: tuple = ()
 
 
+class _UnreadableSignature:
+    """A fetcher whose signature ``inspect`` refuses to read, but that can still be called.
+
+    The shape a builtin has, and the one the plugin's probe has to survive.
+    """
+
+    __signature__ = "not a signature"
+
+    def __init__(self, snapshot: object) -> None:
+        self.snapshot = snapshot
+        self.calls: list = []
+
+    def __call__(self, provider, **kwargs):
+        self.calls.append((provider, kwargs))
+        return self.snapshot
+
+
 class TestSerialize(unittest.TestCase):
     now = datetime(2026, 10, 13, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -141,24 +158,94 @@ class TestFetch(unittest.TestCase):
         # returns None too.
         fake_mod = mock.MagicMock()
         fake_mod.fetch_account_usage = mock.MagicMock(return_value=None)
-        with mock.patch.dict("sys.modules", {"agent": mock.MagicMock(), "agent.account_usage": fake_mod}):
+        with self._patched_core(fake_mod):
             result = usage.fetch("some-unknown-provider")
             self.assertIsNone(result)
 
     # --- the ollama-cloud fallback: core answers first, the plugin's fetcher is the net ---
 
-    def _core_module(self, snapshot: object = None, error: Optional[Exception] = None):
-        """A stand-in agent.account_usage whose fetch answers `snapshot` or raises `error`."""
+    def _core_module(self, snapshot: object = None, error: Optional[Exception] = None,
+                     *, takes_read_only: bool = True):
+        """A stand-in agent.account_usage whose fetch answers `snapshot` or raises `error`.
+
+        The fetch is a real function rather than a ``MagicMock``, because its signature is what
+        decides how the plugin reads it: ``read_only`` reaches only a core that takes it, which
+        Hermes gained after its first releases. Calls land on ``module.calls`` as
+        ``(provider, kwargs)``: the keywords the plugin passed.
+        """
+        calls: list = []
+
+        def answer(provider, kwargs):
+            calls.append((provider, kwargs))
+            if error is not None:
+                raise error
+            return snapshot
+
+        def read_with_read_only(provider, *, read_only, base_url=None, api_key=None):
+            return answer(provider, {"read_only": read_only})
+
+        def read_plainly(provider, *, base_url=None, api_key=None):
+            return answer(provider, {})
+
         module = mock.MagicMock()
-        module.fetch_account_usage = mock.MagicMock(
-            return_value=None if error else snapshot, side_effect=error
-        )
+        module.fetch_account_usage = read_with_read_only if takes_read_only else read_plainly
+        module.calls = calls
         return module
 
-    def _patched_core(self, module):
+    def _patched_core(self, module, *, has_interrupt_compat: bool = True):
+        """A patched ``agent`` package around ``module``'s ``account_usage``.
+
+        ``has_interrupt_compat`` says whether the host's core also ships
+        ``agent.interrupt_compat._accepts_keyword`` — core's own answer to the same question,
+        used where it exists, which reads a ``**kwargs`` fetcher as taking the kwarg. Without
+        it the plugin's own probe decides.
+        """
+        compat = ModuleType("agent.interrupt_compat")
+        if has_interrupt_compat:
+
+            def _accepts_keyword(callable_obj, name):
+                """Core's probe: a named parameter, or a ``**kwargs`` swallow."""
+                try:
+                    parameters = inspect.signature(callable_obj).parameters.values()
+                except (TypeError, ValueError):
+                    return False
+                return any(
+                    p.kind is inspect.Parameter.VAR_KEYWORD
+                    or (p.name == name and p.kind is not inspect.Parameter.POSITIONAL_ONLY)
+                    for p in parameters
+                )
+
+            compat._accepts_keyword = _accepts_keyword  # type: ignore[attr-defined]
         return mock.patch.dict(
-            "sys.modules", {"agent": mock.MagicMock(), "agent.account_usage": module}
+            "sys.modules",
+            {
+                "agent": mock.MagicMock(),
+                "agent.account_usage": module,
+                "agent.interrupt_compat": compat,
+            },
         )
+
+    def test_a_core_whose_signature_cannot_be_read_is_read_plainly(self) -> None:
+        """Whatever the signature probe can't read, the read still happens."""
+        core = _UnreadableSignature(
+            FakeSnapshot(
+                provider="anthropic",
+                windows=(
+                    FakeWindow(
+                        label="Session",
+                        used_percent=12.0,
+                        reset_at=datetime(2030, 1, 1, tzinfo=timezone.utc),
+                    ),
+                ),
+            )
+        )
+        module = mock.MagicMock()
+        module.fetch_account_usage = core
+        with self._patched_core(module):
+            result = usage.fetch("anthropic")
+        assert result is not None
+        self.assertEqual(12.0, result["windows"][0]["used_percent"])
+        self.assertEqual([("anthropic", {})], core.calls)
 
     def test_core_windows_win(self) -> None:
         """A provider core does fetch is never read a second time by the plugin."""
@@ -179,8 +266,83 @@ class TestFetch(unittest.TestCase):
         assert result is not None
         self.assertEqual("Session", result["windows"][0]["label"])
         self.assertEqual(42.0, result["windows"][0]["used_percent"])
-        module.fetch_account_usage.assert_called_once_with("ollama-cloud", read_only=True)
+        self.assertEqual([("ollama-cloud", {"read_only": True})], module.calls)
         plugin_fetch.assert_not_called()
+
+    def test_a_core_without_read_only_is_read_plainly(self) -> None:
+        """An older Hermes takes no ``read_only``; it must still answer, not fail the read."""
+        core = FakeSnapshot(
+            provider="anthropic",
+            windows=(
+                FakeWindow(
+                    label="Session",
+                    used_percent=12.0,
+                    reset_at=datetime(2030, 1, 1, tzinfo=timezone.utc),
+                ),
+            ),
+        )
+        module = self._core_module(core, takes_read_only=False)
+        with self._patched_core(module):
+            result = usage.fetch("anthropic")
+        assert result is not None
+        self.assertEqual(12.0, result["windows"][0]["used_percent"])
+        self.assertEqual([("anthropic", {})], module.calls)
+
+    def test_a_core_without_read_only_still_falls_back_to_the_balance_read(self) -> None:
+        """Ollama Cloud on an older Hermes: core has no fetcher for it, so its plain answer
+        (None) must reach the plugin's balance read rather than fail open as no windows."""
+        snapshot = usage_ollama.Snapshot(
+            provider="ollama-cloud",
+            windows=(
+                usage_ollama.Window(
+                    label="Weekly",
+                    used_percent=56.8,
+                    reset_at=datetime(2030, 1, 1, tzinfo=timezone.utc),
+                ),
+            ),
+        )
+        module = self._core_module(None, takes_read_only=False)
+        with self._patched_core(module):
+            with mock.patch.object(usage_ollama, "fetch_windows", return_value=snapshot) as plugin_fetch:
+                result = usage.fetch("ollama-cloud")
+        plugin_fetch.assert_called_once_with()
+        assert result is not None
+        self.assertEqual("Weekly", result["windows"][0]["label"])
+        self.assertEqual([("ollama-cloud", {})], module.calls)
+
+    def test_a_core_without_core_s_own_probe_is_read_by_this_one(self) -> None:
+        """A core from before ``interrupt_compat``: the plugin's own probe decides, and a core
+        that names the kwarg still gets it."""
+        core = FakeSnapshot(
+            provider="anthropic",
+            windows=(
+                FakeWindow(
+                    label="Session",
+                    used_percent=12.0,
+                    reset_at=datetime(2030, 1, 1, tzinfo=timezone.utc),
+                ),
+            ),
+        )
+        module = self._core_module(core)
+        with self._patched_core(module, has_interrupt_compat=False):
+            result = usage.fetch("anthropic")
+        assert result is not None
+        self.assertEqual([("anthropic", {"read_only": True})], module.calls)
+
+    def test_a_core_that_swallows_kwargs_is_read_with_read_only(self) -> None:
+        """Core's probe reads a ``**kwargs`` fetcher as taking the kwarg, so a core that
+        forwards it still gets the read that never refreshes a credential."""
+        calls: list = []
+
+        def read_swallowing_kwargs(provider, **kwargs):
+            calls.append((provider, kwargs))
+            return None
+
+        module = mock.MagicMock()
+        module.fetch_account_usage = read_swallowing_kwargs
+        with self._patched_core(module):
+            self.assertIsNone(usage.fetch("anthropic"))
+        self.assertEqual([("anthropic", {"read_only": True})], calls)
 
     def test_falls_back_to_the_plugin_fetcher(self) -> None:
         """Core has no ollama-cloud fetcher, so the balance read answers instead."""
