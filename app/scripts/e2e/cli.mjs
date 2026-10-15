@@ -52,6 +52,12 @@ const FLOWS = {
     about:
       "A session opened mid-turn from another device loads whole turns, pages back twice and keeps one reply",
   },
+  "question-from-push": {
+    script: "e2e/question-from-push.mjs",
+    about:
+      'A question opened from a notification shows as waiting, never "No answer", even before the chat is here',
+    alsoPolling: true,
+  },
   "live-poll": {
     script: "e2e/live-poll.mjs",
     mock: "polling",

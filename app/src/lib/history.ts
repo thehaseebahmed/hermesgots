@@ -21,6 +21,7 @@ import {
   type SessionMessage,
 } from "@/lib/hermes"
 import { splitAttachments } from "@/lib/attachments"
+import { readLiveRuns } from "@/lib/waiting"
 import { failureReason, TODO_TOOLS } from "@/lib/tools"
 
 /**
@@ -583,14 +584,21 @@ async function fetchTail(config: HermesConfig, sessionId: string, tip?: number) 
   return { rows: byRowId(rows), full: tip === undefined }
 }
 
-function turnsOf(conversationId: string, sessionId: string, rows: SessionMessage[]) {
+/** With `liveTail`, the last turn is still running: its calls without a result are still at work. */
+function turnsOf(
+  conversationId: string,
+  sessionId: string,
+  rows: SessionMessage[],
+  liveTail = false,
+) {
   const groups: SessionMessage[][] = []
   for (const row of rows) {
     if (isTurnStart(row) || !groups.length) groups.push([row])
     else groups[groups.length - 1].push(row)
   }
-  return groups.map((group) => {
-    const messages = toMessages(conversationId, sessionId, group)
+  return groups.map((group, i) => {
+    const live = liveTail && i === groups.length - 1
+    const messages = toMessages(conversationId, sessionId, group, { live })
     return {
       user: messages.find((m) => m.role === "user"),
       reply: messages.find((m) => m.role === "assistant"),
@@ -644,6 +652,22 @@ function placeBefore(messages: Message[], ceiling?: number) {
   return messages
 }
 
+/** Whether the transcript ends on calls whose results aren't in: still at work, or never ended. */
+function awaitingResults(rows: SessionMessage[]) {
+  const last = rows.findLast(isShown)
+  return Boolean(last?.role === "assistant" && toolCalls(last).length)
+}
+
+/**
+ * Whether the host still runs the session, so a question or command the last turn waits on reads
+ * as waiting, not as never answered, until the run is followed. Asked fresh: a chat opened from a
+ * notification has heard nothing yet. Needs the plugin.
+ */
+async function runningOnHost(config: HermesConfig, sessionId: string) {
+  if (!config.apiKey) return false
+  return Boolean((await readLiveRuns(config))?.runIds[sessionId])
+}
+
 async function reconcile(conversationId: string) {
   const conversation = await db.conversations.get(conversationId)
   if (!conversation) return 0
@@ -660,7 +684,8 @@ async function reconcile(conversationId: string) {
   }
   const { rows, full } = await fetchTail(config, sessionId, tip)
   if (!rows.length) return 0
-  const turns = turnsOf(conversationId, sessionId, rows)
+  const live = awaitingResults(rows) && (await runningOnHost(config, sessionId))
+  const turns = turnsOf(conversationId, sessionId, rows, live)
   return await db.transaction("rw", db.messages, db.conversations, async () => {
     const current = await getMessages(conversationId)
     if (isStreaming(current)) return null
