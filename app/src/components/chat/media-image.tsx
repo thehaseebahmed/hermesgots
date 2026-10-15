@@ -1,34 +1,34 @@
 import { useEffect, useState } from "react"
 
 import { Skeleton } from "@/components/ui/skeleton"
+import { useImageReady } from "@/lib/image"
 import { loadMediaImage } from "@/lib/media-tags"
 import { openImageViewer } from "@/lib/native"
 import { cn } from "@/lib/utils"
 
-// An image's place in a reply, whether it came alone or with others: the same cell either way, and
-// the same one the skeleton takes, so nothing moves as the images arrive. Tapping opens the bigger
-// view, as a photo in a message does.
+// Every image in a reply takes this cell — one image alone, a gallery of them, or one written into
+// the reply's own Markdown — and its skeleton takes it too, so nothing moves as it arrives.
 const CELL = "h-24 w-full rounded-xl border md:h-32 xl:h-40"
 
 /** An image in a reply; tapping it opens the larger view. */
 export function MediaImage({ src, alt }: { src: string; alt?: string }) {
   // The image reserves its place through the skeleton, and the real one loads behind it: `src` is
   // already set, so an <img> that isn't displayed yet still fetches, decodes and fires `load`.
-  const [ready, setReady] = useState(false)
+  const { ready, onLoad, onError } = useImageReady(src)
   return (
     <button
       type="button"
       onClick={() => void openImageViewer(src)}
       aria-label={alt || "Open image"}
+      aria-busy={!ready || undefined}
       className={cn(CELL, "relative block cursor-pointer overflow-hidden bg-muted/40")}
     >
       {!ready && <Skeleton className="absolute inset-0 rounded-xl" />}
       <img
         src={src}
         alt={alt ?? ""}
-        onLoad={() => setReady(true)}
-        // A broken image must not leave the pulse running: show what there is.
-        onError={() => setReady(true)}
+        onLoad={onLoad}
+        onError={onError}
         className={cn("h-full w-full object-cover", !ready && "invisible")}
         draggable={false}
       />
@@ -57,7 +57,7 @@ export function MediaTag({ conversationId, paths }: { conversationId: string; pa
   const list = joined.split("\n")
   // By path, so a reply that grows while it streams keeps the images it has, and a new tag is
   // loading, not shown as text, until its read is in.
-  const [loaded, setLoaded] = useState<Map<string, string | null>>()
+  const [loaded, setLoaded] = useState<Map<string, string | null>>(new Map())
   useEffect(() => {
     let stale = false
     const paths = joined.split("\n")
@@ -76,7 +76,7 @@ export function MediaTag({ conversationId, paths }: { conversationId: string; pa
       )}
     >
       {list.map((path, i) => {
-        const url = loaded?.get(path)
+        const url = loaded.get(path)
         if (url === undefined) return <Skeleton key={i} className={CELL} />
         return url ? <MediaImage key={i} src={url} /> : <Tag key={i} path={path} />
       })}
