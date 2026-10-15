@@ -11,7 +11,9 @@
 // labels a chat as Memento's on POST /api/plugins/memento/sessions/{id}/label. Its
 // GET /api/plugins/memento/sessions/{id}/context reports a keyed session's latest model call.
 // GET /api/plugins/memento/usage?provider=… serves two windows (Session + Weekly) whose
-// used_percent is MOCK_USAGE_PERCENT (default 94 so the composer banner shows; 0 → no windows).
+// used_percent is MOCK_USAGE_PERCENT (default 94 so the composer banner shows; 0 → no windows), and
+// one Ollama Cloud account's monthly allowance with a purchased-credits detail when the provider is
+// ollama-cloud (the picker lists that provider too).
 // Images the agent returns come from GET /api/plugins/memento/media?path=… (a .png path, unless it
 // names something missing), and saying "image" has the agent answer with a MEDIA tag: one for the
 // chart it serves and one for a file that isn't there.
@@ -1329,6 +1331,7 @@ http
           ],
         },
         { slug: "anthropic", name: "Anthropic", is_current: false, authenticated: true, models: ["claude-sonnet-4-5", "claude-opus-4-1"] },
+        { slug: "ollama-cloud", name: "Ollama Cloud", is_current: false, authenticated: true, models: ["gpt-oss:120b", "deepseek-v3.1:671b"] },
         { slug: "nous", name: "Nous Portal", is_current: false, authenticated: false, models: [] },
         // A custom endpoint lists its models only once a refresh has probed it.
         {
@@ -1451,7 +1454,9 @@ http
       if (typeof provider !== "string" || !provider.trim() || typeof model !== "string" || !model.trim()) {
         return json(res, 400, { error: { message: "provider and model are required" } })
       }
-      if (!["openrouter", "anthropic"].includes(provider.trim())) {
+      // The providers the picker lists (see /api/model/options above): a model from one of these
+      // can become the host's.
+      if (!["openrouter", "anthropic", "ollama-cloud"].includes(provider.trim())) {
         return json(res, 400, { error: { message: `Unknown provider '${provider}'.` } })
       }
       hostModels.set(pluginProfile ?? "", { provider: provider.trim(), model: model.trim() })
@@ -1667,11 +1672,15 @@ http
       const pct = Number(process.env.MOCK_USAGE_PERCENT ?? 94)
       // Like a provider's, a window resets at a fixed time, so reading it again changes nothing.
       const next = (ms) => new Date(Math.ceil((Date.now() + 1) / ms) * ms).toISOString()
+      const ollama = provider === "ollama-cloud"
       const windows = pct > 0
-        ? [
-            { label: "Session", used_percent: pct, resets_at: next(2 * 3600_000), detail: null },
-            { label: "Weekly", used_percent: Math.min(100, pct * 0.8), resets_at: next(7 * 86400_000), detail: null },
-          ]
+        ? ollama
+          // Ollama Cloud's own shape: a monthly allowance whose detail names purchased credits.
+          ? [{ label: "Included credits", used_percent: pct, resets_at: next(30 * 86400_000), detail: "Purchased credits: $25.00" }]
+          : [
+              { label: "Session", used_percent: pct, resets_at: next(2 * 3600_000), detail: null },
+              { label: "Weekly", used_percent: Math.min(100, pct * 0.8), resets_at: next(7 * 86400_000), detail: null },
+            ]
         : []
       return json(res, 200, { object: "memento.usage", provider, plan: "Pro", windows })
     }
