@@ -591,7 +591,9 @@ export function ChatPage() {
 
   const actions = conversation && (
     <div className="flex items-center gap-2">
-      {wide && <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />}
+      {wide && configured && !simple && (
+        <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />
+      )}
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
