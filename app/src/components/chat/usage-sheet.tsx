@@ -63,7 +63,7 @@ export function ContextRing({ usage, onClick }: { usage: ContextUsage; onClick: 
   const filled = fraction(usage)
   const radius = 16
   const circumference = 2 * Math.PI * radius
-  const percent = usage.window ? `${Math.round(filled * 100)}%` : undefined
+  const percent = usage.tracked && usage.window ? `${Math.round(filled * 100)}%` : undefined
 
   return (
     <Button
