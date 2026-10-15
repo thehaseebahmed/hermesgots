@@ -157,12 +157,6 @@ jobs:
           cp android/app/build/outputs/apk/release/app-release.apk "$out"
           echo "path=$out" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: memento-${{ steps.version.outputs.name }}
-          path: ${{ steps.apk.outputs.path }}
-          if-no-files-found: error
-
       - name: Attach to the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
