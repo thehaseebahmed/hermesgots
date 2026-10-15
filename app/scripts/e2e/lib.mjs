@@ -114,6 +114,64 @@ function helpers(page) {
       }
       throw new Error(`Timed out after ${ms / 1000}s waiting for ${what}`)
     },
+    /**
+     * Holds every request matching `pattern` back, so a placeholder can be looked at while the bytes
+     * are still coming: `hold()` holds what arrives from then on, `release()` lets it all through. A
+     * hold lasts 10s at most, so a flow that throws can't hang. With `fail`, a url ending in it is
+     * answered as a file the host can't serve (which reads as "Couldn't load").
+     */
+    async held(pattern, fail) {
+      const waiting = []
+      let holding = false
+      await page.route(pattern, async (route) => {
+        if (fail && route.request().url().endsWith(fail))
+          return route.fulfill({ status: 500, contentType: "text/plain", body: "no capture" })
+        if (holding)
+          await new Promise((done) => {
+            waiting.push(done)
+            setTimeout(done, 10_000)
+          })
+        await route.continue().catch(() => {})
+      })
+      return {
+        hold: () => {
+          holding = true
+        },
+        release: () => {
+          holding = false
+          for (const done of waiting.splice(0)) done()
+        },
+      }
+    },
+    /**
+     * Records every skeleton the page renders from then on, with the box it took: a placeholder can
+     * live for a single commit, which polling misses. `skeletons()` reads them, `stopSkeletons()`
+     * ends the recording.
+     */
+    async watchSkeletons() {
+      await page.evaluate(() => {
+        const boxes = new Map()
+        window.__skeletons = []
+        window.__skeletonObserver = new MutationObserver(() => {
+          for (const node of document.querySelectorAll("[data-slot=skeleton]")) {
+            const box = node.getBoundingClientRect()
+            boxes.set(node, {
+              width: Math.round(box.width),
+              height: Math.round(box.height),
+              inButton: Boolean(node.closest("button")),
+            })
+          }
+          window.__skeletons = [...boxes.values()]
+        })
+        window.__skeletonObserver.observe(document.body, { childList: true, subtree: true })
+      })
+    },
+    skeletons() {
+      return page.evaluate(() => window.__skeletons ?? [])
+    },
+    stopSkeletons() {
+      return page.evaluate(() => window.__skeletonObserver?.disconnect())
+    },
   }
 }
 

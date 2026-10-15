@@ -27,21 +27,15 @@ for (const width of [390, 1024]) {
     const look = `${width}${dark ? "-dark" : ""}`
     await flow(
       `image-skeleton-${look}`,
-      async ({ page, until, shot, seed, send }) => {
-        // Every image the plugin serves waits here, so the reply shows its placeholders first. A
-        // request made after the release passes straight through; one before it never waits over 10s.
-        let open = true
-        await page.route("**/api/plugins/memento/media**", async (route) => {
-          for (const end = Date.now() + 10_000; open && Date.now() < end;)
-            await new Promise((done) => setTimeout(done, 100))
-          await route.continue().catch(() => {})
-        })
+      async ({ page, held, seed, send, shot, skeletons, stopSkeletons, until, watchSkeletons }) => {
+        // Every image the plugin serves waits here, so the reply shows its placeholders first.
+        const media = await held("**/api/plugins/memento/media**")
 
         for (const [what, chat] of [
           ["chat", { id: "img-chat", title: "Images" }],
           ["session", { id: "img-session", title: "Images", projectId }],
         ]) {
-          open = true
+          media.hold()
           // A full page load each time, so a session reads its images as freshly as a chat does.
           await seed([chat])
           await page.goto(`${app}/c/${chat.id}`)
@@ -68,17 +62,8 @@ for (const width of [390, 1024]) {
           // A placeholder that lives for one commit is missed by polling, so the page records every
           // one it renders while the images come in — including the one an image itself keeps inside
           // its own button while it decodes.
-          await page.evaluate(() => {
-            window.__placeholders = []
-            new MutationObserver(() => {
-              for (const node of document.querySelectorAll("[data-slot=skeleton]"))
-                window.__placeholders.push({
-                  inButton: Boolean(node.closest("button")),
-                  height: Math.round(node.getBoundingClientRect().height),
-                })
-            }).observe(document.body, { childList: true, subtree: true })
-          })
-          open = false
+          await watchSkeletons()
+          media.release()
           await until(async () => (await shown(page)).skeletons === 0, 20_000, "the images to load")
           const loaded = await shown(page)
           assert.equal(
@@ -102,7 +87,8 @@ for (const width of [390, 1024]) {
             `a lone image and a group's images are the same size in a ${what}`,
           )
           assert.equal(cells[0].h, CELL[width], `an image is ${CELL[width]}px tall in a ${what}`)
-          const placeholders = await page.evaluate(() => window.__placeholders)
+          const placeholders = await skeletons()
+          await stopSkeletons()
           assert.ok(
             placeholders.some((one) => one.inButton && one.height >= CELL[width] - 2),
             `an image kept its own place while it decoded in a ${what}`,

@@ -12,16 +12,10 @@ for (const look of [
 ]) {
   await flow(
     `image-captures-${look.width}${look.dark ? "-dark" : ""}`,
-    async ({ page, until, shot, seed, send }) => {
+    async ({ page, held, seed, send, shot, until }) => {
       // One capture waits on the plugin; the other is a file the host can't serve.
-      let open = true
-      await page.route("**/theseus/evidence/**", async (route) => {
-        if (route.request().url().endsWith("build.svg"))
-          return route.fulfill({ status: 500, contentType: "text/plain", body: "no capture" })
-        for (const end = Date.now() + 10_000; open && Date.now() < end; )
-          await new Promise((done) => setTimeout(done, 100))
-        await route.continue().catch(() => {})
-      })
+      const evidence = await held("**/theseus/evidence/**", "build.svg")
+      evidence.hold()
 
       await seed([{ id: chatId, title: "Run", projectId }])
       await page.goto(`${app}/c/${chatId}`)
@@ -57,7 +51,7 @@ for (const look of [
       )
       await shot("loading")
 
-      open = false
+      evidence.release()
       await until(
         async () => (await page.locator("[data-slot=skeleton]").count()) === 0,
         20_000,
