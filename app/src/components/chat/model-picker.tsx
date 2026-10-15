@@ -527,6 +527,8 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
   const { list, supported, saving, save } = useFallbackModels(profile)
   const providers = useModelInfo(profile)?.providers ?? []
   if (!supported) return null
+  // A row's picker needs the host's model list, and a write on its way blocks every pick regardless.
+  const cannotEdit = !providers.length || saving
 
   const write = (next: Fallback[]) => {
     void save(next).catch((error: unknown) => {
@@ -549,7 +551,7 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
               type="button"
               variant="outline"
               className="h-11 min-w-0 flex-1 justify-between gap-2 font-normal"
-              disabled={!providers.length || saving}
+              disabled={cannotEdit}
               onClick={() => setOpen(index)}
             >
               <span className="truncate">{fullModel(fallback)}</span>
@@ -573,7 +575,7 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
             type="button"
             variant="outline"
             className="h-11 w-full gap-1.5 font-normal"
-            disabled={!providers.length || saving}
+            disabled={cannotEdit}
             onClick={() => setOpen(list.length)}
           >
             <PlusIcon />
