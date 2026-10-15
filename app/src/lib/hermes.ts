@@ -437,6 +437,45 @@ export async function setHostModel(
   })
 }
 
+/** A model a bot falls back to, as its host records it. */
+export interface Fallback {
+  provider: string
+  model: string
+}
+
+/**
+ * The fallback models the bot's host has recorded for its profile, in the order it holds them (the
+ * Gots plugin's `fallbacks`). Newer plugin only; a host without the route answers 404.
+ */
+export async function getFallbackModels(config: HermesConfig): Promise<Fallback[]> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/fallbacks`, {
+    headers: headers(config),
+  })
+  return fallbackList((await response.json())?.fallbacks)
+}
+
+/** Records the bot's fallback models on its host, in order; an empty list clears them. Answers with
+ * the list the host holds, and throws with its reason when it refuses a pick. */
+export async function setFallbackModels(config: HermesConfig, fallbacks: Fallback[]) {
+  const response = await request(`${pluginRoot(config.baseUrl)}/fallbacks`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ fallbacks }),
+  })
+  return fallbackList((await response.json())?.fallbacks)
+}
+
+/** Whatever part of a `fallbacks` answer is a usable pick, in order. */
+function fallbackList(value: unknown): Fallback[] {
+  if (!Array.isArray(value)) return []
+  const entries: Fallback[] = []
+  for (const entry of value) {
+    const { provider, model } = (entry ?? {}) as { provider?: unknown; model?: unknown }
+    if (typeof provider === "string" && typeof model === "string") entries.push({ provider, model })
+  }
+  return entries
+}
+
 export async function checkHealth(config: HermesConfig) {
   const response = await request(`${serverRoot(config.baseUrl)}/health`, {
     headers: headers(config),

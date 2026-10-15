@@ -1,0 +1,59 @@
+import assert from "node:assert/strict"
+import test from "node:test"
+
+import { MAX_FALLBACKS, moveFallbackUp, withFallback } from "../src/lib/fallback-list.ts"
+
+const sonnet = { provider: "openrouter", model: "anthropic/claude-sonnet-4.5" }
+const deepseek = { provider: "deepseek", model: "deepseek-v4-pro" }
+const opus = { provider: "anthropic", model: "claude-opus-4-5" }
+
+test("a bot takes two fallbacks", () => {
+  assert.equal(MAX_FALLBACKS, 2)
+})
+
+test("an empty list takes the first pick", () => {
+  assert.deepEqual(withFallback([], 0, sonnet), [sonnet])
+})
+
+test("a second pick goes after the first", () => {
+  assert.deepEqual(withFallback([sonnet], 1, deepseek), [sonnet, deepseek])
+})
+
+test("a third pick is dropped, at whatever index it arrives", () => {
+  const full = [sonnet, deepseek]
+  assert.deepEqual(withFallback(full, 2, opus), full)
+  assert.deepEqual(withFallback(full, 0, opus), [opus, deepseek])
+  assert.deepEqual(withFallback(full, 1, opus), [sonnet, opus])
+})
+
+test("writing a slot replaces only that one", () => {
+  assert.deepEqual(withFallback([sonnet, deepseek], 1, opus), [sonnet, opus])
+})
+
+test("writing undefined drops the slot", () => {
+  assert.deepEqual(withFallback([sonnet, deepseek], 0, undefined), [deepseek])
+  assert.deepEqual(withFallback([sonnet, deepseek], 1, undefined), [sonnet])
+  assert.deepEqual(withFallback([sonnet], 0, undefined), [])
+})
+
+test("undefined on the add row adds nothing", () => {
+  assert.deepEqual(withFallback([sonnet], 1, undefined), [sonnet])
+  assert.deepEqual(withFallback([], 0, undefined), [])
+})
+
+test("an index outside the list leaves it as it was", () => {
+  assert.deepEqual(withFallback([sonnet], 2, deepseek), [sonnet])
+  assert.deepEqual(withFallback([sonnet], -1, deepseek), [sonnet])
+})
+
+test("moving a fallback up swaps it with the one before", () => {
+  assert.deepEqual(moveFallbackUp([sonnet, deepseek], 1), [deepseek, sonnet])
+  assert.deepEqual(moveFallbackUp([sonnet], 1), [sonnet])
+  assert.deepEqual(moveFallbackUp([sonnet, deepseek], 0), [sonnet, deepseek])
+  assert.deepEqual(moveFallbackUp([], 0), [])
+})
+
+test("moving up twice is a return trip", () => {
+  const moved = moveFallbackUp(moveFallbackUp([sonnet, deepseek], 1), 1)
+  assert.deepEqual(moved, [sonnet, deepseek])
+})

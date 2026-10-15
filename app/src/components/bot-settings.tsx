@@ -6,7 +6,7 @@ import { toast } from "sonner"
 import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BOTS } from "@/components/bots"
-import { DefaultModelSetting } from "@/components/chat/model-picker"
+import { DefaultModelSetting, FallbackModelsSetting } from "@/components/chat/model-picker"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -352,6 +352,13 @@ export function BotEditor({
               })
             }
           />
+        </Field>
+      )}
+
+      {profile.baseUrl.trim() && (
+        <Field>
+          <FieldLabel id="fallback-models-label">Fallback models</FieldLabel>
+          <FallbackModelsSetting profile={profile} />
         </Field>
       )}
 

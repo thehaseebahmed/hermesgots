@@ -1,11 +1,15 @@
 import { useMemo, useState, type ReactNode } from "react"
 import {
   ArrowUpDownIcon,
+  ArrowUpIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  PlusIcon,
   SearchIcon,
+  XIcon,
 } from "lucide-react"
+import { toast } from "sonner"
 
 import { MODEL_SORTS, sortByFacts, type ModelSort } from "@/components/chat/model-sort"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
@@ -19,8 +23,10 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { rememberModel, type ModelChoice, type Profile } from "@/lib/db"
+import { MAX_FALLBACKS, moveFallbackUp, withFallback } from "@/lib/fallback-list"
+import { useFallbackModels } from "@/lib/fallbacks"
 import { formatTokens } from "@/lib/format"
-import type { ModelProvider } from "@/lib/hermes"
+import type { Fallback, ModelProvider } from "@/lib/hermes"
 import { fullModel, hostChoice, shortModel, useModelInfo } from "@/lib/model-info"
 import { modelFacts, useModelCatalog, type Catalog } from "@/lib/models"
 import { codingScoreOf, useCodingRankings, type RankingsPayload } from "@/lib/rankings"
@@ -500,6 +506,99 @@ export function DefaultModelSetting({
               void onChoose(next).finally(() => setTimeout(() => setSaving(undefined), SETTLE_MS))
               if (next) void rememberModel(profile.id, next)
               setOpen(false)
+            }}
+          />
+        </PopupContent>
+      </Popup>
+    </>
+  )
+}
+
+/**
+ * A bot's fallback models, in its settings: the picks its host records after the default, in the
+ * order it holds them. A host whose plugin can't record them shows no rows at all.
+ */
+export function FallbackModelsSetting({ profile }: { profile: Profile }) {
+  // The slot the picker is open on: a row's index, "new" for the add row, nothing while it's shut.
+  const [open, setOpen] = useState<number | "new">()
+  const { list, supported, save } = useFallbackModels(profile)
+  const providers = useModelInfo(profile)?.providers ?? []
+  if (!supported) return null
+
+  const write = (next: Fallback[]) => {
+    void save(next).catch((error: unknown) => {
+      toast.error(error instanceof Error ? error.message : String(error))
+    })
+  }
+  const chosen = typeof open === "number" ? list[open] : undefined
+
+  return (
+    <>
+      <div className="space-y-2" role="group" aria-labelledby="fallback-models-label">
+        {list.map((fallback, index) => (
+          <div key={index} className="flex items-center gap-1">
+            <Button
+              id={`fallback-${index + 1}`}
+              type="button"
+              variant="outline"
+              className="h-11 min-w-0 flex-1 justify-between gap-2 font-normal"
+              disabled={!providers.length}
+              onClick={() => setOpen(index)}
+            >
+              <span className="truncate">{fullModel(fallback)}</span>
+              <ChevronDownIcon className="shrink-0 text-muted-foreground" />
+            </Button>
+            {index > 0 && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-lg"
+                className="size-11 shrink-0"
+                aria-label={`Move fallback ${index + 1} up`}
+                onClick={() => write(moveFallbackUp(list, index))}
+              >
+                <ArrowUpIcon />
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-lg"
+              className="size-11 shrink-0"
+              aria-label={`Remove fallback ${index + 1}`}
+              onClick={() => write(withFallback(list, index, undefined))}
+            >
+              <XIcon />
+            </Button>
+          </div>
+        ))}
+        {list.length < MAX_FALLBACKS && (
+          <Button
+            type="button"
+            variant="outline"
+            className="h-11 w-full gap-1.5 font-normal"
+            disabled={!providers.length}
+            onClick={() => setOpen("new")}
+          >
+            <PlusIcon />
+            Add fallback
+          </Button>
+        )}
+      </div>
+      <Popup open={open !== undefined} onOpenChange={(next) => !next && setOpen(undefined)}>
+        <PopupContent initialFocus={false} className={PICKER_HEIGHT}>
+          <ModelPicker
+            providers={providers}
+            fallback={{ label: "None" }}
+            recent={profile.recentModels}
+            choice={chosen}
+            onChoose={(next) => {
+              // Picking None on the add row adds nothing; on a row it drops that fallback.
+              if (next || typeof open === "number") {
+                write(withFallback(list, typeof open === "number" ? open : list.length, next))
+              }
+              if (next) void rememberModel(profile.id, next)
+              setOpen(undefined)
             }}
           />
         </PopupContent>

@@ -1080,6 +1080,8 @@ const STALL_EVENTS_MS = Number(process.env.MOCK_STALL_EVENTS_MS ?? 0)
 const pushSubscriptions = new Map()
 // The main model the plugin's `model` route set, per profile ("" is the default one).
 const hostModels = new Map()
+// The fallback models the plugin's `fallbacks` route recorded, per profile.
+const fallbacksOf = new Map()
 // Whether a refresh has probed the custom endpoint in /api/model/options.
 let customProbed = false
 const eventLogs = new Map()
@@ -1380,7 +1382,7 @@ http
       return json(res, 200, {
         name: "memento",
         version: PLUGIN_VERSION,
-        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "theseus", ...(EVENTS ? ["events"] : []), "push", "host_model", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : [])],
+        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "theseus", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : [])],
         clarify: true,
         hooks: true,
         theseus: THESEUS_START === "unavailable"
@@ -1461,6 +1463,46 @@ http
       }
       hostModels.set(pluginProfile ?? "", { provider: provider.trim(), model: model.trim() })
       return json(res, 200, { object: "memento.host_model", provider: provider.trim(), model: model.trim() })
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/fallbacks") {
+      const key = pluginProfile ?? ""
+      if (req.method === "GET") {
+        return json(res, 200, { object: "memento.fallbacks", fallbacks: fallbacksOf.get(key) ?? [] })
+      }
+      if (req.method === "POST") {
+        const { fallbacks } = await readBody(req)
+        const entries = fallbacks ?? []
+        if (!Array.isArray(entries)) {
+          return json(res, 400, { error: { message: "fallbacks must be a list" } })
+        }
+        if (entries.length > 2) {
+          return json(res, 400, { error: { message: "A bot takes at most 2 fallback models" } })
+        }
+        // Each pick is checked the way the host's `model` route checks the main one.
+        for (const [at, entry] of entries.entries()) {
+          const provider = entry?.provider?.trim?.() ?? ""
+          const model = entry?.model?.trim?.() ?? ""
+          if (!provider || !model) {
+            return json(res, 400, {
+              error: {
+                message: provider
+                  ? `Fallback ${at + 1} needs a model`
+                  : `Fallback ${at + 1} needs a provider`,
+              },
+            })
+          }
+          if (!["openrouter", "anthropic", "ollama-cloud"].includes(provider)) {
+            return json(res, 400, { error: { message: `Unknown provider '${provider}'.` } })
+          }
+        }
+        const saved = entries.map((entry) => ({
+          provider: entry.provider.trim(),
+          model: entry.model.trim(),
+        }))
+        if (saved.length) fallbacksOf.set(key, saved)
+        else fallbacksOf.delete(key)
+        return json(res, 200, { object: "memento.fallbacks", fallbacks: saved })
+      }
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/github") {
       return json(res, 200, GITHUB ? { connected: true, source: "gh", login: "mock-user" } : { connected: false })
