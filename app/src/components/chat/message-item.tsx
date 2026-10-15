@@ -59,8 +59,7 @@ function toParts(content: string, tools: ToolEvent[], start: number): Part[] {
     cursor = to
   }
   const sorted = [...tools].sort(
-    (a, b) =>
-      (a.contentOffset ?? 0) - (b.contentOffset ?? 0) || a.startedAt - b.startedAt,
+    (a, b) => (a.contentOffset ?? 0) - (b.contentOffset ?? 0) || a.startedAt - b.startedAt,
   )
   for (const tool of sorted) {
     const at = tool.contentOffset ?? cursor
@@ -275,20 +274,24 @@ export const MessageItem = memo(function MessageItem({
   if (message.role === "user") {
     if (plain && isPlanApproval(message.content)) return <PlanApprovedCard />
     const queued = message.status === "queued"
+    // A message this device is still holding, waiting its turn or waiting to be sent again, wears the
+    // same dimmed bubble: one cue for "not through yet", whether the queue holds it or the send failed.
+    const dim = queued || failed
     // The plugin starts a host-queued message itself, so it only waits for a Send when paused.
     const paused = message.hostQueued ? Boolean(message.queuePaused) : !busy
     return (
       <MessageRow align="end">
         <MessageContent className="items-end gap-1">
           {message.attachments?.length ? (
-            <SentAttachments attachments={message.attachments} dim={queued || failed} />
+            <SentAttachments attachments={message.attachments} dim={dim} />
           ) : null}
           {(message.content || failed) && (
             <div className="flex w-full min-w-0 items-center justify-end gap-1.5">
-              {/* A message that didn't go keeps its place but not the colour a delivered one wears:
-                  it takes the page's dim colour, as a queued one dims the bubble it will go from,
-                  and a mark sits beside the bubble rather than under it, so nothing below a short
-                  message reads wider than the message. It says it didn't go and no more. */}
+              {/* A message that didn't go keeps its place but not the strength a delivered one has:
+                  it wears the dimmed green a queued message wears, the same cue for a message that
+                  isn't through yet, so the two read alike; a mark sits beside the bubble rather than
+                  under it, so nothing below a short message reads wider than the message. It says
+                  it didn't go and no more. */}
               {failed && (
                 <AlertCircleIcon
                   role="img"
@@ -297,11 +300,7 @@ export const MessageItem = memo(function MessageItem({
                 />
               )}
               {message.content && (
-                <Bubble
-                  variant={failed ? "muted" : "default"}
-                  align="end"
-                  className={queued ? "opacity-60" : undefined}
-                >
+                <Bubble variant="default" align="end" className={dim ? "opacity-60" : undefined}>
                   <BubbleContent className="px-4 py-2.5 text-[15px] whitespace-pre-wrap">
                     {message.content}
                   </BubbleContent>

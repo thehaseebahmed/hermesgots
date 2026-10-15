@@ -1,8 +1,8 @@
-// A message whose send fails — nothing reaches Hermes at all — stays in the thread, dimmed with a
-// mark beside it, and can be sent again or taken back. It says it didn't go and no more: a reason,
-// when the host gives one, belongs in the chat's own error, not under the message. The state is on
-// the device, so it outlives a reload. Sends are refused meanwhile, as a host the browser can't
-// reach, or one that answers with its own reason, does.
+// A message whose send fails — nothing reaches Hermes at all — stays in the thread wearing the dimmed
+// green a queued message wears, with a mark beside it, and can be sent again or taken back. It says it
+// didn't go and no more: a reason, when the host gives one, belongs in the chat's own error, not under
+// the message. The state is on the device, so it outlives a reload. Sends are refused meanwhile, as a
+// host the browser can't reach, or one that answers with its own reason, does.
 import { app, assert, flow, pass, runId } from "./lib.mjs"
 
 const REFUSAL = "Rate limit exceeded. Try again in a few seconds."
@@ -62,10 +62,11 @@ const idle = (page, chatId) =>
 const rowOf = (page, text) => page.locator("[data-slot=message]").filter({ hasText: text })
 
 /**
- * The bubble's own colour beside the two the page offers, which is how a message that didn't go
- * reads: the dim colour, not the green a delivered one wears.
+ * The bubble's own colour and opacity beside the ones the page offers, which is how a message that
+ * didn't go reads: the green a send goes in, at less than full strength — the same dimmed bubble a
+ * queued message wears — and not the page's flat grey.
  */
-const bubbleColour = (row) =>
+const bubbleLook = (row) =>
   row.locator("[data-slot=bubble-content]").evaluate((bubble) => {
     const probe = (className) => {
       const div = document.createElement("div")
@@ -75,19 +76,25 @@ const bubbleColour = (row) =>
       div.remove()
       return colour
     }
+    const own = getComputedStyle(bubble)
+    // The dimming sits on the bubble, not on its content: a child's own opacity stays 1 whatever its
+    // parent wears, so read the frame that carries the class.
+    const frame = getComputedStyle(bubble.closest("[data-slot=bubble]") ?? bubble)
     return {
-      own: getComputedStyle(bubble).backgroundColor,
-      dim: probe("bg-muted"),
-      sent: probe("bg-primary"),
+      colour: own.backgroundColor,
+      opacity: frame.opacity,
+      green: probe("bg-primary"),
+      grey: probe("bg-muted"),
     }
   })
 
-/** The state a message that never reached the host is in: dim, marked beside it, two ways out. */
+/** The state a message that never reached the host is in: dimmed, marked beside it, two ways out. */
 async function assertNotSent(page, row, what) {
   await row.getByRole("img", { name: "Not sent" }).waitFor({ timeout: 20_000 })
-  const colour = await bubbleColour(row)
-  assert.equal(colour.own, colour.dim, `${what}: the bubble wears the dim colour`)
-  assert.notEqual(colour.own, colour.sent, `${what}: it doesn't read as delivered`)
+  const look = await bubbleLook(row)
+  assert.equal(look.colour, look.green, `${what}: the bubble wears the green a send goes in`)
+  assert.notEqual(look.colour, look.grey, `${what}: not the page's flat grey`)
+  assert.notEqual(look.opacity, "1", `${what}: dimmed, not the strength a delivered one has`)
   assert.equal(
     await row.getByRole("button", { name: "Retry" }).count(),
     1,
@@ -183,6 +190,41 @@ async function body({ page, seed, send, lastReply, until, shot }) {
     "the failed message to be taken back",
   )
   await shot("cancelled")
+
+  // The cue is the one a queued message wears. Side by side: a send that failed and one waiting its
+  // turn dim their bubbles the same way, and only the failed one is marked.
+  await until(() => idle(page, chat), 30_000, "the chat to be idle")
+  await blockSends(page)
+  await send("and this one as well")
+  const stuck = rowOf(page, "and this one as well")
+  await assertNotSent(page, stuck, "a failed send beside a queued one")
+  await page.unroute("**/v1/**")
+  await send("go slow about it") // the mock answers this one in 20 steps, to queue behind
+  await until(
+    async () => (await lastReply(chat))?.status === "streaming",
+    30_000,
+    "the reply to start streaming",
+  )
+  await send("queue this one behind it")
+  await until(
+    async () =>
+      (await messages(page, chat)).some(
+        (m) => m.content === "queue this one behind it" && m.status === "queued",
+      ),
+    20_000,
+    "the send to wait its turn",
+  )
+  const waiting = rowOf(page, "queue this one behind it")
+  assert.equal(
+    await waiting.getByRole("img", { name: "Not sent" }).count(),
+    0,
+    "a queued send isn't marked as failed",
+  )
+  const queuedLook = await bubbleLook(waiting)
+  const failedLook = await bubbleLook(stuck)
+  assert.equal(queuedLook.colour, failedLook.colour, "the two bubbles wear the same colour")
+  assert.equal(queuedLook.opacity, failedLook.opacity, "…and the same dimming")
+  await shot("beside-queued")
 }
 
 // The mark, the dim bubble and the two controls have to read right on a laptop and on a phone in
