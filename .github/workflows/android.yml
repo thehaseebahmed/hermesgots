@@ -107,7 +107,9 @@ jobs:
           rm -f "$RUNNER_TEMP/release.keystore"
           exit $status
 
+      # A PR run is a build check; only what lands on main has an artifact worth keeping.
       - uses: actions/upload-artifact@v7
+        if: github.event_name == 'push'
         with:
           name: memento-${{ steps.version.outputs.sha }}
           path: app/android/app/build/outputs/apk/*/*.apk
