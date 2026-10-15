@@ -258,8 +258,8 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
   const parts = phrases(tools)
   const { row, text, ruler, shown } = useFittingPhrases(parts, [running, failed])
   // One line for the row and the header of the pop-up it opens, so the two never disagree.
-  const full = sentence(parts)
-  const label = shown < parts.length ? summary(parts, shown) : full
+  const full = summary(parts)
+  const label = summary(parts, shown)
   // From tablet width up the details open in the same sheet, behind a back button; on a phone they
   // open as a sheet stacked on the list's, dismissed back to it.
   const wide = useWide()
