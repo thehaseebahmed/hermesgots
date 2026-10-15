@@ -359,6 +359,26 @@ class InstructionsTest(unittest.TestCase):
         self.assertNotIn("Keep the user in the loop", text)
         self.assertNotIn("open_pull_request tool", text)
 
+    def test_the_mock_repeats_the_instructions_word_for_word(self) -> None:
+        # The mock is a standalone Node process, so its copy can't be imported; the e2e flows read
+        # the text it serves, so a drift there tests a prompt no session gets. Compared the way
+        # test_push_kinds compares its lists to the app's. Only the blocks meant to be verbatim:
+        # Theseus is deliberately shortened (the paths are the host's) and the plan is a template.
+        import re
+
+        app = Path(__file__).resolve().parents[2] / "app"
+        mock_js = (app / "scripts" / "mock-hermes.mjs").read_text()
+        for name, block in (
+            ("PR_INSTRUCTIONS", prompt_builder._PR_INSTRUCTIONS),
+            ("DONE_INSTRUCTIONS", prompt_builder._DONE_INSTRUCTIONS),
+            ("PROGRESS_UPDATES_INSTRUCTIONS", prompt_builder._PROGRESS_UPDATES_INSTRUCTIONS),
+        ):
+            with self.subTest(block=name):
+                found = re.search(rf'^const {name} = "(.*)"$', mock_js, re.M)
+                if found is None:
+                    self.fail(f"{name} is not in the mock")
+                self.assertEqual(found.group(1), block)
+
 
 if __name__ == "__main__":
     unittest.main()

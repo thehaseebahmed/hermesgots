@@ -1896,7 +1896,7 @@ http
         record.repos.length === 1
           ? `You are working in a git worktree of ${record.repos[0].name} at ${record.repos[0].path} (branch ${record.branch}). Keep all work inside it.`
           : `You are working in git worktrees of this project's repos, all on branch ${record.branch}:\n${record.repos.map((r, i) => `- ${r.name} at ${r.path}${i === 0 ? " (your current directory)" : ""}`).join("\n")}\nKeep all work inside them.`
-      // The plugin's library line (sessions._files_line), word for word, with the session's path.
+      // The plugin's library line (prompt_builder._files_line), word for word, with the session's path.
       const filesLine = (record) =>
         `Files you make for the user — screenshots, images, charts, reports, markdown — belong in this session's library at ${record.files_dir}, not in the worktree. File each one with the library_add tool (its path and a folder name, one level): name folders after the flow or change the files belong to, kebab-case — library-tab for work on the library tab, library-tab-tree-view for a follow-up change to it — not the file type, and file names kebab-case with their extension (dashboard-light.png). The tool makes ${record.files_dir}/<folder> if it needs to, moves the file there and answers with its new path; a name that isn't kebab-case, or a file of that name already in the folder, is an error — fix the name and call again. Return an image's new path in a MEDIA:<path> tag so the user sees it. Source edits stay in the worktree.`
       // A session's filed files, as the plugin's library routes would list them (see
