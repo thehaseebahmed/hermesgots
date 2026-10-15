@@ -81,6 +81,10 @@ const FLOWS = {
     about:
       "A bot's fallback models are recorded on its host: two picks in order, one removed, no third",
   },
+  "fallbacks-silent-host": {
+    script: "e2e/fallbacks-silent-host.mjs",
+    about: "A host that never answers a fallback write gives the field back instead of wedging it",
+  },
   "todos-legacy": {
     script: "e2e/todos.mjs",
     mock: "legacy",

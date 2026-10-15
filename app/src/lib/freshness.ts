@@ -8,6 +8,9 @@
 export const SAFETY_MS = 5 * 60_000
 /** A read that hasn't answered by now is treated as lost, since a dead connection can hang. */
 export const READ_TIMEOUT_MS = 15_000
+/** A write the host hasn't answered by now is given up on as well: a screen waiting on it (the bot
+ * editor's fallback rows grey out with a save) has to come back, answer or not. */
+export const WRITE_TIMEOUT_MS = 15_000
 /** A plugin that lacks a route (an older one) is left alone this long before it's asked again. */
 export const MISSING_ROUTE_MS = 5 * 60_000
 

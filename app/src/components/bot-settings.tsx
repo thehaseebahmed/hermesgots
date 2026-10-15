@@ -222,8 +222,7 @@ export function BotEditor({
     <FieldGroup>
       {!profile.disabled && pluginOutdated(profile.pluginVersion) && (
         <Banner tone="warning">
-          {profile.name}'s Gots plugin is out of date! Update it to {MIN_PLUGIN_VERSION} or
-          newer.
+          {profile.name}'s Gots plugin is out of date! Update it to {MIN_PLUGIN_VERSION} or newer.
         </Banner>
       )}
       {linked && <EnabledSetting profile={profile} />}
@@ -355,12 +354,7 @@ export function BotEditor({
         </Field>
       )}
 
-      {profile.baseUrl.trim() && (
-        <Field aria-labelledby="fallback-models-label">
-          <FieldLabel id="fallback-models-label">Fallback models</FieldLabel>
-          <FallbackModelsSetting profile={profile} />
-        </Field>
-      )}
+      <FallbackModelsSetting profile={profile} />
 
       <div className="flex flex-wrap items-center gap-3">
         <Button onClick={test} disabled={connection.state === "testing" || profile.disabled}>
