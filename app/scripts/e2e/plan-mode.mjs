@@ -64,12 +64,15 @@ await flow(
       const { setSessionMode } = await import("/src/lib/workspace.ts")
       await setSessionMode(id, "plan")
     }, a)
-    const [sessionA, sessionB, apiKey] = await page.evaluate(async (ids) => {
-      const { db } = await import("/src/lib/db.ts")
-      const profile = (await db.profiles.toArray())[0]
-      const found = await db.conversations.bulkGet(ids)
-      return [...found.map((row) => row.hermesSessionId), profile.apiKey]
-    }, [a, b])
+    const [sessionA, sessionB, apiKey] = await page.evaluate(
+      async (ids) => {
+        const { db } = await import("/src/lib/db.ts")
+        const profile = (await db.profiles.toArray())[0]
+        const found = await db.conversations.bulkGet(ids)
+        return [...found.map((row) => row.hermesSessionId), profile.apiKey]
+      },
+      [a, b],
+    )
     const headers = { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }
     const host = (path) =>
       fetch(`${mock}/api/plugins/memento${path}`, { headers }).then((response) => response.json())
@@ -176,9 +179,42 @@ await flow(
     console.log(`plan-mode: another session's record left ${JSON.stringify(stored)}`)
     assert.equal(stored.planPending, false, "a record naming another session brings no plan")
     assert.equal(stored.planFile, null, "a record naming another session brings no plan file")
-    assert.equal(await page.getByRole("button", { name: "Keep planning" }).count(), 0, "no card either")
+    assert.equal(
+      await page.getByRole("button", { name: "Keep planning" }).count(),
+      0,
+      "no card either",
+    )
     await page.unroute(`**/sessions/${sessionB}/workspace`)
     pass("another session's workspace record is refused")
+
+    // A device that already took another session's plan keeps drawing its card: a read that comes
+    // back with no workspace of this session's own clears it, and the card goes with it.
+    await page.evaluate(async (id) => {
+      const { db } = await import("/src/lib/db.ts")
+      await db.conversations.update(id, {
+        mode: "plan",
+        planPending: true,
+        planFile: "plans/another-session-20261015-000000.md",
+      })
+    }, b)
+    await page.getByRole("button", { name: "Keep planning" }).waitFor({ timeout: 10_000 })
+    const cleared = await page.evaluate(async (id) => {
+      const { refreshWorkspace } = await import("/src/lib/workspace.ts")
+      await refreshWorkspace(id)
+      const { db } = await import("/src/lib/db.ts")
+      const found = await db.conversations.get(id)
+      return { planPending: Boolean(found.planPending), planFile: found.planFile ?? null }
+    }, b)
+    await page.waitForTimeout(1000)
+    console.log(`plan-mode: a plan it never planned left ${JSON.stringify(cleared)}`)
+    assert.equal(cleared.planPending, false, "a plan from another session is cleared")
+    assert.equal(cleared.planFile, null, "and so is its file")
+    assert.equal(
+      await page.getByRole("button", { name: "Keep planning" }).count(),
+      0,
+      "the card it drew goes with it",
+    )
+    pass("a plan taken from another session does not stay on the row")
 
     // The other order the report could have been: A's card already on screen, then back, then in.
     await backToProject()
@@ -207,10 +243,79 @@ await flow(
     // And A keeps its own.
     await backToProject()
     await group("Waiting on you").getByText(titleA).click()
-    await page
-      .getByRole("button", { name: "Keep planning" })
-      .waitFor({ timeout: 20_000 })
+    await page.getByRole("button", { name: "Keep planning" }).waitFor({ timeout: 20_000 })
     pass("session A's plan is still there")
+
+    // The other way the two meet: a session swapped in place beside its project, which keeps this
+    // screen mounted, while the route's own row is still being read. What the screen held before
+    // must not show in the new session's place — its plan card would approve the other plan.
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.goto(project)
+    await group("Waiting on you").getByText(titleA).click()
+    await page.waitForURL(`**/c/${a}`)
+    await page.getByRole("button", { name: "Keep planning" }).waitFor({ timeout: 20_000 })
+    // Hold the swap open: the row takes this long to come back, as a slow device's would.
+    await page.evaluate(async () => {
+      const { db } = await import("/src/lib/db.ts")
+      const get = db.conversations.get.bind(db.conversations)
+      db.conversations.get = async (key) => {
+        const row = await get(key)
+        await new Promise((resolve) => setTimeout(resolve, 800))
+        return row
+      }
+    })
+    // Watched from the moment this route is the one in the address bar: what was on screen before the
+    // swap belongs to the session it was showing.
+    await page.evaluate((route) => {
+      window.__midSwap = []
+      window.__midThread = []
+      window.__midSamples = 0
+      let routeAt = 0
+      window.__watch = setInterval(() => {
+        if (!location.pathname.endsWith(route)) return
+        // The address bar changes before React commits this route: that instant still shows the
+        // screen the navigation started from, which is not this session showing anything of it.
+        routeAt ||= Date.now()
+        if (Date.now() - routeAt < 150) return
+        window.__midSamples += 1
+        const cards = [...document.querySelectorAll("button")].filter(
+          (button) => button.textContent?.trim() === "Keep planning",
+        )
+        if (cards.length) window.__midSwap.push(Date.now())
+        // The message this session was sent is A's alone: seeing it means A's thread is on screen.
+        const thread = document.querySelector('[aria-label="Messages"]')?.innerText ?? ""
+        if (thread.includes("dry run to the log rotation")) window.__midThread.push(Date.now())
+      }, 50)
+    }, `/c/${b}`)
+    await group("Idle").getByText(titleB).click()
+    await page.waitForURL(`**/c/${b}`)
+    await page.waitForTimeout(2500)
+    const mid = await page.evaluate(() => {
+      clearInterval(window.__watch)
+      return {
+        cards: window.__midSwap.length,
+        thread: window.__midThread.length,
+        samples: window.__midSamples,
+      }
+    })
+    console.log(
+      `plan-mode: on the swapped-in route, ${mid.samples} samples; the other chat's card: ${mid.cards}, its thread: ${mid.thread}`,
+    )
+    await shot("swapped-in")
+    assert.ok(mid.samples > 10, "the swap was watched while this route was on screen")
+    assert.equal(mid.cards, 0, "the previous session's plan card never renders in this one's place")
+    assert.equal(mid.thread, 0, "and neither does its thread")
+    assert.equal(
+      await page.getByRole("button", { name: "Keep planning" }).count(),
+      0,
+      "the swapped-in session shows its own composer",
+    )
+    assert.equal(
+      await row(b).then((again) => again.planPending),
+      false,
+      "and the swap leaves its row alone",
+    )
+    pass("a session swapped in place shows nothing of the one before it")
   },
   { viewport: { width: 390, height: 844 } },
 )
