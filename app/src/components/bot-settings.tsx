@@ -355,12 +355,7 @@ export function BotEditor({
         </Field>
       )}
 
-      {profile.baseUrl.trim() && (
-        <Field aria-labelledby="fallback-models-label">
-          <FieldLabel id="fallback-models-label">Fallback models</FieldLabel>
-          <FallbackModelsSetting profile={profile} />
-        </Field>
-      )}
+      {profile.baseUrl.trim() && <FallbackModelsSetting profile={profile} />}
 
       <div className="flex flex-wrap items-center gap-3">
         <Button onClick={test} disabled={connection.state === "testing" || profile.disabled}>

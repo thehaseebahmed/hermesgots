@@ -18,7 +18,7 @@ type Server = Pick<Profile, "baseUrl" | "apiKey">
 /**
  * A bot's fallback models, read from its host once the plugin says it has the route, and the way its
  * settings record new ones. `list` is what to show: the picks a write is putting on the host, until
- * the host's own answer lands.
+ * the host's own answer lands, and `saving` whether such a write is on its way there.
  */
 export function useFallbackModels(profile?: (Server & { id?: string }) | null) {
   const baseUrl = profile?.baseUrl ?? ""
@@ -71,6 +71,8 @@ export function useFallbackModels(profile?: (Server & { id?: string }) | null) {
     list: pendingHere ?? held?.fallbacks ?? [],
     /** Shown only once the host has answered: a bot whose plugin predates the route shows no rows. */
     supported: Boolean(held?.supported),
+    /** A write is on its way to the host: the rows grey out until its answer lands. */
+    saving: pending?.key === key,
     save,
   }
 }

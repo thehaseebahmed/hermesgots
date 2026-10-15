@@ -20,7 +20,9 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Field, FieldLabel } from "@/components/ui/field"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
+import { Spinner } from "@/components/ui/spinner"
 import { rememberModel, type ModelChoice, type Profile } from "@/lib/db"
 import { MAX_FALLBACKS, withFallback } from "@/lib/fallback-list"
 import { useFallbackModels } from "@/lib/fallbacks"
@@ -515,13 +517,14 @@ export function DefaultModelSetting({
 
 /**
  * A bot's fallback models, in its settings: the picks its host records after the default, in the
- * order it holds them. A host whose plugin can't record them shows no rows at all.
+ * order it holds them. A host whose plugin can't record them shows no field at all, and a write on
+ * its way greys the rows out until the host's answer lands.
  */
 export function FallbackModelsSetting({ profile }: { profile: Profile }) {
   // The slot the picker is open on: a row's index, the add row's place at the end of the list,
   // nothing while it's shut.
   const [open, setOpen] = useState<number>()
-  const { list, supported, save } = useFallbackModels(profile)
+  const { list, supported, saving, save } = useFallbackModels(profile)
   const providers = useModelInfo(profile)?.providers ?? []
   if (!supported) return null
 
@@ -533,7 +536,11 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
   const chosen = open === undefined ? undefined : list[open]
 
   return (
-    <>
+    <Field aria-labelledby="fallback-models-label" aria-busy={saving || undefined}>
+      <div className="flex items-center gap-2">
+        <FieldLabel id="fallback-models-label">Fallback models</FieldLabel>
+        {saving && <Spinner className="size-3.5" />}
+      </div>
       <div className="space-y-2">
         {list.map((fallback, index) => (
           <div key={index} className="flex items-center gap-1">
@@ -542,7 +549,7 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
               type="button"
               variant="outline"
               className="h-11 min-w-0 flex-1 justify-between gap-2 font-normal"
-              disabled={!providers.length}
+              disabled={!providers.length || saving}
               onClick={() => setOpen(index)}
             >
               <span className="truncate">{fullModel(fallback)}</span>
@@ -554,6 +561,7 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
               size="icon-lg"
               className="size-11 shrink-0"
               aria-label={`Remove fallback ${index + 1}`}
+              disabled={saving}
               onClick={() => write(withFallback(list, index, undefined))}
             >
               <XIcon />
@@ -565,7 +573,7 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
             type="button"
             variant="outline"
             className="h-11 w-full gap-1.5 font-normal"
-            disabled={!providers.length}
+            disabled={!providers.length || saving}
             onClick={() => setOpen(list.length)}
           >
             <PlusIcon />
@@ -592,6 +600,6 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
           />
         </PopupContent>
       </Popup>
-    </>
+    </Field>
   )
 }
