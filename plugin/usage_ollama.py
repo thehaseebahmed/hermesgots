@@ -2,10 +2,10 @@
 
 Hermes core's ``agent.account_usage`` knows anthropic, openai-codex and openrouter;
 Ollama Cloud publishes its limits on ``GET https://ollama.com/api/balance``, with the
-profile's ``OLLAMA_API_KEY``. This reads that endpoint and maps both payload shapes the
-account answers with — the legacy session/weekly remaining percentages and the current
-monthly allowance — onto the window records ``usage.serialize`` already reads, so the
-app renders them like any other provider's limits.
+profile's ``OLLAMA_API_KEY``. This reads that endpoint and maps every window the account
+reports — the current monthly allowance and/or the legacy session and weekly remaining
+percentages — onto the window records ``usage.serialize`` already reads, so the app
+renders them like any other provider's limits.
 
 The plugin owns this because the key is server-side and no Hermes surface asks Ollama
 for its balance; nothing here imports Hermes core.
@@ -101,16 +101,18 @@ def _allowance_window(included: Dict[str, Any], purchased: Any) -> Optional[Wind
 
 
 def windows_from_payload(payload: Any) -> Tuple[Window, ...]:
-    """Both shapes the account answers with: a monthly allowance, or session/weekly."""
+    """Every window the account reports: a monthly allowance, a session/weekly pair, or both.
+
+    The two are read side by side rather than as alternatives: an account whose payload carries
+    a monthly allowance and a weekly block shows both meters, not just the allowance.
+    """
     if not isinstance(payload, dict):
         return ()
     included = payload.get("included")
     if not isinstance(included, dict):
         return ()
-    current = _allowance_window(included, payload.get("purchased"))
-    if current is not None:
-        return (current,)
     found: List[Optional[Window]] = [
+        _allowance_window(included, payload.get("purchased")),
         _remaining_window("Session", included.get("session")),
         _remaining_window("Weekly", included.get("weekly")),
     ]

@@ -267,7 +267,7 @@ def _urlopen(payload: object, calls: Optional[dict] = None, error: Optional[Exce
 
 
 class TestOllamaWindows(unittest.TestCase):
-    """The two payload shapes Ollama Cloud answers /api/balance with."""
+    """The windows Ollama Cloud's /api/balance reports, in either shape or both."""
 
     legacy = {
         "included": {
@@ -281,6 +281,17 @@ class TestOllamaWindows(unittest.TestCase):
             "balance_usd": 28.5,
             "allowance_usd": 100.0,
             "period": {"until": "2026-11-01T00:00:00Z"},
+        },
+        "purchased": {"balance_usd": 25.0},
+    }
+    # An account that reports the monthly allowance and the legacy pair at once.
+    combined = {
+        "included": {
+            "balance_usd": 28.5,
+            "allowance_usd": 100.0,
+            "period": {"until": "2026-11-01T00:00:00Z"},
+            "session": {"remaining_percent": 82.0, "resets_at": "2026-10-15T01:00:00Z"},
+            "weekly": {"remaining_percent": 50.0, "resets_at": "2026-10-19T00:00:00Z"},
         },
         "purchased": {"balance_usd": 25.0},
     }
@@ -299,6 +310,29 @@ class TestOllamaWindows(unittest.TestCase):
         self.assertAlmostEqual(71.5, windows[0].used_percent)
         self.assertEqual(datetime(2026, 11, 1, tzinfo=timezone.utc), windows[0].reset_at)
         self.assertEqual("Purchased credits: $25.00", windows[0].detail)
+
+    def test_an_allowance_and_a_weekly_block_both_show(self) -> None:
+        windows = usage_ollama.windows_from_payload(
+            {
+                "included": {
+                    "allowance_usd": 100.0,
+                    "balance_usd": 28.5,
+                    "period": {"until": "2026-11-01T00:00:00Z"},
+                    "weekly": {"remaining_percent": 50.0, "resets_at": "2026-10-19T00:00:00Z"},
+                }
+            }
+        )
+        self.assertEqual(["Included credits", "Weekly"], [w.label for w in windows])
+        self.assertAlmostEqual(71.5, windows[0].used_percent)
+        self.assertEqual(50.0, windows[1].used_percent)
+
+    def test_the_allowance_and_the_session_weekly_pair_all_show(self) -> None:
+        windows = usage_ollama.windows_from_payload(self.combined)
+        self.assertEqual(["Included credits", "Session", "Weekly"], [w.label for w in windows])
+        self.assertAlmostEqual(71.5, windows[0].used_percent)
+        self.assertEqual("Purchased credits: $25.00", windows[0].detail)
+        self.assertEqual(18.0, windows[1].used_percent)
+        self.assertEqual(50.0, windows[2].used_percent)
 
     def test_naive_reset_stamp_reads_as_utc(self) -> None:
         windows = usage_ollama.windows_from_payload(
