@@ -61,11 +61,12 @@ function useFittingPhrases(parts: string[], deps: unknown[] = []) {
   const ruler = useRef<HTMLSpanElement>(null)
   const [shown, setShown] = useState(parts.length)
   const key = parts.join("|")
+  const fit = useRef<() => void>(() => {})
   useLayoutEffect(() => {
     const button = row.current
     const measure = ruler.current
     if (!button || !measure) return
-    const fit = () => {
+    fit.current = () => {
       let taken = 0
       let siblings = 0
       for (const child of button.children) {
@@ -81,13 +82,19 @@ function useFittingPhrases(parts: string[], deps: unknown[] = []) {
       }
       setShown(1)
     }
-    fit()
-    const observer = new ResizeObserver(fit)
-    observer.observe(button)
-    return () => observer.disconnect()
+    fit.current()
     // `parts` is rebuilt every render; its content is what `key` stands for.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, ...deps])
+  // The row's width is what the phrases are fitted to, so it is observed once, not per phrase: a
+  // streaming reply changes `parts` every flush, and re-observing each time would force a layout.
+  useLayoutEffect(() => {
+    const button = row.current
+    if (!button) return
+    const observer = new ResizeObserver(() => fit.current())
+    observer.observe(button)
+    return () => observer.disconnect()
+  }, [])
   return { row, text, ruler, shown: Math.min(shown, parts.length) }
 }
 
