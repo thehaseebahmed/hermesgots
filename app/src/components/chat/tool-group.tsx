@@ -170,16 +170,23 @@ function ToolDetail({ tool, onBack }: { tool: ToolEvent; onBack: () => void }) {
   )
 }
 
-function ToolList({ tools, onSelect }: { tools: ToolEvent[]; onSelect: (index: number) => void }) {
-  const parts = phrases(tools)
-  const { row, text, ruler, shown } = useFittingPhrases<HTMLHeadingElement>(parts)
+function ToolList({
+  tools,
+  title,
+  fullTitle,
+  onSelect,
+}: {
+  tools: ToolEvent[]
+  /** The row's own title, so the sheet names the run exactly as the row does. */
+  title: string
+  /** Every phrase, uncut, for the tooltip. */
+  fullTitle: string
+  onSelect: (index: number) => void
+}) {
   return (
     <>
       <PopupHeader className="pb-2">
-        <PopupTitle ref={row} className="relative truncate" title={summary(parts)}>
-          <span ref={text}>{summary(parts, shown)}</span>
-          <span ref={ruler} className="invisible absolute w-max whitespace-nowrap" aria-hidden />
-        </PopupTitle>
+        <PopupTitle title={fullTitle}>{title}</PopupTitle>
       </PopupHeader>
       <ol className="flex flex-col px-6 pt-2">
         {tools.map((tool, index) => {
@@ -243,6 +250,9 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
   const failed = failures.length > 0
   const parts = phrases(tools)
   const { row, text, ruler, shown } = useFittingPhrases<HTMLButtonElement>(parts, [running, failed])
+  // One title for the row and the sheet it opens: the sheet shows the row's cut verbatim.
+  const title = summary(parts, shown)
+  const fullTitle = summary(parts)
   // From tablet width up the details open in the same sheet, behind a back button; on a phone they
   // open as a sheet stacked on the list's, dismissed back to it.
   const wide = useWide()
@@ -256,7 +266,7 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
       <button
         ref={row}
         type="button"
-        aria-label={summary(parts)}
+        aria-label={fullTitle}
         className="relative flex min-h-11 w-full items-center gap-2 text-left text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         onClick={() => setOpen(true)}
       >
@@ -265,7 +275,7 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
           <XIcon className="size-4 shrink-0 text-destructive" strokeWidth={3} aria-label="Failed" />
         )}
         <span ref={text} className="min-w-0 truncate">
-          {summary(parts, shown)}
+          {title}
         </span>
         <span ref={ruler} className="invisible absolute w-max whitespace-nowrap" aria-hidden />
         <ChevronRightIcon className="size-4 shrink-0" />
@@ -301,7 +311,12 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
           {wide && selected ? (
             <ToolDetail tool={selected} onBack={() => setSelectedIndex(undefined)} />
           ) : (
-            <ToolList tools={tools} onSelect={setSelectedIndex} />
+            <ToolList
+              tools={tools}
+              title={title}
+              fullTitle={fullTitle}
+              onSelect={setSelectedIndex}
+            />
           )}
         </PopupContent>
       </Popup>
