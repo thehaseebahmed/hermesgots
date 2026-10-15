@@ -3,7 +3,8 @@ import { KINDS, MODES, PERIODS, sampleBoard } from "../lib/board"
 import { modelsList, tokensList } from "../lib/render"
 
 const board = sampleBoard()
-const endpoint = import.meta.env.PUBLIC_COMMUNITY_URL ?? ""
+const base = (import.meta.env.PUBLIC_COMMUNITY_URL ?? "").replace(/\/+$/, "")
+const endpoint = base ? `${base}/.netlify/functions/community?route=board` : ""
 ---
 
 <div id="board" data-endpoint={endpoint}>
