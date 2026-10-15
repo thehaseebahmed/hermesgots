@@ -294,6 +294,10 @@ export function LibraryTree({
 /**
  * A project's Library tab: every session's filed files as a tree, read from the plugin's project
  * route while the tab is on screen.
+ *
+ * The tree stays in this component's state on purpose: nothing else reads it, and `TabsContent`
+ * unmounts the panel when another tab is selected, so the state goes with it. A shared per-server
+ * cache is for what two or more screens must agree on (see `src/lib/projects.ts`).
  */
 export function LibraryTab({
   config,
