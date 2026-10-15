@@ -35,7 +35,13 @@ export function Popup({ side, ...props }: ComponentProps<typeof Drawer.Root> & {
     </SideSheet.Provider>
   )
 }
-export const PopupTitle = SheetTitle
+/**
+ * A pop-up's heading: centred by the header, bounded to its width so a long one cuts with an
+ * ellipsis rather than running under the close button.
+ */
+export function PopupTitle({ className, ...props }: ComponentProps<typeof SheetTitle>) {
+  return <SheetTitle className={cn("max-w-full truncate", className)} {...props} />
+}
 export const PopupDescription = SheetDescription
 
 const InSheet = createContext(false)
