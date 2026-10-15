@@ -248,8 +248,8 @@ function MenuScreen({
         <NotificationsRow />
         <NotificationTypesRow />
       </Group>
-      <CommunityRow />
       <Group>
+        <CommunityRow />
         <FeedbackRow />
       </Group>
       <Group>
@@ -352,11 +352,7 @@ function NotificationsRow() {
 function CommunityRow() {
   const { account } = useSyncState()
   if (account.status !== "signed-in") return null
-  return (
-    <Group>
-      <Row to="community" icon={TrophyIcon} title="Community" />
-    </Group>
-  )
+  return <Row to="community" icon={TrophyIcon} title="Community" />
 }
 
 function NotificationTypesRow() {

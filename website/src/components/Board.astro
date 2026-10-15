@@ -2,9 +2,11 @@
 import { KINDS, MODES, PERIODS, sampleBoard } from "../lib/board"
 import { modelsList, tokensList } from "../lib/render"
 
-const board = sampleBoard()
+const sample = sampleBoard()
 const base = (import.meta.env.PUBLIC_COMMUNITY_URL ?? "").replace(/\/+$/, "")
 const endpoint = base ? `${base}/.netlify/functions/community?route=board` : ""
+// With a live board configured the page waits for it; the sample shows only when there is none.
+const loading = '<li class="empty">Loading…</li>'
 ---
 
 <div id="board" data-endpoint={endpoint}>
@@ -38,23 +40,24 @@ const endpoint = base ? `${base}/.netlify/functions/community?route=board` : ""
         <ul class="legend" aria-label="Token types">
           {KINDS.map((kind) => <li><span class={`dot ${kind.key}`} />{kind.label}</li>)}
         </ul>
-        <ol class="rows" data-list="tokens" set:html={tokensList(board.periods[period.id], { live: false })} />
+        <ol class="rows" data-list="tokens" set:html={endpoint ? loading : tokensList(sample.periods[period.id], { live: false })} />
 
         <h2>Top models</h2>
         <ul class="legend" aria-label="Modes">
           {MODES.map((mode) => <li><span class={`dot mode-${mode.key}`} />{mode.label}</li>)}
         </ul>
-        <ol class="rows" data-list="models" set:html={modelsList(board.periods[period.id], { live: false })} />
+        <ol class="rows" data-list="models" set:html={endpoint ? loading : modelsList(sample.periods[period.id], { live: false })} />
       </section>
     ))
   }
 </div>
 
 <script>
-  import { PERIODS, readBoard } from "../lib/board"
+  import { PERIODS, readBoard, sampleBoard } from "../lib/board"
   import { modelsList, tokensList } from "../lib/render"
 
   const root = document.getElementById("board")!
+  const badge = document.getElementById("sample-badge")
   const tabs = Array.from(root.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
   const panels = Array.from(root.querySelectorAll<HTMLElement>('[role="tabpanel"]'))
 
@@ -68,12 +71,13 @@ const endpoint = base ? `${base}/.netlify/functions/community?route=board` : ""
     for (const panel of panels) panel.hidden = panel.id !== `panel-${period}`
   }
 
-  for (const [index, tab] of tabs.entries()) {
+  for (const tab of tabs) {
     tab.addEventListener("click", () => {
       select(tab.dataset.period!)
       history.replaceState(null, "", `#${tab.dataset.period}`)
     })
     tab.addEventListener("keydown", (event) => {
+      const index = tabs.indexOf(tab)
       const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0
       if (!step) return
       event.preventDefault()
@@ -85,21 +89,31 @@ const endpoint = base ? `${base}/.netlify/functions/community?route=board` : ""
   const wanted = location.hash.slice(1)
   select(tabs.some((tab) => tab.dataset.period === wanted) ? wanted : tabs[0]!.dataset.period!)
 
-  // A live board replaces the sample; if it can't be read the sample stays, marked as one.
+  function show(board: ReturnType<typeof sampleBoard>, live: boolean) {
+    for (const { id } of PERIODS) {
+      const panel = document.getElementById(`panel-${id}`)!
+      panel.querySelector('[data-list="tokens"]')!.innerHTML = tokensList(board.periods[id], { live })
+      panel.querySelector('[data-list="models"]')!.innerHTML = modelsList(board.periods[id], { live })
+    }
+    badge?.toggleAttribute("hidden", live)
+  }
+
+  // Only a board that can't be read falls back to the sample, and then says so.
   const endpoint = root.dataset.endpoint
-  if (endpoint) {
+  if (!endpoint) {
+    show(sampleBoard(), false)
+  } else {
     fetch(endpoint)
       .then((response) => (response.ok ? response.json() : null))
       .then((value) => {
         const board = readBoard(value)
-        if (!board) return
-        for (const { id } of PERIODS) {
-          const panel = document.getElementById(`panel-${id}`)!
-          panel.querySelector('[data-list="tokens"]')!.innerHTML = tokensList(board.periods[id], { live: true })
-          panel.querySelector('[data-list="models"]')!.innerHTML = modelsList(board.periods[id], { live: true })
+        if (board) {
+          show(board, true)
+          document.dispatchEvent(new CustomEvent("board:live", { detail: board.updatedAt }))
+        } else {
+          show(sampleBoard(), false)
         }
-        document.dispatchEvent(new CustomEvent("board:live", { detail: board.updatedAt }))
       })
-      .catch(() => {})
+      .catch(() => show(sampleBoard(), false))
   }
 </script>
