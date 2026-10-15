@@ -6,12 +6,8 @@ module wraps it so the plugin route stays thin: it calls the fetcher under the
 request's profile scope (credentials stay server-side), drops windows without a
 ``used_percent`` or whose ``reset_at`` has already passed, and serializes the
 rest for the app. ``ollama-cloud``, which core has no fetcher for, is read by
-``usage_ollama`` instead.
-
-Core is asked with ``read_only`` only where the host's Hermes has it: the plugin
-ships ahead of the core it runs on, and an unknown kwarg there fails the whole
-read — no provider's windows, Ollama Cloud's among them, since a core failure
-means no answer to fall back from.
+``usage_ollama`` instead, and core is asked with ``read_only`` only where it
+takes that kwarg (see ``_accepts_read_only``).
 
 """
 
@@ -19,6 +15,7 @@ from __future__ import annotations
 
 import inspect
 from datetime import datetime, timezone
+from functools import lru_cache
 from typing import Any, Callable, Dict, List, Optional
 
 from . import usage_ollama
@@ -61,17 +58,34 @@ def serialize(snapshot: Any, now: Optional[datetime] = None) -> Optional[Dict[st
     }
 
 
-def _accepts_read_only(fetcher: Callable[..., Any]) -> bool:
-    """Whether the host's ``fetch_account_usage`` takes ``read_only``.
+def _names_read_only(fetcher: Callable[..., Any]) -> bool:
+    """Whether ``fetcher``'s own signature names ``read_only``: the fallback probe.
 
-    The kwarg is newer than the first Hermes releases, so it is passed only to a
-    core that names it; a callable whose signature can't be read is taken as not
-    naming it, and is called the plain way. Either way the read happens.
+    Only a core too old to have ``agent.interrupt_compat`` reaches this. A callable whose
+    signature can't be read is taken as not naming it, and is called the plain way.
     """
     try:
         return "read_only" in inspect.signature(fetcher).parameters
     except (TypeError, ValueError):
         return False
+
+
+@lru_cache(maxsize=1)
+def _accepts_read_only(fetcher: Callable[..., Any]) -> bool:
+    """Whether the host's ``fetch_account_usage`` takes ``read_only``.
+
+    The kwarg is newer than the first Hermes releases, and an unknown kwarg fails the whole
+    read — every provider's windows, Ollama Cloud's among them, since a core failure means
+    no answer to fall back from. So it goes only to a core that takes it: core's own
+    ``_accepts_keyword`` decides where the host has it (it also reads a ``**kwargs`` wrapper
+    as taking the kwarg), and ``_names_read_only`` where it doesn't. Either way the read
+    happens, and the answer can't change under a running process, so it is cached.
+    """
+    try:
+        from agent.interrupt_compat import _accepts_keyword
+    except Exception:  # the probe must never be what fails the read
+        return _names_read_only(fetcher)
+    return _accepts_keyword(fetcher, "read_only")
 
 
 def fetch(provider: str) -> Optional[Dict[str, Any]]:
