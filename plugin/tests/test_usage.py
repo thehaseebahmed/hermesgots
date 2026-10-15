@@ -303,15 +303,29 @@ class TestOllamaWindows(unittest.TestCase):
         self.assertEqual(50.0, windows[1].used_percent)
         self.assertEqual(datetime(2026, 10, 15, 1, 0, tzinfo=timezone.utc), windows[0].reset_at)
 
-    def test_current_allowance_reports_used_and_purchased_detail(self) -> None:
+    def test_the_monthly_allowance_and_bought_credits_show_in_that_order(self) -> None:
         windows = usage_ollama.windows_from_payload(self.current)
-        self.assertEqual(1, len(windows))
-        self.assertEqual("Included credits", windows[0].label)
+        self.assertEqual(["Monthly", "Credits"], [w.label for w in windows])
         self.assertAlmostEqual(71.5, windows[0].used_percent)
         self.assertEqual(datetime(2026, 11, 1, tzinfo=timezone.utc), windows[0].reset_at)
-        self.assertEqual("Purchased credits: $25.00", windows[0].detail)
+        self.assertIsNone(windows[0].detail)
+        self.assertEqual(0.0, windows[1].used_percent)
+        self.assertEqual("$25.00", windows[1].detail)
 
-    def test_an_allowance_and_a_weekly_block_both_show(self) -> None:
+    def test_no_credits_window_without_a_balance(self) -> None:
+        windows = usage_ollama.windows_from_payload(
+            {
+                "included": {
+                    "allowance_usd": 100.0,
+                    "balance_usd": 28.5,
+                    "period": {"until": "2026-11-01T00:00:00Z"},
+                },
+                "purchased": {"balance_usd": 0},
+            }
+        )
+        self.assertEqual(["Monthly"], [w.label for w in windows])
+
+    def test_a_weekly_block_sits_above_the_monthly_allowance(self) -> None:
         windows = usage_ollama.windows_from_payload(
             {
                 "included": {
@@ -322,17 +336,17 @@ class TestOllamaWindows(unittest.TestCase):
                 }
             }
         )
-        self.assertEqual(["Included credits", "Weekly"], [w.label for w in windows])
-        self.assertAlmostEqual(71.5, windows[0].used_percent)
-        self.assertEqual(50.0, windows[1].used_percent)
+        self.assertEqual(["Weekly", "Monthly"], [w.label for w in windows])
+        self.assertEqual(50.0, windows[0].used_percent)
+        self.assertAlmostEqual(71.5, windows[1].used_percent)
 
-    def test_the_allowance_and_the_session_weekly_pair_all_show(self) -> None:
+    def test_every_window_an_account_reports_appears_in_order(self) -> None:
         windows = usage_ollama.windows_from_payload(self.combined)
-        self.assertEqual(["Included credits", "Session", "Weekly"], [w.label for w in windows])
-        self.assertAlmostEqual(71.5, windows[0].used_percent)
-        self.assertEqual("Purchased credits: $25.00", windows[0].detail)
-        self.assertEqual(18.0, windows[1].used_percent)
-        self.assertEqual(50.0, windows[2].used_percent)
+        self.assertEqual(["Session", "Weekly", "Monthly", "Credits"], [w.label for w in windows])
+        self.assertEqual(18.0, windows[0].used_percent)
+        self.assertEqual(50.0, windows[1].used_percent)
+        self.assertAlmostEqual(71.5, windows[2].used_percent)
+        self.assertEqual("$25.00", windows[3].detail)
 
     def test_naive_reset_stamp_reads_as_utc(self) -> None:
         windows = usage_ollama.windows_from_payload(
@@ -360,9 +374,10 @@ class TestOllamaWindows(unittest.TestCase):
         assert result is not None
         self.assertEqual("ollama-cloud", result["provider"])
         self.assertEqual("Pro", result["plan"])
-        self.assertEqual("Included credits", result["windows"][0]["label"])
+        self.assertEqual(["Monthly", "Credits"], [w["label"] for w in result["windows"]])
         self.assertEqual("2026-11-01T00:00:00+00:00", result["windows"][0]["resets_at"])
-        self.assertEqual("Purchased credits: $25.00", result["windows"][0]["detail"])
+        self.assertIsNone(result["windows"][0]["detail"])
+        self.assertEqual("$25.00", result["windows"][1]["detail"])
 
 
 class TestOllamaFetch(unittest.TestCase):

@@ -84,27 +84,34 @@ def _remaining_window(label: str, block: Any) -> Optional[Window]:
     )
 
 
-def _allowance_window(included: Dict[str, Any], purchased: Any) -> Optional[Window]:
-    """The current plan's included credits, with any purchased ones as its detail."""
+def _allowance_window(included: Dict[str, Any]) -> Optional[Window]:
+    """The current plan's monthly allowance."""
     allowance = _num(included.get("allowance_usd"))
     balance = _num(included.get("balance_usd"))
     if allowance is None or balance is None or allowance <= 0:
         return None
     period = included.get("period")
-    bought = _num(purchased.get("balance_usd")) if isinstance(purchased, dict) else None
     return Window(
-        label="Included credits",
+        label="Monthly",
         used_percent=max(0.0, min(100.0, (allowance - balance) / allowance * 100.0)),
         reset_at=_utc(period.get("until")) if isinstance(period, dict) else None,
-        detail=f"Purchased credits: ${bought:.2f}" if bought else None,
     )
 
 
-def windows_from_payload(payload: Any) -> Tuple[Window, ...]:
-    """Every window the account reports: a monthly allowance, a session/weekly pair, or both.
+def _credits_window(purchased: Any) -> Optional[Window]:
+    """Bought credits as their own meter: a balance, with none of it spent yet."""
+    bought = _num(purchased.get("balance_usd")) if isinstance(purchased, dict) else None
+    if not bought:
+        return None
+    return Window(label="Credits", used_percent=0.0, detail=f"${bought:.2f}")
 
-    The two are read side by side rather than as alternatives: an account whose payload carries
-    a monthly allowance and a weekly block shows both meters, not just the allowance.
+
+def windows_from_payload(payload: Any) -> Tuple[Window, ...]:
+    """Every window the account reports, in the order the sheet shows them.
+
+    A monthly allowance and the legacy session/weekly blocks are read side by side rather than as
+    alternatives: an account reporting both shows both. The short windows come first, the monthly
+    allowance next, and bought credits last.
     """
     if not isinstance(payload, dict):
         return ()
@@ -112,9 +119,10 @@ def windows_from_payload(payload: Any) -> Tuple[Window, ...]:
     if not isinstance(included, dict):
         return ()
     found: List[Optional[Window]] = [
-        _allowance_window(included, payload.get("purchased")),
         _remaining_window("Session", included.get("session")),
         _remaining_window("Weekly", included.get("weekly")),
+        _allowance_window(included),
+        _credits_window(payload.get("purchased")),
     ]
     return tuple(w for w in found if w is not None)
 

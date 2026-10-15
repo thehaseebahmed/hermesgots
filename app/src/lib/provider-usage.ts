@@ -31,19 +31,22 @@ export interface UsageWindowView {
 
 export function windowViews(usage: ProviderUsageData | undefined): UsageWindowView[] {
   if (!usage?.windows.length) return []
-  return usage.windows
-    .map((w) => ({
-      label: w.label,
-      usedPercent: w.usedPercent,
-      remaining: Math.max(0, Math.round(100 - w.usedPercent)),
-      ...(w.resetsAt ? { resetsAt: w.resetsAt } : {}),
-      ...(w.detail ? { detail: w.detail } : {}),
-    }))
-    .sort((a, b) => a.remaining - b.remaining)
+  // The route's order is the provider's own (a weekly window above a monthly one, say), so the
+  // sheet keeps it; the banner picks the tightest window itself.
+  return usage.windows.map((w) => ({
+    label: w.label,
+    usedPercent: w.usedPercent,
+    remaining: Math.max(0, Math.round(100 - w.usedPercent)),
+    ...(w.resetsAt ? { resetsAt: w.resetsAt } : {}),
+    ...(w.detail ? { detail: w.detail } : {}),
+  }))
 }
 
 export function tightestWindow(usage: ProviderUsageData | undefined) {
-  return windowViews(usage)[0]
+  return windowViews(usage).reduce<UsageWindowView | undefined>(
+    (tightest, window) => (!tightest || window.remaining < tightest.remaining ? window : tightest),
+    undefined,
+  )
 }
 
 export function limitNotice(usage: ProviderUsageData | undefined) {

@@ -1675,11 +1675,12 @@ http
       const ollama = provider === "ollama-cloud"
       const windows = pct > 0
         ? ollama
-          // Ollama Cloud's own shape: a monthly allowance whose detail names purchased credits,
-          // beside the weekly block an account can report at the same time.
+          // Ollama Cloud's own shape: the weekly block, the monthly allowance and any bought
+          // credits, in the order the sheet shows them.
           ? [
-              { label: "Included credits", used_percent: pct, resets_at: next(30 * 86400_000), detail: "Purchased credits: $25.00" },
               { label: "Weekly", used_percent: Math.min(100, pct * 0.6), resets_at: next(7 * 86400_000), detail: null },
+              { label: "Monthly", used_percent: pct, resets_at: next(30 * 86400_000), detail: null },
+              { label: "Credits", used_percent: 0, resets_at: null, detail: "$25.00" },
             ]
           : [
               { label: "Session", used_percent: pct, resets_at: next(2 * 3600_000), detail: null },
