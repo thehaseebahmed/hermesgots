@@ -57,7 +57,7 @@ const idle = (page, chatId) =>
     return !rows.some((m) => m.status === "streaming" || m.status === "queued")
   }, chatId)
 
-await flow("failed-send", async ({ page, seed, send, lastReply, until, shot }) => {
+async function body({ page, seed, send, lastReply, until, shot }) {
   const chat = `e2e-failed-send-${runId()}`
   await seed([{ id: chat, title: "Failed send" }])
   await page.goto(`${app}/c/${chat}`)
@@ -91,11 +91,7 @@ await flow("failed-send", async ({ page, seed, send, lastReply, until, shot }) =
   await refuseSends(page)
   await sendPhoto(page, chat)
   const sent = async () => (await stored(page, chat)).find((m) => m.content === "log the whole disk")
-  await until(
-    async () => (await sent())?.status === "error",
-    30_000,
-    "the photo's send to fail",
-  )
+  await until(async () => (await sent())?.status === "error", 30_000, "the photo's send to fail")
   assert.equal(
     await failed.first().getAttribute("title"),
     REFUSAL,
@@ -138,5 +134,16 @@ await flow("failed-send", async ({ page, seed, send, lastReply, until, shot }) =
     "the failed message to be dropped",
   )
   await shot("dropped")
-  pass("a failed send is kept, sent again with what it held, and dropped on request")
-})
+}
+
+// The Failed line, its buttons and the host's own reason have to read right on a laptop and on a
+// phone in the dark.
+for (const width of [1440, 390]) {
+  const look = width < 768 ? "phone-dark" : "laptop"
+  await flow(`failed-send-${look}`, body, {
+    viewport: { width, height: width < 768 ? 844 : 900 },
+    dark: width < 768,
+  })
+}
+
+pass("a failed send is kept, sent again with what it held, and dropped on request")

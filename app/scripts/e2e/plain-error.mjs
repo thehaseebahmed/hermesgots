@@ -5,7 +5,7 @@ import { app, assert, flow, pass, runId } from "./lib.mjs"
 
 const REFUSED = "The model provider didn't respond."
 
-await flow("plain-error", async ({ page, seed, send, shot, until, lastReply }) => {
+async function body({ page, seed, send, shot, until, lastReply }) {
   const chat = `e2e-plain-error-${runId()}`
   await seed([{ id: chat, title: "A turn that fails" }])
   await page.goto(`${app}/c/${chat}`)
@@ -30,6 +30,15 @@ await flow("plain-error", async ({ page, seed, send, shot, until, lastReply }) =
   assert.equal(await failed.locator("[data-slot=message-avatar]").count(), 0, "no bot beside an error")
   assert.equal(await failed.locator("[data-slot=bubble]").count(), 0, "an error is plain text")
   await shot("error")
+}
 
-  pass("a failed turn reads as plain text, with no bot beside it")
-})
+// The error line has to read right on a laptop and on a phone in the dark.
+for (const width of [1440, 390]) {
+  const look = width < 768 ? "phone-dark" : "laptop"
+  await flow(`plain-error-${look}`, body, {
+    viewport: { width, height: width < 768 ? 844 : 900 },
+    dark: width < 768,
+  })
+}
+
+pass("a failed turn reads as plain text, with no bot beside it")
