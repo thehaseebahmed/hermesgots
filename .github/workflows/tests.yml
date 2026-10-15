@@ -42,6 +42,9 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
         working-directory: app
+      - name: Community function tests
+        run: node scripts/test-community.mjs
+        working-directory: app
       - name: Build
         run: pnpm build
         working-directory: app

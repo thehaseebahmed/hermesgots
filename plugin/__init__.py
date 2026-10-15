@@ -27,6 +27,7 @@ from . import (
     clarify,
     cleanup,
     clones,
+    community,
     context,
     delegation,
     dictation,
@@ -270,6 +271,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "research",
                     "research_followup",
                     "research_rewrite",
+                    "community",
                 ],
                 "clarify": asks,
                 "todo_tool": todo_tool,
@@ -1532,6 +1534,7 @@ def register(ctx) -> None:
     register_hook = getattr(ctx, "register_hook", None)
     if register_hook is not None:
         register_hook("post_api_request", context.record)
+        register_hook("post_api_request", community.record)
         register_hook("pre_tool_call", sessions.before_tool)
         register_hook("pre_tool_call", research.before_tool)
         register_hook("pre_llm_call", sessions.before_llm)

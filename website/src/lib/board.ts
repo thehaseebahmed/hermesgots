@@ -1,22 +1,10 @@
 /**
- * The leaderboard's rows. Sample data for now: a seeded generator, so a build always looks the same.
- * Swap `loadBoard` for a fetch of the community function's JSON when it exists; the page only
- * depends on the `Board` shape.
+ * The leaderboard's data, in the shape the community function serves (`app/netlify/lib/community.ts`,
+ * `GET ?route=board`). Until a board is live the page shows a seeded sample of the same shape.
  */
 
 /** The app's eight bots (`app/src/components/bots.tsx`): the picture is `/bots/<id>.png`. */
-export const BOT_NAMES = {
-  tri: "Tri",
-  cubby: "Cubby",
-  penny: "Penny",
-  hex: "Hex",
-  stella: "Stella",
-  orbi: "Orbi",
-  gem: "Gem",
-  bloom: "Bloom",
-} as const
-export type BotId = keyof typeof BOT_NAMES
-const BOTS = Object.keys(BOT_NAMES) as BotId[]
+export const BOT_IDS = ["tri", "cubby", "penny", "hex", "stella", "orbi", "gem", "bloom"] as const
 
 /** Token kinds in the order, names and colours the app's usage sheet uses. */
 export const KINDS = [
@@ -27,6 +15,16 @@ export const KINDS = [
 ] as const
 export type Kind = (typeof KINDS)[number]["key"]
 
+/** The modes a model's tokens are split by. */
+export const MODES = [
+  { key: "plan", label: "Plan" },
+  { key: "auto", label: "Auto" },
+  { key: "accept_edits", label: "Accept edits" },
+  { key: "theseus", label: "Theseus" },
+  { key: "chat", label: "Chat" },
+] as const
+export type Mode = (typeof MODES)[number]["key"]
+
 export const PERIODS = [
   { id: "today", label: "Today" },
   { id: "week", label: "This week" },
@@ -34,12 +32,27 @@ export const PERIODS = [
 ] as const
 export type PeriodId = (typeof PERIODS)[number]["id"]
 
-export interface Entry extends Record<Kind, number> {
-  handle: string
-  bot: BotId
+export interface Row extends Record<Kind, number> {
+  login: string
+  total: number
 }
 
-export type Board = Record<PeriodId, Entry[]>
+export interface ModelRow {
+  model: string
+  tokens: number
+  users: number
+  modes: Record<Mode, number>
+}
+
+export interface Period {
+  tokens: Row[]
+  models: ModelRow[]
+}
+
+export interface Board {
+  updatedAt: number
+  periods: Record<PeriodId, Period>
+}
 
 const HANDLES = [
   "nightowl",
@@ -54,8 +67,15 @@ const HANDLES = [
   "driftwood",
   "copperkite",
   "mossbank",
-  "saltair",
-  "vesper",
+]
+
+const MODELS = [
+  { name: "claude-opus-5-5", weight: 1 },
+  { name: "claude-sonnet-5-5", weight: 0.8 },
+  { name: "gpt-5.2", weight: 0.55 },
+  { name: "gemini-3-pro", weight: 0.4 },
+  { name: "deepseek-v3.2", weight: 0.3 },
+  { name: "claude-haiku-5-5", weight: 0.2 },
 ]
 
 /** A small seeded generator (mulberry32), so the sample board is the same on every build. */
@@ -81,36 +101,55 @@ function split(total: number, random: () => number): Record<Kind, number> {
 
 export function sampleBoard(): Board {
   const random = seeded(2026)
-  const people = HANDLES.map((handle, index) => ({
-    handle,
-    bot: BOTS[index % BOTS.length]!,
+  const people = HANDLES.map((login) => ({
+    login,
     // Tokens a day at their typical pace: from a light user to a heavy one.
     pace: 2_000_000 + Math.pow(random(), 2.2) * 190_000_000,
   }))
-  const board = {} as Board
+  const periods = {} as Board["periods"]
   for (const { id } of PERIODS) {
     const days = DAYS_IN_PERIOD[id]
-    const entries = people.map((person) => {
-      let total = 0
-      for (let day = 0; day < days; day++) total += person.pace * (0.35 + random() * 1.3)
-      return { handle: person.handle, bot: person.bot, ...split(Math.round(total), random) }
-    })
-    board[id] = entries.sort((a, b) => total(b) - total(a))
+    const tokens = people
+      .map((person) => {
+        let total = 0
+        for (let day = 0; day < days; day++) total += person.pace * (0.35 + random() * 1.3)
+        return { login: person.login, total: Math.round(total), ...split(Math.round(total), random) }
+      })
+      .sort((a, b) => b.total - a.total)
+    const everything = tokens.reduce((sum, row) => sum + row.total, 0)
+    const models = MODELS.map(({ name, weight }) => {
+      const share = (weight * (0.8 + random() * 0.4)) / 3.25
+      const total = Math.round(everything * share)
+      const plan = 0.08 + random() * 0.12
+      const accept = 0.15 + random() * 0.2
+      const theseus = random() * 0.06
+      const chat = 0.1 + random() * 0.15
+      const auto = Math.max(0, 1 - plan - accept - theseus - chat)
+      const modes = Object.fromEntries(
+        Object.entries({ plan, auto, accept_edits: accept, theseus, chat }).map(([k, v]) => [
+          k,
+          Math.round(total * v),
+        ]),
+      ) as Record<Mode, number>
+      return {
+        model: name,
+        tokens: Object.values(modes).reduce((a, b) => a + b, 0),
+        users: Math.max(1, Math.round(people.length * (0.25 + weight * 0.6))),
+        modes,
+      }
+    }).sort((a, b) => b.tokens - a.tokens)
+    periods[id] = { tokens, models }
   }
-  return board
+  return { updatedAt: 0, periods }
 }
 
-export function loadBoard(): Board {
-  return sampleBoard()
-}
-
-export const total = (entry: Entry) => KINDS.reduce((sum, kind) => sum + entry[kind.key], 0)
-
-const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 })
-export const formatTokens = (value: number) => compact.format(value)
-
-const percent = (part: number, whole: number) => (whole ? (part / whole) * 100 : 0)
-export const shares = (entry: Entry) => {
-  const sum = total(entry)
-  return KINDS.map((kind) => ({ ...kind, percent: percent(entry[kind.key], sum) }))
+/** A board read from the community function, checked so a surprise never reaches the page. */
+export function readBoard(value: unknown): Board | null {
+  const periods = (value as Board | null)?.periods
+  if (!periods) return null
+  for (const { id } of PERIODS) {
+    const period = periods[id]
+    if (!period || !Array.isArray(period.tokens) || !Array.isArray(period.models)) return null
+  }
+  return value as Board
 }

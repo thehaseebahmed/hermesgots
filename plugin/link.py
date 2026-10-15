@@ -107,10 +107,11 @@ def call(
     token: str | None = None,
     body: Any = None,
     bot_id: str | None = None,
+    function: str = "registry",
 ) -> Any:
     query = f"route={route}" + (f"&id={bot_id}" if bot_id else "")
     request = urllib.request.Request(
-        f"{site.rstrip('/')}/.netlify/functions/registry?{query}",
+        f"{site.rstrip('/')}/.netlify/functions/{function}?{query}",
         method=method,
         data=None if body is None else json.dumps(body).encode(),
         headers={
@@ -273,6 +274,12 @@ def check_in(home: Path, *, process_env: bool) -> Optional[str]:
             publish(home, state, process_env=process_env, force=True)
         elif (answer.get("bots") or {}).get(bot) is None:
             publish(home, state, process_env=process_env, force=True)
+        from . import community
+
+        before = state.get("community")
+        community.sync(home, state, call)
+        if state.get("community") != before:
+            save_state(home, state)
         return "linked"
     except LinkError as error:
         if error.status == 401:

@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -249,5 +249,19 @@ def connect(path: Path) -> sqlite3.Connection:
         for column in ("repos", "plan_file", "theseus", "files_dir"):
             if column not in columns:
                 conn.execute(f"ALTER TABLE project_sessions ADD COLUMN {column} TEXT")
+        # v20: token counts per UTC day, model and mode, for the community leaderboard.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS community_usage (
+                   day TEXT NOT NULL,
+                   model TEXT NOT NULL,
+                   mode TEXT NOT NULL,
+                   input INTEGER NOT NULL DEFAULT 0,
+                   output INTEGER NOT NULL DEFAULT 0,
+                   cache_write INTEGER NOT NULL DEFAULT 0,
+                   cache_read INTEGER NOT NULL DEFAULT 0,
+                   calls INTEGER NOT NULL DEFAULT 0,
+                   PRIMARY KEY (day, model, mode)
+               )"""
+        )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     return conn

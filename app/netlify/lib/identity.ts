@@ -6,15 +6,18 @@ async function bearerUser(req: Request, authorization: string) {
     headers: { Authorization: authorization },
   })
   if (!response.ok) return null
-  const user = (await response.json()) as { id?: string }
-  return user.id ? { id: user.id } : null
+  const user = (await response.json()) as { id?: string; user_metadata?: { avatar_url?: unknown } }
+  const picture = user.user_metadata?.avatar_url
+  return user.id ? { id: user.id, pictureUrl: typeof picture === "string" ? picture : undefined } : null
 }
 
 /**
  * The signed-in user behind a request, or an error response. Writes need the site's own origin
  * unless they carry a Bearer header.
  */
-export async function requireUser(req: Request): Promise<{ id: string } | Response> {
+export async function requireUser(
+  req: Request,
+): Promise<{ id: string; pictureUrl?: string } | Response> {
   const authorization = req.headers.get("authorization") ?? ""
   const bearer = /^Bearer\s/i.test(authorization)
   const user = (await getUser()) ?? (bearer ? await bearerUser(req, authorization) : null)
@@ -28,5 +31,5 @@ export async function requireUser(req: Request): Promise<{ id: string } | Respon
       return Response.json({ error: "Cross-origin request refused" }, { status: 403 })
     }
   }
-  return { id: user.id }
+  return { id: user.id, pictureUrl: user.pictureUrl }
 }

@@ -201,6 +201,55 @@ h1 {
   background: var(--usage-cache-read);
 }
 
+.mode-plan {
+  background: var(--merged);
+}
+
+.mode-auto {
+  background: var(--usage-output);
+}
+
+.mode-accept_edits {
+  background: var(--usage-input);
+}
+
+.mode-theseus {
+  background: var(--usage-cache-write);
+}
+
+.mode-chat {
+  background: var(--usage-cache-read);
+}
+
+h2 {
+  margin: 2rem 0 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.empty {
+  padding: 1.5rem 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.avatar.round {
+  border-radius: 50%;
+}
+
+.handle a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.handle a:hover {
+  text-decoration: underline;
+}
+
+.row.model {
+  grid-template-columns: 1.75rem minmax(0, 1fr) 5.5rem;
+}
+
 ol.rows {
   margin: 0;
   padding: 0;
@@ -258,6 +307,8 @@ ol.rows {
 }
 
 .handle small {
+  flex: none;
+  white-space: nowrap;
   color: var(--muted-foreground);
   font-size: 0.8125rem;
   font-weight: 400;
