@@ -333,6 +333,8 @@ const projectSessions = new Map()
 const PR_INSTRUCTIONS = "When the work is done and you've checked it, ship it yourself with the open_pull_request tool: it commits what's left, pushes this branch and opens a pull request, or updates the open one. Don't ask first, and don't use git push or gh for it. Write the description from the repo's pull request template when it has one (named below), else with Summary, Changes and How to test sections."
 // The plugin's done-work emphasis (prompt_builder._DONE_INSTRUCTIONS), word for word.
 const DONE_INSTRUCTIONS = "Two things the run's prompt emphasises once the work is done: don't share the pull request url or the commit message in your reply — the open_pull_request result and the session's pull request list already surface them where the user sees them. And before you finish, update your todo list to its final state: every item completed, or cancelled where it was dropped."
+// The plugin's working-rhythm guidance (prompt_builder._PROGRESS_UPDATES_INSTRUCTIONS), word for word.
+const PROGRESS_UPDATES_INSTRUCTIONS = "Keep the user in the loop as you work, at a working rhythm rather than a running commentary. Post a short update between checkpoints — what landed, what you're doing next — so a long stretch of tool calls never reads as a hang. Keep the todo list current as you go: mark items done as they land and add what you discover. When something keeps failing, say what you tried and what you now think is wrong before the next attempt. Thinking out loud while you plan is welcome. Don't narrate each edit, read or command — the tool calls already show those; keep what you do say technical enough to follow the work without spelling out every implementation detail."
 // Theseus runs in Auto with the skill's gates on top, and keeps its mode for the whole session.
 const MODES = ["accept_edits", "auto", "plan", "theseus"]
 // The plugin's Theseus instructions (theseus.INSTRUCTIONS), shortened: the paths are the host's.
@@ -1900,7 +1902,7 @@ http
       // A session's filed files, as the plugin's library routes would list them (see
       // `sessionLibrary` at module scope, shared with the project route).
       const instructions = (record) =>
-        [worktreeLine(record), filesLine(record), PR_INSTRUCTIONS, DONE_INSTRUCTIONS, record.mode === "plan" ? PLAN_INSTRUCTIONS : "", record.mode === "theseus" ? THESEUS_INSTRUCTIONS : ""].filter(Boolean).join("\n")
+        [worktreeLine(record), filesLine(record), PROGRESS_UPDATES_INSTRUCTIONS, PR_INSTRUCTIONS, DONE_INSTRUCTIONS, record.mode === "plan" ? PLAN_INSTRUCTIONS : "", record.mode === "theseus" ? THESEUS_INSTRUCTIONS : ""].filter(Boolean).join("\n")
       const answer = (record) =>
         json(res, 200, {
           object: "memento.workspace",

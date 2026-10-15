@@ -53,16 +53,30 @@ _DONE_INSTRUCTIONS = (
     "request list already surface them where the user sees them. And before you finish, update your "
     "todo list to its final state: every item completed, or cancelled where it was dropped."
 )
+# Added whenever a session has worktrees: the working rhythm, so a long run reads as work in
+# progress rather than a hang, and a short one doesn't narrate every edit. Fixed text, so the prompt
+# cache holds. The app's mock repeats it; keep them the same.
+_PROGRESS_UPDATES_INSTRUCTIONS = (
+    "Keep the user in the loop as you work, at a working rhythm rather than a running commentary. "
+    "Post a short update between checkpoints — what landed, what you're doing next — so a long "
+    "stretch of tool calls never reads as a hang. Keep the todo list current as you go: mark items "
+    "done as they land and add what you discover. When something keeps failing, say what you tried "
+    "and what you now think is wrong before the next attempt. Thinking out loud while you plan is "
+    "welcome. Don't narrate each edit, read or command — the tool calls already show those; keep "
+    "what you do say technical enough to follow the work without spelling out every implementation "
+    "detail."
+)
 
 
 def session_prompt(record: Dict[str, Any]) -> str:
     """What the run's system prompt tells the agent: its worktrees (fixed per session), where its
-    generated files go, how to open its pull request and the repos' templates and, in plan mode,
-    the shape of the plan."""
+    generated files go, how to keep the user in the loop as it works, how to open its pull request
+    and the repos' templates and, in plan mode, the shape of the plan."""
     worktrees = _worktree_line(record)
     lines = [
         worktrees,
         _files_line(record),
+        _PROGRESS_UPDATES_INSTRUCTIONS if worktrees else "",
         _PR_INSTRUCTIONS if worktrees else "",
         _DONE_INSTRUCTIONS if worktrees else "",
         _template_line(record),

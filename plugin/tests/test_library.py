@@ -338,6 +338,27 @@ class InstructionsTest(unittest.TestCase):
         legacy = {**self.record, "files_dir": None}
         self.assertNotIn("library", prompt_builder.session_prompt(legacy))
 
+    def test_the_working_rhythm_block_sits_between_the_files_and_the_ship_instructions(self) -> None:
+        # How to work rides between where the files go and how the run ships, so a long stretch of
+        # tool calls reads as work in progress rather than a hang.
+        text = prompt_builder.session_prompt(self.record)
+        self.assertIn("Keep the user in the loop as you work", text)
+        self.assertLess(text.index("library at"), text.index("Keep the user in the loop"))
+        self.assertLess(text.index("Keep the user in the loop"), text.index("open_pull_request tool"))
+
+    def test_the_block_names_the_rhythm_rules(self) -> None:
+        text = prompt_builder.session_prompt(self.record)
+        self.assertIn("short update between checkpoints", text)
+        self.assertIn("todo list current", text)
+        self.assertIn("Don't narrate each edit", text)
+
+    def test_a_record_without_worktrees_has_no_block(self) -> None:
+        # The same gate as the ship instructions: a record with no repos gets neither.
+        no_repos = {**self.record, "repos": []}
+        text = prompt_builder.session_prompt(no_repos)
+        self.assertNotIn("Keep the user in the loop", text)
+        self.assertNotIn("open_pull_request tool", text)
+
 
 if __name__ == "__main__":
     unittest.main()
