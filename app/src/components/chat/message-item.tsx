@@ -90,11 +90,11 @@ function Stats({ message }: { message: Message }) {
 }
 
 /** A sent message's attachments; the ones this device still has open in a viewer. */
-function SentAttachments({ attachments, queued }: { attachments: Attachment[]; queued: boolean }) {
+function SentAttachments({ attachments, dim }: { attachments: Attachment[]; dim: boolean }) {
   const [viewing, setViewing] = useState<number | null>(null)
   const viewable = attachments.filter(openable)
   return (
-    <div className={cn("flex max-w-full flex-wrap justify-end gap-2", queued && "opacity-60")}>
+    <div className={cn("flex max-w-full flex-wrap justify-end gap-2", dim && "opacity-60")}>
       {attachments.map((attachment) => (
         <AttachmentTile
           key={attachment.id}
@@ -164,14 +164,11 @@ function QueuedActions({ message, paused }: { message: Message; paused: boolean 
   )
 }
 
-/** Under a message whose send failed: why it did, and the way to send it again or drop it. */
+/** Under a message whose send failed: send it again, or take it back. The bubble itself says it
+ * didn't go — it stays dim with the mark beside it — so nothing here repeats why. */
 function FailedActions({ message, busy }: { message: Message; busy?: boolean }) {
   return (
     <div className="-my-2 flex items-center gap-1 text-xs text-muted-foreground">
-      <AlertCircleIcon className="size-3.5 text-destructive" />
-      <span className="min-w-0 flex-1 truncate pr-1" title={message.statusText}>
-        Failed
-      </span>
       <Button
         variant="ghost"
         size="sm"
@@ -190,7 +187,7 @@ function FailedActions({ message, busy }: { message: Message; busy?: boolean }) 
         variant="ghost"
         size="icon-sm"
         className="size-11"
-        aria-label="Discard failed message"
+        aria-label="Cancel failed message"
         onClick={() => void discardFailed(message)}
       >
         <XIcon />
@@ -259,14 +256,33 @@ export const MessageItem = memo(function MessageItem({
       <MessageRow align="end">
         <MessageContent className="items-end gap-1">
           {message.attachments?.length ? (
-            <SentAttachments attachments={message.attachments} queued={queued} />
+            <SentAttachments attachments={message.attachments} dim={queued || failed} />
           ) : null}
-          {message.content && (
-            <Bubble variant="default" align="end" className={queued ? "opacity-60" : undefined}>
-              <BubbleContent className="px-4 py-2.5 text-[15px] whitespace-pre-wrap">
-                {message.content}
-              </BubbleContent>
-            </Bubble>
+          {(message.content || failed) && (
+            <div className="flex w-full min-w-0 items-center justify-end gap-1.5">
+              {/* A message that didn't go keeps its place but not the colour a delivered one wears:
+                  it takes the page's dim colour, as a queued one dims the bubble it will go from,
+                  and a mark sits beside the bubble rather than under it, so nothing below a short
+                  message reads wider than the message. It says it didn't go and no more. */}
+              {failed && (
+                <AlertCircleIcon
+                  role="img"
+                  aria-label="Not sent"
+                  className="size-4 shrink-0 text-destructive"
+                />
+              )}
+              {message.content && (
+                <Bubble
+                  variant={failed ? "muted" : "default"}
+                  align="end"
+                  className={queued ? "opacity-60" : undefined}
+                >
+                  <BubbleContent className="px-4 py-2.5 text-[15px] whitespace-pre-wrap">
+                    {message.content}
+                  </BubbleContent>
+                </Bubble>
+              )}
+            </div>
           )}
           {queued && <QueuedActions message={message} paused={paused} />}
           {failed && <FailedActions message={message} busy={busy} />}

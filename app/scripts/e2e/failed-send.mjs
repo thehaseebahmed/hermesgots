@@ -1,7 +1,8 @@
-// A message whose send fails — nothing reaches Hermes at all — stays in the thread with its text
-// and its attachments, marked Failed, and can be sent again or dropped. Its state is on the device,
-// so it outlives a reload. Sends are refused meanwhile, as a host the browser can't reach, or one
-// that answers with its own reason, does.
+// A message whose send fails — nothing reaches Hermes at all — stays in the thread, dimmed with a
+// mark beside it, and can be sent again or taken back. It says it didn't go and no more: a reason,
+// when the host gives one, belongs in the chat's own error, not under the message. The state is on
+// the device, so it outlives a reload. Sends are refused meanwhile, as a host the browser can't
+// reach, or one that answers with its own reason, does.
 import { app, assert, flow, pass, runId } from "./lib.mjs"
 
 const REFUSAL = "Rate limit exceeded. Try again in a few seconds."
@@ -57,6 +58,47 @@ const idle = (page, chatId) =>
     return !rows.some((m) => m.status === "streaming" || m.status === "queued")
   }, chatId)
 
+const rowOf = (page, text) => page.locator("[data-slot=message]").filter({ hasText: text })
+
+/**
+ * The bubble's own colour beside the two the page offers, which is how a message that didn't go
+ * reads: the dim colour, not the green a delivered one wears.
+ */
+const bubbleColour = (row) =>
+  row.locator("[data-slot=bubble-content]").evaluate((bubble) => {
+    const probe = (className) => {
+      const div = document.createElement("div")
+      div.className = className
+      document.body.append(div)
+      const colour = getComputedStyle(div).backgroundColor
+      div.remove()
+      return colour
+    }
+    return {
+      own: getComputedStyle(bubble).backgroundColor,
+      dim: probe("bg-muted"),
+      sent: probe("bg-primary"),
+    }
+  })
+
+/** The state a message that never reached the host is in: dim, marked beside it, two ways out. */
+async function assertNotSent(page, row, what) {
+  await row.getByRole("img", { name: "Not sent" }).waitFor({ timeout: 20_000 })
+  const colour = await bubbleColour(row)
+  assert.equal(colour.own, colour.dim, `${what}: the bubble wears the dim colour`)
+  assert.notEqual(colour.own, colour.sent, `${what}: it doesn't read as delivered`)
+  assert.equal(
+    await row.getByRole("button", { name: "Retry" }).count(),
+    1,
+    `${what}: it can be sent again`,
+  )
+  assert.equal(
+    await row.getByRole("button", { name: "Cancel failed message" }).count(),
+    1,
+    `${what}: it can be taken back`,
+  )
+}
+
 async function body({ page, seed, send, lastReply, until, shot }) {
   const chat = `e2e-failed-send-${runId()}`
   await seed([{ id: chat, title: "Failed send" }])
@@ -66,8 +108,8 @@ async function body({ page, seed, send, lastReply, until, shot }) {
   // beside it.
   await blockSends(page)
   await send("count the old logs")
-  const failed = page.getByText("Failed", { exact: true })
-  await failed.first().waitFor({ timeout: 20_000 })
+  const logs = rowOf(page, "count the old logs")
+  await assertNotSent(page, logs, "a send the browser couldn't make")
   assert.deepEqual(await stored(page, chat), [
     { role: "user", status: "error", content: "count the old logs", attachments: undefined },
   ])
@@ -75,28 +117,30 @@ async function body({ page, seed, send, lastReply, until, shot }) {
 
   // It survives a reload, and sending again goes through once the host answers.
   await page.reload()
-  await failed.first().waitFor({ timeout: 20_000 })
+  await assertNotSent(page, logs, "a failed send after a reload")
   await page.unroute("**/v1/**")
-  await page.getByRole("button", { name: "Retry" }).click()
+  await logs.getByRole("button", { name: "Retry" }).click()
   await until(
     async () => (await lastReply(chat))?.status === "done",
     30_000,
     "the reply to arrive after the retry",
   )
-  assert.equal(await failed.count(), 0, "the message is no longer failed")
+  assert.equal(
+    await page.getByRole("img", { name: "Not sent" }).count(),
+    0,
+    "the message is no longer marked",
+  )
   await shot("resent")
 
-  // A host that refuses the turn says why, and the message keeps its attachment to go again with.
+  // A host that refuses the turn: the message keeps its attachment to go again with, and the host's
+  // own reason is not repeated under it — a reason belongs in the chat's error, not here.
   await until(() => idle(page, chat), 30_000, "the chat to be idle")
   await refuseSends(page)
   await sendPhoto(page, chat)
   const sent = async () => (await stored(page, chat)).find((m) => m.content === "log the whole disk")
   await until(async () => (await sent())?.status === "error", 30_000, "the photo's send to fail")
-  assert.equal(
-    await failed.first().getAttribute("title"),
-    REFUSAL,
-    "the host's own message is what the failure says",
-  )
+  await assertNotSent(page, rowOf(page, "log the whole disk"), "a send the host turned down")
+  assert.equal(await page.getByText(REFUSAL).count(), 0, "the reason isn't repeated under it")
   assert.deepEqual(await sent(), {
     role: "user",
     status: "error",
@@ -106,7 +150,7 @@ async function body({ page, seed, send, lastReply, until, shot }) {
   await shot("refused")
 
   await page.unroute("**/v1/**")
-  await page.getByRole("button", { name: "Retry" }).click()
+  await rowOf(page, "log the whole disk").getByRole("button", { name: "Retry" }).click()
   await until(async () => (await sent())?.status === "done", 30_000, "the photo's message to go through")
   assert.deepEqual(await sent(), {
     role: "user",
@@ -115,7 +159,7 @@ async function body({ page, seed, send, lastReply, until, shot }) {
     attachments: ["photo.png"],
   })
 
-  // Dropping one takes its text with it.
+  // Taking one back removes it and its text.
   await until(() => idle(page, chat), 30_000, "the chat to be idle")
   await blockSends(page)
   await send("and the ones from last week")
@@ -127,17 +171,19 @@ async function body({ page, seed, send, lastReply, until, shot }) {
     20_000,
     "the second send to fail",
   )
-  await page.getByRole("button", { name: "Discard failed message" }).click()
+  await rowOf(page, "and the ones from last week")
+    .getByRole("button", { name: "Cancel failed message" })
+    .click()
   await until(
     async () => !(await stored(page, chat)).some((m) => m.content === "and the ones from last week"),
     10_000,
-    "the failed message to be dropped",
+    "the failed message to be taken back",
   )
-  await shot("dropped")
+  await shot("cancelled")
 }
 
-// The Failed line, its buttons and the host's own reason have to read right on a laptop and on a
-// phone in the dark.
+// The mark, the dim bubble and the two controls have to read right on a laptop and on a phone in
+// the dark.
 for (const width of [1440, 390]) {
   const look = width < 768 ? "phone-dark" : "laptop"
   await flow(`failed-send-${look}`, body, {
@@ -146,4 +192,4 @@ for (const width of [1440, 390]) {
   })
 }
 
-pass("a failed send is kept, sent again with what it held, and dropped on request")
+pass("a failed send is kept, sent again with what it held, and taken back on request")
