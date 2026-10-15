@@ -26,6 +26,8 @@ export interface Settings {
   theseus?: boolean
   /** The bot-first layout: bots in the sidebar, each chat a thread in its bot. Developer, local. */
   botThreads?: boolean
+  /** Meetings: record or add a meeting and read its notes (a design mock). Developer, local. */
+  meetings?: boolean
   /** How the bot-threads sidebar orders the bots; unset is `recent`. Local. */
   botSort?: BotSort
   /** How the Library tab orders folders and files; unset is `new`. Local. */

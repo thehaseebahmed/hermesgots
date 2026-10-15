@@ -131,6 +131,10 @@ const FLOWS = {
     script: "e2e/research.mjs",
     about: "A research mission from question to guide, another format, and a citation's source",
   },
+  meetings: {
+    script: "e2e/meetings.mjs",
+    about: "Meetings behind its Developer switch: a recording, an added file and a timestamp",
+  },
   "clarify-polling": {
     script: "regression-clarify-polling.mjs",
     mock: "legacy",

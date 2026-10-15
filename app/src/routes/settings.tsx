@@ -4,6 +4,7 @@ import { useTheme } from "next-themes"
 import { Link, Navigate, useParams, useSearchParams } from "react-router"
 import {
   ArrowLeftIcon,
+  AudioLinesIcon,
   BellIcon,
   BellRingIcon,
   BookOpenCheckIcon,
@@ -487,6 +488,19 @@ function DeveloperSettings() {
           subtitle="Bots in the sidebar, chats as threads"
           checked={Boolean(settings?.botThreads)}
           onCheckedChange={(checked) => saveSettings({ botThreads: checked })}
+        />
+        <SwitchRow
+          id="meetings"
+          icon={AudioLinesIcon}
+          title={
+            <span className="flex items-center gap-2">
+              Meetings
+              <ExperimentalBadge />
+            </span>
+          }
+          subtitle="Design only, with sample meetings"
+          checked={Boolean(settings?.meetings)}
+          onCheckedChange={(checked) => saveSettings({ meetings: checked })}
         />
       </Group>
       {isNative && pushAvailable() && <TestPushRow />}

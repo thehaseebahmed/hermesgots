@@ -23,6 +23,14 @@ const OpenSessionPage = lazy(() =>
 )
 const CodePage = lazy(() => import("@/routes/code").then((m) => ({ default: m.CodePage })))
 const ProjectPage = lazy(() => import("@/routes/project").then((m) => ({ default: m.ProjectPage })))
+const MeetingsPage = lazy(() =>
+  import("@/routes/meetings").then((m) => ({ default: m.MeetingsPage })),
+)
+const MeetingPage = lazy(() =>
+  import("@/routes/meetings").then((m) => ({ default: m.MeetingPage })),
+)
+const TopicPage = lazy(() => import("@/routes/meetings").then((m) => ({ default: m.TopicPage })))
+const RecordPage = lazy(() => import("@/routes/meetings").then((m) => ({ default: m.RecordPage })))
 const ResearchPage = lazy(() =>
   import("@/routes/research").then((m) => ({ default: m.ResearchPage })),
 )
@@ -89,6 +97,10 @@ function AppRoutes() {
         <Route path="s/:sessionId" element={<OpenSessionPage />} />
         <Route path="code" element={<CodePage />} />
         <Route path="code/:profileId/:projectId" element={<ProjectPage />} />
+        <Route path="meetings" element={<MeetingsPage />} />
+        <Route path="meetings/record" element={<RecordPage />} />
+        <Route path="meetings/:id" element={<MeetingPage />} />
+        <Route path="meetings/:id/topics/:topic" element={<TopicPage />} />
         <Route path="routines" element={<RoutinesPage />} />
         <Route path="research" element={<ResearchPage />} />
         <Route path="research/:id" element={<MissionPage />} />
