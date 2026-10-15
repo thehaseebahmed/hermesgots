@@ -215,6 +215,17 @@ function readClarify(tool: ToolEvent): { asked: Asked[]; outcome?: string } {
 /** What the user says to have the agent ask a question it never got an answer for again. */
 const ASK_AGAIN = "Ask me that again."
 
+/**
+ * How a clarify call ended: what the card calls it, and whether an answer was still owed. Everything
+ * else Hermes says — an outcome this app doesn't know, or none at all — reads as no answer.
+ */
+const CLARIFY_ENDED: Record<string, { title: string; owed: boolean }> = {
+  submitted: { title: "Skipped", owed: false },
+  cancelled: { title: "Not answered", owed: false },
+  undelivered: { title: "Not answered", owed: false },
+  timed_out: { title: "No answer", owed: true },
+}
+
 /** A clarify call in the thread: its questions and the answers, or that it's waiting for them. */
 export function ClarifyCard({
   tool,
@@ -230,23 +241,11 @@ export function ClarifyCard({
   const [asking, setAsking] = useState(false)
   const { asked, outcome } = readClarify(tool)
   const answered = asked.some((a) => a.answers.length > 0)
+  const ended = CLARIFY_ENDED[outcome ?? ""] ?? { title: "No answer", owed: true }
   // The window closed on this question: it was neither answered nor skipped, so it can be asked
   // again. Nothing resumes the expired call — the agent asks afresh, in a new turn.
-  const missed =
-    !running &&
-    !answered &&
-    outcome !== "submitted" &&
-    outcome !== "cancelled" &&
-    outcome !== "undelivered"
-  const title = running
-    ? "Question"
-    : answered
-      ? "Answered"
-      : outcome === "submitted"
-        ? "Skipped"
-        : outcome === "cancelled" || outcome === "undelivered"
-          ? "Not answered"
-          : "No answer"
+  const missed = !running && !answered && ended.owed
+  const title = running ? "Question" : answered ? "Answered" : ended.title
   const askAgain = async () => {
     setAsking(true)
     try {

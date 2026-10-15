@@ -13,6 +13,7 @@ import {
   type Conversation,
   type Message,
   type MessageStats,
+  type MessageStatus,
   type Profile,
   type ToolEvent,
   updateConversation,
@@ -138,8 +139,6 @@ interface Turn {
   firstTokenAt: number | null
   /** Set when a reply is picked up after a reload, so its timings can't be trusted. */
   resumed: boolean
-  /** Set when the turn failed before anything reached Hermes, so the message can be sent again. */
-  sendFailed: boolean
   /** Stops flushing and saves the draft one last time. */
   close: () => Promise<void>
 }
@@ -214,7 +213,6 @@ function openTurn(
     touch,
     firstTokenAt: null,
     resumed,
-    sendFailed: false,
     close,
   }
   controllers.set(conversationId, controller)
@@ -620,8 +618,12 @@ async function trackRun(turn: Turn, runId: string): Promise<RunOutcome> {
   }
 }
 
-/** Settles a finished, stopped or failed reply: closes running tools, adds stats, saves it. */
-async function finishTurn(turn: Turn, usage: TurnUsage | undefined) {
+/**
+ * Settles a finished, stopped or failed reply: closes running tools, adds stats, saves it. A send
+ * that never reached Hermes leaves nothing on the host to read again, so its follow-ups — context,
+ * provider limits, todos, a session's workspace and pull requests — are left alone.
+ */
+async function finishTurn(turn: Turn, usage: TurnUsage | undefined, sendFailed = false) {
   const { draft, conversationId } = turn
   const endedAt = Date.now()
   draft.tools = draft.tools.map((t) =>
@@ -657,13 +659,15 @@ async function finishTurn(turn: Turn, usage: TurnUsage | undefined) {
   draft.runId = undefined
   draft.runSeq = undefined
   await turn.close()
-  noteFollowUps(conversationId)
+  if (!sendFailed) {
+    noteFollowUps(conversationId)
+    void refreshContext(conversationId)
+    void refreshChatProviderUsage(conversationId).catch(quietly("Reading provider limits"))
+    void refreshTodos(conversationId)
+  }
   await updateConversation(conversationId, { updatedAt: endedAt })
-  void refreshContext(conversationId)
-  void refreshChatProviderUsage(conversationId).catch(quietly("Reading provider limits"))
-  void refreshTodos(conversationId)
   const conversation = await db.conversations.get(conversationId)
-  if (conversation?.projectId) {
+  if (conversation?.projectId && !sendFailed) {
     if (draft.status === "done" && conversation.mode === "plan")
       await db.conversations.update(conversationId, { planPending: true })
     // A moment later: the plugin's own hook records the finished plan-mode turn.
@@ -717,10 +721,12 @@ function reattachLater(conversationId: string) {
 async function runTurn(
   turn: Turn,
   start: () => Promise<{ usage?: TurnUsage; pendingSteer?: string }>,
-) {
+): Promise<{ status: MessageStatus; sendFailed: boolean }> {
   const { draft, controller } = turn
   let usage: TurnUsage | undefined
   let pendingSteer: string | undefined
+  // The turn failed before anything reached Hermes, so the message can be sent again.
+  let sendFailed = false
   try {
     const result = await start()
     usage = result.usage
@@ -736,7 +742,7 @@ async function runTurn(
       draft.statusText = undefined
       await turn.close()
       reattachLater(turn.conversationId)
-      return draft.status
+      return { status: draft.status, sendFailed }
     } else {
       draft.status = "error"
       draft.statusText =
@@ -744,15 +750,15 @@ async function runTurn(
       // A run that never started and nothing streamed: the message didn't reach Hermes at all, so it
       // can go again. A reply that failed part-way through has something to keep, and its turn did
       // reach the host.
-      if (!draft.runId && !draft.content && !draft.tools.length) turn.sendFailed = true
+      if (!draft.runId && !draft.content && !draft.tools.length) sendFailed = true
     }
   }
   reattachTries.delete(turn.conversationId)
-  await finishTurn(turn, usage)
+  await finishTurn(turn, usage, sendFailed)
   // The plugin puts a leftover steer first in its own queue, and starts what waits there.
   if (await hostQueue(turn.config)) followHostQueue(turn.conversationId)
   else if (pendingSteer) await requeueSteer(turn.conversationId, pendingSteer)
-  return draft.status
+  return { status: draft.status, sendFailed }
 }
 
 /**
@@ -995,7 +1001,7 @@ export async function sendMessage(
 
   const config = serverConfig(profile)
   const turn = openTurn(conversationId, config, reply, false, controller)
-  const status = await runTurn(turn, async () => {
+  const { status, sendFailed } = await runTurn(turn, async () => {
     // Without a key Hermes keeps no session under our id, so nothing would sync or resume.
     if (!config.apiKey) throw new HermesError("This bot has no API key. Link it in Settings.")
     // A project session works in its worktree; the plugin can't be told about it any other way.
@@ -1041,10 +1047,10 @@ export async function sendMessage(
     return followTurnRun(turn, runId)
   })
 
-  if (status === "error" && turn.sendFailed) {
+  if (sendFailed) {
     // Nothing reached Hermes, so the message keeps its place, its text and its attachments, and
-    // waits to be sent again or dropped. The empty reply row that recorded the failure goes: the
-    // message itself carries the reason.
+    // waits to be sent again or dropped. The empty reply row that recorded the failure goes, and the
+    // reason is kept on the message.
     await db.transaction("rw", db.messages, async () => {
       await db.messages.delete(reply.id)
       await db.messages.update(userMessage.id, {
@@ -1152,7 +1158,7 @@ async function resumeReply(reply: Message) {
   }
   const config = serverConfig(profile)
   const turn = openTurn(conversationId, config, reply, true, controller)
-  const status = await runTurn(turn, () => followTurnRun(turn, runId))
+  const { status } = await runTurn(turn, () => followTurnRun(turn, runId))
   if (status === "done") await sendNextQueued(conversationId)
 }
 
@@ -1377,7 +1383,10 @@ export async function sendNextQueued(conversationId: string) {
   if (next) await sendQueued(next)
 }
 
-/** Sends a queued message now; one whose send fails stays there, to send again or drop. */
+/**
+ * Sends a message this device is still holding — one waiting in the queue, or a send the user asked
+ * to try again. One that fails stays where it is, to send again or drop.
+ */
 export async function sendQueued(message: Message) {
   if (message.hostQueued) {
     const host = await hostOf(message.conversationId)
@@ -1393,6 +1402,7 @@ export async function sendQueued(message: Message) {
   })
 }
 
+/** Drops a message this device is still holding, queued or failed, with the text it kept. */
 export async function removeQueued(message: Message) {
   if (message.hostQueued) {
     const host = await hostOf(message.conversationId)
@@ -1404,19 +1414,6 @@ export async function removeQueued(message: Message) {
       return
     }
   }
-  await db.messages.delete(message.id)
-}
-
-/** Sends a message whose send failed again, with the text and attachments it kept. */
-export async function resendFailed(message: Message) {
-  await sendMessage(message.conversationId, message.content, {
-    queuedId: message.id,
-    attachments: message.attachments,
-  })
-}
-
-/** Drops a message whose send failed; its text and attachments go with it. */
-export async function discardFailed(message: Message) {
   await db.messages.delete(message.id)
 }
 

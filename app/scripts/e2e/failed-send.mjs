@@ -7,7 +7,8 @@ import { app, assert, flow, pass, runId } from "./lib.mjs"
 
 const REFUSAL = "Rate limit exceeded. Try again in a few seconds."
 
-const stored = (page, chatId) =>
+/** The chat's stored messages, oldest first. */
+const messages = (page, chatId) =>
   page.evaluate(async (id) => {
     const { db } = await import("/src/lib/db.ts")
     const rows = await db.messages.where("conversationId").equals(id).sortBy("createdAt")
@@ -110,7 +111,7 @@ async function body({ page, seed, send, lastReply, until, shot }) {
   await send("count the old logs")
   const logs = rowOf(page, "count the old logs")
   await assertNotSent(page, logs, "a send the browser couldn't make")
-  assert.deepEqual(await stored(page, chat), [
+  assert.deepEqual(await messages(page, chat), [
     { role: "user", status: "error", content: "count the old logs", attachments: undefined },
   ])
   await shot("failed")
@@ -137,7 +138,8 @@ async function body({ page, seed, send, lastReply, until, shot }) {
   await until(() => idle(page, chat), 30_000, "the chat to be idle")
   await refuseSends(page)
   await sendPhoto(page, chat)
-  const sent = async () => (await stored(page, chat)).find((m) => m.content === "log the whole disk")
+  const sent = async () =>
+    (await messages(page, chat)).find((m) => m.content === "log the whole disk")
   await until(async () => (await sent())?.status === "error", 30_000, "the photo's send to fail")
   await assertNotSent(page, rowOf(page, "log the whole disk"), "a send the host turned down")
   assert.equal(await page.getByText(REFUSAL).count(), 0, "the reason isn't repeated under it")
@@ -165,7 +167,7 @@ async function body({ page, seed, send, lastReply, until, shot }) {
   await send("and the ones from last week")
   await until(
     async () =>
-      (await stored(page, chat)).some(
+      (await messages(page, chat)).some(
         (m) => m.content === "and the ones from last week" && m.status === "error",
       ),
     20_000,
@@ -175,7 +177,8 @@ async function body({ page, seed, send, lastReply, until, shot }) {
     .getByRole("button", { name: "Cancel failed message" })
     .click()
   await until(
-    async () => !(await stored(page, chat)).some((m) => m.content === "and the ones from last week"),
+    async () =>
+      !(await messages(page, chat)).some((m) => m.content === "and the ones from last week"),
     10_000,
     "the failed message to be taken back",
   )

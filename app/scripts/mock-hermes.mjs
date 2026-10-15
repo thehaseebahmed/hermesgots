@@ -613,8 +613,6 @@ function pageRows(rows, params) {
 async function playTurn(req, body, last, out) {
   let pieces = 0
   let spoken = ""
-  // A turn that ends with an error on the run rather than an answer.
-  let failed = false
   titleChat(req, last)
   record(req, { role: "user", content: last })
   const say = async (text, pace = 25) => {
@@ -1050,7 +1048,7 @@ async function playTurn(req, body, last, out) {
     })
   }
   record(req, { role: "assistant", content: spoken, finish_reason: "stop" })
-  return { spoken, prompt_tokens, completion_tokens: pieces, failed }
+  return { spoken, prompt_tokens, completion_tokens: pieces }
 }
 
 async function waitForApproval(id) {
@@ -1314,7 +1312,8 @@ function streamRunEvents(req, res, run, lastSeq) {
     res.write(`data: ${JSON.stringify({ event: "replay.truncated", run_id: run.id, oldest_retained_seq: replay[0].seq })}\n\n`)
   }
   replay.forEach(send)
-  if (run.status === "completed" || run.status === "cancelled") return res.end(": stream closed\n\n")
+  // A finished run's stream ends at once, the way Hermes's does, however it finished.
+  if (["completed", "cancelled", "failed"].includes(run.status)) return res.end(": stream closed\n\n")
   const listener = (event) => (event ? send(event) : res.end(": stream closed\n\n"))
   run.listeners.add(listener)
   // Like Hermes, a comment every 10s while nothing else is sent, so the app can tell a live stream from a dead one.

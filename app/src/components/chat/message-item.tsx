@@ -23,7 +23,7 @@ import { Message as MessageRow, MessageAvatar, MessageContent } from "@/componen
 import { Spinner } from "@/components/ui/spinner"
 import { DELEGATE_TOOL } from "@/lib/agents"
 import { openable } from "@/lib/attachments"
-import { discardFailed, removeQueued, resendFailed, sendQueued } from "@/lib/chat"
+import { removeQueued, sendQueued } from "@/lib/chat"
 import type { Attachment, Message, ToolEvent } from "@/lib/db"
 import { describeActivity, formatDuration } from "@/lib/format"
 import { mediaImages } from "@/lib/media-tags"
@@ -130,33 +130,53 @@ function SteerBubble({ text }: { text: string }) {
   )
 }
 
-/** Under a queued message: it goes on its own, or waits for a Send once the queue is paused. */
-function QueuedActions({ message, paused }: { message: Message; paused: boolean }) {
+/**
+ * The row under a message this device is still holding — one waiting in the queue, or a send that
+ * failed: what it is, the control that sends it, and the X that drops it.
+ */
+function HeldActions({
+  message,
+  lead,
+  send,
+  dismiss,
+}: {
+  message: Message
+  /** What the row is, before the controls; a failed one is already marked beside its bubble. */
+  lead?: ReactNode
+  /** The control that sends it, when it waits for one. */
+  send?: { label: string; icon: ReactNode; disabled?: boolean }
+  /** What the X does, for a screen reader. */
+  dismiss: string
+}) {
   return (
     <div className="-my-2 flex items-center gap-1 text-xs text-muted-foreground">
-      <ClockIcon className="size-3.5" />
-      <span className="pr-1">{message.statusText ?? (paused ? "Queued, paused" : "Queued")}</span>
-      {paused && (
+      {lead}
+      {send && (
         <Button
           variant="ghost"
           size="sm"
           className="min-h-11 text-xs"
+          disabled={send.disabled}
           onClick={() =>
             void sendQueued(message).catch((error) =>
               toast.error(error instanceof Error ? error.message : "Couldn't send your message."),
             )
           }
         >
-          <SendHorizontalIcon data-icon="inline-start" />
-          Send now
+          {send.icon}
+          {send.label}
         </Button>
       )}
       <Button
         variant="ghost"
         size="icon-sm"
         className="size-11"
-        aria-label="Remove queued message"
-        onClick={() => void removeQueued(message)}
+        aria-label={dismiss}
+        onClick={() =>
+          void removeQueued(message).catch((error) =>
+            toast.error(error instanceof Error ? error.message : "Couldn't remove your message."),
+          )
+        }
       >
         <XIcon />
       </Button>
@@ -164,35 +184,38 @@ function QueuedActions({ message, paused }: { message: Message; paused: boolean 
   )
 }
 
+/** Under a queued message: it goes on its own, or waits for a Send once the queue is paused. */
+function QueuedActions({ message, paused }: { message: Message; paused: boolean }) {
+  return (
+    <HeldActions
+      message={message}
+      lead={
+        <>
+          <ClockIcon className="size-3.5" />
+          <span className="pr-1">
+            {message.statusText ?? (paused ? "Queued, paused" : "Queued")}
+          </span>
+        </>
+      }
+      send={
+        paused
+          ? { label: "Send now", icon: <SendHorizontalIcon data-icon="inline-start" /> }
+          : undefined
+      }
+      dismiss="Remove queued message"
+    />
+  )
+}
+
 /** Under a message whose send failed: send it again, or take it back. The bubble itself says it
  * didn't go — it stays dim with the mark beside it — so nothing here repeats why. */
 function FailedActions({ message, busy }: { message: Message; busy?: boolean }) {
   return (
-    <div className="-my-2 flex items-center gap-1 text-xs text-muted-foreground">
-      <Button
-        variant="ghost"
-        size="sm"
-        className="min-h-11 text-xs"
-        disabled={busy}
-        onClick={() =>
-          void resendFailed(message).catch((error) =>
-            toast.error(error instanceof Error ? error.message : "Couldn't send your message."),
-          )
-        }
-      >
-        <RotateCcwIcon data-icon="inline-start" />
-        Retry
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        className="size-11"
-        aria-label="Cancel failed message"
-        onClick={() => void discardFailed(message)}
-      >
-        <XIcon />
-      </Button>
-    </div>
+    <HeldActions
+      message={message}
+      send={{ label: "Retry", icon: <RotateCcwIcon data-icon="inline-start" />, disabled: busy }}
+      dismiss="Cancel failed message"
+    />
   )
 }
 
@@ -245,11 +268,13 @@ export const MessageItem = memo(function MessageItem({
   // Replies type out a word at a time, however Hermes delivers them.
   const content = useReveal(message.role === "assistant" ? message.content : "")
   const revealing = content.length < message.content.length && message.role === "assistant"
+  // The turn failed: a user message whose send never got there, or a reply that errored instead of
+  // answering. The one kept in the thread waits to be sent again; the other says so plainly.
+  const failed = message.status === "error"
 
   if (message.role === "user") {
     if (plain && isPlanApproval(message.content)) return <PlanApprovedCard />
     const queued = message.status === "queued"
-    const failed = message.status === "error"
     // The plugin starts a host-queued message itself, so it only waits for a Send when paused.
     const paused = message.hostQueued ? Boolean(message.queuePaused) : !busy
     return (
@@ -300,7 +325,7 @@ export const MessageItem = memo(function MessageItem({
   // A turn that failed with nothing to show for it — nothing streamed, no call ran — is the whole
   // row: plain text on the page, with no bot beside it to answer for it.
   const bareError =
-    message.status === "error" &&
+    failed &&
     !message.content &&
     !message.tools?.length &&
     !message.steers?.length &&
@@ -393,7 +418,7 @@ export const MessageItem = memo(function MessageItem({
         </>
       )}
       {/* An error on a reply that streamed says so plainly: it isn't the bot's answer. */}
-      {message.status === "error" && (
+      {failed && (
         <div className="flex items-start gap-2 px-1 text-[15px] text-destructive">{error}</div>
       )}
       {message.status === "stopped" && !message.content && (
@@ -405,7 +430,7 @@ export const MessageItem = memo(function MessageItem({
 
   const footerShown =
     (plain ? streaming : typing || statusShown) ||
-    message.status === "error" ||
+    failed ||
     (message.status === "stopped" && !message.content) ||
     statsShown
   return (
@@ -426,7 +451,7 @@ export const MessageItem = memo(function MessageItem({
                 botId={botId}
                 plain={plain}
                 busy={busy}
-                bare={bareError}
+                noAvatar={bareError}
                 lift={last && statsShown}
                 parts={parts}
               >
@@ -460,7 +485,7 @@ function AssistantRow({
   botId,
   plain,
   busy,
-  bare,
+  noAvatar,
   lift,
   parts,
   children,
@@ -471,7 +496,7 @@ function AssistantRow({
   /** A reply is streaming in this chat, so a card that sends (a missed question) waits. */
   busy?: boolean
   /** Nothing but the error stands here, so no picture of the bot stands beside it. */
-  bare?: boolean
+  noAvatar?: boolean
   /** A line sits under the last bubble, so the avatar rises to stay level with it. */
   lift?: boolean
   parts: Part[]
@@ -479,7 +504,7 @@ function AssistantRow({
 }) {
   return (
     <MessageRow align="start" className="gap-2">
-      {!plain && !bare && (
+      {!plain && !noAvatar && (
         <MessageAvatar className={cn("size-8 bg-transparent", lift && "mb-6")}>
           <Bot id={botId} className="size-8" />
         </MessageAvatar>
