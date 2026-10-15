@@ -1,11 +1,11 @@
 // An image an agent returns holds its place with a skeleton while it loads — in a chat and in a
-// project session — and gives way to the image, or to the tag's text when it can't load. The plugin
-// media route is held back so the placeholder is on screen long enough to check, at phone and tablet
-// widths, in light and dark.
+// project session — and gives way to the image, or to the tag's text when it can't load. A lone
+// image takes the same cell as one in a group. The plugin media route is held back so the
+// placeholder is on screen long enough to check, at phone and tablet widths, in light and dark.
 import { app, assert, flow, pass } from "./lib.mjs"
 
 const projectId = "p_1a2b3c4d"
-const FRAME = { 390: 320, 1024: 440 }
+const CELL = { 390: 96, 1024: 128 }
 
 /** The images on screen: those painted, those still showing a skeleton, and the tags left as text. */
 const shown = (page) =>
@@ -32,7 +32,7 @@ for (const width of [390, 1024]) {
         // request made after the release passes straight through; one before it never waits over 10s.
         let open = true
         await page.route("**/api/plugins/memento/media**", async (route) => {
-          for (const end = Date.now() + 10_000; open && Date.now() < end; )
+          for (const end = Date.now() + 10_000; open && Date.now() < end;)
             await new Promise((done) => setTimeout(done, 100))
           await route.continue().catch(() => {})
         })
@@ -52,14 +52,18 @@ for (const width of [390, 1024]) {
             20_000,
             "the image placeholders",
           )
-          const boxes = await page
-            .locator("[data-slot=skeleton]")
-            .evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().height))
-          assert.equal(
-            Math.max(...boxes),
-            FRAME[width],
-            `the single image's placeholder is ${FRAME[width]}px tall in a ${what}`,
+          const boxes = await page.locator("[data-slot=skeleton]").evaluateAll((nodes) =>
+            nodes.map((node) => {
+              const box = node.getBoundingClientRect()
+              return { w: Math.round(box.width), h: Math.round(box.height) }
+            }),
           )
+          assert.equal(
+            new Set(boxes.map((box) => `${box.w}x${box.h}`)).size,
+            1,
+            `one image and a group reserve the same cell in a ${what}`,
+          )
+          assert.equal(boxes[0].h, CELL[width], `a cell is ${CELL[width]}px tall in a ${what}`)
           await shot(`loading-${what}`)
           // A placeholder that lives for one commit is missed by polling, so the page records every
           // one it renders while the images come in — including the one an image itself keeps inside
@@ -77,11 +81,30 @@ for (const width of [390, 1024]) {
           open = false
           await until(async () => (await shown(page)).skeletons === 0, 20_000, "the images to load")
           const loaded = await shown(page)
-          assert.equal(loaded.painted, 4, `the four images the plugin serves are on screen in a ${what}`)
+          assert.equal(
+            loaded.painted,
+            4,
+            `the four images the plugin serves are on screen in a ${what}`,
+          )
           assert.equal(loaded.tags, 1, `the image that isn't there stays as its tag in a ${what}`)
+          // The cell, not the image inside it: that carries the button's 1px border on every side.
+          const cells = await page.evaluate(() =>
+            [...document.querySelectorAll("button img")]
+              .filter((img) => img.naturalWidth > 0)
+              .map((img) => {
+                const box = img.closest("button").getBoundingClientRect()
+                return { w: Math.round(box.width), h: Math.round(box.height) }
+              }),
+          )
+          assert.equal(
+            new Set(cells.map((cell) => `${cell.w}x${cell.h}`)).size,
+            1,
+            `a lone image and a group's images are the same size in a ${what}`,
+          )
+          assert.equal(cells[0].h, CELL[width], `an image is ${CELL[width]}px tall in a ${what}`)
           const placeholders = await page.evaluate(() => window.__placeholders)
           assert.ok(
-            placeholders.some((one) => one.inButton && one.height > 100),
+            placeholders.some((one) => one.inButton && one.height >= CELL[width] - 2),
             `an image kept its own place while it decoded in a ${what}`,
           )
           await shot(`loaded-${what}`)

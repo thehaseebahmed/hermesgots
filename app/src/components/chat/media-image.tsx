@@ -5,13 +5,13 @@ import { loadMediaImage } from "@/lib/media-tags"
 import { openImageViewer } from "@/lib/native"
 import { cn } from "@/lib/utils"
 
-// The box an image takes before it paints, so the reply doesn't jump when it arrives. Kept in step
-// with the loaded image's own sizing below.
-const FRAME = "h-[320px] w-[min(100%,42rem)] rounded-xl border md:h-[440px] xl:h-[560px]"
+// An image's place in a reply, whether it came alone or with others: the same cell either way, and
+// the same one the skeleton takes, so nothing moves as the images arrive. Tapping opens the bigger
+// view, as a photo in a message does.
 const CELL = "h-24 w-full rounded-xl border md:h-32 xl:h-40"
 
-/** An image in a reply; tapping it opens the larger view. `cell` sizes it for a gallery grid. */
-export function MediaImage({ src, alt, cell }: { src: string; alt?: string; cell?: boolean }) {
+/** An image in a reply; tapping it opens the larger view. */
+export function MediaImage({ src, alt }: { src: string; alt?: string }) {
   // The image reserves its place through the skeleton, and the real one loads behind it: `src` is
   // already set, so an <img> that isn't displayed yet still fetches, decodes and fires `load`.
   const [ready, setReady] = useState(false)
@@ -20,25 +20,16 @@ export function MediaImage({ src, alt, cell }: { src: string; alt?: string; cell
       type="button"
       onClick={() => void openImageViewer(src)}
       aria-label={alt || "Open image"}
-      className={cn(
-        "relative block cursor-pointer overflow-hidden rounded-xl border bg-muted/40",
-        cell ? "h-24 w-full md:h-32 xl:h-40" : "w-fit max-w-[min(100%,42rem)]",
-      )}
+      className={cn(CELL, "relative block cursor-pointer overflow-hidden bg-muted/40")}
     >
-      {!ready &&
-        (cell ? <Skeleton className="absolute inset-0" /> : <Skeleton className={FRAME} />)}
+      {!ready && <Skeleton className="absolute inset-0 rounded-xl" />}
       <img
         src={src}
         alt={alt ?? ""}
         onLoad={() => setReady(true)}
         // A broken image must not leave the pulse running: show what there is.
         onError={() => setReady(true)}
-        className={cn(
-          cell
-            ? "h-full w-full object-cover"
-            : "h-[320px] w-auto max-w-full object-contain md:h-[440px] xl:h-[560px]",
-          !ready && "invisible absolute top-0 left-0",
-        )}
+        className={cn("h-full w-full object-cover", !ready && "invisible")}
         draggable={false}
       />
     </button>
@@ -55,17 +46,17 @@ function Tag({ path }: { path: string }) {
 }
 
 /**
- * The images behind a reply's `MEDIA:<path>` tags: one image, or the tags it sent together as a
- * small gallery. An image still being read holds its place with a skeleton; a tag that can't load
- * stays visible as its text.
+ * The images behind a reply's `MEDIA:<path>` tags, one or several sent together, each in the same
+ * cell: one image is one cell, which is exactly what a gallery's images are. An image still being
+ * read holds its cell with a skeleton; a tag that can't load stays visible as its text.
  */
 export function MediaTag({ conversationId, paths }: { conversationId: string; paths: string[] }) {
   // The list's identity moves on every render (it comes from splitting a streaming reply), so the
   // join keys the fetch below.
   const joined = paths.join("\n")
   const list = joined.split("\n")
-  // By path, so a gallery that grows while the reply streams keeps the images it has, and a new
-  // tag is loading, not shown as text, until its read is in.
+  // By path, so a reply that grows while it streams keeps the images it has, and a new tag is
+  // loading, not shown as text, until its read is in.
   const [loaded, setLoaded] = useState<Map<string, string | null>>()
   useEffect(() => {
     let stale = false
@@ -77,11 +68,6 @@ export function MediaTag({ conversationId, paths }: { conversationId: string; pa
       stale = true
     }
   }, [conversationId, joined])
-  if (list.length === 1) {
-    const url = loaded?.get(list[0])
-    if (url === undefined) return <Skeleton className={FRAME} />
-    return url ? <MediaImage src={url} /> : <Tag path={list[0]} />
-  }
   return (
     <div
       className={cn(
@@ -92,7 +78,7 @@ export function MediaTag({ conversationId, paths }: { conversationId: string; pa
       {list.map((path, i) => {
         const url = loaded?.get(path)
         if (url === undefined) return <Skeleton key={i} className={CELL} />
-        return url ? <MediaImage key={i} src={url} cell /> : <Tag key={i} path={path} />
+        return url ? <MediaImage key={i} src={url} /> : <Tag key={i} path={path} />
       })}
     </div>
   )
