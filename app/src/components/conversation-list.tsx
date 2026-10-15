@@ -2,6 +2,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { matchPath, NavLink, useLocation, type NavLinkProps } from "react-router"
 import {
   ArrowDownUpIcon,
+  AudioLinesIcon,
   BellOffIcon,
   ChevronRightIcon,
   CodeXmlIcon,
@@ -32,6 +33,7 @@ import Dexie from "dexie"
 import type { BotSort, Message } from "@/lib/db"
 import { db } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
+import { useMeetingsEnabled } from "@/lib/meetings"
 import { useNav } from "@/lib/nav"
 import { useSyncState } from "@/lib/sync"
 import {
@@ -350,6 +352,7 @@ function ProfileButton({ onNavigate }: { onNavigate?: () => void }) {
 export function ConversationList({ onNavigate }: { onNavigate?: () => void }) {
   const { root } = useNav()
   const botThreads = useBotThreads()
+  const meetings = useMeetingsEnabled()
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -370,6 +373,12 @@ export function ConversationList({ onNavigate }: { onNavigate?: () => void }) {
             <TelescopeIcon className="size-5 text-muted-foreground" />
             Research
           </RootLink>
+          {meetings && (
+            <RootLink to="/meetings" onClick={onNavigate} className={rowClass}>
+              <AudioLinesIcon className="size-5 text-muted-foreground" />
+              Meetings
+            </RootLink>
+          )}
           <RootLink to="/routines" onClick={onNavigate} className={rowClass}>
             <TimerIcon className="size-5 text-muted-foreground" />
             Routines
