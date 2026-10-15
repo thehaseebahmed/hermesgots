@@ -275,6 +275,21 @@ export const MessageItem = memo(function MessageItem({
     )
   }
 
+  const error = (
+    <>
+      <AlertCircleIcon className="mt-0.5 size-4 shrink-0" />
+      <span>{message.statusText ?? "Something went wrong."}</span>
+    </>
+  )
+  // A turn that failed with nothing to show for it — nothing streamed, no call ran — is the whole
+  // row: plain text on the page, with no bot beside it to answer for it.
+  const bareError =
+    message.status === "error" &&
+    !message.content &&
+    !message.tools?.length &&
+    !message.steers?.length &&
+    !message.approval?.resolved
+
   const streaming = message.status === "streaming"
   const approval = message.approval
   const awaitingApproval = Boolean(approval && !approval.resolved)
@@ -334,12 +349,6 @@ export const MessageItem = memo(function MessageItem({
     since = b.time
   }
 
-  const error = (
-    <>
-      <AlertCircleIcon className="mt-0.5 size-4 shrink-0" />
-      <span>{message.statusText ?? "Something went wrong."}</span>
-    </>
-  )
   // The avatar lines up with the bubble, which has the stats line under it only once the reply is done.
   const statsShown = showStats && !streaming && !revealing && Boolean(message.stats)
   const statusShown =
@@ -367,14 +376,10 @@ export const MessageItem = memo(function MessageItem({
           {typing && <TypingBubble />}
         </>
       )}
-      {message.status === "error" &&
-        (plain ? (
-          <div className="flex items-start gap-2 px-1 text-[15px] text-destructive">{error}</div>
-        ) : (
-          <Bubble variant="destructive">
-            <BubbleContent className="flex items-start gap-2 px-4 py-3">{error}</BubbleContent>
-          </Bubble>
-        ))}
+      {/* An error on a reply that streamed says so plainly: it isn't the bot's answer. */}
+      {message.status === "error" && (
+        <div className="flex items-start gap-2 px-1 text-[15px] text-destructive">{error}</div>
+      )}
       {message.status === "stopped" && !message.content && (
         <div className="px-1 text-xs text-muted-foreground">Stopped</div>
       )}
@@ -405,6 +410,7 @@ export const MessageItem = memo(function MessageItem({
                 botId={botId}
                 plain={plain}
                 busy={busy}
+                bare={bareError}
                 lift={last && statsShown}
                 parts={parts}
               >
@@ -438,6 +444,7 @@ function AssistantRow({
   botId,
   plain,
   busy,
+  bare,
   lift,
   parts,
   children,
@@ -447,6 +454,8 @@ function AssistantRow({
   plain?: boolean
   /** A reply is streaming in this chat, so a card that sends (a missed question) waits. */
   busy?: boolean
+  /** Nothing but the error stands here, so no picture of the bot stands beside it. */
+  bare?: boolean
   /** A line sits under the last bubble, so the avatar rises to stay level with it. */
   lift?: boolean
   parts: Part[]
@@ -454,7 +463,7 @@ function AssistantRow({
 }) {
   return (
     <MessageRow align="start" className="gap-2">
-      {!plain && (
+      {!plain && !bare && (
         <MessageAvatar className={cn("size-8 bg-transparent", lift && "mb-6")}>
           <Bot id={botId} className="size-8" />
         </MessageAvatar>

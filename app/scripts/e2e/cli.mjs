@@ -45,6 +45,10 @@ const FLOWS = {
     script: "e2e/failed-send.mjs",
     about: "A message the host never received stays in the thread, marked Failed, to send again or drop",
   },
+  "plain-error": {
+    script: "e2e/plain-error.mjs",
+    about: "A turn that fails before it answers shows as plain text in the chat, with no bot beside it",
+  },
   reattach: {
     script: "e2e/reattach.mjs",
     about: "A reply still streaming when the page reloads picks its run up again and finishes",

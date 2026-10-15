@@ -36,7 +36,8 @@
 // GET /api/plugins/memento/sessions/{id}/todos reads back from a keyed session's transcript.
 // Turns also run on POST /v1/runs, whose events replay from GET /v1/runs/{id}/events?last_seq=N and
 // which keep going when the client drops, unlike a chat completion. Say "long" for a slow reply, and
-// "fail" for a tool call that fails. Say "tool placement" to replay a real turn whose tool rows
+// "fail" for a tool call that fails, or "fail the turn" for a run that ends with an error instead of
+// an answer. Say "tool placement" to replay a real turn whose tool rows
 // rendered in the wrong place (add "report" for the longer work-log turn):
 // scripts/fixtures/tool-placement.json holds both, with the placement each call really had. Say
 // "marathon" for a turn longer than a transcript page: 40 steps of text and a tool call, quick at
@@ -612,6 +613,8 @@ function pageRows(rows, params) {
 async function playTurn(req, body, last, out) {
   let pieces = 0
   let spoken = ""
+  // A turn that ends with an error on the run rather than an answer.
+  let failed = false
   titleChat(req, last)
   record(req, { role: "user", content: last })
   const say = async (text, pace = 25) => {
@@ -645,6 +648,12 @@ async function playTurn(req, body, last, out) {
     out.tool({ tool: "clarify", toolCallId: id, status: "completed", result })
     record(req, { role: "tool", tool_call_id: id, tool_name: "clarify", content: result })
     return { answers, outcome }
+  }
+
+  // A turn that dies before it says anything, as a host that refuses the call or drops the
+  // connection does: the run ends with an error and the transcript holds no answer.
+  if (/fail the turn/i.test(last)) {
+    return { spoken: "", prompt_tokens: 6000, completion_tokens: 0, failed: true }
   }
 
   // In plan mode the plugin blocks every tool that changes anything, so the agent reads and plans.
@@ -1041,7 +1050,7 @@ async function playTurn(req, body, last, out) {
     })
   }
   record(req, { role: "assistant", content: spoken, finish_reason: "stop" })
-  return { spoken, prompt_tokens, completion_tokens: pieces }
+  return { spoken, prompt_tokens, completion_tokens: pieces, failed }
 }
 
 async function waitForApproval(id) {
@@ -1274,9 +1283,10 @@ function startRun(req, body) {
       push("clarify.responded", { clarify_id, outcome, answers })
       return { answers, outcome }
     },
-  }).then(({ spoken, output, prompt_tokens, completion_tokens }) => {
+  }).then(({ spoken, output, prompt_tokens, completion_tokens, failed }) => {
     if (steerPoints.get(run.sessionId)) steerPoints.delete(run.sessionId)
-    run.status = run.stopped ? "cancelled" : "completed"
+    run.status = run.stopped ? "cancelled" : failed ? "failed" : "completed"
+    if (failed) run.error = "The model provider didn't respond."
     run.endedAt = Date.now()
     // A scenario can name the final message alone, as Hermes's `final_response` carries it.
     const final = output ?? spoken
@@ -1286,7 +1296,7 @@ function startRun(req, body) {
     if (run.stopped) run.pendingSteer = undefined
     noteEvent("session", run.sessionId)
     noteEvent("runs", run.sessionId)
-    push(`run.${run.status}`, { completed: !run.stopped, interrupted: run.stopped, output: final, usage: run.usage, ...(run.pendingSteer ? { pending_steer: run.pendingSteer } : {}) })
+    push(`run.${run.status}`, { completed: !run.stopped && !failed, interrupted: run.stopped, ...(run.error ? { error: run.error } : {}), output: final, usage: run.usage, ...(run.pendingSteer ? { pending_steer: run.pendingSteer } : {}) })
     for (const listener of run.listeners) listener(null)
     setTimeout(() => pumpQueue(run.sessionId), 300)
   })
@@ -1325,6 +1335,7 @@ const runStatus = (run) => ({
   ...(run.status === "waiting_for_approval" && run.approval ? { approval: run.approval } : {}),
   ...(run.clarify ? { clarify: run.clarify } : {}),
   ...(run.output !== undefined ? { output: run.output, usage: run.usage } : {}),
+  ...(run.error ? { error: run.error } : {}),
   ...(run.pendingSteer && run.output !== undefined ? { pending_steer: run.pendingSteer } : {}),
 })
 
