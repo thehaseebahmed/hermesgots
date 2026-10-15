@@ -366,6 +366,7 @@ export const MessageItem = memo(function MessageItem({
                 conversationId={message.conversationId}
                 botId={botId}
                 plain={plain}
+                busy={busy}
                 lift={last && statsShown}
                 parts={parts}
               >
@@ -398,6 +399,7 @@ function AssistantRow({
   conversationId,
   botId,
   plain,
+  busy,
   lift,
   parts,
   children,
@@ -405,6 +407,8 @@ function AssistantRow({
   conversationId: string
   botId?: string
   plain?: boolean
+  /** A reply is streaming in this chat, so a card that sends (a missed question) waits. */
+  busy?: boolean
   /** A line sits under the last bubble, so the avatar rises to stay level with it. */
   lift?: boolean
   parts: Part[]
@@ -420,7 +424,12 @@ function AssistantRow({
       <MessageContent className={plain ? "gap-3" : "gap-2"}>
         {parts.map((part) =>
           part.kind === "clarify" ? (
-            <ClarifyCard key={part.tool.toolCallId} tool={part.tool} />
+            <ClarifyCard
+              key={part.tool.toolCallId}
+              tool={part.tool}
+              conversationId={conversationId}
+              busy={busy}
+            />
           ) : part.kind === "agent" ? (
             <AgentCards key={part.tool.toolCallId} tool={part.tool} />
           ) : part.kind === "tools" ? (

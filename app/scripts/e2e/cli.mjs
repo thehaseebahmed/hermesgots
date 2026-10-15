@@ -37,6 +37,10 @@ const FLOWS = {
     about: "An approval the host timed out, or refuses to take an answer for, leaves the composer",
     alsoPolling: true,
   },
+  "clarify-missed": {
+    script: "e2e/clarify-missed.mjs",
+    about: "A question the host timed out stays in the thread, and asking again has the agent ask afresh",
+  },
   reattach: {
     script: "e2e/reattach.mjs",
     about: "A reply still streaming when the page reloads picks its run up again and finishes",

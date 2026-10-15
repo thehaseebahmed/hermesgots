@@ -62,7 +62,8 @@
 // the app queued and starts it when the session's run ends, like plugin/outbox.py. The agent asks the user questions
 // with Hermes's clarify tool, which the plugin serves on runs: say "ask" for one, or "ask five" for
 // five (plan mode asks before planning), the run carries
-// `clarify.request` and waits, and POST /api/plugins/memento/runs/{id}/clarify answers it.
+// `clarify.request` and waits, and POST /api/plugins/memento/runs/{id}/clarify answers it. POST
+// /__mock/clarify ends every pending question with no answer, like a window that closed on the user.
 // POST /v1/runs/{id}/steer hands a running turn more from the user: like Hermes, it lands as a
 // `display_kind: "steer"` user row after the next tool result, and one still unread when the turn
 // ends comes back as the run's `pending_steer`. Say "long" for a turn with a tool call every few steps.
@@ -1899,6 +1900,13 @@ http
         if (outcome === "lost") pendingApprovals.delete(id)
         else resolve("timeout")
       }
+      return json(res, 200, { ok: true })
+    }
+    // Dev only: POST { outcome } ends every run's pending question without the app. Its window
+    // closed on the user ("timed_out"), so the run carries on with no answer.
+    if (url.pathname === "/__mock/clarify" && req.method === "POST") {
+      const { outcome = "timed_out" } = await readBody(req)
+      for (const { resolve } of [...pendingClarifies.values()]) resolve({ answers: {}, outcome })
       return json(res, 200, { ok: true })
     }
     // Dev only: POST { fail } makes the plugin's read of a session's pull requests fail, like a
