@@ -388,14 +388,18 @@ export async function handleCommunity(req: Request, ctx: CommunityContext) {
   const { userId } = caller
   const account = await read<Account>(ctx.registry, accountKey(userId))
 
+  const joined = async (login: string) => {
+    const member = await read<Member>(ctx.store, memberKey(login))
+    return json({ joined: true, login, totals: standing(member, now) })
+  }
+
   if (op === "GET me") {
     if (!account) return json({ joined: false })
-    const member = await read<Member>(ctx.store, memberKey(account.login))
-    return json({ joined: true, login: account.login, totals: standing(member, now) })
+    return joined(account.login)
   }
 
   if (op === "POST join") {
-    if (account) return json({ joined: true, login: account.login })
+    if (account) return joined(account.login)
     const id = AVATAR_ID.exec(caller.pictureUrl ?? "")?.[1]
     if (!id) return error("Couldn't read your GitHub account from your sign-in.", 422)
     let login: string | null
@@ -412,7 +416,7 @@ export async function handleCommunity(req: Request, ctx: CommunityContext) {
     }
     await ctx.registry.setJSON(ownerKey(login), { userId })
     await ctx.registry.setJSON(accountKey(userId), { login, joinedAt: now } satisfies Account)
-    return json({ joined: true, login })
+    return joined(login)
   }
 
   if (op === "POST leave") {

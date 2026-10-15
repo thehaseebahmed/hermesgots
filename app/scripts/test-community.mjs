@@ -85,7 +85,7 @@ test("join derives the username, report needs a join, leave erases everything", 
   )
 
   const joined = await call(env, user, "POST", "join")
-  assert.deepEqual(joined.body, { joined: true, login: "octocat" })
+  assert.deepEqual(joined.body, { joined: true, login: "octocat", totals: { today: 0, week: 0, month: 0 } })
   assert.equal((await call(env, host, "GET", "community")).body.enabled, true)
 
   const report = await call(env, host, "POST", "report", {
