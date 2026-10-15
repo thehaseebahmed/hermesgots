@@ -8,10 +8,12 @@ the provider and model and resolves the route, and ``persist_model_selection`` w
 reads ``config.yaml`` each time it builds an agent, so the next turn on every surface of the profile
 runs it without a restart.
 
-A bot's fallback models live here too — the up-to-two picks Gots records after its main model, under
-``model.fallbacks`` in the same file, written one key at a time by Hermes's own writer. That key is
-Gots's own record: Hermes's failover chain is the top-level ``fallback_providers`` and is left
-untouched, so recording a fallback does not change what a turn does when a model request fails.
+A bot's fallback models live beside it — the up-to-two picks Gots keeps after its main model. They
+are Hermes's own failover chain, the top-level ``fallback_providers`` that ``hermes fallback`` writes,
+so Hermes tries them, in order, on every surface of the profile when a model request fails: the
+gateway re-reads the chain from the profile's file for the next agent it builds, and a chat that is
+already open adopts the edit. The legacy single ``fallback_model`` key is dropped on a write, as
+``hermes fallback`` does, so the chain has one source of truth.
 """
 
 from __future__ import annotations
@@ -21,9 +23,12 @@ from typing import Any, Dict, List
 
 # Gots gives a bot a main model and up to two fallbacks after it.
 MAX_FALLBACKS = 2
-# Where a bot's fallback models are recorded, inside the profile's ``model:`` block. A single-key
-# write, so the sibling keys a user keeps there (``model_slots``, ...) survive.
-FALLBACK_KEY = "model.fallbacks"
+# Hermes's failover chain, at the top of the file (the key ``hermes fallback`` writes). A single-key
+# write, so every other key and comment in the file survives.
+FALLBACK_KEY = "fallback_providers"
+# The chain's older single-entry spelling. Hermes still reads it, so a write drops it: one source of
+# truth, as ``hermes fallback`` keeps.
+LEGACY_FALLBACK_KEY = "fallback_model"
 
 
 def clean(body: Any) -> tuple[str, str]:
@@ -34,9 +39,9 @@ def clean(body: Any) -> tuple[str, str]:
 
 
 def clean_fallbacks(body: Any) -> List[Dict[str, str]]:
-    """``[{"provider", "model"}]`` from a ``{"fallbacks": [...]}`` body: in order, at most
-    ``MAX_FALLBACKS`` long, and `[]` when the key is missing or null (which clears them). ValueError
-    names the entry the body got wrong."""
+    """``[{"provider", "model"}]`` from a ``{"fallbacks": [...]}`` body: in order, and `[]` when the
+    key is missing or null (which clears the chain). ValueError names the entry the body got wrong.
+    How many a bot takes is ``set_fallbacks``'s call: it can see the chain already there."""
     if not isinstance(body, dict):
         raise ValueError("Body must be a JSON object")
     entries = body.get("fallbacks")
@@ -44,8 +49,6 @@ def clean_fallbacks(body: Any) -> List[Dict[str, str]]:
         return []
     if not isinstance(entries, list):
         raise ValueError("fallbacks must be a list")
-    if len(entries) > MAX_FALLBACKS:
-        raise ValueError(f"A bot takes at most {MAX_FALLBACKS} fallback models")
     return [_entry(entry, number) for number, entry in enumerate(entries, start=1)]
 
 
@@ -113,46 +116,58 @@ def set_main(config_path: Path, provider: str, model: str) -> Dict[str, str]:
 
 
 def set_fallbacks(config_path: Path, entries: List[Dict[str, str]]) -> List[Dict[str, str]]:
-    """Record ``entries`` as the bot's fallback models in ``config_path``, in order; an empty list
-    clears them. Every pick is checked by Hermes the way the main model is, and a refusal is a
-    ValueError carrying its reason. One key is written, so the rest of the file and its comments
-    survive."""
+    """Make ``entries`` the bot's fallback chain in ``config_path``, in order; an empty list clears
+    it. Every pick is checked by Hermes the way the main model is, and a refusal is a ValueError
+    carrying its reason. Gots adds up to ``MAX_FALLBACKS``, while a longer chain a user built with
+    ``hermes fallback`` can still be shortened from here. Hermes's key is written and the legacy one
+    dropped, so the chain has one source of truth, and the rest of the file and its comments stay."""
     from gateway.run import _load_gateway_config
     from utils import atomic_roundtrip_yaml_update
 
     cfg = _load_gateway_config(config_path=config_path) or {}
+    stored = _chain_of(cfg)
+    if len(entries) > MAX_FALLBACKS and len(entries) >= len(stored):
+        raise ValueError(f"A bot takes at most {MAX_FALLBACKS} fallback models")
     resolved = []
     for entry in entries:
         result = _switch(cfg, entry["provider"], entry["model"])
-        resolved.append({"provider": result.target_provider, "model": result.new_model})
-    # ``None`` removes the key: a cleared bot keeps no empty list behind it.
+        resolved.append(_routed(result, stored))
+    # ``None`` removes the key: a bot with no fallbacks keeps no empty list behind it.
     atomic_roundtrip_yaml_update(config_path, FALLBACK_KEY, resolved or None)
+    atomic_roundtrip_yaml_update(config_path, LEGACY_FALLBACK_KEY, None)
     return resolved
 
 
 def read_fallbacks(config_path: Path) -> List[Dict[str, str]]:
-    """The fallback models recorded in ``config_path``, in order, as the bot's settings read them
-    back; `[]` when it has none."""
+    """The bot's fallback chain in ``config_path``, in the order Hermes would try it, as the bot's
+    settings read it back. Each entry comes back as its provider and model only, so a credential or
+    endpoint a hand-written entry carries never reaches the app; `[]` when the bot has none."""
     from gateway.run import _load_gateway_config
 
-    cfg = _load_gateway_config(config_path=config_path) or {}
-    model = cfg.get("model") if isinstance(cfg.get("model"), dict) else {}
-    return _stored(model.get("fallbacks"))
+    named = [_named(one) for one in _chain_of(_load_gateway_config(config_path=config_path) or {})]
+    return [one for one in named if one["provider"] and one["model"]]
 
 
-def _stored(value: Any) -> List[Dict[str, str]]:
-    """The entries in a ``model.fallbacks`` value: anything malformed (a hand-edited file) drops
-    out, and nothing past the cap is kept."""
-    if not isinstance(value, list):
-        return []
-    entries: List[Dict[str, str]] = []
-    for entry in value:
-        if len(entries) == MAX_FALLBACKS:
-            break
-        if not isinstance(entry, dict):
-            continue
-        try:
-            entries.append(_entry(entry, len(entries) + 1))
-        except ValueError:
-            continue
-    return entries
+def _chain_of(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The chain Hermes itself would run, through Hermes's own reader: it merges the two keys in that
+    order, drops what it cannot use, and keeps the extra keys an entry carries."""
+    from hermes_cli.fallback_config import get_fallback_chain
+
+    return list(get_fallback_chain(cfg))
+
+
+def _named(entry: Dict[str, Any]) -> Dict[str, str]:
+    """One chain entry as the bot's settings name it: provider and model, trimmed."""
+    return {
+        "provider": str(entry.get("provider") or "").strip(),
+        "model": str(entry.get("model") or "").strip(),
+    }
+
+
+def _routed(result: Any, stored: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The chain entry for a Hermes-approved pick: the provider and model it resolved, under the keys
+    Hermes reads. A stored entry for the same route keeps whatever else it carried — an endpoint, a
+    wire, a credential — so an edit in the app doesn't drop what a hand-written entry had."""
+    entry: Dict[str, Any] = {"provider": result.target_provider, "model": result.new_model}
+    match = next((one for one in stored if _named(one) == entry), None)
+    return {**match, **entry} if match else entry
