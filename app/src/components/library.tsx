@@ -294,6 +294,13 @@ export function LibraryTree({
 /**
  * A project's Library tab: every session's filed files as a tree, read from the plugin's project
  * route while the tab is on screen.
+ *
+ * Why the tree stays in component state rather than the shared per-server cache in
+ * `src/lib/projects.ts`: it is this project's own, read only while its tab is on screen, and the
+ * tab panel is unmounted while another tab is selected (Base UI `Tabs.Panel`), so the state is
+ * dropped on its own when the tab goes away. A module cache keyed by connection key plus project
+ * id would keep a tree for every project visited with nothing to retire it, so a server switched
+ * away from and back to would show a stale tree. Don't "fix" this into the shared store.
  */
 export function LibraryTab({
   config,
