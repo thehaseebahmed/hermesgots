@@ -1,8 +1,8 @@
 // A bot's fallback models: its settings screen records them on the host, in order, takes one away,
-// and never offers a third.
+// never offers a third, and greys the rows out while a write is on its way there.
 import { app, assert, flow, mock, pass } from "./lib.mjs"
 
-await flow("fallback-models", async ({ page, profileId, until, shot }) => {
+await flow("fallback-models", async ({ page, profileId, until, shot, held }) => {
   // The host's own record, which is what the screen must be writing.
   const hosted = async () => {
     const response = await fetch(`${mock}/api/plugins/memento/fallbacks`)
@@ -15,6 +15,8 @@ await flow("fallback-models", async ({ page, profileId, until, shot }) => {
     await picker.getByRole("textbox", { name: "Search models" }).fill(query)
     await picker.getByRole("button", { name: label }).first().click()
   }
+  // The whole field, so the heading's saving icon and the rows are read where they render.
+  const field = page.getByRole("group", { name: "Fallback models" })
 
   // A dev's mock may be holding another run's fallbacks, so start from none.
   await fetch(`${mock}/api/plugins/memento/fallbacks`, {
@@ -28,10 +30,26 @@ await flow("fallback-models", async ({ page, profileId, until, shot }) => {
   const add = page.getByRole("button", { name: "Add fallback" })
   await add.waitFor({ timeout: 15_000 })
 
+  // A pick is written whole, so while it is on its way the rows are greyed out and the heading says
+  // so: a second pick can't overlap the one already going out.
+  const write = await held("**/api/plugins/memento/fallbacks")
+  write.hold()
   await add.click()
   await pick("gpt-5-mini", "openai/gpt-5-mini")
+  await page.locator("#fallback-1").waitFor()
+  assert.ok(await page.locator("#fallback-1").isDisabled(), "the row is greyed out while saving")
+  assert.ok(
+    await page.getByRole("button", { name: "Remove fallback 1" }).isDisabled(),
+    "so is its remove",
+  )
+  assert.ok(await add.isDisabled(), "and no second pick can start")
+  assert.equal(await field.getByRole("status").count(), 1, "the heading shows a save is happening")
+  await shot("saving")
+  write.release()
   await until(async () => (await hosted()).length === 1, 10_000, "the host to record the first fallback")
   await page.locator("#fallback-1").getByText("openrouter/openai/gpt-5-mini").waitFor()
+  assert.equal(await field.getByRole("status").count(), 0, "the heading is quiet once it landed")
+  assert.ok(!(await add.isDisabled()), "and the rows are usable again")
 
   await add.click()
   await pick("claude-opus-4-1", "claude-opus-4-1")
