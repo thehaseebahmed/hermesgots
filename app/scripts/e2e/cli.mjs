@@ -127,6 +127,10 @@ const FLOWS = {
     script: "e2e/screens.mjs",
     about: "Code, a project, Routines and a chat load at 390 and 1024px, light and dark",
   },
+  "sidebar-collapse": {
+    script: "e2e/sidebar-collapse.mjs",
+    about: "The sidebar shrinks to an icon rail at 1024px and stays collapsed; phones have no button",
+  },
   research: {
     script: "e2e/research.mjs",
     about: "A research mission from question to guide, another format, and a citation's source",

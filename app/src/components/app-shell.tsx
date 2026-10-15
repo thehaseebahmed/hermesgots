@@ -17,6 +17,7 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { useLarge, useWide } from "@/lib/media"
 import { depth } from "@/lib/nav"
 import { useProjectPane } from "@/lib/pane"
+import { useSidebarCollapsed } from "@/lib/sidebar"
 import { useBotPane, useBotThreads } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 
@@ -119,6 +120,7 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
 export function AppShell({ children }: { children?: ReactNode }) {
   const wide = useWide()
   const [open, setOpen] = useState(false)
+  const [collapsed, toggleCollapsed] = useSidebarCollapsed()
   const { pathname } = useLocation()
   const main = useRef<HTMLElement>(null)
   const project = useProjectPane()
@@ -148,8 +150,13 @@ export function AppShell({ children }: { children?: ReactNode }) {
         <div className="flex h-dvh overflow-hidden bg-background">
           {/* Not mounted on phones, where the drawer holds the list, so its queries don't run twice. */}
           {wide && (
-            <aside className="w-72 shrink-0 border-r bg-sidebar text-sidebar-foreground lg:w-80">
-              <ConversationList />
+            <aside
+              className={cn(
+                "shrink-0 border-r bg-sidebar text-sidebar-foreground transition-[width] duration-300 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
+                collapsed ? "w-20" : "w-72 lg:w-80",
+              )}
+            >
+              <ConversationList collapsed={collapsed} onToggleCollapsed={toggleCollapsed} />
             </aside>
           )}
           <Sheet open={open} onOpenChange={setOpen}>

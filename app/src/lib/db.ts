@@ -30,6 +30,8 @@ export interface Settings {
   meetings?: boolean
   /** How the bot-threads sidebar orders the bots; unset is `recent`. Local. */
   botSort?: BotSort
+  /** Whether the sidebar is shrunk to icons on tablet and wider; unset is expanded. Local. */
+  sidebarCollapsed?: boolean
   /** How the Library tab orders folders and files; unset is `new`. Local. */
   librarySort?: LibrarySort
   activeProfileId?: string
