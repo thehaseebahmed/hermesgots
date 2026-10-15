@@ -68,6 +68,7 @@ elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` l
 | `image-skeleton` | A reply's images hold their cell while the plugin serves them (the route is held), then land at that size: one image and a gallery alike, phone and tablet, light and dark |
 | `image-captures` | Theseus's capture screenshots hold their place, and a capture the host can't serve says so |
 | `image-viewer` | A photo opened from a message holds its own box while it decodes |
+| `fallback-models` | A bot's fallback models are recorded on its host from its settings: two picks in order, one removed, and no third offered |
 
 The new flows live in `app/scripts/e2e/`. The older ones are `app/scripts/regression-*.mjs`, which
 the CLI runs by name.

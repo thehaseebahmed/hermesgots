@@ -1080,6 +1080,11 @@ const STALL_EVENTS_MS = Number(process.env.MOCK_STALL_EVENTS_MS ?? 0)
 const pushSubscriptions = new Map()
 // The main model the plugin's `model` route set, per profile ("" is the default one).
 const hostModels = new Map()
+// The fallback models the plugin's `fallbacks` route recorded, per profile.
+const fallbacksOf = new Map()
+// The providers the picker lists (see /api/model/options below): a model from one of these can
+// become the host's model or one of its fallbacks.
+const PICKER_PROVIDERS = ["openrouter", "anthropic", "ollama-cloud"]
 // Whether a refresh has probed the custom endpoint in /api/model/options.
 let customProbed = false
 const eventLogs = new Map()
@@ -1380,7 +1385,7 @@ http
       return json(res, 200, {
         name: "memento",
         version: PLUGIN_VERSION,
-        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "theseus", ...(EVENTS ? ["events"] : []), "push", "host_model", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : [])],
+        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "theseus", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : [])],
         clarify: true,
         hooks: true,
         theseus: THESEUS_START === "unavailable"
@@ -1456,11 +1461,53 @@ http
       }
       // The providers the picker lists (see /api/model/options above): a model from one of these
       // can become the host's.
-      if (!["openrouter", "anthropic", "ollama-cloud"].includes(provider.trim())) {
+      if (!PICKER_PROVIDERS.includes(provider.trim())) {
         return json(res, 400, { error: { message: `Unknown provider '${provider}'.` } })
       }
       hostModels.set(pluginProfile ?? "", { provider: provider.trim(), model: model.trim() })
       return json(res, 200, { object: "memento.host_model", provider: provider.trim(), model: model.trim() })
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/fallbacks") {
+      const key = pluginProfile ?? ""
+      if (req.method === "GET") {
+        return json(res, 200, { object: "memento.fallbacks", fallbacks: fallbacksOf.get(key) ?? [] })
+      }
+      if (req.method === "POST") {
+        const { fallbacks } = await readBody(req)
+        const entries = fallbacks ?? []
+        if (!Array.isArray(entries)) {
+          return json(res, 400, { error: { message: "fallbacks must be a list" } })
+        }
+        if (entries.length > 2) {
+          // The mock only ever holds two, so the host's "or shorter than what is stored" allowance
+          // for trimming a longer chain never applies here.
+          return json(res, 400, { error: { message: "A bot takes at most 2 fallback models" } })
+        }
+        // Each pick is checked the way the host's `model` route checks the main one.
+        for (const [at, entry] of entries.entries()) {
+          const provider = entry?.provider?.trim?.() ?? ""
+          const model = entry?.model?.trim?.() ?? ""
+          if (!provider || !model) {
+            return json(res, 400, {
+              error: {
+                message: provider
+                  ? `Fallback ${at + 1} needs a model`
+                  : `Fallback ${at + 1} needs a provider`,
+              },
+            })
+          }
+          if (!PICKER_PROVIDERS.includes(provider)) {
+            return json(res, 400, { error: { message: `Unknown provider '${provider}'.` } })
+          }
+        }
+        const saved = entries.map((entry) => ({
+          provider: entry.provider.trim(),
+          model: entry.model.trim(),
+        }))
+        if (saved.length) fallbacksOf.set(key, saved)
+        else fallbacksOf.delete(key)
+        return json(res, 200, { object: "memento.fallbacks", fallbacks: saved })
+      }
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/github") {
       return json(res, 200, GITHUB ? { connected: true, source: "gh", login: "mock-user" } : { connected: false })

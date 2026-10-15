@@ -76,6 +76,11 @@ const FLOWS = {
     script: "e2e/todos.mjs",
     about: "The todo list shows while the reply that wrote it runs, from events or the transcript",
   },
+  "fallback-models": {
+    script: "e2e/fallback-models.mjs",
+    about:
+      "A bot's fallback models are recorded on its host: two picks in order, one removed, no third",
+  },
   "todos-legacy": {
     script: "e2e/todos.mjs",
     mock: "legacy",

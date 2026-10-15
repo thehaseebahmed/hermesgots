@@ -263,6 +263,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "push",
                     "sync_delegation",
                     "host_model",
+                    "fallbacks",
                     "queue",
                     "dictation",
                     "usage",
@@ -324,11 +325,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             provider, model = host_model.clean(await json_body(request))
         except ValueError as error:
             return _error(web, str(error), 400)
-        from hermes_constants import get_hermes_home
 
         # Both on the loop thread, where the request's profile scope is visible: the worker
         # re-enters it, so switch_model reads this profile's credentials.
-        config_path = Path(get_hermes_home()) / "config.yaml"
+        config_path = host_config_path()
         scope = profile_scope()
 
         def run() -> Dict[str, str]:
@@ -343,6 +343,49 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "This Hermes version can't switch models from here.", 501)
         return web.json_response({"object": "memento.host_model", **chosen})
 
+    async def get_fallbacks(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        config_path = host_config_path()
+        scope = profile_scope()
+
+        def run() -> List[Dict[str, str]]:
+            with scope():
+                return host_model.read_fallbacks(config_path)
+
+        try:
+            fallbacks = await asyncio.to_thread(run)
+        except ImportError:
+            return _error(web, "This Hermes version can't read models from here.", 501)
+        return web.json_response({"object": "memento.fallbacks", "fallbacks": fallbacks})
+
+    async def set_fallbacks(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            entries = host_model.clean_fallbacks(await json_body(request))
+        except ValueError as error:
+            return _error(web, str(error), 400)
+
+        # Both on the loop thread, where the request's profile scope is visible: the worker
+        # re-enters it, so each pick is checked against this profile's credentials.
+        config_path = host_config_path()
+        scope = profile_scope()
+
+        def run() -> List[Dict[str, str]]:
+            with scope():
+                return host_model.set_fallbacks(config_path, entries)
+
+        try:
+            fallbacks = await asyncio.to_thread(run)
+        except ValueError as error:
+            return _error(web, str(error), 400)
+        except ImportError:
+            return _error(web, "This Hermes version can't switch models from here.", 501)
+        return web.json_response({"object": "memento.fallbacks", "fallbacks": fallbacks})
+
     def profile_scope():
         # The API server's own per-profile scope (home and secrets) for the request being served, or
         # nothing when this Hermes has none.
@@ -356,6 +399,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if not callable(enter):
             return contextlib.nullcontext
         return lambda: enter(profile)
+
+    def host_config_path() -> Path:
+        # On the loop thread, like store_path: the API server scopes get_hermes_home() to the
+        # request's profile, and that scope isn't visible inside to_thread.
+        from hermes_constants import get_hermes_home
+
+        return Path(get_hermes_home()) / "config.yaml"
 
     def store_path() -> Path:
         # On the loop thread: the API server scopes get_hermes_home() to the request's profile, and
@@ -1042,6 +1092,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/projects/{{project_id}}/usage", project_usage)
     app.router.add_get(f"{PREFIX}/projects/{{project_id}}/library", project_library)
     app.router.add_post(f"{PREFIX}/model", set_host_model)
+    app.router.add_get(f"{PREFIX}/fallbacks", get_fallbacks)
+    app.router.add_post(f"{PREFIX}/fallbacks", set_fallbacks)
     app.router.add_get(f"{PREFIX}/github", github_status)
     app.router.add_get(f"{PREFIX}/github/repos", github_repos)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/label", label_session)
