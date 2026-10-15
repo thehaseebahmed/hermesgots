@@ -42,6 +42,7 @@ The CLI reuses any server that is already up, so after `pnpm e2e up` each run st
 | 18643 | Mock `polling`: `MOCK_NO_EVENTS=1`, polling like an older plugin |
 | 18644 | Mock `legacy`: `MOCK_BLOCK_RUN_EVENTS=1`, Hermes v2026.9.24's blocked run stream |
 | 18645 | Mock `no-dictation`: `MOCK_DICTATION=off` |
+| 18646 | Mock `theseus`: `MOCK_THESEUS=building`, a run part-way through its checkpoints |
 
 The CLI looks for Playwright in `app/node_modules`, then globally (`npm root -g`). If it's
 elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` loads without
@@ -64,6 +65,9 @@ elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` l
 | `dictation` | Dictation pieces, retries, the kept recording, and no mic where the host can't transcribe |
 | `drafts` | Composer drafts are kept per chat and cleared on send |
 | `submission` | Concurrent sends start one run and get one reply |
+| `image-skeleton` | A reply's images hold their cell while the plugin serves them (the route is held), then land at that size: one image and a gallery alike, phone and tablet, light and dark |
+| `image-captures` | Theseus's capture screenshots hold their place, and a capture the host can't serve says so |
+| `image-viewer` | A photo opened from a message holds its own box while it decodes |
 
 The new flows live in `app/scripts/e2e/`. The older ones are `app/scripts/regression-*.mjs`, which
 the CLI runs by name.
@@ -118,6 +122,11 @@ Projects, attach it to your reply, or describe what it shows. Never commit scree
    - `send` types into the composer and sends.
    - `lastReply(chatId)` reads the newest reply's status and length.
    - `until(check, ms, what)` polls a check.
+   - `held(pattern, fail)` holds requests matching a pattern back until its `release()` (10s at most),
+     so a placeholder can be looked at while the bytes are still coming; `fail` answers a url ending
+     in it as a file the host can't serve.
+   - `watchSkeletons()` records every skeleton the page renders, `skeletons()` reads them and
+     `stopSkeletons()` ends it: a placeholder can live for a single commit, which polling misses.
 2. Register the flow in `FLOWS` in `app/scripts/e2e/cli.mjs`: its script, a one-line `about`, and,
    if it needs one, `mock` (another mock), `alsoPolling` (also run on the polling mock under `all`)
    or `extra` (more mock URLs as env vars). A new mock variant goes in `MOCKS` there and in the
