@@ -84,10 +84,8 @@ jobs:
           VITE_SITE_URL: ${{ vars.MEMENTO_SITE_URL }}
 
       - name: Version
-        id: version
         run: |
           sha="${COMMIT_REF::7}"
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "ANDROID_VERSION_CODE=${{ github.run_number }}" >> "$GITHUB_ENV"
           echo "ANDROID_VERSION_NAME=$(node -p 'require("./package.json").version')-$sha" >> "$GITHUB_ENV"
 
@@ -106,14 +104,6 @@ jobs:
           ./gradlew assembleDebug --no-daemon || status=$?
           rm -f "$RUNNER_TEMP/release.keystore"
           exit $status
-
-      # A PR run is a build check; only what lands on main has an artifact worth keeping.
-      - uses: actions/upload-artifact@v7
-        if: github.event_name == 'push'
-        with:
-          name: memento-${{ steps.version.outputs.sha }}
-          path: app/android/app/build/outputs/apk/*/*.apk
-          if-no-files-found: error
 
       # Only what lands on main reaches testers, and only with a stable key, or each build
       # would refuse to install over the last.
