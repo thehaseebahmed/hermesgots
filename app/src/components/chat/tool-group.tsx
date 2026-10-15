@@ -55,17 +55,18 @@ const summary = (parts: string[], shown = parts.length) =>
   sentence(parts.slice(0, shown)) + (shown < parts.length ? ` (+${parts.length - shown})` : "")
 
 /** How many phrases of the summary fit on the row's line, with "(+N)" standing in for the rest. */
-function useFittingPhrases<T extends HTMLElement>(parts: string[], deps: unknown[] = []) {
-  const row = useRef<T>(null)
+function useFittingPhrases(parts: string[], deps: unknown[] = []) {
+  const row = useRef<HTMLButtonElement>(null)
   const text = useRef<HTMLSpanElement>(null)
   const ruler = useRef<HTMLSpanElement>(null)
   const [shown, setShown] = useState(parts.length)
   const key = parts.join("|")
+  const fit = useRef<() => void>(() => {})
   useLayoutEffect(() => {
     const button = row.current
     const measure = ruler.current
     if (!button || !measure) return
-    const fit = () => {
+    fit.current = () => {
       let taken = 0
       let siblings = 0
       for (const child of button.children) {
@@ -81,13 +82,19 @@ function useFittingPhrases<T extends HTMLElement>(parts: string[], deps: unknown
       }
       setShown(1)
     }
-    fit()
-    const observer = new ResizeObserver(fit)
-    observer.observe(button)
-    return () => observer.disconnect()
+    fit.current()
     // `parts` is rebuilt every render; its content is what `key` stands for.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, ...deps])
+  // A fresh observer delivers the button's size once, so re-creating one per phrase change ran the
+  // fit twice; observing once keeps a change to a single fit.
+  useLayoutEffect(() => {
+    const button = row.current
+    if (!button) return
+    const observer = new ResizeObserver(() => fit.current())
+    observer.observe(button)
+    return () => observer.disconnect()
+  }, [])
   return { row, text, ruler, shown: Math.min(shown, parts.length) }
 }
 
@@ -154,7 +161,7 @@ function ToolDetail({ tool, onBack }: { tool: ToolEvent; onBack: () => void }) {
             <span className="sr-only">Back</span>
           </Button>
         )}
-        <PopupTitle className="max-w-full truncate">
+        <PopupTitle>
           {tool.emoji ? `${tool.emoji} ` : ""}
           {tool.tool}
         </PopupTitle>
@@ -170,16 +177,23 @@ function ToolDetail({ tool, onBack }: { tool: ToolEvent; onBack: () => void }) {
   )
 }
 
-function ToolList({ tools, onSelect }: { tools: ToolEvent[]; onSelect: (index: number) => void }) {
-  const parts = phrases(tools)
-  const { row, text, ruler, shown } = useFittingPhrases<HTMLHeadingElement>(parts)
+function ToolList({
+  tools,
+  label,
+  tip,
+  onSelect,
+}: {
+  tools: ToolEvent[]
+  /** The row's own line, so the pop-up names the run exactly as the row does. */
+  label: string
+  /** Every phrase, uncut, for the heading's tooltip. */
+  tip: string
+  onSelect: (index: number) => void
+}) {
   return (
     <>
       <PopupHeader className="pb-2">
-        <PopupTitle ref={row} className="relative truncate" title={summary(parts)}>
-          <span ref={text}>{summary(parts, shown)}</span>
-          <span ref={ruler} className="invisible absolute w-max whitespace-nowrap" aria-hidden />
-        </PopupTitle>
+        <PopupTitle title={tip}>{label}</PopupTitle>
       </PopupHeader>
       <ol className="flex flex-col px-6 pt-2">
         {tools.map((tool, index) => {
@@ -242,7 +256,10 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
   const failures = tools.filter((t) => t.status === "failed")
   const failed = failures.length > 0
   const parts = phrases(tools)
-  const { row, text, ruler, shown } = useFittingPhrases<HTMLButtonElement>(parts, [running, failed])
+  const { row, text, ruler, shown } = useFittingPhrases(parts, [running, failed])
+  // One line for the row and the header of the pop-up it opens, so the two never disagree.
+  const full = summary(parts)
+  const label = summary(parts, shown)
   // From tablet width up the details open in the same sheet, behind a back button; on a phone they
   // open as a sheet stacked on the list's, dismissed back to it.
   const wide = useWide()
@@ -256,7 +273,7 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
       <button
         ref={row}
         type="button"
-        aria-label={summary(parts)}
+        aria-label={full}
         className="relative flex min-h-11 w-full items-center gap-2 text-left text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         onClick={() => setOpen(true)}
       >
@@ -265,7 +282,7 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
           <XIcon className="size-4 shrink-0 text-destructive" strokeWidth={3} aria-label="Failed" />
         )}
         <span ref={text} className="min-w-0 truncate">
-          {summary(parts, shown)}
+          {label}
         </span>
         <span ref={ruler} className="invisible absolute w-max whitespace-nowrap" aria-hidden />
         <ChevronRightIcon className="size-4 shrink-0" />
@@ -301,7 +318,7 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
           {wide && selected ? (
             <ToolDetail tool={selected} onBack={() => setSelectedIndex(undefined)} />
           ) : (
-            <ToolList tools={tools} onSelect={setSelectedIndex} />
+            <ToolList tools={tools} label={label} tip={full} onSelect={setSelectedIndex} />
           )}
         </PopupContent>
       </Popup>

@@ -487,9 +487,9 @@ export function TheseusSheet({
           <PlanView run={run} onBack={() => onView({ kind: "run" })} />
         ) : view?.kind === "setting" ? (
           <>
-            <PopupHeader className="flex-row items-center gap-1 pb-2 text-left">
+            <PopupHeader className="flex-row items-center gap-1 pb-2">
               <Back onClick={() => onView({ kind: "run" })} label="Back to the run" />
-              <PopupTitle className="min-w-0 flex-1 truncate">
+              <PopupTitle className="min-w-0 flex-1 text-left">
                 {SETTING_QUESTIONS[view.key].label}
               </PopupTitle>
             </PopupHeader>
@@ -702,9 +702,9 @@ function CheckpointView({
   const rounds = [...(cp.reviews ?? [])].sort((a, b) => b.round - a.round)
   return (
     <>
-      <PopupHeader className="flex-row items-center gap-1 pb-2 text-left">
+      <PopupHeader className="flex-row items-center gap-1 pb-2">
         <Back onClick={onBack} label="Back to the run" />
-        <PopupTitle className="min-w-0 flex-1 truncate">
+        <PopupTitle className="min-w-0 flex-1 text-left">
           {cp.id} · {cp.title}
         </PopupTitle>
       </PopupHeader>
@@ -899,9 +899,9 @@ function ModelsView({
   const blocked = info && !info.reviewers.model
   return (
     <>
-      <PopupHeader className="flex-row items-center gap-1 pb-2 text-left">
+      <PopupHeader className="flex-row items-center gap-1 pb-2">
         <Back onClick={onBack} label="Back to the run" />
-        <PopupTitle className="min-w-0 flex-1 truncate">Reviewer models</PopupTitle>
+        <PopupTitle className="min-w-0 flex-1 text-left">Reviewer models</PopupTitle>
       </PopupHeader>
       {blocked && (
         <div className="px-6 pt-2">
@@ -966,9 +966,9 @@ function PlanView({ run, onBack }: { run: TheseusRun; onBack: () => void }) {
   const { plan } = run
   return (
     <>
-      <PopupHeader className="flex-row items-center gap-1 pb-2 text-left">
+      <PopupHeader className="flex-row items-center gap-1 pb-2">
         <Back onClick={onBack} label="Back to the run" />
-        <PopupTitle className="min-w-0 flex-1 truncate">Plan</PopupTitle>
+        <PopupTitle className="min-w-0 flex-1 text-left">Plan</PopupTitle>
       </PopupHeader>
       <div className="flex flex-col gap-1 px-6">
         <p className="text-[15px] font-medium">{plan.task}</p>
