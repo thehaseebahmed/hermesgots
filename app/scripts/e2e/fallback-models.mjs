@@ -17,6 +17,13 @@ await flow("fallback-models", async ({ page, profileId, until, shot, held }) => 
   }
   // The whole field, so the heading's saving icon and the rows are read where they render.
   const field = page.getByRole("group", { name: "Fallback models" })
+  // Every fallback write the page sends, so the greying out is checked against what goes to the host
+  // and not only against how the rows look.
+  const writes = []
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().endsWith("/api/plugins/memento/fallbacks"))
+      writes.push(request.url())
+  })
 
   // A dev's mock may be holding another run's fallbacks, so start from none.
   await fetch(`${mock}/api/plugins/memento/fallbacks`, {
@@ -44,6 +51,8 @@ await flow("fallback-models", async ({ page, profileId, until, shot, held }) => 
   )
   assert.ok(await add.isDisabled(), "and no second pick can start")
   assert.equal(await field.getByRole("status").count(), 1, "the heading shows a save is happening")
+  await page.waitForTimeout(300)
+  assert.equal(writes.length, 1, "and only the one write went out")
   await shot("saving")
   write.release()
   await until(async () => (await hosted()).length === 1, 10_000, "the host to record the first fallback")
@@ -59,6 +68,7 @@ await flow("fallback-models", async ({ page, profileId, until, shot, held }) => 
     { provider: "anthropic", model: "claude-opus-4-1" },
   ])
   await page.locator("#fallback-2").getByText("anthropic/claude-opus-4-1").waitFor()
+  assert.equal(writes.length, 2, "and the second pick is a write of its own")
   await shot("two")
   // Two is what a bot takes: with both recorded there is no row to add a third, and no arrow to
   // reorder them.
