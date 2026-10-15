@@ -173,4 +173,10 @@ Projects, attach it to your reply, or describe what it shows. Never commit scree
 - When a selector stops matching, check whether the app renamed it before you blame your change.
   The sidebar's chat list went from "Conversations" to "Recents".
 - Don't `pkill -f` with a pattern from your own command line, because it kills your shell. Use
-  `pnpm e2e down`, or `fuser -k <port>/tcp`.
+  `pnpm e2e down`, or a bracketed pattern that can't match itself (`pkill -f 'mock-herme[s]'`).
+  `fuser` isn't installed everywhere, so `fuser -k <port>/tcp` can no-op silently: an old server
+  then keeps the port *and* its state, which reads as a regression in your change. Check with
+  `pgrep -af <name>` and kill by pid.
+- A regression that seeds a fixed chat id — `regression-submission.mjs` uses `overlap-test` — reads
+  that session's transcript off the mock, so it passes only against a mock that hasn't served it
+  before. Restart the mock between runs of one.
