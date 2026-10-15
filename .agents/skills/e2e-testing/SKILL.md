@@ -177,6 +177,10 @@ Projects, attach it to your reply, or describe what it shows. Never commit scree
   `fuser` isn't installed everywhere, so `fuser -k <port>/tcp` can no-op silently: an old server
   then keeps the port *and* its state, which reads as a regression in your change. Check with
   `pgrep -af <name>` and kill by pid.
+- A dev server that was already running when the tree changed (a rebase, a checkout, a peer's
+  commits) can hold a stale dependency graph: a lazily imported route then fails to load and the
+  flow reports a missing control — `504 (Outdated Optimize Dep)` in the browser console is the tell.
+  Restart the app (clear `node_modules/.vite` first) before reading the failure as a regression.
 - A regression that seeds a fixed chat id — `regression-submission.mjs` uses `overlap-test` — reads
   that session's transcript off the mock, so it passes only against a mock that hasn't served it
   before. Restart the mock between runs of one.
