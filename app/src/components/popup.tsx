@@ -182,7 +182,7 @@ export function PopupContent({
 }: {
   className?: string
   /** A sheet's height that holds between views of its content (a picker's list, then a provider's
-   * models). A menu fits its content instead, so it keeps no empty room under a short view. */
+   * models). A menu holds a smaller one (30rem), as it sits beside its button. */
   fixedHeight?: string
   /** The sheet's or menu's width; a drawer is a third of the viewport whatever this is. */
   size?: PopupSize
@@ -231,6 +231,7 @@ export function PopupContent({
               className={cn(
                 "flex max-h-[min(36rem,var(--available-height))] max-w-(--available-width) origin-(--transform-origin) flex-col overflow-hidden rounded-2xl bg-popover pb-3 text-sm text-popover-foreground shadow-2xl ring-1 ring-foreground/5 transition-[opacity,scale] duration-150 outline-none data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none dark:ring-foreground/10",
                 MENU_SIZE[size],
+                fixedHeight && "h-[min(30rem,var(--available-height))]",
                 className,
                 // A menu never runs past the room the screen has beside its button, whatever height
                 // the content asks for.
