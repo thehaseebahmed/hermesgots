@@ -57,7 +57,7 @@ export function useMeetingsPane(): MeetingsPane | undefined {
   const large = useXLarge()
   const { pathname } = useLocation()
   if (!large) return undefined
-  if (matchPath("/meetings", pathname)) return { open: false }
+  if (matchPath("/meetings", pathname)) return { open: true }
   const id = matchPath("/meetings/:id/*", pathname)?.params.id
   return id ? { open: true, selected: id } : undefined
 }

@@ -60,6 +60,10 @@ for (const [width, dark] of [
       const toList = async () => {
         if (width < 1280) await page.getByRole("button", { name: "Back to Meetings" }).click()
       }
+      const newMeeting = async (tab) => {
+        await page.getByRole("button", { name: "New meeting" }).click()
+        await page.getByRole("tab", { name: tab }).click()
+      }
       const setSwitch = (meetings) =>
         page.evaluate(async (meetings) => {
           const { db } = await import("/src/lib/db.ts")
@@ -81,6 +85,23 @@ for (const [width, dark] of [
       })
       await page.goto(`${app}/meetings`)
       await page.getByText("Weekly product sync").waitFor({ timeout: 15_000 })
+      if (width >= 1280) {
+        // The third pane is never empty: the top meeting is open.
+        await page.waitForURL("**/meetings/m_*", { timeout: 5_000 })
+        pass(`${width}: the first meeting opens beside the list`)
+        await page.goto(`${app}/meetings`)
+        await page.waitForURL("**/meetings/m_*", { timeout: 5_000 })
+      }
+      for (const group of ["Waiting on you", "Today", "Earlier"])
+        assert.ok(await page.getByRole("heading", { name: group }).isVisible(), group)
+      if (width >= 1024)
+        assert.ok(await page.getByRole("link", { name: "Meetings" }).isVisible(), "sidebar row")
+      await shot("1-list")
+      pass(`${width}: the sample meetings show by when they happened`)
+
+      // New meeting is one sheet with two tabs; the bot's cards switch the bot sitting in.
+      await newMeeting("Record")
+      await shot("1c-new")
       const cards = page.getByRole("group", { name: "Bot" })
       await cards.getByRole("button", { name: "Second", exact: false }).click()
       await page.getByText(/Kindly start/).waitFor({ timeout: 5_000 })
@@ -90,12 +111,9 @@ for (const [width, dark] of [
         "the picked bot is marked",
       )
       pass(`${width}: a card switches the bot and its line`)
-      for (const group of ["Needs you", "Today", "Earlier"])
-        assert.ok(await page.getByRole("heading", { name: group }).isVisible(), group)
-      if (width >= 1024)
-        assert.ok(await page.getByRole("link", { name: "Meetings" }).isVisible(), "sidebar row")
-      await shot("1-list")
-      pass(`${width}: the sample meetings show by when they happened`)
+      await page.getByRole("button", { name: "Start recording" }).waitFor()
+      await page.keyboard.press("Escape")
+      await page.getByRole("button", { name: "Start recording" }).waitFor({ state: "detached" })
 
       // Search reads the write-ups too, and a project chip narrows the list.
       const search = page.getByRole("searchbox", { name: "Search meetings" })
@@ -171,7 +189,8 @@ for (const [width, dark] of [
       // Record: mark a moment, write a note, end it and follow it to its recap.
       await toList()
       const listUrl = page.url()
-      await page.getByRole("button", { name: "Record", exact: true }).click()
+      await newMeeting("Record")
+      await page.getByRole("button", { name: "Start recording" }).click()
       await page.getByText("Recording", { exact: true }).waitFor({ timeout: 5_000 })
       // A full-screen popup over the list, not a screen of its own.
       assert.equal(page.url(), listUrl, "recording is a popup, not a route")
@@ -203,7 +222,7 @@ for (const [width, dark] of [
 
       // An audio file from the device.
       await toList()
-      await page.getByRole("button", { name: "Upload", exact: true }).click()
+      await newMeeting("Upload")
       await page
         .locator("input[type=file]")
         .first()
@@ -221,8 +240,7 @@ for (const [width, dark] of [
 
       // A transcript is told by its extension: one file and a project, no mode to pick.
       await toList()
-      await page.getByRole("button", { name: "Upload", exact: true }).click()
-      assert.equal(await page.getByRole("tab").count(), 0, "no recording or transcript switch")
+      await newMeeting("Upload")
       const picker = page.locator("input[type=file]").first()
       await picker.setInputFiles({
         name: "retro.srt",

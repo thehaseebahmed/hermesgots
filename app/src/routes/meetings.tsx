@@ -12,6 +12,7 @@ import {
   EllipsisIcon,
   FileAudioIcon,
   FileTextIcon,
+  AudioLinesIcon,
   FlagIcon,
   FolderIcon,
   GitBranchIcon,
@@ -26,8 +27,7 @@ import {
   SparklesIcon,
   SquareIcon,
   Trash2Icon,
-  TriangleAlertIcon,
-  UploadIcon,
+  PlusIcon,
   XIcon,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -68,7 +68,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { formatRelative } from "@/lib/format"
@@ -207,8 +206,24 @@ function BotAvatar({ botId, className }: { botId: string; className?: string }) 
 export function MeetingsPage() {
   return (
     <Gate>
-      <MeetingsList />
+      <MeetingsIndex />
     </Gate>
+  )
+}
+
+/** From `xl` the list is the pane, so this screen is the third pane: the top meeting, or a placeholder. */
+function MeetingsIndex() {
+  const pane = useMeetingsPane()
+  const meetings = useMeetings()
+  const now = useNow()
+  if (!pane) return <MeetingsList />
+  const first = meetingGroups(meetings, now)[0]?.meetings[0]
+  if (first) return <Navigate to={`/meetings/${first.id}`} replace />
+  return (
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
+      <AudioLinesIcon className="size-10" aria-hidden />
+      <p>No meetings yet</p>
+    </div>
   )
 }
 
@@ -232,9 +247,6 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
   const openDrawer = useOpenDrawer()
   const open = useSwap()
   const meetings = useMeetings()
-  const bot = useMeetingBot()
-  const bots = useMeetingBots()
-  const activeId = useLiveQuery(async () => (await getActiveProfile())?.id, [])
   const [adding, setAdding] = useState(false)
   const [recording, setRecording] = useState(false)
   // A fresh form each time it opens.
@@ -274,63 +286,6 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
       />
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
-        <section className="relative overflow-hidden rounded-[2rem] border bg-radial-[at_25%_20%] from-primary/15 to-card to-70% p-5">
-          <div className="flex items-center gap-4">
-            <Bot id={bot.botId} animate className="size-20" />
-            <p className="min-w-0 flex-1 text-lg leading-snug font-semibold tracking-tight">
-              {readyLine(bot.botId)}
-            </p>
-          </div>
-          {bots.length > 1 && (
-            <div
-              className="-mx-5 mt-4 flex [scrollbar-width:none] gap-2 overflow-x-auto px-5"
-              role="group"
-              aria-label="Bot"
-            >
-              {bots.map((option) => {
-                const active = option.id === activeId
-                return (
-                  <button
-                    key={option.id}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => void setActiveProfile(option.id)}
-                    className={cn(
-                      "flex min-h-11 w-20 shrink-0 flex-col items-center gap-1 rounded-3xl border bg-background/70 px-2 py-2 text-xs font-medium transition-colors",
-                      active ? "border-primary bg-primary/10" : "hover:bg-muted",
-                    )}
-                  >
-                    <Bot id={option.botId} className="size-10" />
-                    <span className="w-full truncate text-center">{option.name}</span>
-                  </button>
-                )
-              })}
-            </div>
-          )}
-          <div className="mt-5 grid grid-cols-2 gap-3">
-            <Button
-              size="lg"
-              className="h-12 rounded-full text-base"
-              onClick={() => setRecording(true)}
-            >
-              <MicIcon data-icon="inline-start" />
-              Record
-            </Button>
-            <Button
-              variant="outline"
-              size="lg"
-              className="h-12 rounded-full bg-background/70 text-base"
-              onClick={() => {
-                setForm((n) => n + 1)
-                setAdding(true)
-              }}
-            >
-              <UploadIcon data-icon="inline-start" />
-              Upload
-            </Button>
-          </div>
-        </section>
-
         {meetings.length > 0 && (
           <div className="flex flex-col gap-3">
             <InputGroup className="h-11 rounded-full bg-background dark:bg-input/30">
@@ -424,7 +379,27 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
         ))}
       </div>
 
-      <Upload key={form} open={adding} onOpenChange={setAdding} />
+      <div className="pointer-events-none sticky bottom-0 mt-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <div className="mx-auto flex w-full max-w-2xl justify-end">
+          <Button
+            data-toast-above
+            size="lg"
+            className="pointer-events-auto h-12 rounded-full px-5 shadow-lg"
+            onClick={() => {
+              setForm((n) => n + 1)
+              setAdding(true)
+            }}
+          >
+            <PlusIcon /> New meeting
+          </Button>
+        </div>
+      </div>
+      <NewMeeting
+        key={form}
+        open={adding}
+        onOpenChange={setAdding}
+        onRecord={() => setRecording(true)}
+      />
       {recording && (
         <Recorder
           onClose={() => setRecording(false)}
@@ -474,7 +449,7 @@ function meetingGroups(meetings: Meeting[], now: number) {
   const today = day.getTime()
   const yesterday = today - 86_400_000
   const week = today - 6 * 86_400_000
-  const labels = ["Needs you", "In progress", "Today", "Yesterday", "This week", "Earlier"]
+  const labels = ["Waiting on you", "In progress", "Today", "Yesterday", "This week", "Earlier"]
   const of = (m: Meeting) =>
     m.stage === "failed"
       ? 0
@@ -540,17 +515,13 @@ function MeetingRow({
       )}
     >
       <span className="relative mt-0.5 shrink-0">
-        <BotAvatar botId={meeting.bot.botId} className="size-10" />
-        {(isWorking(meeting) || failed) && (
-          <span
-            className={cn(
-              "absolute -right-1 -bottom-1 flex size-5 items-center justify-center rounded-full bg-background ring-2 ring-background",
-              failed ? "text-warning" : "text-muted-foreground",
-            )}
-          >
-            {failed ? <TriangleAlertIcon className="size-3.5" /> : <Spinner className="size-3.5" />}
-          </span>
-        )}
+        <span className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <AudioLinesIcon className="size-5" aria-hidden />
+        </span>
+        <BotAvatar
+          botId={meeting.bot.botId}
+          className="absolute -right-1 -bottom-1 size-5 bg-background ring-2 ring-background"
+        />
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-1">
         <span className="flex items-baseline gap-2">
@@ -651,7 +622,7 @@ const isTranscript = (file: File) =>
 const baseName = (name: string) => name.replace(/\.[^.]+$/, "")
 
 /** A recording or a transcript from the device, by its extension, and the project it's filed under. */
-function Upload({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+function UploadForm({ onAdded }: { onAdded: () => void }) {
   const go = useSwap()
   const bot = useMeetingBot()
   const { projects, project, pick } = usePickedProject()
@@ -695,7 +666,7 @@ function Upload({ open, onOpenChange }: { open: boolean; onOpenChange: (open: bo
           fileName: picked.file.name,
           duration: "seconds" in picked ? picked.seconds : 0,
         })
-    onOpenChange(false)
+    onAdded()
     go(`/meetings/${meeting.id}`)
   }
 
@@ -716,49 +687,129 @@ function Upload({ open, onOpenChange }: { open: boolean; onOpenChange: (open: bo
           .join(" · ")
 
   return (
+    <form
+      className="flex flex-col gap-5 px-6"
+      onSubmit={(event) => {
+        event.preventDefault()
+        add()
+      }}
+    >
+      <Field>
+        <FieldLabel htmlFor="meeting-file">Recording or transcript</FieldLabel>
+        <Input
+          id="meeting-file"
+          type="file"
+          accept={`${RECORDING_TYPES},${TRANSCRIPT_TYPES}`}
+          className="h-11 cursor-pointer py-2 file:mr-3 file:cursor-pointer"
+          onChange={(event) => {
+            const file = event.target.files?.[0]
+            if (file) void choose(file)
+          }}
+        />
+        {detail && <FieldDescription>{detail}</FieldDescription>}
+      </Field>
+
+      {project && (
+        <Field>
+          <FieldLabel htmlFor="meeting-project">Project</FieldLabel>
+          <ProjectSelect
+            id="meeting-project"
+            projects={projects}
+            value={project.id}
+            onChange={pick}
+          />
+        </Field>
+      )}
+
+      <Button type="submit" size="lg" className="h-11 rounded-full" disabled={!ready}>
+        Add
+      </Button>
+    </form>
+  )
+}
+
+/** The bot that will sit in, and the cards to pick another. */
+function BotChoice() {
+  const bot = useMeetingBot()
+  const bots = useMeetingBots()
+  const activeId = useLiveQuery(async () => (await getActiveProfile())?.id, [])
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center gap-4">
+        <Bot id={bot.botId} className="size-16 shrink-0" />
+        <p className="min-w-0 flex-1 text-lg leading-snug font-semibold tracking-tight">
+          {readyLine(bot.botId)}
+        </p>
+      </div>
+      {bots.length > 1 && (
+        <div
+          className="-mx-6 flex [scrollbar-width:none] gap-2 overflow-x-auto px-6"
+          role="group"
+          aria-label="Bot"
+        >
+          {bots.map((option) => {
+            const active = option.id === activeId
+            return (
+              <button
+                key={option.id}
+                type="button"
+                aria-pressed={active}
+                onClick={() => void setActiveProfile(option.id)}
+                className={cn(
+                  "flex min-h-11 w-20 shrink-0 flex-col items-center gap-1 rounded-3xl border px-2 py-2 text-xs font-medium transition-colors",
+                  active ? "border-primary bg-primary/10" : "hover:bg-muted",
+                )}
+              >
+                <Bot id={option.botId} className="size-10" />
+                <span className="w-full truncate text-center">{option.name}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** A new meeting: record one with the bot in the room, or upload a recording or transcript. */
+function NewMeeting({
+  open,
+  onOpenChange,
+  onRecord,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onRecord: () => void
+}) {
+  return (
     <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent size="md">
         <PopupHeader className="pb-2">
-          <PopupTitle>Upload a meeting</PopupTitle>
+          <PopupTitle>New meeting</PopupTitle>
         </PopupHeader>
-        <form
-          className="flex flex-col gap-5 px-6"
-          onSubmit={(event) => {
-            event.preventDefault()
-            add()
-          }}
-        >
-          <Field>
-            <FieldLabel htmlFor="meeting-file">Recording or transcript</FieldLabel>
-            <Input
-              id="meeting-file"
-              type="file"
-              accept={`${RECORDING_TYPES},${TRANSCRIPT_TYPES}`}
-              className="h-11 cursor-pointer py-2 file:mr-3 file:cursor-pointer"
-              onChange={(event) => {
-                const file = event.target.files?.[0]
-                if (file) void choose(file)
+        <Tabs defaultValue="record">
+          <TabsList>
+            <TabsTrigger value="record">Record</TabsTrigger>
+            <TabsTrigger value="upload">Upload</TabsTrigger>
+          </TabsList>
+          <TabsContent value="record" className="flex flex-col gap-5 px-6 pt-5">
+            <BotChoice />
+            <Button
+              size="lg"
+              className="h-11 rounded-full"
+              onClick={() => {
+                onOpenChange(false)
+                onRecord()
               }}
-            />
-            {detail && <FieldDescription>{detail}</FieldDescription>}
-          </Field>
-
-          {project && (
-            <Field>
-              <FieldLabel htmlFor="meeting-project">Project</FieldLabel>
-              <ProjectSelect
-                id="meeting-project"
-                projects={projects}
-                value={project.id}
-                onChange={pick}
-              />
-            </Field>
-          )}
-
-          <Button type="submit" size="lg" className="h-11 rounded-full" disabled={!ready}>
-            Add
-          </Button>
-        </form>
+            >
+              <MicIcon data-icon="inline-start" />
+              Start recording
+            </Button>
+          </TabsContent>
+          <TabsContent value="upload" className="pt-5">
+            <UploadForm onAdded={() => onOpenChange(false)} />
+          </TabsContent>
+        </Tabs>
       </PopupContent>
     </Popup>
   )
