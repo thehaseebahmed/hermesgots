@@ -1,4 +1,4 @@
-import { MODES, type ModelRow, type Period, type Row } from "./board"
+import { MODES, type ModelRow, type Period, type ProviderRow, type Row } from "./board"
 
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 })
 export const formatTokens = (value: number) => compact.format(value)
@@ -79,6 +79,27 @@ function modelRow(row: ModelRow, index: number) {
 </li>`
 }
 
+/** A provider's bar is split by its own top models, so each row names them under its bar. */
+function providerRow(row: ProviderRow, index: number) {
+  const parts = [
+    ...row.models.map((m, i) => ({ label: m.model, tokens: m.tokens, slot: `model-${i + 1}` })),
+    ...(row.others > 0 ? [{ label: "Others", tokens: row.others, slot: "model-others" }] : []),
+  ].map((p) => ({ ...p, percent: percent(p.tokens, row.tokens) }))
+  const label = parts
+    .filter((p) => p.percent >= 1)
+    .map((p) => `${Math.round(p.percent)}% ${escape(p.label)}`)
+    .join(", ")
+  return `<li class="row model${index === 0 ? " first" : ""}">
+  <span class="rank">${index + 1}</span>
+  <div class="who wide">
+    <span class="handle"><b>${escape(row.provider)}</b><small>${row.users} ${row.users === 1 ? "person" : "people"}</small></span>
+    <div class="split" role="img" aria-label="${label}">${parts.map((p) => `<span class="seg ${p.slot}" style="width:${p.percent}%"></span>`).join("")}</div>
+    <ul class="legend mini" aria-hidden="true">${parts.map((p) => `<li><span class="dot ${p.slot}"></span>${escape(p.label)}</li>`).join("")}</ul>
+  </div>
+  <div class="tokens">${formatTokens(row.tokens)}<small>tokens</small></div>
+</li>`
+}
+
 const empty = '<li class="empty">No one has shared yet.</li>'
 
 export function tokensList(period: Period, options: RenderOptions) {
@@ -89,4 +110,9 @@ export function tokensList(period: Period, options: RenderOptions) {
 export function modelsList(period: Period, options: RenderOptions) {
   const rows = period.models.slice(0, options.limit ?? 10)
   return rows.length ? rows.map((row, i) => modelRow(row, i)).join("") : empty
+}
+
+export function providersList(period: Period, options: RenderOptions) {
+  const rows = period.providers.slice(0, options.limit ?? 10)
+  return rows.length ? rows.map((row, i) => providerRow(row, i)).join("") : empty
 }

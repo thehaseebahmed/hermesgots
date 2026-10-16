@@ -173,6 +173,17 @@ h1 {
   font-size: 0.8125rem;
 }
 
+.legend.mini {
+  gap: 0.125rem 0.75rem;
+  margin: 0.375rem 0 0;
+  font-size: 0.75rem;
+}
+
+.legend.mini .dot {
+  width: 0.5rem;
+  height: 0.5rem;
+}
+
 .legend li {
   display: flex;
   align-items: center;

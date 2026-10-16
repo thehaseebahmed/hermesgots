@@ -1,6 +1,6 @@
 ---
 import { MODES, PERIODS, sampleBoard } from "../lib/board"
-import { modelsList, tokensLegend, tokensList } from "../lib/render"
+import { modelsList, providersList, tokensLegend, tokensList } from "../lib/render"
 
 const sample = sampleBoard()
 const base = (import.meta.env.PUBLIC_COMMUNITY_URL ?? "").replace(/\/+$/, "")
@@ -45,6 +45,9 @@ const loading = '<li class="empty">Loading…</li>'
           {MODES.map((mode) => <li><span class={`dot mode-${mode.key}`} />{mode.label}</li>)}
         </ul>
         <ol class="rows" data-list="models" set:html={endpoint ? loading : modelsList(sample.periods[period.id], { live: false })} />
+
+        <h2>Top providers</h2>
+        <ol class="rows" data-list="providers" set:html={endpoint ? loading : providersList(sample.periods[period.id], { live: false })} />
       </section>
     ))
   }
@@ -52,7 +55,7 @@ const loading = '<li class="empty">Loading…</li>'
 
 <script>
   import { PERIODS, readBoard, sampleBoard } from "../lib/board"
-  import { modelsList, tokensLegend, tokensList } from "../lib/render"
+  import { modelsList, providersList, tokensLegend, tokensList } from "../lib/render"
 
   // The period last picked on this device, so a return visit opens where the person left off.
   const STORED = "gots-community-period"
@@ -116,6 +119,7 @@ const loading = '<li class="empty">Loading…</li>'
       panel.querySelector('[data-list="legend"]')!.innerHTML = tokensLegend(board.periods[id])
       panel.querySelector('[data-list="tokens"]')!.innerHTML = tokensList(board.periods[id], { live })
       panel.querySelector('[data-list="models"]')!.innerHTML = modelsList(board.periods[id], { live })
+      panel.querySelector('[data-list="providers"]')!.innerHTML = providersList(board.periods[id], { live })
     }
     badge?.toggleAttribute("hidden", live)
   }

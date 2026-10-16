@@ -2,7 +2,8 @@
 
 ``post_api_request`` sees every model call with its own usage, so the hook adds it to a counter
 for the call's UTC day, model and the mode of the session it belongs to (``goal`` while the session
-has an active goal, else a project session's Accept edits, Auto or Plan, else ``chat``). Only the numbers are kept: no prompt, text,
+has an active goal, else a project session's Accept edits, Auto or Plan, else ``chat``), and its tokens to a counter for the day, provider and
+model. Only the numbers are kept: no prompt, text,
 session id or path. They stay on the host until the account joins the leaderboard in the app,
 which the registry answers on each check-in; then the last 35 days are sent to Gots, which adds
 them to the account's GitHub username.
@@ -31,6 +32,15 @@ MODES = ("accept_edits", "auto", "plan")
 # state database read.
 GOAL_TTL_S = 30.0
 _goal_seen: Dict[str, Tuple[float, bool]] = {}
+
+
+def _provider(value: Any) -> str:
+    """The provider as the board names it: Hermes's slug, without a custom endpoint's own name
+    (``custom:acme`` is ``custom``), so nothing a person named reaches the board."""
+    if not isinstance(value, str):
+        return "unknown"
+    name = value.strip().lower().split(":", 1)[0]
+    return name[:48] or "unknown"
 
 
 def _count(value: Any) -> int:
@@ -95,8 +105,14 @@ def _record(kwargs: Dict[str, Any]) -> None:
                    calls = calls + 1""",
             (_day(), model.strip().lower()[:96], mode, *counts),
         )
+        conn.execute(
+            """INSERT INTO community_providers (day, provider, model, tokens) VALUES (?, ?, ?, ?)
+               ON CONFLICT(day, provider, model) DO UPDATE SET tokens = tokens + excluded.tokens""",
+            (_day(), _provider(kwargs.get("provider")), model.strip().lower()[:96], sum(counts)),
+        )
         oldest = _day(time.time() - KEEP_DAYS * 86400)
         conn.execute("DELETE FROM community_usage WHERE day < ?", (oldest,))
+        conn.execute("DELETE FROM community_providers WHERE day < ?", (oldest,))
     finally:
         conn.close()
 
@@ -124,16 +140,22 @@ def _goal_active(session_id: str) -> bool:
 
 
 def payload(home: Path) -> Dict[str, Any]:
-    """``{ days: { "2026-10-15": { model: { mode: { input, output, cacheWrite, cacheRead, calls } } } } }``"""
+    """``{ days: { "2026-10-15": { model: { mode: { input, output, cacheWrite, cacheRead, calls } } } },
+    providers: { "2026-10-15": { provider: { model: tokens } } } }``"""
     path = db_path(home)
     if not path.exists():
-        return {"days": {}}
+        return {"days": {}, "providers": {}}
     oldest = _day(time.time() - (KEEP_DAYS - 1) * 86400)
     conn = connect(path)
     try:
         rows = conn.execute(
             """SELECT day, model, mode, input, output, cache_write, cache_read, calls
                FROM community_usage WHERE day >= ? ORDER BY day, model, mode""",
+            (oldest,),
+        ).fetchall()
+        provider_rows = conn.execute(
+            """SELECT day, provider, model, tokens FROM community_providers
+               WHERE day >= ? AND tokens > 0 ORDER BY day, provider, model""",
             (oldest,),
         ).fetchall()
     finally:
@@ -143,7 +165,10 @@ def payload(home: Path) -> Dict[str, Any]:
         entry = dict(zip((WIRE[k] for k in KINDS), numbers[:4]))
         entry["calls"] = numbers[4]
         days.setdefault(day, {}).setdefault(model, {})[mode] = entry
-    return {"days": days}
+    providers: Dict[str, Any] = {}
+    for day, provider, model, tokens in provider_rows:
+        providers.setdefault(day, {}).setdefault(provider, {})[model] = tokens
+    return {"days": days, "providers": providers}
 
 
 def sync(home: Path, state: Dict[str, Any], call: Any) -> None:

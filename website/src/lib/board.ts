@@ -41,11 +41,21 @@ export interface ModelRow {
   modes: Record<Mode, number>
 }
 
+export interface ProviderRow {
+  provider: string
+  tokens: number
+  users: number
+  /** Its own most used models, most first; the rest is `others`. */
+  models: { model: string; tokens: number }[]
+  others: number
+}
+
 export interface Period {
   /** The period's most used models, most first, that every row is split by. */
   topModels: string[]
   tokens: Row[]
   models: ModelRow[]
+  providers: ProviderRow[]
 }
 
 export interface Board {
@@ -67,6 +77,16 @@ const HANDLES = [
   "copperkite",
   "mossbank",
 ]
+
+/** Where each sample model's tokens come from: its maker, and a share through other providers. */
+const ROUTES: Record<string, Record<string, number>> = {
+  "claude-opus-5-5": { anthropic: 0.6, openrouter: 0.25, bedrock: 0.15 },
+  "claude-sonnet-5-5": { anthropic: 0.55, openrouter: 0.25, bedrock: 0.2 },
+  "claude-haiku-5-5": { anthropic: 0.5, openrouter: 0.3, bedrock: 0.2 },
+  "gpt-5.2": { "openai-codex": 0.7, openrouter: 0.3 },
+  "gemini-3-pro": { gemini: 0.75, openrouter: 0.25 },
+  "deepseek-v3.2": { openrouter: 0.6, deepseek: 0.4 },
+}
 
 const MODELS = [
   { name: "claude-opus-5-5", weight: 1 },
@@ -151,7 +171,32 @@ export function sampleBoard(): Board {
         return row
       })
       .sort((a, b) => b.total - a.total)
-    periods[id] = { topModels, tokens, models }
+    const byProvider = new Map<string, { models: Map<string, number>; users: Set<string> }>()
+    for (const person of spent) {
+      MODELS.forEach(({ name }, index) => {
+        const total = person.byModel[index]!
+        if (!total) return
+        for (const [provider, share] of Object.entries(ROUTES[name] ?? {})) {
+          const n = Math.round(total * share * (0.7 + random() * 0.6))
+          const entry = byProvider.get(provider) ?? { models: new Map(), users: new Set<string>() }
+          entry.models.set(name, (entry.models.get(name) ?? 0) + n)
+          entry.users.add(person.login)
+          byProvider.set(provider, entry)
+        }
+      })
+    }
+    const providers = [...byProvider]
+      .map(([provider, entry]) => {
+        const all = [...entry.models]
+          .map(([model, tokens]) => ({ model, tokens }))
+          .sort((a, b) => b.tokens - a.tokens)
+        const tokens = all.reduce((sum, row) => sum + row.tokens, 0)
+        const top = all.slice(0, TOP_MODELS)
+        const others = tokens - top.reduce((sum, row) => sum + row.tokens, 0)
+        return { provider, tokens, users: entry.users.size, models: top, others }
+      })
+      .sort((a, b) => b.tokens - a.tokens)
+    periods[id] = { topModels, tokens, models, providers }
   }
   return { updatedAt: 0, periods }
 }
@@ -167,6 +212,7 @@ export function readBoard(value: unknown): Board | null {
       !Array.isArray(period.topModels) ||
       !Array.isArray(period.tokens) ||
       !Array.isArray(period.models) ||
+      !Array.isArray(period.providers) ||
       // A board from before rows were split by model.
       period.tokens.some((row) => !row?.models || typeof row.others !== "number")
     ) {

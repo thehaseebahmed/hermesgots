@@ -77,12 +77,21 @@ class CommunityTest(unittest.TestCase):
         self.assertEqual(modes["goal"]["calls"], 1)
         self.assertEqual(modes["plan"]["calls"], 2)
 
+    def test_tokens_are_counted_per_provider_without_a_custom_endpoint_name(self) -> None:
+        self.call(provider="anthropic")
+        self.call(provider="Custom:Acme Corp", model="llama-4")
+        self.call()
+        (day,) = community.payload(self.home)["providers"].values()
+        self.assertEqual(day["anthropic"], {"anthropic/claude-opus-5-5": 126})
+        self.assertEqual(day["custom"], {"llama-4": 126})
+        self.assertEqual(day["unknown"], {"anthropic/claude-opus-5-5": 126})
+
     def test_other_surfaces_and_empty_usage_are_ignored(self) -> None:
         self.call(platform="telegram")
         self.call(usage={"input_tokens": 0})
         self.call(usage=None)
         self.call(model="")
-        self.assertEqual(community.payload(self.home), {"days": {}})
+        self.assertEqual(community.payload(self.home), {"days": {}, "providers": {}})
 
     def test_sync_reports_only_when_joined_and_changed(self) -> None:
         self.call()

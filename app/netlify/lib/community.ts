@@ -35,10 +35,15 @@ export type Day = Record<string, Partial<Record<Mode, Counts>>>
 /** UTC dates (`YYYY-MM-DD`) to what happened that day. */
 export type Days = Record<string, Day>
 
+/** UTC dates to tokens by provider (Hermes's slug) and then normalised model id. */
+export type ProviderDays = Record<string, Record<string, Record<string, number>>>
+
 /** The public record of one username. */
 export interface Member {
   login: string
   days: Days
+  /** Absent on a record from before providers were counted, and for a host on an older plugin. */
+  providers?: ProviderDays
   updatedAt: number
 }
 
@@ -73,13 +78,25 @@ export interface ModelRow {
   modes: Record<Mode, number>
 }
 
+/** One provider: its tokens split by its own five most used models and the rest. */
+export interface ProviderRow {
+  provider: string
+  tokens: number
+  users: number
+  models: { model: string; tokens: number }[]
+  others: number
+}
+
 export type PeriodId = "today" | "week" | "month"
 
 export interface Board {
   /** The board's shape; a cached board of another is built again. */
   version: number
   updatedAt: number
-  periods: Record<PeriodId, { topModels: string[]; tokens: Row[]; models: ModelRow[] }>
+  periods: Record<
+    PeriodId,
+    { topModels: string[]; tokens: Row[]; models: ModelRow[]; providers: ProviderRow[] }
+  >
 }
 
 export const BOARD_VERSION = 2
@@ -92,6 +109,8 @@ const REPORT_GAP_MS = 30_000
 const TOKENS_ROWS = 50
 const MODEL_ROWS = 20
 const TOP_MODELS = 5
+const PROVIDER_ROWS = 10
+const MAX_PROVIDERS_PER_DAY = 12
 const MAX_BYTES = 256 * 1024
 const MAX_MODELS_PER_DAY = 24
 /** A day no host gets near: a held-back day is dropped, not the report. */
@@ -109,6 +128,7 @@ interface Account {
 
 interface Report {
   days: Days
+  providers?: ProviderDays
   at: number
 }
 
@@ -218,6 +238,59 @@ export function cleanDays(
   return { days, heldBack }
 }
 
+/**
+ * A host's tokens by provider, cleaned like its days. An older plugin sends none, and a shape that
+ * can't be read is dropped without costing the rest of the report.
+ */
+export function cleanProviders(value: unknown, now: number): ProviderDays {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {}
+  const oldest = dateOf(now, KEEP_DAYS - 1)
+  const newest = dateOf(now, -1)
+  const out: ProviderDays = {}
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (entries.length > KEEP_DAYS + 2) return {}
+  for (const [date, providers] of entries) {
+    if (!DATE.test(date) || date < oldest || date > newest) continue
+    if (!providers || typeof providers !== "object" || Array.isArray(providers)) continue
+    const day: Record<string, Record<string, number>> = {}
+    let tokens = 0
+    for (const [raw, models] of Object.entries(providers as Record<string, unknown>)) {
+      const provider = typeof raw === "string" ? raw.trim().toLowerCase() : ""
+      if (!MODEL.test(provider) || !models || typeof models !== "object") continue
+      for (const [rawModel, rawTokens] of Object.entries(models as Record<string, unknown>)) {
+        const model = modelName(rawModel)
+        const n = count(rawTokens, MAX_DAY_TOKENS)
+        if (!model || !n) continue
+        const slot = (day[provider] ??= {})
+        slot[model] = (slot[model] ?? 0) + n
+        tokens += n
+      }
+    }
+    const names = Object.keys(day)
+    if (names.length > MAX_PROVIDERS_PER_DAY) continue
+    if (names.some((name) => Object.keys(day[name]!).length > MAX_MODELS_PER_DAY)) continue
+    if (tokens > 0 && tokens <= MAX_DAY_TOKENS) out[date] = day
+  }
+  return out
+}
+
+/** Every host's provider days of one account, added together and cut to the window. */
+export function mergeProviders(reports: ProviderDays[], now: number): ProviderDays {
+  const oldest = dateOf(now, KEEP_DAYS - 1)
+  const merged: ProviderDays = {}
+  for (const days of reports) {
+    for (const [date, providers] of Object.entries(days)) {
+      if (date < oldest) continue
+      const day = (merged[date] ??= {})
+      for (const [provider, models] of Object.entries(providers)) {
+        const slot = (day[provider] ??= {})
+        for (const [model, n] of Object.entries(models)) slot[model] = (slot[model] ?? 0) + n
+      }
+    }
+  }
+  return merged
+}
+
 /** Adds one day's counts into another. */
 function addDay(into: Day, from: Day) {
   for (const [model, modes] of Object.entries(from)) {
@@ -303,9 +376,46 @@ export function buildBoard(members: Member[], now: number): Board {
         }
         return row
       })
-    periods[period] = { topModels, tokens, models: ranked.slice(0, MODEL_ROWS) }
+    periods[period] = {
+      topModels,
+      tokens,
+      models: ranked.slice(0, MODEL_ROWS),
+      providers: providerRows(members, since),
+    }
   }
   return { version: BOARD_VERSION, updatedAt: now, periods }
+}
+
+/** Top providers since a date, each split by its own five most used models and the rest. */
+function providerRows(members: Member[], since: string): ProviderRow[] {
+  const providers = new Map<string, { models: Map<string, number>; users: Set<string> }>()
+  for (const member of members) {
+    for (const [date, day] of Object.entries(member.providers ?? {})) {
+      if (date < since) continue
+      for (const [provider, models] of Object.entries(day)) {
+        const entry = providers.get(provider) ?? { models: new Map(), users: new Set<string>() }
+        for (const [model, n] of Object.entries(models)) {
+          if (n <= 0) continue
+          entry.models.set(model, (entry.models.get(model) ?? 0) + n)
+          entry.users.add(member.login)
+        }
+        providers.set(provider, entry)
+      }
+    }
+  }
+  return [...providers]
+    .map(([provider, entry]) => {
+      const models = [...entry.models]
+        .map(([model, tokens]) => ({ model, tokens }))
+        .sort((a, b) => b.tokens - a.tokens || a.model.localeCompare(b.model))
+      const tokens = models.reduce((sum, row) => sum + row.tokens, 0)
+      const top = models.slice(0, TOP_MODELS)
+      const others = tokens - top.reduce((sum, row) => sum + row.tokens, 0)
+      return { provider, tokens, users: entry.users.size, models: top, others }
+    })
+    .filter((row) => row.tokens > 0)
+    .sort((a, b) => b.tokens - a.tokens || a.provider.localeCompare(b.provider))
+    .slice(0, PROVIDER_ROWS)
 }
 
 async function body(req: Request): Promise<Record<string, unknown> | null> {
@@ -326,6 +436,7 @@ const memberKey = (login: string) => `users/${login.toLowerCase()}`
 
 async function recompute(ctx: CommunityContext, userId: string, login: string, now: number) {
   const reports: Days[] = []
+  const providers: ProviderDays[] = []
   const prefix = `community/reports/${userId}/`
   for (const { key } of (await ctx.registry.list({ prefix })).blobs) {
     const hostId = key.slice(prefix.length)
@@ -335,9 +446,17 @@ async function recompute(ctx: CommunityContext, userId: string, login: string, n
       continue
     }
     const report = await read<Report>(ctx.registry, key)
-    if (report) reports.push(report.days)
+    if (report) {
+      reports.push(report.days)
+      providers.push(report.providers ?? {})
+    }
   }
-  const member: Member = { login, days: mergeReports(reports, now), updatedAt: now }
+  const member: Member = {
+    login,
+    days: mergeReports(reports, now),
+    providers: mergeProviders(providers, now),
+    updatedAt: now,
+  }
   await ctx.store.setJSON(memberKey(login), member)
 }
 
@@ -412,6 +531,7 @@ export async function handleCommunity(req: Request, ctx: CommunityContext) {
       await ctx.registry.setJSON(gapKey, { at: now })
       await ctx.registry.setJSON(reportKey(userId, hostId), {
         days: cleaned.days,
+        providers: cleanProviders(input?.providers, now),
         at: now,
       } satisfies Report)
       await recompute(ctx, userId, account.login, now)
