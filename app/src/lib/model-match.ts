@@ -65,7 +65,13 @@ const gemmaAlias = (id: string) => id.replace(/\bgemma4(?=[-:]|$)/, "gemma-4")
  * Ids a catalog spelling might be stored under, most specific first. A lookup takes the first
  * candidate that has a BenchLM row, so an exact row always beats a looser reading.
  */
+const candidateCache = new Map<string, string[]>()
+
 export function benchCandidates(id: string): string[] {
+  // Built once per id: a lookup runs for every row, and again for every keystroke while the
+  // picker's search is typed.
+  const cached = candidateCache.get(id)
+  if (cached) return cached
   const base = normalise(id)
   const bases = [base]
   if (base.includes(":")) bases.push(base.replace(/:/g, "-"), base.split(":")[0])
@@ -78,5 +84,7 @@ export function benchCandidates(id: string): string[] {
     }
   }
   const aliased = out.map(gemmaAlias)
-  return [...new Set([...out, ...aliased])]
+  const candidates = [...new Set([...out, ...aliased])]
+  candidateCache.set(id, candidates)
+  return candidates
 }
