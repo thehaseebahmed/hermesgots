@@ -1,7 +1,7 @@
 import { lazy, useEffect } from "react"
 import { useTheme } from "next-themes"
 import { useLiveQuery } from "dexie-react-hooks"
-import { Navigate, Route, Routes } from "react-router"
+import { Navigate, Route, Routes, useParams } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
 import { getActiveProfile } from "@/lib/db"
@@ -22,6 +22,9 @@ const OpenSessionPage = lazy(() =>
   import("@/routes/open-session").then((m) => ({ default: m.OpenSessionPage })),
 )
 const CodePage = lazy(() => import("@/routes/code").then((m) => ({ default: m.CodePage })))
+const ProjectsPage = lazy(() =>
+  import("@/routes/projects").then((m) => ({ default: m.ProjectsPage })),
+)
 const ProjectPage = lazy(() => import("@/routes/project").then((m) => ({ default: m.ProjectPage })))
 const MeetingsPage = lazy(() =>
   import("@/routes/meetings").then((m) => ({ default: m.MeetingsPage })),
@@ -77,6 +80,12 @@ function Home() {
   return active ? <Navigate to={`/b/${active.id}`} replace /> : <ChatPage />
 }
 
+/** A project's old address, from before projects had a place of their own. */
+function MovedProject() {
+  const { profileId, projectId } = useParams()
+  return <Navigate to={`/projects/${profileId}/${projectId}`} replace />
+}
+
 function AppRoutes() {
   useRecordLastChat()
   useShareReceiver()
@@ -95,7 +104,9 @@ function AppRoutes() {
         <Route path="c/:id" element={<ChatPage />} />
         <Route path="s/:sessionId" element={<OpenSessionPage />} />
         <Route path="code" element={<CodePage />} />
-        <Route path="code/:profileId/:projectId" element={<ProjectPage />} />
+        <Route path="code/:profileId/:projectId" element={<MovedProject />} />
+        <Route path="projects" element={<ProjectsPage />} />
+        <Route path="projects/:profileId/:projectId" element={<ProjectPage />} />
         <Route path="meetings" element={<MeetingsPage />} />
         <Route path="meetings/:id" element={<MeetingPage />} />
         <Route path="meetings/:id/topics/:topic" element={<TopicPage />} />

@@ -56,14 +56,11 @@ try {
     0,
     "Code sessions must not appear under bot chats",
   )
-  const profileId = await page.evaluate(
-    async () => (await (await import("/src/lib/db.ts")).db.profiles.toArray())[0].id,
-  )
-  await page.goto(`${app}/code/${profileId}/p_1a2b3c4d`)
+  await page.goto(`${app}/code`)
   await page.getByText("Code session", { exact: true }).waitFor()
   await page.getByText("Code session", { exact: true }).click()
   await page.waitForURL("**/c/code")
-  console.log("PASS: sessions stay in Code and open from their project")
+  console.log("PASS: sessions stay in Code and open from Code")
 } finally {
   await browser.close()
 }

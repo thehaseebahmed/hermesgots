@@ -1,7 +1,7 @@
-// The list beside what it opened, for Meetings and Research: one pane on a phone and on a tablet in
+// The list beside what it opened, for Projects, Code, Meetings and Research: one pane on a phone and on a tablet in
 // portrait, two on a tablet in landscape with the sidebar as a rail, one again with the sidebar
 // open, and the list beside the item (the sidebar a third pane) from 1280px. The item pane opens the
-// one opened last, and New research asks in it. With no console errors.
+// one opened last, New research asks in it, and New session picks the project of the chip in use. With no console errors.
 import { app, assert, flow, pass } from "./lib.mjs"
 
 const errors = []
@@ -19,7 +19,7 @@ const CASES = [
 for (const [width, collapsed, panes] of CASES) {
   await flow(
     `panes-${width}${collapsed ? "-rail" : ""}`,
-    async ({ page, shot: take }) => {
+    async ({ page, profileId, seed, shot: take }) => {
       const shot = async (step) => {
         await page.waitForTimeout(400)
         return take(step)
@@ -62,6 +62,68 @@ for (const [width, collapsed, panes] of CASES) {
         assert.equal(new URL(page.url()).pathname, "/meetings", "stays on the list")
         await shot("meetings")
         pass(`${look}: meetings is one pane`)
+      }
+
+      // Projects: with room the top project opens beside the list.
+      await page.goto(`${app}/projects`)
+      await page.getByText("Smart Home").first().waitFor({ timeout: 15_000 })
+      if (panes === 2) {
+        await page.waitForURL(`**/projects/${profileId}/p_*`, { timeout: 5_000 })
+        await shot("projects")
+        assert.equal(await page.getByRole("button", { name: "Back to Projects" }).count(), 0)
+        const first = page.url()
+        await page.getByRole("link", { name: /Maze/ }).click()
+        await page.waitForURL((url) => url.href !== first)
+        const last = page.url()
+        await page.waitForFunction(
+          ([key, id]) => localStorage.getItem(key) === id,
+          ["memento:last-projects", `${profileId}/p_5e6f7a8b`],
+        )
+        await page.goto(`${app}/projects`)
+        await page.waitForURL(last, { timeout: 5_000 })
+        pass(`${look}: projects list beside the project, reopening the last one`)
+      } else {
+        assert.equal(new URL(page.url()).pathname, "/projects", "stays on the list")
+        await shot("projects")
+        pass(`${look}: projects is one pane`)
+      }
+
+      // Code: every project's sessions in one list.
+      await seed([
+        { id: "pane-gots", title: "Rotate the logs", projectId: "p_1a2b3c4d" },
+        { id: "pane-maze", title: "Add a timer", projectId: "p_5e6f7a8b" },
+      ])
+      await page.goto(`${app}/code`)
+      if (panes === 2) {
+        await page.waitForURL("**/c/pane-*", { timeout: 15_000 })
+        await page.getByRole("region", { name: "Today" }).getByText("Add a timer").waitFor()
+        await shot("code")
+        assert.equal(await page.getByRole("button", { name: "Back to Code" }).count(), 0)
+        const first = page.url()
+        const other = first.endsWith("pane-gots") ? "Add a timer" : "Rotate the logs"
+        await page.getByRole("region", { name: "Today" }).getByText(other).click()
+        await page.waitForURL((url) => url.href !== first)
+        const last = page.url()
+        await page.waitForFunction(
+          ([key, id]) => localStorage.getItem(key) === id,
+          ["memento:last-code", last.split("/").at(-1)],
+        )
+        await page.goto(`${app}/code`)
+        await page.waitForURL(last, { timeout: 5_000 })
+        pass(`${look}: code list beside the session, reopening the last one`)
+      } else {
+        await page.getByRole("region", { name: "Today" }).getByText("Add a timer").waitFor()
+        assert.equal(new URL(page.url()).pathname, "/code", "stays on the list")
+        // A chip picks the project, and New session starts there.
+        await page.getByRole("button", { name: "Maze", exact: true }).click()
+        assert.equal(await page.getByText("Rotate the logs").count(), 0, "the chip filters")
+        await page.getByRole("button", { name: "New session" }).click()
+        const picked = page.getByRole("radio", { checked: true })
+        await picked.waitFor({ timeout: 5_000 })
+        assert.match(await picked.innerText(), /Maze/, "New session picks the chip's project")
+        await shot("code-new")
+        await page.keyboard.press("Escape")
+        pass(`${look}: code is one pane, New session takes the chip's project`)
       }
 
       // Research.

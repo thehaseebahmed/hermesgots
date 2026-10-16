@@ -41,6 +41,7 @@ type Server = { baseUrl: string; apiKey: string }
  */
 let answers = new Map<string, LiveRuns>()
 let found: Found = {}
+let running: Record<string, LiveRunStatus> = {}
 let servers: Server[] = []
 const listeners = new Set<() => void>()
 let timer: number | undefined
@@ -52,6 +53,7 @@ function notify() {
     {},
     ...servers.map((server) => answers.get(connectionKey(server))?.waiting ?? {}),
   )
+  running = Object.assign({}, ...[...answers.values()].map((answer) => answer.sessions))
   listeners.forEach((listener) => listener())
 }
 
@@ -142,6 +144,12 @@ export function useLiveRuns(profile: Server | undefined) {
     if (baseUrl && apiKey) void readLiveRuns({ baseUrl, apiKey })
   }, [baseUrl, apiKey])
   return useSyncExternalStore(subscribe, () => (key && answers.get(key)?.sessions) || NO_RUNS)
+}
+
+/** Sessions with a run in flight on any bot's server, by Hermes session id. Needs the plugin. */
+export function useAllLiveRuns() {
+  useWaiting()
+  return useSyncExternalStore(subscribe, () => running)
 }
 
 /** A session's run in flight on its server, from the shared poll's last answer. */

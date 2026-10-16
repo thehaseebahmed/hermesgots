@@ -16,14 +16,14 @@ import { DrawerContext } from "@/components/drawer-context"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { useLarge, useWide } from "@/lib/media"
 import { depth } from "@/lib/nav"
-import { useMeetingsPane, useProjectPane, useResearchPane } from "@/lib/pane"
+import { useCodePane, useMeetingsPane, useProjectsPane, useResearchPane } from "@/lib/pane"
 import { useSidebarCollapsed } from "@/lib/sidebar"
 import { useBotPane, useBotThreads } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 
 /**
- * A list kept on screen beside what it opened: a project beside its session (from `xl`), a bot
- * beside its thread, or the meetings or research missions beside one (where `useSplit` says
+ * A list kept on screen beside what it opened: a bot beside its thread (from `xl`), or Code's
+ * sessions, the projects, the meetings or research missions beside one (where `useSplit` says
  * there is room). `screen` is the list's own path.
  */
 interface ListPane {
@@ -33,8 +33,8 @@ interface ListPane {
 }
 
 /**
- * From `lg` Settings' sections open beside its menu, and from `xl` a project's sessions beside the
- * project (and a bot's threads beside the bot), so each counts as one screen.
+ * From `lg` Settings' sections open beside its menu, and a list and what it opened beside it, so
+ * each counts as one screen.
  */
 function screenOf(path: string, large: boolean, pane: ListPane | undefined) {
   if (pane) return pane.screen
@@ -50,7 +50,10 @@ const MeetingsPane = lazy(() =>
 const ResearchPane = lazy(() =>
   import("@/routes/research").then((m) => ({ default: m.ResearchPane })),
 )
-const ProjectPage = lazy(() => import("@/routes/project").then((m) => ({ default: m.ProjectPage })))
+const CodePane = lazy(() => import("@/routes/code").then((m) => ({ default: m.CodePane })))
+const ProjectsPane = lazy(() =>
+  import("@/routes/projects").then((m) => ({ default: m.ProjectsPane })),
+)
 
 /**
  * Animates the main pane in when the screen changes: from the right when it was opened on top of
@@ -86,8 +89,8 @@ function usePageTransition(ref: RefObject<HTMLElement | null>, pane: ListPane | 
 }
 
 /**
- * From `xl`, a project and the session open beside it: the project narrows to a list pane and the
- * session slides in to its right. Both stay mounted while sessions are swapped.
+ * A list and the item open beside it: the list narrows to a pane and the item slides in to its
+ * right. Both stay mounted while items are swapped.
  */
 function Panes({ pane, children }: { pane: ListPane | undefined; children: ReactNode }) {
   const session = useRef<HTMLDivElement>(null)
@@ -117,7 +120,7 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
         </div>
       )}
       <div ref={session} className="flex min-w-0 flex-1 flex-col">
-        {/* The project's own route has nothing to add beside it. */}
+        {/* A list's own route has nothing to add beside it. */}
         {pane && !open ? null : <Suspense fallback={null}>{children}</Suspense>}
       </div>
     </div>
@@ -130,41 +133,28 @@ export function AppShell({ children }: { children?: ReactNode }) {
   const [collapsed, toggleCollapsed] = useSidebarCollapsed()
   const { pathname } = useLocation()
   const main = useRef<HTMLElement>(null)
-  const project = useProjectPane()
   const bot = useBotPane(useBotThreads())
+  const code = useCodePane()
+  const projects = useProjectsPane()
   const meetings = useMeetingsPane()
   const research = useResearchPane()
-  const pane: ListPane | undefined = project
+  const pane: ListPane | undefined = bot
     ? {
-        screen: `/code/${project.profileId}/${project.projectId}`,
-        open: Boolean(project.session),
-        node: (
-          <ProjectPage
-            key={`${project.profileId}/${project.projectId}`}
-            pane={project}
-            session={project.session}
-          />
-        ),
+        screen: `/b/${bot.profileId}`,
+        open: Boolean(bot.thread),
+        node: <BotThreadsPage key={bot.profileId} profileId={bot.profileId} thread={bot.thread} />,
       }
-    : bot
-      ? {
-          screen: `/b/${bot.profileId}`,
-          open: Boolean(bot.thread),
-          node: (
-            <BotThreadsPage key={bot.profileId} profileId={bot.profileId} thread={bot.thread} />
-          ),
-        }
-      : meetings
-        ? {
-            screen: "/meetings",
-            open: meetings.open,
-            node: <MeetingsPane pane={meetings} />,
-          }
-        : research && {
-            screen: "/research",
-            open: research.open,
-            node: <ResearchPane pane={research} />,
-          }
+    : code
+      ? { screen: "/code", open: code.open, node: <CodePane pane={code} /> }
+      : projects
+        ? { screen: "/projects", open: projects.open, node: <ProjectsPane pane={projects} /> }
+        : meetings
+          ? { screen: "/meetings", open: meetings.open, node: <MeetingsPane pane={meetings} /> }
+          : research && {
+              screen: "/research",
+              open: research.open,
+              node: <ResearchPane pane={research} />,
+            }
   usePageTransition(main, pane)
 
   return (

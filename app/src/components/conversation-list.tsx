@@ -6,6 +6,7 @@ import {
   BellOffIcon,
   ChevronRightIcon,
   CodeXmlIcon,
+  FolderKanbanIcon,
   ListChecksIcon,
   MessageCircleQuestionMarkIcon,
   PanelLeftCloseIcon,
@@ -467,6 +468,15 @@ export function ConversationList({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         <nav className={cn("flex flex-col gap-0.5", collapsed && "items-center")} aria-label="Main">
+          <RootLink
+            to="/projects"
+            onClick={onNavigate}
+            aria-label={collapsed ? "Projects" : undefined}
+            className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
+          >
+            <FolderKanbanIcon className="size-5 text-muted-foreground" />
+            {!collapsed && "Projects"}
+          </RootLink>
           <RootLink
             to="/code"
             onClick={onNavigate}

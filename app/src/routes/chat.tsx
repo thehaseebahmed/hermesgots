@@ -112,6 +112,7 @@ import { useLive, watchChat } from "@/lib/live"
 import { useSessionRunning } from "@/lib/waiting"
 import { usePoll } from "@/lib/poll"
 import { useXLarge, useWide } from "@/lib/media"
+import { useCodePane, useRememberOpened } from "@/lib/pane"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
@@ -241,7 +242,7 @@ export function ChatPage() {
     [id],
   )
   // The route is the chat on screen. The live query keeps its last result until the next one is in,
-  // so a session swapped in place beside its project can still hand back the one before it: nothing
+  // so a session swapped in place beside Code's list can still hand back the one before it: nothing
   // of that session may render or be acted on here — its plan card's Approve would send its plan.
   const conversation = found && found.id !== id ? undefined : found
   // A chat talks to its own bot; a new chat goes to the selected one. Same rule as the row above:
@@ -521,19 +522,19 @@ export function ChatPage() {
   const [leavingWithDraft, setLeavingWithDraft] = useState(false)
   const unsent =
     session !== undefined && messages?.length === 0 && !(session.updatedAt > session.createdAt)
-  const projectPath = session && `/code/${session.profileId}/${session.projectId}`
+  const codePath = session && "/code"
   const leave = () => {
-    if (!session || !projectPath) return
-    if (!unsent) return up(projectPath)
+    if (!session || !codePath) return
+    if (!unsent) return up(codePath)
     if (draftRef.current.trim()) return setLeavingWithDraft(true)
     void deleteConversation(session.id)
-    up(projectPath)
+    up(codePath)
   }
   const leaveRef = useRef(leave)
   useEffect(() => {
     leaveRef.current = leave
   })
-  // Beside its project another session can be picked straight away, with no chance to ask, so a
+  // Beside Code's list another session can be picked straight away, with no chance to ask, so a
   // session left unsent goes, or is kept as a draft when something was typed.
   const shown = useRef(id)
   useEffect(() => {
@@ -554,10 +555,12 @@ export function ChatPage() {
   const botThreads = useBotThreads()
   const botPath =
     botThreads && conversation && !session ? `/b/${conversation.profileId}` : undefined
-  // From `xl` a session opens beside its project, and a thread beside its bot, which they close to.
+  // From `xl` a thread opens beside its bot, which it closes to. A session opens beside Code's list
+  // where there's room, and is then a top-level screen with nothing to go back to.
   const xl = useXLarge()
   const wide = useWide()
-  const beside = xl && Boolean(session)
+  const beside = Boolean(useCodePane()) && Boolean(session)
+  useRememberOpened("code", session?.id)
   // Beside its bot the header drops the picture, so the reply count sits under the title instead.
   const replyCount = messages?.filter((m) => m.role === "assistant").length ?? 0
   const repliesLine =
@@ -571,14 +574,15 @@ export function ChatPage() {
       return true
     })
   }, [botPath, up])
-  // A session sits under its project; a plain chat is top-level, so back leaves the app.
+  // A session sits under Code, unless it's beside it; a plain chat is top-level, so back leaves the
+  // app.
   useEffect(() => {
-    if (!projectPath) return
+    if (!codePath || beside) return
     return setBackGuard(() => {
       leaveRef.current()
       return true
     })
-  }, [projectPath])
+  }, [codePath, beside])
 
   /** Before a session is deleted or discarded: its run, worktrees, pull requests and branches. */
   const closeSession = async () => {
@@ -712,15 +716,16 @@ export function ChatPage() {
               {xl ? <XIcon /> : <ArrowLeftIcon />}
             </Button>
           ) : (
-            session && (
+            session &&
+            !beside && (
               <Button
                 variant="outline"
                 size="icon-lg"
                 className="size-11 rounded-full bg-background/80 backdrop-blur"
                 onClick={leave}
-                aria-label={beside ? "Close session" : "Back to project"}
+                aria-label="Back to Code"
               >
-                {beside ? <XIcon /> : <ArrowLeftIcon />}
+                <ArrowLeftIcon />
               </Button>
             )
           )
@@ -883,7 +888,7 @@ export function ChatPage() {
           </div>
         ) : (
           <Composer
-            // Sessions are swapped in place beside their project; each keeps its own text.
+            // Sessions are swapped in place beside Code's list; each keeps its own text.
             key={session?.id}
             busy={busy}
             disabled={!configured}
@@ -1021,18 +1026,18 @@ export function ChatPage() {
             <AlertDialogAction
               variant="outline"
               onClick={async () => {
-                if (!session || !projectPath) return
+                if (!session || !codePath) return
                 await deleteConversation(session.id)
-                up(projectPath)
+                up(codePath)
               }}
             >
               Delete
             </AlertDialogAction>
             <AlertDialogAction
               onClick={async () => {
-                if (!session || !projectPath) return
+                if (!session || !codePath) return
                 await updateConversation(session.id, { draftAt: Date.now() })
-                up(projectPath)
+                up(codePath)
               }}
             >
               Save draft
@@ -1064,7 +1069,7 @@ export function ChatPage() {
                   await deleteConversation(id)
                 }
                 setDeleting(false)
-                if (projectPath) up(projectPath)
+                if (codePath) up(codePath)
                 else root(botPath ?? "/")
               }}
             >

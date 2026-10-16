@@ -116,7 +116,7 @@ export function channelName(category: PushCategoryInfo) {
 /** Where a tapped notification goes: the session it is about, or the screen of what failed. */
 export function pushPath(kind: unknown, id: unknown) {
   if (kind === "routine_failed") return "/routines"
-  if (kind === "clone_failed") return "/code"
+  if (kind === "clone_failed") return "/projects"
   if (typeof kind === "string" && kind.startsWith("research_"))
     return typeof id === "string" && id ? `/research/${encodeURIComponent(id)}` : "/research"
   return typeof id === "string" && id ? `/s/${encodeURIComponent(id)}` : null

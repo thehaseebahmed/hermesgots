@@ -1,25 +1,16 @@
 import { useEffect, useState, type ReactNode } from "react"
 import {
-  ArchiveIcon,
-  ArchiveRestoreIcon,
-  ArrowLeftIcon,
-  ChartLineIcon,
   CodeXmlIcon,
   GitForkIcon,
   LockIcon,
-  PinIcon,
-  PinOffIcon,
   PlusIcon,
   RotateCcwIcon,
   SearchIcon,
-  Trash2Icon,
   XIcon,
-  type LucideIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
-import { ProjectUsageView } from "@/components/project-usage"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -63,9 +54,8 @@ function projectRepos(project: HermesProject) {
 }
 
 /**
- * A project's settings: its name, goal and repos (saved together), its usage, and pinning,
- * archiving and deleting it (at once). Adding and removing repos runs on the plugin, in the
- * background.
+ * A project's name, goal and repos, saved together. Adding and removing repos runs on the plugin,
+ * in the background.
  */
 export function ProjectSettings({
   open,
@@ -73,8 +63,6 @@ export function ProjectSettings({
   profile,
   project,
   onChanged,
-  onArchived,
-  onDelete,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -82,51 +70,21 @@ export function ProjectSettings({
   project: HermesProject
   /** Something changed on the plugin; read the project again. */
   onChanged: () => void
-  onArchived: () => void
-  onDelete: () => void
 }) {
-  const [view, setView] = useState<"settings" | "usage">("settings")
   return (
-    <Popup
-      open={open}
-      onOpenChange={(next) => {
-        if (next) setView("settings")
-        onOpenChange(next)
-      }}
-      onOpenChangeComplete={(next) => !next && setView("settings")}
-    >
+    <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent className="max-h-[92dvh] pb-0 md:max-h-[85dvh] md:pb-0">
-        {/* Centred, so the room the back button takes on the left mirrors the close button's on
-            the right: without it the heading sits left of the panel's axis. */}
-        <PopupHeader className={cn("relative pb-2", view === "usage" && "md:pl-16")}>
-          {view === "usage" && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="absolute top-4 left-4"
-              onClick={() => setView("settings")}
-              aria-label="Back"
-            >
-              <ArrowLeftIcon />
-            </Button>
-          )}
-          <PopupTitle>{view === "usage" ? "Usage" : "Settings"}</PopupTitle>
+        <PopupHeader className="pb-2">
+          <PopupTitle>Edit project</PopupTitle>
         </PopupHeader>
-        {view === "usage" ? (
-          <ProjectUsageView profile={profile} project={project} />
-        ) : (
-          <SettingsForm
-            // Fresh fields every time the sheet opens on the project as it now is.
-            key={open ? project.id : "closed"}
-            profile={profile}
-            project={project}
-            onClose={() => onOpenChange(false)}
-            onChanged={onChanged}
-            onArchived={onArchived}
-            onDelete={onDelete}
-            onUsage={() => setView("usage")}
-          />
-        )}
+        <SettingsForm
+          // Fresh fields every time the sheet opens on the project as it now is.
+          key={open ? project.id : "closed"}
+          profile={profile}
+          project={project}
+          onClose={() => onOpenChange(false)}
+          onChanged={onChanged}
+        />
       </PopupContent>
     </Popup>
   )
@@ -137,17 +95,11 @@ function SettingsForm({
   project,
   onClose,
   onChanged,
-  onArchived,
-  onDelete,
-  onUsage,
 }: {
   profile: Profile
   project: HermesProject
   onClose: () => void
   onChanged: () => void
-  onArchived: () => void
-  onDelete: () => void
-  onUsage: () => void
 }) {
   const [name, setName] = useState(project.name)
   const [goal, setGoal] = useState(project.description ?? "")
@@ -322,47 +274,6 @@ function SettingsForm({
               </button>
             ))}
         </Section>
-
-        <Group>
-          <ActionRow icon={ChartLineIcon} onClick={onUsage}>
-            Usage
-          </ActionRow>
-          <ActionRow
-            icon={project.pinnedAt ? PinOffIcon : PinIcon}
-            onClick={() =>
-              void act(
-                () => updateProject(profile, project.id, { pinned: !project.pinnedAt }),
-                "Couldn't pin the project.",
-              )
-            }
-          >
-            {project.pinnedAt ? "Unpin" : "Pin"}
-          </ActionRow>
-          <ActionRow
-            icon={project.archived ? ArchiveRestoreIcon : ArchiveIcon}
-            onClick={() =>
-              void act(async () => {
-                await updateProject(profile, project.id, { archived: !project.archived })
-                if (!project.archived) {
-                  onClose()
-                  onArchived()
-                }
-              }, "Couldn't archive the project.")
-            }
-          >
-            {project.archived ? "Unarchive" : "Archive"}
-          </ActionRow>
-          <ActionRow
-            icon={Trash2Icon}
-            destructive
-            onClick={() => {
-              onClose()
-              onDelete()
-            }}
-          >
-            Delete
-          </ActionRow>
-        </Group>
       </fieldset>
 
       <div className="sticky bottom-0 bg-popover px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6 md:pb-6">
@@ -427,29 +338,6 @@ function Section({
 
 function Group({ children }: { children: ReactNode }) {
   return <div className="flex flex-col gap-0.5 overflow-hidden rounded-3xl">{children}</div>
-}
-
-function ActionRow({
-  icon: Icon,
-  destructive,
-  onClick,
-  children,
-}: {
-  icon: LucideIcon
-  destructive?: boolean
-  onClick: () => void
-  children: ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      className={cn(ROW_BUTTON, destructive && "text-destructive")}
-      onClick={onClick}
-    >
-      <Icon className="size-5 shrink-0" />
-      <span className="flex-1 text-base">{children}</span>
-    </button>
-  )
 }
 
 /** A repo of the project; while it's being added or removed, how that's going. */

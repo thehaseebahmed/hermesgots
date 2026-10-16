@@ -2,7 +2,7 @@
 // alone. The report this covers: the user was in the first session, went back and opened the
 // second one just as the first one's plan-mode reply landed, and the first session's plan-ready
 // card showed on the second one's screen — where approving it would have run the wrong plan.
-// The switch is the phone's own: the project screen, then the session's row, no reload.
+// The switch is the phone's own: Code's list of sessions, then the session's row, no reload.
 import { app, assert, flow, mock, pass, runId } from "./lib.mjs"
 
 const PROJECT = "p_1a2b3c4d"
@@ -36,7 +36,7 @@ const clearCards = (page) =>
 
 await flow(
   "plan-mode",
-  async ({ page, profileId, seed, send, until, shot }) => {
+  async ({ page, seed, send, until, shot }) => {
     const a = `plan-a-${runId()}`
     const b = `plan-b-${runId()}`
     // The mock keeps its chat list between runs, so the titles carry the run's tag.
@@ -47,9 +47,9 @@ await flow(
       { id: b, title: titleB, projectId: PROJECT },
     ])
 
-    const project = `${app}/code/${profileId}/${PROJECT}`
+    const project = `${app}/code`
     const group = (label) => page.getByRole("region", { name: label })
-    const backToProject = () => page.getByRole("button", { name: "Back to project" }).click()
+    const backToProject = () => page.getByRole("button", { name: "Back to Code" }).click()
     const openSession = async (id, title) => {
       await group("Today").getByText(title).click()
       await page.waitForURL(`**/c/${id}`)
@@ -97,9 +97,9 @@ await flow(
     )
     pass("session A is planning, waiting on the questions its plan needs")
 
-    // Back to the project and into the other session, while A is still planning.
+    // Back to Code and into the other session, while A is still planning.
     await backToProject()
-    await page.waitForURL(`**/code/${profileId}/${PROJECT}`)
+    await page.waitForURL("**/code")
     await clearCards(page)
     await openSession(b, titleB)
     await shot("other-session")
@@ -218,7 +218,7 @@ await flow(
 
     // The other order the report could have been: A's card already on screen, then back, then in.
     await backToProject()
-    await page.waitForURL(`**/code/${profileId}/${PROJECT}`)
+    await page.waitForURL("**/code")
     await group("Waiting on you").getByText(titleA).click()
     await page.waitForURL(`**/c/${a}`)
     await page.getByRole("button", { name: "Keep planning" }).waitFor({ timeout: 20_000 })
@@ -226,7 +226,7 @@ await flow(
     pass("session A shows its own plan-ready card")
 
     await backToProject()
-    await page.waitForURL(`**/code/${profileId}/${PROJECT}`)
+    await page.waitForURL("**/code")
     await clearCards(page)
     await openSession(b, titleB)
     await page.waitForTimeout(3000)
@@ -246,7 +246,7 @@ await flow(
     await page.getByRole("button", { name: "Keep planning" }).waitFor({ timeout: 20_000 })
     pass("session A's plan is still there")
 
-    // The other way the two meet: a session swapped in place beside its project, which keeps this
+    // The other way the two meet: a session swapped in place beside Code's list, which keeps this
     // screen mounted, while the route's own row is still being read. What the screen held before
     // must not show in the new session's place — its plan card would approve the other plan.
     await page.setViewportSize({ width: 1280, height: 900 })

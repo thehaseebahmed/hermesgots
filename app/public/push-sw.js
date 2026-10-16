@@ -30,7 +30,7 @@ const UNTITLED = {
 }
 
 // What the push is about when it isn't a session.
-const SCREENS = { routine_failed: "/routines", clone_failed: "/code" }
+const SCREENS = { routine_failed: "/routines", clone_failed: "/projects" }
 
 self.addEventListener("push", (event) => {
   let data = {}

@@ -1,8 +1,8 @@
 // A run started somewhere else (another device, the plugin's queue) shows the same on the session
-// screen as in its project: the open chat finds it on the host and follows it to the end.
+// screen as in Code: the open chat finds it on the host and follows it to the end.
 import { app, assert, flow, mock, pass } from "./lib.mjs"
 
-await flow("foreign-run", async ({ page, profileId, seed, send, lastReply, until, shot }) => {
+await flow("foreign-run", async ({ page, seed, send, lastReply, until, shot }) => {
   await seed([{ id: "e2e-foreign", title: "Elsewhere", projectId: "p_1a2b3c4d" }])
   await page.goto(`${app}/c/e2e-foreign`)
   await send("hello there")
@@ -25,9 +25,9 @@ await flow("foreign-run", async ({ page, profileId, seed, send, lastReply, until
   assert.equal(started.status, 202, "the host starts the run")
 
   const region = page.getByRole("region", { name: "Working" })
-  await page.goto(`${app}/code/${profileId}/p_1a2b3c4d`)
+  await page.goto(`${app}/code`)
   await region.getByText("Elsewhere").waitFor({ timeout: 15_000 })
-  pass("the project shows the session working")
+  pass("Code shows the session working")
 
   await page.getByText("Elsewhere").first().click()
   await page.waitForURL("**/c/e2e-foreign")

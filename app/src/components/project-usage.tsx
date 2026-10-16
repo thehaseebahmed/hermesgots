@@ -11,9 +11,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Spinner } from "@/components/ui/spinner"
-import { db, type Profile } from "@/lib/db"
+import { db } from "@/lib/db"
 import { formatTokens } from "@/lib/format"
-import { getProjectUsage, type HermesProject, type ProjectUsage } from "@/lib/hermes"
+import {
+  getProjectUsage,
+  type HermesConfig,
+  type HermesProject,
+  type ProjectUsage,
+} from "@/lib/hermes"
 import { estimateCost, type ModelUsage } from "@/lib/pricing"
 import { cn } from "@/lib/utils"
 
@@ -41,22 +46,22 @@ function formatCost({ usd: value, partial }: { usd: number; partial: boolean }) 
 
 /** A project's usage: totals, the split by kind of token and each session's share. */
 export function ProjectUsageView({
-  profile,
+  config,
   project,
 }: {
-  profile: Profile
+  config: HermesConfig
   project: HermesProject
 }) {
   const [usage, setUsage] = useState<ProjectUsage | null>()
   useEffect(() => {
     let cancelled = false
-    getProjectUsage(profile, project.id)
+    getProjectUsage(config, project.id)
       .then((value) => !cancelled && setUsage(value))
       .catch(() => !cancelled && setUsage(null))
     return () => {
       cancelled = true
     }
-  }, [profile, project.id])
+  }, [config, project.id])
   if (usage === undefined)
     return (
       <div className="flex justify-center px-6 py-10">

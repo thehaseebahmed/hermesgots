@@ -6,44 +6,6 @@ import { db } from "@/lib/db"
 import { useLarge, useXLarge } from "@/lib/media"
 import { useSidebarCollapsed } from "@/lib/sidebar"
 
-export interface ProjectPane {
-  profileId: string
-  projectId: string
-  /** The session open beside the project. */
-  session?: string
-}
-
-/**
- * From `xl` a project stays on screen while one of its sessions is open, as a pane to its left.
- * Links from the project pass it as `state.pane`, so the layout holds until the session loads.
- */
-export function useProjectPane(): ProjectPane | undefined {
-  const large = useXLarge()
-  const { pathname, state } = useLocation()
-  const project = matchPath("/code/:profileId/:projectId", pathname)?.params
-  const chat = matchPath("/c/:id", pathname)?.params.id
-  // Tagged with the id it's for, since a new id still sees the last answer for a moment.
-  const read = useLiveQuery(
-    async () => ({ chat, found: chat ? ((await db.conversations.get(chat)) ?? null) : null }),
-    [chat],
-  )
-  const hint = (state as { pane?: Omit<ProjectPane, "session"> } | null)?.pane
-
-  let pane: ProjectPane | undefined
-  if (project?.profileId && project.projectId)
-    pane = { profileId: project.profileId, projectId: project.projectId }
-  else if (chat) {
-    const found = read?.chat === chat ? read.found : undefined
-    if (found?.projectId)
-      pane = { profileId: found.profileId, projectId: found.projectId, session: chat }
-    else if (found === undefined) {
-      // Still loading: go by what the link said.
-      if (hint) pane = { profileId: hint.profileId, projectId: hint.projectId, session: chat }
-    }
-  }
-  return large ? pane : undefined
-}
-
 /**
  * Whether a list and what it opened fit side by side: the list pane is 412px and the item needs
  * about 520px more, so that's 1024px with the sidebar as a rail (a tablet in landscape) and 1280px
@@ -81,8 +43,42 @@ function useFeaturePane(base: string): FeaturePane | undefined {
 export const useMeetingsPane = () => useFeaturePane("/meetings")
 export const useResearchPane = () => useFeaturePane("/research")
 
+/** A project is named by its bot and its id, so its pane's selection is both: `<bot>/<project>`. */
+export function useProjectsPane(): FeaturePane | undefined {
+  const split = useSplit()
+  const { pathname } = useLocation()
+  if (!split) return undefined
+  if (matchPath("/projects", pathname)) return { open: true }
+  const project = matchPath("/projects/:profileId/:projectId", pathname)?.params
+  return project ? { open: true, selected: `${project.profileId}/${project.projectId}` } : undefined
+}
+
+/**
+ * Code's list of every session stays beside the open session. A session is a chat (`/c/<id>`), so
+ * whether one is open is read from its row; links from the list say so in `state.code`, so the
+ * layout holds while the row loads.
+ */
+export function useCodePane(): FeaturePane | undefined {
+  const split = useSplit()
+  const { pathname, state } = useLocation()
+  const chat = matchPath("/c/:id", pathname)?.params.id
+  // Tagged with the id it's for, since a new id still sees the last answer for a moment.
+  const read = useLiveQuery(
+    async () => ({ chat, found: chat ? ((await db.conversations.get(chat)) ?? null) : null }),
+    [chat],
+  )
+  if (!split) return undefined
+  if (matchPath("/code", pathname)) return { open: true }
+  if (!chat) return undefined
+  const found = read?.chat === chat ? read.found : undefined
+  const hint = Boolean((state as { code?: boolean } | null)?.code)
+  return found?.projectId || (found === undefined && hint)
+    ? { open: true, selected: chat }
+    : undefined
+}
+
 /** The features whose item pane opens on the one opened last, per device. */
-type Feature = "meetings" | "research"
+type Feature = "meetings" | "research" | "code" | "projects"
 
 const lastKey = (feature: Feature) => `memento:last-${feature}`
 

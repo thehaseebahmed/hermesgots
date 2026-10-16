@@ -1,31 +1,28 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import Dexie from "dexie"
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   ArchiveIcon,
-  ArchiveXIcon,
+  ArchiveRestoreIcon,
   ArrowLeftIcon,
-  CheckIcon,
   ChevronUpIcon,
-  CircleAlertIcon,
-  CodeXmlIcon,
-  GitPullRequestArrowIcon,
-  LockIcon,
-  PlusIcon,
-  Settings2Icon,
+  EllipsisIcon,
+  PencilIcon,
+  PinIcon,
+  PinOffIcon,
+  Trash2Icon,
 } from "lucide-react"
-import { useLocation, useNavigate, useParams } from "react-router"
+import { useLocation, useParams } from "react-router"
 import { toast } from "sonner"
 
-import { HOST_WORK_MS, PR_PENDING_MS, SAFETY_MS, SESSION_REREAD_MS } from "@/lib/freshness"
+import { HOST_WORK_MS, SAFETY_MS } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
 import { ChatHeader } from "@/components/chat/chat-header"
-import { PR_GROUPS, prLabel, prLook } from "@/components/chat/pr-look"
+import { PR_GROUPS } from "@/components/chat/pr-look"
 import { PrRow } from "@/components/chat/pr-pill"
-import { ItemGroup, ItemRow } from "@/components/item-list"
-import { itemGroups } from "@/lib/item-groups"
 import { LibraryTab } from "@/components/library"
 import { ProjectSettings } from "@/components/project-settings"
+import { ProjectUsageView } from "@/components/project-usage"
+import { RepoChips } from "@/components/repos"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -38,92 +35,70 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { Spinner } from "@/components/ui/spinner"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { stopMessage } from "@/lib/chat"
+import { projectKey, useProjectSessions, useSessionFollowUps } from "@/lib/code"
 import {
   byNewestPr,
-  createConversation,
   db,
   deleteConversation,
-  prIsLive,
   prKey,
   type Conversation,
   type PullRequestRef,
 } from "@/lib/db"
-import { formatRelative } from "@/lib/format"
-import { useDraft } from "@/lib/drafts"
 import { useChanges, useLive } from "@/lib/live"
-import { usePoll } from "@/lib/poll"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
-import { reasonText, useLiveRuns, useWaiting, type WaitingReason } from "@/lib/waiting"
-import { deleteProject, type HermesProject } from "@/lib/hermes"
+import { useProjectsPane, useRememberOpened } from "@/lib/pane"
+import { usePoll } from "@/lib/poll"
+import { deleteProject, updateProject, type HermesProject } from "@/lib/hermes"
 import { readProjects, useProjects } from "@/lib/projects"
-import {
-  projectRepos,
-  prChecksPending,
-  refreshPrs,
-  refreshWorkspace,
-  sessionGroup,
-  type SessionState,
-} from "@/lib/workspace"
-
-const DAY_MS = 86_400_000
-
-function serverKey(baseUrl: string) {
-  return baseUrl.trim().replace(/\/+$/, "").replace(/\/v1$/, "")
-}
+import { projectRepos } from "@/lib/workspace"
 
 /**
- * One Hermes Project: its sessions, library and PRs. From `xl` the app shell keeps it beside the
- * open session (`session`), so picking another one swaps it in place.
+ * One Hermes Project: its goal and repos, then its library, pull requests and usage. Its sessions
+ * are listed in Code. Beside the list of projects (see `useProjectsPane`) it is the item pane.
  */
-export function ProjectPage({
-  pane,
-  session: openSession,
-}: {
-  pane?: { profileId: string; projectId: string }
-  session?: string
-}) {
-  const params = useParams()
-  const { profileId = "", projectId = "" } = pane ?? params
-  const navigate = useNavigate()
-  const { root, up } = useNav()
-  // A project sits under Code, and a session open beside it under the project.
-  const back = useCallback(
-    () => (openSession ? root("/code") : up("/code")),
-    [openSession, root, up],
-  )
-  useEffect(() => {
-    return setBackGuard(() => {
-      back()
-      return true
-    })
-  }, [back])
+export function ProjectPage() {
+  const { profileId = "", projectId = "" } = useParams()
+  const beside = Boolean(useProjectsPane())
+  const { up } = useNav()
+  const back = useCallback(() => up("/projects"), [up])
+  // Beside the list a project is the top-level screen, so back leaves the app.
+  useEffect(() => (beside ? undefined : setBackGuard(() => (back(), true))), [back, beside])
   const passed = (useLocation().state as { project?: HermesProject } | null)?.project
   const profile = useLiveQuery(() => db.profiles.get(profileId), [profileId])
   const baseUrl = profile?.baseUrl
   const apiKey = profile?.apiKey
-  const server = baseUrl !== undefined && apiKey !== undefined ? { baseUrl, apiKey } : undefined
+  const server = useMemo(
+    () => (baseUrl !== undefined && apiKey !== undefined ? { baseUrl, apiKey } : undefined),
+    [baseUrl, apiKey],
+  )
   const fetched = useProjects(server)?.find((p) => p.id === projectId)
-  // The Code screen hands the project over, so it shows at once; it's read again here regardless.
+  // The list hands the project over, so it shows at once; it's read again here regardless.
   const project = fetched ?? (passed?.id === projectId ? passed : undefined)
+  useRememberOpened("projects", project ? `${profileId}/${projectId}` : undefined)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [tab, setTab] = useState("sessions")
+  const [tab, setTab] = useState("library")
   const [reads, setReads] = useState(0)
   const reload = () => setReads((n) => n + 1)
-  const live = useLiveRuns(profile)
   const streaming = useLive(profile)
   const projectChanges = useChanges("projects", profile)
   const changing = project?.folders.some((f) => f.status === "cloning" || f.status === "removing")
 
   useEffect(() => {
-    if (baseUrl === undefined || apiKey === undefined) return
-    readProjects({ baseUrl, apiKey }).catch(quietly("Reading projects"))
-  }, [baseUrl, apiKey, reads, projectChanges])
+    if (!server) return
+    readProjects(server).catch(quietly("Reading projects"))
+  }, [server, reads, projectChanges])
 
   usePoll(() => setReads((n) => n + 1), streaming ? SAFETY_MS : HOST_WORK_MS, [], {
     active: Boolean(changing),
@@ -131,138 +106,35 @@ export function ProjectPage({
     onShow: false,
   })
 
-  // Bots on one server share its projects, so their sessions all belong here. With them, what this
-  // device sees of its own turns: a reply streaming, an approval or a question waiting. Only a reply
-  // in flight can carry those (a finished turn expires its approval and question), and it's the
-  // newest reply, so each session's messages are read back only as far as that, past any queued
-  // after it.
-  const listed = useLiveQuery(async () => {
-    const local: Record<string, { any?: boolean; streaming?: boolean; waiting?: boolean }> = {}
-    if (baseUrl === undefined) return { rows: [] as Conversation[], local, now: Date.now() }
-    const server = serverKey(baseUrl)
-    const bots = new Set(
-      (await db.profiles.toArray()).filter((p) => serverKey(p.baseUrl) === server).map((p) => p.id),
-    )
-    const rows = (await db.conversations.where("projectId").equals(projectId).toArray())
-      .filter((c) => bots.has(c.profileId))
-      .sort((a, b) => b.updatedAt - a.updatedAt)
-    await Promise.all(
-      rows.map(async (c) => {
-        const tail = await db.messages
-          .where("[conversationId+createdAt]")
-          .between([c.id, Dexie.minKey], [c.id, Dexie.maxKey])
-          .reverse()
-          .until((m) => m.role === "assistant", true)
-          .toArray()
-        if (!tail.length) return
-        local[c.id] = {
-          any: true,
-          streaming: tail.some((m) => m.status === "streaming"),
-          waiting: tail.some(
-            (m) => (m.approval && !m.approval.resolved) || (m.clarify && !m.clarify.resolved),
-          ),
-        }
-      }),
-    )
-    return { rows, local, now: Date.now() }
-    // The address, not the bot: its row changes far more often than which server it's on.
-  }, [baseUrl, projectId])
-  const rows = listed?.rows
-  const bots = useLiveQuery(
-    async () => Object.fromEntries((await db.profiles.toArray()).map((p) => [p.id, p.botId])),
-    [],
-  )
-  const local = listed?.local
-  const now = listed?.now ?? 0
+  const listed = useProjectSessions(server ? projectKey(server, projectId) : undefined)
+  const sessions = server ? listed?.sessions : undefined
+  useSessionFollowUps(sessions)
   // Each session's title by its worktree's name, so a library file can say which filed it.
   const titles = useMemo(
     () =>
       new Map(
-        (rows ?? [])
+        (sessions ?? [])
           .filter((c) => c.worktree?.branch)
           .map((c) => [c.worktree!.branch.replace(/^hermes\//, ""), c.title]),
       ),
-    [rows],
+    [sessions],
   )
-
-  // What the server says waits on the user: a goal paused or blocked, a question, an approval or a
-  // plan to read.
-  const waits = useWaiting()
-
-  // A session nothing was sent in (or typed for) isn't one yet. Synced ones carry their activity in
-  // `updatedAt`, since their messages load only when opened.
-  const sessions = rows?.filter((c) => c.draftAt || c.updatedAt > c.createdAt || local?.[c.id]?.any)
-
-  // A session's PRs are read when it's open; this reads them for every session as the screen opens,
-  // its worktree first when this device hasn't seen it (a session started elsewhere). While the
-  // screen stays open it reads both again, at most every minute, as the sessions change, so a plan
-  // approved or a pull request opened on another device shows here too.
-  const read = useRef(new Map<string, number>())
-  useEffect(() => {
-    const now = Date.now()
-    for (const c of sessions ?? []) {
-      const last = read.current.get(c.id)
-      if (last !== undefined && now - last < SESSION_REREAD_MS) continue
-      read.current.set(c.id, now)
-      const workspace = !c.worktree || last !== undefined
-      void (workspace ? refreshWorkspace(c.id) : Promise.resolve()).then(() => {
-        void refreshPrs(c.id)
-      })
-    }
-  }, [sessions])
-  // The open session's chat pane polls its own PR; exclude it here to avoid duplicate reads.
-  const runningChecks = (sessions ?? []).filter(
-    (c) => c.id !== openSession && prChecksPending(c.prs),
-  )
-  // While any does, read its pull requests again every few seconds, so the rows here keep up with
-  // the pill. Forced, so the freshness gate doesn't skip a tick that lands just inside its window.
-  usePoll(
-    () => {
-      for (const c of runningChecks) void refreshPrs(c.id, { force: true })
-    },
-    PR_PENDING_MS,
-    [],
-    { active: runningChecks.length > 0, immediate: false, onShow: false },
-  )
-
   const prs = projectPrs(sessions ?? [])
-  // The header names the repos, like the chips under it do: the one repo's name, or a count.
   const repos = project ? projectRepos(project) : []
   const subtitle = [
     profile?.name,
     repos.length > 1 ? `${repos.length} repositories` : repos[0]?.name,
   ]
     .filter(Boolean)
-    .join(" - ")
+    .join(" · ")
 
-  // A session spans every repo of the project; without one there's nowhere for it to work, and
-  // while one is still being cloned it would start without it.
-  const adding = project?.folders.flatMap((f) => (f.status === "cloning" && f.repo ? [f.repo] : []))
-  const canStart = Boolean(
-    profile?.apiKey &&
-    project?.status === "ready" &&
-    !project.archived &&
-    !adding?.length &&
-    project.folders.some((folder) => folder.git),
-  )
-  // The repos a session works in that are no longer in the project.
-  // Named as the plugin names a session's repos: by GitHub origin, else by folder.
-  const current = new Set(
-    project?.folders.filter((f) => f.git).map((f) => f.repo ?? f.path.split(/[\\/]/).at(-1)),
-  )
-  const removedRepos = (c: Conversation) =>
-    project?.status === "ready"
-      ? (c.worktree?.repos ?? []).map((r) => r.name).filter((name) => !current.has(name))
-      : []
-
-  const start = async () => {
-    if (!profile) return
-    const conversation = await createConversation(profile.id, { title: "Draft session", projectId })
-    // So the new session can name its repos at once. Beside a session, it takes that one's place.
-    navigate(`/c/${conversation.id}`, {
-      replace: Boolean(openSession),
-      state: { project, pane: { profileId, projectId } },
-    })
+  const act = async (action: () => Promise<void>, fallback: string) => {
+    try {
+      await action()
+      reload()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : fallback)
+    }
   }
 
   const remove = async () => {
@@ -274,35 +146,16 @@ export function ProjectPage({
         stopMessage(c.id)
         await deleteConversation(c.id)
       }
+      setDeleting(false)
       back()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't delete the project.")
+    } finally {
       setBusy(false)
-      setDeleting(false)
     }
   }
 
-  // A goal only the user can move (paused or blocked), a question, an approval or a plan: the server
-  // says which sessions wait on the user.
-  const serverWaits = (c: Conversation) => Boolean(waits[c.hermesSessionId])
-  const placed = (sessions ?? []).map((c) => ({
-    c,
-    ...sessionGroup(c, live[c.hermesSessionId], {
-      ...local?.[c.id],
-      waiting: local?.[c.id]?.waiting || serverWaits(c),
-    }),
-  }))
-  const grouped = itemGroups(
-    placed,
-    (s) =>
-      s.state === "resolved" || s.state === "discarded"
-        ? "closed"
-        : s.state === "idle"
-          ? undefined
-          : s.state,
-    (s) => s.c.updatedAt,
-    now,
-  )
+  const ready = profile && project?.status === "ready"
 
   return (
     <div className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col">
@@ -312,89 +165,95 @@ export function ProjectPage({
         subtitle={subtitle}
         showBot={false}
         leading={
-          <Button
-            variant="outline"
-            size="icon-lg"
-            className="size-11 rounded-full"
-            onClick={back}
-            aria-label="Back"
-          >
-            <ArrowLeftIcon />
-          </Button>
-        }
-        actions={
-          project?.status === "ready" && (
+          beside ? null : (
             <Button
               variant="outline"
               size="icon-lg"
-              className="size-11 rounded-full bg-background/80 backdrop-blur"
-              onClick={() => setSettingsOpen(true)}
-              aria-label="Project settings"
+              className="size-11 rounded-full"
+              onClick={back}
+              aria-label="Back to Projects"
             >
-              <Settings2Icon />
+              <ArrowLeftIcon />
             </Button>
           )
         }
+        actions={
+          ready && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    size="icon-lg"
+                    className="size-11 rounded-full bg-background/80 backdrop-blur"
+                    aria-label="Project options"
+                  />
+                }
+              >
+                <EllipsisIcon />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-48">
+                <DropdownMenuItem className="min-h-11" onClick={() => setSettingsOpen(true)}>
+                  <PencilIcon />
+                  Edit
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="min-h-11"
+                  onClick={() =>
+                    void act(
+                      () => updateProject(profile, projectId, { pinned: !project.pinnedAt }),
+                      "Couldn't pin the project.",
+                    )
+                  }
+                >
+                  {project.pinnedAt ? <PinOffIcon /> : <PinIcon />}
+                  {project.pinnedAt ? "Unpin" : "Pin"}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="min-h-11"
+                  onClick={() =>
+                    void act(
+                      () => updateProject(profile, projectId, { archived: !project.archived }),
+                      "Couldn't archive the project.",
+                    )
+                  }
+                >
+                  {project.archived ? <ArchiveRestoreIcon /> : <ArchiveIcon />}
+                  {project.archived ? "Unarchive" : "Archive"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  variant="destructive"
+                  className="min-h-11"
+                  onClick={() => setDeleting(true)}
+                >
+                  <Trash2Icon />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )
+        }
       />
+      {project && (project.description || repos.length > 0 || project.archived) && (
+        <div className="flex flex-col gap-3 px-4 pb-4">
+          {project.archived && (
+            <p className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+              <ArchiveIcon className="size-4" /> Archived
+            </p>
+          )}
+          {project.description && (
+            <p className="text-center text-sm text-muted-foreground">{project.description}</p>
+          )}
+          <RepoChips repos={repos} />
+        </div>
+      )}
       <Tabs value={tab} onValueChange={setTab} className="flex-1">
         <TabsList>
-          <TabsTrigger value="sessions">Sessions</TabsTrigger>
           <TabsTrigger value="library">Library</TabsTrigger>
-          <TabsTrigger value="prs">PRs</TabsTrigger>
+          <TabsTrigger value="prs">Pull requests</TabsTrigger>
+          <TabsTrigger value="usage">Usage</TabsTrigger>
         </TabsList>
-        <TabsContent value="sessions" className="flex flex-col overflow-y-auto">
-          <div className="mx-auto w-full max-w-2xl flex-1 px-4 py-6">
-            {sessions && sessions.length === 0 ? (
-              <p className="px-1 text-sm text-muted-foreground">No sessions yet.</p>
-            ) : (
-              <div className="flex flex-col gap-6">
-                {grouped.map((group) => (
-                  <ItemGroup key={group.key} group={group}>
-                    {group.items.map(({ c, state, prTick }) => (
-                      <li key={c.id}>
-                        <SessionItem
-                          session={c}
-                          botId={bots?.[c.profileId]}
-                          open={c.id === openSession}
-                          pane={openSession ? { profileId, projectId } : undefined}
-                          state={state}
-                          prTick={prTick}
-                          now={now}
-                          removed={removedRepos(c)}
-                          waiting={waits[c.hermesSessionId]}
-                        />
-                      </li>
-                    ))}
-                  </ItemGroup>
-                ))}
-              </div>
-            )}
-          </div>
-          {project?.archived ? (
-            <BottomNote icon={<ArchiveIcon className="size-4 shrink-0" />}>
-              This project is archived. Unarchive it in settings to start a session.
-            </BottomNote>
-          ) : adding?.length ? (
-            <BottomNote icon={<Spinner className="size-4 shrink-0" />}>
-              Adding {names.format(adding)}. New sessions can start once{" "}
-              {adding.length === 1 ? "it's" : "they're"} cloned.
-            </BottomNote>
-          ) : (
-            canStart && (
-              <div className="sticky bottom-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-                <div className="mx-auto flex w-full max-w-2xl justify-end">
-                  <Button
-                    size="lg"
-                    className="h-12 rounded-full px-5 shadow-lg"
-                    onClick={() => void start()}
-                  >
-                    <PlusIcon /> New session
-                  </Button>
-                </div>
-              </div>
-            )
-          )}
-        </TabsContent>
         <TabsContent value="library" className="flex-1 overflow-y-auto">
           {server && (
             <div className="mx-auto w-full max-w-2xl">
@@ -435,17 +294,20 @@ export function ProjectPage({
             )}
           </div>
         </TabsContent>
+        <TabsContent value="usage" className="overflow-y-auto pt-4">
+          {server && project && tab === "usage" && (
+            <ProjectUsageView config={server} project={project} />
+          )}
+        </TabsContent>
       </Tabs>
 
-      {profile && project?.status === "ready" && (
+      {ready && (
         <ProjectSettings
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
           profile={profile}
           project={project}
           onChanged={reload}
-          onArchived={back}
-          onDelete={() => setDeleting(true)}
         />
       )}
 
@@ -467,115 +329,6 @@ export function ProjectPage({
         </AlertDialogContent>
       </AlertDialog>
     </div>
-  )
-}
-
-const names = new Intl.ListFormat(undefined, { type: "conjunction" })
-
-/** In place of the New session button: why there's none right now. */
-function BottomNote({ icon, children }: { icon: ReactNode; children: ReactNode }) {
-  return (
-    <div className="sticky bottom-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-      <div
-        role="status"
-        className="mx-auto flex w-full max-w-2xl items-center gap-3 rounded-3xl border bg-background/90 px-4 py-3 text-sm shadow-lg backdrop-blur"
-      >
-        {icon}
-        <span className="min-w-0 flex-1">{children}</span>
-      </div>
-    </div>
-  )
-}
-
-function formatWhen(at: number, now: number) {
-  if (now - at < DAY_MS) return formatRelative(at, now)
-  return new Date(at).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })
-}
-
-/**
- * `user/repo #27 · Open`, naming the repo when the session spans more than one. Only the live
- * pull requests show: a session keeps the ones it already finished, and its row is for what it
- * still has open — a session left with only finished ones shows its newest.
- */
-function prLine(session: Conversation) {
-  const all = session.prs ?? []
-  if (!all.length) return undefined
-  const live = all.filter(prIsLive)
-  const shown = live.length
-    ? live
-    : [all.reduce((newest, pr) => (pr.number > newest.number ? pr : newest))]
-  return shown
-    .map((pr) => {
-      const state = prLook(pr).label
-      return `${prLabel(pr, all)} · ${state[0].toUpperCase() + state.slice(1)}`
-    })
-    .join(", ")
-}
-
-function StateIcon({ state }: { state: SessionState }) {
-  if (state === "working") return <Spinner />
-  if (state === "waiting") return <CircleAlertIcon />
-  if (state === "resolved") return <CheckIcon />
-  if (state === "discarded") return <ArchiveXIcon />
-  return <CodeXmlIcon />
-}
-
-function SessionItem({
-  session,
-  botId,
-  open,
-  pane,
-  state,
-  prTick,
-  now,
-  removed,
-  waiting,
-}: {
-  session: Conversation
-  botId?: string
-  /** Open beside the project. */
-  open?: boolean
-  /** The project, when a session is open beside it: another one takes its place. */
-  pane?: { profileId: string; projectId: string }
-  state: SessionState
-  /** Waits on the user with an open pull request to review and merge. */
-  prTick?: boolean
-  now: number
-  /** Why the server says the session waits on the user, if it does. */
-  waiting?: WaitingReason
-  /** Repos the session works in that were removed from the project, which makes it read-only. */
-  removed: string[]
-}) {
-  const draft = useDraft(session.id)
-  // A session the server says waits on the user says why: a goal paused or blocked, a question to
-  // answer, an approval to give, a plan to read.
-  const wait = waiting ? reasonText(waiting) : undefined
-  const line2 = removed.length
-    ? `${names.format(removed)} removed`
-    : (wait ?? prLine(session) ?? session.worktree?.branch ?? draft)
-  return (
-    <ItemRow
-      icon={
-        removed.length && state !== "working" ? (
-          <LockIcon />
-        ) : prTick ? (
-          <GitPullRequestArrowIcon />
-        ) : (
-          <StateIcon state={state} />
-        )
-      }
-      waiting={state === "waiting" && !prTick}
-      botId={botId}
-      title={session.title}
-      when={formatWhen(session.updatedAt, now)}
-      line={line2 && <span className="truncate">{line2}</span>}
-      selected={open}
-      link={{
-        to: `/c/${session.id}`,
-        replace: Boolean(pane),
-        state: { pane: pane ?? { profileId: session.profileId, projectId: session.projectId } },
-      }}
-    />
   )
 }
 
@@ -612,9 +365,7 @@ function Group({
   )
 }
 
-/**
- * Every session's pull requests, each once, newest number first.
- */
+/** Every session's pull requests, each once, newest number first. */
 function projectPrs(sessions: Conversation[]) {
   const byKey = new Map<string, PullRequestRef>()
   for (const pr of sessions.flatMap((c) => c.prs ?? [])) {

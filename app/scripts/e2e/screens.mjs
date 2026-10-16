@@ -1,4 +1,4 @@
-// Code, a project, Routines and a chat load their data at phone and tablet widths, in light and
+// Projects, a project, Code, Routines and a chat load their data at phone and tablet widths, in light and
 // dark mode, with no errors in the console.
 import { app, assert, flow, pass } from "./lib.mjs"
 
@@ -13,12 +13,15 @@ for (const width of [390, 1024]) {
         page.on("console", (message) => {
           if (message.type() === "error") errors.push(`${look}: ${message.text()}`)
         })
-        await page.goto(`${app}/code`)
+        await page.goto(`${app}/projects`)
         await page.getByText("Smart Home", { exact: true }).first().waitFor({ timeout: 15_000 })
-        await shot("code")
-        await page.goto(`${app}/code/${profileId}/p_1a2b3c4d`)
-        await page.getByRole("button", { name: "New session" }).waitFor({ timeout: 15_000 })
+        await shot("projects")
+        await page.goto(`${app}/projects/${profileId}/p_1a2b3c4d`)
+        await page.getByRole("tab", { name: "Pull requests" }).waitFor({ timeout: 15_000 })
         await shot("project")
+        await page.goto(`${app}/code`)
+        await page.getByRole("button", { name: "New session" }).first().waitFor({ timeout: 15_000 })
+        await shot("code")
         await page.goto(`${app}/routines`)
         await page.getByText("Inbox triage").first().waitFor({ timeout: 15_000 })
         await shot("routines")
@@ -32,7 +35,7 @@ for (const width of [390, 1024]) {
           "the reply to finish",
         )
         await shot("chat")
-        pass(`Code, a project, Routines and a chat load at ${look}`)
+        pass(`Projects, a project, Code, Routines and a chat load at ${look}`)
       },
       { viewport: { width, height: width < 768 ? 844 : 768 }, dark },
     )
