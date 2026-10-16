@@ -38,14 +38,23 @@ jobs:
         with:
           script: |
             const fs = require("fs")
-            const report = JSON.parse(fs.readFileSync(process.env.REPORT, "utf8"))
+            // The check writes its report only once both hosts answered, so a missing file is a
+            // fetch that failed — say so instead of failing to parse.
+            let report
+            try {
+              report = JSON.parse(fs.readFileSync(process.env.REPORT, "utf8"))
+            } catch {
+              report = null
+            }
             const title = "BenchLM: unmatched model ids"
-            const lines = [
-              `Checked ${report.checkedAt}. BenchLM data as of ${report.benchlmDataAsOf}.`,
-              "",
-              "Unlisted unmatched ids (add a fix in model-match.ts or a reason in scripts/benchlm-known-gaps.json):",
-              ...report.failing.map((id) => `- ${id}`),
-            ]
+            const lines = report
+              ? [
+                  `Checked ${report.checkedAt}. BenchLM data as of ${report.benchlmDataAsOf}.`,
+                  "",
+                  "Unlisted unmatched ids (add a fix in model-match.ts or a reason in scripts/benchlm-known-gaps.json):",
+                  ...report.failing.map((id) => `- ${id}`),
+                ]
+              : ["The check wrote no report, so BenchLM or models.dev could not be read. See the job log."]
             const body = lines.join("\n")
             const { data: open } = await github.rest.issues.listForRepo({
               owner: context.repo.owner, repo: context.repo.repo, state: "open", labels: "benchlm-match",
