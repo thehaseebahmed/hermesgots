@@ -527,3 +527,110 @@ the handler to catch. A `force: "yes"` therefore comes back through a different 
 ---
 
 Found while simplifying the pull_request tool's own four commits, on this branch.
+
+---
+
+# Deferred fixes from the simplify pass on the model row's facts line
+
+A cleanup review of `feat(chat): show a model row's cost and capabilities as fixed slots` (the same
+four parallel reviewers: reuse, quality, efficiency, altitude) turned up five changes worth making
+that are either wider than this branch or a design decision the branch should not settle on its own.
+They are recorded here instead of applied.
+
+Everything else the review found is applied on this branch: the top cost band is the exported
+`MAX_COST_TIER` rather than a second `COST_BANDS.length + 1`, and the band is read off the price the
+price sort already needs, so a model's facts cost one walk fewer over models.dev and parse its prices
+once; the pick that answers "does models.dev list it at all" lost its load-bearing `entry ?` guard,
+because `matchIn` now asks a pick only about an entry that exists, which protects every pick that
+follows; the row's dim has one owner (`DIM`) and its two capability marks come from one table that
+derives each mark's label and dim in one place; the fixed line is written in reading order instead of
+an array, a filter and an index-keyed join; the doc comment no longer shows a separator inside the
+cost run that the code never renders; and the AGENTS.md sentence on the row's shape moved out of the
+context-window paragraph into the picker's own.
+
+## Risky
+
+### 1. One catalog entry for all of a model's facts
+
+`modelFacts` (`src/lib/models.ts`) answers five questions in four walks of models.dev — `listed`,
+`context`, `vision`, `reasoning` and the price the band comes off — because `findIn` resolves each
+field independently: the model's own provider first, then any provider, so a field the own entry
+lacks can come from a different entry than a sibling field.
+
+- Cost: a model whose provider id doesn't match models.dev's, or whose entry lacks a field, walks
+  every provider once per field instead of once in total. The `factsCache` bounds that to one such
+  walk per model per catalog version, so it is paid on a catalog refresh, not per render.
+- Suggested fix: a `findIn` that returns the matched entry, with every fact read off that one object —
+  and one pass answering `listed`, which today needs a walk of its own to say "any entry at all".
+- Why it is risky: it changes which entry each fact is read from, so a row's score, cost, marks and
+  window could move for exactly the models the fallthrough exists for. That is a behaviour change to
+  the feature the previous two commits built, and it wants the e2e flows and a catalog of real ids to
+  judge — which this cleanup pass does not have.
+
+## Careful
+
+### 2. An unlisted row hides a BenchLM score the app has
+
+`modelDetail` returns `—` for a model models.dev doesn't list (`app/src/components/chat/model-picker.tsx`),
+but the line aggregates two sources: models.dev for the cost, the marks and the window, BenchLM's
+payload for the score. A model BenchLM ranks but models.dev doesn't list yet — a new release —
+rendered `BenchLM 87` before this branch and renders `—` after it.
+
+- Cost: a score the app holds is hidden because an unrelated source is silent, and the row reads as
+  "we know nothing" where the app knows something.
+- Suggested fix: let each source decide its own part — the score whenever it exists, the
+  models.dev-backed slots only for a listed model. If blanking the whole line is the design, say so at
+  the gate instead of leaving it reading as the old "nothing to show" fallback.
+- Why it is risky: it is user-visible behaviour that was decided on its own terms — the dash was
+  chosen over a row of dimmed slots for a model nothing is known about — so moving the gate is the
+  author's call rather than a cleanup's.
+
+### 3. A dim slot says nothing to a screen reader
+
+A dimmed mark keeps the plain label (`Vision`) and the cost slots carry no text alternative at all, so
+the one distinction the row was built to draw — supported, unsupported, not known — reaches assistive
+tech as "Vision" on every listed model, and five dim dollars read as a price.
+
+- Cost: the fixed-slot design is silently wrong for a screen-reader user on every model whose
+  modalities models.dev doesn't state, and an unknown cost is announced as a real one.
+- Suggested fix: carry the third state in the text (`Vision unknown`), and give the cost a text
+  alternative (`role="img"` with an `aria-label`, since a bare span's `aria-label` is ignored) naming
+  the band, or that it is unknown.
+- Why it is risky: it changes the tooltip and the accessible name of a row on every surface that
+  renders this picker, and the wording was chosen deliberately (unsupported reads "No vision", unknown
+  reads the plain name), so it is a design decision rather than a fix.
+
+### 4. "Unknown" reads permissive for image input and conservative for the mark
+
+`imageInputOf` (`src/lib/models.ts`) answers `true`, `false` or `undefined`, and its two callers read
+the unknown in opposite directions on purpose: the composer's attachment gating treats it as "yes,
+allow images" (`profile.imageInput !== false`, in `routes/chat.tsx`, `routes/bot-threads.tsx` and
+`routes/share.tsx`), while this row's mark treats it as "don't claim it" and dims.
+
+- Cost: the intended reading of `undefined` can only be recovered by reading both call sites, and a
+  reader of the mark cannot tell whether the dim is deliberate or an oversight.
+- Suggested fix: record the split where the tri-state is defined (the comment on `imageInputOf`) or in
+  AGENTS.md's image-input paragraph, rather than leaving each caller to imply it.
+- Why it is risky: it documents a deliberate asymmetry rather than fixing anything, and a shared
+  tri-state helper both callers consume would be a larger change that flattens two intents into one.
+
+### 5. The em dash is a literal in three files
+
+`modelDetail`'s `—` is the literal `chat/goal-wizard.tsx` and `chat/usage-sheet.tsx` each write their
+own copy of, and `src/lib/format.ts` exports no placeholder constant to import instead.
+
+- Cost: three copies of one typographic placeholder, with nothing tying them together.
+- Suggested fix: one exported constant in `format.ts`, used by all three.
+- Why it is risky: pre-existing — this branch only moved the dash from a `parts.length === 0` fallback
+  onto the listed gate — and it edits two files the change never touches, for a rename's worth of
+  value.
+
+---
+
+Found by the `/simplify-code` pass on this branch. It was a cleanup review, not a bug hunt —
+correctness was out of scope — and none of the five blocks the pull request. One check is not an entry
+here because it does not need deferring: both builds were rendered and the sheet is byte-identical
+(same screenshot hash of the sheet element at phone light and tablet dark), so the cleanup is
+pixel-neutral. The browser flows that open this picker were skipped at the author's request, so no
+flow asserts the row's shape.
+

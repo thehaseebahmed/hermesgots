@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useRef, useState, type ReactNode } from "react"
+import { useMemo, useRef, useState, type ReactNode } from "react"
 import { BrainIcon, EyeIcon, type LucideIcon } from "lucide-react"
 import {
   ArrowLeftIcon,
@@ -350,15 +350,43 @@ function sortProviders(providers: ModelProvider[]) {
     .sort((a, b) => byName.compare(a.name, b.name))
 }
 
-/** A capability mark: a lucide icon with a tooltip naming the capability; dimmed when it isn't supported. */
-function CapabilityIcon({ label, Icon, dim }: { label: string; Icon: LucideIcon; dim: boolean }) {
+/** The dim a fixed slot gets when the model isn't known to have it. */
+const DIM = "opacity-40"
+
+interface Capability {
+  key: "vision" | "reasoning"
+  label: string
+  /** What the mark reads as when the catalog says the model lacks it. */
+  off: string
+  Icon: LucideIcon
+}
+
+/** The capability marks every row draws, in order. */
+const CAPABILITIES: Capability[] = [
+  { key: "vision", label: "Vision", off: "No vision", Icon: EyeIcon },
+  { key: "reasoning", label: "Reasoning", off: "No reasoning", Icon: BrainIcon },
+]
+
+/**
+ * A capability mark: a lucide icon with a tooltip naming the capability, dimmed when the model
+ * isn't known to have it.
+ */
+function CapabilityMark({
+  capability,
+  supported,
+}: {
+  capability: Capability
+  supported?: boolean
+}) {
+  const { Icon } = capability
+  const label = supported === false ? capability.off : capability.label
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <span
             aria-label={label}
-            className={cn("inline-flex align-[-2px]", dim && "opacity-40")}
+            className={cn("inline-flex align-[-2px]", supported !== true && DIM)}
           />
         }
       >
@@ -369,13 +397,13 @@ function CapabilityIcon({ label, Icon, dim }: { label: string; Icon: LucideIcon;
   )
 }
 
-/** The cost as fixed dollar slots: the band's signs lit, the rest dimmed, so every row is the same width. */
+/** The cost as fixed dollar slots: the band's signs lit, the rest dimmed, so every row lines up. */
 function CostSigns({ tier }: { tier: number | undefined }) {
   const lit = tier ?? 0
   return (
     <span className="inline-flex">
-      {lit > 0 && "$".repeat(lit)}
-      {MAX_COST_TIER > lit && <span className="opacity-40">{"$".repeat(MAX_COST_TIER - lit)}</span>}
+      {"$".repeat(lit)}
+      {MAX_COST_TIER > lit && <span className={DIM}>{"$".repeat(MAX_COST_TIER - lit)}</span>}
     </span>
   )
 }
@@ -388,10 +416,10 @@ function benchlmLabel(score: number | undefined, rankings: RankingsPayload | und
 }
 
 /**
- * A model row's muted second line, in a fixed order: `BenchLM 87 · $$·$$$ · 👁 🧠 · 1M`. The score
- * and context drop out when unknown; the cost and both capability marks always show, dimmed when
- * the model doesn't have them. An unlisted model shows `—`, and no line at all while the catalog
- * is still loading.
+ * A model row's muted second line, one shape in a fixed order: the BenchLM score, the cost, the
+ * model's capabilities, then the context window. The score and the context drop out when unknown;
+ * the cost and both capability marks always show, dimmed when the model isn't known to have them.
+ * An unlisted model shows `—`, and no line at all while the catalog is still loading.
  */
 function modelDetail(
   catalog: Catalog | undefined,
@@ -402,29 +430,23 @@ function modelDetail(
   const facts = modelFacts(catalog, choice)
   if (!facts.listed) return "—"
   const benchlm = benchlmLabel(overallScoreOf(rankings, choice), rankings)
-  const parts: ReactNode[] = [
-    benchlm,
-    <CostSigns key="cost" tier={facts.tier} />,
-    <span key="capabilities" className="inline-flex items-center gap-1">
-      <CapabilityIcon
-        label={facts.vision === false ? "No vision" : "Vision"}
-        Icon={EyeIcon}
-        dim={facts.vision !== true}
-      />
-      <CapabilityIcon
-        label={facts.reasoning === false ? "No reasoning" : "Reasoning"}
-        Icon={BrainIcon}
-        dim={facts.reasoning !== true}
-      />
-    </span>,
-    facts.context ? formatTokens(facts.context) : null,
-  ].filter((part) => part !== null)
-  return parts.map((part, i) => (
-    <Fragment key={`part-${i}`}>
-      {i > 0 && " · "}
-      {part}
-    </Fragment>
-  ))
+  return (
+    <>
+      {benchlm && `${benchlm} · `}
+      <CostSigns tier={facts.tier} />
+      {" · "}
+      <span className="inline-flex items-center gap-1">
+        {CAPABILITIES.map((capability) => (
+          <CapabilityMark
+            key={capability.key}
+            capability={capability}
+            supported={facts[capability.key]}
+          />
+        ))}
+      </span>
+      {facts.context ? ` · ${formatTokens(facts.context)}` : null}
+    </>
+  )
 }
 
 // Four provider rows (each 3.5rem, `PROVIDER_ROW`) and the list's padding: a host with more
