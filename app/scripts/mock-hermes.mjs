@@ -1337,7 +1337,7 @@ http
       if (url.searchParams.get("refresh") === "true") customProbed = true
       return json(res, 200, { model, provider: set?.provider ?? "openrouter", providers })
     }
-    if (url.pathname === "/v1/skills") {
+    if (url.pathname === "/api/plugins/memento/skills") {
       return json(res, 200, {
         object: "list",
         data: [
@@ -1370,7 +1370,7 @@ http
       return json(res, 200, {
         name: "memento",
         version: PLUGIN_VERSION,
-        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "goal", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : [])],
+        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "goal", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "skills", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : [])],
         clarify: true,
         hooks: true,
         goal:
