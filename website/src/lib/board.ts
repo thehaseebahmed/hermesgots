@@ -21,8 +21,8 @@ export type Mode = (typeof MODES)[number]["key"]
 
 export const PERIODS = [
   { id: "today", label: "Today" },
-  { id: "week", label: "This week" },
-  { id: "month", label: "This month" },
+  { id: "week", label: "Week" },
+  { id: "month", label: "Month" },
 ] as const
 export type PeriodId = (typeof PERIODS)[number]["id"]
 

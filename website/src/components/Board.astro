@@ -15,6 +15,21 @@ const BOARDS = [
 ---
 
 <div id="board" data-endpoint={endpoint}>
+  <div class="switch" role="tablist" aria-label="Board">
+    {
+      BOARDS.map((board, index) => (
+        <button
+          type="button"
+          role="tab"
+          aria-selected={index === 0 ? "true" : "false"}
+          data-board={board.id}
+        >
+          {board.label}
+        </button>
+      ))
+    }
+  </div>
+
   <div class="tabs" role="tablist" aria-label="Period">
     {
       PERIODS.map((period, index) => (
@@ -27,21 +42,6 @@ const BOARDS = [
           data-period={period.id}
         >
           {period.label}
-        </button>
-      ))
-    }
-  </div>
-
-  <div class="switch" role="tablist" aria-label="Board">
-    {
-      BOARDS.map((board, index) => (
-        <button
-          type="button"
-          role="tab"
-          aria-selected={index === 0 ? "true" : "false"}
-          data-board={board.id}
-        >
-          {board.label}
         </button>
       ))
     }
