@@ -9,7 +9,8 @@
 // route's 404 carries no CORS headers.
 // The plugin also keeps the chat list (GET and POST /api/plugins/memento/chats, newer record wins) and
 // labels a chat as Gots's on POST /api/plugins/memento/sessions/{id}/label. Its
-// GET /api/plugins/memento/sessions/{id}/context reports a keyed session's latest model call.
+// GET /api/plugins/memento/sessions/{id}/context reports a keyed session's latest model call, and
+// GET /api/plugins/memento/skills serves the composer's `/` menu (three skills, no profile scope).
 // GET /api/plugins/memento/usage?provider=… serves two windows (Session + Weekly) whose
 // used_percent is MOCK_USAGE_PERCENT (default 94 so the composer banner shows; 0 → no windows), and
 // one Ollama Cloud account's monthly allowance with a purchased-credits detail when the provider is
@@ -1337,16 +1338,6 @@ http
       if (url.searchParams.get("refresh") === "true") customProbed = true
       return json(res, 200, { model, provider: set?.provider ?? "openrouter", providers })
     }
-    if (url.pathname === "/api/plugins/memento/skills") {
-      return json(res, 200, {
-        object: "list",
-        data: [
-          { name: "github-pr-workflow", description: "Open, review and land pull requests.", category: "github" },
-          { name: "log-triage", description: "Find the noisy lines in a pile of logs.", category: "ops" },
-          { name: "plan", description: "Write a step-by-step plan before touching anything.", category: null },
-        ],
-      })
-    }
     if (url.pathname === "/api/jobs") {
       const all = url.searchParams.get("include_disabled") === "true"
       const jobs = cronJobs(profile).filter((job) => all || !job.paused)
@@ -1385,6 +1376,16 @@ http
     }
     if (PLUGIN && RESEARCH && !profile && (await handleResearch(req, res, url.pathname, { json, readBody, noteEvent })))
       return
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/skills") {
+      return json(res, 200, {
+        object: "list",
+        data: [
+          { name: "github-pr-workflow", description: "Open, review and land pull requests.", category: "github" },
+          { name: "log-triage", description: "Find the noisy lines in a pile of logs.", category: "ops" },
+          { name: "plan", description: "Write a step-by-step plan before touching anything.", category: null },
+        ],
+      })
+    }
     // Web Push: the mock keeps subscriptions but sends nothing.
     if (PLUGIN && !profile && req.method === "POST" && url.pathname === "/api/plugins/memento/push") {
       const { subscription, device, vapid_key, subject, categories } = await readBody(req)
