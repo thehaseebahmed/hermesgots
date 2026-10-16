@@ -45,6 +45,9 @@ jobs:
       - name: Community function tests
         run: node scripts/test-community.mjs
         working-directory: app
+      - name: BenchLM matching tests
+        run: node --experimental-strip-types --test scripts/test-bench-matching.mjs
+        working-directory: app
       - name: Build
         run: pnpm build
         working-directory: app
