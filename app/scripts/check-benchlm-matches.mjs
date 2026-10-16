@@ -8,7 +8,7 @@ import { readFileSync, writeFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
 
-import { benchCandidates, scoreFor, scoreMapOf } from "../src/lib/model-match.ts"
+import { scoreFor, scoreMapOf } from "../src/lib/model-match.ts"
 
 const PROVIDERS = ["github-copilot", "ollama-cloud", "anthropic", "deepseek", "xai"]
 const BENCHLM_URL = "https://memento.thehaseebahmed.com/.netlify/functions/benchlm"
@@ -37,8 +37,7 @@ export function chatIdsByProvider(catalog, providers = PROVIDERS) {
 }
 
 // Splits ids into matched and unmatched using the same rules as the picker.
-export function classify(ids, rows) {
-  const map = scoreMapOf(rows.map((r) => ({ modelKey: r.modelKey, score: r.score })))
+export function classify(ids, map) {
   const matched = []
   const unmatched = []
   for (const id of ids) {
@@ -73,11 +72,14 @@ async function main() {
 
   const ids = chatIdsByProvider(catalog)
   const gaps = JSON.parse(readFileSync(GAPS_PATH, "utf8"))
+  // One map for every provider, built from the payload's own rows, so a row carrying only a slug or
+  // a name scores here exactly as it does in the app.
+  const map = scoreMapOf(rows)
 
   const unmatchedByProvider = {}
   const summary = {}
   for (const provider of PROVIDERS) {
-    const { matched, unmatched } = classify(ids[provider], rows)
+    const { matched, unmatched } = classify(ids[provider], map)
     summary[provider] = { checked: ids[provider].length, matched: matched.length, unmatched: unmatched.length }
     unmatchedByProvider[provider] = unmatched
   }

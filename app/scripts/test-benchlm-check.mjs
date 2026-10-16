@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { chatIdsByProvider, classify, isChatModel, unlistedGaps } from "./check-benchlm-matches.mjs"
+import { scoreMapOf } from "../src/lib/model-match.ts"
 
 test("only text-output models count as chat", () => {
   assert.equal(isChatModel({ modalities: { output: ["text"] } }), true)
@@ -19,8 +20,8 @@ test("chat ids are collected per provider", () => {
 })
 
 test("classify splits matched and unmatched ids", () => {
-  const rows = [{ modelKey: "gpt-oss-20b", score: 18.17 }]
-  assert.deepEqual(classify(["gpt-oss:20b", "unknown-model"], rows), {
+  const map = scoreMapOf([{ modelKey: "gpt-oss-20b", score: 18.17 }])
+  assert.deepEqual(classify(["gpt-oss:20b", "unknown-model"], map), {
     matched: ["gpt-oss:20b"],
     unmatched: ["unknown-model"],
   })
