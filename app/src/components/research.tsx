@@ -1,7 +1,6 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from "react"
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
 import {
   CheckIcon,
-  CircleIcon,
   ExternalLinkIcon,
   FlagIcon,
   MessageCircleQuestionIcon,
@@ -76,18 +75,6 @@ export function CiteChip({ id, onCite }: { id: string; onCite: (id: string) => v
   )
 }
 
-/** One claim as the evidence shows it, for the sheet a tapped citation opens. */
-export function SourceCard({ id }: { id: string }) {
-  const { claims, sources } = useContext(LedgerContext)
-  const claim = claims.get(id)
-  if (!claim) return null
-  return (
-    <div className="rounded-3xl border bg-card p-4">
-      <ClaimBody claim={claim} source={sources.get(claim.source)} />
-    </div>
-  )
-}
-
 function Spans({ spans, onCite }: { spans: Span[]; onCite: (id: string) => void }) {
   return spans.map((span, index) =>
     span.flagged ? (
@@ -135,12 +122,9 @@ function Bars({ lines = 3 }: { lines?: number }) {
 export function GuideCanvas({
   mission,
   onCite,
-  focus,
 }: {
   mission: Mission
   onCite: (id: string) => void
-  /** A section the overview just jumped to, lit up for a moment; `at` makes a jump again light it again. */
-  focus?: { index: number; at: number }
 }) {
   const sections = mission.outputs?.guide ?? []
   const writing = mission.stage === "drafting" || mission.making === "guide"
@@ -165,13 +149,6 @@ export function GuideCanvas({
             id={`section-${index}`}
             className="relative isolate -mx-4 flex scroll-mt-4 flex-col gap-3 rounded-3xl px-4 py-3"
           >
-            {focus?.index === index && (
-              <span
-                key={focus.at}
-                aria-hidden
-                className="section-flash pointer-events-none absolute inset-0 -z-10 rounded-3xl"
-              />
-            )}
             {section?.question && (
               <span className="-mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                 <MessageCircleQuestionIcon className="size-3.5 shrink-0" />
@@ -355,6 +332,14 @@ function ClaimBody({ claim, source }: { claim: Claim; source?: Source }) {
 
 /** The evidence ledger, read-only: every claim with its source and the passage behind it. */
 export function Evidence({ ledger, active }: { ledger?: Ledger; active?: string }) {
+  // A tapped citation opens the drawer on its claim.
+  useEffect(() => {
+    if (!active) return
+    const frame = requestAnimationFrame(() =>
+      document.getElementById(`claim-${active}`)?.scrollIntoView({ block: "center" }),
+    )
+    return () => cancelAnimationFrame(frame)
+  }, [active])
   const sources = new Map(ledger?.sources.map((source) => [source.id, source]))
   const claims = ledger?.claims ?? []
   return (
@@ -389,61 +374,6 @@ function stageDetail(mission: Mission, stage: MissionStage) {
     : "Every claim to a source"
 }
 
-/** Reading sources, Drafting, Reviewing: done, under way or still to come. */
-export function StageList({ mission }: { mission: Mission }) {
-  const at = order.indexOf(mission.stage)
-  return (
-    <ol className="flex flex-col">
-      {RESEARCH_STAGES.map((stage, index) => {
-        const state = index < at ? "done" : index === at ? "now" : "next"
-        return (
-          <li key={stage.id} className="relative flex gap-3 pb-5 last:pb-0">
-            {index < RESEARCH_STAGES.length - 1 && (
-              <span
-                aria-hidden
-                className={cn(
-                  "absolute top-7 bottom-1 left-[11px] w-0.5 rounded-full",
-                  state === "done" ? "bg-primary" : "bg-border",
-                )}
-              />
-            )}
-            <span
-              className={cn(
-                "flex size-6 shrink-0 items-center justify-center rounded-full",
-                state === "done" && "bg-primary text-primary-foreground",
-                state === "now" && "bg-primary/10 text-primary",
-                state === "next" && "text-muted-foreground/50",
-              )}
-            >
-              {state === "done" ? (
-                <CheckIcon className="size-3.5" />
-              ) : state === "now" && mission.error ? (
-                <TriangleAlertIcon className="size-3.5 text-warning" />
-              ) : state === "now" ? (
-                <Spinner className="size-3.5" />
-              ) : (
-                <CircleIcon className="size-4" />
-              )}
-            </span>
-            <span className="flex min-w-0 flex-col">
-              <span
-                className={cn("text-sm font-medium", state === "next" && "text-muted-foreground")}
-              >
-                {stage.name}
-              </span>
-              {state !== "next" && (
-                <span className="text-xs text-muted-foreground">
-                  {stageDetail(mission, stage.id)}
-                </span>
-              )}
-            </span>
-          </li>
-        )
-      })}
-    </ol>
-  )
-}
-
 /** The sources read most recently, while reading. */
 export function NowReading({ mission }: { mission: Mission }) {
   const recent = (mission.ledger?.sources ?? []).slice(-3).reverse()
@@ -460,7 +390,7 @@ export function NowReading({ mission }: { mission: Mission }) {
   )
 }
 
-/** On phones, in place of the stage list: where the work is, as one line with a bar. */
+/** Where the work is, as one line with a bar, at the top of the mission while it works. */
 export function StageStrip({ mission }: { mission: Mission }) {
   const at = order.indexOf(mission.stage)
   const stage = RESEARCH_STAGES[at]

@@ -11,6 +11,7 @@ import {
   ClipboardCopyIcon,
   EllipsisIcon,
   FileTextIcon,
+  HistoryIcon,
   ListChecksIcon,
   MessageCircleQuestionIcon,
   MenuIcon,
@@ -38,8 +39,6 @@ import {
   MakingCanvas,
   NowReading,
   QuizCanvas,
-  SourceCard,
-  StageList,
   StageStrip,
 } from "@/components/research"
 import {
@@ -72,7 +71,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { db, getActiveProfile, rememberModel, type ModelChoice } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { getResearchWriters } from "@/lib/hermes"
-import { useLarge } from "@/lib/media"
 import { useModelInfo } from "@/lib/model-info"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
@@ -84,7 +82,6 @@ import {
   MISSION_TYPES,
   SOURCE_KINDS,
   approveScope,
-  claimNumber,
   confirmBrief,
   createMission,
   deleteMission,
@@ -499,7 +496,7 @@ export function MissionPage() {
 
   const researching = !["brief", "scope"].includes(mission.stage)
   return researching ? (
-    <WorkView mission={mission} onBack={beside ? undefined : back} beside={beside} />
+    <WorkView mission={mission} onBack={beside ? undefined : back} />
   ) : (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <MissionHeader
@@ -553,8 +550,16 @@ function MissionError({ mission }: { mission: Mission }) {
   )
 }
 
-/** Copy and Markdown once something is made, Missed something, Rewrite and Delete. */
-function MissionMenu({ mission, format }: { mission: Mission; format?: OutputFormat }) {
+/** Copy and Markdown once something is made, Revisions, Missed something, Rewrite and Delete. */
+function MissionMenu({
+  mission,
+  format,
+  onRevisions,
+}: {
+  mission: Mission
+  format?: OutputFormat
+  onRevisions?: () => void
+}) {
   const navigate = useNavigate()
   const [confirming, setConfirming] = useState(false)
   const [asking, setAsking] = useState(false)
@@ -616,6 +621,15 @@ function MissionMenu({ mission, format }: { mission: Mission; format?: OutputFor
               <DropdownMenuItem className="min-h-11" onClick={download}>
                 <FileTextIcon />
                 Markdown
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          )}
+          {onRevisions && (
+            <>
+              <DropdownMenuItem className="min-h-11" onClick={onRevisions}>
+                <HistoryIcon />
+                Revisions
               </DropdownMenuItem>
               <DropdownMenuSeparator />
             </>
@@ -1063,34 +1077,17 @@ function ScopeForm({ mission, botId }: { mission: Mission; botId?: string }) {
 }
 
 /**
- * Research under way, then delivered: the stages (and once delivered, the contents and the
- * evidence) on the left from tablet width, the output building in the centre.
+ * Research under way, then delivered, as one reading column: the stage strip while it works, the
+ * output building and delivered, and its sources and revisions in drawers.
  */
-function WorkView({
-  mission,
-  onBack,
-  beside,
-}: {
-  mission: Mission
-  onBack?: () => void
-  beside: boolean
-}) {
-  // Its own side pane needs the room beside the sidebar, and beside the list there is none.
-  const wide = useLarge() && !beside
+function WorkView({ mission, onBack }: { mission: Mission; onBack?: () => void }) {
   const delivered = mission.stage === "delivered"
   const [format, setFormat] = useState<OutputFormat>(mission.formats[0] ?? mission.format)
-  const [pane, setPane] = useState<Pane>("overview")
-  const [cited, setCited] = useState<string>()
-  // The overview and sources, on a phone or tablet.
-  const [sheet, setSheet] = useState(false)
-  // One citation tapped on a phone or tablet.
-  const [source, setSource] = useState<string>()
-  const [focus, setFocus] = useState<{ index: number; at: number }>()
-  const [current, setCurrent] = useState(0)
+  // The Sources drawer, and the claim a tapped citation opened it on.
+  const [sources, setSources] = useState<{ cited?: string }>()
+  const [revisions, setRevisions] = useState(false)
   const [viewing, setViewing] = useState<number>()
   const main = useRef<HTMLElement>(null)
-  // Until when the scroll is the overview's jump, not the reader's.
-  const jumping = useRef(0)
 
   // An earlier revision on show in place of the latest, read-only.
   const revision = mission.revisions?.find((r) => r.number === viewing && !isLatest(mission, r))
@@ -1113,53 +1110,14 @@ function WorkView({
         : "making"
       : format
   const outputs = shown.outputs ?? {}
-  const sections = canvas === "guide" ? (outputs.guide?.length ?? 0) : 0
+  const found = mission.ledger?.sources.length ?? 0
+  const revised = (mission.revisions?.length ?? 0) > 1 || Boolean(mission.pending)
 
-  const cite = (id: string) => {
-    setCited(id)
-    if (!wide) {
-      setSource(id)
-      return
-    }
-    setPane("evidence")
-    window.setTimeout(() =>
-      document.getElementById(`claim-${id}`)?.scrollIntoView({ block: "center" }),
-    )
-  }
-
-  const jump = (index: number) => {
-    setSheet(false)
-    setCurrent(index)
-    setFocus({ index, at: Date.now() })
-    jumping.current = Date.now() + 1200
-    const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches
-    // After a sheet has let go of the page.
-    window.setTimeout(
-      () =>
-        document
-          .getElementById(`section-${index}`)
-          ?.scrollIntoView({ block: "start", behavior: smooth ? "smooth" : "auto" }),
-      wide ? 0 : 350,
-    )
-  }
-
-  // The section at the top of the guide, for the overview to mark.
-  const follow = () => {
-    const box = main.current
-    if (!box || Date.now() < jumping.current) return
-    if (box.scrollTop + box.clientHeight >= box.scrollHeight - 2) return setCurrent(sections - 1)
-    const top = box.getBoundingClientRect().top + box.clientHeight / 3
-    let index = 0
-    for (let i = 0; i < sections; i++) {
-      const at = document.getElementById(`section-${i}`)?.getBoundingClientRect().top
-      if (at !== undefined && at <= top) index = i
-    }
-    setCurrent(index)
-  }
+  const cite = (id: string) => setSources({ cited: id })
 
   const view = (number?: number) => {
     setViewing(number)
-    setSheet(false)
+    setRevisions(false)
     main.current?.scrollTo({ top: 0 })
   }
 
@@ -1167,38 +1125,26 @@ function WorkView({
     if (await attempt("make it", () => makeFormat(mission, next))) setFormat(next)
   }
 
-  const side = (
-    <SidePane
-      mission={mission}
-      shown={shown}
-      format={viewed}
-      pane={pane}
-      onPane={setPane}
-      cited={cited}
-      current={current}
-      onJump={jump}
-      viewing={revision?.number}
-      onView={view}
-    />
-  )
-
   const actions = (
     <>
-      {delivered && !wide && (
+      {found > 0 && (
         <Button
           variant="outline"
-          size="icon-lg"
-          className="size-11 rounded-full"
-          onClick={() => {
-            setCited(undefined)
-            setSheet(true)
-          }}
-          aria-label="Overview and sources"
+          size="lg"
+          className="h-11 rounded-full px-4"
+          onClick={() => setSources({})}
+          aria-label={`${found} sources`}
         >
-          <BookMarkedIcon />
+          <BookMarkedIcon data-icon="inline-start" />
+          {found}
+          <span className="max-sm:hidden"> sources</span>
         </Button>
       )}
-      <MissionMenu mission={mission} format={format} />
+      <MissionMenu
+        mission={mission}
+        format={format}
+        onRevisions={revised ? () => setRevisions(true) : undefined}
+      />
     </>
   )
 
@@ -1206,90 +1152,68 @@ function WorkView({
     <LedgerProvider ledger={mission.ledger}>
       <div className="flex min-h-0 flex-1 flex-col">
         <MissionHeader mission={mission} onBack={onBack} actions={actions} />
-        <div className="flex min-h-0 flex-1">
-          {wide && (
-            // Material 3's list pane width, as in Settings and a project beside its session.
-            <aside
-              aria-label="Mission details"
-              className="flex w-90 shrink-0 flex-col gap-5 overflow-y-auto border-r px-4 pt-2 pb-6 min-[1200px]:w-103"
-            >
-              {delivered ? (
-                side
-              ) : (
-                <>
-                  <StageList mission={mission} />
-                  {mission.stage === "reading" && <NowReading mission={mission} />}
-                </>
-              )}
-            </aside>
-          )}
-          <main
-            ref={main}
-            onScroll={sections ? follow : undefined}
-            className="min-w-0 flex-1 overflow-y-auto"
-          >
-            <div className="mx-auto flex max-w-2xl flex-col gap-6 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))] md:px-8">
-              {!wide && !delivered && <StageStrip mission={mission} />}
-              {!wide && mission.stage === "reading" && <NowReading mission={mission} />}
-              <MissionError mission={mission} />
-              {revision ? (
-                <Banner
-                  tone="info"
-                  className="pr-28"
-                  action={
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-9 rounded-full"
-                      onClick={() => view(undefined)}
-                    >
-                      Latest
-                    </Button>
-                  }
-                >
-                  Revision {revision.number}: {revisionReason(revision)}
-                </Banner>
-              ) : (
-                delivered && (
-                  <FormatTabs mission={mission} value={format} onChange={setFormat} onMake={make} />
-                )
-              )}
-              <div className="flex flex-col gap-1">
-                <h2 className="text-2xl font-semibold tracking-tight">{mission.title}</h2>
-                <p className="text-sm text-muted-foreground">
-                  {formatName(viewed)} · {mission.found || "…"} sources · For{" "}
-                  {mission.audience.charAt(0).toLowerCase() + mission.audience.slice(1)}
-                </p>
-              </div>
-              {canvas === "making" ? (
-                <MakingCanvas found={mission.found} />
-              ) : canvas === "quiz" ? (
-                <QuizCanvas questions={outputs.quiz ?? []} onCite={cite} />
-              ) : canvas === "glossary" ? (
-                <GlossaryCanvas terms={outputs.glossary ?? []} onCite={cite} />
-              ) : (
-                <GuideCanvas mission={shown} onCite={cite} focus={focus} />
-              )}
+        <main ref={main} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+          <div className="mx-auto flex max-w-2xl flex-col gap-6 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))] md:px-8">
+            {!delivered && <StageStrip mission={mission} />}
+            {mission.stage === "reading" && <NowReading mission={mission} />}
+            <MissionError mission={mission} />
+            {revision ? (
+              <Banner
+                tone="info"
+                className="pr-28"
+                action={
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9 rounded-full"
+                    onClick={() => view(undefined)}
+                  >
+                    Latest
+                  </Button>
+                }
+              >
+                Revision {revision.number}: {revisionReason(revision)}
+              </Banner>
+            ) : (
+              delivered && (
+                <FormatTabs mission={mission} value={format} onChange={setFormat} onMake={make} />
+              )
+            )}
+            <div className="flex flex-col gap-1">
+              <h2 className="text-2xl font-semibold tracking-tight">{mission.title}</h2>
+              <p className="text-sm text-muted-foreground">
+                {formatName(viewed)} · {mission.found || "…"} sources · For{" "}
+                {mission.audience.charAt(0).toLowerCase() + mission.audience.slice(1)}
+              </p>
             </div>
-          </main>
-        </div>
-        <Popup open={sheet} onOpenChange={setSheet} side>
+            {canvas === "making" ? (
+              <MakingCanvas found={mission.found} />
+            ) : canvas === "quiz" ? (
+              <QuizCanvas questions={outputs.quiz ?? []} onCite={cite} />
+            ) : canvas === "glossary" ? (
+              <GlossaryCanvas terms={outputs.glossary ?? []} onCite={cite} />
+            ) : (
+              <GuideCanvas mission={shown} onCite={cite} />
+            )}
+          </div>
+        </main>
+        <Popup open={Boolean(sources)} onOpenChange={(open) => !open && setSources(undefined)} side>
           <PopupContent initialFocus={false}>
             <PopupHeader>
-              <PopupTitle>{pane === "evidence" ? "Sources" : "Overview"}</PopupTitle>
+              <PopupTitle>Sources</PopupTitle>
             </PopupHeader>
-            <div className="flex flex-col gap-5 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-              {side}
+            <div className="px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+              <Evidence ledger={mission.ledger} active={sources?.cited} />
             </div>
           </PopupContent>
         </Popup>
-        <Popup open={Boolean(source)} onOpenChange={(open) => !open && setSource(undefined)}>
+        <Popup open={revisions && revised} onOpenChange={setRevisions} side>
           <PopupContent initialFocus={false}>
             <PopupHeader>
-              <PopupTitle>Source {source && claimNumber(source)}</PopupTitle>
+              <PopupTitle>Revisions</PopupTitle>
             </PopupHeader>
             <div className="px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-              {source && <SourceCard id={source} />}
+              <Revisions mission={mission} viewing={revision?.number} onView={view} />
             </div>
           </PopupContent>
         </Popup>
@@ -1298,59 +1222,9 @@ function WorkView({
   )
 }
 
-type Pane = "overview" | "evidence"
-
 /** The latest revision is what the mission shows, unless it's being written again. */
 const isLatest = (mission: Mission, revision: Revision) =>
   !mission.pending && revision.number === mission.revisions?.at(-1)?.number
-
-/** Beside a delivered mission: its overview and revisions, or the evidence. */
-function SidePane({
-  mission,
-  shown,
-  format,
-  pane,
-  onPane,
-  cited,
-  current,
-  onJump,
-  viewing,
-  onView,
-}: {
-  mission: Mission
-  /** The mission as on show: the latest, or an earlier revision. */
-  shown: Mission
-  format: OutputFormat
-  pane: Pane
-  onPane: (pane: Pane) => void
-  cited?: string
-  current: number
-  onJump: (index: number) => void
-  viewing?: number
-  onView: (number?: number) => void
-}) {
-  return (
-    <>
-      <Segmented
-        label="Pane"
-        options={[
-          { id: "overview", name: "Overview" },
-          { id: "evidence", name: "Sources" },
-        ]}
-        value={pane}
-        onChange={onPane}
-      />
-      {pane === "evidence" ? (
-        <Evidence ledger={mission.ledger} active={cited} />
-      ) : (
-        <>
-          <Overview mission={shown} format={format} current={current} onJump={onJump} />
-          <Revisions mission={mission} viewing={viewing} onView={onView} />
-        </>
-      )}
-    </>
-  )
-}
 
 /**
  * Questions the mission missed: the ones the model thinks it leaves open, to pick, and the user's
@@ -1503,57 +1377,6 @@ function FormatTabs({
   )
 }
 
-/** What the mission found, and its guide's sections, each jumping to its place in the guide. */
-function Overview({
-  mission,
-  format,
-  current,
-  onJump,
-}: {
-  mission: Mission
-  format: OutputFormat
-  current: number
-  onJump: (index: number) => void
-}) {
-  const unchecked = mission.ledger?.claims.filter((c) => c.confidence === "uncertain").length ?? 0
-  const sections = mission.outputs?.guide ?? []
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1 text-sm">
-        <span className="flex items-center gap-2 font-medium">
-          <CheckIcon className="size-4 text-success" />
-          Researched {mission.found} sources
-        </span>
-        <span className="flex items-center gap-2 text-muted-foreground">
-          <CheckIcon className="size-4 text-success" />
-          {unchecked
-            ? `${mission.claimCount - unchecked} of ${mission.claimCount} claims checked`
-            : "Every claim checked"}
-        </span>
-      </div>
-      {format === "guide" && sections.length > 0 && (
-        <ol className="flex flex-col gap-0.5">
-          {sections.map((section, index) => (
-            <li key={index}>
-              <button
-                type="button"
-                onClick={() => onJump(index)}
-                aria-current={index === current ? "location" : undefined}
-                className="flex min-h-11 w-full items-center gap-3 rounded-2xl px-3 text-left text-sm transition-colors hover:bg-muted aria-[current]:bg-muted aria-[current]:font-medium"
-              >
-                <span className="text-xs font-normal text-muted-foreground tabular-nums">
-                  {index + 1}
-                </span>
-                <span className="min-w-0 flex-1">{section.title}</span>
-              </button>
-            </li>
-          ))}
-        </ol>
-      )}
-    </div>
-  )
-}
-
 /** Each version the mission delivered and why it was written, newest first; one opens to read. */
 function Revisions({
   mission,
@@ -1569,59 +1392,56 @@ function Revisions({
   if (!revisions.length) return null
   const pending = mission.pending
   return (
-    <section className="flex flex-col gap-2">
-      <h3 className="px-3 text-sm font-medium text-muted-foreground">Revisions</h3>
-      <ol className="flex flex-col gap-0.5">
-        {pending && (
-          <li className="flex min-h-11 items-start gap-3 rounded-2xl px-3 py-2 text-sm">
-            <span className="pt-0.5 text-xs text-muted-foreground tabular-nums">
-              {revisions.length + 1}
+    <ol className="flex flex-col gap-0.5">
+      {pending && (
+        <li className="flex min-h-11 items-start gap-3 rounded-2xl px-3 py-2 text-sm">
+          <span className="pt-0.5 text-xs text-muted-foreground tabular-nums">
+            {revisions.length + 1}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-medium">
+              {pending.reason === "followup"
+                ? `Answering ${pending.questions?.map((q) => `“${q}”`).join(", ")}`
+                : `Rewriting with ${mission.writer?.model ?? "the default model"}`}
             </span>
-            <span className="min-w-0 flex-1">
-              <span className="block font-medium">
-                {pending.reason === "followup"
-                  ? `Answering ${pending.questions?.map((q) => `“${q}”`).join(", ")}`
-                  : `Rewriting with ${mission.writer?.model ?? "the default model"}`}
-              </span>
-              <span className="block text-xs text-muted-foreground">
-                {mission.error ? "Stopped" : RESEARCH_STAGE_NAMES[mission.stage]}
-              </span>
+            <span className="block text-xs text-muted-foreground">
+              {mission.error ? "Stopped" : RESEARCH_STAGE_NAMES[mission.stage]}
             </span>
-            {!mission.error && <Spinner className="mt-0.5 size-4 text-muted-foreground" />}
+          </span>
+          {!mission.error && <Spinner className="mt-0.5 size-4 text-muted-foreground" />}
+        </li>
+      )}
+      {[...revisions].reverse().map((revision) => {
+        const latest = isLatest(mission, revision)
+        const open = latest ? viewing === undefined : viewing === revision.number
+        return (
+          <li key={revision.number}>
+            <button
+              type="button"
+              aria-pressed={open}
+              onClick={() => onView(latest ? undefined : revision.number)}
+              className="flex min-h-11 w-full items-start gap-3 rounded-2xl px-3 py-2 text-left text-sm transition-colors hover:bg-muted aria-pressed:bg-muted"
+            >
+              <span className="pt-0.5 text-xs text-muted-foreground tabular-nums">
+                {revision.number}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block font-medium">{revisionReason(revision)}</span>
+                <span className="block text-xs text-muted-foreground">
+                  {[
+                    latest && "Current",
+                    `${revision.claims} claims`,
+                    revision.at && formatRelative(revision.at, now),
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+              </span>
+            </button>
           </li>
-        )}
-        {[...revisions].reverse().map((revision) => {
-          const latest = isLatest(mission, revision)
-          const open = latest ? viewing === undefined : viewing === revision.number
-          return (
-            <li key={revision.number}>
-              <button
-                type="button"
-                aria-pressed={open}
-                onClick={() => onView(latest ? undefined : revision.number)}
-                className="flex min-h-11 w-full items-start gap-3 rounded-2xl px-3 py-2 text-left text-sm transition-colors hover:bg-muted aria-pressed:bg-muted"
-              >
-                <span className="pt-0.5 text-xs text-muted-foreground tabular-nums">
-                  {revision.number}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block font-medium">{revisionReason(revision)}</span>
-                  <span className="block text-xs text-muted-foreground">
-                    {[
-                      latest && "Current",
-                      `${revision.claims} claims`,
-                      revision.at && formatRelative(revision.at, now),
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </span>
-                </span>
-              </button>
-            </li>
-          )
-        })}
-      </ol>
-    </section>
+        )
+      })}
+    </ol>
   )
 }
 
