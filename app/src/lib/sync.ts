@@ -15,6 +15,7 @@ import {
 } from "@/lib/account"
 import { hasPluginFeature, mergeChatList } from "@/lib/hermes"
 import { adoptDraft } from "@/lib/drafts"
+import { adoptSessionMode } from "@/lib/workspace"
 import {
   APPEARANCE_FIELDS,
   DEFAULT_PROFILE,
@@ -83,6 +84,7 @@ const CHAT_FIELDS = [
   "discardedAt",
   "draftAt",
   "draftText",
+  "mode",
   "modelChoice",
   "muted",
 ] as const
@@ -459,6 +461,8 @@ async function applyChats(profileId: string, pull: [string, Entry<ChatValue>][])
       })
       // A pulled draft fills an empty composer here; it never overwrites text typed on this device.
       if (entry.value.draftText) await adoptDraft(`c:${id}`, entry.value.draftText)
+      // A pick made on another device follows the session here, and out to the plugin.
+      if (entry.value.mode && entry.value.mode !== existing?.mode) await adoptSessionMode(id, entry.value.mode)
     }
   }
 }

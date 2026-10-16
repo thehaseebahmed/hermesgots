@@ -154,7 +154,7 @@ export interface Conversation {
   discardedAt?: number
   /** Its pushes are muted. Synced through the chat list, which is where the plugin reads it. */
   muted?: boolean
-  /** Permission mode, as the plugin last reported it. Local only; the plugin holds it. */
+  /** Permission mode. The plugin holds it live; the user's saved pick also travels in the chat record. */
   mode?: SessionMode
   /**
    * The session's worktrees (one per repo of the project, all on `branch`), from the plugin, and
