@@ -162,6 +162,57 @@ h1 {
   outline-offset: 2px;
 }
 
+/* The boards' switch: a smaller pill set in a track, so it reads as a second level under the periods. */
+.switch {
+  display: inline-flex;
+  gap: 0.25rem;
+  margin-top: 1rem;
+  padding: 0.25rem;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.switch button {
+  min-height: 2.25rem;
+  padding-inline: 1rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.switch button[aria-selected="true"] {
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: 0 1px 2px oklch(0 0 0 / 12%);
+}
+
+.switch button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* A board sits on its own panel, with its heading and legend close to the list it names. */
+.board {
+  margin-top: 1.25rem;
+  padding: 1rem 0.25rem 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 1.4);
+  background: var(--card);
+}
+
+.board h2 {
+  margin: 0;
+}
+
+.board .legend {
+  margin: 0.5rem 0 1rem;
+}
+
 .legend {
   display: flex;
   flex-wrap: wrap;
