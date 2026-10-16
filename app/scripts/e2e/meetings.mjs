@@ -73,8 +73,23 @@ for (const [width, dark] of [
       pass(`${width}: hidden until the Developer switch is on`)
 
       await setSwitch(true)
+      // A second bot, so the cards that switch between them show.
+      await page.evaluate(async () => {
+        const { db } = await import("/src/lib/db.ts")
+        const [first] = await db.profiles.toArray()
+        await db.profiles.put({ ...first, id: "e2e-second", name: "Second", botId: "penny" })
+      })
       await page.goto(`${app}/meetings`)
       await page.getByText("Weekly product sync").waitFor({ timeout: 15_000 })
+      const cards = page.getByRole("group", { name: "Bot" })
+      await cards.getByRole("button", { name: "Second", exact: false }).click()
+      await page.getByText(/Kindly start/).waitFor({ timeout: 5_000 })
+      assert.equal(
+        await cards.getByRole("button", { name: "Second", exact: false }).getAttribute("aria-pressed"),
+        "true",
+        "the picked bot is marked",
+      )
+      pass(`${width}: a card switches the bot and its line`)
       for (const group of ["Needs you", "Today", "Earlier"])
         assert.ok(await page.getByRole("heading", { name: group }).isVisible(), group)
       if (width >= 1024)
