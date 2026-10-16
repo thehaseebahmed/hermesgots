@@ -325,7 +325,7 @@ class InstructionsTest(unittest.TestCase):
         text = prompt_builder.session_prompt(self.record)
         self.assertIn(f"this session's library at {self.record['files_dir']}", text)
         self.assertIn("library_add tool", text)
-        self.assertLess(text.index("library at"), text.index("open_pull_request tool"))
+        self.assertLess(text.index("library at"), text.index("pull_request tool"))
 
     def test_the_line_teaches_the_naming_convention(self) -> None:
         text = prompt_builder.session_prompt(self.record)
@@ -344,7 +344,7 @@ class InstructionsTest(unittest.TestCase):
         text = prompt_builder.session_prompt(self.record)
         self.assertIn("Keep the user in the loop as you work", text)
         self.assertLess(text.index("library at"), text.index("Keep the user in the loop"))
-        self.assertLess(text.index("Keep the user in the loop"), text.index("open_pull_request tool"))
+        self.assertLess(text.index("Keep the user in the loop"), text.index("pull_request tool"))
 
     def test_the_block_names_the_rhythm_rules(self) -> None:
         text = prompt_builder.session_prompt(self.record)
@@ -357,7 +357,7 @@ class InstructionsTest(unittest.TestCase):
         no_repos = {**self.record, "repos": []}
         text = prompt_builder.session_prompt(no_repos)
         self.assertNotIn("Keep the user in the loop", text)
-        self.assertNotIn("open_pull_request tool", text)
+        self.assertNotIn("pull_request tool", text)
 
     def test_the_mock_repeats_the_instructions_word_for_word(self) -> None:
         # The mock is a standalone Node process, so its copy can't be imported; the e2e flows read

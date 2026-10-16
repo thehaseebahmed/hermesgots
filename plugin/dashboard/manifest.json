@@ -3,7 +3,7 @@
   "label": "Gots",
   "description": "Status of the Gots plugin, which serves cron run history to the Gots app and labels its chats.",
   "icon": "Smartphone",
-  "version": "0.43.0",
+  "version": "0.44.0",
   "tab": { "path": "/memento", "position": "end" },
   "entry": "dist/index.js",
   "api": "plugin_api.py"

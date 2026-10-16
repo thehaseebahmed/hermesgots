@@ -62,7 +62,7 @@ NOUNS = (
 )
 GIT_TIMEOUT_S = 60
 MUTATING_TOOLS = frozenset(
-    {"write_file", "patch", "execute_code", "delegate_task", "open_pull_request", "library_add"}
+    {"write_file", "patch", "execute_code", "delegate_task", "pull_request", "library_add"}
 )
 READ_ONLY_COMMANDS = frozenset(
     "ls cat head tail grep rg find fd pwd wc tree stat file which echo printf env du df diff sort "

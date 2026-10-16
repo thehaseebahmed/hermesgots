@@ -22,7 +22,7 @@ class HandleErrorPropagationTests(unittest.TestCase):
                 patch("plugin.ship.ship", return_value=results),
             ):
                 return ship.handle(
-                    {"title": "Test", "body": "Test body"},
+                    {"action": "ship", "commit_message": "Test", "title": "Test", "body": "Test body"},
                     task_id="test-session",
                 )
 

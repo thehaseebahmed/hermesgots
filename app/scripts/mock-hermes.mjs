@@ -50,7 +50,7 @@
 // names the file the plugin would have saved it to (plan_file). Every session also gets a library
 // folder (files_dir) the instructions tell the agent to file its generated files in, with the
 // plugin's library_add tool. From its second turn, or one that
-// says "ship", the agent opens the branch's PRs with the plugin's open_pull_request tool
+// says "ship", the agent opens the branch's PRs with the plugin's pull_request tool
 // (GET …/sessions/{id}/prs reads them, newest first and the finished ones included; "draft" in that
 // turn drafts them, and a later turn that says "ship" again opens another, its predecessor merged by
 // then): "merge" or "close" in a turn sets the live one's state, a merge resolves the session in the
@@ -335,9 +335,9 @@ const PENDING_CHECK_S = 12
 /** Project sessions as the plugin's memento.db holds them, by Hermes session id. */
 const projectSessions = new Map()
 // The plugin's pull request instruction (prompt_builder._PR_INSTRUCTIONS), word for word.
-const PR_INSTRUCTIONS = "When the work is done and you've checked it, ship it yourself with the open_pull_request tool: it commits what's left, pushes this branch and opens a pull request, or updates the open one. Don't ask first, and don't use git push or gh for it. Write the description from the repo's pull request template when it has one (named below), else with Summary, Changes and How to test sections."
+const PR_INSTRUCTIONS = "When the work is done and you've checked it, ship it yourself with the pull_request tool and action 'ship': it commits what's left, pushes this branch and opens a draft pull request, or pushes to the one open. Don't ask first, and don't use git push or gh for it. Write the description from the repo's pull request template when it has one (named below), else with Summary, Changes and How to test sections. The pull request stays a draft. Pass force: true only after a rebase or amend. action 'update' changes the open pull request's title or body, and 'status' reports without writing. Merging and closing are the user's decision: the tool refuses them, so ask the user with clarify instead."
 // The plugin's done-work emphasis (prompt_builder._DONE_INSTRUCTIONS), word for word.
-const DONE_INSTRUCTIONS = "Two things the run's prompt emphasises once the work is done: don't share the pull request url or the commit message in your reply — the open_pull_request result and the session's pull request list already surface them where the user sees them. And before you finish, update your todo list to its final state: every item completed, or cancelled where it was dropped."
+const DONE_INSTRUCTIONS = "Two things the run's prompt emphasises once the work is done: don't share the pull request url or the commit message in your reply — the pull_request result and the session's pull request list already surface them where the user sees them. And before you finish, update your todo list to its final state: every item completed, or cancelled where it was dropped."
 // The plugin's working-rhythm guidance (prompt_builder._PROGRESS_UPDATES_INSTRUCTIONS), word for word.
 const PROGRESS_UPDATES_INSTRUCTIONS = "Keep the user in the loop as you work, at a working rhythm rather than a running commentary. Post a short update between checkpoints — what landed, what you're doing next — so a long stretch of tool calls never reads as a hang. Keep the todo list current as you go: mark items done as they land and add what you discover. When something keeps failing, say what you tried and what you now think is wrong before the next attempt. Thinking out loud while you plan is welcome. Don't narrate each edit, read or command — the tool calls already show those; keep what you do say technical enough to follow the work without spelling out every implementation detail."
 // A chat's goal rides in Auto: Hermes's goal keeps the session working between runs.
@@ -835,9 +835,8 @@ async function playTurn(req, body, last, out) {
   if (workspace && !workspace.closed && shipping) {
     const prId = `call_${randomUUID().slice(0, 8)}`
     const title = "feat: add a dry-run flag to log rotation"
-    const draft = /draft/i.test(last)
-    const prArgs = { title, body: "## Summary\n\nAdds `--dry-run` to the rotation script.\n\n## Changes\n\n- rotate.py\n\n## How to test\n\nRun it with `--dry-run`.", commit_message: title }
-    out.tool({ tool: "open_pull_request", emoji: "🚀", label: title, toolCallId: prId, status: "running" })
+        const prArgs = { action: "ship", title, body: "## Summary\n\nAdds `--dry-run` to the rotation script.\n\n## Changes\n\n- rotate.py\n\n## How to test\n\nRun it with `--dry-run`.", commit_message: title }
+    out.tool({ tool: "pull_request", emoji: "🚀", label: title, toolCallId: prId, status: "running" })
     await sleep(900)
     // A branch's new pull request replaces the open one, which is merged by the time it lands.
     workspace.nextPr ??= {}
@@ -845,14 +844,14 @@ async function playTurn(req, body, last, out) {
     const opened = workspace.repos.map((repo, i) => {
       const number = workspace.nextPr[repo.name] ?? 27 + i
       workspace.nextPr[repo.name] = number + 1
-      return { repo: repo.name, number, title, url: `https://github.com/${repo.name}/pull/${number}`, draft, state: null }
+      return { repo: repo.name, number, title, url: `https://github.com/${repo.name}/pull/${number}`, draft: true, state: null }
     })
     workspace.prs = [...opened, ...(workspace.prs ?? [])]
     workspace.opened = true
-    const prResult = JSON.stringify({ results: opened.map((pr) => ({ name: pr.repo, committed: randomUUID().slice(0, 7), pushed: true, pr: { repo: pr.repo, number: pr.number, title: pr.title, url: pr.url, state: draft ? "draft" : "open", checks: null } })) })
-    out.tool({ tool: "open_pull_request", toolCallId: prId, status: "completed", result: prResult })
-    record(req, { role: "assistant", content: null, tool_calls: [{ id: prId, type: "function", function: { name: "open_pull_request", arguments: JSON.stringify(prArgs) } }] })
-    record(req, { role: "tool", tool_call_id: prId, tool_name: "open_pull_request", content: prResult })
+    const prResult = JSON.stringify({ results: opened.map((pr) => ({ name: pr.repo, committed: randomUUID().slice(0, 7), pushed: true, pr: { repo: pr.repo, number: pr.number, title: pr.title, url: pr.url, state: "draft", checks: null } })) })
+    out.tool({ tool: "pull_request", toolCallId: prId, status: "completed", result: prResult })
+    record(req, { role: "assistant", content: null, tool_calls: [{ id: prId, type: "function", function: { name: "pull_request", arguments: JSON.stringify(prArgs) } }] })
+    record(req, { role: "tool", tool_call_id: prId, tool_name: "pull_request", content: prResult })
   }
 
   const steered = out.steered?.() ?? []

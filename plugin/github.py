@@ -452,6 +452,16 @@ def close_pull_request(repo: str, number: int, auth: str) -> None:
     _request(f"/repos/{repo}/pulls/{number}", auth, "PATCH", {"state": "closed"})
 
 
+def update_pull_request(repo: str, number: int, title: Optional[str], body: Optional[str], auth: str) -> Dict[str, Any]:
+    """Sets the given title and/or body of a pull request, leaving the other as it is."""
+    fields = {key: value for key, value in (("title", title), ("body", body)) if value is not None}
+    row = _request(f"/repos/{repo}/pulls/{number}", auth, "PATCH", fields)
+    found = _pr(repo, row, auth, checks=False)
+    if not found:
+        raise GitHubError("GitHub didn't return the pull request.")
+    return found
+
+
 def _ref(branch: str) -> str:
     return urllib.parse.quote(f"heads/{branch}", safe="/")
 
