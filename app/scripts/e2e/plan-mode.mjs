@@ -156,7 +156,6 @@ await flow(
             plan_file: "plans/another-session-20261015-000000.md",
             repos: [],
             files_dir: null,
-            theseus: {},
           },
           instructions: null,
           blocked: null,
