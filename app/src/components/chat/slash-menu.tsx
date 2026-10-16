@@ -61,35 +61,35 @@ export function SlashMenu({
               onMouseMove={() => index !== active && onActive(index)}
               onClick={() => onPick(item)}
               className={cn(
-                "flex min-h-11 cursor-pointer items-center gap-3 rounded-2xl px-3 py-2",
+                "flex min-h-11 cursor-pointer flex-col justify-center rounded-2xl px-3 py-2",
                 index === active && "bg-accent text-accent-foreground",
               )}
             >
-              <Icon className="size-4 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-mono text-sm">/{item.name}</div>
-                {item.description && (
-                  <div className="truncate text-xs text-muted-foreground">{item.description}</div>
+              {/* The icon rides the title's line, so a description hangs under the title, not the icon. */}
+              <div className="flex items-center gap-3">
+                <span className="flex h-5 shrink-0 items-center">
+                  <Icon className="size-4 text-muted-foreground" />
+                </span>
+                <div className="min-w-0 flex-1 truncate font-mono text-sm">/{item.name}</div>
+                {item.kind === "skill" && item.category && (
+                  <Badge variant="secondary" className="max-w-28">
+                    <span className="truncate">{item.category}</span>
+                  </Badge>
                 )}
               </div>
-              {item.kind === "skill" && item.category && (
-                <Badge variant="secondary" className="max-w-28">
-                  <span className="truncate">{item.category}</span>
-                </Badge>
+              {item.description && (
+                <div className="truncate pl-7 text-xs text-muted-foreground">
+                  {item.description}
+                </div>
               )}
             </li>
           )
         })}
       </ul>
-      {status !== "ok" && (
+      {/* A bot whose host can't list skills shows the commands alone; silently, as a missing feature. */}
+      {status === "loading" && (
         <div className="flex items-center gap-2 border-t px-4 py-2.5 text-xs text-muted-foreground">
-          {status === "loading" ? (
-            <>
-              <Spinner className="size-3.5" /> Loading skills…
-            </>
-          ) : (
-            "Couldn't load skills from Hermes."
-          )}
+          <Spinner className="size-3.5" /> Loading skills…
         </div>
       )}
     </div>
