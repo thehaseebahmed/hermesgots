@@ -37,6 +37,7 @@ export function AttachMenu({
   onAdd: (files: File[]) => void
 }) {
   const [open, setOpen] = useState(false)
+  const button = useRef<HTMLButtonElement>(null)
   const [intro, setIntro] = useState(false)
   const inputs = useRef<Record<Source, HTMLInputElement | null>>({
     camera: null,
@@ -70,6 +71,7 @@ export function AttachMenu({
   return (
     <>
       <Button
+        ref={button}
         type="button"
         variant="ghost"
         size="icon-lg"
@@ -115,7 +117,7 @@ export function AttachMenu({
         className="hidden"
         onChange={picked}
       />
-      <Popup open={open} onOpenChange={setOpen}>
+      <Popup open={open} onOpenChange={setOpen} anchor={button}>
         <PopupContent>
           <PopupHeader className="pb-2">
             <PopupTitle>Add context</PopupTitle>

@@ -33,7 +33,7 @@ export function OutputsDrawer({
     wasOpen.current = open
   }, [open, prs.length])
   return (
-    <Popup side open={open} onOpenChange={onOpenChange}>
+    <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent>
         <PopupHeader className="pb-2">
           <PopupTitle>Outputs</PopupTitle>

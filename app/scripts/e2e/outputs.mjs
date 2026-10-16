@@ -81,14 +81,15 @@ await flow("outputs", async ({ page, seed, send, stored, until, shot }) => {
   await shot("library")
   pass("the Library tab is the project Library's tree, the session's folders only")
 
-  // The drawer in each of its three forms — a bottom sheet on a phone, a dialog on a tablet, a side
-  // sheet on a large display — in both modes.
+  // The drawer in each of its forms — a bottom sheet on a phone, the same sheet capped and centred on
+  // a tablet, a side drawer from 1024px — in both modes.
   await drawer.getByRole("tab", { name: "PRs" }).click()
   for (const [width, dark] of [
     [390, false],
     [390, true],
     [768, false],
     [768, true],
+    [1024, false],
     [1440, false],
   ]) {
     const look = `${width}${dark ? "-dark" : ""}`
@@ -107,7 +108,7 @@ await flow("outputs", async ({ page, seed, send, stored, until, shot }) => {
     await shot(`library-${look}`)
     await shown.getByRole("tab", { name: "PRs" }).click()
   }
-  pass("the drawer draws as a bottom sheet, a dialog and a side sheet, in both modes")
+  pass("the drawer draws as a bottom sheet on phones and tablets and a side drawer from 1024px")
 
   // Some outputs and no pull request: the same pill, opening on the library it only has.
   const filed = `outputs-files-${runId()}`

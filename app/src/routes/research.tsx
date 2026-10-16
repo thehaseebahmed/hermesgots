@@ -646,7 +646,7 @@ function MissionMenu({
         </PopupContent>
       </Popup>
       <Popup open={rewriting && canRewrite} onOpenChange={setRewriting}>
-        <PopupContent initialFocus={false} className={PICKER_HEIGHT}>
+        <PopupContent initialFocus={false} fixedHeight={PICKER_HEIGHT}>
           <RewritePicker mission={mission} onDone={() => setRewriting(false)} />
         </PopupContent>
       </Popup>
@@ -1177,7 +1177,7 @@ function WorkView({ mission, onBack }: { mission: Mission; onBack?: () => void }
             )}
           </div>
         </main>
-        <Popup open={Boolean(sources)} onOpenChange={(open) => !open && setSources(undefined)} side>
+        <Popup open={Boolean(sources)} onOpenChange={(open) => !open && setSources(undefined)}>
           <PopupContent initialFocus={false}>
             <PopupHeader>
               <PopupTitle>Sources</PopupTitle>
@@ -1187,7 +1187,7 @@ function WorkView({ mission, onBack }: { mission: Mission; onBack?: () => void }
             </div>
           </PopupContent>
         </Popup>
-        <Popup open={revisions && revised} onOpenChange={setRevisions} side>
+        <Popup open={revisions && revised} onOpenChange={setRevisions}>
           <PopupContent initialFocus={false}>
             <PopupHeader>
               <PopupTitle>Revisions</PopupTitle>

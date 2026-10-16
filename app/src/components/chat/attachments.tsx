@@ -9,7 +9,7 @@ import {
   XIcon,
 } from "lucide-react"
 
-import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { FullscreenPopup, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
@@ -132,13 +132,18 @@ function LoadedImage({
 }) {
   const { ready, onLoad, onError } = useImageReady(url)
   // The photo's own shape, kept on the record, so its box is right from the first frame and the
-  // pop-up doesn't shrink when the photo paints. A photo with no size on it (one the host sent
-  // back, which this device never read) keeps the full-height band.
-  const shape = width && height ? `${width} / ${height}` : undefined
+  // viewer doesn't jump when the photo paints. A photo with no size on it (one the host sent back,
+  // which this device never read) fills the viewer.
+  const ratio = width && height ? width / height : undefined
   return (
     <div
-      className={cn("relative w-full", shape ? "max-h-[55dvh]" : "h-[55dvh]")}
-      style={shape ? { aspectRatio: shape } : undefined}
+      className={cn("relative", !ratio && "h-full w-full")}
+      // As large as the viewer's room allows at the photo's own shape.
+      style={
+        ratio
+          ? { aspectRatio: `${width} / ${height}`, width: `min(100cqw, 100cqh * ${ratio})` }
+          : undefined
+      }
       aria-busy={!ready || undefined}
     >
       {!ready && <Skeleton className="absolute inset-0 rounded-2xl" />}
@@ -183,27 +188,42 @@ export function AttachmentViewer({
     count > 1 && `${at + 1} of ${count}`,
   ]
 
+  const close = () => onIndex(null)
+
+  // An image wants the whole screen, so the viewer takes it on every size, with the name and the
+  // way out on top and stepping and Remove below.
   return (
-    <Popup open={index !== null} onOpenChange={(open) => !open && onIndex(null)}>
-      <PopupContent size="2xl">
-        <PopupHeader>
-          <PopupTitle>{shown?.name}</PopupTitle>
-          <p className="text-sm text-muted-foreground tabular-nums">
-            {details?.filter(Boolean).join(" · ")}
-          </p>
-        </PopupHeader>
-        <div
-          className="flex flex-col gap-4 px-4 sm:px-6"
-          onKeyDown={(event) => {
-            if (count < 2) return
-            if (event.key === "ArrowLeft") step(-1)
-            if (event.key === "ArrowRight") step(1)
-          }}
-        >
+    <FullscreenPopup open={index !== null} onOpenChange={(open) => !open && close()}>
+      <div
+        className="flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)] pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+        onKeyDown={(event) => {
+          if (count < 2) return
+          if (event.key === "ArrowLeft") step(-1)
+          if (event.key === "ArrowRight") step(1)
+        }}
+      >
+        <header className="flex items-center gap-2 px-2 py-2 sm:px-4">
+          <Button
+            variant="ghost"
+            size="icon-lg"
+            className="size-11 shrink-0"
+            aria-label="Close"
+            onClick={close}
+          >
+            <XIcon />
+          </Button>
+          <div className="min-w-0 flex-1">
+            <PopupTitle className="justify-start text-left">{shown?.name}</PopupTitle>
+            <p className="text-sm text-muted-foreground tabular-nums">
+              {details?.filter(Boolean).join(" · ")}
+            </p>
+          </div>
+        </header>
+        <div className="[container-type:size] mx-4 flex min-h-0 flex-1 items-center justify-center sm:mx-6">
           {image ? (
             <LoadedImage url={url} name={shown.name} width={shown.width} height={shown.height} />
           ) : (
-            <div className="flex flex-col items-center gap-3 rounded-2xl bg-muted/50 px-4 py-10 text-center">
+            <div className="flex w-full max-w-md flex-col items-center gap-3 rounded-2xl bg-muted/50 px-4 py-10 text-center">
               <FileIcon className="size-10 text-muted-foreground" />
               <span className="text-sm break-all text-muted-foreground">{shown?.type}</span>
               {url && !isNative && (
@@ -225,48 +245,48 @@ export function AttachmentViewer({
               )}
             </div>
           )}
-          {(count > 1 || onRemove) && (
-            <div className="flex items-center gap-2">
-              {count > 1 && (
-                <>
-                  <Button
-                    variant="outline"
-                    size="icon-lg"
-                    className="size-11 rounded-full"
-                    aria-label="Previous"
-                    onClick={() => step(-1)}
-                  >
-                    <ChevronLeftIcon />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="icon-lg"
-                    className="size-11 rounded-full"
-                    aria-label="Next"
-                    onClick={() => step(1)}
-                  >
-                    <ChevronRightIcon />
-                  </Button>
-                </>
-              )}
-              <span className="flex-1" />
-              {onRemove && shown && (
-                <Button
-                  variant="ghost"
-                  className="min-h-11 text-destructive"
-                  onClick={() => {
-                    onRemove(shown)
-                    onIndex(count > 1 ? Math.min(at, count - 2) : null)
-                  }}
-                >
-                  <Trash2Icon data-icon="inline-start" />
-                  Remove
-                </Button>
-              )}
-            </div>
-          )}
         </div>
-      </PopupContent>
-    </Popup>
+        {(count > 1 || onRemove) && (
+          <div className="flex items-center gap-2 px-4 pt-3 sm:px-6">
+            {count > 1 && (
+              <>
+                <Button
+                  variant="outline"
+                  size="icon-lg"
+                  className="size-11 rounded-full"
+                  aria-label="Previous"
+                  onClick={() => step(-1)}
+                >
+                  <ChevronLeftIcon />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon-lg"
+                  className="size-11 rounded-full"
+                  aria-label="Next"
+                  onClick={() => step(1)}
+                >
+                  <ChevronRightIcon />
+                </Button>
+              </>
+            )}
+            <span className="flex-1" />
+            {onRemove && shown && (
+              <Button
+                variant="ghost"
+                className="min-h-11 text-destructive"
+                onClick={() => {
+                  onRemove(shown)
+                  onIndex(count > 1 ? Math.min(at, count - 2) : null)
+                }}
+              >
+                <Trash2Icon data-icon="inline-start" />
+                Remove
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+    </FullscreenPopup>
   )
 }
