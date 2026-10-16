@@ -10,7 +10,7 @@ import { LEADERBOARD_URL, joinCommunity, leaveCommunity, useCommunity } from "@/
 
 const SHARED = [
   "Your GitHub username, shown as your name on the board",
-  "Tokens used per day, model and mode (plan, auto, accept edits, Theseus, chat)",
+  "Tokens used per day, model and mode (plan, auto, accept edits, goal, chat)",
   "Counts from the last 35 days, sent when you join and kept up to date by your bots' hosts",
 ]
 
