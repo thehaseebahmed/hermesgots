@@ -51,14 +51,14 @@ await flow(
     const group = (label) => page.getByRole("region", { name: label })
     const backToProject = () => page.getByRole("button", { name: "Back to project" }).click()
     const openSession = async (id, title) => {
-      await group("Idle").getByText(title).click()
+      await group("Today").getByText(title).click()
       await page.waitForURL(`**/c/${id}`)
     }
 
     // Session A plans, as the mode menu sets it: the mode on the row here, on the plugin with the
     // first turn.
     await page.goto(project)
-    await group("Idle").getByText(titleA).click()
+    await group("Today").getByText(titleA).click()
     await page.waitForURL(`**/c/${a}`)
     await page.evaluate(async (id) => {
       const { setSessionMode } = await import("/src/lib/workspace.ts")
@@ -287,7 +287,7 @@ await flow(
         if (thread.includes("dry run to the log rotation")) window.__midThread.push(Date.now())
       }, 50)
     }, `/c/${b}`)
-    await group("Idle").getByText(titleB).click()
+    await group("Today").getByText(titleB).click()
     await page.waitForURL(`**/c/${b}`)
     await page.waitForTimeout(2500)
     const mid = await page.evaluate(() => {

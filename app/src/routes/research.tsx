@@ -30,6 +30,8 @@ import { BotPicker } from "@/components/chat/bot-picker"
 import { ModelPicker, PICKER_HEIGHT } from "@/components/chat/model-picker"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { ExperimentalBadge } from "@/components/experimental-badge"
+import { ItemGroup, ItemRow, ItemSearch } from "@/components/item-list"
+import { itemGroups } from "@/lib/item-groups"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import {
   Evidence,
@@ -136,14 +138,30 @@ export function ResearchPage() {
   const pane = useResearchPane()
   const { missions, loaded } = useMissions()
   const asked = Boolean((useLocation().state as { ask?: boolean } | null)?.ask)
+  const now = useNow()
   if (!pane) return <ResearchHome />
   if (!loaded) return null
-  const first = asked ? undefined : itemToOpen("research", missions.map(rankedFirst))
+  const ids = missionGroups(missions, now).flatMap((g) => g.items.map((m) => m.id))
+  const first = asked ? undefined : itemToOpen("research", ids)
   if (first) return <Navigate to={`/research/${first}`} replace />
   return <ResearchHome ask />
 }
 
-const rankedFirst = (mission: Mission) => mission.id
+/** Missions by what they need, then by when they were asked. */
+function missionGroups(missions: Mission[], now: number) {
+  return itemGroups(
+    missions,
+    (m) => (needsYou(m) ? "waiting" : m.stage !== "delivered" ? "working" : undefined),
+    (m) => m.createdAt,
+    now,
+  )
+}
+
+const matches = (mission: Mission, query: string) => {
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  const text = `${mission.title} ${mission.input}`.toLowerCase()
+  return words.every((word) => text.includes(word))
+}
 
 /** The list kept on screen beside the open mission (see `useResearchPane`). */
 export function ResearchPane({ pane }: { pane: FeaturePane }) {
@@ -174,9 +192,10 @@ function ResearchHome({ ask, list }: { ask?: boolean; list?: FeaturePane }) {
     navigate(`/research/${started.id}`, { replace: ask })
   }
 
-  const waiting = missions.filter(needsYou)
-  const working = missions.filter((m) => !needsYou(m) && m.stage !== "delivered")
-  const ready = missions.filter((m) => !needsYou(m) && m.stage === "delivered")
+  const [query, setQuery] = useState("")
+  const now = useNow()
+  const shown = missions.filter((m) => matches(m, query))
+  const groups = missionGroups(shown, now)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -253,12 +272,26 @@ function ResearchHome({ ask, list }: { ask?: boolean; list?: FeaturePane }) {
           </section>
         )}
 
-        {!ask && (
-          <>
-            <MissionGroup title="Waiting on you" missions={waiting} selected={list?.selected} />
-            <MissionGroup title="Researching" missions={working} selected={list?.selected} />
-            <MissionGroup title="Ready" missions={ready} selected={list?.selected} />
-          </>
+        {!ask && missions.length > 0 && (
+          <div className="flex flex-col gap-6">
+            <ItemSearch value={query} onChange={setQuery} label="Search research" />
+            {shown.length === 0 && (
+              <p className="py-8 text-center text-sm text-muted-foreground">No research matches.</p>
+            )}
+            {groups.map((group) => (
+              <ItemGroup key={group.key} group={group}>
+                {group.items.map((mission) => (
+                  <li key={mission.id}>
+                    <MissionRow
+                      mission={mission}
+                      now={now}
+                      selected={mission.id === list?.selected}
+                    />
+                  </li>
+                ))}
+              </ItemGroup>
+            ))}
+          </div>
         )}
       </div>
 
@@ -348,85 +381,32 @@ function missionLine(mission: Mission) {
   }
 }
 
-function MissionGroup({
-  title,
-  missions,
+function MissionRow({
+  mission,
+  now,
   selected,
 }: {
-  title: string
-  missions: Mission[]
-  selected?: string
+  mission: Mission
+  now: number
+  selected: boolean
 }) {
   const navigate = useNavigate()
   // Beside the list a mission takes the place of the one open.
   const swap = Boolean(useResearchPane()?.open)
-  const now = useNow()
-  const profiles = useLiveQuery(() => db.profiles.toArray(), [])
-  if (!missions.length) return null
+  const botId = useLiveQuery(() => db.profiles.get(mission.profileId), [mission.profileId])?.botId
+  const Icon = FORMAT_ICONS[mission.format]
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="flex items-center gap-2 px-1 text-sm font-medium text-muted-foreground">
-        {title}
-        <span
-          className={cn(
-            "rounded-full px-1.5 text-xs leading-5 font-semibold tabular-nums",
-            title === "Waiting on you" ? "bg-warning/15 text-warning" : "bg-muted",
-          )}
-        >
-          {missions.length}
-        </span>
-      </h2>
-      <ul className="flex flex-col gap-2">
-        {missions.map((mission) => {
-          const Icon = FORMAT_ICONS[mission.format]
-          const waiting = needsYou(mission)
-          const busy = isWorking(mission)
-          const botId = profiles?.find((p) => p.id === mission.profileId)?.botId
-          return (
-            <li key={mission.id}>
-              <button
-                type="button"
-                onClick={() => navigate(`/research/${mission.id}`, { replace: swap })}
-                aria-current={mission.id === selected || undefined}
-                className={cn(
-                  "flex min-h-16 w-full items-center gap-3 rounded-3xl border bg-card px-4 py-3 text-left transition-colors hover:bg-muted",
-                  mission.id === selected && "bg-muted",
-                )}
-              >
-                <span className="relative shrink-0">
-                  <span
-                    className={cn(
-                      "flex size-10 items-center justify-center rounded-2xl",
-                      waiting ? "bg-warning/15 text-warning" : "bg-muted text-muted-foreground",
-                    )}
-                  >
-                    {busy ? <Spinner className="size-5" /> : <Icon className="size-5" />}
-                  </span>
-                  <Bot
-                    id={botId}
-                    className="absolute -right-1.5 -bottom-1.5 size-6 rounded-full bg-card p-px ring-2 ring-card"
-                  />
-                </span>
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate font-medium">{mission.title}</span>
-                  <span
-                    className={cn(
-                      "truncate text-sm text-muted-foreground",
-                      mission.error && "text-warning",
-                    )}
-                  >
-                    {missionLine(mission)}
-                  </span>
-                </span>
-                <span className="shrink-0 self-start pt-0.5 text-xs text-muted-foreground">
-                  {formatRelative(mission.createdAt, now)}
-                </span>
-              </button>
-            </li>
-          )
-        })}
-      </ul>
-    </section>
+    <ItemRow
+      icon={isWorking(mission) ? <Spinner /> : <Icon />}
+      waiting={needsYou(mission)}
+      botId={botId}
+      title={mission.title}
+      when={formatRelative(mission.createdAt, now)}
+      line={<span className="truncate">{missionLine(mission)}</span>}
+      warn={Boolean(mission.error)}
+      selected={selected}
+      onOpen={() => navigate(`/research/${mission.id}`, { replace: swap })}
+    />
   )
 }
 

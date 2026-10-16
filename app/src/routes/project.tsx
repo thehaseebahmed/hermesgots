@@ -8,12 +8,13 @@ import {
   CheckIcon,
   ChevronUpIcon,
   CircleAlertIcon,
+  CodeXmlIcon,
   GitPullRequestArrowIcon,
   LockIcon,
   PlusIcon,
   Settings2Icon,
 } from "lucide-react"
-import { Link, useLocation, useNavigate, useParams } from "react-router"
+import { useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
 
 import { HOST_WORK_MS, PR_PENDING_MS, SAFETY_MS, SESSION_REREAD_MS } from "@/lib/freshness"
@@ -21,6 +22,8 @@ import { quietly } from "@/lib/report"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { PR_GROUPS, prLabel, prLook } from "@/components/chat/pr-look"
 import { PrRow } from "@/components/chat/pr-pill"
+import { ItemGroup, ItemRow } from "@/components/item-list"
+import { itemGroups } from "@/lib/item-groups"
 import { LibraryTab } from "@/components/library"
 import { ProjectSettings } from "@/components/project-settings"
 import {
@@ -55,7 +58,6 @@ import { usePoll } from "@/lib/poll"
 import { waitsOnUser } from "@/lib/theseus"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
-import { cn } from "@/lib/utils"
 import { reasonText, useLiveRuns, useWaiting, type WaitingReason } from "@/lib/waiting"
 import { deleteProject, type HermesProject } from "@/lib/hermes"
 import { readProjects, useProjects } from "@/lib/projects"
@@ -69,13 +71,6 @@ import {
 } from "@/lib/workspace"
 
 const DAY_MS = 86_400_000
-const GROUPS: { state: SessionState; label: string }[] = [
-  { state: "working", label: "Working" },
-  { state: "waiting", label: "Waiting on you" },
-  { state: "idle", label: "Idle" },
-  { state: "resolved", label: "Resolved" },
-  { state: "discarded", label: "Discarded" },
-]
 
 function serverKey(baseUrl: string) {
   return baseUrl.trim().replace(/\/+$/, "").replace(/\/v1$/, "")
@@ -174,6 +169,10 @@ export function ProjectPage({
     // The address, not the bot: its row changes far more often than which server it's on.
   }, [baseUrl, projectId])
   const rows = listed?.rows
+  const bots = useLiveQuery(
+    async () => Object.fromEntries((await db.profiles.toArray()).map((p) => [p.id, p.botId])),
+    [],
+  )
   const local = listed?.local
   const now = listed?.now ?? 0
   // Each session's title by its worktree's name, so a library file can say which filed it.
@@ -295,10 +294,17 @@ export function ProjectPage({
       waiting: local?.[c.id]?.waiting || theseusWaits(c),
     }),
   }))
-  const grouped = GROUPS.map((group) => ({
-    ...group,
-    sessions: placed.filter((s) => s.state === group.state),
-  })).filter((group) => group.sessions.length > 0)
+  const grouped = itemGroups(
+    placed,
+    (s) =>
+      s.state === "resolved" || s.state === "discarded"
+        ? "closed"
+        : s.state === "idle"
+          ? undefined
+          : s.state,
+    (s) => s.c.updatedAt,
+    now,
+  )
 
   return (
     <div className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col">
@@ -345,19 +351,15 @@ export function ProjectPage({
             ) : (
               <div className="flex flex-col gap-6">
                 {grouped.map((group) => (
-                  <Group
-                    key={group.state}
-                    label={group.label}
-                    count={group.sessions.length}
-                    fold={group.state === "discarded" ? "always" : group.state === "resolved"}
-                  >
-                    {group.sessions.map(({ c, prTick }) => (
+                  <ItemGroup key={group.key} group={group}>
+                    {group.items.map(({ c, state, prTick }) => (
                       <li key={c.id}>
                         <SessionItem
                           session={c}
+                          botId={bots?.[c.profileId]}
                           open={c.id === openSession}
                           pane={openSession ? { profileId, projectId } : undefined}
-                          state={group.state}
+                          state={state}
                           prTick={prTick}
                           now={now}
                           removed={removedRepos(c)}
@@ -365,7 +367,7 @@ export function ProjectPage({
                         />
                       </li>
                     ))}
-                  </Group>
+                  </ItemGroup>
                 ))}
               </div>
             )}
@@ -513,15 +515,16 @@ function prLine(session: Conversation) {
 }
 
 function StateIcon({ state }: { state: SessionState }) {
-  if (state === "working") return <Spinner className="size-4" />
-  if (state === "waiting") return <CircleAlertIcon className="size-4 text-warning" />
-  if (state === "resolved") return <CheckIcon className="size-4 text-success" />
-  if (state === "discarded") return <ArchiveXIcon className="size-4 text-muted-foreground" />
-  return null
+  if (state === "working") return <Spinner />
+  if (state === "waiting") return <CircleAlertIcon />
+  if (state === "resolved") return <CheckIcon />
+  if (state === "discarded") return <ArchiveXIcon />
+  return <CodeXmlIcon />
 }
 
 function SessionItem({
   session,
+  botId,
   open,
   pane,
   state,
@@ -531,6 +534,7 @@ function SessionItem({
   waiting,
 }: {
   session: Conversation
+  botId?: string
   /** Open beside the project. */
   open?: boolean
   /** The project, when a session is open beside it: another one takes its place. */
@@ -553,35 +557,28 @@ function SessionItem({
     ? `${names.format(removed)} removed`
     : (theseusLine ?? prLine(session) ?? session.worktree?.branch ?? draft)
   return (
-    <Link
-      to={`/c/${session.id}`}
-      replace={Boolean(pane)}
-      state={{ pane: pane ?? { profileId: session.profileId, projectId: session.projectId } }}
-      aria-current={open ? "page" : undefined}
-      className={cn(
-        "-mx-2 flex min-h-14 items-center gap-3 rounded-2xl px-2 py-3 outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring",
-        open && "bg-muted hover:bg-muted",
-      )}
-    >
-      <span className="flex w-5 shrink-0 items-center justify-center">
-        {removed.length && state !== "working" ? (
-          <LockIcon className="size-4 text-muted-foreground" />
+    <ItemRow
+      icon={
+        removed.length && state !== "working" ? (
+          <LockIcon />
         ) : prTick ? (
-          <GitPullRequestArrowIcon className="size-4 text-primary" />
+          <GitPullRequestArrowIcon />
         ) : (
           <StateIcon state={state} />
-        )}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="flex items-baseline gap-3">
-          <span className="min-w-0 flex-1 truncate font-medium">{session.title}</span>
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {formatWhen(session.updatedAt, now)}
-          </span>
-        </span>
-        {line2 && <span className="block truncate text-sm text-muted-foreground">{line2}</span>}
-      </span>
-    </Link>
+        )
+      }
+      waiting={state === "waiting" && !prTick}
+      botId={botId}
+      title={session.title}
+      when={formatWhen(session.updatedAt, now)}
+      line={line2 && <span className="truncate">{line2}</span>}
+      selected={open}
+      link={{
+        to: `/c/${session.id}`,
+        replace: Boolean(pane),
+        state: { pane: pane ?? { profileId: session.profileId, projectId: session.projectId } },
+      }}
+    />
   )
 }
 
@@ -589,8 +586,8 @@ function SessionItem({
 const FOLD_OVER = 5
 
 /**
- * A titled list that folds away; a finished one (`fold`) longer than `FOLD_OVER` starts folded, and
- * an `"always"` one always does. It's mounted once its first item is known, so that count decides.
+ * A titled list that folds away; a finished one (`fold`) longer than `FOLD_OVER` starts folded.
+ * It's mounted once its first item is known, so that count decides.
  */
 function Group({
   label,
@@ -600,14 +597,11 @@ function Group({
 }: {
   label: string
   count: number
-  fold?: boolean | "always"
+  fold?: boolean
   children: ReactNode
 }) {
   return (
-    <Collapsible
-      defaultOpen={!fold || (fold !== "always" && count <= FOLD_OVER)}
-      render={<section aria-label={label} />}
-    >
+    <Collapsible defaultOpen={!fold || count <= FOLD_OVER} render={<section aria-label={label} />}>
       <h2>
         <CollapsibleTrigger className="group -mx-1 flex min-h-11 items-center gap-1.5 rounded-xl px-2 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
           {label} ({count})

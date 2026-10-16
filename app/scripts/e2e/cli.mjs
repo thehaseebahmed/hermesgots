@@ -29,7 +29,7 @@ const FLOWS = {
   },
   approval: {
     script: "e2e/approval.mjs",
-    about: "A project session waits on an approval in the sidebar and its project, then goes idle",
+    about: "A project session waits on an approval in the sidebar and its project, then lands under Today",
     alsoPolling: true,
   },
   "approval-missed": {
