@@ -38,6 +38,7 @@ from . import (
     library,
     link,
     media,
+    model_changes,
     merges,
     outbox,
     projects,
@@ -454,7 +455,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         denied = unauthorized(request)
         if denied is not None:
             return denied
-        session_id = request.match_info["session_id"]
+        asked_id = request.match_info["session_id"]
+        session_id = asked_id
         path = store_path()
         open_db = getattr(adapter, "_ensure_session_db_async", None)
         db = await open_db() if callable(open_db) else None
@@ -466,12 +468,14 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             except Exception:
                 logger.debug("memento: couldn't resolve session %s", session_id, exc_info=True)
         found = await asyncio.to_thread(context.read, path, session_id) or {}
+        changes = await asyncio.to_thread(model_changes.read, path, session_id, asked_id)
         # Never a 404 for an unknown session: the app reads a 404 as a missing plugin.
         return web.json_response(
             {
                 "object": "memento.context",
                 "session_id": session_id,
                 **{field: found.get(field) for field in context.FIELDS},
+                "model_changes": changes,
             }
         )
 
@@ -1542,6 +1546,7 @@ def register(ctx) -> None:
     register_hook = getattr(ctx, "register_hook", None)
     if register_hook is not None:
         register_hook("post_api_request", context.record)
+        register_hook("post_api_request", model_changes.record)
         register_hook("post_api_request", community.record)
         register_hook("pre_tool_call", sessions.before_tool)
         register_hook("pre_tool_call", research.before_tool)

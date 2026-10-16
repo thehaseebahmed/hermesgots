@@ -1,5 +1,5 @@
 """``$HERMES_HOME/memento/memento.db``: the chat list (``chats.py``), context use (``context.py``) and
-project sessions (``sessions.py``),
+the models each chat's calls ran on (``model_changes.py``), project sessions (``sessions.py``),
 projects still cloning (``clones.py``), repos being added to or removed from a project (``repos.py``),
 pinned projects (``projects.py``), merged pull requests (``merges.py``) and recent changes for the
 app's live stream (``events.py``), devices' push subscriptions (``push.py``) and messages waiting
@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -272,6 +272,16 @@ def connect(path: Path) -> sqlite3.Connection:
                    model TEXT NOT NULL,
                    tokens INTEGER NOT NULL DEFAULT 0,
                    PRIMARY KEY (day, provider, model)
+               )"""
+        )
+        # v22: the model a chat's calls ran on, so its thread can show where it changed.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS model_changes (
+                   session_id TEXT NOT NULL,
+                   at INTEGER NOT NULL,
+                   model TEXT NOT NULL,
+                   provider TEXT,
+                   PRIMARY KEY (session_id, at)
                )"""
         )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
