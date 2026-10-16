@@ -24,7 +24,7 @@ class Categories(unittest.TestCase):
         row = {"categories": None}
         for category in ("chat_input", "code_input"):
             self.assertTrue(push.wants(row, category))
-        for category in ("code_theseus", "chat_run_done", "code_run_failed", "routine_failed"):
+        for category in ("chat_run_done", "code_run_failed", "routine_failed"):
             self.assertFalse(push.wants(row, category))
 
     def test_a_subscription_wants_only_what_it_listed(self):
@@ -47,7 +47,6 @@ class Categories(unittest.TestCase):
         self.assertEqual(push.category_of("plan"), "code_input")
         self.assertEqual(push.category_of("run_failed"), "chat_run_failed")
         self.assertEqual(push.category_of("run_done", project=True), "code_run_done")
-        self.assertEqual(push.category_of("theseus"), "code_theseus")
         self.assertEqual(push.category_of("pr_checks"), "code_pr_checks")
         self.assertEqual(push.category_of("clone_failed"), "code_setup_failed")
         self.assertEqual(push.category_of("routine_failed"), "routine_failed")
@@ -203,10 +202,10 @@ class Messages(unittest.TestCase):
         self.assertLessEqual(len(title), push.TITLE_MAX)
         self.assertTrue(title.endswith("…"))
 
-    def test_the_bot_and_stage_ride_along(self):
+    def test_the_bot_rides_along(self):
         push.set_bot(self.path, "penny")
-        push._run(self.path, "theseus", "memento-d", stage="checkpoints")
-        self.assertEqual(self.sent, [{"stage": "checkpoints", "bot": "penny"}])
+        push._run(self.path, "run_done", "memento-d")
+        self.assertEqual(self.sent, [{"bot": "penny"}])
 
     def test_only_a_bot_id_is_kept(self):
         with self.assertRaises(push.PushError):
@@ -256,26 +255,6 @@ class Turns(unittest.TestCase):
         alerts._started["telegram-9"] = time.monotonic() - 1000
         self.end(session="telegram-9", completed=True, failed=False, interrupted=False)
         self.assertEqual(self.told, [])
-
-
-class Theseus(unittest.TestCase):
-    def test_a_looping_wait_pushes_once_per_stage(self):
-        alerts._waits.clear()
-        told = []
-        stages = iter(["plan", "plan", "plan", "approval"])
-        theseus = types.ModuleType("plugin.theseus")
-        theseus.waiting_stage = lambda record: next(stages)
-        record = {"session_id": "s1"}
-        wait = {"command": "node theseus wait --timeout 120"}
-        with mock.patch.object(push, "notify", lambda kind, sid, path=None, **_: told.append((kind, sid))):
-            with mock.patch.dict(sys.modules, {"plugin.theseus": theseus}):
-                with mock.patch("plugin.theseus", theseus, create=True):
-                    for _ in range(3):
-                        alerts.theseus_tool(Path("p"), record, "terminal", wait)
-                    # The agent did something else: the next wait is a new round.
-                    alerts.theseus_tool(Path("p"), record, "write_file", {})
-                    alerts.theseus_tool(Path("p"), record, "terminal", wait)
-        self.assertEqual(told, [("theseus", "s1"), ("theseus", "s1")])
 
 
 class Routines(unittest.TestCase):

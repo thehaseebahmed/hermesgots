@@ -40,10 +40,13 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import events, push, theseus, tools_common
+from . import events, push, tools_common
 from .store import connect
 
 logger = logging.getLogger(__name__)
+
+# The plugin context, kept by wire() so llm_gate can see whether the host offers ctx.llm.
+ctx: Any = None
 
 TYPES = ("learn",)
 FORMATS = ("guide", "quiz", "glossary")
@@ -98,6 +101,27 @@ def available() -> Optional[str]:
     if getattr(ctx, "llm", None) is None:
         return "This Hermes can't make the model calls Research needs. Update Hermes."
     return None
+
+
+def llm_gate() -> Dict[str, bool]:
+    """Whether the host config lets this plugin pick the provider and model of a model call
+    (``plugins.entries.memento.llm.allow_*_override``). A call on the profile's own model needs
+    neither, so both flags are False until the user grants them."""
+    allowed = {"model": False, "provider": False}
+    if getattr(ctx, "llm", None) is None:
+        return allowed
+    try:
+        from hermes_cli.config import load_config
+
+        entry = ((load_config().get("plugins") or {}).get("entries") or {}).get("memento") or {}
+        llm = entry.get("llm") or {}
+        allowed = {
+            "model": bool(llm.get("allow_model_override")),
+            "provider": bool(llm.get("allow_provider_override")),
+        }
+    except Exception:
+        logger.debug("memento: couldn't read the plugin's llm trust flags", exc_info=True)
+    return allowed
 
 
 # --- the database ------------------------------------------------------------------------------
@@ -436,7 +460,7 @@ def rewrite(path: Path, mission_id: str, body: Dict[str, Any]) -> Dict[str, Any]
     if body.get("model") is not None or body.get("provider") is not None:
         model = _text(body.get("model"), MAX_MODEL, "The model")
         provider = _text(body.get("provider"), MAX_MODEL, "The provider", required=False)
-        allowed = theseus.llm_gate()
+        allowed = llm_gate()
         if not allowed["model"] or (provider and not allowed["provider"]):
             raise ResearchError(
                 "This host doesn't let Gots pick the model. Allow it with "

@@ -14,10 +14,10 @@ import unittest
 class PluginImportTests(unittest.TestCase):
     MODULES = [
         "alerts", "attachments", "chats", "clarify", "cleanup",
-        "clones", "community", "context", "delegation", "events", "github",
+        "clones", "community", "context", "delegation", "events", "github", "goal",
         "host_model", "link", "media", "merges", "outbox",
         "projects", "repos", "sessions", "push", "ship",
-        "stream", "theseus", "todos", "usage",
+        "stream", "todos", "usage",
     ]
 
     def test_all_modules_import(self):

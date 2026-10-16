@@ -64,7 +64,6 @@ KINDS = (
     "approval",
     "question",
     "plan",
-    "theseus",
     "run_done",
     "run_failed",
     "pr_checks",
@@ -83,7 +82,6 @@ CATEGORIES = (
     "chat_run_failed",
     "chat_run_done",
     "code_input",
-    "code_theseus",
     "code_run_failed",
     "code_run_done",
     "code_pr_checks",
@@ -97,7 +95,7 @@ CATEGORIES = (
 # What a device that never said which it wants gets: what pushed before there were more.
 LEGACY_CATEGORIES = ("chat_input", "code_input")
 # Kinds that are about a chat's session, so that chat can be muted.
-SESSION_KINDS = ("approval", "question", "plan", "theseus", "run_done", "run_failed", "pr_checks", "pr_merged")
+SESSION_KINDS = ("approval", "question", "plan", "run_done", "run_failed", "pr_checks", "pr_merged")
 INPUT_KINDS = ("approval", "question", "plan")
 
 
@@ -110,7 +108,7 @@ def category_of(kind: str, project: bool = False) -> str:
         return "research_input"
     if kind.startswith("research_"):
         return kind
-    if kind in ("theseus", "pr_checks", "pr_merged"):
+    if kind in ("pr_checks", "pr_merged"):
         return f"code_{kind}"
     feature = "code" if project or kind == "plan" else "chat"
     return f"{feature}_{'input' if kind in INPUT_KINDS else kind}"
@@ -437,13 +435,12 @@ def notify(
     session_id: Optional[str],
     path: Optional[Path] = None,
     title: Optional[str] = None,
-    stage: Optional[str] = None,
 ) -> None:
     """Something a device should hear about. ``session_id`` is the session it is about, or for the
     kinds that aren't about one the routine's job id (``routine_failed``), the project's id
-    (``clone_failed``) or the research mission's id (``research_*``); it only picks what a tap opens. ``title`` names what it is about when that
-    isn't a session (whose chat title is looked up), and ``stage`` is a Theseus run's. Never raises:
-    it runs inside Hermes's hooks."""
+    (``clone_failed``) or the research mission's id (``research_*``); it only picks what a tap opens.
+    ``title`` names what it is about when that isn't a session (whose chat title is looked up).
+    Never raises: it runs inside Hermes's hooks."""
     try:
         if kind not in KINDS or not session_id:
             return
@@ -463,7 +460,7 @@ def notify(
         if not reachable(path):
             return
         threading.Thread(
-            target=_run, args=(path, kind, session_id, title, stage), name="memento-push", daemon=True
+            target=_run, args=(path, kind, session_id, title), name="memento-push", daemon=True
         ).start()
     except Exception:
         logger.debug("memento: couldn't send a push", exc_info=True)
@@ -594,14 +591,14 @@ def _project_session(path: Path, session_id: str) -> bool:
     return bool(sessions.record_for(path, path.parent.parent, session_id))
 
 
-def _run(path: Path, kind: str, session_id: str, title: Optional[str] = None, stage: Optional[str] = None) -> None:
+def _run(path: Path, kind: str, session_id: str, title: Optional[str] = None) -> None:
     try:
         if muted(path, kind, session_id):
             return
         project = kind in SESSION_KINDS and _project_session(path, session_id)
         if kind in SESSION_KINDS and not title:
             title = session_title(path, session_id)
-        message = {"title": _short(title), "stage": stage, "bot": bot(path)}
+        message = {"title": _short(title), "bot": bot(path)}
         _deliver(path, kind, category_of(kind, project), session_id, {k: v for k, v in message.items() if v})
     except Exception:
         logger.debug("memento: a push failed", exc_info=True)

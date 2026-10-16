@@ -5,7 +5,7 @@ can read cron run history from Hermes's execution ledger instead of piecing it t
 device, keep its chat list on the server (``chats.py``), report each chat's context use
 (``context.py``) and the agent's todo list (``todos.py``), list and create Hermes Projects (``projects.py``) with GitHub repos cloned into
 them in the background (``clones.py``, ``github.py``), add and remove a project's repos (``repos.py``), run project sessions in their own worktrees with a permission mode and save their plans
-(``sessions.py``), let the agent push and open its pull requests, close them when a session is dropped (``ship.py``), file the files it generates in the project's library (``library.py``) and resolve a session once its pull request merges (``merges.py``), run a session end to end with the Theseus skill (``theseus.py``), research a question into a cited guide, quiz or glossary (``research.py``), let the agent ask the user questions with Hermes's ``clarify`` tool (``clarify.py``), keep its delegations in the turn that made them (``delegation.py``) and
+(``sessions.py``), let the agent push and open its pull requests, close them when a session is dropped (``ship.py``), file the files it generates in the project's library (``library.py``) and resolve a session once its pull request merges (``merges.py``), hold a chat's goal with Hermes's own ``/goal`` and keep it going between runs (``goal.py``), research a question into a cited guide, quiz or glossary (``research.py``), let the agent ask the user questions with Hermes's ``clarify`` tool (``clarify.py``), keep its delegations in the turn that made them (``delegation.py``) and
 set the profile's main model from a bot's Default model (``host_model.py``), label its chats as Gots's, tell the app what changed as it happens (``events.py``, ``stream.py``), and links the profile to a Gots account (``link.py``). The dashboard half lives in ``dashboard/``.
 """
 
@@ -17,7 +17,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from . import (
     alerts,
@@ -33,6 +33,7 @@ from . import (
     dictation,
     events,
     github,
+    goal,
     host_model,
     library,
     link,
@@ -47,7 +48,6 @@ from . import (
     push,
     ship,
     stream,
-    theseus,
     todos,
     usage,
 )
@@ -156,8 +156,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     ship.wire(adapter)
     # The agent files its generated files in the project's library; see library.py.
     library.wire(adapter)
-    # Theseus sessions review with another model; see theseus.py.
-    theseus.wire(adapter)
     # A background delegation's result would wait for the user's next message; see delegation.py.
     delegation.wire(adapter)
     # Research missions' researchers record their claims; see research.py.
@@ -260,7 +258,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "close",
                     "merge_resolve",
                     "events",
-                    "theseus",
+                    "goal",
                     "push",
                     "sync_delegation",
                     "host_model",
@@ -276,13 +274,18 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 "clarify": asks,
                 "todo_tool": todo_tool,
                 "hooks": hooks_live(),
-                "theseus": await asyncio.to_thread(theseus.info),
+                "goal": {
+                    "ready": goal.available() is None,
+                    "reason": goal.available(),
+                    "min_turns": goal.MIN_TURNS,
+                    "max_turns": goal.MAX_TURNS,
+                },
                 "dictation": await asyncio.to_thread(dictation.info),
                 "research": {
                     "ready": research.available() is None,
                     "reason": research.available(),
                     # Whether the host lets a mission be written with another model than the profile's.
-                    "writers": await asyncio.to_thread(theseus.llm_gate),
+                    "writers": await asyncio.to_thread(research.llm_gate),
                 },
             }
         )
@@ -766,10 +769,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "Body must be a JSON object", 400)
         session_id = request.match_info["session_id"]
         path, home = store_path(), hermes_home()
-        if body.get("mode") == "theseus":
-            reason = await asyncio.to_thread(theseus.available)
-            if reason and not await asyncio.to_thread(sessions.read, path, session_id):
-                return _error(web, reason, 409)
         try:
             record = await asyncio.to_thread(
                 sessions.ensure,
@@ -958,88 +957,76 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             request.query.get("device") or None,
         )
 
-    async def theseus_record(request: "web.Request"):
-        session_id = request.match_info["session_id"]
-        record = await asyncio.to_thread(sessions.record_for, store_path(), hermes_home(), session_id)
-        if not record or record["mode"] != "theseus":
-            return None, _error(web, "This isn't a Theseus session.", 404)
-        return record, None
+    def goal_scope():
+        # Hermes keeps a goal in this profile's session database (``state_meta``), so every read and
+        # write re-enters the request's profile scope inside the worker thread.
+        return profile_scope()
 
-    async def theseus_view(record: Dict[str, Any], fresh: bool = False) -> "web.Response":
-        home = await asyncio.to_thread(theseus.run_home, record)
-        snap = await asyncio.to_thread(theseus.state, home, fresh) if home else None
+    async def goal_view(session_id: str, extra: Optional[Dict[str, Any]] = None) -> "web.Response":
+        scope = goal_scope()
+
+        def run():
+            with scope():
+                return goal.read(session_id)
+
+        found = await asyncio.to_thread(run)
         return web.json_response(
-            {
-                "object": "memento.theseus",
-                "stage": theseus.stage(snap),
-                "state": snap,
-                "models": (record.get("theseus") or {}).get("models") or {"review": [], "visual": []},
-                "unavailable": await asyncio.to_thread(theseus.available),
-            }
+            {"object": "memento.goal", "session_id": session_id, **(extra or {}), **found}
         )
 
-    async def get_theseus(request: "web.Request") -> "web.Response":
+    async def get_goal(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
             return denied
-        record, problem = await theseus_record(request)
-        if problem is not None:
-            return problem
-        try:
-            return await theseus_view(record)
-        except theseus.TheseusError as error:
-            return _error(web, str(error), error.status)
+        return await goal_view(request.match_info["session_id"])
 
-    async def post_theseus(request: "web.Request") -> "web.Response":
+    async def post_goal(request: "web.Request") -> "web.Response":
+        """Sets the session's goal from the wizard's ``/goal`` text, and its quality gates."""
         denied = unauthorized(request)
         if denied is not None:
             return denied
         body = await json_body(request)
         if body is None:
             return _error(web, "Body must be a JSON object", 400)
-        record, problem = await theseus_record(request)
-        if problem is not None:
-            return problem
-        try:
-            home = await asyncio.to_thread(theseus.run_home, record)
-            result = await asyncio.to_thread(theseus.act, home, str(body.get("action")), body)
-            events.note("runs", record["session_id"], store_path(), True)
-            view = await theseus_view(record, True)
-        except theseus.TheseusError as error:
-            return _error(web, str(error), error.status)
-        payload = json.loads(view.text)
-        payload["message"] = result.get("message")
-        return web.json_response(payload)
+        session_id = request.match_info["session_id"]
+        scope = goal_scope()
 
-    async def post_theseus_models(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        body = await json_body(request)
-        if body is None:
-            return _error(web, "Body must be a JSON object", 400)
-        record, problem = await theseus_record(request)
-        if problem is not None:
-            return problem
+        def run():
+            with scope():
+                return goal.apply(
+                    session_id, body.get("command"), body.get("gates"), body.get("max_turns")
+                )
+
         try:
-            models = theseus.clean_models(body)
+            applied = await asyncio.to_thread(run)
+        except goal.GoalError as error:
+            return _error(web, str(error), error.status)
         except ValueError as error:
             return _error(web, str(error), 400)
-        updated = await asyncio.to_thread(sessions.set_theseus, store_path(), record["session_id"], models)
-        return await theseus_view(updated or record)
+        events.note("runs", session_id, store_path(), True)
+        return web.json_response({"object": "memento.goal", "session_id": session_id, **applied})
 
-    async def theseus_evidence(request: "web.Request") -> "web.StreamResponse":
+    async def post_goal_control(request: "web.Request") -> "web.Response":
+        """The sheet's actions: pause, resume or clear the session's goal."""
         denied = unauthorized(request)
         if denied is not None:
             return denied
-        record, problem = await theseus_record(request)
-        if problem is not None:
-            return problem
-        home = await asyncio.to_thread(theseus.run_home, record)
-        file = theseus.evidence_file(home, request.match_info["cp"], request.match_info["name"]) if home else None
-        if file is None:
-            return _error(web, "No such screenshot", 404)
-        return web.FileResponse(file, headers={"content-type": theseus.media_type(file)})
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        session_id = request.match_info["session_id"]
+        scope = goal_scope()
+
+        def run():
+            with scope():
+                return goal.control(session_id, body.get("action"))
+
+        try:
+            done = await asyncio.to_thread(run)
+        except goal.GoalError as error:
+            return _error(web, str(error), error.status)
+        events.note("runs", session_id, store_path(), True)
+        return web.json_response({"object": "memento.goal", "session_id": session_id, **done})
 
     async def push_subscribe(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1217,10 +1204,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/dictation", dictate)
     app.router.add_post(f"{PREFIX}/dictation/warm", warm_dictation)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/attachments", upload_attachment)
-    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/theseus", get_theseus)
-    app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/theseus", post_theseus)
-    app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/theseus/models", post_theseus_models)
-    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/theseus/evidence/{{cp}}/{{name}}", theseus_evidence)
+    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/goal", get_goal)
+    app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/goal", post_goal)
+    app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/goal/control", post_goal_control)
     app.router.add_get(f"{PREFIX}/runs/live", live_runs)
     app.router.add_get(f"{PREFIX}/events", stream_events)
     app.router.add_post(f"{PREFIX}/push", push_subscribe)
@@ -1566,7 +1552,6 @@ def register(ctx) -> None:
         )
     ship.register(ctx)
     library.register(ctx)
-    theseus.register(ctx)
     research.register(ctx)
     register_handler = getattr(ctx, "register_platform_handler", None)
     if register_handler is None:

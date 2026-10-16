@@ -3,9 +3,9 @@
 Hermes runs a top-level delegation in the background and hands the agent a handle. On a ``/v1/runs``
 session that resumes server history, the finished result is saved for the next client turn and the
 agent is not woken (``_resolve_async_wake_sid`` in ``tools/delegate_tool_dispatch.py``), so it never
-sees the result until the user writes again. A Theseus planner, or any subagent in a session left
-running with the app closed, would wait for a message nobody sends. Run synchronously, the child's
-result comes back as the tool's own answer, and an orchestrator child still fans out as before.
+sees the result until the user writes again. A subagent in a session left running with the app
+closed would wait for a message nobody sends. Run synchronously, the child's result comes back as
+the tool's own answer, and an orchestrator child still fans out as before.
 
 Hermes keeps every delegated child as a session of its own (``platform="subagent"``, its parent's id
 in ``parent_session_id`` and in ``model_config``'s ``_delegate_from``), so ``children`` lists them for

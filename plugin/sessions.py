@@ -22,7 +22,6 @@ import logging
 import os
 import re
 import secrets
-import shutil
 import sqlite3
 import subprocess
 import time
@@ -35,7 +34,9 @@ from .store import connect
 
 logger = logging.getLogger(__name__)
 
-MODES = ("accept_edits", "auto", "plan", "theseus")
+MODES = ("accept_edits", "auto", "plan")
+# What earlier versions wrote for a mode of their own; a session left in one reads as Auto.
+LEGACY_MODES = {"theseus": "auto"}
 FIELDS = (
     "session_id",
     "project_id",
@@ -48,7 +49,6 @@ FIELDS = (
     "repos",
     "plan_file",
     "files_dir",
-    "theseus",
 )
 REPO_FIELDS = ("name", "repo_root", "path", "branch")
 MAX_PARENT_HOPS = 5
@@ -113,11 +113,7 @@ class WorkspaceError(Exception):
 def _record(row: Any) -> Dict[str, Any]:
     record = dict(zip(FIELDS, row))
     record["plan_pending"] = bool(record["plan_pending"])
-    try:
-        settings = json.loads(record["theseus"]) if record["theseus"] else {}
-    except ValueError:
-        settings = {}
-    record["theseus"] = settings if isinstance(settings, dict) else {}
+    record["mode"] = LEGACY_MODES.get(record["mode"], record["mode"])
     try:
         repos = json.loads(record["repos"]) if record["repos"] else []
     except ValueError:
@@ -380,8 +376,8 @@ def ensure(
     the cwd."""
     if not isinstance(project_id, (str, int)) or isinstance(project_id, bool) or not str(project_id).strip():
         raise ValueError("project_id is required.")
-    if mode is not None and mode not in MODES:
-        raise ValueError("mode must be accept_edits, auto, plan or theseus.")
+    if mode is not None and LEGACY_MODES.get(mode, mode) not in MODES:
+        raise ValueError("mode must be accept_edits, auto or plan.")
     if task is not None and not isinstance(task, str):
         raise ValueError("task must be a string.")
     project_id = str(project_id).strip()
@@ -519,17 +515,6 @@ def apply_cwd(session_id: str, cwd: str) -> None:
     register_task_env_overrides(session_id, {"cwd": cwd})
 
 
-def _record_cwd(session_id: str, cwd: Optional[str]) -> None:
-    """Moves the session's current folder, as a ``cd`` would; its registered worktree stays."""
-    if not cwd:
-        return
-    try:
-        from tools.terminal_tool import record_session_cwd
-    except ImportError:
-        return
-    record_session_cwd(session_id, cwd)
-
-
 def _cwd(session_id: str) -> Optional[str]:
     try:
         from tools.terminal_tool import get_session_cwd
@@ -576,18 +561,12 @@ def stamp(db: Any, record: Dict[str, Any]) -> bool:
 
 def set_mode(path: Path, session_id: str, mode: Any) -> Optional[Dict[str, Any]]:
     """Sets the mode and clears a pending plan, which the app does to dismiss it everywhere."""
+    mode = LEGACY_MODES.get(mode, mode)
     if mode not in MODES:
-        raise ValueError("mode must be accept_edits, auto, plan or theseus.")
+        raise ValueError("mode must be accept_edits, auto or plan.")
     record = read(path, session_id)
     if not record:
         return None
-    if mode != record["mode"] and "theseus" in (mode, record["mode"]):
-        # A Theseus run is the whole session, from its first turn to its last.
-        raise WorkspaceError(
-            "A Theseus session keeps its mode." if record["mode"] == "theseus"
-            else "Theseus can only start a new session.",
-            409,
-        )
     conn = connect(path)
     try:
         conn.execute(
@@ -597,22 +576,6 @@ def set_mode(path: Path, session_id: str, mode: Any) -> Optional[Dict[str, Any]]
     finally:
         conn.close()
     events.note("runs", session_id, path, True)
-    return read(path, session_id)
-
-
-def set_theseus(path: Path, session_id: str, models: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Keeps a Theseus session's reviewer models (see ``theseus.clean_models``)."""
-    record = read(path, session_id)
-    if not record or record["mode"] != "theseus":
-        return None
-    conn = connect(path)
-    try:
-        conn.execute(
-            "UPDATE project_sessions SET theseus = ? WHERE session_id = ?",
-            (json.dumps({**record["theseus"], "models": models}, separators=(",", ":")), session_id),
-        )
-    finally:
-        conn.close()
     return read(path, session_id)
 
 
@@ -695,11 +658,6 @@ def remove(path: Path, session_id: str) -> Dict[str, Any]:
             _git(repo["repo_root"], "branch", "-d", repo["branch"])
     if kept:
         return {"removed": False, "kept": kept}
-    from . import theseus
-
-    folder = theseus.session_folder(record, path.parent.parent)
-    if folder:
-        shutil.rmtree(folder, ignore_errors=True)
     _delete(path, session_id)
     return {"removed": True, "kept": []}
 
@@ -801,13 +759,6 @@ def waiting(
     for session_id, record in records.items():
         if record["plan_pending"]:
             found.setdefault(session_id, {"kind": "plan"})
-        elif session_id not in found and record["mode"] == "theseus":
-            from . import theseus
-
-            # Its run is in `theseus wait` (so the turn is still running); the user is who it waits on.
-            at = theseus.waiting_stage(record)
-            if at:
-                found[session_id] = {"kind": "theseus", "stage": at}
     names = _project_names(hermes_home) if any(s in records for s in found) else {}
     for session_id, reason in found.items():
         record = records.get(session_id)
@@ -882,23 +833,8 @@ def _before_tool(kwargs: Dict[str, Any]) -> Optional[Dict[str, str]]:
     if record["path"] and task_id and not _has_cwd(task_id):
         # The gateway restarted since the app last posted the workspace.
         apply_cwd(task_id, record["path"])
-    # A Theseus session runs in Auto: the user's say is on the run's checkpoints, not on commands.
-    follow_auto(record["mode"] in ("auto", "theseus"))
-    if record["mode"] == "theseus":
-        from . import alerts, theseus
-
-        args = kwargs.get("args") if isinstance(kwargs.get("args"), dict) else {}
-        alerts.theseus_tool(path, record, kwargs.get("tool_name"), args)
-        if theseus.blocks_record(kwargs.get("tool_name"), args):
-            return {"action": "block", "message": theseus.THESEUS_BLOCK}
-        misplaced = theseus.misplaced_init(kwargs.get("tool_name"), args, record, _cwd(task_id))
-        if misplaced:
-            return {"action": "block", "message": misplaced}
-        if kwargs.get("tool_name") == "delegate_task" and task_id:
-            # A child starts in the parent's current folder, and the run may live in another repo
-            # of the session (or above them), where the planner has to work.
-            _record_cwd(task_id, theseus.run_home(record))
-        return None
+    # A goal continues a session's turn on its own, so the run stays in Auto.
+    follow_auto(record["mode"] == "auto")
     if record["mode"] != "plan":
         return None
     tool = kwargs.get("tool_name")

@@ -2,9 +2,7 @@
 
 One module holds the whole thing: every paragraph of the run's instructions as a private string at
 the top, and ``session_prompt`` joining them for a session's record, so a reader sees exactly what
-the agent is told without tracing the session bookkeeping. The Theseus-mode segment still comes
-from ``theseus.instructions`` — it creates the session's run folder as a side effect, so it stays
-where that behavior lives.
+the agent is told without tracing the session bookkeeping.
 """
 
 from __future__ import annotations
@@ -83,10 +81,6 @@ def session_prompt(record: Dict[str, Any]) -> str:
     ]
     if record.get("mode") == "plan":
         lines.append(_PLAN_INSTRUCTIONS)
-    if record.get("mode") == "theseus":
-        from . import theseus
-
-        lines.append(theseus.instructions(record))
     return "\n".join(line for line in lines if line)
 
 

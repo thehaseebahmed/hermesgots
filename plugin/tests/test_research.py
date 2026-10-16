@@ -274,12 +274,12 @@ class MissionTest(unittest.TestCase):
 
     def test_a_mission_is_rewritten_with_another_model(self) -> None:
         found = self.deliver()
-        with mock.patch.object(research.theseus, "llm_gate", return_value={"model": False, "provider": False}):
+        with mock.patch.object(research, "llm_gate", return_value={"model": False, "provider": False}):
             with self.assertRaises(research.ResearchError) as refused:
                 research.rewrite(self.path, found["id"], {"provider": "openrouter", "model": "x/y"})
         self.assertEqual(refused.exception.status, 403)
 
-        with mock.patch.object(research.theseus, "llm_gate", return_value={"model": True, "provider": True}):
+        with mock.patch.object(research, "llm_gate", return_value={"model": True, "provider": True}):
             found = research.rewrite(self.path, found["id"], {"provider": "openrouter", "model": "x/y"})
         self.assertEqual((found["stage"], found["writer"]), ("drafting", {"provider": "openrouter", "model": "x/y"}))
         before = len(self.llm.calls)

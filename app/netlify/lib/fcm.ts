@@ -15,7 +15,6 @@ export const PUSH_KINDS = [
   "approval",
   "question",
   "plan",
-  "theseus",
   "run_done",
   "run_failed",
   "pr_checks",
@@ -35,7 +34,6 @@ export const PUSH_CATEGORIES = [
   "chat_run_failed",
   "chat_run_done",
   "code_input",
-  "code_theseus",
   "code_run_failed",
   "code_run_done",
   "code_pr_checks",
@@ -62,11 +60,9 @@ export function categoryOf(kind: PushKind): PushCategory | "test" {
   return `code_${kind}`
 }
 
-/** What the plugin tells about a push beyond its kind (0.33): the chat's title and a Theseus run's
- * stage. */
+/** What the plugin tells about a push beyond its kind (0.33): the chat's title. */
 export interface PushDetail {
   title?: string
-  stage?: string
 }
 
 export interface FcmSender {
@@ -92,7 +88,6 @@ const WORDS: Record<PushKind, string> = {
   approval: "Waiting for your approval",
   question: "You have a question waiting",
   plan: "The plan is ready for your review",
-  theseus: "Waiting for you",
   run_done: "You have a new reply",
   run_failed: "The run stopped with an error",
   pr_checks: "Checks are failing on the pull request",
@@ -104,13 +99,6 @@ const WORDS: Record<PushKind, string> = {
   research_done: "Your research is ready",
   research_failed: "The mission stopped with an error",
   test: "This is a test notification",
-}
-
-const THESEUS_WORDS: Record<string, string> = {
-  plan: "The plan is ready for your review",
-  checkpoints: "The checkpoints are ready for your review",
-  approval: "A checkpoint is waiting for your approval",
-  closing: "All checkpoints are done, choose how to wrap up",
 }
 
 // When the plugin is older or couldn't find a name.
@@ -126,7 +114,7 @@ const UNTITLED: Partial<Record<PushKind, string>> = {
 /** The notification's title and body. */
 export function pushText(kind: PushKind, detail: PushDetail = {}) {
   const title = detail.title?.trim() || UNTITLED[kind] || "Gots"
-  const body = (kind === "theseus" && detail.stage && THESEUS_WORDS[detail.stage]) || WORDS[kind]
+  const body = WORDS[kind]
   return { title, body }
 }
 

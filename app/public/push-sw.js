@@ -7,7 +7,6 @@ const WORDS = {
   approval: "Waiting for your approval",
   question: "You have a question waiting",
   plan: "The plan is ready for your review",
-  theseus: "Waiting for you",
   run_done: "You have a new reply",
   run_failed: "The run stopped with an error",
   pr_checks: "Checks are failing on the pull request",
@@ -18,13 +17,6 @@ const WORDS = {
   research_scope: "The scope is ready for your approval",
   research_done: "Your research is ready",
   research_failed: "The mission stopped with an error",
-}
-
-const THESEUS_WORDS = {
-  plan: "The plan is ready for your review",
-  checkpoints: "The checkpoints are ready for your review",
-  approval: "A checkpoint is waiting for your approval",
-  closing: "All checkpoints are done, choose how to wrap up",
 }
 
 // When the plugin is older or couldn't find a name.
@@ -66,7 +58,7 @@ async function show(data) {
   const title =
     (typeof data.title === "string" && data.title.trim()) || UNTITLED[data.kind] || "Gots"
   const body =
-    (data.kind === "theseus" && THESEUS_WORDS[data.stage]) || WORDS[data.kind] || "Waiting for you"
+    WORDS[data.kind] || "Waiting for you"
   // The bot's own picture, so it's plain which bot it is.
   const bot = typeof data.bot === "string" && /^[a-z0-9-]{1,32}$/.test(data.bot) ? data.bot : ""
   await self.registration.showNotification(title, {

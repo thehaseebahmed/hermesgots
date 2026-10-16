@@ -1,10 +1,10 @@
 """News worth a push while the app is closed, beyond a session that waits on the user (``push.py``).
 
-A run that finished or failed, a Theseus run that needs the user, a pull request whose checks fail,
-and a routine that failed come from here (a merged pull request is told by ``merges.py``, a project
-that couldn't be set up by ``clones.py`` and ``repos.py``). Each is its own kind of push, so a device
-picks which it wants. Most come from hooks; the pull requests and routines are looked up every few
-minutes, because nothing in Hermes tells the plugin when GitHub or the scheduler moves.
+A run that finished or failed, a pull request whose checks fail, and a routine that failed come from
+here (a merged pull request is told by ``merges.py``, a project that couldn't be set up by
+``clones.py`` and ``repos.py``). Each is its own kind of push, so a device picks which it wants. Most
+come from hooks; the pull requests and routines are looked up every few minutes, because nothing in
+Hermes tells the plugin when GitHub or the scheduler moves.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from . import github, merges, push, sessions
 from .store import db_path
@@ -33,8 +33,6 @@ ROUTINE_FRESH_S = 30 * 60
 
 _lock = threading.Lock()
 _started: Dict[str, float] = {}
-# The Theseus stage already pushed for a session, until its agent does something else.
-_waits: Dict[Tuple[str, str], str] = {}
 
 
 def _text(value: Any) -> Optional[str]:
@@ -81,30 +79,6 @@ def turn_finished(**kwargs: Any) -> None:
             push.notify("run_done", session_id, path)
     except Exception:
         logger.debug("memento: couldn't tell a turn's end", exc_info=True)
-
-
-def theseus_tool(path: Path, record: Dict[str, Any], tool: Optional[str], args: Dict[str, Any]) -> None:
-    """``pre_tool_call`` of a Theseus session. Its agent sits in ``theseus wait`` while the user
-    decides, so the first wait that finds the run at a stage for the user is the moment to say so; the
-    waits that follow (it loops) stay quiet until the agent has done something else."""
-    try:
-        key = (str(path), record["session_id"])
-        if tool != "terminal" or "theseus wait" not in str(args.get("command") or ""):
-            with _lock:
-                _waits.pop(key, None)
-            return
-        from . import theseus
-
-        stage = theseus.waiting_stage(record)
-        if stage is None:
-            return
-        with _lock:
-            if _waits.get(key) == stage:
-                return
-            _waits[key] = stage
-        push.notify("theseus", record["session_id"], path, stage=stage)
-    except Exception:
-        logger.debug("memento: couldn't tell a Theseus wait", exc_info=True)
 
 
 def _finished_recently(row: Dict[str, Any], now: float) -> bool:
