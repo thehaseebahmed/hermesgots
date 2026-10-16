@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState, type ReactNode } from "react"
+import { Fragment, useMemo, useRef, useState, type ReactNode } from "react"
+import { BrainIcon, EyeIcon, type LucideIcon } from "lucide-react"
 import {
   ArrowLeftIcon,
   ArrowUpDownIcon,
@@ -25,6 +26,7 @@ import {
 import { Field, FieldLabel } from "@/components/ui/field"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Spinner } from "@/components/ui/spinner"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { rememberModel, type ModelChoice, type Profile } from "@/lib/db"
 import { MAX_FALLBACKS, withFallback } from "@/lib/fallback-list"
 import { useFallbackModels } from "@/lib/fallbacks"
@@ -345,6 +347,20 @@ function sortProviders(providers: ModelProvider[]) {
     .sort((a, b) => byName.compare(a.name, b.name))
 }
 
+/** A capability mark: a lucide icon with a tooltip naming the capability. */
+function CapabilityIcon({ label, Icon }: { label: string; Icon: LucideIcon }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span aria-label={label} className="inline-flex align-[-2px]">
+          <Icon className="size-3.5" aria-hidden="true" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  )
+}
+
 /**
  * A model row's muted second line: what models.dev and BenchLM say about it
  * (`BenchLM 87 · 1M · vision · $$$`), `—` when neither lists anything, and no line at all
@@ -368,11 +384,17 @@ function modelDetail(
   const parts = [
     benchlm,
     context ? formatTokens(context) : null,
-    vision ? "vision" : null,
-    reasoning ? "reasoning" : null,
+    vision ? <CapabilityIcon key="vision" label="Vision" Icon={EyeIcon} /> : null,
+    reasoning ? <CapabilityIcon key="reasoning" label="Reasoning" Icon={BrainIcon} /> : null,
     tier ? "$".repeat(tier) : null,
-  ].filter((part): part is string => part !== null)
-  return parts.join(" · ") || "—"
+  ].filter((part) => part !== null)
+  if (parts.length === 0) return "—"
+  return parts.map((part, i) => (
+    <Fragment key={`part-${i}`}>
+      {i > 0 && " · "}
+      {part}
+    </Fragment>
+  ))
 }
 
 // Four provider rows (each 3.5rem, `PROVIDER_ROW`) and the list's padding: a host with more
@@ -396,7 +418,7 @@ function ModelOption({
   onClick,
 }: {
   label: string
-  detail?: string
+  detail?: ReactNode
   selected: boolean
   /** Opens a list of its own rather than picking. */
   opens?: boolean
