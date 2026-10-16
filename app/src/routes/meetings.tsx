@@ -53,7 +53,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
+import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import {
   InputGroup,
@@ -570,12 +570,12 @@ function ProjectSelect({
       onValueChange={(next) => next && onChange(next)}
     >
       <SelectTrigger id={id} className="h-11 w-full">
-        <FolderIcon className="text-muted-foreground" />
-        <SelectValue className="flex-1 text-left" />
+        <SelectValue />
       </SelectTrigger>
       <SelectContent>
         {projects.map((p) => (
           <SelectItem key={p.id} value={p.id}>
+            <FolderIcon className="size-5 text-muted-foreground" />
             {p.name}
           </SelectItem>
         ))}
@@ -620,6 +620,73 @@ const isTranscript = (file: File) =>
   /\.(txt|vtt|srt|md)$/i.test(file.name) || file.type.startsWith("text/")
 
 const baseName = (name: string) => name.replace(/\.[^.]+$/, "")
+
+/** A place to drop a file, or tap to choose one. */
+function DropZone({
+  accept,
+  icon: Icon,
+  label,
+  file,
+  detail,
+  onFile,
+}: {
+  accept: string
+  icon: typeof FileAudioIcon
+  label: string
+  file?: string
+  detail?: string
+  onFile: (file: File) => void
+}) {
+  const input = useRef<HTMLInputElement>(null)
+  const [over, setOver] = useState(false)
+  return (
+    <>
+      <input
+        ref={input}
+        type="file"
+        accept={accept}
+        className="hidden"
+        onChange={(event) => {
+          const picked = event.target.files?.[0]
+          if (picked) onFile(picked)
+          event.target.value = ""
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => input.current?.click()}
+        onDragOver={(event) => {
+          event.preventDefault()
+          setOver(true)
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(event) => {
+          event.preventDefault()
+          setOver(false)
+          const dropped = event.dataTransfer.files[0]
+          if (dropped) onFile(dropped)
+        }}
+        className={cn(
+          "flex min-h-20 w-full items-center gap-3 rounded-3xl border px-4 py-3 text-left transition-colors hover:bg-muted",
+          !file && "border-dashed",
+          over && "border-primary bg-primary/5",
+        )}
+      >
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
+          <Icon className="size-5" />
+        </span>
+        {file ? (
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate font-medium">{file}</span>
+            {detail && <span className="text-sm text-muted-foreground">{detail}</span>}
+          </span>
+        ) : (
+          <span className="flex-1 font-medium">{label}</span>
+        )}
+      </button>
+    </>
+  )
+}
 
 /** A recording or a transcript from the device, by its extension, and the project it's filed under. */
 function UploadForm({ onAdded }: { onAdded: () => void }) {
@@ -694,20 +761,14 @@ function UploadForm({ onAdded }: { onAdded: () => void }) {
         add()
       }}
     >
-      <Field>
-        <FieldLabel htmlFor="meeting-file">Recording or transcript</FieldLabel>
-        <Input
-          id="meeting-file"
-          type="file"
-          accept={`${RECORDING_TYPES},${TRANSCRIPT_TYPES}`}
-          className="h-11 cursor-pointer py-2 file:mr-3 file:cursor-pointer"
-          onChange={(event) => {
-            const file = event.target.files?.[0]
-            if (file) void choose(file)
-          }}
-        />
-        {detail && <FieldDescription>{detail}</FieldDescription>}
-      </Field>
+      <DropZone
+        accept={`${RECORDING_TYPES},${TRANSCRIPT_TYPES}`}
+        icon={picked && "text" in picked ? FileTextIcon : FileAudioIcon}
+        label="Choose a file"
+        file={picked?.file.name}
+        detail={detail}
+        onFile={(file) => void choose(file)}
+      />
 
       {project && (
         <Field>
