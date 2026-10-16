@@ -346,3 +346,123 @@ then three times, then four.
 
 Found while running the flows for the goal reframe's rebase onto main, on a detached checkout of
 main alone. It predates that branch and is not caused by it.
+
+---
+
+# Deferred fixes from the simplify pass on the BenchLM matching and the overall scores
+
+A cleanup review of `fix(chat): match BenchLM scores across tags and model suffixes` (the same four
+parallel reviewers: reuse, quality, efficiency, altitude) turned up seven changes worth making that
+are wider than this branch or belong to a second mechanism. They are recorded here instead of
+applied: each touches a shared path, a second module, or a host surface this branch does not own.
+
+Everything else the review found is applied on this branch: the check builds one score map from the
+payload's own rows rather than a narrowed copy rebuilt per provider (so a row carrying only a slug or
+a name scores there exactly as it does in the app), its unused import is gone, a candidate chain is
+built once per id instead of once per lookup on the picker's search path, the picker reads the
+rankings state once and computes a score only for the BenchLM sort, `isRankings` is module-private
+again, the migrations are back in version order, and the nightly job reports a check that could not
+read BenchLM or models.dev rather than failing to parse a report that was never written.
+
+## Risky
+
+### 1. The known-gaps file stands in for a matcher miss
+
+`app/scripts/benchlm-known-gaps.json` lists `anthropic/claude-sonnet-4-5` and its dated form with a
+reason that now says BenchLM ranks it overall (48.57, #107/950). Those two entries are only unmatched
+because the deployed proxy still serves the coding surface; once the overall surface is live they
+should match exactly. The file's stated job (`check-benchlm-matches.mjs:1-3`) is ids BenchLM has no
+row for, so a matcher miss filed as a coverage gap silences the job over a real defect.
+
+- Cost: the nightly job goes green over an id the matcher should reach, and the allowlist drifts from
+  its purpose. It is the same class of mismatch the branch fixed in code for `gemma4` and filed as
+  data here — two mechanisms for one problem, so the next reader cannot tell which to use.
+- Suggested fix: re-derive the file against the overall surface once it deploys, drop entries that
+  turn into matches, and fix the matcher (or the alias data below) for any that stay unmatched but
+  plainly exist on the site. Reserve this file for ids with no row anywhere on BenchLM.
+- Why it is risky: confirming the spelling needs the live overall payload, which does not exist until
+  the proxy deploys — and dropping the entries before then turns the nightly job red for a reason
+  that is not a defect in this branch.
+
+### 2. Family spellings are code rather than data
+
+`app/src/lib/model-match.ts:62` splices a per-family alias (`gemma4` → `gemma-4`) into a candidate
+builder that otherwise derives every spelling from shape (`:` tag to dash, a date or
+`-preview`/`-free` suffix stripped).
+
+- Cost: every future glued-version family (a `gemma3`, a `qwen3`, a `llama3`) needs another branch
+  and another test inside the matcher, so it accretes family knowledge instead of staying generic.
+- Suggested fix: an alias map consumed by `benchCandidates` (`{ gemma4: "gemma-4" }`), so a new
+  family is a data edit. Keep it in `model-match.ts`, which must stay import-free for the
+  `--experimental-strip-types` tests.
+- Why it is risky: a general "letters followed by a trailing version digit" rule would be broader
+  than the evidence, and this branch measured its candidate chain against the real payload — a
+  speculative widening would undo that. One entry does not yet justify the indirection.
+
+## Careful
+
+### 3. One models.dev URL, two literals
+
+`app/scripts/check-benchlm-matches.mjs:15` declares `MODELS_DEV_URL` while
+`app/src/lib/models.ts:9` already has `CATALOG_URL` for the same endpoint.
+
+- Cost: if the catalog URL ever gains a version or moves host, the nightly job silently queries the
+  dead one while the app queries the new one, and the drift shows up as every model reading
+  unmatched.
+- Suggested fix: hoist the literal into a dependency-free module both import — the scripts already
+  follow this pattern by importing `src/lib/model-match.ts` — since the check cannot import
+  `models.ts` (Dexie, React and the `@/` alias).
+- Why it is risky: one URL that has never changed, and the fix adds a module for a single string.
+
+### 4. The check's BenchLM host is hard-coded
+
+`app/scripts/check-benchlm-matches.mjs:14` bakes in the deploy host, while the app derives the same
+endpoint from its site URL (`app/src/lib/rankings.ts:8`, `app/src/lib/native.ts:66`).
+
+- Cost: a site rename or a staging run leaves the nightly job hitting the old host, and it fails as a
+  red "BenchLM unreachable" rather than anything that names the cause.
+- Suggested fix: read the site URL the way the app and the Android workflows do (the repo's
+  `MEMENTO_SITE_URL`/`VITE_SITE_URL`), falling back to the current host.
+- Why it is risky: it needs the workflow to pass that variable through, for a host that has not
+  changed, on a job whose failure mode is already visible.
+
+### 5. The proxy's bare catch hides an upstream failure
+
+`app/netlify/functions/benchlm.mts:60` catches everything and discards it, and with a stale cache
+present the function still answers 200: a persistent auth or schema failure upstream is invisible,
+and the app scores from old data indefinitely. Pre-existing (`git blame`: f9a4fa05) — this branch
+changed only the surface it requests.
+
+- Cost: diagnostic only, but it is the one place that would say why the scores stopped moving.
+- Suggested fix: log the error and keep serving the stale payload (the current behaviour is right;
+  it just says nothing).
+- Why it is risky: low, and out of scope for a cleanup of the matching — the line predates the diff.
+
+### 6. One tooltip root per capability per row
+
+`app/src/components/chat/model-picker.tsx:351` mounts a Base UI `Tooltip` root for each capability a
+model has, in a list that is not virtualised.
+
+- Cost: a provider listing 100+ models mounts 200+ tooltip roots, all re-rendered while the search
+  box is typed.
+- Suggested fix: a single `Tooltip.Provider` or one shared popup, if the list is ever seen to jank.
+- Why it is risky: mounting cost only, and unmeasured — the rows are small and the list is
+  short in practice.
+
+### 7. The issue step reads 30 issues to find one
+
+`.github/workflows/benchlm-match.yml:50` lists open issues by label and matches the title in
+JavaScript.
+
+- Cost: a page of issues per nightly run for one lookup, and the update would miss the issue entirely
+  if more than 30 labelled ones were ever open.
+- Suggested fix: `search.issuesAndPullRequests` with `repo:… label:benchlm-match in:title`.
+- Why it is risky: it swaps a call that cannot fail for one that can, to save a read nobody pays for.
+
+---
+
+Found by the `/simplify-code` pass on this branch. It was a cleanup review, not a bug hunt —
+correctness was out of scope — and none of the seven blocks the pull request. Two live checks the
+branch still owes are not entries here: the overall surface needs Netlify to deploy before
+`claude-sonnet-4-5` reaches its row (entry 1), and the Dexie v14 upgrade has not been exercised on a
+device.
