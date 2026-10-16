@@ -4,7 +4,7 @@ import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { db, type Conversation, type ModelChoice, type Profile } from "@/lib/db"
 import { fullModel } from "@/lib/model-info"
 import { modelFacts, sameModel, type Catalog } from "@/lib/models"
-import { getSessionContext } from "@/lib/hermes"
+import { getSessionContext, type ModelChange } from "@/lib/hermes"
 
 /** Bots whose plugin has no context route (an older plugin). */
 const unsupported = cooldown()
@@ -54,18 +54,47 @@ export async function refreshContext(conversationId: string) {
     // and one left from before would be older than the turns since.
     if (!(await lacksRoute(profile, error, "context"))) return
     unsupported.start(key)
-    if (conversation.liveContext)
-      await db.conversations.update(conversationId, { liveContext: undefined })
+    // One left from before would be older than the turns since, the model list with it.
+    if (conversation.liveContext || conversation.modelChanges)
+      await db.conversations.update(conversationId, {
+        liveContext: undefined,
+        modelChanges: undefined,
+      })
     return
   }
   unsupported.clear(key)
+  if (!live) return
   const current = conversation.liveContext
+  const changes = live.modelChanges
+  const context: Conversation["liveContext"] =
+    live.tokens === undefined
+      ? undefined
+      : { tokens: live.tokens, window: live.window, model: live.model }
   // The model counts too: a switch that lands with the same tokens and window still has to show.
-  const unchanged =
-    current?.tokens === live?.tokens &&
-    current?.window === live?.window &&
-    current?.model === live?.model
-  if (!live || unchanged) return
+  const contextMoved =
+    !!context &&
+    (current?.tokens !== context.tokens ||
+      current?.window !== context.window ||
+      current?.model !== context.model)
+  // The host omits the list when it couldn't read it: unknown is not "no changes", so a missing
+  // list keeps the dividers we have rather than clearing them.
+  const changesMoved = changes !== undefined && !sameChanges(conversation.modelChanges, changes)
+  if (!contextMoved && !changesMoved) return
   // Not through updateConversation: this is local, so it mustn't move the sync clock.
-  await db.conversations.update(conversationId, { liveContext: live })
+  await db.conversations.update(conversationId, {
+    ...(contextMoved ? { liveContext: context } : {}),
+    ...(changesMoved ? { modelChanges: changes } : {}),
+  })
+}
+
+/**
+ * Whether the host's list moved: a switch can land with the same figure and still have to show, and
+ * the host may name one model two ways between reads. Missing on both sides still reads unchanged.
+ */
+function sameChanges(before: ModelChange[] | undefined, after: ModelChange[] | undefined) {
+  const was = before?.at(-1)?.model
+  const is = after?.at(-1)?.model
+  return (
+    (before?.length ?? 0) === (after?.length ?? 0) && (was === is || sameModel(was ?? "", is ?? ""))
+  )
 }

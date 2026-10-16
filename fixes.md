@@ -691,3 +691,105 @@ and a 500 all look the same as a bot that has no skills.
 
 Found by the `/simplify-code` pass on this branch. It was a cleanup review, not a bug hunt —
 correctness was out of scope — and none of the three blocks the pull request.
+
+---
+
+# Deferred fixes from the simplify pass on the chat's model dividers
+
+A cleanup review of `feat(chat): show a chat's model changes in its thread` and the three checkpoints
+under it (four parallel reviewers: reuse, quality, efficiency, altitude) turned up three changes
+worth making that are wider than a cleanup pass. They are recorded here instead of applied: one wants
+a shared helper in front of three existing modules, one moves a field onto its own read, and one is a
+sweep across three test files this branch never touches.
+
+Everything else the review found is applied on this branch: the divider's placement imports the app's
+own `sameModel` from `model-match.ts` instead of mirroring it (the comment claiming the mirror kept
+the module node-safe was wrong — `allowImportingTsExtensions` is on, and the placement tests already
+load `model-match.ts` for that same reason), the placement's helpers are module-private again and a
+turn carries only the two fields it reads, the model in effect has one spelling in `chat.ts`, the
+host's two spellings of one model compare through the shared matcher in `context.ts`, the host double
+computes a turn's model and provider once instead of twice a block, the scroller item draws the
+divider rather than `MessageItem` (which is back to main's shape: 120 of its 130 changed lines were
+re-indentation), an unreadable model history answers `None` instead of an empty list so the app keeps
+the dividers it has rather than clearing them, the module prunes hourly with a `KEEP_MS` of its own
+rather than borrowing `context.py`'s, and the tests' temp Hermes home comes from `tests/_helpers.py`.
+
+## Risky
+
+### 1. The model history walks two session ids where the plugin walks lineage four times
+
+`plugin/model_changes.py::read(path, session_id, also=None)` takes the resolved session and the id the
+app asked with, and `/context` passes exactly those two. A chat compressed twice reads A, B, C: the
+route resolves `asked_id` (A) to the live session (C), so the read covers C and A and never looks at B
+— the middle session, whose rows are where a long chat's older dividers were recorded. The plugin
+already owns the walk this needs (`delegation._lineage`, `push._lineage`, `sessions.record_for` and
+`stream.chat_session` each climb `parent_session_id`), and this is a fifth, one-hop copy of it.
+
+- Cost: a chat compressed more than once loses the dividers recorded under its middle sessions, while
+  the same host answers for the sessions on either side of them; and the fifth copy is a fifth place
+  a change to how Hermes names parents has to land.
+- Suggested fix: one lineage helper over the store's `sessions` table, read by `model_changes.read`
+  (every ancestor, not two ids), with the four callers above moved onto it where their own shape
+  allows.
+- Why it is risky: it rewrites `delegation.py` and `push.py`, which this branch never touches, and
+  each of the four walks stops where it does for its own reason (delegation caps at the parent for the
+  child list; `record_for` stops at the project session). It wants its own task, with the plugin suite
+  and the flows run over it.
+
+### 2. The host's model list is persisted inside the context read
+
+`refreshContext` (`app/src/lib/context.ts`) reads `/context` and writes both `liveContext` and
+`modelChanges`, and the `unsupported` cooldown it starts is keyed on the `context` feature — so a host
+whose plugin has one of the two routes and not the other is either asked forever or never asked
+again. Every sibling record a chat reads (todos, provider limits, the workspace, the pull requests)
+has its own refresh and its own `lacksRoute` cooldown, and `AGENTS.md` names
+`src/lib/model-changes.ts` as where a chat's model changes are read: that module never asks the host
+anything today.
+
+- Cost: a plugin that ships `/context` without `model_changes` (or the reverse) is read as missing
+  entirely, and the next reader looking for where the dividers come from finds the module they are
+  placed in rather than the one that fetches them.
+- Suggested fix: its own refresh beside the others, run when the transcript moved as
+  `useSessionFollowUps` does, with its own feature and cooldown in `freshness.ts`'s terms; or, if one
+  request per turn is the decision, say so in `AGENTS.md` and move the compare-and-write out of
+  `refreshContext` into `model-changes.ts`, so both sides of the contract live together.
+- Why it is risky: it splits one request into two on the path every chat runs at the end of a turn,
+  and the timings in `freshness.ts` are the repo's one place for them — a new read there wants the
+  request budget (`pnpm e2e idle-requests`) watched as well as the flows.
+
+## Careful
+
+### 3. Seven more test set-ups hand-roll the temp Hermes home
+
+`tests/_helpers.py::temp_hermes_home` now holds the throwaway home and the fake `hermes_constants`
+patch this branch's test used to carry itself, but `test_library.py` has four more copies (its
+set-ups at lines 31, 93, 239 and 302), `test_plan_mode.py` two (28 and 79) and `test_community.py` one
+(21).
+
+- Cost: eight copies of one fixture, so a change to how the plugin resolves its home — or to the
+  module it imports it from — lands in one and silently not the others.
+- Suggested fix: the same call in each set-up, `self.home = temp_hermes_home(self)`.
+- Why it is risky: test-only and mechanical, but `test_plan_mode.py:79` re-patches `hermes_constants`
+  mid-test with a fake of its own and `test_library.py:239` wants a `files/` root rather than the home,
+  so every site has to be read before it moves — and three files this branch never touches is a wider
+  pass than a cleanup should make.
+
+---
+
+Found by the `/simplify-code` pass on this branch. It was a cleanup review, not a bug hunt —
+correctness was out of scope — and none of the three blocks the pull request. Two findings are
+deliberately not entries here, because they were measured and do not hold:
+
+- **The divider map is recomputed on every streaming write.** Keying the memo on something cheaper
+  than the thread was the review's largest efficiency item: `routes/chat.tsx` re-runs the placement
+  whenever the live query hands back a new array, which is every `FLUSH_INTERVAL_MS` while a reply
+  streams. Measured on the module itself, at 2,000 messages over 1,000 turns: 0.18 ms median per
+  recompute, 0.05 ms at 200, so about 1.3 ms of main-thread work per second of streaming in the
+  longest thread there is. A key built from the values placement reads costs about as much as the
+  placement does, and the cheap structural keys have a hole in them (a row rewritten at the same
+  length, which `history.ts`'s reconcile does write). The single-pass merge of the two per-turn scans
+  was tried and measured inside the noise (min 0.164 → 0.155 ms), so it was dropped too.
+- **`/context` reads its two tables one after the other.** They are independent, and `asyncio.gather`
+  would halve the route's latency in relative terms — but the plugin calls no `gather` anywhere today,
+  both reads are local sqlite opens, and the route runs at most once per turn, so the absolute saving
+  is under a millisecond on a path nobody waits for.

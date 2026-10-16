@@ -30,6 +30,10 @@ const FLOWS = {
     script: "e2e/slash-skills.mjs",
     about: "The composer's / menu lists the bot's skills from the Gots plugin, not Hermes's /v1/skills",
   },
+  "model-switch": {
+    script: "e2e/model-switch.mjs",
+    about: "Changing the model mid-chat shows where it changed in the thread, on a reload too",
+  },
   approval: {
     script: "e2e/approval.mjs",
     about:

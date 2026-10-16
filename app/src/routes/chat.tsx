@@ -31,6 +31,7 @@ import { BotPicker } from "@/components/chat/bot-picker"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
+import { ModelChange } from "@/components/chat/model-change"
 import { prLabel } from "@/components/chat/pr-look"
 import { PrPill } from "@/components/chat/pr-pill"
 import { LibraryPill } from "@/components/chat/library-pill"
@@ -117,6 +118,7 @@ import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { setThreadMuted } from "@/lib/push"
+import { modelChanges } from "@/lib/model-changes"
 import { hostChoice, shortModel, useModelInfo } from "@/lib/model-info"
 import { syncContextWindow, useModelCatalog } from "@/lib/models"
 import {
@@ -276,6 +278,11 @@ export function ChatPage() {
         ...messages.filter((m) => m.status === "queued"),
       ],
     [messages],
+  )
+  // Where this chat's model changed, as the host recorded it: the divider each turn below carries.
+  const changes = useMemo(
+    () => modelChanges(thread ?? [], conversation?.modelChanges),
+    [thread, conversation?.modelChanges],
   )
   // Only a run can be steered, and only on a Hermes that has the route.
   const [steerRoute, setSteerRoute] = useState<{ baseUrl: string; ok: boolean }>()
@@ -752,18 +759,22 @@ export function ChatPage() {
                   </Button>
                 )}
                 <AgentsContext.Provider value={agentsSource}>
-                  {thread!.map((message) => (
-                    <MessageScrollerItem key={message.id} messageId={message.id}>
-                      <MessageItem
-                        message={message}
-                        showStats={!simple}
-                        simple={simple}
-                        botId={profile?.botId}
-                        busy={busy}
-                        plain={Boolean(session)}
-                      />
-                    </MessageScrollerItem>
-                  ))}
+                  {thread!.map((message) => {
+                    const change = changes.get(message.id)
+                    return (
+                      <MessageScrollerItem key={message.id} messageId={message.id}>
+                        {change && <ModelChange model={change} />}
+                        <MessageItem
+                          message={message}
+                          showStats={!simple}
+                          simple={simple}
+                          botId={profile?.botId}
+                          busy={busy}
+                          plain={Boolean(session)}
+                        />
+                      </MessageScrollerItem>
+                    )
+                  })}
                 </AgentsContext.Provider>
               </MessageScrollerContent>
             </MessageScrollerViewport>

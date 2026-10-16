@@ -1,7 +1,7 @@
 import Dexie, { type EntityTable, type Transaction } from "dexie"
 
 import { BOTS, LEGACY_BOT_IDS } from "@/components/bots"
-import type { ProviderUsage } from "@/lib/hermes"
+import type { ModelChange, ProviderUsage } from "@/lib/hermes"
 import { randomId } from "@/lib/utils"
 
 export type ThemePreference = "system" | "light" | "dark"
@@ -128,6 +128,11 @@ export interface Conversation {
    * from the plugin.
    */
   liveContext?: { tokens: number; window?: number; model?: string }
+  /**
+   * Every model this chat's calls ran on, oldest first, as the Gots plugin recorded them, so its
+   * thread can show where the model changed. Local only; every device reads the same list.
+   */
+  modelChanges?: ModelChange[]
   /** Newest Hermes transcript row this device has caught up to. Local only; never synced. */
   hermesTip?: number
   /**
@@ -342,6 +347,8 @@ export interface Message {
   status: MessageStatus
   /** Latest `hermes.status` text while streaming, or the error text. */
   statusText?: string
+  /** The model this device started the turn with, when the chat had one picked. Local only. */
+  model?: string
   stats?: MessageStats
   createdAt: number
   /** The Hermes transcript row a user message was matched to, once the device has seen it. */
