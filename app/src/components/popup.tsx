@@ -6,33 +6,69 @@ import {
   useRef,
   type ComponentProps,
   type ReactNode,
+  type RefObject,
 } from "react"
 import { Dialog } from "@base-ui/react/dialog"
 import { Drawer } from "@base-ui/react/drawer"
+import { Popover } from "@base-ui/react/popover"
 import { XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
-import { useWide, useXLarge } from "@/lib/media"
+import { PopupFormContext, usePopupDrawer, usePopupForm, type PopupForm } from "@/lib/popup-form"
 import { cn } from "@/lib/utils"
 
 /**
- * The app's pop-up: a modal bottom sheet on phones, a centred dialog with a close button from tablet
- * width up. Both are the same dialog underneath, so every pop-up has a pinned header with its title;
- * the header carries the close button on dialogs and side sheets. Phone sheets dismiss by swiping down,
- * tapping the scrim or the handle, Escape, or Android's back button (`handleBackButton`).
+ * What a pop-up is on this screen. Below 1024px a modal bottom sheet (full width on a phone, 640px
+ * at most and centred on a tablet). From 1024px a side drawer: full height on the right, swiped off
+ * to the right, a third of the viewport wide — never narrower than the 412px list pane it sits
+ * beside, never wider than four thirds of it (549px). Material's line for side sheets, which "often
+ * become bottom sheets on mobile". A small pick made from a button (the composer's `+` and model
+ * pill, a model field) passes that button as `anchor` and is a menu beside it from 1024px instead,
+ * since a drawer on the far right would move the eye across the screen for one tap.
  *
- * A pop-up you read beside the chat rather than act in (`side`: tool details, an agent's transcript)
- * is a modal side sheet from 1280px instead, Material's place for supporting content: full height on
- * the right, swiped off to the right, a third of the viewport wide — never narrower than the 412px
- * list pane it sits beside, never wider than four thirds of it (549px).
+ * Confirmations aren't pop-ups: they stay `AlertDialog`s, a centred dialog on every screen. A
+ * recording or a photo takes the whole screen (`FullscreenPopup`).
  */
-export function Popup({ side, ...props }: ComponentProps<typeof Drawer.Root> & { side?: boolean }) {
-  const sideSheet = useXLarge() && Boolean(side)
+export function Popup({
+  anchor,
+  open,
+  onOpenChange,
+  onOpenChangeComplete,
+  children,
+}: {
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  onOpenChangeComplete?: (open: boolean) => void
+  /** The button the pop-up opens from: from 1024px it's a menu beside it rather than a drawer. */
+  anchor?: RefObject<HTMLElement | null>
+  children?: ReactNode
+}) {
+  const large = usePopupDrawer()
+  const form: PopupForm = !large ? "sheet" : anchor ? "menu" : "drawer"
   return (
-    <SideSheet.Provider value={sideSheet}>
-      <Drawer.Root swipeDirection={sideSheet ? "right" : "down"} {...props} />
-    </SideSheet.Provider>
+    <PopupFormContext.Provider value={form}>
+      <Anchor.Provider value={anchor}>
+        {form === "menu" ? (
+          <Popover.Root
+            open={open}
+            onOpenChange={(next) => onOpenChange?.(next)}
+            onOpenChangeComplete={onOpenChangeComplete}
+          >
+            {children}
+          </Popover.Root>
+        ) : (
+          <Drawer.Root
+            swipeDirection={form === "drawer" ? "right" : "down"}
+            open={open}
+            onOpenChange={(next) => onOpenChange?.(next)}
+            onOpenChangeComplete={onOpenChangeComplete}
+          >
+            {children}
+          </Drawer.Root>
+        )}
+      </Anchor.Provider>
+    </PopupFormContext.Provider>
   )
 }
 /**
@@ -41,21 +77,32 @@ export function Popup({ side, ...props }: ComponentProps<typeof Drawer.Root> & {
  * a control of the header's own passes `text-left`.
  */
 export function PopupTitle({ className, ...props }: ComponentProps<typeof SheetTitle>) {
-  return (
-    <SheetTitle
-      className={cn("max-w-full justify-center truncate text-center", className)}
-      {...props}
-    />
+  const classes = cn(
+    "cn-font-heading max-w-full justify-center truncate text-center text-base font-medium text-foreground",
+    className,
   )
+  // A menu's heading starts where its rows do, as it sits beside the button it opened from.
+  if (usePopupForm() === "menu")
+    return <Popover.Title {...props} className={cn(classes, "justify-start text-left")} />
+  return <SheetTitle className={classes} {...props} />
 }
-export const PopupDescription = SheetDescription
+export function PopupDescription(props: ComponentProps<typeof SheetDescription>) {
+  if (usePopupForm() === "menu")
+    return (
+      <Popover.Description
+        {...props}
+        className={cn("text-sm text-muted-foreground", props.className as string)}
+      />
+    )
+  return <SheetDescription {...props} />
+}
 
-const InSheet = createContext(false)
-const SideSheet = createContext(false)
+const Anchor = createContext<RefObject<HTMLElement | null> | undefined>(undefined)
 const HeaderSeen = createContext<() => void>(() => {})
 
 export function PopupHeader({ className, children, ...props }: ComponentProps<typeof SheetHeader>) {
-  const sheet = useContext(InSheet)
+  const form = usePopupForm()
+  const sheet = form === "sheet"
   const markHeaderSeen = useContext(HeaderSeen)
   useEffect(() => {
     markHeaderSeen()
@@ -64,18 +111,19 @@ export function PopupHeader({ className, children, ...props }: ComponentProps<ty
     <SheetHeader
       className={cn(
         "sticky top-0 z-10 bg-popover pb-4",
-        // The close button sits at the header's right, so a dialog or side sheet keeps that room
-        // clear; a phone sheet has no close button and keeps its own right padding.
-        !sheet && "pr-14",
-        // A phone sheet centres its whole header, as a Material bottom sheet does, and has the
-        // drag handle above the heading, so it takes no top padding. The heading centres itself in
-        // every form (PopupTitle), leaving a dialog's or side sheet's other header rows as they were.
+        // The close button sits at a drawer header's right, so a drawer keeps that room clear; a
+        // sheet has no close button (nor does a menu, dismissed by a press outside it).
+        form === "drawer" && "pr-14",
+        form === "menu" && "px-5 pt-4 pb-3",
+        // A sheet centres its whole header, as a Material bottom sheet does, and has the drag
+        // handle above the heading, so it takes no top padding. The heading centres itself in every
+        // form (PopupTitle), leaving a drawer's or menu's other header rows as they were.
         sheet && "items-center pt-0 text-center",
         className,
       )}
       {...props}
     >
-      {!sheet && CLOSE}
+      {form === "drawer" && CLOSE}
       {children}
     </SheetHeader>
   )
@@ -105,17 +153,24 @@ const CLOSE = (
 )
 
 /**
- * A pop-up's width: the dialog's max width, `lg` (the default) unless a wider or narrower one is
- * asked for. A phone sheet is full width up to 640px whatever it is, and a side sheet takes its own
- * width instead, so a size never caps it.
+ * A pop-up's width as a sheet or a menu, `lg` (the default) unless a wider or narrower one is asked
+ * for. A sheet is full width on a phone and 640px at most on a tablet, narrower only for `md`; a
+ * drawer takes its own width, so a size never sets it.
  */
 export type PopupSize = "md" | "lg" | "xl" | "2xl"
 
-const SIZE: Record<PopupSize, string> = {
+const SHEET_SIZE: Record<PopupSize, string> = {
   md: "sm:max-w-md",
   lg: "",
-  xl: "sm:max-w-xl",
-  "2xl": "md:max-w-2xl",
+  xl: "",
+  "2xl": "",
+}
+
+const MENU_SIZE: Record<PopupSize, string> = {
+  md: "w-80",
+  lg: "w-96",
+  xl: "w-[28rem]",
+  "2xl": "w-[32rem]",
 }
 
 export function PopupContent({
@@ -125,7 +180,7 @@ export function PopupContent({
   initialFocus,
 }: {
   className?: string
-  /** The dialog's max width; a side sheet is a third of the viewport whatever this is. */
+  /** The sheet's or menu's width; a drawer is a third of the viewport whatever this is. */
   size?: PopupSize
   children: ReactNode
   /** `false` focuses the pop-up itself, so a search field doesn't take focus (and the keyboard) on open. */
@@ -137,8 +192,8 @@ export function PopupContent({
     headerSeen.current = true
   }, [])
   const focus = initialFocus === false ? popup : undefined
-  const wide = useWide()
-  const side = useContext(SideSheet)
+  const form = usePopupForm()
+  const anchor = useContext(Anchor)
   // Every pop-up renders a header. Only an open one can be missing it: its children mount then, and
   // the header reports through the context below. The check waits a frame, since Base UI puts the
   // popup in the document after the commit that opens it, and clears the flag while it's closed so a
@@ -154,7 +209,37 @@ export function PopupContent({
     })
     return () => cancelAnimationFrame(frame)
   })
-  if (side)
+  if (form === "menu")
+    return (
+      <HeaderSeen.Provider value={markHeaderSeen}>
+        <Popover.Portal>
+          <Popover.Positioner
+            className="isolate z-50"
+            anchor={anchor}
+            side="top"
+            align="start"
+            sideOffset={8}
+            collisionPadding={16}
+          >
+            <Popover.Popup
+              ref={popup}
+              initialFocus={focus}
+              className={cn(
+                "flex max-h-[min(36rem,var(--available-height))] max-w-(--available-width) origin-(--transform-origin) flex-col overflow-hidden rounded-2xl bg-popover pb-3 text-sm text-popover-foreground shadow-2xl ring-1 ring-foreground/5 transition-[opacity,scale] duration-150 outline-none data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none dark:ring-foreground/10",
+                MENU_SIZE[size],
+                className,
+                // A menu never runs past the room the screen has beside its button, whatever height
+                // the content asks for.
+                "max-h-[min(36rem,var(--available-height))]",
+              )}
+            >
+              <Scroll>{children}</Scroll>
+            </Popover.Popup>
+          </Popover.Positioner>
+        </Popover.Portal>
+      </HeaderSeen.Provider>
+    )
+  if (form === "drawer")
     return (
       <HeaderSeen.Provider value={markHeaderSeen}>
         <Drawer.Portal>
@@ -172,6 +257,8 @@ export function PopupContent({
                 "relative flex h-full w-[clamp(calc(var(--spacing)*103),33.33vw,calc(var(--spacing)*103*4/3))] max-w-[calc(100vw-3.5rem)] flex-col overflow-hidden rounded-l-2xl bg-popover pb-6 text-sm text-popover-foreground shadow-lg outline-none",
                 "[transform:translateX(var(--drawer-swipe-movement-x))] transition-transform duration-300 ease-[cubic-bezier(0.2,0,0,1)] data-ending-style:[transform:translateX(100%)] data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] data-starting-style:[transform:translateX(100%)] data-swiping:duration-0 data-swiping:select-none motion-reduce:duration-0",
                 className,
+                // A drawer is always the full height of the screen, whatever a sheet's height was.
+                "h-full max-h-none",
               )}
             >
               <Drawer.Content className="flex min-h-0 flex-1 flex-col">
@@ -182,69 +269,48 @@ export function PopupContent({
         </Drawer.Portal>
       </HeaderSeen.Provider>
     )
-  if (!wide)
-    return (
-      <HeaderSeen.Provider value={markHeaderSeen}>
-        <Drawer.Portal>
-          <Drawer.Backdrop
-            // Base UI renders a nested drawer's backdrop only when forced, and without it a sheet
-            // stacked on another has nothing separating it from the sheet behind: both sit at full
-            // brightness and read as one surface. The child's scrim covers the parent sheet, so the
-            // stack reads as layers, and a press outside the child still dismisses only the child.
-            forceRender
-            className={cn(
-              SCRIM,
-              "opacity-[calc(1-var(--drawer-swipe-progress))] duration-300 data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] data-swiping:duration-0 motion-reduce:duration-0",
-            )}
-          />
-          <Drawer.Viewport className="fixed inset-0 z-50 flex items-end justify-center">
-            <Drawer.Popup
-              ref={popup}
-              initialFocus={focus}
-              className={cn(
-                "group/popup relative flex max-h-[85dvh] w-full max-w-[640px] flex-col overflow-hidden rounded-t-[28px] bg-popover pb-[max(1.5rem,env(safe-area-inset-bottom))] text-sm text-popover-foreground shadow-lg outline-none",
-                SIZE[size],
-                // A sheet opened on top of this one stacks on it: this one lifts so a peek shows above
-                // the child, its content and handle fading out, and the child's own scrim dims this
-                // sheet so the stack reads as layers. Base UI sets the nested count, both heights and
-                // the child's swipe progress on the popup, and the lift keeps the peek constant
-                // whatever either sheet's height is, unwinding with the child's swipe.
-                "[transform:translateY(calc(var(--drawer-swipe-movement-y)-var(--stack-peek-offset)-var(--stack-lift)))] transition-[transform,height] duration-300 ease-[cubic-bezier(0.2,0,0,1)] [--peek:1.75rem] [--stack-front:var(--drawer-frontmost-height,0px)] [--stack-lift:calc(var(--stack-front)-var(--stack-own))] [--stack-own:var(--drawer-height,var(--drawer-frontmost-height,0px))] [--stack-peek-offset:max(0px,calc((var(--nested-drawers)-var(--stack-progress))*var(--peek)))] [--stack-progress:clamp(0,var(--drawer-swipe-progress),1)] data-ending-style:[transform:translateY(100%)] data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] data-nested-drawer-open:h-[var(--drawer-height)] data-nested-drawer-swiping:duration-0 data-starting-style:[transform:translateY(100%)] data-swiping:duration-0 data-swiping:select-none motion-reduce:duration-0",
-                className,
-              )}
-            >
-              <Drawer.Close
-                aria-label="Close"
-                className="mx-auto flex h-12 w-16 shrink-0 cursor-grab touch-none items-center justify-center transition-opacity duration-200 outline-none group-data-nested-drawer-open/popup:opacity-0 group-data-nested-drawer-swiping/popup:opacity-100 focus-visible:[&>span]:bg-ring"
-              >
-                <span className="h-1 w-8 rounded-full bg-muted-foreground/60" />
-              </Drawer.Close>
-              <InSheet.Provider value>
-                <Drawer.Content className="flex min-h-0 flex-1 flex-col transition-opacity duration-300 group-data-nested-drawer-open/popup:opacity-0 group-data-nested-drawer-swiping/popup:opacity-100">
-                  <Scroll>{children}</Scroll>
-                </Drawer.Content>
-              </InSheet.Provider>
-            </Drawer.Popup>
-          </Drawer.Viewport>
-        </Drawer.Portal>
-      </HeaderSeen.Provider>
-    )
   return (
     <HeaderSeen.Provider value={markHeaderSeen}>
-      <Dialog.Portal>
-        <Dialog.Backdrop className={cn(SCRIM, "duration-150")} />
-        <Dialog.Popup
-          ref={popup}
-          initialFocus={focus}
+      <Drawer.Portal>
+        <Drawer.Backdrop
+          // Base UI renders a nested drawer's backdrop only when forced, and without it a sheet
+          // stacked on another has nothing separating it from the sheet behind: both sit at full
+          // brightness and read as one surface. The child's scrim covers the parent sheet, so the
+          // stack reads as layers, and a press outside the child still dismisses only the child.
+          forceRender
           className={cn(
-            "fixed top-1/2 left-1/2 z-50 flex max-h-[85dvh] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-3xl bg-popover pb-6 text-sm text-popover-foreground shadow-lg transition duration-150 outline-none data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0",
-            SIZE[size],
-            className,
+            SCRIM,
+            "opacity-[calc(1-var(--drawer-swipe-progress))] duration-300 data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] data-swiping:duration-0 motion-reduce:duration-0",
           )}
-        >
-          <Scroll>{children}</Scroll>
-        </Dialog.Popup>
-      </Dialog.Portal>
+        />
+        <Drawer.Viewport className="fixed inset-0 z-50 flex items-end justify-center">
+          <Drawer.Popup
+            ref={popup}
+            initialFocus={focus}
+            className={cn(
+              "group/popup relative flex max-h-[85dvh] w-full max-w-[640px] flex-col overflow-hidden rounded-t-[28px] bg-popover pb-[max(1.5rem,env(safe-area-inset-bottom))] text-sm text-popover-foreground shadow-lg outline-none",
+              SHEET_SIZE[size],
+              // A sheet opened on top of this one stacks on it: this one lifts so a peek shows above
+              // the child, its content and handle fading out, and the child's own scrim dims this
+              // sheet so the stack reads as layers. Base UI sets the nested count, both heights and
+              // the child's swipe progress on the popup, and the lift keeps the peek constant
+              // whatever either sheet's height is, unwinding with the child's swipe.
+              "[transform:translateY(calc(var(--drawer-swipe-movement-y)-var(--stack-peek-offset)-var(--stack-lift)))] transition-[transform,height] duration-300 ease-[cubic-bezier(0.2,0,0,1)] [--peek:1.75rem] [--stack-front:var(--drawer-frontmost-height,0px)] [--stack-lift:calc(var(--stack-front)-var(--stack-own))] [--stack-own:var(--drawer-height,var(--drawer-frontmost-height,0px))] [--stack-peek-offset:max(0px,calc((var(--nested-drawers)-var(--stack-progress))*var(--peek)))] [--stack-progress:clamp(0,var(--drawer-swipe-progress),1)] data-ending-style:[transform:translateY(100%)] data-ending-style:duration-[calc(var(--drawer-swipe-strength)*300ms)] data-nested-drawer-open:h-[var(--drawer-height)] data-nested-drawer-swiping:duration-0 data-starting-style:[transform:translateY(100%)] data-swiping:duration-0 data-swiping:select-none motion-reduce:duration-0",
+              className,
+            )}
+          >
+            <Drawer.Close
+              aria-label="Close"
+              className="mx-auto flex h-12 w-16 shrink-0 cursor-grab touch-none items-center justify-center transition-opacity duration-200 outline-none group-data-nested-drawer-open/popup:opacity-0 group-data-nested-drawer-swiping/popup:opacity-100 focus-visible:[&>span]:bg-ring"
+            >
+              <span className="h-1 w-8 rounded-full bg-muted-foreground/60" />
+            </Drawer.Close>
+            <Drawer.Content className="flex min-h-0 flex-1 flex-col transition-opacity duration-300 group-data-nested-drawer-open/popup:opacity-0 group-data-nested-drawer-swiping/popup:opacity-100">
+              <Scroll>{children}</Scroll>
+            </Drawer.Content>
+          </Drawer.Popup>
+        </Drawer.Viewport>
+      </Drawer.Portal>
     </HeaderSeen.Provider>
   )
 }

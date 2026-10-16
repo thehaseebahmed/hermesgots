@@ -158,7 +158,7 @@ function AgentCard({ agent, source }: { agent: DelegatedAgent; source: AgentsSou
           {agentLine(agent)}
         </span>
       </CardShell>
-      <Popup side open={open} onOpenChange={setOpen}>
+      <Popup open={open} onOpenChange={setOpen}>
         <PopupContent size="xl">
           {open && <AgentView agent={agent} server={source.server} />}
         </PopupContent>

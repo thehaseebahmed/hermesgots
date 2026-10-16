@@ -145,7 +145,7 @@ export function TodosSheet({
   const { done, total } = progress(items)
   const levels = depths(items)
   return (
-    <Popup side open={open} onOpenChange={onOpenChange}>
+    <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent>
         <PopupHeader className="pb-2">
           <PopupTitle className="tabular-nums">

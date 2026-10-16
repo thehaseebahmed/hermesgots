@@ -18,10 +18,10 @@ import {
 import { Details } from "@/components/chat/tool-card"
 import { Button } from "@/components/ui/button"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { usePopupDrawer, usePopupForm } from "@/lib/popup-form"
 import { Spinner } from "@/components/ui/spinner"
 import type { ToolEvent } from "@/lib/db"
 import { formatDuration } from "@/lib/format"
-import { useWide } from "@/lib/media"
 import { failureReason, kindOf, phrases, todoTarget, TODO_TOOLS, type KindId } from "@/lib/tools"
 
 function useElapsed(tool: ToolEvent) {
@@ -142,9 +142,9 @@ function StatusIcon({ tool, icon: Icon }: { tool: ToolEvent; icon: LucideIcon })
 
 function ToolDetail({ tool, onBack }: { tool: ToolEvent; onBack: () => void }) {
   const elapsed = useElapsed(tool)
-  // The back button sits over the header, which only exists from tablet width up: on a phone the
-  // sheet's drag handle dismisses it, so the button would float over the handle band.
-  const wide = useWide()
+  // The back button sits over a drawer's header: a sheet's drag handle dismisses it instead, so the
+  // button would float over the handle band.
+  const wide = usePopupForm() !== "sheet"
   const status =
     tool.status === "running" ? "Running" : tool.status === "failed" ? "Failed" : "Completed"
   return (
@@ -262,7 +262,7 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
   const label = summary(parts, shown)
   // From tablet width up the details open in the same sheet, behind a back button; on a phone they
   // open as a sheet stacked on the list's, dismissed back to it.
-  const wide = useWide()
+  const wide = usePopupDrawer()
   const detail = !wide ? selected : undefined
   // Kept while the stacked sheet animates out, so it doesn't empty first.
   const [last, setLast] = useState<ToolEvent | undefined>()
@@ -293,14 +293,13 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
         </p>
       )}
       <Popup
-        side
         open={open}
         onOpenChange={(next) => {
           setOpen(next)
           if (!next) setSelectedIndex(undefined)
         }}
       >
-        {/* On a phone the details open as a sheet stacked on this one; it renders inside the
+        {/* As a sheet, the details open as a sheet stacked on this one; it renders inside the
             parent sheet's tree so Base UI registers the nesting. */}
         {!wide && (
           <Popup

@@ -1,5 +1,6 @@
-import { useMemo, useState, type ReactNode } from "react"
+import { useMemo, useRef, useState, type ReactNode } from "react"
 import {
+  ArrowLeftIcon,
   ArrowUpDownIcon,
   CheckIcon,
   ChevronDownIcon,
@@ -12,6 +13,7 @@ import { toast } from "sonner"
 
 import { MODEL_SORTS, sortByFacts, type ModelSort } from "@/components/chat/model-sort"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { usePopupForm } from "@/lib/popup-form"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -90,6 +92,20 @@ export function ModelPicker({
       })
       .filter((p) => p.models.length)
   }, [sorted, drilled, query, sort, catalog, rankings])
+
+  const form = usePopupForm()
+  // A menu has no sheet to stack on, so a provider's models take its place, with a way back.
+  if (form === "menu" && drilled && sorted.length > 1)
+    return (
+      <ProviderModels
+        provider={drilled}
+        catalog={catalog}
+        rankings={rankings}
+        isChosen={isChosen}
+        onChoose={onChoose}
+        onBack={() => setOpenSlug(undefined)}
+      />
+    )
 
   const top = !query && !drilled
   // The sort menu orders a flat model list; the providers list stays A to Z, so it shows no menu.
@@ -188,7 +204,7 @@ export function ModelPicker({
       </div>
       {/* A provider's models open as a sheet stacked on this one, dismissed back to it; it
           renders inside this sheet's tree so Base UI registers the nesting. */}
-      {drilled && (
+      {drilled && form !== "menu" && (
         <Popup open onOpenChange={(next) => !next && setOpenSlug(undefined)}>
           <PopupContent initialFocus={false} className={PICKER_HEIGHT}>
             <ProviderModels
@@ -212,12 +228,15 @@ function ProviderModels({
   rankings,
   isChosen,
   onChoose,
+  onBack,
 }: {
   provider: ModelProvider
   catalog: Catalog | undefined
   rankings: RankingsPayload | undefined
   isChosen: (m: ModelChoice) => boolean
   onChoose: (choice: ModelChoice | undefined) => void
+  /** Back to the providers, where the models take the picker's place rather than stack on it. */
+  onBack?: () => void
 }) {
   const [query, setQuery] = useState("")
   const [sort, setSort] = useState<ModelSort>("name")
@@ -236,7 +255,18 @@ function ProviderModels({
   }, [provider, query, sort, catalog, rankings])
   return (
     <>
-      <PopupHeader>
+      <PopupHeader className={cn(onBack && "pl-16")}>
+        {onBack && (
+          <Button
+            variant="ghost"
+            size="icon-lg"
+            className="absolute top-1.5 left-2 size-11"
+            aria-label="All providers"
+            onClick={onBack}
+          >
+            <ArrowLeftIcon />
+          </Button>
+        )}
         <PopupTitle>{provider.name}</PopupTitle>
       </PopupHeader>
       <div className="flex flex-col gap-5 px-6 pt-2 text-[15px]">
@@ -398,6 +428,7 @@ export function ModelMenu({
   display?: "pill" | "block"
 }) {
   const [open, setOpen] = useState(false)
+  const button = useRef<HTMLButtonElement>(null)
   const info = useModelInfo(profile)
   const providers = info?.providers ?? []
   // The host's last reported model, shown greyed while it's read again. Only a bot whose host runs
@@ -422,6 +453,7 @@ export function ModelMenu({
   return (
     <>
       <Button
+        ref={button}
         type="button"
         variant="secondary"
         className={cn(
@@ -435,7 +467,7 @@ export function ModelMenu({
         <span className={cn("min-w-0 truncate", stale && "text-muted-foreground")}>{label}</span>
         {providers.length > 0 && <ChevronDownIcon className="shrink-0 text-muted-foreground" />}
       </Button>
-      <Popup open={open} onOpenChange={setOpen}>
+      <Popup open={open} onOpenChange={setOpen} anchor={button}>
         <PopupContent initialFocus={false} className={PICKER_HEIGHT}>
           <ModelPicker
             providers={providers}
@@ -469,6 +501,7 @@ export function DefaultModelSetting({
   onChoose: (choice: ModelChoice | undefined) => Promise<void>
 }) {
   const [open, setOpen] = useState(false)
+  const field = useRef<HTMLButtonElement>(null)
   // The pick while the host saves it, so the field doesn't flick back to the old model.
   const [saving, setSaving] = useState<ModelChoice>()
   const info = useModelInfo(profile)
@@ -482,6 +515,7 @@ export function DefaultModelSetting({
   return (
     <>
       <Button
+        ref={field}
         id="default-model"
         type="button"
         variant="outline"
@@ -494,7 +528,7 @@ export function DefaultModelSetting({
         </span>
         <ChevronDownIcon className="text-muted-foreground" />
       </Button>
-      <Popup open={open} onOpenChange={setOpen}>
+      <Popup open={open} onOpenChange={setOpen} anchor={field}>
         <PopupContent initialFocus={false} className={PICKER_HEIGHT}>
           <ModelPicker
             providers={providers}
@@ -524,6 +558,8 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
   // The slot the picker is open on: a row's index, the add row's place at the end of the list,
   // nothing while it's shut.
   const [open, setOpen] = useState<number>()
+  // The row the picker opened from, which it sits beside as a menu.
+  const opener = useRef<HTMLElement | null>(null)
   const { list, supported, saving, save } = useFallbackModels(profile)
   const providers = useModelInfo(profile)?.providers ?? []
   if (!supported) return null
@@ -552,7 +588,10 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
               variant="outline"
               className="h-11 min-w-0 flex-1 justify-between gap-2 font-normal"
               disabled={cannotEdit}
-              onClick={() => setOpen(index)}
+              onClick={(event) => {
+                opener.current = event.currentTarget
+                setOpen(index)
+              }}
             >
               <span className="truncate">{fullModel(fallback)}</span>
               <ChevronDownIcon className="shrink-0 text-muted-foreground" />
@@ -576,14 +615,21 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
             variant="outline"
             className="h-11 w-full gap-1.5 font-normal"
             disabled={cannotEdit}
-            onClick={() => setOpen(list.length)}
+            onClick={(event) => {
+              opener.current = event.currentTarget
+              setOpen(list.length)
+            }}
           >
             <PlusIcon />
             Add fallback
           </Button>
         )}
       </div>
-      <Popup open={open !== undefined} onOpenChange={(next) => !next && setOpen(undefined)}>
+      <Popup
+        open={open !== undefined}
+        onOpenChange={(next) => !next && setOpen(undefined)}
+        anchor={opener}
+      >
         <PopupContent initialFocus={false} className={PICKER_HEIGHT}>
           <ModelPicker
             providers={providers}
