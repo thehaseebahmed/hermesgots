@@ -165,7 +165,7 @@ export function ModelPicker({
         {top && !drilled ? (
           <section className="flex flex-col gap-2">
             <h3 className="px-1 text-sm text-muted-foreground">Providers</h3>
-            <ModelList>
+            <ModelList className={PROVIDER_ROWS}>
               {sorted.map((p) => {
                 return (
                   <ModelOption
@@ -368,8 +368,17 @@ function modelDetail(
   return parts.join(" · ") || "—"
 }
 
-function ModelList({ children }: { children: ReactNode }) {
-  return <div className="flex flex-col overflow-hidden rounded-2xl bg-muted/60 p-1">{children}</div>
+// Four provider rows (each 3.5rem, `PROVIDER_ROW`) and the list's padding: a host with more
+// providers scrolls inside the list rather than pushing the Default and Recent rows off the picker.
+const PROVIDER_ROWS = "max-h-[14.5rem] overflow-y-auto overscroll-contain"
+const PROVIDER_ROW = "min-h-14"
+
+function ModelList({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div className={cn("flex flex-col overflow-hidden rounded-2xl bg-muted/60 p-1", className)}>
+      {children}
+    </div>
+  )
 }
 
 function ModelOption({
@@ -391,7 +400,8 @@ function ModelOption({
       type="button"
       aria-pressed={opens ? undefined : selected}
       className={cn(
-        "flex min-h-11 items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-background/60 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
+        "flex min-h-11 shrink-0 items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-background/60 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
+        opens && PROVIDER_ROW,
         selected && "bg-background",
       )}
       onClick={onClick}
