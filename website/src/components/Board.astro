@@ -1,8 +1,10 @@
 ---
-import { MODES, PERIODS, sampleBoard } from "../lib/board"
+import { MODES, sampleBoard } from "../lib/board"
 import { modelsList, providersList, tokensLegend, tokensList } from "../lib/render"
 
-const sample = sampleBoard()
+// The board shows the week; the period tabs are gone until there is more to compare.
+const PERIOD = "week"
+const sample = sampleBoard().periods[PERIOD]
 const base = (import.meta.env.PUBLIC_COMMUNITY_URL ?? "").replace(/\/+$/, "")
 const endpoint = base ? `${base}/.netlify/functions/community?route=board` : ""
 // With a live board configured the page waits for it; the sample shows only when there is none.
@@ -30,93 +32,53 @@ const BOARDS = [
     }
   </div>
 
-  <div class="tabs" role="tablist" aria-label="Period">
-    {
-      PERIODS.map((period, index) => (
-        <button
-          type="button"
-          role="tab"
-          id={`tab-${period.id}`}
-          aria-controls={`panel-${period.id}`}
-          aria-selected={index === 0 ? "true" : "false"}
-          data-period={period.id}
-        >
-          {period.label}
-        </button>
-      ))
-    }
-  </div>
+  <section class="panel" id="panel-week">
+    <section class="board" data-board="tokens">
+      <h2>Top tokens spent</h2>
+      <ul class="legend" aria-label="Models" data-list="legend" set:html={endpoint ? "" : tokensLegend(sample)} />
+      <ol class="rows" data-list="tokens" set:html={endpoint ? loading : tokensList(sample, { live: false })} />
+    </section>
 
-  {
-    PERIODS.map((period, index) => (
-      <section
-        class="panel"
-        role="tabpanel"
-        id={`panel-${period.id}`}
-        aria-labelledby={`tab-${period.id}`}
-        hidden={index !== 0}
-      >
-        <section class="board" data-board="tokens">
-          <h2>Top tokens spent</h2>
-          <ul class="legend" aria-label="Models" data-list="legend" set:html={endpoint ? "" : tokensLegend(sample.periods[period.id])} />
-          <ol class="rows" data-list="tokens" set:html={endpoint ? loading : tokensList(sample.periods[period.id], { live: false })} />
-        </section>
+    <section class="board" data-board="models" hidden>
+      <h2>Top models</h2>
+      <ul class="legend" aria-label="Modes">
+        {MODES.map((mode) => <li><span class={`dot mode-${mode.key}`} />{mode.label}</li>)}
+      </ul>
+      <ol class="rows" data-list="models" set:html={endpoint ? loading : modelsList(sample, { live: false })} />
+    </section>
 
-        <section class="board" data-board="models" hidden>
-          <h2>Top models</h2>
-          <ul class="legend" aria-label="Modes">
-            {MODES.map((mode) => <li><span class={`dot mode-${mode.key}`} />{mode.label}</li>)}
-          </ul>
-          <ol class="rows" data-list="models" set:html={endpoint ? loading : modelsList(sample.periods[period.id], { live: false })} />
-        </section>
-
-        <section class="board" data-board="providers" hidden>
-          <h2>Top providers</h2>
-          <ol class="rows" data-list="providers" set:html={endpoint ? loading : providersList(sample.periods[period.id], { live: false })} />
-        </section>
-      </section>
-    ))
-  }
+    <section class="board" data-board="providers" hidden>
+      <h2>Top providers</h2>
+      <ol class="rows" data-list="providers" set:html={endpoint ? loading : providersList(sample, { live: false })} />
+    </section>
+  </section>
 </div>
 
 <script>
-  import { PERIODS, readBoard, sampleBoard } from "../lib/board"
+  import { readBoard, sampleBoard } from "../lib/board"
   import { modelsList, providersList, tokensLegend, tokensList } from "../lib/render"
 
-  // The period and the board last picked on this device, so a return visit opens where they left off.
-  const STORED = "gots-community-period"
+  // The board last picked on this device, so a return visit opens where the person left off.
   const STORED_BOARD = "gots-community-board"
   const root = document.getElementById("board")!
   const badge = document.getElementById("sample-badge")
-  const tabs = Array.from(root.querySelectorAll<HTMLButtonElement>('[role="tab"][data-period]'))
-  const switches = Array.from(root.querySelectorAll<HTMLButtonElement>('[role="tab"][data-board]'))
-  const panels = Array.from(root.querySelectorAll<HTMLElement>('[role="tabpanel"]'))
+  const switches = Array.from(root.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
   const boards = Array.from(root.querySelectorAll<HTMLElement>(".board"))
 
-  function remember(key: string, value: string) {
+  function remember(value: string) {
     try {
-      localStorage.setItem(key, value)
+      localStorage.setItem(STORED_BOARD, value)
     } catch {
       // Storage blocked: the page still works, it just won't remember.
     }
   }
 
-  function stored(key: string) {
+  function stored() {
     try {
-      return localStorage.getItem(key)
+      return localStorage.getItem(STORED_BOARD)
     } catch {
       return null
     }
-  }
-
-  function select(period: string, focus = false) {
-    for (const tab of tabs) {
-      const on = tab.dataset.period === period
-      tab.setAttribute("aria-selected", String(on))
-      tab.tabIndex = on ? 0 : -1
-      if (on && focus) tab.focus()
-    }
-    for (const panel of panels) panel.hidden = panel.id !== `panel-${period}`
   }
 
   // One board at a time, so each one has the page to itself and the switch sets them apart.
@@ -130,27 +92,10 @@ const BOARDS = [
     for (const section of boards) section.hidden = section.dataset.board !== board
   }
 
-  for (const tab of tabs) {
-    tab.addEventListener("click", () => {
-      select(tab.dataset.period!)
-      remember(STORED, tab.dataset.period!)
-      history.replaceState(null, "", `#${tab.dataset.period}`)
-    })
-    tab.addEventListener("keydown", (event) => {
-      const index = tabs.indexOf(tab)
-      const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0
-      if (!step) return
-      event.preventDefault()
-      const next = tabs[(index + step + tabs.length) % tabs.length]!
-      select(next.dataset.period!, true)
-      remember(STORED, next.dataset.period!)
-    })
-  }
-
   for (const button of switches) {
     button.addEventListener("click", () => {
       pick(button.dataset.board!)
-      remember(STORED_BOARD, button.dataset.board!)
+      remember(button.dataset.board!)
     })
     button.addEventListener("keydown", (event) => {
       const index = switches.indexOf(button)
@@ -159,27 +104,21 @@ const BOARDS = [
       event.preventDefault()
       const next = switches[(index + step + switches.length) % switches.length]!
       pick(next.dataset.board!, true)
-      remember(STORED_BOARD, next.dataset.board!)
+      remember(next.dataset.board!)
     })
   }
 
-  // A link to a period wins, then the one last picked here, then the first.
-  const known = (period: string | null) => tabs.some((tab) => tab.dataset.period === period)
-  const fromHash = location.hash.slice(1)
-  const fromStore = stored(STORED)
-  select(known(fromHash) ? fromHash : known(fromStore) ? fromStore! : tabs[0]!.dataset.period!)
-  const knownBoard = (board: string | null) => switches.some((b) => b.dataset.board === board)
-  const savedBoard = stored(STORED_BOARD)
-  pick(knownBoard(savedBoard) ? savedBoard! : switches[0]!.dataset.board!)
+  const known = (board: string | null) => switches.some((b) => b.dataset.board === board)
+  const saved = stored()
+  pick(known(saved) ? saved! : switches[0]!.dataset.board!)
 
   function show(board: ReturnType<typeof sampleBoard>, live: boolean) {
-    for (const { id } of PERIODS) {
-      const panel = document.getElementById(`panel-${id}`)!
-      panel.querySelector('[data-list="legend"]')!.innerHTML = tokensLegend(board.periods[id])
-      panel.querySelector('[data-list="tokens"]')!.innerHTML = tokensList(board.periods[id], { live })
-      panel.querySelector('[data-list="models"]')!.innerHTML = modelsList(board.periods[id], { live })
-      panel.querySelector('[data-list="providers"]')!.innerHTML = providersList(board.periods[id], { live })
-    }
+    const period = board.periods.week
+    const panel = document.getElementById("panel-week")!
+    panel.querySelector('[data-list="legend"]')!.innerHTML = tokensLegend(period)
+    panel.querySelector('[data-list="tokens"]')!.innerHTML = tokensList(period, { live })
+    panel.querySelector('[data-list="models"]')!.innerHTML = modelsList(period, { live })
+    panel.querySelector('[data-list="providers"]')!.innerHTML = providersList(period, { live })
     badge?.toggleAttribute("hidden", live)
   }
 
