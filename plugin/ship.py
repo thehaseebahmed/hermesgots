@@ -45,6 +45,12 @@ def _has_ref(tree: str, ref: str) -> bool:
     return _git(tree, "rev-parse", "--verify", "-q", ref).returncode == 0
 
 
+def _ref_sha(tree: str, ref: str) -> Optional[str]:
+    """The commit a local reference points at, or ``None`` when it has none."""
+    found = _git(tree, "rev-parse", "--verify", "-q", ref)
+    return found.stdout.strip() or None if found.returncode == 0 else None
+
+
 def _repo_status(repo: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     tree = repo.get("path")
     if not tree or not os.path.isdir(tree):
@@ -145,19 +151,28 @@ def _commit(hermes_home: Path, tree: str, message: str) -> str:
 def _push(hermes_home: Path, tree: str, branch: str, force: bool = False) -> None:
     auth, _ = github.token(hermes_home)
     command = github.git_auth_args(auth)
+    lease: List[str] = []
     if force:
-        # Refresh the remote-tracking ref first, so --force-with-lease compares against what GitHub holds now.
-        fetched = _run(tree, [*command, "fetch", "-q", "origin", f"refs/heads/{branch}:refs/remotes/origin/{branch}"])
-        if fetched.returncode != 0 and "couldn't find remote ref" not in fetched.stderr:
-            raise _push_error(fetched.stderr, "git fetch failed.", auth)
-    lease = ["--force-with-lease"] if force and _has_ref(tree, f"refs/remotes/origin/{branch}") else []
+        # --force-with-lease refuses a branch that moved since this tree last looked at it: git
+        # compares the branch on GitHub against the commit we hand it, so that commit has to be one
+        # we knew before now. Refreshing it first would always match and leave the guard a no-op.
+        seen = _ref_sha(tree, f"refs/remotes/origin/{branch}")
+        if not seen and _remote_sha(tree, command, branch):
+            raise ShipError(
+                "GitHub's branch has commits this tree has never fetched, so a force push would "
+                "replace them blind. Fetch the branch first (git fetch origin), then call "
+                "pull_request again.",
+                409,
+            )
+        if seen:
+            lease = [f"--force-with-lease=refs/heads/{branch}:{seen}"]
     pushed = _run(tree, [*command, "push", *lease, "-u", "origin", f"HEAD:refs/heads/{branch}"])
     if pushed.returncode != 0:
         stderr = pushed.stderr
         if "stale info" in stderr:
             raise ShipError(
-                "GitHub's branch moved since it was last fetched, so the force push was refused. "
-                "Check what changed on the branch before forcing again.",
+                "GitHub's branch moved since this session last pushed or fetched it, so the force "
+                "push was refused. Check what changed on the branch before forcing again.",
                 409,
             )
         if "non-fast-forward" in stderr or "fetch first" in stderr:
@@ -167,6 +182,14 @@ def _push(hermes_home: Path, tree: str, branch: str, force: bool = False) -> Non
                 409,
             )
         raise _push_error(stderr, "git push failed.", auth)
+
+
+def _remote_sha(tree: str, command: List[str], branch: str) -> Optional[str]:
+    """The commit ``branch`` is at on ``origin``, asked of the remote itself: ``None`` when it has
+    none (a branch this session hasn't pushed yet, or a remote we couldn't reach)."""
+    found = _run(tree, [*command, "ls-remote", "origin", f"refs/heads/{branch}"])
+    line = found.stdout.strip() if found.returncode == 0 else ""
+    return line.split("\t", 1)[0] if line else None
 
 
 def _push_error(stderr: str, fallback: str, auth: Optional[str]) -> ShipError:
@@ -372,7 +395,8 @@ SCHEMA = {
                 "type": "boolean",
                 "description": (
                     "Replace the branch's remote commits with this one's, after a rebase or amend "
-                    "(ship, push). Off by default."
+                    "(ship, push). Off by default. Refused when the branch has moved since this "
+                    "session last pushed or fetched it, rather than overwriting that work."
                 ),
             },
         },

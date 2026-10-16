@@ -78,7 +78,12 @@ class DraftTests(_Base):
 
 
 class ForceTests(_Base):
-    def test_force_uses_lease_after_fetch(self):
+    def _push_args(self, calls):
+        return [call for call in calls if "push" in call][0]
+
+    def test_force_leases_against_the_commit_we_last_knew(self):
+        """--force-with-lease compares GitHub against a commit this tree knew before now; nothing
+        refreshes that answer on the way, or the guard would always match."""
         calls = []
 
         def fake_run(tree, args, env=None):
@@ -87,14 +92,53 @@ class ForceTests(_Base):
 
         with (
             patch("plugin.ship._run", side_effect=fake_run),
-            patch("plugin.ship._has_ref", return_value=True),
+            patch("plugin.ship._ref_sha", return_value="cafe1234"),
             patch("plugin.github.token", return_value=("tok", "u")),
-            patch("plugin.github.git_auth_args", return_value=["-c", "x"]),
+            patch("plugin.github.git_auth_args", return_value=[]),
         ):
             ship._push(Path(self.tmp), self.tmp, "hermes/s1", force=True)
-        pushes = [c for c in calls if "push" in c]
-        self.assertTrue(any("fetch" in c for c in calls), calls)
-        self.assertIn("--force-with-lease", pushes[0])
+        push = self._push_args(calls)
+        self.assertIn("--force-with-lease=refs/heads/hermes/s1:cafe1234", push)
+        self.assertFalse(any("fetch" in call or "ls-remote" in call for call in calls), calls)
+
+    def test_force_refuses_a_branch_this_tree_has_never_looked_at(self):
+        """No commit to check against and a branch on GitHub: overwriting it would be blind."""
+        calls = []
+
+        def fake_run(tree, args, env=None):
+            calls.append(args)
+            return MagicMock(returncode=0, stderr="", stdout="")
+
+        with (
+            patch("plugin.ship._run", side_effect=fake_run),
+            patch("plugin.ship._ref_sha", return_value=None),
+            patch("plugin.ship._remote_sha", return_value="deadbeef"),
+            patch("plugin.github.token", return_value=("tok", "u")),
+            patch("plugin.github.git_auth_args", return_value=[]),
+        ):
+            with self.assertRaises(ship.ShipError) as ctx:
+                ship._push(Path(self.tmp), self.tmp, "hermes/s1", force=True)
+        self.assertEqual(ctx.exception.status, 409)
+        self.assertIn("never fetched", str(ctx.exception))
+        self.assertFalse([call for call in calls if "push" in call], calls)
+
+    def test_force_on_a_branch_github_has_not_got_is_an_ordinary_push(self):
+        """A branch that isn't on GitHub yet has nothing to overwrite, so it is simply created."""
+        calls = []
+
+        def fake_run(tree, args, env=None):
+            calls.append(args)
+            return MagicMock(returncode=0, stderr="", stdout="")
+
+        with (
+            patch("plugin.ship._run", side_effect=fake_run),
+            patch("plugin.ship._ref_sha", return_value=None),
+            patch("plugin.ship._remote_sha", return_value=None),
+            patch("plugin.github.token", return_value=("tok", "u")),
+            patch("plugin.github.git_auth_args", return_value=[]),
+        ):
+            ship._push(Path(self.tmp), self.tmp, "hermes/s1", force=True)
+        self.assertNotIn("force", " ".join(self._push_args(calls)))
 
     def test_plain_push_has_no_force_flags(self):
         calls = []
@@ -109,10 +153,12 @@ class ForceTests(_Base):
             patch("plugin.github.git_auth_args", return_value=[]),
         ):
             ship._push(Path(self.tmp), self.tmp, "hermes/s1", force=False)
-        flat = " ".join(" ".join(c) for c in calls)
+        flat = " ".join(" ".join(call) for call in calls)
         self.assertNotIn("force", flat)
 
     def test_stale_info_rejection_is_reported_not_retried(self):
+        """A branch someone else moved is refused and surfaced, never forced again."""
+
         def fake_run(tree, args, env=None):
             if "push" in args:
                 return MagicMock(returncode=1, stderr="! [rejected] (stale info)", stdout="")
@@ -120,7 +166,7 @@ class ForceTests(_Base):
 
         with (
             patch("plugin.ship._run", side_effect=fake_run),
-            patch("plugin.ship._has_ref", return_value=True),
+            patch("plugin.ship._ref_sha", return_value="cafe1234"),
             patch("plugin.github.token", return_value=("tok", "u")),
             patch("plugin.github.git_auth_args", return_value=[]),
         ):

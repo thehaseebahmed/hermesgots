@@ -473,9 +473,14 @@ device.
 
 A cleanup review of `feat(hermes): give the agent a pull_request tool with actions and drafts` and
 its three follow-up commits (four parallel reviewers: reuse, quality, efficiency, altitude) turned
-up one finding worth a decision and three worth a later pass. They are recorded here instead of
-applied: the first contradicts a stated requirement, the rest touch shared infrastructure or a
+up four findings. Two are recorded here instead of applied: each touches shared infrastructure or a
 second module.
+
+The fourth was the force guard: `_push` refreshed the very ref its `--force-with-lease` checked
+against, so the guard could never refuse anything. That one is fixed on this branch, on the decision
+that the lease is against a commit the session knew before now, and that a branch it has never
+pushed or fetched is refused rather than overwritten blind. The same change removed the block's
+`"couldn't find remote ref"` stderr match, since nothing fetches on the way to a push any more.
 
 Everything else the review found is applied on this branch: the app's tool-label map keeps
 `open_pull_request` beside `pull_request` (the plugin keeps the old name resolvable forever, and the
@@ -487,34 +492,9 @@ redirect stub no longer gates `pull_request`'s own registration or wiring; `hand
 trailing booleans by keyword; and the mock's turn vocabulary and its live pull-request state match
 the tool again (they are always drafts, so the `"open"` arm was unreachable).
 
-## Risky
-
-### 1. The force push refreshes the very ref it leases against, so `--force-with-lease` can't refuse
-
-`plugin/ship.py::_push` fetches `refs/heads/<branch>:refs/remotes/origin/<branch>` and *then* pushes
-with a bare `--force-with-lease`. The lease compares the remote ref against that remote-tracking
-ref, which the fetch has just set to the remote's current value — so it always matches and the force
-push overwrites whatever the branch holds, including commits pushed since the session last looked.
-`plugin/README.md` and the run's own text promise the opposite ("a branch that moved on GitHub is
-refused, not overwritten"), and the code comment says the fetch exists so the lease "compares
-against what GitHub holds now", which is exactly why it can refuse nothing.
-
-- Cost: `force: true` silently clobbers concurrent commits on the session branch, while telling the
-  user it won't; the guard is decoration and the docs are wrong about it.
-- Suggested fix: stop refreshing that ref before leasing — keep the expected SHA the session last
-  saw (or read it once, before the rebase) and push
-  `--force-with-lease=refs/heads/<branch>:<sha>`, so a branch that genuinely moved is refused and a
-  stale-info rejection reaches the agent as the 409 the code already has. The same block also tells
-  "the remote branch doesn't exist yet" from a real failure by matching git's English
-  (`"couldn't find remote ref" not in fetched.stderr`), where the module already answers that
-  question directly with `_has_ref` and `github.branch_exists`.
-- Why it is risky: the plan for this work prescribed the fetch-then-lease order, so changing it
-  changes the agreed force-push semantics, and threading the expected SHA in reaches `_repo_status`,
-  `ship()` and `status()`. It is its own decision, not a cleanup.
-
 ## Careful
 
-### 2. "Still live" is re-written at every call site that looks at a pull request
+### 1. "Still live" is re-written at every call site that looks at a pull request
 
 `("open", "draft")` is now spelled out in four places inside the tool's own path —
 `plugin/ship.py::ship` (`existing["state"] in ("open", "draft")`), `plugin/ship.py::update`,
@@ -529,7 +509,7 @@ normalized dict, so they cannot simply call it today.
 - Why it is not applied here: it edits `alerts.py` and `merges.py`, which this change never touched,
   so it belongs in a pass that can test their own flows.
 
-### 3. `force` is validated in the handler while the text fields validate themselves
+### 2. `force` is validated in the handler while the text fields validate themselves
 
 `plugin/ship.py::handle` type-checks `force` and answers a JSON error, but `title`, `body` and
 `commit_message` are checked inside `ship()`/`update()` by `_text()`, which raises `ValueError` for
@@ -543,19 +523,6 @@ the handler to catch. A `force: "yes"` therefore comes back through a different 
 - Why it is not applied here: the handler-level check is defensible for an argument the schema
   declares a boolean (the schema is what the model sees), so this is a preference rather than a
   defect, and the reviewers were split on it.
-
-### 4. The push hand-rolls a second authenticated fetch
-
-`plugin/ship.py::_push`'s force path builds its own `git fetch` with `github.git_auth_args`, while
-`plugin/sessions.py::_fetch_origin` already owns "fetch this origin with the host's token".
-
-- Cost: two places know how to fetch `origin` as the server's GitHub account, with their own refspec,
-  quiet flag and error policy.
-- Suggested fix: give `_fetch_origin` an optional refspec and a mode that surfaces errors, and call
-  it here.
-- Why it is not applied here: the reviewer's own confidence was low — the new fetch is
-  refspec-targeted and deliberately surfaces its failure, where `_fetch_origin` is a best-effort
-  `--prune` — so it is not a drop-in, and item 1 above may delete the call outright.
 
 ---
 
