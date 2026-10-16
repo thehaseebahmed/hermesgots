@@ -76,8 +76,9 @@ export async function refreshContext(conversationId: string) {
     (current?.tokens !== context.tokens ||
       current?.window !== context.window ||
       current?.model !== context.model)
-  // And a switch recorded under an unchanged figure: the divider rides the list alone.
-  const changesMoved = !sameChanges(conversation.modelChanges, changes)
+  // The host omits the list when it couldn't read it: unknown is not "no changes", so a missing
+  // list keeps the dividers we have rather than clearing them.
+  const changesMoved = changes !== undefined && !sameChanges(conversation.modelChanges, changes)
   if (!contextMoved && !changesMoved) return
   // Not through updateConversation: this is local, so it mustn't move the sync clock.
   await db.conversations.update(conversationId, {
@@ -86,9 +87,14 @@ export async function refreshContext(conversationId: string) {
   })
 }
 
-/** Whether the host's list moved: a switch can land with the same figure and still has to show. */
+/**
+ * Whether the host's list moved: a switch can land with the same figure and still have to show, and
+ * the host may name one model two ways between reads. Missing on both sides still reads unchanged.
+ */
 function sameChanges(before: ModelChange[] | undefined, after: ModelChange[] | undefined) {
+  const was = before?.at(-1)?.model
+  const is = after?.at(-1)?.model
   return (
-    (before?.length ?? 0) === (after?.length ?? 0) && before?.at(-1)?.model === after?.at(-1)?.model
+    (before?.length ?? 0) === (after?.length ?? 0) && (was === is || sameModel(was ?? "", is ?? ""))
   )
 }

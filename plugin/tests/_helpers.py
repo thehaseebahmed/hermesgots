@@ -1,6 +1,9 @@
 """Shared test helpers for plugin tests."""
 
 import sys
+import tempfile
+import unittest
+from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock, patch
 
@@ -64,3 +67,20 @@ def stub_projects_db(projects=None, get_project=None, list_projects=None):
         projects_db.get_project = get_project
     module.projects_db = projects_db
     return patch.dict(sys.modules, {"hermes_cli": module, "hermes_cli.projects_db": projects_db})
+
+
+def temp_hermes_home(case: unittest.TestCase) -> Path:
+    """Give ``case`` a throwaway Hermes home that ``hermes_constants.get_hermes_home`` answers.
+
+    The temp directory and the patch are cleaned up with the case. Returns the home as a Path;
+    the host hands the plugin a string, which is what the fake answers.
+    """
+    tmp = tempfile.TemporaryDirectory()
+    case.addCleanup(tmp.cleanup)
+    home = Path(tmp.name)
+    constants = ModuleType("hermes_constants")
+    constants.get_hermes_home = lambda: str(home)  # type: ignore[attr-defined]
+    patcher = patch.dict(sys.modules, {"hermes_constants": constants})
+    patcher.start()
+    case.addCleanup(patcher.stop)
+    return home
