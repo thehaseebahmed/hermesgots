@@ -31,6 +31,7 @@ import { BotPicker } from "@/components/chat/bot-picker"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
+import { ModelChange } from "@/components/chat/model-change"
 import { prLabel } from "@/components/chat/pr-look"
 import { PrPill } from "@/components/chat/pr-pill"
 import { LibraryPill } from "@/components/chat/library-pill"
@@ -758,19 +759,22 @@ export function ChatPage() {
                   </Button>
                 )}
                 <AgentsContext.Provider value={agentsSource}>
-                  {thread!.map((message) => (
-                    <MessageScrollerItem key={message.id} messageId={message.id}>
-                      <MessageItem
-                        message={message}
-                        showStats={!simple}
-                        simple={simple}
-                        botId={profile?.botId}
-                        busy={busy}
-                        plain={Boolean(session)}
-                        change={changes.get(message.id)}
-                      />
-                    </MessageScrollerItem>
-                  ))}
+                  {thread!.map((message) => {
+                    const change = changes.get(message.id)
+                    return (
+                      <MessageScrollerItem key={message.id} messageId={message.id}>
+                        {change && <ModelChange model={change} />}
+                        <MessageItem
+                          message={message}
+                          showStats={!simple}
+                          simple={simple}
+                          botId={profile?.botId}
+                          busy={busy}
+                          plain={Boolean(session)}
+                        />
+                      </MessageScrollerItem>
+                    )
+                  })}
                 </AgentsContext.Provider>
               </MessageScrollerContent>
             </MessageScrollerViewport>
