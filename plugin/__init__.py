@@ -936,6 +936,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except Exception:
             logger.debug("memento: reading waiting sessions failed", exc_info=True)
             waiting = {}
+        try:
+            # A goal paused or blocked by the judge waits on the user too, and outranks its own note:
+            # a question the run asked is what the turn is doing right now.
+            waiting = {**await asyncio.to_thread(goal.waiting, hermes_home()), **waiting}
+        except Exception:
+            logger.debug("memento: reading waiting goals failed", exc_info=True)
         return web.json_response(
             {"object": "memento.runs", "sessions": live, "run_ids": run_ids, "waiting": waiting}
         )
@@ -1514,6 +1520,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/rewrite", research_rewrite)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/retry", research_retry)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/remove", remove_research)
+    # The goal loop judges finished turns and posts continuations through the server's own scope
+    # readers and adapter, which only exist here; see goal.py.
+    goal.wire(adapter, scope=profile_scope, profile=request_profile)
     mirror_for_profiles(app, web)
     logger.info("memento: serving %s on the API server", PREFIX)
 
@@ -1540,6 +1549,9 @@ def register(ctx) -> None:
         register_hook("post_approval_response", events.on_approval)
         register_hook("post_approval_response", approvals.settled)
         register_hook("on_session_end", events.on_turn_end)
+        # A session with a goal is judged when its turn ends, and continued from here; see goal.py.
+        register_hook("post_llm_call", goal.remember)
+        register_hook("on_session_end", goal.turn_finished)
         # The run is over, so a queued message can go now rather than at the next tick.
         register_hook("on_session_end", lambda **_kwargs: outbox.wake())
     register_cli = getattr(ctx, "register_cli_command", None)
