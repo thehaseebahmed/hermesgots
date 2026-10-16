@@ -66,14 +66,21 @@ async function show(data) {
     tag,
     icon: bot ? `/bots/${bot}.png` : "/pwa-192x192.png",
     // Safari revokes a subscription that gets pushes without notifications, so a visible app still
-    // shows one, silently and only for a moment.
+    // shows one, silently. It is closed as soon as it is shown: Chrome counts it as delivered, and
+    // nothing is left in the tray.
     silent: looking,
     data: { sessionId, screen },
   })
   if (looking) {
-    await new Promise((resolve) => setTimeout(resolve, 3000))
-    for (const notification of await self.registration.getNotifications({ tag }))
-      notification.close()
+    // The browser may not list a notification in the same tick it was shown, so one retry.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const shown = await self.registration.getNotifications({ tag })
+      if (shown.length) {
+        for (const notification of shown) notification.close()
+        break
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300))
+    }
   }
 }
 
