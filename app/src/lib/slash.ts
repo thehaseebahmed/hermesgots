@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react"
 
 import { connectionKey } from "@/lib/connection"
-import { listSkills, type HermesConfig, type Skill } from "@/lib/hermes"
+import { READ_TIMEOUT_MS } from "@/lib/freshness"
+import { hasPluginFeature, listSkills, type HermesConfig, type Skill } from "@/lib/hermes"
 
 export type LocalCommand = "new" | "settings" | "goal"
 /** Commands that carry the message after them, while a reply runs. */
@@ -58,11 +59,15 @@ function cacheKey({ baseUrl, apiKey }: HermesConfig) {
   return connectionKey({ baseUrl, apiKey })
 }
 
-async function loadSkills({ baseUrl, apiKey }: HermesConfig) {
-  const key = cacheKey({ baseUrl, apiKey })
+async function loadSkills(config: HermesConfig) {
+  const key = cacheKey(config)
   let pending = requests.get(key)
   if (!pending) {
-    pending = listSkills({ baseUrl, apiKey })
+    // A plugin without the route (an older one) has no skills to offer, so don't ask it: the menu
+    // shows the commands alone either way, and a bot whose host can't list skills keeps quiet.
+    pending = hasPluginFeature(config, "skills").then((lists) =>
+      lists ? listSkills(config, AbortSignal.timeout(READ_TIMEOUT_MS)) : [],
+    )
     requests.set(key, pending)
     pending.catch(() => requests.delete(key))
   }
