@@ -46,7 +46,7 @@ jobs:
         run: node scripts/test-community.mjs
         working-directory: app
       - name: BenchLM matching tests
-        run: node --experimental-strip-types --test scripts/test-bench-matching.mjs
+        run: node --experimental-strip-types --test scripts/test-bench-matching.mjs scripts/test-benchlm-check.mjs
         working-directory: app
       - name: Build
         run: pnpm build
