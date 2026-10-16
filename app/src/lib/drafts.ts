@@ -38,12 +38,27 @@ export async function flushDrafts() {
       for (const [id, text] of entries) {
         // A chat deleted while its text waited here keeps no draft.
         const chat = id.startsWith("c:") ? id.slice(2) : undefined
-        if (!text.trim() || (chat && !(await db.conversations.get(chat))))
+        const live = chat ? await db.conversations.get(chat) : undefined
+        if (!text.trim() || (chat && !live)) {
           await db.drafts.delete(id)
-        else await db.drafts.put({ id, text, at: Date.now() })
+          // Sending or deleting clears the draft from the chat record too.
+          if (chat && live?.draftText !== undefined) await db.conversations.update(chat, { draftText: undefined })
+        } else {
+          await db.drafts.put({ id, text, at: Date.now() })
+          // Mirrors the text onto the chat record, which syncs it to the plugin.
+          if (chat && live && live.draftText !== text) await db.conversations.update(chat, { draftText: text })
+        }
       }
     })
     .catch(() => undefined)
+}
+
+/** Adopts a draft that arrived from sync into an empty row; refused while this device has pending text. */
+export async function adoptDraft(key: string, text: string) {
+  if (pending.has(key)) return
+  const row = await db.drafts.get(key)
+  if (row?.text?.trim()) return
+  await db.drafts.put({ id: key, text, at: Date.now() })
 }
 
 document.addEventListener("visibilitychange", () => {
