@@ -26,7 +26,7 @@ permissions:
   packages: write
 
 env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/memento-dev
+  IMAGE: ghcr.io/${{ github.repository_owner }}/gots-dev
 
 jobs:
   image:

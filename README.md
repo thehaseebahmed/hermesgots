@@ -77,29 +77,29 @@ UI primitives in `src/components/ui` are shadcn `base-maia` components. Add more
 `Dockerfile` builds an image with everything the app, the plugin and the website need — Node 22, pnpm 10, Python 3.13 (with the plugin tests' `cryptography`) and headless Chromium for the e2e flows. It is published to the GitHub Container Registry whenever it changes:
 
 ```bash
-docker pull ghcr.io/thehaseebahmed/memento-dev:latest
+docker pull ghcr.io/thehaseebahmed/gots-dev:latest
 ```
 
 Or build it yourself and mount the repository at `/workspace`; the image carries the toolchains, never a copy of the tree:
 
 ```bash
-docker build -t memento-dev .
-docker run --rm -it -p 15173:15173 -p 8642:8642 -v "$PWD:/workspace" -w /workspace memento-dev
+docker build -t gots-dev .
+docker run --rm -it -p 15173:15173 -p 8642:8642 -v "$PWD:/workspace" -w /workspace gots-dev
 # inside the container: cd app && pnpm install && pnpm dev -- --host 0.0.0.0
 ```
 
 The checks run the same way:
 
 ```bash
-docker run --rm -v "$PWD:/workspace" -w /workspace memento-dev sh -lc "cd app && pnpm install --frozen-lockfile && pnpm lint && pnpm typecheck && pnpm build"
-docker run --rm -v "$PWD:/workspace" -w /workspace memento-dev sh -lc "python3 -m unittest discover -s plugin/tests"
-docker run --rm -v "$PWD:/workspace" -w /workspace memento-dev sh -lc "cd website && pnpm install --frozen-lockfile && pnpm build"
+docker run --rm -v "$PWD:/workspace" -w /workspace gots-dev sh -lc "cd app && pnpm install --frozen-lockfile && pnpm lint && pnpm typecheck && pnpm build"
+docker run --rm -v "$PWD:/workspace" -w /workspace gots-dev sh -lc "python3 -m unittest discover -s plugin/tests"
+docker run --rm -v "$PWD:/workspace" -w /workspace gots-dev sh -lc "cd website && pnpm install --frozen-lockfile && pnpm build"
 ```
 
 An e2e flow drives the dev server itself, so start it bound to IPv4 in the same container first: the harness probes `localhost`, which Node resolves to IPv4, while Vite binds `::1` — the trap `.agents/skills/e2e-testing/` describes.
 
 ```bash
-docker run --rm -v "$PWD:/workspace" -w /workspace memento-dev sh -lc '
+docker run --rm -v "$PWD:/workspace" -w /workspace gots-dev sh -lc '
   cd app && pnpm install --frozen-lockfile
   pnpm exec vite --port 15173 --strictPort --host 127.0.0.1 &
   sleep 5
