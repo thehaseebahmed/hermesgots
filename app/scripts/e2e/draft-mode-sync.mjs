@@ -1,39 +1,67 @@
-// A draft and a picked mode sync through the plugin's chat record: typing and a pick reach the
-// mock, come back after the local row is cleared, and neither moves the chat's updatedAt.
+// A composer's unsent text and a session's picked mode travel in the chat record the Gots plugin
+// holds: typing and a pick in the Add context sheet reach it, they come back to a device that lost
+// its copy, and typing leaves the chat's updatedAt (the activity clock the lists sort on) alone.
 import { app, assert, flow, mock, pass } from "./lib.mjs"
 
-const chatRecord = async (id) => {
-  const res = await fetch(`${mock}/api/plugins/memento/chats`)
-  const body = await res.json()
-  return (body.chats ?? body).find((c) => c.id === id)?.value ?? null
+const chat = "e2e-draft-sync"
+const PROJECT = "p_1a2b3c4d"
+
+/** The chat record the plugin holds for this chat, as the app pushed it. */
+async function record() {
+  const body = await fetch(`${mock}/api/plugins/memento/chats`).then((res) => res.json())
+  return body.chats?.[chat]?.value ?? null
 }
 
-await flow("draft-mode-sync", async ({ page, seed, shot }) => {
-  await seed([{ id: "e2e-draft-sync", title: "Draft sync" }])
-  await page.goto(`${app}/c/e2e-draft-sync`)
+await flow("draft-mode-sync", async ({ page, seed, until, shot }) => {
+  // A project session, so its composer carries the mode picker the pick comes from.
+  await seed([{ id: chat, title: "Draft sync", projectId: PROJECT }])
+  await page.goto(`${app}/c/${chat}`)
+  const composer = page.getByRole("textbox").last()
 
-  const composer = page.getByRole("textbox").first()
   await composer.fill("half-written thought")
-  await page.getByRole("button", { name: /plan/i }).first().click()
+  await page.getByRole("button", { name: "Add context" }).click()
+  await page.getByRole("radio", { name: /^Plan/ }).click()
 
-  await page.waitForTimeout(3_000)
-  const record = await chatRecord("e2e-draft-sync")
-  assert.equal(record?.draftText, "half-written thought", "the draft reaches the chat record")
-  assert.ok(record?.mode, "the picked mode reaches the chat record")
+  await until(
+    async () => (await record())?.draftText === "half-written thought",
+    20_000,
+    "the typed draft to reach the plugin's chat record",
+  )
+  assert.equal((await record())?.mode, "plan", "the picked mode reaches the chat record")
   pass("typing and a mode pick reach the plugin's chat record")
 
-  await page.evaluate(() => indexedDB.deleteDatabase("db"))
+  // This device loses its copy of the chat; the plugin's copy arrives on the next pull.
+  await page.evaluate(async (id) => {
+    const { deleteConversation } = await import("/src/lib/db.ts")
+    await deleteConversation(id, { remote: true })
+  }, chat)
   await page.reload()
-  await composer.waitFor({ timeout: 15_000 })
-  await page.waitForTimeout(3_000)
-  assert.equal(await composer.inputValue(), "half-written thought", "the draft comes back after a reset")
+  await until(
+    () =>
+      page.evaluate(async (id) => {
+        const { db } = await import("/src/lib/db.ts")
+        return (await db.conversations.get(id))?.draftText === "half-written thought"
+      }, chat),
+    20_000,
+    "the chat record to come back from the plugin",
+  )
+  await page.goto(`${app}/c/${chat}`)
+  await composer.waitFor()
+  await until(
+    async () => (await composer.inputValue()) === "half-written thought",
+    10_000,
+    "the draft to fill the composer again",
+  )
   await shot("draft-restored")
-  pass("a draft and its mode come back after the local row is cleared")
+  pass("the draft comes back after the local row is cleared")
 
-  const before = (await chatRecord("e2e-draft-sync"))?.updatedAt
+  const before = (await record())?.updatedAt
   await composer.fill("another line")
-  await page.waitForTimeout(3_000)
-  const after = (await chatRecord("e2e-draft-sync"))?.updatedAt
-  assert.equal(after, before, "typing does not move updatedAt")
+  await until(
+    async () => (await record())?.draftText === "another line",
+    20_000,
+    "the new text to sync",
+  )
+  assert.equal((await record())?.updatedAt, before, "typing leaves the chat's updatedAt alone")
   pass("typing leaves updatedAt where it was")
 })

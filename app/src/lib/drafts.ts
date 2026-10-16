@@ -1,6 +1,6 @@
 import { useLiveQuery } from "dexie-react-hooks"
 
-import { db } from "@/lib/db"
+import { db, updateConversation } from "@/lib/db"
 
 // Composers save as the user types, so writes are batched and flushed when the page hides.
 const pending = new Map<string, string>()
@@ -42,11 +42,13 @@ export async function flushDrafts() {
         if (!text.trim() || (chat && !live)) {
           await db.drafts.delete(id)
           // Sending or deleting clears the draft from the chat record too.
-          if (chat && live?.draftText !== undefined) await db.conversations.update(chat, { draftText: undefined })
+          if (chat && live?.draftText !== undefined)
+            await updateConversation(chat, { draftText: undefined })
         } else {
           await db.drafts.put({ id, text, at: Date.now() })
           // Mirrors the text onto the chat record, which syncs it to the plugin.
-          if (chat && live && live.draftText !== text) await db.conversations.update(chat, { draftText: text })
+          if (chat && live && live.draftText !== text)
+            await updateConversation(chat, { draftText: text })
         }
       }
     })
