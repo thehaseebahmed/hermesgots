@@ -200,6 +200,27 @@ function useWebPush() {
   return { permission, on: Boolean(settings?.on) && permission === "granted" }
 }
 
+/**
+ * Clears what this app has shown in the device's notification tray: the Android app's, or the
+ * service worker's on the web. Runs when the app comes to the front, so a push that arrived while
+ * it was closed doesn't sit there after it's been opened. A session still waiting on the user stays
+ * in Waiting for input. Nothing to clear (no registration, push never turned on) is a no-op.
+ */
+export async function clearNotifications() {
+  try {
+    if (isNative) {
+      const { push } = await plugin()
+      await push.removeAllDeliveredNotifications()
+      return
+    }
+    const registration = await navigator.serviceWorker?.getRegistration()
+    if (!registration) return
+    for (const notification of await registration.getNotifications()) notification.close()
+  } catch {
+    // An older APK's plugin without the call, or a browser without the Notifications API.
+  }
+}
+
 /** Keeps new bots and a restarted app in step with the subscription. */
 function startWeb() {
   if (!webSupported()) return
@@ -210,7 +231,9 @@ function startWeb() {
   }
   liveQuery(() => db.profiles.toArray()).subscribe(soon)
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") soon()
+    if (document.visibilityState !== "visible") return
+    soon()
+    void clearNotifications()
   })
 }
 
@@ -419,7 +442,10 @@ function startNative() {
     setTimeout(() => void syncCategories().catch(() => {}), 3000)
   }
   void sync().catch(() => {})
-  void App.addListener("resume", () => void sync().catch(() => {}))
+  void App.addListener("resume", () => {
+    void sync().catch(() => {})
+    void clearNotifications()
+  })
 }
 
 /** Asks the registry to push to this phone now, with the app open or not. */
@@ -552,6 +578,8 @@ export function startPush() {
   startMutes()
   if (isNative) startNative()
   else startWeb()
+  // Launch: the app is already in front, so whatever is in the tray has been seen.
+  void clearNotifications()
 }
 
 /** The toggle's state: whether push is available, allowed by the OS or browser and turned on here. */
