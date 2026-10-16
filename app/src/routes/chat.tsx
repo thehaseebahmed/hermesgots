@@ -42,7 +42,6 @@ import {
   PlanReadyCard,
   ResolvedCard,
 } from "@/components/chat/session-cards"
-import type { SheetView } from "@/components/chat/theseus"
 import { TodosPill, TodosSheet } from "@/components/chat/todos"
 import { ModelMenu } from "@/components/chat/model-picker"
 import {
@@ -139,14 +138,17 @@ import {
 import { SESSION_SUGGESTIONS, SUGGESTIONS } from "@/lib/suggestions"
 import { useBotThreads } from "@/lib/threads"
 import { draftKey } from "@/lib/drafts"
-import { useTheseusInfo, useTheseusRun, waitsOnUser } from "@/lib/theseus"
+import { useGoal } from "@/lib/goal"
 import { AgentsContext, DELEGATE_TOOL, useSessionAgents } from "@/lib/agents"
 
-// Only a Theseus session shows these, so they load with the first one.
-const theseusUi = () => import("@/components/chat/theseus")
-const TheseusCard = lazy(() => theseusUi().then((m) => ({ default: m.TheseusCard })))
-const TheseusPill = lazy(() => theseusUi().then((m) => ({ default: m.TheseusPill })))
-const TheseusSheet = lazy(() => theseusUi().then((m) => ({ default: m.TheseusSheet })))
+// Only a chat that has a goal loads its pill, card and sheet.
+const goalUi = () => import("@/components/chat/goal")
+const GoalPill = lazy(() => goalUi().then((m) => ({ default: m.GoalPill })))
+const GoalCard = lazy(() => goalUi().then((m) => ({ default: m.GoalCard })))
+const GoalSheet = lazy(() => goalUi().then((m) => ({ default: m.GoalSheet })))
+// Only a chat that sets one loads the goal wizard.
+const goalFormUi = () => import("@/components/chat/goal-wizard")
+const GoalWizard = lazy(() => goalFormUi().then((m) => ({ default: m.GoalWizard })))
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
@@ -263,7 +265,9 @@ export function ChatPage() {
   const [pendingModel, setPendingModel] = useState<{ profileId?: string; choice?: ModelChoice }>()
   const [todosOpen, setTodosOpen] = useState(false)
   const [outputsOpen, setOutputsOpen] = useState(false)
-  const [theseusView, setTheseusView] = useState<SheetView | null>(null)
+  // The goal wizard: open, and the task line `/goal <text>` handed it.
+  const [goalForm, setGoalForm] = useState<{ open: boolean; task?: string }>({ open: false })
+  const [goalSheet, setGoalSheet] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const [historyMissing, setHistoryMissing] = useState<string>()
 
@@ -412,8 +416,8 @@ export function ChatPage() {
   // when this tab comes back, and now and then while it's on screen.
   const updatedAt = conversation?.updatedAt
   const hasMessages = (messages?.length ?? 0) > 0
-  // A Theseus session's run, once its first turn has started it.
-  const theseus = useTheseusRun(session, profile, session?.mode === "theseus" && hasMessages)
+  // The chat's goal, if it has one: the plugin reads it from Hermes while the chat is open.
+  const goal = useGoal(conversation ?? undefined, profile)
   // The agents this chat's agent delegated to, for their cards in the thread.
   const delegations = messages
     ?.flatMap((m) => m.tools ?? [])
@@ -428,9 +432,8 @@ export function ChatPage() {
     () => (agents && baseUrl && apiKey ? { agents, server: { baseUrl, apiKey } } : null),
     [agents, baseUrl, apiKey],
   )
-  const theseusInfo = useTheseusInfo(profile)
-  // The agent sits in `theseus wait` while it waits, so the turn is still running: busy or not.
-  const theseusWaits = theseus && waitsOnUser(theseus)
+  // A paused or blocked goal waits on the user: the turn is over and nothing moves until they do.
+  const goalWaits = Boolean(goal && (goal.status === "paused" || goal.verdict === "blocked"))
   // Only persistent /v1/runs work survives losing the app's connection; legacy streams do not.
   useBreakReminderEligibility(
     isBackgroundSafeRunActive({
@@ -438,7 +441,7 @@ export function ChatPage() {
       runId,
       awaitingApproval: Boolean(awaitingApproval),
       awaitingClarify: Boolean(awaitingClarify),
-      theseusWaits: Boolean(theseusWaits),
+      goalWaits,
       resolved: Boolean(conversation?.resolvedAt),
       discarded: Boolean(conversation?.discardedAt),
       blocked: Boolean(conversation?.blocked),
@@ -487,6 +490,17 @@ export function ChatPage() {
     : project
       ? projectRepos(project)
       : []
+
+  // `/goal` (or `/goal <what to work towards>`) opens the wizard. A goal lives on the host's
+  // session, so a chat that hasn't sent anything yet has nowhere to put one.
+  const server = baseUrl && apiKey ? { baseUrl, apiKey } : null
+  const openGoal = (task?: string) => {
+    if (!conversation?.hermesSessionId) {
+      toast.error("A goal needs a session on the host — send a message first.")
+      return
+    }
+    setGoalForm({ open: true, task })
+  }
 
   // A deleted (or unknown) conversation id falls back to a fresh chat.
   useEffect(() => {
@@ -773,13 +787,13 @@ export function ChatPage() {
       )}
 
       <div data-toast-above className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
-        {(todos.length > 0 || theseus || prs.length > 0 || outputs > 0) && (
+        {(todos.length > 0 || goal || prs.length > 0 || outputs > 0) && (
           // One line, centred; wider than the screen it scrolls, from the first pill.
           <div className="-mx-3 flex [scrollbar-width:none] overflow-x-auto px-3 pb-2 sm:-mx-4 sm:px-4 [&::-webkit-scrollbar]:hidden">
             <div className="mx-auto flex w-max max-w-none min-w-full shrink-0 justify-center gap-2">
-              {theseus ? (
+              {goal ? (
                 <Suspense fallback={null}>
-                  <TheseusPill run={theseus} onClick={() => setTheseusView({ kind: "run" })} />
+                  <GoalPill goal={goal} onClick={() => setGoalSheet(true)} />
                 </Suspense>
               ) : (
                 todos.length > 0 && (
@@ -843,10 +857,16 @@ export function ChatPage() {
           <div className="mx-auto w-full max-w-3xl">
             <BlockedCard reason={session.blocked} />
           </div>
-        ) : theseusWaits ? (
+        ) : goalWaits && goal && conversation?.hermesSessionId ? (
           <div className="mx-auto w-full max-w-3xl">
             <Suspense fallback={null}>
-              <TheseusCard run={theseus} onOpen={setTheseusView} />
+              <GoalCard
+                goal={goal}
+                profile={server}
+                target={{ id: conversation.id, hermesSessionId: conversation.hermesSessionId }}
+                onOpen={() => setGoalSheet(true)}
+                onStart={(text) => void send(text).catch(() => {})}
+              />
             </Suspense>
           </div>
         ) : session?.planPending && session.mode === "plan" && !busy ? (
@@ -879,7 +899,10 @@ export function ChatPage() {
             filesAvailable={Boolean(profile?.apiKey)}
             imagesAvailable={profile?.imageInput !== false}
             onStop={() => id && stopMessage(id)}
-            onCommand={(command) => root(command === "new" ? (botPath ?? "/") : "/settings")}
+            onCommand={(command, rest) => {
+              if (command === "goal") return openGoal(rest)
+              root(command === "new" ? (botPath ?? "/") : "/settings")
+            }}
             connection={serverConfig(profile)}
             botName={profile?.name}
             dictationHint={[
@@ -897,8 +920,6 @@ export function ChatPage() {
                     ? "accept_edits"
                     : (session.mode ?? "accept_edits"),
                 autoAvailable: tracked,
-                theseus: theseusInfo,
-                started: hasMessages,
                 onMode: (mode) =>
                   setSessionMode(session.id, mode).catch((error) =>
                     toast.error(
@@ -927,13 +948,34 @@ export function ChatPage() {
           config={serverConfig(profile)}
         />
       )}
-      {theseus && (
+
+      {goal && conversation?.hermesSessionId && (
         <Suspense fallback={null}>
-          <TheseusSheet
-            run={theseus}
-            info={theseusInfo}
-            view={theseusView}
-            onView={setTheseusView}
+          <GoalSheet
+            goal={goal}
+            profile={server}
+            target={{ id: conversation.id, hermesSessionId: conversation.hermesSessionId }}
+            open={goalSheet}
+            onOpenChange={setGoalSheet}
+            onStart={(text) => void send(text).catch(() => {})}
+          />
+        </Suspense>
+      )}
+
+      {goalForm.open && conversation?.hermesSessionId && (
+        <Suspense fallback={null}>
+          <GoalWizard
+            key={goalForm.task ?? "new-goal"}
+            open
+            task={goalForm.task}
+            target={{
+              id: conversation.id,
+              hermesSessionId: conversation.hermesSessionId,
+              repos: sessionRepos.map((repo) => repo.name),
+            }}
+            profile={server}
+            onOpenChange={(open) => setGoalForm({ open })}
+            onStart={(text) => void send(text).catch(() => {})}
           />
         </Suspense>
       )}

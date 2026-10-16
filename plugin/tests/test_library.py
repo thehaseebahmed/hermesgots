@@ -363,7 +363,7 @@ class InstructionsTest(unittest.TestCase):
         # The mock is a standalone Node process, so its copy can't be imported; the e2e flows read
         # the text it serves, so a drift there tests a prompt no session gets. Compared the way
         # test_push_kinds compares its lists to the app's. Only the blocks meant to be verbatim:
-        # Theseus is deliberately shortened (the paths are the host's) and the plan is a template.
+        # the plan is a template, and the wording inside it is Hermes's own.
         import re
 
         app = Path(__file__).resolve().parents[2] / "app"

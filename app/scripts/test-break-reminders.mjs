@@ -112,7 +112,7 @@ test("only a live backend run that does not need the user can trigger reminders"
     runId: "run-1",
     awaitingApproval: false,
     awaitingClarify: false,
-    theseusWaits: false,
+    goalWaits: false,
     resolved: false,
     discarded: false,
     blocked: false,
@@ -122,7 +122,7 @@ test("only a live backend run that does not need the user can trigger reminders"
   assert.equal(isBackgroundSafeRunActive({ ...active, busy: false }), false)
   assert.equal(isBackgroundSafeRunActive({ ...active, awaitingApproval: true }), false)
   assert.equal(isBackgroundSafeRunActive({ ...active, awaitingClarify: true }), false)
-  assert.equal(isBackgroundSafeRunActive({ ...active, theseusWaits: true }), false)
+  assert.equal(isBackgroundSafeRunActive({ ...active, goalWaits: true }), false)
   assert.equal(isBackgroundSafeRunActive({ ...active, resolved: true }), false)
   assert.equal(isBackgroundSafeRunActive({ ...active, discarded: true }), false)
   assert.equal(isBackgroundSafeRunActive({ ...active, blocked: true }), false)

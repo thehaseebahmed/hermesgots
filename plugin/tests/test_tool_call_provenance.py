@@ -106,33 +106,6 @@ class TestToolCallProvenance(unittest.TestCase):
             "At most one clarify tool definition, never duplicated",
         )
 
-    def test_theseus_wrapper_preserves_original_tools(self) -> None:
-        """The Theseus wrapper must also preserve existing tools without duplication."""
-        base_agent = FakeAgent()
-        base_agent.tools = [{"type": "function", "function": {"name": "terminal"}}]
-        base_agent.valid_tool_names = {"terminal"}
-
-        def original_create(*args: Any, **kwargs: Any) -> FakeAgent:
-            return base_agent
-
-        adapter = FakeAdapter()
-        adapter._create_agent = original_create  # type: ignore[assignment]
-
-        from plugin.theseus import wire as theseus_wire
-
-        result = theseus_wire(adapter)
-        # wire returns False when the theseus tool isn't available, which is fine
-        if result:
-            agent = adapter._create_agent()  # type: ignore[assignment]
-            terminal_count = sum(
-                1 for t in agent.tools if (t.get("function") or {}).get("name") == "terminal"
-            )
-            self.assertEqual(
-                terminal_count,
-                1,
-                "Original tools must not be duplicated by Theseus wrapper",
-            )
-
     def test_double_wrapping_does_not_multiply(self) -> None:
         """Wrapping an already-wrapped adapter must not double-call the original."""
         adapter = FakeAdapter()

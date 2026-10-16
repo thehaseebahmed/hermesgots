@@ -6,6 +6,7 @@ import {
   db,
   prIsLive,
   prKey,
+  sessionMode,
   type Conversation,
   type PullRequestRef,
   type SessionMode,
@@ -52,7 +53,6 @@ export const MODE_LABELS: Record<SessionMode, string> = {
   accept_edits: "Accept edits",
   auto: "Auto",
   plan: "Plan",
-  theseus: "Theseus",
 }
 
 /** The session and its bot, when the bot's plugin can hold its workspace. */
@@ -112,7 +112,7 @@ export async function ensureSessionWorkspace(
     const workspace = await ensureWorkspace(profile, conversation.hermesSessionId, {
       projectId: conversation.projectId!,
       task,
-      mode: conversation.mode,
+      mode: sessionMode(conversation.mode),
     })
     await store(conversationId, workspace)
     return workspace
@@ -126,7 +126,7 @@ export async function ensureSessionWorkspace(
     return {
       ...conversation.worktree,
       projectId: conversation.projectId!,
-      mode: conversation.mode ?? "accept_edits",
+      mode: sessionMode(conversation.mode),
       planPending: Boolean(conversation.planPending),
       planFile: conversation.planFile ?? null,
       blocked: null,

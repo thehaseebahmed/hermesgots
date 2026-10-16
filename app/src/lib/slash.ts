@@ -3,7 +3,7 @@ import { useEffect, useState } from "react"
 import { connectionKey } from "@/lib/connection"
 import { listSkills, type HermesConfig, type Skill } from "@/lib/hermes"
 
-export type LocalCommand = "new" | "settings"
+export type LocalCommand = "new" | "settings" | "goal"
 /** Commands that carry the message after them, while a reply runs. */
 export type SendMode = "steer" | "queue"
 
@@ -13,6 +13,7 @@ export type SlashItem =
 
 export const LOCAL_COMMANDS: SlashItem[] = [
   { kind: "command", name: "new", description: "Start a new chat" },
+  { kind: "command", name: "goal", description: "Work towards something until it's done" },
   { kind: "command", name: "settings", description: "Open settings" },
 ]
 
@@ -28,6 +29,15 @@ export const isSendMode = (name: string): name is SendMode => name === "steer" |
 export function sendMode(text: string): { mode: SendMode; text: string } | null {
   const match = /^\/(steer|queue)(?:\s+([\s\S]*))?$/.exec(text.trimStart())
   return match ? { mode: match[1] as SendMode, text: (match[2] ?? "").trim() } : null
+}
+
+/**
+ * `/goal` or `/goal <what to work towards>`: opens the wizard, with the line after it as the task.
+ * A goal is composed and set through the plugin, so it never goes to the agent as a message.
+ */
+export function goalCommand(text: string): { task: string } | null {
+  const match = /^\/goal(?:\s+([\s\S]*))?$/.exec(text.trimStart())
+  return match ? { task: (match[1] ?? "").trim() } : null
 }
 
 export function localCommand(text: string): LocalCommand | null {

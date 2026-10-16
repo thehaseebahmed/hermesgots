@@ -120,7 +120,7 @@ const MOCK_PNG = Buffer.from(
 )
 const githubRepos = [
   { full_name: "mock-user/memento", description: "A PWA companion for Hermes", private: false },
-  { full_name: "mock-user/theseus", description: "A tiny maze game", private: true },
+  { full_name: "mock-user/maze", description: "A tiny maze game", private: true },
   { full_name: "mock-user/dotfiles", description: null, private: false },
   { full_name: "mock-org/zigbee-bridge", description: "Zigbee to MQTT glue", private: true },
   { full_name: "mock-user/ha-automations", description: "Home Assistant automations", private: false },
@@ -201,12 +201,12 @@ function seedProjects() {
     },
     {
       id: "p_5e6f7a8b",
-      slug: "theseus",
-      name: "theseus",
+      slug: "maze",
+      name: "Maze",
       description: "A tiny maze game for the phone, written over lunch breaks",
       created_at: now - 20 * 86_400,
       last_active: now - 3 * 3_600,
-      folders: [{ ...folder("/home/hermes/code/theseus"), is_primary: true }],
+      folders: [{ ...folder("/home/hermes/code/maze"), is_primary: true }],
     },
     {
       id: "p_9c0d1e2f",
@@ -340,105 +340,52 @@ const PR_INSTRUCTIONS = "When the work is done and you've checked it, ship it yo
 const DONE_INSTRUCTIONS = "Two things the run's prompt emphasises once the work is done: don't share the pull request url or the commit message in your reply — the open_pull_request result and the session's pull request list already surface them where the user sees them. And before you finish, update your todo list to its final state: every item completed, or cancelled where it was dropped."
 // The plugin's working-rhythm guidance (prompt_builder._PROGRESS_UPDATES_INSTRUCTIONS), word for word.
 const PROGRESS_UPDATES_INSTRUCTIONS = "Keep the user in the loop as you work, at a working rhythm rather than a running commentary. Post a short update between checkpoints — what landed, what you're doing next — so a long stretch of tool calls never reads as a hang. Keep the todo list current as you go: mark items done as they land and add what you discover. When something keeps failing, say what you tried and what you now think is wrong before the next attempt. Thinking out loud while you plan is welcome. Don't narrate each edit, read or command — the tool calls already show those; keep what you do say technical enough to follow the work without spelling out every implementation detail."
-// Theseus runs in Auto with the skill's gates on top, and keeps its mode for the whole session.
-const MODES = ["accept_edits", "auto", "plan", "theseus"]
-// The plugin's Theseus instructions (theseus.INSTRUCTIONS), shortened: the paths are the host's.
-const THESEUS_INSTRUCTIONS = "This session is a Theseus run: the user decides, you build in small checkpoints that each pass four gates. Follow the tha-theseus skill. Reviews (coverage, gates 2 and 3) are done by the theseus_review tool, which asks another model and records its verdict itself."
-// MOCK_THESEUS=<stage> starts every Theseus run there; MOCK_THESEUS=unavailable says the host has no Node.
-let THESEUS_START = process.env.MOCK_THESEUS ?? "discovery"
-const theseusRuns = new Map()
-const THESEUS_STAGES = ["discovery", "planning", "plan", "checkpoints", "building", "approval", "closing", "done"]
-
-const theseusPass = (extra = {}) => ({ red: "pass", tests: "pass", visual: "pass", review: "pass", ...extra })
-const theseusCheckpoints = (stage) => {
-  const base = [
-    { id: "CP1", title: "Schedules in words become Hermes schedules", done: "'weekdays at 9:30' and 'every 15 minutes' map to Hermes's cron and interval shapes", ui: false, tests: ["weekdays at 9:30 becomes cron 30 9 * * 1-5", "every 15 minutes becomes an interval of 15", "an unknown phrase is refused with a message"] },
-    { id: "CP2", title: "Creating a routine through Hermes", done: "a valid routine is created, and Hermes's refusal comes back as its message", ui: false, tests: ["a valid routine is posted and returned with its id", "a 400 from Hermes surfaces its error text", "a 501 reads as cron not available"] },
-    { id: "CP3", title: "Routine editor, empty and error states", done: "the pop-up matches the mock when empty and when Hermes refuses the schedule", ui: true, tests: ["the form opens empty, Save disabled", "a refused schedule shows Hermes's message under the field", "Save is enabled once name, prompt and schedule are filled"] },
-    { id: "CP4", title: "Editing an existing routine", done: "a routine opens filled in, and saving keeps its run history", ui: true, tests: ["the form opens with the routine's values", "saving keeps last_run_at and runs"] },
-    { id: "CP5", title: "Pause, resume and delete in the editor", done: "each action updates the list at once and survives a reload", ui: true, tests: ["pause shows Paused", "delete asks first, then removes the row"] },
-    { id: "CP6", title: "New routines in the Routines list", done: "a new routine shows its schedule in words and its next run", ui: true, tests: ["the new row reads 'Weekdays at 9:30 AM'"] },
-  ]
-  const item = (reviewer, round, items, via) => ({ reviewer, round, findings: items.length, isolation: "model", via, verdict: items.length ? "FINDINGS" : "PASS", summary: items.length ? "One thing to fix." : "Nothing to fix.", items })
-  const finding = { text: "routine-editor.tsx:48", where: "routine-editor.tsx:48", what: "The schedule error is cleared on every keystroke, before Hermes answers.", rule: "Keep the server's message until the next answer replaces it", fix: "Clear it when the next validation returns." }
-  const tests = { cmd: "pnpm test", exit: 0, passed: true, tail: "✓ routine-editor.test.tsx (3)\n\nTest Files  1 passed (1)\n     Tests  3 passed (3)" }
-  if (["discovery", "planning", "plan"].includes(stage)) return []
-  if (stage === "checkpoints") return base.map((cp) => ({ ...cp, status: "pending", approved: false, gates: null, evidence: {}, screenshots: [] }))
-  const done = (cp) => ({ ...cp, status: "done", approved: true, gates: null, evidence: { tests, ...(cp.ui ? {} : { visual: { skip: { reason: "No screen changed." } } }) }, screenshots: [] })
-  const three = {
-    ...base[2],
-    approved: true,
-    screenshots: ["reference.svg", "build.svg"],
+// A chat's goal rides in Auto: Hermes's goal keeps the session working between runs.
+const MODES = ["accept_edits", "auto", "plan"]
+// A chat's goal, as the plugin's goal routes carry it: Hermes's own state, kept per session.
+// MOCK_GOAL=<status> starts every goal there: active, paused, done or cleared.
+const goals = new Map()
+const GOAL_STATUSES = ["active", "paused", "done", "cleared"]
+const GOAL_START = GOAL_STATUSES.includes(process.env.MOCK_GOAL) ? process.env.MOCK_GOAL : "active"
+// Hermes's contract labels (goals.parse_contract): the wizard writes these, the app reads them back.
+const CONTRACT_LABELS = {
+  outcome: "outcome",
+  verify: "verification",
+  verification: "verification",
+  constraints: "constraints",
+  boundaries: "boundaries",
+  "stop when": "stop_when",
+}
+const contractOf = (text) => {
+  const found = { outcome: "", verification: "", constraints: "", boundaries: "", stop_when: "" }
+  for (const line of String(text).split("\n")) {
+    const match = /^([a-z ]+):\s*(.+)$/i.exec(line.trim())
+    const field = match && CONTRACT_LABELS[match[1].toLowerCase().trim()]
+    if (field) found[field] += (found[field] ? " " : "") + match[2].trim()
   }
-  const reviews = (rounds) => ({ reviewers: {}, history: rounds })
-  if (stage === "building")
-    return [done(base[0]), done(base[1]), { ...three, status: "building", gates: { ...theseusPass(), review: "findings" }, evidence: { tests, review: reviews([item("a", 1, [finding], "anthropic/claude-opus-5-5"), item("b", 1, [], "openai/gpt-5")]) } }, ...base.slice(3).map((cp) => ({ ...cp, status: "pending", approved: true, gates: null, evidence: {}, screenshots: [] }))]
-  if (stage === "approval")
-    return [done(base[0]), done(base[1]), { ...three, status: "awaiting-approval", gates: theseusPass(), evidence: { tests, review: reviews([item("a", 1, [finding], "anthropic/claude-opus-5-5"), item("b", 1, [], "openai/gpt-5"), item("a", 2, [], "anthropic/claude-opus-5-5"), item("b", 2, [], "openai/gpt-5")]) } }, ...base.slice(3).map((cp) => ({ ...cp, status: "pending", approved: true, gates: null, evidence: {}, screenshots: [] }))]
-  return base.map((cp) => done(cp))
+  return found
 }
-
-const THESEUS_PLAN = {
-  task: "Create and edit routines from the Routines screen",
-  goal: "Routines can be made and changed in the app, not only on the Hermes host.",
-  acceptance_criteria: ["A new routine with a name, prompt and schedule appears in the list and runs on time", "Editing a routine keeps its run history", "A schedule Hermes can't parse is refused with Hermes's own message"],
-  scope_boundaries: ["Delivery targets other than the chat", "Routine templates"],
-  user_proposed_approach: "A form in a pop-up, posting to Hermes's jobs API.",
-  recommended_approach: "The same pop-up, with the schedule typed in words and shown back as Hermes reads it, through POST /api/jobs and PATCH /api/jobs/{id}.",
-  approach_rationale: "Hermes already validates schedules, so the app shows its answer rather than parsing cron itself.",
-  rejected_alternatives: [{ alternative: "A cron expression field", reason: "Most routines are 'every weekday at 9', which words say better." }],
-  verification: { automated: [{ prerequisites: "none", action: "pnpm test routines", expected: "every case passes" }], manual: [{ prerequisites: "the app running", action: "Make a routine for two minutes from now", expected: "it runs, and its run shows in the list" }] },
-}
-
-const theseusOptions = () => ({
-  autonomy: { label: "approve", options: [{ value: "step" }, { value: "batch:3" }, { value: "unattended" }] },
-  visual: { label: "visual", options: [{ value: "on" }, { value: "off" }] },
-  reviewers: { label: "code reviewers", options: [{ value: "2" }, { value: "1" }, { value: "0" }] },
-})
-
-const theseusNext = {
-  discovery: "finish requirements discovery in chat (task, behaviour, approach and open decisions), then: theseus.js plan --file F",
-  planning: "load the checkpoints: theseus.js checkpoints --file F",
-  plan: "human confirms the requirements plan in the viewer; agent runs: theseus.js wait",
-  checkpoints: "human approves the plan (CP1, CP2, CP3, CP4, CP5, CP6) in the viewer; agent runs: theseus.js wait",
-  building: "gate 3 for CP3: two isolated reviewers",
-  approval: "human approves CP3 in the viewer; agent runs: theseus.js wait",
-  closing: "human confirms the run complete in the viewer (or keeps it open); agent runs: theseus.js wait",
-  done: "run routine-editor is completed — nothing left to do; it stays in History",
-}
-
-function theseusRecord(id) {
-  let run = theseusRuns.get(id)
-  if (!run) {
-    run = { stage: THESEUS_STAGES.includes(THESEUS_START) ? THESEUS_START : "discovery", settings: { autonomy: "step", visual: "on", reviewers: "2", granularity: "s-m" }, models: { review: [], visual: [] } }
-    theseusRuns.set(id, run)
+const goalRecord = (id) => {
+  let record = goals.get(id)
+  if (!record) {
+    record = {
+      goal: "",
+      status: GOAL_START,
+      turns_used: GOAL_START === "active" ? 2 : 0,
+      max_turns: 20,
+      subgoals: [],
+      contract: contractOf(""),
+      gates: [],
+      verdict: GOAL_START === "active" ? "continue" : null,
+      reason: GOAL_START === "paused" ? "The turn budget is spent." : null,
+      paused_reason: GOAL_START === "paused" ? "The turn budget is spent." : null,
+      waiting: null,
+    }
+    goals.set(id, record)
   }
-  return run
+  return record
 }
-
-function theseusView(id) {
-  const run = theseusRecord(id)
-  const stage = run.stage
-  const checkpoints = theseusCheckpoints(stage)
-  const status = stage === "closing" ? "completing" : stage === "done" ? "completed" : "open"
-  const plan = ["discovery"].includes(stage) ? undefined : { ...THESEUS_PLAN, status: stage === "plan" ? "pending" : "confirmed" }
-  return {
-    object: "memento.theseus",
-    stage,
-    models: run.models,
-    unavailable: THESEUS_START === "unavailable" ? "Theseus needs Node 20 or newer on the Hermes host, and there is none." : null,
-    state: {
-      run: { key: "routine-editor", reference: "docs/routine-mock.html", testCmd: "pnpm test", status, planRequired: true, ...run.settings, plan },
-      settings: { ...run.settings, options: theseusOptions() },
-      checkpoints,
-      next: theseusNext[stage],
-      learnings: stage === "discovery" || stage === "planning" || stage === "plan" ? [] : [{ source: "human", text: "Show Hermes's own error text; never rephrase a server refusal.", cp: null }, ...(["building", "approval", "closing", "done"].includes(stage) ? [{ source: "reviewer", cp: "CP3", text: "Keep a server's validation message until the next answer replaces it." }] : [])],
-      feedback: [],
-      log: [],
-      runs: [],
-    },
-  }
-}
+const goalView = (record) => (record && record.goal ? { ...record, gates: [...record.gates] } : null)
 
 // The sessions each session delegated to with delegate_task (the plugin reads them from state.db),
 // each a transcript of its own at GET /api/sessions/{id}/messages.
@@ -475,8 +422,6 @@ async function runDelegation(parent, goal, out) {
   return report
 }
 
-// A wireframe for a gate 2 capture; the reference is dashed, the build is solid.
-const theseusCapture = (reference) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 400"><rect width="300" height="400" fill="#fff"/><rect x="1" y="1" width="298" height="398" fill="none" stroke="#888" ${reference ? 'stroke-dasharray="6 4"' : ""}/><rect x="24" y="28" width="130" height="12" rx="6" fill="#333"/><rect x="24" y="68" width="252" height="34" rx="10" fill="none" stroke="#999"/><rect x="24" y="116" width="252" height="68" rx="10" fill="none" stroke="#999"/><rect x="24" y="198" width="252" height="34" rx="10" fill="none" stroke="#d33"/><rect x="24" y="242" width="170" height="8" rx="4" fill="#d33"/><rect x="170" y="344" width="106" height="34" rx="17" fill="#7a8cff"/></svg>`
 
 // The plugin's plan-mode instructions (prompt_builder._PLAN_INSTRUCTIONS), word for word.
 const PLAN_INSTRUCTIONS = `You are in plan mode: change nothing. Read what you need. Then, before you write the plan, settle every choice the user would otherwise be left to make: ask with the clarify tool, every question in one call, your recommended answer first. If you can't ask (no clarify tool, or no answer came), decide it yourself and record the decision under Risks and assumptions. Then make your whole final reply the plan below and stop; the user approves it before you act. It is saved to a file as written, so write it for someone who hasn't read this chat, and a plan with an open question isn't finished. Use this Markdown shape exactly:
@@ -657,8 +602,6 @@ async function playTurn(req, body, last, out) {
   // In plan mode the plugin blocks every tool that changes anything, so the agent reads and plans.
   const workspace = projectSessions.get(sessionOf(req, body))
   if (workspace) workspace.plan_pending = 0
-  // A Theseus agent that has settled the requirements submits the plan and waits for the user.
-  if (workspace?.mode === "theseus" && theseusRecord(workspace.session_id).stage === "discovery") theseusRecord(workspace.session_id).stage = "plan"
   if (workspace?.mode === "plan") {
     // Read-only calls, on the stream and in the transcript: what a client without the stream polls.
     const reads = [
@@ -981,7 +924,7 @@ async function playTurn(req, body, last, out) {
     const cleanupId = `call_${randomUUID().slice(0, 8)}`
     out.tool({ tool: "terminal", emoji: "💻", label: "find /var/log -name '*.log.*' -mtime +90 -delete", toolCallId: cleanupId, status: "running" })
     // In Auto the plugin turns Hermes's own approval bypass on for the run, so nothing is asked.
-    const choice = ["auto", "theseus"].includes(projectSessions.get(sessionOf(req, body))?.mode) ? "once" : await out.approve({
+    const choice = projectSessions.get(sessionOf(req, body))?.mode === "auto" ? "once" : await out.approve({
       command: "find /var/log -name '*.log.*' -mtime +90 -delete",
       pattern_key: "recursive_delete",
       description: "Delete 34 rotated log files older than 90 days (4.2 GB) under /var/log",
@@ -1428,12 +1371,13 @@ http
       return json(res, 200, {
         name: "memento",
         version: PLUGIN_VERSION,
-        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "theseus", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : [])],
+        features: ["cron_runs", "session_label", "chats", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "goal", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : [])],
         clarify: true,
         hooks: true,
-        theseus: THESEUS_START === "unavailable"
-          ? { skill: "mock", api: 1, node: null, ready: false, reason: "Theseus needs Node 20 or newer on the Hermes host, and there is none.", reviewers: { llm: true, model: true, provider: true } }
-          : { skill: "mock", api: 1, node: "22.0.0", ready: true, reason: null, reviewers: { llm: true, model: process.env.MOCK_THESEUS_MODELS !== "0", provider: process.env.MOCK_THESEUS_MODELS !== "0" } },
+        goal:
+          process.env.MOCK_GOAL === "unavailable"
+            ? { ready: false, reason: "This Hermes version has no /goal command to set one with.", min_turns: 1, max_turns: 500 }
+            : { ready: true, reason: null, min_turns: 1, max_turns: 500 },
         research: { ready: true, reason: null, writers: { model: RESEARCH_WRITERS, provider: RESEARCH_WRITERS } },
         dictation: DICTATION === "off"
           ? { ready: false, reason: "faster-whisper isn't installed on the host. Run `hermes tools` and pick Local Whisper.", model: "base" }
@@ -1887,9 +1831,13 @@ http
         else waiting[run.sessionId] ??= { kind: "approval", ...(run.approval?.command ? { command: run.approval.command } : {}) }
       }
       for (const record of projectSessions.values()) if (record.plan_pending) waiting[record.session_id] ??= { kind: "plan" }
-      for (const record of projectSessions.values())
-        if (record.mode === "theseus" && ["plan", "checkpoints", "approval", "closing"].includes(theseusRecord(record.session_id).stage))
-          waiting[record.session_id] ??= { kind: "theseus", stage: theseusRecord(record.session_id).stage }
+      // A goal the user has to unstick parks a session: paused (its budget spent, a gate out of
+      // retries) or judged blocked.
+      for (const [id, record] of goals) {
+        const goal = goalView(record)
+        if (goal && (goal.status === "paused" || goal.verdict === "blocked"))
+          waiting[id] ??= { kind: "goal", reason: goal.paused_reason ?? goal.reason ?? "blocked" }
+      }
       for (const [id, reason] of Object.entries(waiting)) {
         const record = projectSessions.get(id)
         const name = record && mockProjects().find((p) => p.id === record.project_id)?.name
@@ -1897,7 +1845,6 @@ http
       }
       return json(res, 200, { object: "memento.runs", sessions, run_ids, waiting })
     }
-    // Dev only: POST { stage } moves every Theseus run (and the next ones) to that stage.
     if (url.pathname === "/__mock/dictation" && req.method === "GET") {
       return json(res, 200, { clips: dictationClips })
     }
@@ -1926,14 +1873,7 @@ http
       PRS_FAIL = !!fail
       return json(res, 200, { ok: true })
     }
-    if (url.pathname === "/__mock/theseus" && req.method === "POST") {
-      const { stage } = await readBody(req)
-      if (!THESEUS_STAGES.includes(stage)) return json(res, 400, { error: { message: "No such stage." } })
-      THESEUS_START = stage
-      for (const run of theseusRuns.values()) run.stage = stage
-      return json(res, 200, { ok: true })
-    }
-    const sessionRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/(workspace|workspace\/remove|mode|prs|library|close|theseus|theseus\/models|theseus\/evidence\/[^/]+\/[^/]+)$/.exec(url.pathname)
+    const sessionRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/(workspace|workspace\/remove|mode|prs|library|close|goal|goal\/control)$/.exec(url.pathname)
     if (PLUGIN && !profile && sessionRoute) {
       const id = decodeURIComponent(sessionRoute[1])
       const route = sessionRoute[2]
@@ -1950,7 +1890,7 @@ http
       // A session's filed files, as the plugin's library routes would list them (see
       // `sessionLibrary` at module scope, shared with the project route).
       const instructions = (record) =>
-        [worktreeLine(record), filesLine(record), PROGRESS_UPDATES_INSTRUCTIONS, PR_INSTRUCTIONS, DONE_INSTRUCTIONS, record.mode === "plan" ? PLAN_INSTRUCTIONS : "", record.mode === "theseus" ? THESEUS_INSTRUCTIONS : ""].filter(Boolean).join("\n")
+        [worktreeLine(record), filesLine(record), PROGRESS_UPDATES_INSTRUCTIONS, PR_INSTRUCTIONS, DONE_INSTRUCTIONS, record.mode === "plan" ? PLAN_INSTRUCTIONS : ""].filter(Boolean).join("\n")
       const answer = (record) =>
         json(res, 200, {
           object: "memento.workspace",
@@ -1969,7 +1909,7 @@ http
         const gitFolders = project.folders.filter((f) => f.git)
         if (!gitFolders.length) return json(res, 400, { error: { message: "This project has no git repository." } })
         if (mode !== undefined && !MODES.includes(mode))
-          return json(res, 400, { error: { message: "mode must be accept_edits, auto, plan or theseus." } })
+          return json(res, 400, { error: { message: "mode must be accept_edits, auto or plan." } })
         let record = workspace
         if (!record) {
           await sleep(800 * gitFolders.length)
@@ -1979,51 +1919,74 @@ http
           record = { session_id: id, project_id: project.id, repo_root: repos[0].repo_root, path: repos[0].path, branch: repos[0].branch, mode: mode ?? "accept_edits", plan_pending: 0, created_at: Date.now(), repos, files_dir: `${repos[0].repo_root}/files/${slug}`, plan_file: null }
           projectSessions.set(id, record)
         } else if (mode && mode !== record.mode) {
-          if (mode === "theseus" || record.mode === "theseus")
-            return json(res, 409, { error: { message: record.mode === "theseus" ? "A Theseus session keeps its mode." : "Theseus can only start a new session." } })
           record.mode = mode
           record.plan_pending = 0
         }
         return answer(record)
       }
       if (route === "workspace") return answer(workspace ?? null)
-      if (route.startsWith("theseus")) {
-        if (workspace?.mode !== "theseus") return json(res, 404, { error: { message: "This isn't a Theseus session." } })
-        const run = theseusRecord(id)
-        if (route.startsWith("theseus/evidence/"))
-          return (res.writeHead(200, { "Content-Type": "image/svg+xml", ...cors }), res.end(theseusCapture(route.endsWith("reference.svg"))))
-        if (route === "theseus/models" && req.method === "POST") {
-          const body = await readBody(req)
-          const pick = (list) => (Array.isArray(list) ? list : []).slice(0, 2).map((m) => ({ provider: m?.provider || null, model: m?.model || null }))
-          run.models = { review: pick(body.review), visual: pick(body.visual) }
+      if (route === "goal") {
+        // Hermes's own /goal, as the plugin's routes carry it: setting one answers with the kick text
+        // the app then sends, and everything after that is state.
+        const record = goalRecord(id)
+        if (req.method !== "POST") {
+          return json(res, 200, { object: "memento.goal", session_id: id, goal: goalView(record) })
         }
-        if (route === "theseus" && req.method === "POST") {
-          const body = await readBody(req)
-          const need = (stage, what) => run.stage === stage || (json(res, 409, { error: { message: what } }), false)
-          const step = {
-            confirm_plan: () => need("plan", "there is no plan waiting for review") && ((run.stage = "planning"), setTimeout(() => (run.stage = "checkpoints"), 1500), true),
-            revise_plan: () => need("plan", "there is no plan waiting for review") && ((run.stage = "discovery"), true),
-            approve_checkpoints: () => need("checkpoints", "there are no checkpoints waiting for approval") && ((run.stage = "building"), true),
-            approve: () => need("approval", "no checkpoint is awaiting approval") && ((run.stage = "closing"), true),
-            request_changes: () => need("approval", "no checkpoint is awaiting approval") && ((run.stage = "building"), true),
-            close: () => need("closing", "the run isn't waiting to be closed") && ((run.stage = body.decision === "confirm" ? "done" : "building"), true),
-            settings: () => {
-              for (const key of ["autonomy", "visual", "reviewers", "granularity"]) if (typeof body[key] === "string") run.settings[key] = body[key]
-              return true
-            },
-          }[body.action]
-          if (!step) return json(res, 400, { error: { message: `Unknown action ${body.action}.` } })
-          if (!step()) return
+        const body = await readBody(req)
+        const text = String(body?.command ?? "").trim()
+        if (!text) return json(res, 400, { error: { message: "A goal needs something to work towards." } })
+        const max = Number(body?.max_turns) || 20
+        if (max < 1 || max > 500)
+          return json(res, 400, { error: { message: "max_turns must be between 1 and 500." } })
+        const gates = (Array.isArray(body?.gates) ? body.gates : []).map(String).filter(Boolean)
+        Object.assign(record, {
+          goal: text,
+          status: "active",
+          turns_used: 0,
+          max_turns: max,
+          contract: contractOf(text),
+          subgoals: [],
+          verdict: null,
+          reason: null,
+          paused_reason: null,
+          waiting: null,
+          gates: gates.map((command) => ({ command, passing: null, exit_code: null, attempts: 0, max_retries: 2, output: "" })),
+        })
+        return json(res, 200, {
+          object: "memento.goal",
+          session_id: id,
+          goal: goalView(record),
+          kick: `Continue working towards this goal: ${text.split("\n")[0]}`,
+        })
+      }
+      if (route === "goal/control") {
+        const record = goalRecord(id)
+        const { action } = await readBody(req)
+        if (!["pause", "resume", "clear"].includes(action))
+          return json(res, 400, { error: { message: `Unknown goal action ${JSON.stringify(action)}.` } })
+        if (action === "clear") {
+          goals.delete(id)
+          return json(res, 200, { object: "memento.goal", session_id: id, goal: null, kick: null, message: "Cleared the goal." })
         }
-        return json(res, 200, theseusView(id))
+        if (action === "pause") {
+          record.status = "paused"
+          record.paused_reason = "Paused by the user."
+          return json(res, 200, { object: "memento.goal", session_id: id, goal: goalView(record), kick: null, message: "Paused the goal." })
+        }
+        record.status = "active"
+        record.paused_reason = null
+        return json(res, 200, {
+          object: "memento.goal",
+          session_id: id,
+          goal: goalView(record),
+          kick: `Continue working towards this goal: ${record.goal.split("\n")[0]}`,
+          message: "Continuing the goal.",
+        })
       }
       if (route === "mode" && req.method === "POST") {
         const { mode } = await readBody(req)
-        if (!MODES.includes(mode)) return json(res, 400, { error: { message: "mode must be accept_edits, auto, plan or theseus." } })
+        if (!MODES.includes(mode)) return json(res, 400, { error: { message: "mode must be accept_edits, auto or plan." } })
         if (!workspace) return json(res, 404, { error: { message: "This session has no workspace yet" } })
-        // A Theseus session keeps its mode for good (mock of the planned plugin rule).
-        if (mode !== workspace.mode && (mode === "theseus" || workspace.mode === "theseus"))
-          return json(res, 409, { error: { message: workspace.mode === "theseus" ? "A Theseus session keeps its mode." : "Theseus can only start a new session." } })
         workspace.mode = mode
         workspace.plan_pending = 0
         // Switching to Auto answers what a run of the session already waits on, like the plugin.

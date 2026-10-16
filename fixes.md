@@ -300,3 +300,49 @@ though `cli.mjs` already owns the height convention.
 
 Found by the `/simplify-code` pass on this branch. It was a cleanup review, not a bug hunt —
 correctness was out of scope — and none of the eight blocks the pull request.
+
+---
+
+# Deferred: the duplicate turns the submission flow sees while a chat sits open
+
+The browser flows were run over the goal work once it was rebased onto main. `pnpm e2e submission`
+is red there, and red on main itself without any of this branch's commits, so the finding is
+recorded here rather than fixed inside a goal reframe.
+
+What the flow sees: one `POST /v1/runs` for two concurrent sends, as intended, but four assistant
+rows in the chat where it expects one (`app/scripts/regression-submission.mjs:74`). While the chat
+is open with a run live on the host, the app reads the host's transcript about once a second — seven
+reads in six seconds in a probe — and each read appends the same turn again.
+
+## Risky
+
+### 1. The catch-up poll re-reads the transcript whenever the rows it just wrote change
+
+`app/src/routes/chat.tsx:464-472` polls `reconcileHistory` and `reattachRun` at `CATCH_UP_MS`,
+restarting on `[id, updatedAt, hostRuns, hostRuns && messages?.length]`; `usePoll` runs a restart
+immediately, so every append re-reads. The read itself re-fetches the tail rather than stopping at
+what the host already has: `app/src/lib/history.ts:671-684` takes `conversation.hermesTip` as its
+short-circuit, and with no tip on a chat that has local rows it goes straight to `fetchTail`. The
+host double makes that loop visible: `app/scripts/mock-hermes.mjs:2081-2087` answers the transcript
+route from a canned script whose rows carry fresh ids per request, so `rowIdOf`
+(`app/src/lib/history.ts:550`) can't recognise what it already has and the same turn lands twice,
+then three times, then four.
+
+- Cost: the flow guarding the concurrent-send fix is red on main, so the next change to the send
+  path or to reconciliation cannot tell a regression from the noise; and a host that renumbers rows
+  (or an app read that races a rewrite) can duplicate a turn in the thread the user reads.
+- Suggested fix: stop the loop where it starts rather than at the ids. Record the tip the chat read
+  to (`hermesTip`) whenever rows are written, so `reconcile` can answer "nothing newer" without
+  fetching; and take the local row count out of the poll's dependencies, since the poll's own writes
+  change it — `caughtUpWithin` (`app/src/lib/history.ts:494`) is the tree's existing idiom for
+  "this chat was read recently". If the mock is to blame for the ids, give its transcripts stable
+  ones, which is what the host does.
+- Why it is risky: the loop spans three owners — the app's reconciliation, the poll's dependencies
+  and the host double's ids — and the app-side fix touches timing code that also carries
+  reattachment, catch-up and sync on one timer, so it wants the flows run at both widths with the
+  request budget (`pnpm e2e idle-requests`) watched as well as `submission`.
+
+---
+
+Found while running the flows for the goal reframe's rebase onto main, on a detached checkout of
+main alone. It predates that branch and is not caused by it.

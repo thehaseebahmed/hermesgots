@@ -102,15 +102,15 @@ export function agentsOf(tool: ToolEvent, agents: DelegatedAgent[]) {
 
 const ROLES: [RegExp, string][] = [
   [/\bfix mode\b/i, "Fixer"],
-  [/\b(theseus-)?planner\b|checkpoints\.md/i, "Planner"],
-  [/\b(theseus-)?builder\b|builder\.md/i, "Builder"],
-  [/\b(theseus-)?reviewer\b|reviewer\.md/i, "Reviewer"],
+  [/\bplanner\b|checkpoints\.md/i, "Planner"],
+  [/\bbuilder\b|builder\.md/i, "Builder"],
+  [/\breviewer\b|reviewer\.md/i, "Reviewer"],
 ]
 
 /**
- * What the agent was asked to be, read from its brief: "Builder · CP3" in a Theseus run. A brief can
- * mention other roles, so the one it names first wins, and fix mode wins over the builder it runs
- * as. Any other agent goes by its goal.
+ * What the agent was asked to be, read from its brief: "Builder · CP3" in a run with checkpoints. A
+ * brief can mention other roles, so the one it names first wins, and fix mode wins over the builder
+ * it runs as. Any other agent goes by its goal.
  */
 export function agentName(goal: string) {
   const named = ROLES.map(([pattern, role]) => ({ role, at: goal.search(pattern) }))

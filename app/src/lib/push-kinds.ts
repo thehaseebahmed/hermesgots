@@ -13,7 +13,6 @@ export type PushCategory =
   | "chat_run_failed"
   | "chat_run_done"
   | "code_input"
-  | "code_theseus"
   | "code_run_failed"
   | "code_run_done"
   | "code_pr_checks"
@@ -58,7 +57,6 @@ export const PUSH_CATEGORIES: PushCategoryInfo[] = [
     on: true,
     importance: 4,
   },
-  { id: "code_theseus", feature: "code", title: "Theseus needs you", on: true, importance: 4 },
   { id: "code_run_failed", feature: "code", title: "Run failed", on: true, importance: 4 },
   { id: "code_run_done", feature: "code", title: "Run finished", on: false, importance: 3 },
   {

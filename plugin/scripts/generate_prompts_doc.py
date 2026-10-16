@@ -13,18 +13,12 @@ from __future__ import annotations
 
 import sys
 import tempfile
-import types
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-# theseus.session_folder resolves the profile home through hermes_constants, which only exists
-# inside Hermes; the multi-repo Theseus variant needs it, so point it at a throwaway home.
 _base = Path(tempfile.mkdtemp(prefix="prompts-doc-"))
-_constants = types.ModuleType("hermes_constants")
-_constants.get_hermes_home = lambda: str(_base)  # type: ignore[attr-defined]
-sys.modules["hermes_constants"] = _constants
 
 from plugin import prompt_builder  # noqa: E402
 
@@ -86,17 +80,6 @@ VARIANTS = [
         "writes before anything is allowed to change.",
         {**SINGLE, "mode": "plan"},
     ),
-    (
-        "Theseus mode, one repo",
-        "The Theseus segment on top of the single-repo prompt: the skill to read and how a run "
-        "works on this host. A single-repo session's run stays in its worktree.",
-        {**SINGLE, "mode": "theseus"},
-    ),
-    (
-        "Theseus mode, two repos",
-        "The same segment, with the run folder both repos' checkpoints share.",
-        {**MULTI, "mode": "theseus"},
-    ),
 ]
 
 HEADER = """# Session prompts
@@ -107,8 +90,8 @@ HEADER = """# Session prompts
 
 Every project session's run carries the prompt `prompt_builder.session_prompt(record)` builds for
 its record: where its worktrees are, where its generated files are filed, how it keeps the user in
-the loop while it works, how it opens its pull request and which templates it follows. Plan and
-Theseus sessions get their mode's segment on top.
+the loop while it works, how it opens its pull request and which templates it follows. Plan sessions
+get that mode's segment on top.
 """
 
 

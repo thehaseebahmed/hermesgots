@@ -42,6 +42,7 @@ import {
   type DictationAvailability,
 } from "@/lib/dictation"
 import {
+  goalCommand,
   isSendMode,
   localCommand,
   optionId,
@@ -104,7 +105,7 @@ export function Composer({
   /** Called instead of `onSend` while a reply is streaming: Enter queues the message. */
   onQueue: (text: string, attachments: Attachment[]) => Promise<void> | void
   onStop: () => void
-  onCommand: (command: LocalCommand) => void
+  onCommand: (command: LocalCommand, rest?: string) => void
 }) {
   const [value, setValue] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -177,9 +178,9 @@ export function Composer({
     (slash.items.length > 0 || slash.status !== "ok")
   const activeIndex = Math.min(active, Math.max(slash.items.length - 1, 0))
 
-  const runCommand = (command: LocalCommand) => {
+  const runCommand = (command: LocalCommand, rest?: string) => {
     setValue("")
-    onCommand(command)
+    onCommand(command, rest)
   }
 
   const pick = (item: SlashItem) => {
@@ -256,6 +257,9 @@ export function Composer({
 
   const submit = (event?: FormEvent) => {
     event?.preventDefault()
+    // `/goal fix the login bug` opens the wizard with that line as the task.
+    const goal = goalCommand(value)
+    if (goal && !disabled) return runCommand("goal", goal.task)
     const command = localCommand(value)
     if (command && !disabled) return runCommand(command)
     if (!canSend) return

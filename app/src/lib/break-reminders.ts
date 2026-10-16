@@ -25,7 +25,8 @@ export interface BackgroundRunState {
   runId?: string
   awaitingApproval: boolean
   awaitingClarify: boolean
-  theseusWaits: boolean
+  /** The goal waits on the user: paused (budget spent, a gate out of retries) or judged blocked. */
+  goalWaits: boolean
   resolved: boolean
   discarded: boolean
   blocked: boolean
@@ -37,7 +38,7 @@ export function isBackgroundSafeRunActive(state: BackgroundRunState) {
     Boolean(state.runId) &&
     !state.awaitingApproval &&
     !state.awaitingClarify &&
-    !state.theseusWaits &&
+    !state.goalWaits &&
     !state.resolved &&
     !state.discarded &&
     !state.blocked

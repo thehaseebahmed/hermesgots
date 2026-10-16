@@ -42,7 +42,6 @@ The CLI reuses any server that is already up, so after `pnpm e2e up` each run st
 | 18643 | Mock `polling`: `MOCK_NO_EVENTS=1`, polling like an older plugin |
 | 18644 | Mock `legacy`: `MOCK_BLOCK_RUN_EVENTS=1`, Hermes v2026.9.24's blocked run stream |
 | 18645 | Mock `no-dictation`: `MOCK_DICTATION=off` |
-| 18646 | Mock `theseus`: `MOCK_THESEUS=building`, a run part-way through its checkpoints |
 
 The CLI looks for Playwright in `app/node_modules`, then globally (`npm root -g`). If it's
 elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` loads without
@@ -69,7 +68,8 @@ elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` l
 | `drafts` | Composer drafts are kept per chat and cleared on send |
 | `submission` | Concurrent sends start one run and get one reply |
 | `image-skeleton` | A reply's images hold their cell while the plugin serves them (the route is held), then land at that size: one image and a gallery alike, phone and tablet, light and dark |
-| `image-captures` | Theseus's capture screenshots hold their place, and a capture the host can't serve says so |
+| `goal-wizard` | `/goal` opens the wizard, the preview follows the form, and Save sets the goal and sends its kick |
+| `goal-pill` | A set goal keeps its pill and sheet; pausing waits on the user with a card, and Resume sends the kick again |
 | `image-viewer` | A photo opened from a message holds its own box while it decodes |
 | `fallback-models` | A bot's fallback models are recorded on its host from its settings: two picks in order, one removed, and no third offered |
 

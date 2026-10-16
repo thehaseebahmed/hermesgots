@@ -55,7 +55,6 @@ import { formatRelative } from "@/lib/format"
 import { useDraft } from "@/lib/drafts"
 import { useChanges, useLive } from "@/lib/live"
 import { usePoll } from "@/lib/poll"
-import { waitsOnUser } from "@/lib/theseus"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { reasonText, useLiveRuns, useWaiting, type WaitingReason } from "@/lib/waiting"
@@ -186,7 +185,8 @@ export function ProjectPage({
     [rows],
   )
 
-  // What the server says waits on the user, including a Theseus run's plan, checkpoints or approval.
+  // What the server says waits on the user: a goal paused or blocked, a question, an approval or a
+  // plan to read.
   const waits = useWaiting()
 
   // A session nothing was sent in (or typed for) isn't one yet. Synced ones carry their activity in
@@ -282,16 +282,14 @@ export function ProjectPage({
     }
   }
 
-  // A Theseus run sits in `theseus wait` (a running turn) while it waits on the user.
-  const theseusWaits = (c: Conversation) => {
-    const reason = waits[c.hermesSessionId]
-    return reason?.kind === "theseus" && waitsOnUser(reason)
-  }
+  // A goal only the user can move (paused or blocked), a question, an approval or a plan: the server
+  // says which sessions wait on the user.
+  const serverWaits = (c: Conversation) => Boolean(waits[c.hermesSessionId])
   const placed = (sessions ?? []).map((c) => ({
     c,
     ...sessionGroup(c, live[c.hermesSessionId], {
       ...local?.[c.id],
-      waiting: local?.[c.id]?.waiting || theseusWaits(c),
+      waiting: local?.[c.id]?.waiting || serverWaits(c),
     }),
   }))
   const grouped = itemGroups(
@@ -548,14 +546,13 @@ function SessionItem({
   /** Repos the session works in that were removed from the project, which makes it read-only. */
   removed: string[]
 }) {
-  const theseusLine =
-    session.mode === "theseus"
-      ? `Theseus · ${waiting?.kind === "theseus" ? reasonText(waiting) : "Run in progress"}`
-      : undefined
   const draft = useDraft(session.id)
+  // A session the server says waits on the user says why: a goal paused or blocked, a question to
+  // answer, an approval to give, a plan to read.
+  const wait = waiting ? reasonText(waiting) : undefined
   const line2 = removed.length
     ? `${names.format(removed)} removed`
-    : (theseusLine ?? prLine(session) ?? session.worktree?.branch ?? draft)
+    : (wait ?? prLine(session) ?? session.worktree?.branch ?? draft)
   return (
     <ItemRow
       icon={
