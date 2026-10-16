@@ -94,7 +94,7 @@ The app's checks, run in the container:
 docker run --rm -v "$PWD:/workspace" -w /workspace gots-dev sh -lc "cd app && pnpm install --frozen-lockfile && pnpm lint && pnpm typecheck && node scripts/test-community.mjs && pnpm build"
 ```
 
-The plugin's and the website's take the same shape — `python3 -m unittest discover -s plugin/tests`, and `cd website && pnpm install --frozen-lockfile && pnpm build`. `dev-image.yml` runs the whole set against the image itself; `AGENTS.md` lists it for a host checkout.
+The plugin's and the website's take the same shape — `python3 -m unittest discover -s plugin/tests`, and `cd website && pnpm install --frozen-lockfile && pnpm build`. `dev-image.yml` runs them against the image itself; `AGENTS.md` lists them for a host checkout.
 
 An e2e flow drives the dev server itself, so start it bound to IPv4 in the same container first: the harness probes the port over IPv4 while Vite binds `::1` unless told otherwise — the trap `.agents/skills/e2e-testing/` lists under Gotchas.
 

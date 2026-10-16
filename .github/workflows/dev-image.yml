@@ -85,8 +85,9 @@ jobs:
           # image itself has already been pushed.
           cache-to: type=gha,mode=max,ignore-error=true,timeout=30m
 
-      # The checks CI runs, run inside the image against the checkout: an image that cannot run
-      # them is not worth publishing.
+      # The app's gates, the plugin's tests and the website's build, run inside the image against
+      # the checkout: an image that cannot run them is not worth publishing. `tests.yml` owns that
+      # set — a gate added there does not reach this list on its own (see fixes.md).
       - name: Verify the image
         run: |
           image=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
