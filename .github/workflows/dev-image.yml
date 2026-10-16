@@ -10,11 +10,21 @@ on:
       - "Dockerfile"
       - ".dockerignore"
       - ".github/workflows/dev-image.yml"
+      # The image's second-heaviest layer is the pnpm store, warmed from these four: a dependency
+      # bump changes what the image carries, so it has to rebuild and re-verify it.
+      - "app/package.json"
+      - "app/pnpm-lock.yaml"
+      - "website/package.json"
+      - "website/pnpm-lock.yaml"
   pull_request:
     paths:
       - "Dockerfile"
       - ".dockerignore"
       - ".github/workflows/dev-image.yml"
+      - "app/package.json"
+      - "app/pnpm-lock.yaml"
+      - "website/package.json"
+      - "website/pnpm-lock.yaml"
   workflow_dispatch:
 
 concurrency:
