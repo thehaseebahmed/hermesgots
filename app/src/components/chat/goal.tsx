@@ -263,7 +263,8 @@ export function GoalSheet({
       else if (kick) onStart(kick)
     })
   return (
-    <Popup side open={open} onOpenChange={onOpenChange}>
+    // A drawer from 1024px and a sheet below it: main's Popup picks by width now, not by a prop.
+    <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent size="lg">
         <PopupHeader className="pb-2">
           <PopupTitle className="flex items-center gap-2">
