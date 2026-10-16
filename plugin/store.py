@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -262,6 +262,16 @@ def connect(path: Path) -> sqlite3.Connection:
                    cache_read INTEGER NOT NULL DEFAULT 0,
                    calls INTEGER NOT NULL DEFAULT 0,
                    PRIMARY KEY (day, model, mode)
+               )"""
+        )
+        # v21: tokens per UTC day, provider and model, for the leaderboard's Top providers.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS community_providers (
+                   day TEXT NOT NULL,
+                   provider TEXT NOT NULL,
+                   model TEXT NOT NULL,
+                   tokens INTEGER NOT NULL DEFAULT 0,
+                   PRIMARY KEY (day, provider, model)
                )"""
         )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

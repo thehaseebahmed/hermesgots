@@ -868,10 +868,11 @@ html:not(.js) .dots {
 
 .footer .wrap {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem 2rem;
+  justify-content: center;
+  gap: 1rem;
+  text-align: center;
 }
 
 .footer p {
@@ -884,6 +885,8 @@ html:not(.js) .dots {
 
 .footer nav {
   display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
   gap: 1.25rem;
 }
 
