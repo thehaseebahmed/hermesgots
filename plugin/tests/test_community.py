@@ -59,6 +59,24 @@ class CommunityTest(unittest.TestCase):
         conn.close()
         self.assertNotIn("session_id", columns)
 
+    def test_a_session_with_an_active_goal_counts_as_goal(self) -> None:
+        from plugin import goal
+
+        community._goal_seen.clear()
+        self.addCleanup(community._goal_seen.clear)
+        active = types.SimpleNamespace(state=types.SimpleNamespace(status="active"))
+        done = types.SimpleNamespace(state=types.SimpleNamespace(status="done"))
+        with mock.patch.object(sessions, "record_for", return_value={"mode": "plan"}):
+            with mock.patch.object(goal, "manager", return_value=active):
+                self.call(session_id="memento-goal")
+            with mock.patch.object(goal, "manager", return_value=done):
+                self.call(session_id="memento-done")
+            with mock.patch.object(goal, "manager", side_effect=goal.GoalError("no /goal", 501)):
+                self.call(session_id="memento-old")
+        modes = next(iter(community.payload(self.home)["days"].values()))["anthropic/claude-opus-5-5"]
+        self.assertEqual(modes["goal"]["calls"], 1)
+        self.assertEqual(modes["plan"]["calls"], 2)
+
     def test_other_surfaces_and_empty_usage_are_ignored(self) -> None:
         self.call(platform="telegram")
         self.call(usage={"input_tokens": 0})
