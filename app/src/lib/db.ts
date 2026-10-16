@@ -409,9 +409,9 @@ export interface ModelsDevCatalog {
   fetchedAt: number
 }
 
-/** BenchLM coding rankings cached on this device, with a 24-hour freshness window. */
-export interface CodingRankings {
-  id: "coding"
+/** BenchLM overall rankings cached on this device, with a 24-hour freshness window. */
+export interface OverallRankings {
+  id: "overall"
   /** The rankings payload; its shape lives in `rankings.ts`. */
   data: unknown
   fetchedAt: number
@@ -441,7 +441,7 @@ export const db = new Dexie("memento") as Dexie & {
   vault: EntityTable<VaultKey, "id">
   drafts: EntityTable<Draft, "id">
   modelsDevCatalog: EntityTable<ModelsDevCatalog, "id">
-  codingRankings: EntityTable<CodingRankings, "id">
+  overallRankings: EntityTable<OverallRankings, "id">
   dictations: EntityTable<SavedDictation, "id">
 }
 
@@ -579,7 +579,7 @@ db.version(9)
 // v10: the models.dev catalog is cached on the device, with a 24-hour freshness window.
 db.version(10).stores({ modelsDevCatalog: "id" })
 
-// v11: BenchLM coding rankings cached on the device, with a 24-hour freshness window.
+// v11: BenchLM rankings cached on the device, with a 24-hour freshness window.
 db.version(11).stores({ codingRankings: "id" })
 
 // v12: a recording waiting for its text is kept, under its composer's draft key.
@@ -591,6 +591,10 @@ db.version(13).stores({
   conversations: "id, updatedAt, [profileId+updatedAt], projectId, hermesSessionId, changedAt",
   messages: "id, conversationId, [conversationId+createdAt], status, [conversationId+role]",
 })
+
+// v14: BenchLM overall rankings replace the coding cache. The coding table is dropped; the cache is
+// disposable (24-hour TTL), so the next picker open refetches the overall payload.
+db.version(14).stores({ codingRankings: null, overallRankings: "id" })
 
 db.on("populate", (tx) => seedProfile(tx))
 

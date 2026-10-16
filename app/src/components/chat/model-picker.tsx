@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState, type ReactNode } from "react"
+import { Fragment, useMemo, useRef, useState, type ReactNode } from "react"
+import { BrainIcon, EyeIcon, type LucideIcon } from "lucide-react"
 import {
   ArrowLeftIcon,
   ArrowUpDownIcon,
@@ -25,6 +26,7 @@ import {
 import { Field, FieldLabel } from "@/components/ui/field"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Spinner } from "@/components/ui/spinner"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { rememberModel, type ModelChoice, type Profile } from "@/lib/db"
 import { MAX_FALLBACKS, withFallback } from "@/lib/fallback-list"
 import { useFallbackModels } from "@/lib/fallbacks"
@@ -32,7 +34,7 @@ import { formatTokens } from "@/lib/format"
 import type { Fallback, ModelProvider } from "@/lib/hermes"
 import { fullModel, hostChoice, shortModel, useModelInfo } from "@/lib/model-info"
 import { modelFacts, useModelCatalog, type Catalog } from "@/lib/models"
-import { codingScoreOf, useCodingRankings, type RankingsPayload } from "@/lib/rankings"
+import { overallScoreOf, useOverallRankings, type RankingsPayload } from "@/lib/rankings"
 import { cn } from "@/lib/utils"
 
 /**
@@ -60,8 +62,8 @@ export function ModelPicker({
   const [sort, setSort] = useState<ModelSort>("name")
   // The cached models.dev catalog, live: each row's facts repaint when a refresh lands.
   const catalog = useModelCatalog()
-  // The cached BenchLM coding rankings, live: each row's score repaints when a refresh lands.
-  const rankings = useCodingRankings()
+  // The cached BenchLM overall rankings, live: each row's score repaints when a refresh lands.
+  const rankings = useOverallRankings()
   const sorted = useMemo(() => sortProviders(providers), [providers])
   // A host with one provider has nothing to choose between, so its models show at once.
   const drilled = sorted.length === 1 ? sorted[0] : sorted.find((p) => p.slug === openSlug)
@@ -77,14 +79,17 @@ export function ModelPicker({
       .map((p) => {
         const haystack = (m: string) => `${p.name} ${p.slug} ${m}`.toLowerCase()
         const matched = p.models.filter((m) => words.every((w) => haystack(m).includes(w)))
-        // Price ranks by the blended cost, context by the window, BenchLM by the coding score.
+        // Price ranks by the blended cost, context by the window, BenchLM by the overall score.
         return {
           ...p,
           models: sortByFacts(
             sort,
             (m) => ({
               ...modelFacts(catalog, { provider: p.slug, model: m }),
-              benchlm: codingScoreOf(rankings, { provider: p.slug, model: m }),
+              benchlm:
+                sort === "benchlm"
+                  ? overallScoreOf(rankings, { provider: p.slug, model: m })
+                  : undefined,
             }),
             matched,
           ),
@@ -248,7 +253,7 @@ function ProviderModels({
       sort,
       (m) => ({
         ...modelFacts(catalog, { provider: provider.slug, model: m }),
-        benchlm: codingScoreOf(rankings, { provider: provider.slug, model: m }),
+        benchlm: overallScoreOf(rankings, { provider: provider.slug, model: m }),
       }),
       matched,
     )
@@ -345,10 +350,29 @@ function sortProviders(providers: ModelProvider[]) {
     .sort((a, b) => byName.compare(a.name, b.name))
 }
 
+/** A capability mark: a lucide icon with a tooltip naming the capability. */
+function CapabilityIcon({ label, Icon }: { label: string; Icon: LucideIcon }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span aria-label={label} className="inline-flex align-[-2px]" />}>
+        <Icon className="size-3.5" aria-hidden="true" />
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+/** `BenchLM 87`, `BenchLM ?` for a loaded payload with no row, nothing before the payload lands. */
+function benchlmLabel(score: number | undefined, rankings: RankingsPayload | undefined) {
+  if (score !== undefined) return `BenchLM ${Math.round(score)}`
+  // "?" only once the payload is loaded: before that, no score is shown rather than a false miss.
+  return rankings ? "BenchLM ?" : null
+}
+
 /**
  * A model row's muted second line: what models.dev and BenchLM say about it
- * (`BenchLM 87 · 1M · vision · $$$`), `—` when neither lists anything, and no line at all
- * while the catalog is still loading.
+ * (`BenchLM 87 · 1M · <capability icons> · $$$`), `—` when neither lists anything, and no line at
+ * all while the catalog is still loading.
  */
 function modelDetail(
   catalog: Catalog | undefined,
@@ -357,15 +381,21 @@ function modelDetail(
 ) {
   if (!catalog) return undefined
   const { context, vision, reasoning, tier } = modelFacts(catalog, choice)
-  const score = codingScoreOf(rankings, choice)
+  const benchlm = benchlmLabel(overallScoreOf(rankings, choice), rankings)
   const parts = [
-    score !== undefined ? `BenchLM ${Math.round(score)}` : null,
+    benchlm,
     context ? formatTokens(context) : null,
-    vision ? "vision" : null,
-    reasoning ? "reasoning" : null,
+    vision ? <CapabilityIcon key="vision" label="Vision" Icon={EyeIcon} /> : null,
+    reasoning ? <CapabilityIcon key="reasoning" label="Reasoning" Icon={BrainIcon} /> : null,
     tier ? "$".repeat(tier) : null,
-  ].filter((part): part is string => part !== null)
-  return parts.join(" · ") || "—"
+  ].filter((part) => part !== null)
+  if (parts.length === 0) return "—"
+  return parts.map((part, i) => (
+    <Fragment key={`part-${i}`}>
+      {i > 0 && " · "}
+      {part}
+    </Fragment>
+  ))
 }
 
 // Four provider rows (each 3.5rem, `PROVIDER_ROW`) and the list's padding: a host with more
@@ -389,7 +419,7 @@ function ModelOption({
   onClick,
 }: {
   label: string
-  detail?: string
+  detail?: ReactNode
   selected: boolean
   /** Opens a list of its own rather than picking. */
   opens?: boolean
