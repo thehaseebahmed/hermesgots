@@ -404,16 +404,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "This Hermes version can't switch models from here.", 501)
         return web.json_response({"object": "memento.fallbacks", "fallbacks": fallbacks})
 
-    def request_profile():
-        # The profile the request being served belongs to, read on the loop thread (None when this
-        # Hermes has no profile scope).
-        try:
-            from gateway.platforms.api_server import _api_request_profile
-
-            return _api_request_profile.get()
-        except Exception:
-            return None
-
     def profile_scope():
         # The API server's own per-profile scope (home and secrets) for the request being served, or
         # nothing when this Hermes has none.
@@ -1238,6 +1228,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/push/remove", push_unsubscribe)
     app.router.add_post(f"{PREFIX}/push/mute", push_mute)
     app.router.add_post(f"{PREFIX}/runs/{{run_id}}/clarify", answer_clarify)
+    # The profile the request being served belongs to, read on the loop thread (None when this
+    # Hermes has no profile scope). One definition only: everything below resolves it by name.
     def request_profile():
         try:
             from gateway.platforms.api_server import _api_request_profile
