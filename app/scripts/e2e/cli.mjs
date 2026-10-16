@@ -175,6 +175,10 @@ const FLOWS = {
     about:
       "A chat or session not started shows the big bot, a greeting once an hour and the bot's five lines in turn",
   },
+  onboarding: {
+    script: "e2e/onboarding.mjs",
+    about: "The setup wizard's Join the leaderboard step: on by default, and Continue joins or not",
+  },
   prs: {
     script: "e2e/prs.mjs",
     about:
