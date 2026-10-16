@@ -1,11 +1,11 @@
 import { getStore } from "@netlify/blobs"
 
-const BENCHLM_URL = "https://data.benchlm.ai/v1/rankings/current?surface=coding"
-const CACHE_KEY = "coding"
+const BENCHLM_URL = "https://data.benchlm.ai/v1/rankings/current?surface=overall"
+const CACHE_KEY = "overall"
 // 4 hours: BenchLM's free plan is 1,000 reads/month, so a single shared fetch every 4
 // hours stays well under the limit regardless of how many devices open the picker.
 const MAX_AGE_MS = 4 * 60 * 60 * 1000
-// The API caps at 100 items per request; the coding surface has ~147, so the proxy
+// The API caps at 100 items per request; the overall surface has ~220, so the proxy
 // paginates dynamically until a page comes back short.
 const PAGE_SIZE = 100
 
@@ -18,7 +18,7 @@ interface RankingsPayload {
   items?: unknown[]
 }
 
-/** Fetches all pages of the coding rankings, merging the items into one payload. */
+/** Fetches all pages of the overall rankings, merging the items into one payload. */
 async function fetchAllRankings(key: string): Promise<unknown> {
   const headers = { Authorization: `Bearer ${key}` }
   let offset = 0

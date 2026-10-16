@@ -32,7 +32,7 @@ import { formatTokens } from "@/lib/format"
 import type { Fallback, ModelProvider } from "@/lib/hermes"
 import { fullModel, hostChoice, shortModel, useModelInfo } from "@/lib/model-info"
 import { modelFacts, useModelCatalog, type Catalog } from "@/lib/models"
-import { codingScoreOf, useCodingRankings, type RankingsPayload } from "@/lib/rankings"
+import { isRankings, overallScoreOf, useOverallRankings, type RankingsPayload } from "@/lib/rankings"
 import { cn } from "@/lib/utils"
 
 /**
@@ -61,7 +61,7 @@ export function ModelPicker({
   // The cached models.dev catalog, live: each row's facts repaint when a refresh lands.
   const catalog = useModelCatalog()
   // The cached BenchLM coding rankings, live: each row's score repaints when a refresh lands.
-  const rankings = useCodingRankings()
+  const rankings = useOverallRankings()
   const sorted = useMemo(() => sortProviders(providers), [providers])
   // A host with one provider has nothing to choose between, so its models show at once.
   const drilled = sorted.length === 1 ? sorted[0] : sorted.find((p) => p.slug === openSlug)
@@ -84,7 +84,7 @@ export function ModelPicker({
             sort,
             (m) => ({
               ...modelFacts(catalog, { provider: p.slug, model: m }),
-              benchlm: codingScoreOf(rankings, { provider: p.slug, model: m }),
+              benchlm: overallScoreOf(rankings, { provider: p.slug, model: m }),
             }),
             matched,
           ),
@@ -248,7 +248,7 @@ function ProviderModels({
       sort,
       (m) => ({
         ...modelFacts(catalog, { provider: provider.slug, model: m }),
-        benchlm: codingScoreOf(rankings, { provider: provider.slug, model: m }),
+        benchlm: overallScoreOf(rankings, { provider: provider.slug, model: m }),
       }),
       matched,
     )
@@ -357,9 +357,16 @@ function modelDetail(
 ) {
   if (!catalog) return undefined
   const { context, vision, reasoning, tier } = modelFacts(catalog, choice)
-  const score = codingScoreOf(rankings, choice)
+  const score = overallScoreOf(rankings, choice)
+  // "?" only once the payload is loaded: before that, no score is shown rather than a false miss.
+  const benchlm =
+    score !== undefined
+      ? `BenchLM ${Math.round(score)}`
+      : rankings && isRankings(rankings)
+        ? "BenchLM ?"
+        : null
   const parts = [
-    score !== undefined ? `BenchLM ${Math.round(score)}` : null,
+    benchlm,
     context ? formatTokens(context) : null,
     vision ? "vision" : null,
     reasoning ? "reasoning" : null,
