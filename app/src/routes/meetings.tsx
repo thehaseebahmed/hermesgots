@@ -105,7 +105,13 @@ import {
 import { getActiveProfile, setActiveProfile } from "@/lib/db"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
-import { useMeetingsPane, type MeetingsPane as PaneState } from "@/lib/pane"
+import {
+  itemToOpen,
+  useMeetingsPane,
+  useRememberOpened,
+  type FeaturePane as PaneState,
+} from "@/lib/pane"
+import { createSignal } from "@/lib/store"
 import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 
@@ -211,23 +217,35 @@ export function MeetingsPage() {
   )
 }
 
-/** From `xl` the list is the pane, so this screen is the third pane: the top meeting, or a placeholder. */
+/** Asks the list to open the New meeting sheet, from the empty pane beside it. */
+const newMeetingAsked = createSignal()
+
+/**
+ * Beside the list (see `useMeetingsPane`) this screen is the meeting pane: the meeting opened
+ * last, else the top one, else a way to make the first.
+ */
 function MeetingsIndex() {
   const pane = useMeetingsPane()
   const meetings = useMeetings()
   const now = useNow()
   if (!pane) return <MeetingsList />
-  const first = meetingGroups(meetings, now)[0]?.meetings[0]
-  if (first) return <Navigate to={`/meetings/${first.id}`} replace />
+  const ids = meetingGroups(meetings, now).flatMap((g) => g.meetings.map((m) => m.id))
+  const open = itemToOpen("meetings", ids)
+  if (open) return <Navigate to={`/meetings/${open}`} replace />
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
-      <AudioLinesIcon className="size-10" aria-hidden />
-      <p>No meetings yet</p>
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
+      <span className="flex size-16 items-center justify-center rounded-full bg-primary/10 text-primary">
+        <AudioLinesIcon className="size-8" aria-hidden />
+      </span>
+      <h2 className="text-lg font-semibold tracking-tight">No meetings yet</h2>
+      <Button size="lg" className="h-12 rounded-full px-5" onClick={() => newMeetingAsked.notify()}>
+        <PlusIcon /> New meeting
+      </Button>
     </div>
   )
 }
 
-/** The list kept on screen beside the open meeting, from `xl` (see `useMeetingsPane`). */
+/** The list kept on screen beside the open meeting (see `useMeetingsPane`). */
 export function MeetingsPane({ pane }: { pane: PaneState }) {
   return (
     <Gate>
@@ -262,6 +280,15 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
   )
   const groups = meetingGroups(shown, now)
   const filtering = Boolean(query.trim() || project)
+
+  useEffect(
+    () =>
+      newMeetingAsked.subscribe(() => {
+        setForm((n) => n + 1)
+        setAdding(true)
+      }),
+    [],
+  )
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -1233,7 +1260,9 @@ function MeetingView() {
   const now = useNow()
   const scroller = useRef<HTMLDivElement>(null)
   const back = useCallback(() => up("/meetings"), [up])
-  useEffect(() => setBackGuard(() => (back(), true)), [back])
+  // Beside the list a meeting is the top-level screen, so back leaves the app.
+  useEffect(() => (beside ? undefined : setBackGuard(() => (back(), true))), [back, beside])
+  useRememberOpened("meetings", meeting?.id)
 
   const said = meeting?.chat?.length ?? 0
   useEffect(() => {
@@ -1794,6 +1823,7 @@ function TopicScreen() {
   const { id = "", topic: topicId = "" } = useParams()
   const meeting = useMeeting(id)
   const topic = meeting?.recap?.topics.find((t) => t.id === topicId)
+  useRememberOpened("meetings", meeting?.id)
   if (!meeting?.recap || !topic) return <Gone />
   // A fresh player for each topic.
   return <TopicView key={topic.id} meeting={meeting} recap={meeting.recap} topic={topic} />

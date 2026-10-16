@@ -16,14 +16,15 @@ import { DrawerContext } from "@/components/drawer-context"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { useLarge, useWide } from "@/lib/media"
 import { depth } from "@/lib/nav"
-import { useMeetingsPane, useProjectPane } from "@/lib/pane"
+import { useMeetingsPane, useProjectPane, useResearchPane } from "@/lib/pane"
 import { useSidebarCollapsed } from "@/lib/sidebar"
 import { useBotPane, useBotThreads } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 
 /**
- * A list kept on screen, from `xl`, beside what it opened: a project beside its session, or a bot
- * beside its thread, or the meetings beside one meeting. `screen` is the list's own path.
+ * A list kept on screen beside what it opened: a project beside its session (from `xl`), a bot
+ * beside its thread, or the meetings or research missions beside one (where `useSplit` says
+ * there is room). `screen` is the list's own path.
  */
 interface ListPane {
   screen: string
@@ -45,6 +46,9 @@ const BotThreadsPage = lazy(() =>
 )
 const MeetingsPane = lazy(() =>
   import("@/routes/meetings").then((m) => ({ default: m.MeetingsPane })),
+)
+const ResearchPane = lazy(() =>
+  import("@/routes/research").then((m) => ({ default: m.ResearchPane })),
 )
 const ProjectPage = lazy(() => import("@/routes/project").then((m) => ({ default: m.ProjectPage })))
 
@@ -129,6 +133,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
   const project = useProjectPane()
   const bot = useBotPane(useBotThreads())
   const meetings = useMeetingsPane()
+  const research = useResearchPane()
   const pane: ListPane | undefined = project
     ? {
         screen: `/code/${project.profileId}/${project.projectId}`,
@@ -149,11 +154,17 @@ export function AppShell({ children }: { children?: ReactNode }) {
             <BotThreadsPage key={bot.profileId} profileId={bot.profileId} thread={bot.thread} />
           ),
         }
-      : meetings && {
-          screen: "/meetings",
-          open: meetings.open,
-          node: <MeetingsPane pane={meetings} />,
-        }
+      : meetings
+        ? {
+            screen: "/meetings",
+            open: meetings.open,
+            node: <MeetingsPane pane={meetings} />,
+          }
+        : research && {
+            screen: "/research",
+            open: research.open,
+            node: <ResearchPane pane={research} />,
+          }
   usePageTransition(main, pane)
 
   return (
