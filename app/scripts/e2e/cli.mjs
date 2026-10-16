@@ -173,7 +173,7 @@ const FLOWS = {
   "session-empty": {
     script: "e2e/session-empty.mjs",
     about:
-      "A session not started shows the big bot and one short line, greets once an hour, and has no header bot or title",
+      "A chat or session not started shows the big bot, a greeting once an hour and the bot's five lines in turn",
   },
   prs: {
     script: "e2e/prs.mjs",

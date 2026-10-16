@@ -1,60 +1,75 @@
 import { useEffect, useState } from "react"
 
-const SEEN = "memento:last-greeted"
-const ABSENCE_MS = 60 * 60 * 1000
+import { BOTS, DEFAULT_BOT_ID } from "@/components/bots"
 
-const LINES = [
-  "Ready to get started. A little too excited, honestly.",
-  "Running on electricity and optimism. Let's go.",
-  "I've been waiting here very calmly. Mostly calmly.",
-  "Nervous? Me? Okay, a little. Mostly ready.",
-  "All warmed up and nothing to break yet.",
-  "Tools sharpened. Tell me where to begin.",
-]
+const SEEN = "memento:last-greeted"
+const TURN = "memento:line-turn:"
+const ABSENCE_MS = 60 * 60 * 1000
 
 /** The time of day's greeting, in the user's own clock. */
 export const greetingAt = (now: Date) => {
   const hour = now.getHours()
-  return hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening"
+  return hour < 12 ? "Good morning." : hour < 18 ? "Good afternoon." : "Good evening."
 }
 
-/** When this device last showed a greeting, if it can say. */
-const lastGreeted = () => {
+const read = (key: string) => {
   try {
-    return Number(localStorage.getItem(SEEN)) || 0
+    return Number(localStorage.getItem(key)) || 0
   } catch {
     return 0
   }
 }
 
+const write = (key: string, value: number) => {
+  try {
+    localStorage.setItem(key, String(value))
+  } catch {
+    // Storage can be blocked; the greeting then shows each time and the lines start over.
+  }
+}
+
+interface Told {
+  greeting?: string
+  line: string
+  /** When the greeting was chosen, and which of the bot's lines the line was. */
+  at?: number
+  turn: number
+}
+
 /** What each session was told, so a screen drawn again keeps its line. */
-const told = new Map<string, { now?: number; text: string }>()
+const told = new Map<string, Told>()
+
+function choose(botId: string): Told {
+  const lines = (BOTS.find((b) => b.id === botId) ?? BOTS.find((b) => b.id === DEFAULT_BOT_ID)!)
+    .lines
+  const now = Date.now()
+  const turn = read(TURN + botId) % lines.length
+  const greet = now - read(SEEN) >= ABSENCE_MS
+  return {
+    greeting: greet ? greetingAt(new Date(now)) : undefined,
+    line: lines[turn],
+    at: greet ? now : undefined,
+    turn,
+  }
+}
 
 /**
- * What an unstarted session says: a short line about the bot being ready, with a greeting only when
- * the last one was an hour or more ago, so a user starting several sessions in a row hears it once.
+ * What a chat or session not started yet says under its bot: a greeting only when the last one was
+ * an hour or more ago, so starting several in a row greets once, and then one of the bot's five
+ * lines, in turn, so the next one that opens has the next line.
  */
-export function useReadyLine(sessionId: string) {
+export function useReadyLine(botId: string, id?: string) {
   const [line] = useState(() => {
-    const known = told.get(sessionId)
+    const known = id ? told.get(id) : undefined
     if (known) return known
-    const now = Date.now()
-    const text = LINES[Math.floor(Math.random() * LINES.length)]
-    const made =
-      now - lastGreeted() >= ABSENCE_MS
-        ? { now, text: `${greetingAt(new Date(now))}. ${text}` }
-        : { text }
-    told.set(sessionId, made)
+    const made = choose(botId)
+    if (id) told.set(id, made)
     return made
   })
-  // Stamped once it shows, not while the line is chosen, which a double render would count twice.
+  // Marked once it shows, not while the line is chosen, which a double render would count twice.
   useEffect(() => {
-    if (!line.now) return
-    try {
-      localStorage.setItem(SEEN, String(line.now))
-    } catch {
-      // Storage can be blocked; the greeting then shows each time.
-    }
-  }, [line.now])
-  return line.text
+    if (line.at) write(SEEN, line.at)
+    write(TURN + botId, line.turn + 1)
+  }, [line, botId])
+  return line
 }
