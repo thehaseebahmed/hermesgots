@@ -533,7 +533,7 @@ Found while simplifying the pull_request tool's own four commits, on this branch
 # Deferred fixes from the simplify pass on the model row's facts line
 
 A cleanup review of `feat(chat): show a model row's cost and capabilities as fixed slots` (the same
-four parallel reviewers: reuse, quality, efficiency, altitude) turned up five changes worth making
+four parallel reviewers: reuse, quality, efficiency, altitude) turned up four changes worth making
 that are either wider than this branch or a design decision the branch should not settle on its own.
 They are recorded here instead of applied.
 
@@ -546,7 +546,10 @@ follows; the row's dim has one owner (`DIM`) and its two capability marks come f
 derives each mark's label and dim in one place; the fixed line is written in reading order instead of
 an array, a filter and an index-keyed join; the doc comment no longer shows a separator inside the
 cost run that the code never renders; and the AGENTS.md sentence on the row's shape moved out of the
-context-window paragraph into the picker's own.
+context-window paragraph into the picker's own. The one behaviour the review flagged — an unlisted
+model losing its BenchLM score to the row's `—` — was fixed on top of that pass rather than recorded:
+the row now reads its score with a dash where the rest would be, and `—` is left for a model that
+neither source knows anything about.
 
 ## Risky
 
@@ -569,23 +572,7 @@ lacks can come from a different entry than a sibling field.
 
 ## Careful
 
-### 2. An unlisted row hides a BenchLM score the app has
-
-`modelDetail` returns `—` for a model models.dev doesn't list (`app/src/components/chat/model-picker.tsx`),
-but the line aggregates two sources: models.dev for the cost, the marks and the window, BenchLM's
-payload for the score. A model BenchLM ranks but models.dev doesn't list yet — a new release —
-rendered `BenchLM 87` before this branch and renders `—` after it.
-
-- Cost: a score the app holds is hidden because an unrelated source is silent, and the row reads as
-  "we know nothing" where the app knows something.
-- Suggested fix: let each source decide its own part — the score whenever it exists, the
-  models.dev-backed slots only for a listed model. If blanking the whole line is the design, say so at
-  the gate instead of leaving it reading as the old "nothing to show" fallback.
-- Why it is risky: it is user-visible behaviour that was decided on its own terms — the dash was
-  chosen over a row of dimmed slots for a model nothing is known about — so moving the gate is the
-  author's call rather than a cleanup's.
-
-### 3. A dim slot says nothing to a screen reader
+### 2. A dim slot says nothing to a screen reader
 
 A dimmed mark keeps the plain label (`Vision`) and the cost slots carry no text alternative at all, so
 the one distinction the row was built to draw — supported, unsupported, not known — reaches assistive
@@ -600,7 +587,7 @@ tech as "Vision" on every listed model, and five dim dollars read as a price.
   renders this picker, and the wording was chosen deliberately (unsupported reads "No vision", unknown
   reads the plain name), so it is a design decision rather than a fix.
 
-### 4. "Unknown" reads permissive for image input and conservative for the mark
+### 3. "Unknown" reads permissive for image input and conservative for the mark
 
 `imageInputOf` (`src/lib/models.ts`) answers `true`, `false` or `undefined`, and its two callers read
 the unknown in opposite directions on purpose: the composer's attachment gating treats it as "yes,
@@ -614,7 +601,7 @@ allow images" (`profile.imageInput !== false`, in `routes/chat.tsx`, `routes/bot
 - Why it is risky: it documents a deliberate asymmetry rather than fixing anything, and a shared
   tri-state helper both callers consume would be a larger change that flattens two intents into one.
 
-### 5. The em dash is a literal in three files
+### 4. The em dash is a literal in three files
 
 `modelDetail`'s `—` is the literal `chat/goal-wizard.tsx` and `chat/usage-sheet.tsx` each write their
 own copy of, and `src/lib/format.ts` exports no placeholder constant to import instead.
@@ -628,9 +615,8 @@ own copy of, and `src/lib/format.ts` exports no placeholder constant to import i
 ---
 
 Found by the `/simplify-code` pass on this branch. It was a cleanup review, not a bug hunt —
-correctness was out of scope — and none of the five blocks the pull request. One check is not an entry
+correctness was out of scope — and none of the four blocks the pull request. One check is not an entry
 here because it does not need deferring: both builds were rendered and the sheet is byte-identical
 (same screenshot hash of the sheet element at phone light and tablet dark), so the cleanup is
 pixel-neutral. The browser flows that open this picker were skipped at the author's request, so no
 flow asserts the row's shape.
-

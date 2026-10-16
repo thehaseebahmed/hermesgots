@@ -419,7 +419,8 @@ function benchlmLabel(score: number | undefined, rankings: RankingsPayload | und
  * A model row's muted second line, one shape in a fixed order: the BenchLM score, the cost, the
  * model's capabilities, then the context window. The score and the context drop out when unknown;
  * the cost and both capability marks always show, dimmed when the model isn't known to have them.
- * An unlisted model shows `—`, and no line at all while the catalog is still loading.
+ * A model models.dev doesn't list shows its score and a dash where the rest would be, or `—` when
+ * BenchLM doesn't rank it either, and no line at all while the catalog is still loading.
  */
 function modelDetail(
   catalog: Catalog | undefined,
@@ -428,8 +429,9 @@ function modelDetail(
 ) {
   if (!catalog) return undefined
   const facts = modelFacts(catalog, choice)
-  if (!facts.listed) return "—"
   const benchlm = benchlmLabel(overallScoreOf(rankings, choice), rankings)
+  // The score stands on its own: models.dev knows nothing else about an unlisted model.
+  if (!facts.listed) return benchlm ? `${benchlm} · —` : "—"
   return (
     <>
       {benchlm && `${benchlm} · `}
