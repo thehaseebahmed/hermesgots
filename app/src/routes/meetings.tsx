@@ -23,7 +23,6 @@ import {
   PauseIcon,
   PlayIcon,
   RotateCcwIcon,
-  SearchIcon,
   SparklesIcon,
   SquareIcon,
   Trash2Icon,
@@ -36,6 +35,8 @@ import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { ExperimentalBadge } from "@/components/experimental-badge"
+import { ItemGroup, ItemRow, ItemSearch } from "@/components/item-list"
+import { itemGroups } from "@/lib/item-groups"
 import { FullscreenPopup, Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import {
   AlertDialog,
@@ -55,12 +56,6 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-} from "@/components/ui/input-group"
 import {
   Select,
   SelectContent,
@@ -229,7 +224,7 @@ function MeetingsIndex() {
   const meetings = useMeetings()
   const now = useNow()
   if (!pane) return <MeetingsList />
-  const ids = meetingGroups(meetings, now).flatMap((g) => g.meetings.map((m) => m.id))
+  const ids = meetingGroups(meetings, now).flatMap((g) => g.items.map((m) => m.id))
   const open = itemToOpen("meetings", ids)
   if (open) return <Navigate to={`/meetings/${open}`} replace />
   return (
@@ -315,32 +310,7 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
         {meetings.length > 0 && (
           <div className="flex flex-col gap-3">
-            <InputGroup className="h-11 rounded-full bg-background dark:bg-input/30">
-              <InputGroupAddon>
-                <SearchIcon />
-              </InputGroupAddon>
-              <InputGroupInput
-                type="search"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search meetings"
-                aria-label="Search meetings"
-                autoComplete="off"
-                className="[&::-webkit-search-cancel-button]:hidden"
-              />
-              {query && (
-                <InputGroupAddon align="inline-end">
-                  <InputGroupButton
-                    size="icon-sm"
-                    className="size-8 rounded-full"
-                    onClick={() => setQuery("")}
-                    aria-label="Clear search"
-                  >
-                    <XIcon />
-                  </InputGroupButton>
-                </InputGroupAddon>
-              )}
-            </InputGroup>
+            <ItemSearch value={query} onChange={setQuery} label="Search meetings" />
             {projects.length > 1 && (
               <div
                 className="-mx-4 flex [scrollbar-width:none] gap-2 overflow-x-auto px-4"
@@ -387,22 +357,19 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
         )}
 
         {groups.map((group) => (
-          <section key={group.label} className="flex flex-col gap-2" aria-label={group.label}>
-            <h2 className="px-1 text-sm font-medium text-muted-foreground">{group.label}</h2>
-            <ul className="flex flex-col">
-              {group.meetings.map((meeting) => (
-                <li key={meeting.id}>
-                  <MeetingRow
-                    meeting={meeting}
-                    now={now}
-                    showProject={!project}
-                    selected={meeting.id === pane?.selected}
-                    onOpen={() => open(`/meetings/${meeting.id}`)}
-                  />
-                </li>
-              ))}
-            </ul>
-          </section>
+          <ItemGroup key={group.key} group={group}>
+            {group.items.map((meeting) => (
+              <li key={meeting.id}>
+                <MeetingRow
+                  meeting={meeting}
+                  now={now}
+                  showProject={!project}
+                  selected={meeting.id === pane?.selected}
+                  onOpen={() => open(`/meetings/${meeting.id}`)}
+                />
+              </li>
+            ))}
+          </ItemGroup>
         ))}
       </div>
 
@@ -466,32 +433,14 @@ function Chip({
   )
 }
 
-/**
- * Meetings by what they need: a failed one first, then any still being written up, then the rest
- * by when they happened.
- */
+/** Meetings by what they need (a failed one waits on you), then by when they happened. */
 function meetingGroups(meetings: Meeting[], now: number) {
-  const day = new Date(now)
-  day.setHours(0, 0, 0, 0)
-  const today = day.getTime()
-  const yesterday = today - 86_400_000
-  const week = today - 6 * 86_400_000
-  const labels = ["Waiting on you", "In progress", "Today", "Yesterday", "This week", "Earlier"]
-  const of = (m: Meeting) =>
-    m.stage === "failed"
-      ? 0
-      : isWorking(m)
-        ? 1
-        : m.createdAt >= today
-          ? 2
-          : m.createdAt >= yesterday
-            ? 3
-            : m.createdAt >= week
-              ? 4
-              : 5
-  return labels
-    .map((label, index) => ({ label, meetings: meetings.filter((m) => of(m) === index) }))
-    .filter((g) => g.meetings.length)
+  return itemGroups(
+    meetings,
+    (m) => (m.stage === "failed" ? "waiting" : isWorking(m) ? "working" : undefined),
+    (m) => m.createdAt,
+    now,
+  )
 }
 
 /** A meeting's topics as one thin strip, each as long as it ran. */
@@ -532,49 +481,30 @@ function MeetingRow({
   const failed = meeting.stage === "failed"
   const Source = SOURCE_ICONS[meeting.source]
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      aria-current={selected || undefined}
-      className={cn(
-        "-mx-2 flex min-h-16 w-[calc(100%+1rem)] items-start gap-3 rounded-2xl px-2 py-3 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring",
-        selected && "bg-muted",
-      )}
-    >
-      <span className="relative mt-0.5 shrink-0">
-        <span className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary">
-          <AudioLinesIcon className="size-5" aria-hidden />
-        </span>
-        <BotAvatar
-          botId={meeting.bot.botId}
-          className="absolute -right-1 -bottom-1 size-5 bg-background ring-2 ring-background"
-        />
-      </span>
-      <span className="flex min-w-0 flex-1 flex-col gap-1">
-        <span className="flex items-baseline gap-2">
-          <span className="min-w-0 flex-1 truncate font-medium">{meeting.title}</span>
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {formatRelative(meeting.createdAt, now)}
-          </span>
-        </span>
-        <span
-          className={cn(
-            "flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground",
-            failed && "text-warning",
-          )}
-        >
+    <ItemRow
+      icon={<AudioLinesIcon aria-hidden />}
+      waiting={failed}
+      botId={meeting.bot.botId}
+      title={meeting.title}
+      when={formatRelative(meeting.createdAt, now)}
+      warn={failed}
+      line={
+        <>
           <Source className="size-3.5 shrink-0" aria-label={SOURCE_LABELS[meeting.source]} />
           <span className="truncate">
             {[showProject && meeting.projectName, meetingLine(meeting)].filter(Boolean).join(" · ")}
           </span>
+        </>
+      }
+      selected={selected}
+      onOpen={onOpen}
+    >
+      {meeting.recap && (
+        <span className="mt-1 block">
+          <MiniStrip recap={meeting.recap} />
         </span>
-        {meeting.recap && (
-          <span className="mt-1 block">
-            <MiniStrip recap={meeting.recap} />
-          </span>
-        )}
-      </span>
-    </button>
+      )}
+    </ItemRow>
   )
 }
 

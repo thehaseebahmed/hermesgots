@@ -10,7 +10,7 @@ await flow("live-poll", async ({ page, seed, shot }) => {
     if (request.url().includes("/api/plugins/memento/runs/live")) reads.push(Date.now())
   })
   await page.goto(`${app}/c/e2e-poll`)
-  await page.getByRole("region", { name: "Idle" }).waitFor({ timeout: 15_000 })
+  await page.getByRole("region", { name: "Today" }).waitFor({ timeout: 15_000 })
   reads.length = 0
   await page.waitForTimeout(25_000)
   await shot("screen")
