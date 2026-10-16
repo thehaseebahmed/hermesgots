@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useRef, useState, type ReactNode } from "react"
+import { useMemo, useRef, useState, type ReactNode } from "react"
 import { BrainIcon, EyeIcon, type LucideIcon } from "lucide-react"
 import {
   ArrowLeftIcon,
@@ -33,7 +33,7 @@ import { useFallbackModels } from "@/lib/fallbacks"
 import { formatTokens } from "@/lib/format"
 import type { Fallback, ModelProvider } from "@/lib/hermes"
 import { fullModel, hostChoice, shortModel, useModelInfo } from "@/lib/model-info"
-import { modelFacts, useModelCatalog, type Catalog } from "@/lib/models"
+import { MAX_COST_TIER, modelFacts, useModelCatalog, type Catalog } from "@/lib/models"
 import { overallScoreOf, useOverallRankings, type RankingsPayload } from "@/lib/rankings"
 import { cn } from "@/lib/utils"
 
@@ -350,15 +350,61 @@ function sortProviders(providers: ModelProvider[]) {
     .sort((a, b) => byName.compare(a.name, b.name))
 }
 
-/** A capability mark: a lucide icon with a tooltip naming the capability. */
-function CapabilityIcon({ label, Icon }: { label: string; Icon: LucideIcon }) {
+/** The dim a fixed slot gets when the model isn't known to have it. */
+const DIM = "opacity-40"
+
+interface Capability {
+  key: "vision" | "reasoning"
+  label: string
+  /** What the mark reads as when the catalog says the model lacks it. */
+  off: string
+  Icon: LucideIcon
+}
+
+/** The capability marks every row draws, in order. */
+const CAPABILITIES: Capability[] = [
+  { key: "vision", label: "Vision", off: "No vision", Icon: EyeIcon },
+  { key: "reasoning", label: "Reasoning", off: "No reasoning", Icon: BrainIcon },
+]
+
+/**
+ * A capability mark: a lucide icon with a tooltip naming the capability, dimmed when the model
+ * isn't known to have it.
+ */
+function CapabilityMark({
+  capability,
+  supported,
+}: {
+  capability: Capability
+  supported?: boolean
+}) {
+  const { Icon } = capability
+  const label = supported === false ? capability.off : capability.label
   return (
     <Tooltip>
-      <TooltipTrigger render={<span aria-label={label} className="inline-flex align-[-2px]" />}>
+      <TooltipTrigger
+        render={
+          <span
+            aria-label={label}
+            className={cn("inline-flex align-[-2px]", supported !== true && DIM)}
+          />
+        }
+      >
         <Icon className="size-3.5" aria-hidden="true" />
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
+  )
+}
+
+/** The cost as fixed dollar slots: the band's signs lit, the rest dimmed, so every row lines up. */
+function CostSigns({ tier }: { tier: number | undefined }) {
+  const lit = tier ?? 0
+  return (
+    <span className="inline-flex">
+      {"$".repeat(lit)}
+      {MAX_COST_TIER > lit && <span className={DIM}>{"$".repeat(MAX_COST_TIER - lit)}</span>}
+    </span>
   )
 }
 
@@ -370,9 +416,11 @@ function benchlmLabel(score: number | undefined, rankings: RankingsPayload | und
 }
 
 /**
- * A model row's muted second line: what models.dev and BenchLM say about it
- * (`BenchLM 87 · 1M · <capability icons> · $$$`), `—` when neither lists anything, and no line at
- * all while the catalog is still loading.
+ * A model row's muted second line, one shape in a fixed order: the BenchLM score, the cost, the
+ * model's capabilities, then the context window. The score and the context drop out when unknown;
+ * the cost and both capability marks always show, dimmed when the model isn't known to have them.
+ * A model models.dev doesn't list shows its score and a dash where the rest would be, or `—` when
+ * BenchLM doesn't rank it either, and no line at all while the catalog is still loading.
  */
 function modelDetail(
   catalog: Catalog | undefined,
@@ -380,22 +428,27 @@ function modelDetail(
   choice: ModelChoice,
 ) {
   if (!catalog) return undefined
-  const { context, vision, reasoning, tier } = modelFacts(catalog, choice)
+  const facts = modelFacts(catalog, choice)
   const benchlm = benchlmLabel(overallScoreOf(rankings, choice), rankings)
-  const parts = [
-    benchlm,
-    context ? formatTokens(context) : null,
-    vision ? <CapabilityIcon key="vision" label="Vision" Icon={EyeIcon} /> : null,
-    reasoning ? <CapabilityIcon key="reasoning" label="Reasoning" Icon={BrainIcon} /> : null,
-    tier ? "$".repeat(tier) : null,
-  ].filter((part) => part !== null)
-  if (parts.length === 0) return "—"
-  return parts.map((part, i) => (
-    <Fragment key={`part-${i}`}>
-      {i > 0 && " · "}
-      {part}
-    </Fragment>
-  ))
+  // The score stands on its own: models.dev knows nothing else about an unlisted model.
+  if (!facts.listed) return benchlm ? `${benchlm} · —` : "—"
+  return (
+    <>
+      {benchlm && `${benchlm} · `}
+      <CostSigns tier={facts.tier} />
+      {" · "}
+      <span className="inline-flex items-center gap-1">
+        {CAPABILITIES.map((capability) => (
+          <CapabilityMark
+            key={capability.key}
+            capability={capability}
+            supported={facts[capability.key]}
+          />
+        ))}
+      </span>
+      {facts.context ? ` · ${formatTokens(facts.context)}` : null}
+    </>
+  )
 }
 
 // Four provider rows (each 3.5rem, `PROVIDER_ROW`) and the list's padding: a host with more
