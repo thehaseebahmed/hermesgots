@@ -26,6 +26,10 @@ const FLOWS = {
     script: "e2e/chat-message.mjs",
     about: "Start a new chat, send a message, get the whole reply and find it in Recents",
   },
+  "slash-skills": {
+    script: "e2e/slash-skills.mjs",
+    about: "The composer's / menu lists the bot's skills from the Gots plugin, not Hermes's /v1/skills",
+  },
   approval: {
     script: "e2e/approval.mjs",
     about:

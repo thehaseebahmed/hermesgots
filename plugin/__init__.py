@@ -45,6 +45,7 @@ from . import (
     repos,
     research,
     sessions,
+    skill_catalog,
     push,
     ship,
     stream,
@@ -240,6 +241,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "todos",
                     "projects",
                     "projects_async",
+                    "skills",
                     "project_repos",
                     "project_usage",
                     "github",
@@ -365,6 +367,17 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "This Hermes version can't read models from here.", 501)
         return web.json_response({"object": "memento.fallbacks", "fallbacks": fallbacks})
 
+    async def list_skills(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        profile = request_profile()
+        try:
+            skills = await asyncio.to_thread(skill_catalog.read, profile)
+        except ImportError:
+            return _error(web, "This Hermes version can't list skills from here.", 501)
+        return web.json_response({"object": "list", "data": skills})
+
     async def set_fallbacks(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -395,12 +408,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # The API server's own per-profile scope (home and secrets) for the request being served, or
         # nothing when this Hermes has none.
         enter = getattr(adapter, "_profile_scope", None)
-        try:
-            from gateway.platforms.api_server import _api_request_profile
-
-            profile = _api_request_profile.get()
-        except Exception:
-            profile = None
+        profile = request_profile()
         if not callable(enter):
             return contextlib.nullcontext
         return lambda: enter(profile)
@@ -1090,6 +1098,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/projects/{{project_id}}/library", project_library)
     app.router.add_post(f"{PREFIX}/model", set_host_model)
     app.router.add_get(f"{PREFIX}/fallbacks", get_fallbacks)
+    app.router.add_get(f"{PREFIX}/skills", list_skills)
     app.router.add_post(f"{PREFIX}/fallbacks", set_fallbacks)
     app.router.add_get(f"{PREFIX}/github", github_status)
     app.router.add_get(f"{PREFIX}/github/repos", github_repos)
@@ -1219,6 +1228,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/push/remove", push_unsubscribe)
     app.router.add_post(f"{PREFIX}/push/mute", push_mute)
     app.router.add_post(f"{PREFIX}/runs/{{run_id}}/clarify", answer_clarify)
+    # The profile the request being served belongs to, read on the loop thread (None when this
+    # Hermes has no profile scope). One definition only: everything below resolves it by name.
     def request_profile():
         try:
             from gateway.platforms.api_server import _api_request_profile

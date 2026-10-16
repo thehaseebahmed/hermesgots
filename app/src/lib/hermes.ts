@@ -346,13 +346,14 @@ export interface Skill {
   category?: string | null
 }
 
-export async function listSkills(config: HermesConfig): Promise<Skill[]> {
-  const response = await request(endpoint(config.baseUrl, "/skills"), {
+/** The skills the bot's profile can run, for the composer's `/` menu. Hermes's own `/v1/skills`
+ * is unscoped and fails on current Hermes, so the plugin lists them under the profile instead. */
+export async function listSkills(config: HermesConfig, signal?: AbortSignal): Promise<Skill[]> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/skills`, {
     headers: headers(config),
+    signal,
   })
-  const body = await response.json()
-  // The code returns an OpenAI-style list; the docs show a bare array. Accept both.
-  const data: unknown = Array.isArray(body) ? body : body?.data
+  const data: unknown = (await response.json())?.data
   return Array.isArray(data)
     ? data.filter((s): s is Skill => typeof s?.name === "string" && s.name.length > 0)
     : []

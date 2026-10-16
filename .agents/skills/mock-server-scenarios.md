@@ -123,7 +123,6 @@ pnpm mock
 |--------|------|-------------|
 | GET | `/health` | `{ status: "ok", platform: "mock-hermes" }` |
 | GET | `/v1/models` | Lists models (profile-aware) |
-| GET | `/v1/skills` | Returns 3 mock skills |
 | GET | `/api/model/options` | Model + provider for current profile |
 | GET | `/v1/capabilities` | Feature flags (runs depend on `MOCK_NO_RUNS`) |
 
@@ -155,6 +154,7 @@ pnpm mock
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/plugins/memento/info` | Plugin manifest with features list |
+| GET | `/api/plugins/memento/skills` | The profile's skills for the composer's `/` menu (3 fixtures) |
 | GET | `/api/plugins/memento/cron/runs?per_job=24` | Ledger-style run history per job |
 | GET | `/api/plugins/memento/github` | `{ connected: true, login: "mock-user" }` or `connected: false` |
 | GET | `/api/plugins/memento/github/repos` | 5 mock repos (memento, maze, dotfiles, zigbee-bridge, ha-automations) |

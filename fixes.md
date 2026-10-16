@@ -620,3 +620,74 @@ here because it does not need deferring: both builds were rendered and the sheet
 (same screenshot hash of the sheet element at phone light and tablet dark), so the cleanup is
 pixel-neutral. The browser flows that open this picker were skipped at the author's request, so no
 flow asserts the row's shape.
+
+---
+
+# Deferred fixes from the simplify pass on the slash menu's skills
+
+A cleanup review of `fix(chat): read the composer's slash menu skills from the Gots plugin` (the
+same four parallel reviewers: reuse, quality, efficiency, altitude) turned up three changes worth
+making that are either wider than this branch or belong to a second mechanism. They are recorded
+here instead of applied.
+
+Everything else the review found is applied on this branch: the duplicate `request_profile()` the
+branch had added (the file already defined one, and the later binding won, so the new copy and its
+comment were dead) is gone, `listSkills` carries the read timeout every other host read has, its
+dead bare-array tolerance is dropped, the menu row is a grid instead of a magic `pl-7` offset, the
+plugin docstring no longer claims parity with the dashboard's different listing, and the app gates
+the request on the `skills` feature it already advertised.
+
+## Risky
+
+### 1. The profile's skill scan has no cache of its own
+
+`plugin/skill_catalog.py::read` runs Hermes's scan inside `_profile_scope`, which holds the
+process-wide skills lock for the whole scan. Hermes caches the result, but its cache key ignores the
+skills directory, so two profiles alternating force a full re-scan each time; a reviewer measured
+~936 ms cold for 66 skills and ~31 ms warm on this host, against 0.2 ms for a Hermes-side cache hit.
+Two `/skills` requests for different profiles can never overlap — both want the same lock.
+
+- Cost: the first menu open per profile per warm window pays a full scan, and a multiplexed host
+  serialises them. At the app's call rate (once per page per bot, only when the menu opens) that is
+  not a problem today; it is the shape that gets slow when more screens want the list.
+- Suggested fix: a small per-profile TTL memo in `skill_catalog` (return the last list for ~30 s),
+  keeping the scan in `asyncio.to_thread` as it is.
+- Why it is risky: it adds plugin-side state and a staleness window to a route that is currently
+  stateless, and the cost is unmeasured under a real multiplexed host — the numbers above come from
+  one profile pair on one machine. A cache wants a test that pins both hit and expiry behaviour.
+
+## Careful
+
+### 2. `request_profile` swallows every failure as "the launch profile"
+
+`plugin/__init__.py::request_profile` wraps the import and the contextvar read in one `try` that
+returns `None` on any exception, and `None` means the launch profile to everything that calls it.
+The branch now calls it from a second place (the skills route reads it for its scan).
+
+- Cost: a Hermes that renames or moves the contextvar answers with another profile's skills instead
+  of failing, and the log says nothing.
+- Suggested fix: narrow to `except ImportError` (the only expected case) and `logger.debug(...,
+  exc_info=True)` otherwise, matching the plugin's idiom elsewhere.
+- Why it is risky: the lines are pre-existing (`git blame`: the queue feature) and the failure is
+  thin — the import is the only thing that can realistically raise. Narrowing changes what a caller
+  sees for an unexpected exception, and the app reads a 500 as "no plugin".
+
+### 3. The menu's failure is silent by design, so a broken host looks like a plain one
+
+`app/src/components/chat/slash-menu.tsx` renders no line when the load fails, as asked: a dropped
+connection, a refused key, the plugin's own 501 ("this Hermes version can't list skills from here")
+and a 500 all look the same as a bot that has no skills.
+
+- Cost: the 501 is a real "your Hermes moved its internals, update the plugin" signal and it is
+  discarded, and `SkillsState`'s `error` member is now unobservable from the menu.
+- Suggested fix: if it is ever wanted back, the repo already has the distinction — `lacksRoute` +
+  `cooldown` (`src/lib/todos.ts` shows the shape): a missing route (older plugin) stays silent and
+  backs off, while a real failure keeps surfacing.
+- Why it is risky: the user asked for exactly this silence, and the app now gates on the `skills`
+  feature, so the missing-route case never asks at all. Re-adding a line would undo a decision, not
+  fix a defect.
+
+---
+
+Found by the `/simplify-code` pass on this branch. It was a cleanup review, not a bug hunt —
+correctness was out of scope — and none of the three blocks the pull request.
