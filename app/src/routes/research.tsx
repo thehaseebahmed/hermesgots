@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { useNavigate, useParams } from "react-router"
+import { Navigate, useLocation, useNavigate, useParams } from "react-router"
 import {
   ArrowLeftIcon,
   ArrowUpIcon,
@@ -76,6 +76,7 @@ import { useLarge } from "@/lib/media"
 import { useModelInfo } from "@/lib/model-info"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
+import { itemToOpen, useRememberOpened, useResearchPane, type FeaturePane } from "@/lib/pane"
 import {
   FORMATS,
   MAX_FOLLOWUPS,
@@ -129,8 +130,30 @@ async function attempt(what: string, action: () => Promise<unknown>) {
 
 const formatName = (format: OutputFormat) => FORMATS.find((f) => f.id === format)!.name
 
-/** Research: start a mission from a question, and the missions so far by what they need. */
+/**
+ * Research: start a mission from a question, and the missions so far by what they need. Where the
+ * list stays beside the mission (see `useResearchPane`) this is the mission pane: the one opened
+ * last, else the top one, else the question.
+ */
 export function ResearchPage() {
+  const pane = useResearchPane()
+  const { missions, loaded } = useMissions()
+  const asked = Boolean((useLocation().state as { ask?: boolean } | null)?.ask)
+  if (!pane) return <ResearchHome />
+  if (!loaded) return null
+  const first = asked ? undefined : itemToOpen("research", missions.map(rankedFirst))
+  if (first) return <Navigate to={`/research/${first}`} replace />
+  return <ResearchHome ask />
+}
+
+const rankedFirst = (mission: Mission) => mission.id
+
+/** The list kept on screen beside the open mission (see `useResearchPane`). */
+export function ResearchPane({ pane }: { pane: FeaturePane }) {
+  return <ResearchHome list={pane} />
+}
+
+function ResearchHome({ ask, list }: { ask?: boolean; list?: FeaturePane }) {
   const openDrawer = useOpenDrawer()
   const navigate = useNavigate()
   const { missions, unsupported } = useMissions()
@@ -151,7 +174,7 @@ export function ResearchPage() {
     setStarting(false)
     if (!started) return
     setText("")
-    navigate(`/research/${started.id}`)
+    navigate(`/research/${started.id}`, { replace: ask })
   }
 
   const waiting = missions.filter(needsYou)
@@ -160,79 +183,102 @@ export function ResearchPage() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-      <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
-        <div className="mx-auto flex max-w-2xl items-center gap-3">
-          <Button
-            variant="outline"
-            size="icon-lg"
-            className="size-11 rounded-full md:hidden"
-            onClick={openDrawer}
-            aria-label="Open conversations"
-          >
-            <MenuIcon />
-          </Button>
-          <h1 className="flex flex-1 items-center gap-2 text-xl font-semibold tracking-tight">
-            Research
-            <ExperimentalBadge />
-          </h1>
-        </div>
-      </header>
+      {!ask && (
+        <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
+          <div className="mx-auto flex max-w-2xl items-center gap-3">
+            <Button
+              variant="outline"
+              size="icon-lg"
+              className="size-11 rounded-full md:hidden"
+              onClick={openDrawer}
+              aria-label="Open conversations"
+            >
+              <MenuIcon />
+            </Button>
+            <h1 className="flex flex-1 items-center gap-2 text-xl font-semibold tracking-tight">
+              Research
+              <ExperimentalBadge />
+            </h1>
+          </div>
+        </header>
+      )}
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-4 pt-4 pb-[max(2rem,env(safe-area-inset-bottom))] md:pt-10">
-        <section className="flex flex-col gap-4">
-          <h2 className="text-center text-2xl font-semibold tracking-tight md:text-3xl">
-            What do you want to understand?
-          </h2>
-          <form
-            onSubmit={(event) => {
-              event.preventDefault()
-              void start()
-            }}
-            className="flex flex-col gap-3"
-          >
-            {profile && (
-              <div>
-                <BotPicker profile={profile} />
-              </div>
-            )}
-            <InputGroup className="bg-background shadow-lg shadow-black/5 has-[textarea]:rounded-[1.75rem] dark:bg-input/30">
-              <InputGroupTextarea
-                value={text}
-                onChange={(event) => setText(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault()
-                    void start()
-                  }
-                }}
-                placeholder={example}
-                rows={2}
-                className="max-h-48 min-h-16 px-5 pt-4 pb-2 text-base md:text-[15px]"
-                aria-label="What to research"
-              />
-              <InputGroupAddon align="block-end" className="px-2.5 pt-0 pb-1.5">
-                <span className="flex-1" />
-                <InputGroupButton
-                  type="submit"
-                  variant="default"
-                  size="icon-sm"
-                  className="size-11 rounded-full"
-                  disabled={!text.trim() || !profile || Boolean(blocked) || starting}
-                  aria-label="Start"
-                >
-                  {starting ? <Spinner /> : <ArrowUpIcon />}
-                </InputGroupButton>
-              </InputGroupAddon>
-            </InputGroup>
-          </form>
-          {blocked && <Banner>{blocked}</Banner>}
-          <MissionTypes value={type} onChange={setType} />
-        </section>
+        {!list && (
+          <section className="flex flex-col gap-4">
+            <h2 className="text-center text-2xl font-semibold tracking-tight md:text-3xl">
+              What do you want to understand?
+            </h2>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault()
+                void start()
+              }}
+              className="flex flex-col gap-3"
+            >
+              {profile && (
+                <div>
+                  <BotPicker profile={profile} />
+                </div>
+              )}
+              <InputGroup className="bg-background shadow-lg shadow-black/5 has-[textarea]:rounded-[1.75rem] dark:bg-input/30">
+                <InputGroupTextarea
+                  value={text}
+                  onChange={(event) => setText(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault()
+                      void start()
+                    }
+                  }}
+                  placeholder={example}
+                  rows={2}
+                  className="max-h-48 min-h-16 px-5 pt-4 pb-2 text-base md:text-[15px]"
+                  aria-label="What to research"
+                />
+                <InputGroupAddon align="block-end" className="px-2.5 pt-0 pb-1.5">
+                  <span className="flex-1" />
+                  <InputGroupButton
+                    type="submit"
+                    variant="default"
+                    size="icon-sm"
+                    className="size-11 rounded-full"
+                    disabled={!text.trim() || !profile || Boolean(blocked) || starting}
+                    aria-label="Start"
+                  >
+                    {starting ? <Spinner /> : <ArrowUpIcon />}
+                  </InputGroupButton>
+                </InputGroupAddon>
+              </InputGroup>
+            </form>
+            {blocked && <Banner>{blocked}</Banner>}
+            <MissionTypes value={type} onChange={setType} />
+          </section>
+        )}
 
-        <MissionGroup title="Waiting on you" missions={waiting} />
-        <MissionGroup title="Researching" missions={working} />
-        <MissionGroup title="Ready" missions={ready} />
+        {!ask && (
+          <>
+            <MissionGroup title="Waiting on you" missions={waiting} selected={list?.selected} />
+            <MissionGroup title="Researching" missions={working} selected={list?.selected} />
+            <MissionGroup title="Ready" missions={ready} selected={list?.selected} />
+          </>
+        )}
       </div>
+
+      {list && (
+        <div className="pointer-events-none sticky bottom-0 mt-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <div className="mx-auto flex w-full max-w-2xl justify-end">
+            <Button
+              data-toast-above
+              size="lg"
+              className="pointer-events-auto h-12 rounded-full px-5 shadow-lg"
+              onClick={() => navigate("/research", { replace: true, state: { ask: true } })}
+            >
+              <PlusIcon /> New research
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -305,8 +351,18 @@ function missionLine(mission: Mission) {
   }
 }
 
-function MissionGroup({ title, missions }: { title: string; missions: Mission[] }) {
+function MissionGroup({
+  title,
+  missions,
+  selected,
+}: {
+  title: string
+  missions: Mission[]
+  selected?: string
+}) {
   const navigate = useNavigate()
+  // Beside the list a mission takes the place of the one open.
+  const swap = Boolean(useResearchPane()?.open)
   const now = useNow()
   const profiles = useLiveQuery(() => db.profiles.toArray(), [])
   if (!missions.length) return null
@@ -333,8 +389,12 @@ function MissionGroup({ title, missions }: { title: string; missions: Mission[] 
             <li key={mission.id}>
               <button
                 type="button"
-                onClick={() => navigate(`/research/${mission.id}`)}
-                className="flex min-h-16 w-full items-center gap-3 rounded-3xl border bg-card px-4 py-3 text-left transition-colors hover:bg-muted"
+                onClick={() => navigate(`/research/${mission.id}`, { replace: swap })}
+                aria-current={mission.id === selected || undefined}
+                className={cn(
+                  "flex min-h-16 w-full items-center gap-3 rounded-3xl border bg-card px-4 py-3 text-left transition-colors hover:bg-muted",
+                  mission.id === selected && "bg-muted",
+                )}
               >
                 <span className="relative shrink-0">
                   <span
@@ -424,8 +484,11 @@ export function MissionPage() {
   const { id = "" } = useParams()
   const { mission, loaded } = useMission(id)
   const { up } = useNav()
+  const beside = Boolean(useResearchPane())
   const back = useCallback(() => up("/research"), [up])
-  useEffect(() => setBackGuard(() => (back(), true)), [back])
+  // Beside the list a mission is the top-level screen, so back leaves the app.
+  useEffect(() => (beside ? undefined : setBackGuard(() => (back(), true))), [back, beside])
+  useRememberOpened("research", mission?.id)
 
   if (!mission)
     return (
@@ -436,10 +499,14 @@ export function MissionPage() {
 
   const researching = !["brief", "scope"].includes(mission.stage)
   return researching ? (
-    <WorkView mission={mission} onBack={back} />
+    <WorkView mission={mission} onBack={beside ? undefined : back} beside={beside} />
   ) : (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-      <MissionHeader mission={mission} onBack={back} actions={<MissionMenu mission={mission} />} />
+      <MissionHeader
+        mission={mission}
+        onBack={beside ? undefined : back}
+        actions={<MissionMenu mission={mission} />}
+      />
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
         <Steps mission={mission} />
         <p className="ml-auto max-w-[85%] rounded-3xl rounded-br-lg bg-muted px-4 py-2.5">
@@ -663,7 +730,7 @@ function MissionHeader({
   actions,
 }: {
   mission: Mission
-  onBack: () => void
+  onBack?: () => void
   actions?: ReactNode
 }) {
   const type = MISSION_TYPES.find((t) => t.id === mission.type)!
@@ -672,15 +739,17 @@ function MissionHeader({
   return (
     <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
       <div className="flex items-center gap-3">
-        <Button
-          variant="outline"
-          size="icon-lg"
-          className="size-11 shrink-0 rounded-full"
-          onClick={onBack}
-          aria-label="Back to Research"
-        >
-          <ArrowLeftIcon />
-        </Button>
+        {onBack && (
+          <Button
+            variant="outline"
+            size="icon-lg"
+            className="size-11 shrink-0 rounded-full"
+            onClick={onBack}
+            aria-label="Back to Research"
+          >
+            <ArrowLeftIcon />
+          </Button>
+        )}
         <div className="flex min-w-0 flex-1 flex-col">
           <h1 className="truncate text-base font-semibold tracking-tight">{mission.title}</h1>
           <p className="truncate text-xs text-muted-foreground">
@@ -997,9 +1066,17 @@ function ScopeForm({ mission, botId }: { mission: Mission; botId?: string }) {
  * Research under way, then delivered: the stages (and once delivered, the contents and the
  * evidence) on the left from tablet width, the output building in the centre.
  */
-function WorkView({ mission, onBack }: { mission: Mission; onBack: () => void }) {
-  // The panes need the room beside the sidebar, so a tablet gets the phone layout.
-  const wide = useLarge()
+function WorkView({
+  mission,
+  onBack,
+  beside,
+}: {
+  mission: Mission
+  onBack?: () => void
+  beside: boolean
+}) {
+  // Its own side pane needs the room beside the sidebar, and beside the list there is none.
+  const wide = useLarge() && !beside
   const delivered = mission.stage === "delivered"
   const [format, setFormat] = useState<OutputFormat>(mission.formats[0] ?? mission.format)
   const [pane, setPane] = useState<Pane>("overview")

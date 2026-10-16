@@ -141,6 +141,10 @@ const FLOWS = {
     script: "e2e/research.mjs",
     about: "A research mission from question to guide, another format, and a citation's source",
   },
+  panes: {
+    script: "e2e/panes.mjs",
+    about: "Meetings and Research: the list beside the item with room for it, one pane without",
+  },
   meetings: {
     script: "e2e/meetings.mjs",
     about: "Meetings behind its Developer switch: a recording, an added file and a timestamp",
