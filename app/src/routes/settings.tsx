@@ -31,7 +31,6 @@ import {
   MoonIcon,
   PaletteIcon,
   PlusIcon,
-  SailboatIcon,
   SunIcon,
   TrophyIcon,
   TelescopeIcon,
@@ -366,7 +365,6 @@ const CATEGORY_ICONS: Record<PushCategory, LucideIcon> = {
   chat_run_failed: CircleAlertIcon,
   chat_run_done: CircleCheckIcon,
   code_input: MessageCircleQuestionIcon,
-  code_theseus: SailboatIcon,
   code_run_failed: CircleAlertIcon,
   code_run_done: CircleCheckIcon,
   code_pr_checks: GitPullRequestIcon,
@@ -473,19 +471,6 @@ function DeveloperSettings() {
   return (
     <>
       <Group>
-        <SwitchRow
-          id="theseus"
-          icon={SailboatIcon}
-          title={
-            <span className="flex items-center gap-2">
-              Theseus mode
-              <ExperimentalBadge />
-            </span>
-          }
-          subtitle="Very unstable"
-          checked={Boolean(settings?.theseus)}
-          onCheckedChange={(checked) => saveSettings({ theseus: checked })}
-        />
         <SwitchRow
           id="bot-threads"
           icon={MessagesSquareIcon}

@@ -13,8 +13,7 @@
     "typecheck": "tsc -b",
     "format": "prettier --write src",
     "mock": "node scripts/mock-hermes.mjs",
-    "e2e": "node scripts/e2e/cli.mjs",
-    "sync:theseus": "node scripts/sync-theseus.mjs"
+    "e2e": "node scripts/e2e/cli.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

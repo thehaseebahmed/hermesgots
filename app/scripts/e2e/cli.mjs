@@ -97,6 +97,11 @@ const FLOWS = {
     about:
       "A checkpoint's capture screenshots hold their place while they load, and say so when one can't",
   },
+  "goal-wizard": {
+    script: "e2e/goal-wizard.mjs",
+    about:
+      "/goal opens the wizard: the preview follows the form, and Save sets the goal and sends its kick",
+  },
   "image-viewer": {
     script: "e2e/image-viewer.mjs",
     about: "A photo opened from a message holds its place while it decodes, then paints",

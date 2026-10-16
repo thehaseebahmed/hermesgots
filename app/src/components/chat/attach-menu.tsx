@@ -3,11 +3,9 @@ import { CameraIcon, FileUpIcon, ImageIcon, PlusIcon, type LucideIcon } from "lu
 
 import { Banner } from "@/components/banner"
 import { ModeIcon, ModeOptions, type ModeSettings } from "@/components/chat/mode-menu"
-import { TheseusIntro } from "@/components/chat/theseus-intro"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import type { SessionMode } from "@/lib/db"
-import { introSeen } from "@/lib/theseus"
 import { cn } from "@/lib/utils"
 import { MODE_LABELS } from "@/lib/workspace"
 
@@ -38,7 +36,6 @@ export function AttachMenu({
 }) {
   const [open, setOpen] = useState(false)
   const button = useRef<HTMLButtonElement>(null)
-  const [intro, setIntro] = useState(false)
   const inputs = useRef<Record<Source, HTMLInputElement | null>>({
     camera: null,
     photos: null,
@@ -60,9 +57,7 @@ export function AttachMenu({
   const pickMode = (mode: SessionMode) => {
     if (!session || mode === session.mode) return setOpen(false)
     setOpen(false)
-    // The first time on this device, Theseus is explained before it's taken.
-    if (mode === "theseus" && !introSeen()) setIntro(true)
-    else session.onMode(mode)
+    session.onMode(mode)
   }
 
   // The mode isn't on screen any more, so one that changes what the agent may do marks the button.
@@ -87,13 +82,6 @@ export function AttachMenu({
           </span>
         )}
       </Button>
-      {session && (
-        <TheseusIntro
-          open={intro}
-          onOpenChange={setIntro}
-          onUse={() => session.onMode("theseus")}
-        />
-      )}
       <input
         ref={(el) => void (inputs.current.camera = el)}
         type="file"
@@ -153,8 +141,6 @@ export function AttachMenu({
               <ModeOptions
                 mode={session.mode}
                 autoAvailable={session.autoAvailable}
-                theseus={session.theseus}
-                started={session.started}
                 onPick={pickMode}
               />
             </section>

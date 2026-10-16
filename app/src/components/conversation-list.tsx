@@ -11,9 +11,9 @@ import {
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
   PlusIcon,
-  SailboatIcon,
   SearchIcon,
   ShieldAlertIcon,
+  TargetIcon,
   TelescopeIcon,
   TimerIcon,
   UserIcon,
@@ -85,7 +85,7 @@ const REASON_ICONS: Record<WaitingReason["kind"], typeof ListChecksIcon> = {
   question: MessageCircleQuestionMarkIcon,
   approval: ShieldAlertIcon,
   plan: ListChecksIcon,
-  theseus: SailboatIcon,
+  goal: TargetIcon,
 }
 
 /**

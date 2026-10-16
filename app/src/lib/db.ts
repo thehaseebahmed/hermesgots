@@ -22,8 +22,6 @@ export interface Settings {
   appearanceAt?: number
   /** Shows the Developer section in Settings (tapping the version five times). */
   developer?: boolean
-  /** Offers Theseus among a project session's modes; a Developer setting, off by default. Local. */
-  theseus?: boolean
   /** The bot-first layout: bots in the sidebar, each chat a thread in its bot. Developer, local. */
   botThreads?: boolean
   /** Meetings: record or add a meeting and read its notes (a design mock). Developer, local. */
@@ -178,7 +176,15 @@ export interface Conversation {
 }
 
 /** How much a project session may do without asking. */
-export type SessionMode = "accept_edits" | "auto" | "plan" | "theseus"
+export type SessionMode = "accept_edits" | "auto" | "plan"
+
+/**
+ * A session's mode as the app works with it. Sessions made before 0.42 stored Theseus as a mode of
+ * its own; those read as Auto, which is what carries a goal on.
+ */
+export function sessionMode(mode: SessionMode | "theseus" | undefined): SessionMode {
+  return mode === "accept_edits" || mode === "plan" ? mode : "auto"
+}
 
 export type PrState = "open" | "draft" | "merged" | "closed"
 

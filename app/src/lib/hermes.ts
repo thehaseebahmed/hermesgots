@@ -1368,7 +1368,7 @@ export interface SessionWorkspace {
   blocked: string | null
 }
 
-const MODES = new Set<string>(["accept_edits", "auto", "plan", "theseus"])
+const MODES = new Set<string>(["accept_edits", "auto", "plan"])
 
 function parseWorkspace(raw: unknown, sessionId: string): SessionWorkspace | null {
   const body = raw as {
@@ -1541,43 +1541,23 @@ export async function setWorkspaceMode(
   return parseWorkspace(await response.json(), sessionId)
 }
 
-/** A reviewer model: a model on a provider; either unset means the user's own. */
-export interface ReviewerModel {
-  provider: string | null
-  model: string | null
-}
-
-export interface TheseusModels {
-  review: ReviewerModel[]
-  visual: ReviewerModel[]
-}
-
-/** What the plugin says about running Theseus on this bot's host (`info`'s `theseus`). */
-export interface TheseusInfo {
+/** What the plugin says about goals on this bot's host (`info`'s `goal`). */
+export interface GoalInfo {
   ready: boolean
-  /** Why it can't run here: no Node 20, or a plugin without the skill. */
+  /** Why it can't hold a goal here: a Hermes whose `/goal` the plugin can't reach. */
   reason: string | null
-  /** Whether the host lets the plugin pick a reviewer's model and provider (Hermes config). */
-  reviewers: { llm: boolean; model: boolean; provider: boolean }
 }
 
-export async function getTheseusInfo(config: HermesConfig): Promise<TheseusInfo | null> {
+export async function getGoalInfo(config: HermesConfig): Promise<GoalInfo | null> {
   const response = await request(`${pluginRoot(config.baseUrl)}/info`, { headers: headers(config) })
-  const raw = (await response.json())?.theseus
+  const raw = (await response.json())?.goal
   if (!raw || typeof raw !== "object") return null
-  const reviewers = raw.reviewers ?? {}
   return {
     ready: Boolean(raw.ready),
     reason: typeof raw.reason === "string" ? raw.reason : null,
-    reviewers: {
-      llm: Boolean(reviewers.llm),
-      model: Boolean(reviewers.model),
-      provider: Boolean(reviewers.provider),
-    },
   }
 }
 
-/** The plugin's view of a Theseus session: the skill's snapshot (`status --json --full`) as is. */
 /** A session the agent delegated to with `delegate_task`, from Hermes's store via the plugin. */
 export interface DelegatedAgent {
   id: string
@@ -1590,12 +1570,45 @@ export interface DelegatedAgent {
   status: "running" | "done" | "stopped"
 }
 
-export interface RawTheseus {
-  stage: string
-  state: Record<string, any> | null
-  models: TheseusModels
-  unavailable: string | null
-  message?: string | null
+/** One of the goal's quality gates: a shell command that must pass before it can be done. */
+export interface GoalGate {
+  command: string
+  /** Whether it passed its last run; null before it has run. */
+  passing: boolean | null
+  exitCode: number | null
+  attempts: number
+  maxRetries: number
+  /** The tail of what it said, so a failing gate explains itself. */
+  output: string
+}
+
+/** The five fields of a goal's completion contract, as Hermes stores them. */
+export interface GoalContract {
+  outcome: string
+  verification: string
+  constraints: string
+  boundaries: string
+  stopWhen: string
+}
+
+/** A chat's goal: Hermes's own `/goal` state, as the plugin reports it. */
+export interface Goal {
+  /** The goal text, exactly as it was set (headline first, then the contract lines). */
+  text: string
+  status: "active" | "paused" | "done" | "cleared"
+  turnsUsed: number
+  maxTurns: number
+  contract: GoalContract
+  gates: GoalGate[]
+  subgoals: string[]
+  /** The judge's last word: `done`, `blocked`, `continue`, `wait` or `skipped`. */
+  verdict: string | null
+  /** Why the judge said it. */
+  reason: string | null
+  /** Why the goal paused itself, e.g. the turn budget spent. */
+  pausedReason: string | null
+  /** What it's parked on when it isn't the user (a process, a deadline). */
+  waiting: string | null
 }
 
 function parseAgents(raw: unknown): DelegatedAgent[] {
@@ -1613,23 +1626,46 @@ function parseAgents(raw: unknown): DelegatedAgent[] {
     }))
 }
 
-function parseModels(raw: unknown): TheseusModels {
-  const pick = (list: unknown): ReviewerModel[] =>
-    (Array.isArray(list) ? list : []).slice(0, 2).map((entry) => ({
-      provider: typeof entry?.provider === "string" ? entry.provider : null,
-      model: typeof entry?.model === "string" ? entry.model : null,
-    }))
-  const body = (raw ?? {}) as Record<string, unknown>
-  return { review: pick(body.review), visual: pick(body.visual) }
+const str = (value: unknown) => (typeof value === "string" ? value : "")
+
+function parseGate(raw: any): GoalGate {
+  return {
+    command: str(raw?.command),
+    passing: typeof raw?.passing === "boolean" ? raw.passing : null,
+    exitCode: typeof raw?.exit_code === "number" ? raw.exit_code : null,
+    attempts: typeof raw?.attempts === "number" ? raw.attempts : 0,
+    maxRetries: typeof raw?.max_retries === "number" ? raw.max_retries : 0,
+    output: str(raw?.output),
+  }
 }
 
-function parseTheseus(raw: any): RawTheseus {
+/** The plugin's payload as the app reads it; null when the session hasn't a goal. */
+export function parseGoal(raw: any): Goal | null {
+  const body = raw?.goal
+  if (!body || typeof body !== "object") return null
+  const status = str(body.status)
+  const contract = body.contract ?? {}
   return {
-    stage: typeof raw?.stage === "string" ? raw.stage : "discovery",
-    state: raw?.state && typeof raw.state === "object" ? raw.state : null,
-    models: parseModels(raw?.models),
-    unavailable: typeof raw?.unavailable === "string" ? raw.unavailable : null,
-    message: typeof raw?.message === "string" ? raw.message : null,
+    text: str(body.goal),
+    status:
+      status === "paused" || status === "done" || status === "cleared" ? status : "active",
+    turnsUsed: typeof body.turns_used === "number" ? body.turns_used : 0,
+    maxTurns: typeof body.max_turns === "number" ? body.max_turns : 0,
+    contract: {
+      outcome: str(contract.outcome),
+      verification: str(contract.verification),
+      constraints: str(contract.constraints),
+      boundaries: str(contract.boundaries),
+      stopWhen: str(contract.stop_when),
+    },
+    gates: (Array.isArray(body.gates) ? body.gates : []).map(parseGate),
+    subgoals: (Array.isArray(body.subgoals) ? body.subgoals : []).filter(
+      (s: unknown): s is string => typeof s === "string",
+    ),
+    verdict: typeof body.verdict === "string" ? body.verdict : null,
+    reason: typeof body.reason === "string" ? body.reason : null,
+    pausedReason: typeof body.paused_reason === "string" ? body.paused_reason : null,
+    waiting: typeof body.waiting === "string" ? body.waiting : null,
   }
 }
 
@@ -1645,56 +1681,49 @@ export async function getSessionAgents(
   return parseAgents((await response.json())?.agents)
 }
 
-export async function getTheseus(config: HermesConfig, sessionId: string): Promise<RawTheseus> {
-  const response = await request(pluginSession(config, sessionId, "/theseus"), {
+/** The session's goal, or null when it hasn't one. */
+export async function getGoal(config: HermesConfig, sessionId: string): Promise<Goal | null> {
+  const response = await request(pluginSession(config, sessionId, "/goal"), {
     headers: headers(config),
   })
-  return parseTheseus(await response.json())
+  return parseGoal(await response.json())
 }
 
-/** One of the user's answers to the run (`confirm_plan`, `approve`, `settings`, ...). */
-export async function postTheseus(
+/**
+ * Sets the session's goal from the wizard's text, its gates and its turn budget. Answers with the
+ * goal and the kick text — what the app sends as the first message, so the run starts at once.
+ */
+export async function postGoal(
   config: HermesConfig,
   sessionId: string,
-  body: Record<string, unknown>,
-): Promise<RawTheseus> {
-  const response = await request(pluginSession(config, sessionId, "/theseus"), {
+  body: { command: string; gates: string[]; maxTurns?: number | null },
+): Promise<{ goal: Goal | null; kick: string | null }> {
+  const response = await request(pluginSession(config, sessionId, "/goal"), {
     method: "POST",
     headers: headers(config),
-    body: JSON.stringify(body),
+    body: JSON.stringify({ command: body.command, gates: body.gates, max_turns: body.maxTurns }),
   })
-  return parseTheseus(await response.json())
+  const parsed = await response.json()
+  return { goal: parseGoal(parsed), kick: typeof parsed?.kick === "string" ? parsed.kick : null }
 }
 
-export async function setTheseusModels(
+/** Pause, resume or clear the session's goal. Resuming answers with the text that continues it. */
+export async function controlGoal(
   config: HermesConfig,
   sessionId: string,
-  models: TheseusModels,
-): Promise<RawTheseus> {
-  const response = await request(pluginSession(config, sessionId, "/theseus/models"), {
+  action: "pause" | "resume" | "clear",
+): Promise<{ goal: Goal | null; kick: string | null; message: string }> {
+  const response = await request(pluginSession(config, sessionId, "/goal/control"), {
     method: "POST",
     headers: headers(config),
-    body: JSON.stringify(models),
+    body: JSON.stringify({ action }),
   })
-  return parseTheseus(await response.json())
-}
-
-/** A screenshot from a checkpoint's evidence, as an object URL for an <img>. */
-export async function getTheseusCapture(
-  config: HermesConfig,
-  sessionId: string,
-  checkpoint: string,
-  file: string,
-): Promise<string> {
-  const response = await request(
-    pluginSession(
-      config,
-      sessionId,
-      `/theseus/evidence/${encodeURIComponent(checkpoint)}/${encodeURIComponent(file)}`,
-    ),
-    { headers: headers(config) },
-  )
-  return URL.createObjectURL(await response.blob())
+  const parsed = await response.json()
+  return {
+    goal: parseGoal(parsed),
+    kick: typeof parsed?.kick === "string" ? parsed.kick : null,
+    message: str(parsed?.message),
+  }
 }
 
 export interface KeptWorktree {
@@ -1908,8 +1937,8 @@ export type WaitingReason =
   | { kind: "question"; count: number }
   | { kind: "approval"; command?: string }
   | { kind: "plan" }
-  /** A Theseus run waiting on the user: its plan, its checkpoints, a checkpoint or its closing. */
-  | { kind: "theseus"; stage: "plan" | "checkpoints" | "approval" | "closing" }
+  /** A goal only the user can move: paused (budget spent, a gate out of retries) or judged blocked. */
+  | { kind: "goal"; reason: string }
 
 /** What a server's plugin reports of its runs, by Hermes session id. */
 export interface LiveRuns {
@@ -1958,11 +1987,12 @@ export async function getLiveRuns(config: HermesConfig, signal?: AbortSignal): P
         project,
       }
     else if (raw.kind === "plan") waiting[id] = { kind: "plan", project }
-    else if (
-      raw.kind === "theseus" &&
-      ["plan", "checkpoints", "approval", "closing"].includes(String(raw.stage))
-    )
-      waiting[id] = { kind: "theseus", stage: raw.stage as "plan", project }
+    else if (raw.kind === "goal")
+      waiting[id] = {
+        kind: "goal",
+        reason: typeof raw.reason === "string" ? raw.reason : "paused",
+        project,
+      }
   }
   return { sessions, runIds, waiting }
 }
