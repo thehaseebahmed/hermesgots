@@ -1,0 +1,61 @@
+name: BenchLM id check
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: app
+      - name: Check model ids against BenchLM
+        id: check
+        run: node --experimental-strip-types scripts/check-benchlm-matches.mjs --report "$RUNNER_TEMP/benchlm-report.json"
+        working-directory: app
+        continue-on-error: true
+      - name: Open or update issue
+        if: steps.check.outcome == 'failure'
+        uses: actions/github-script@v7
+        env:
+          REPORT: ${{ runner.temp }}/benchlm-report.json
+        with:
+          script: |
+            const fs = require("fs")
+            const report = JSON.parse(fs.readFileSync(process.env.REPORT, "utf8"))
+            const title = "BenchLM: unmatched model ids"
+            const lines = [
+              `Checked ${report.checkedAt}. BenchLM data as of ${report.benchlmDataAsOf}.`,
+              "",
+              "Unlisted unmatched ids (add a fix in model-match.ts or a reason in scripts/benchlm-known-gaps.json):",
+              ...report.failing.map((id) => `- ${id}`),
+            ]
+            const body = lines.join("\n")
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo, state: "open", labels: "benchlm-match",
+            })
+            const existing = open.find((i) => i.title === title)
+            if (existing) {
+              await github.rest.issues.update({ owner: context.repo.owner, repo: context.repo.repo, issue_number: existing.number, body })
+            } else {
+              await github.rest.issues.create({ owner: context.repo.owner, repo: context.repo.repo, title, body, labels: ["benchlm-match"] })
+            }
+      - name: Fail the job
+        if: steps.check.outcome == 'failure'
+        run: exit 1
