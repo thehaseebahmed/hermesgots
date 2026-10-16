@@ -8,6 +8,7 @@ from __future__ import annotations
 import sqlite3
 import time
 import unittest
+from unittest.mock import patch
 
 from plugin import model_changes
 from plugin.store import connect, db_path
@@ -19,7 +20,7 @@ class ModelChangesTest(unittest.TestCase):
         self.home = temp_hermes_home(self)
         self.path = db_path(self.home)
         # The prune is gated hourly per process: each case starts as if this one never pruned.
-        model_changes._pruned_at = 0.0
+        model_changes._pruned_at = None
 
     def call(self, session="s1", model="anthropic/claude-sonnet-4.5", provider="openrouter", **kw):
         model_changes.record(
@@ -91,6 +92,18 @@ class ModelChangesTest(unittest.TestCase):
         self.call(model="openai/gpt-5")
         self.assertEqual(self.rows(), [("openai/gpt-5",)])
         self.assertGreater(model_changes.KEEP_MS, 0)
+
+    def test_the_first_prune_does_not_wait_for_an_uptime(self) -> None:
+        """``monotonic()`` is the host's uptime, so a host that has just booted prunes on its first
+        call: the interval is measured against the last prune, not against the host's boot."""
+        conn = connect(self.path)
+        conn.execute(
+            "INSERT INTO model_changes (session_id, at, model, provider) VALUES ('s1', 1, 'old', NULL)"
+        )
+        conn.close()
+        with patch.object(model_changes.time, "monotonic", return_value=200.0):
+            self.call(model="openai/gpt-5")
+        self.assertEqual(self.rows(), [("openai/gpt-5",)])
 
     def test_the_prune_runs_hourly_not_on_every_call(self) -> None:
         conn = connect(self.path)

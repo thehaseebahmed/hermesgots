@@ -189,3 +189,9 @@ Projects, attach it to your reply, or describe what it shows. Never commit scree
 - A regression that seeds a fixed chat id — `regression-submission.mjs` uses `overlap-test` — reads
   that session's transcript off the mock, so it passes only against a mock that hasn't served it
   before. Restart the mock between runs of one.
+- A Vite started without `--host` binds `::1` alone, while the readiness probe in
+  `app/scripts/e2e/cli.mjs` polls `http://localhost:<port>` with Node's `fetch`, which reaches it
+  over IPv4 — so the probe loops for its full 60s and reports `app didn't start on <port>` against a
+  server that is up (`curl http://localhost:<port>` and `curl http://[::1]:<port>` both answer in
+  that same container). Start the app with `--host 127.0.0.1` and pass `--app
+  http://127.0.0.1:<port>`, or `--host 0.0.0.0` when the port is published out of a container.

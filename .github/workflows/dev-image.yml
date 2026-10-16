@@ -1,0 +1,123 @@
+name: Dev image
+
+# The development container is built from `Dockerfile` and published to the GitHub Container
+# Registry. A pull request builds and verifies it; only a push to `main` publishes it, the same
+# line `android.yml` draws between a build check and a distribution.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - ".github/workflows/dev-image.yml"
+      # The image's second-heaviest layer is the pnpm store, warmed from these four: a dependency
+      # bump changes what the image carries, so it has to rebuild and re-verify it.
+      - "app/package.json"
+      - "app/pnpm-lock.yaml"
+      - "website/package.json"
+      - "website/pnpm-lock.yaml"
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - ".github/workflows/dev-image.yml"
+      - "app/package.json"
+      - "app/pnpm-lock.yaml"
+      - "website/package.json"
+      - "website/pnpm-lock.yaml"
+  workflow_dispatch:
+
+concurrency:
+  group: dev-image-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/gots-dev
+
+jobs:
+  image:
+    name: Build, verify and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to the GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tags and labels
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          # A pull request has no registry credentials to pull from, so it verifies the image
+          # this runner just built.
+          load: ${{ github.event_name == 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_REVISION=${{ github.sha }}
+          cache-from: type=gha
+          # A warm cache is worth having; failing the build for one is not. The export talks to
+          # GitHub's cache API, whose rate limiting shows up as a 10-minute timeout after the
+          # image itself has already been pushed.
+          cache-to: type=gha,mode=max,ignore-error=true,timeout=30m
+
+      # The app's gates, the plugin's tests and the website's build, run inside the image against
+      # the checkout: an image that cannot run them is not worth publishing. `tests.yml` owns that
+      # set — a gate added there does not reach this list on its own (see fixes.md).
+      - name: Verify the image
+        run: |
+          image=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
+          if [ "${{ github.event_name }}" != "pull_request" ]; then docker pull "$image"; fi
+          docker run --rm -v "$PWD:/workspace" -w /workspace -e ASTRO_TELEMETRY_DISABLED=1 \
+            "$image" sh -lc '
+              set -e
+              cd app
+              pnpm install --frozen-lockfile
+              pnpm lint
+              pnpm typecheck
+              node scripts/test-community.mjs
+              pnpm build
+              cd ..
+              python3 -m unittest discover -s plugin/tests
+              cd website
+              pnpm install --frozen-lockfile
+              pnpm build
+            '
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Dev image"
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| Image | \`${{ env.IMAGE }}\` |"
+            echo "| Tags | $(echo "${{ steps.meta.outputs.tags }}" | tr '\n' ' ') |"
+            echo "| Published | ${{ github.event_name != 'pull_request' }} |"
+            echo "| Digest | \`${{ steps.build.outputs.digest }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

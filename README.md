@@ -72,6 +72,42 @@ Sync needs Netlify Identity and the `netlify/functions/sync.mts` function, which
 
 UI primitives in `src/components/ui` are shadcn `base-maia` components. Add more with `pnpm dlx shadcn@latest add <name>`.
 
+### Development container
+
+`Dockerfile` builds an image with everything the app, the plugin and the website need — Node 22, pnpm 10, Python 3.13 (with the plugin tests' `cryptography`) and headless Chromium for the e2e flows. `.github/workflows/dev-image.yml` builds it on every pull request and publishes it on a push to `main`:
+
+```bash
+docker pull ghcr.io/thehaseebahmed/gots-dev:latest
+```
+
+Or build it yourself and mount the repository at `/workspace`; the image carries the toolchains, never a copy of the tree:
+
+```bash
+docker build -t gots-dev .
+docker run --rm -it -p 15173:15173 -p 8642:8642 -v "$PWD:/workspace" -w /workspace gots-dev
+# inside the container: cd app && pnpm install && pnpm dev -- --host 0.0.0.0
+```
+
+The app's checks, run in the container:
+
+```bash
+docker run --rm -v "$PWD:/workspace" -w /workspace gots-dev sh -lc "cd app && pnpm install --frozen-lockfile && pnpm lint && pnpm typecheck && node scripts/test-community.mjs && pnpm build"
+```
+
+The plugin's and the website's take the same shape — `python3 -m unittest discover -s plugin/tests`, and `cd website && pnpm install --frozen-lockfile && pnpm build`. `dev-image.yml` runs them against the image itself; `AGENTS.md` lists them for a host checkout.
+
+An e2e flow drives the dev server itself, so start it bound to IPv4 in the same container first: the harness probes the port over IPv4 while Vite binds `::1` unless told otherwise — the trap `.agents/skills/e2e-testing/` lists under Gotchas.
+
+```bash
+docker run --rm -v "$PWD:/workspace" -w /workspace gots-dev sh -lc '
+  cd app && pnpm install --frozen-lockfile
+  pnpm exec vite --port 15173 --strictPort --host 127.0.0.1 &
+  until curl -sf http://127.0.0.1:15173 >/dev/null; do sleep 0.5; done
+  pnpm e2e chat-message --app http://127.0.0.1:15173'
+```
+
+The container runs as root, so an install inside it leaves root-owned `node_modules` and `dist` in the mounted tree. `.agents/skills/e2e-testing/` lists which server takes which port; publish the ones you need with `-p`. The Android APK is not built here: see [Android app](#android-app).
+
 ## Deploy to Netlify
 
 `netlify.toml` is included (base `app`, build `pnpm build`, publish `dist`, SPA fallback, service-worker cache headers). In Netlify, choose **Add new site → Import an existing project**, pick this repo, and deploy. Then add the site's URL to `API_SERVER_CORS_ORIGINS`.

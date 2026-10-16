@@ -1,0 +1,15 @@
+# The image carries toolchains, not a checkout, so nothing the build does not copy needs to
+# travel to the daemon. Keep the context small enough to stay quick on a warm machine.
+**/node_modules
+**/dist
+**/.git
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.astro
+*.log
+app/android/.gradle
+app/android/**/build
+app/android/app/src/main/assets/public
+*.apk
+.env*

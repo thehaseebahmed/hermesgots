@@ -25,7 +25,10 @@ KEEP_MS = 90 * 24 * 60 * 60 * 1000
 # The prune can't use the (session_id, at) key, since `at` isn't its leftmost column, so it walks the
 # table — and rows old enough to go are rare. Hourly is plenty for rows that expire in 90 days.
 PRUNE_EVERY_S = 60 * 60
-_pruned_at = 0.0
+# None rather than 0.0: ``time.monotonic()`` is the host's uptime, so a zero sentinel only reads as
+# "never pruned" on a machine that has been up for PRUNE_EVERY_S already. A host that just booted
+# would skip its first prune and wait out an hour of uptime first.
+_pruned_at: Optional[float] = None
 
 
 def normalise(model: str) -> str:
@@ -77,7 +80,7 @@ def _prune(conn: Any, now: int) -> None:
     """Drops rows too old for a thread to still show, once an hour rather than on every call."""
     global _pruned_at
     since = time.monotonic()
-    if since - _pruned_at < PRUNE_EVERY_S:
+    if _pruned_at is not None and since - _pruned_at < PRUNE_EVERY_S:
         return
     _pruned_at = since
     conn.execute("DELETE FROM model_changes WHERE at < ?", (now - KEEP_MS,))
