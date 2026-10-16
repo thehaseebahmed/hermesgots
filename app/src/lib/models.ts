@@ -149,6 +149,9 @@ function reasoningOf(entry: CatalogModel | undefined) {
 /** The upper bound of each cost band, in blended USD per million tokens. */
 const COST_BANDS = [2, 8, 25, 80]
 
+/** The cost slots a model row draws: one per band, the top band's own slot included. */
+export const MAX_COST_TIER = COST_BANDS.length + 1
+
 /**
  * The model's cost band, 1–5, from the blended price (5×input + output): `$` under 2, `$$` to 8,
  * `$$$` to 25, `$$$$` to 80, `$$$$$` above that. Unknown when either price is missing.
@@ -224,6 +227,8 @@ export const findContextWindow = (info: ModelRef) => lookUp(info, contextOf)
 export const findImageInput = (info: ModelRef) => lookUp(info, imageInputOf)
 
 export interface ModelFacts {
+  /** Whether models.dev lists the model at all; an unlisted model has nothing else to show. */
+  listed?: boolean
   context?: number
   vision?: boolean
   reasoning?: boolean
@@ -245,6 +250,7 @@ export function modelFacts(catalog: Catalog | undefined, info: ModelRef): ModelF
   let facts = byModel.get(key)
   if (!facts) {
     facts = {
+      listed: findIn(catalog, info, (entry) => (entry ? true : undefined)) === true,
       context: findIn(catalog, info, contextOf),
       vision: findIn(catalog, info, imageInputOf),
       reasoning: findIn(catalog, info, reasoningOf),

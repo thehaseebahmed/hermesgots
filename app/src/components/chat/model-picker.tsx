@@ -33,7 +33,7 @@ import { useFallbackModels } from "@/lib/fallbacks"
 import { formatTokens } from "@/lib/format"
 import type { Fallback, ModelProvider } from "@/lib/hermes"
 import { fullModel, hostChoice, shortModel, useModelInfo } from "@/lib/model-info"
-import { modelFacts, useModelCatalog, type Catalog } from "@/lib/models"
+import { MAX_COST_TIER, modelFacts, useModelCatalog, type Catalog } from "@/lib/models"
 import { overallScoreOf, useOverallRankings, type RankingsPayload } from "@/lib/rankings"
 import { cn } from "@/lib/utils"
 
@@ -350,15 +350,33 @@ function sortProviders(providers: ModelProvider[]) {
     .sort((a, b) => byName.compare(a.name, b.name))
 }
 
-/** A capability mark: a lucide icon with a tooltip naming the capability. */
-function CapabilityIcon({ label, Icon }: { label: string; Icon: LucideIcon }) {
+/** A capability mark: a lucide icon with a tooltip naming the capability; dimmed when it isn't supported. */
+function CapabilityIcon({ label, Icon, dim }: { label: string; Icon: LucideIcon; dim: boolean }) {
   return (
     <Tooltip>
-      <TooltipTrigger render={<span aria-label={label} className="inline-flex align-[-2px]" />}>
+      <TooltipTrigger
+        render={
+          <span
+            aria-label={label}
+            className={cn("inline-flex align-[-2px]", dim && "opacity-40")}
+          />
+        }
+      >
         <Icon className="size-3.5" aria-hidden="true" />
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
+  )
+}
+
+/** The cost as fixed dollar slots: the band's signs lit, the rest dimmed, so every row is the same width. */
+function CostSigns({ tier }: { tier: number | undefined }) {
+  const lit = tier ?? 0
+  return (
+    <span className="inline-flex">
+      {lit > 0 && "$".repeat(lit)}
+      {MAX_COST_TIER > lit && <span className="opacity-40">{"$".repeat(MAX_COST_TIER - lit)}</span>}
+    </span>
   )
 }
 
@@ -370,9 +388,10 @@ function benchlmLabel(score: number | undefined, rankings: RankingsPayload | und
 }
 
 /**
- * A model row's muted second line: what models.dev and BenchLM say about it
- * (`BenchLM 87 · 1M · <capability icons> · $$$`), `—` when neither lists anything, and no line at
- * all while the catalog is still loading.
+ * A model row's muted second line, in a fixed order: `BenchLM 87 · $$·$$$ · 👁 🧠 · 1M`. The score
+ * and context drop out when unknown; the cost and both capability marks always show, dimmed when
+ * the model doesn't have them. An unlisted model shows `—`, and no line at all while the catalog
+ * is still loading.
  */
 function modelDetail(
   catalog: Catalog | undefined,
@@ -380,16 +399,26 @@ function modelDetail(
   choice: ModelChoice,
 ) {
   if (!catalog) return undefined
-  const { context, vision, reasoning, tier } = modelFacts(catalog, choice)
+  const facts = modelFacts(catalog, choice)
+  if (!facts.listed) return "—"
   const benchlm = benchlmLabel(overallScoreOf(rankings, choice), rankings)
-  const parts = [
+  const parts: ReactNode[] = [
     benchlm,
-    context ? formatTokens(context) : null,
-    vision ? <CapabilityIcon key="vision" label="Vision" Icon={EyeIcon} /> : null,
-    reasoning ? <CapabilityIcon key="reasoning" label="Reasoning" Icon={BrainIcon} /> : null,
-    tier ? "$".repeat(tier) : null,
+    <CostSigns key="cost" tier={facts.tier} />,
+    <span key="capabilities" className="inline-flex items-center gap-1">
+      <CapabilityIcon
+        label={facts.vision === false ? "No vision" : "Vision"}
+        Icon={EyeIcon}
+        dim={facts.vision !== true}
+      />
+      <CapabilityIcon
+        label={facts.reasoning === false ? "No reasoning" : "Reasoning"}
+        Icon={BrainIcon}
+        dim={facts.reasoning !== true}
+      />
+    </span>,
+    facts.context ? formatTokens(facts.context) : null,
   ].filter((part) => part !== null)
-  if (parts.length === 0) return "—"
   return parts.map((part, i) => (
     <Fragment key={`part-${i}`}>
       {i > 0 && " · "}
