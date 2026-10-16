@@ -4,6 +4,7 @@ import { createStore } from "@/lib/store"
 import { db, type ModelsDevCatalog, type Profile } from "@/lib/db"
 import { getModelInfo, type ModelInfo } from "@/lib/hermes"
 import { fullModel } from "@/lib/model-info"
+import { lastSegment, normalise } from "@/lib/model-match"
 
 const CATALOG_URL = "https://models.dev/api.json"
 const CATALOG_ROW = "catalog"
@@ -122,9 +123,8 @@ export function warmCatalog() {
   void loadCatalog().catch(() => {})
 }
 
-/** `anthropic/Claude-Sonnet-4.5` and `claude-sonnet-4-5` should meet. */
-export const normalise = (id: string) => id.toLowerCase().replace(/\./g, "-")
-export const lastSegment = (id: string) => id.slice(id.lastIndexOf("/") + 1)
+// `anthropic/Claude-Sonnet-4.5` and `claude-sonnet-4-5` should meet; see model-match.ts.
+export { normalise, lastSegment } from "@/lib/model-match"
 
 /** Whether two ids name the same model: Hermes vendors the ids it reports, a pick is bare. */
 export function sameModel(a: string, b: string) {

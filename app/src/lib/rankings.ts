@@ -3,19 +3,11 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { db } from "@/lib/db"
 import type { ModelInfo } from "@/lib/hermes"
 import { isNative, SITE_URL } from "@/lib/native"
-import { lastSegment, normalise } from "@/lib/models"
+import { scoreFor, scoreMapOf, type ScoredRow } from "@/lib/model-match"
 
 const RANKINGS_URL = `${isNative ? SITE_URL : ""}/.netlify/functions/benchlm`
 const RANKINGS_ROW = "coding"
 const TTL_MS = 24 * 60 * 60 * 1000
-
-/** A row in BenchLM's coding rankings: a model's key/slug and its BenchAlign score. */
-interface RankingRow {
-  modelKey?: unknown
-  slug?: unknown
-  name?: unknown
-  score?: unknown
-}
 
 /** The shape we expect from the BenchLM coding surface, validated before caching. */
 export interface RankingsPayload {
@@ -90,38 +82,11 @@ export function useCodingRankings(): RankingsPayload | undefined {
   return row?.data as RankingsPayload | undefined
 }
 
-/** Extracts the score from a ranking row, guarding the payload shape. */
-function scoreOf(row: RankingRow | undefined): number | undefined {
-  const score = row?.score
-  return typeof score === "number" && Number.isFinite(score) ? score : undefined
-}
-
-/** Extracts a model id from a ranking row: modelKey, then slug, then name. */
-function modelIdOf(row: RankingRow | undefined): string | undefined {
-  const id = row?.modelKey ?? row?.slug ?? row?.name
-  return typeof id === "string" && id.trim() ? id.trim() : undefined
-}
-
 type ModelRef = Pick<ModelInfo, "provider" | "model">
 
 // Pre-normalised score lookup, built once per payload so repeated calls during search typing
 // are O(1) — mirrors the WeakMap cache in `modelFacts`.
 const scoreCache = new WeakMap<RankingsPayload, Map<string, number | undefined>>()
-
-function buildScoreMap(rows: RankingRow[]): Map<string, number | undefined> {
-  const map = new Map<string, number | undefined>()
-  for (const row of rows) {
-    const id = modelIdOf(row)
-    if (!id) continue
-    const full = normalise(id)
-    const short = lastSegment(full)
-    const score = scoreOf(row)
-    // Full match takes priority; only store short if no full entry exists yet.
-    if (!map.has(full)) map.set(full, score)
-    if (!map.has(short)) map.set(short, score)
-  }
-  return map
-}
 
 /**
  * The model's BenchLM coding score, or undefined if it isn't ranked. The matching follows the
@@ -136,10 +101,8 @@ export function codingScoreOf(
   let map = scoreCache.get(rankings)
   if (!map) {
     if (!isRankings(rankings)) return undefined
-    map = buildScoreMap(rankings.items as RankingRow[])
+    map = scoreMapOf(rankings.items as ScoredRow[])
     scoreCache.set(rankings, map)
   }
-  const full = normalise(model)
-  const short = lastSegment(full)
-  return map.get(full) ?? map.get(short)
+  return scoreFor(map, model)
 }
