@@ -124,13 +124,7 @@ export function warmCatalog() {
 }
 
 // `anthropic/Claude-Sonnet-4.5` and `claude-sonnet-4-5` should meet; see model-match.ts.
-export { normalise, lastSegment } from "@/lib/model-match"
-
-/** Whether two ids name the same model: Hermes vendors the ids it reports, a pick is bare. */
-export function sameModel(a: string, b: string) {
-  if (!a || !b) return false
-  return normalise(lastSegment(a)) === normalise(lastSegment(b))
-}
+export { lastSegment, normalise, sameModel } from "@/lib/model-match"
 
 function contextOf(entry: CatalogModel | undefined) {
   const context = entry?.limit?.context

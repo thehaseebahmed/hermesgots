@@ -3,6 +3,10 @@
 export const normalise = (id: string) => id.toLowerCase().replace(/\./g, "-")
 export const lastSegment = (id: string) => id.slice(id.lastIndexOf("/") + 1)
 
+/** Whether two ids name the same model: Hermes vendors the ids it reports, a pick is bare. */
+export const sameModel = (a: string, b: string) =>
+  !!a && !!b && normalise(lastSegment(a)) === normalise(lastSegment(b))
+
 /** A ranking row as BenchLM returns it: a key/slug/name and a numeric score. */
 export interface ScoredRow {
   modelKey?: unknown

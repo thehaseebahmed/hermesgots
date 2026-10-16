@@ -900,9 +900,14 @@ async function uploadAttachments(
   return saved
 }
 
+/** The chat's own pick, else the bot's default: the model in effect, before any fallback. */
+function pickOf(conversation: Conversation, profile: Profile) {
+  return conversation.modelChoice ?? profile.modelChoice
+}
+
 /** The chat's own pick, else the bot's default, else whatever the host runs. */
 function modelOf(conversation: Conversation, profile: Profile) {
-  const chosen = conversation.modelChoice ?? profile.modelChoice
+  const chosen = pickOf(conversation, profile)
   return { model: chosen?.model ?? profile.model, provider: chosen?.provider }
 }
 
@@ -931,7 +936,7 @@ async function prepareSend(
   const history = await getMessages(conversationId)
   const now = nextAt(history)
   // The pick in effect, not the profile's advertised default name, which isn't a model id.
-  const sent = conversation.modelChoice ?? profile.modelChoice
+  const sent = pickOf(conversation, profile)
   const userMessage: Message = {
     id: queuedId ?? randomId(),
     conversationId,

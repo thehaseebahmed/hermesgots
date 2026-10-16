@@ -1,27 +1,23 @@
 import type { Message } from "@/lib/db"
 import type { ModelChange } from "@/lib/hermes"
+import { sameModel } from "./model-match.ts"
 
 /**
  * Where a chat's model changed, for its thread to draw a divider on. Kept free of every runtime
- * import so `scripts/test-model-changes.mjs` runs it under plain node, like `model-sort.ts`.
+ * import so `scripts/test-model-changes.mjs` runs it under plain node, like `model-sort.ts` — the
+ * model-identity rule it needs lives in `model-match.ts` for the same reason.
  */
 
 /** One turn of a thread, as the placement reads it. */
-export interface Turn {
+interface Turn {
   /** The first message the thread shows of the turn: what a divider above the turn sits above. */
-  first: Message
+  first: { id: string; createdAt: number }
   /** The model this device started the turn with, which only a reply carries. */
   sent?: string
 }
 
-/** The same comparison `lib/models.ts`'s `sameModel` makes, mirrored to keep this module node-safe. */
-function same(a: string, b: string) {
-  const bare = (id: string) => (id.toLowerCase().replace(/\./g, "-").split("/").pop() ?? "").trim()
-  return bare(a) === bare(b)
-}
-
 /** A thread's turns in order: one opens at its user message, or at its reply when the user row isn't loaded. */
-export function readTurns(messages: Message[]): Turn[] {
+function readTurns(messages: Message[]): Turn[] {
   const turns: Turn[] = []
   for (const message of messages) {
     const open = turns[turns.length - 1]
@@ -41,7 +37,7 @@ export function readTurns(messages: Message[]): Turn[] {
  * device sent it with. `end` is where the turn's call is known to have run by — the next turn's
  * opening, or unbounded for the turn still at the end of the thread.
  */
-export function turnModel(
+function turnModel(
   turn: Turn,
   changes: ModelChange[] | undefined,
   end: number,
@@ -49,7 +45,8 @@ export function turnModel(
   const recorded = changes ?? []
   const start = turn.first.createdAt
   // A change fired while the turn ran answered it, so it lands here; one that lands later in the
-  // same turn is the next turn's own call, and shows there instead.
+  // same turn is the next turn's own call, and shows there instead. The rows are in order, so the
+  // first one inside the turn is the one to read.
   const fired = recorded.find((change) => change.at >= start && change.at < end)
   if (fired) return fired
   let carried: ModelChange | undefined
@@ -73,7 +70,7 @@ export function modelChanges(messages: Message[], changes?: ModelChange[]): Map<
   for (const [index, turn] of turns.entries()) {
     const end = turns[index + 1]?.first.createdAt ?? Infinity
     const model = turnModel(turn, changes, end)?.model
-    if (model && carried && !same(carried, model)) dividers.set(turn.first.id, model)
+    if (model && carried && !sameModel(carried, model)) dividers.set(turn.first.id, model)
     if (model) carried = model
   }
   return dividers

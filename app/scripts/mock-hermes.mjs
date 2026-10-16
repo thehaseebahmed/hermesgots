@@ -983,20 +983,21 @@ async function playTurn(req, body, last, out) {
   const calls = /clean|delete|\bask\b/i.test(last) ? 3 : 2
   const prompt_tokens = calls * (6000 + Math.round(transcript / 4))
   if (keyed) {
+    // What the turn asked for, so a switched model reads back as the one that ran.
+    const model = typeof body.model === "string" ? body.model : null
+    const provider = typeof body.provider === "string" ? body.provider : null
     lastCalls.set(sessionId, {
       prompt_tokens: 6000 + Math.round(transcript / 4),
       output_tokens: pieces,
       context_length: 200000,
-      // What the turn asked for, so a switched model reads back as the one that ran.
-      model: typeof body.model === "string" ? body.model : null,
-      provider: typeof body.provider === "string" ? body.provider : null,
+      model,
+      provider,
     })
     // Like the plugin's own hook: a row only where this turn asked for a different model than the
     // session's last one, so the app can draw a divider above the turn it answered with.
-    const model = typeof body.model === "string" ? body.model : null
     const changes = modelChanges.get(sessionId) ?? []
     if (model && changes.at(-1)?.model !== model) {
-      changes.push({ at: Date.now(), model, provider: body.provider ?? null })
+      changes.push({ at: Date.now(), model, provider })
       modelChanges.set(sessionId, changes)
     }
   }
