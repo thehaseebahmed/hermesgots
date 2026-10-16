@@ -38,16 +38,19 @@ How to test the whole change end to end: commands, what to look at, expected res
 What could go wrong, and each decision you made without the user: what you chose and why. Nothing here is left for the user to decide."""
 # Added whenever a session has worktrees. Fixed text, so the prompt cache holds.
 _PR_INSTRUCTIONS = (
-    "When the work is done and you've checked it, ship it yourself with the open_pull_request tool: "
-    "it commits what's left, pushes this branch and opens a pull request, or updates the open one. "
-    "Don't ask first, and don't use git push or gh for it. Write the description from the repo's "
-    "pull request template when it has one (named below), else with Summary, Changes and How to "
-    "test sections."
+    "When the work is done and you've checked it, ship it yourself with the pull_request tool and "
+    "action 'ship': it commits what's left, pushes this branch and opens a draft pull request, or "
+    "pushes to the one open. Don't ask first, and don't use git push or gh for it. Write the "
+    "description from the repo's pull request template when it has one (named below), else with "
+    "Summary, Changes and How to test sections. The pull request stays a draft. Pass force: true "
+    "only after a rebase or amend. action 'update' changes the open pull request's title or body, "
+    "and 'status' reports without writing. Merging and closing are the user's decision: the tool "
+    "refuses them, so ask the user with clarify instead."
 )
 # The same condition as _PR_INSTRUCTIONS: only code sessions get it.
 _DONE_INSTRUCTIONS = (
     "Two things the run's prompt emphasises once the work is done: don't share the pull request url "
-    "or the commit message in your reply — the open_pull_request result and the session's pull "
+    "or the commit message in your reply — the pull_request result and the session's pull "
     "request list already surface them where the user sees them. And before you finish, update your "
     "todo list to its final state: every item completed, or cancelled where it was dropped."
 )

@@ -1,4 +1,4 @@
-"""Shipping a project session's work: the agent's ``open_pull_request`` tool commits what's left in
+"""Shipping a project session's work: the agent's ``pull_request`` tool commits what's left in
 each worktree, pushes the branch and opens a pull request (or updates the open one), on the Hermes
 host with its GitHub account (``github.py``), so the agent never needs the token or ``gh``. Closing a
 session (discarded or deleted in the app) closes its pull requests and deletes its pushed branches.
@@ -43,6 +43,12 @@ def _count(tree: str, *args: str) -> Optional[int]:
 
 def _has_ref(tree: str, ref: str) -> bool:
     return _git(tree, "rev-parse", "--verify", "-q", ref).returncode == 0
+
+
+def _ref_sha(tree: str, ref: str) -> Optional[str]:
+    """The commit a local reference points at, or ``None`` when it has none."""
+    found = _git(tree, "rev-parse", "--verify", "-q", ref)
+    return found.stdout.strip() or None if found.returncode == 0 else None
 
 
 def _repo_status(repo: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -142,15 +148,54 @@ def _commit(hermes_home: Path, tree: str, message: str) -> str:
     return _git(tree, "rev-parse", "--short", "HEAD").stdout.strip()
 
 
-def _push(hermes_home: Path, tree: str, branch: str) -> None:
+def _push(hermes_home: Path, tree: str, branch: str, force: bool = False) -> None:
     auth, _ = github.token(hermes_home)
     command = github.git_auth_args(auth)
-    pushed = _run(tree, [*command, "push", "-u", "origin", f"HEAD:refs/heads/{branch}"])
+    lease: List[str] = []
+    if force:
+        # --force-with-lease refuses a branch that moved since this tree last looked at it: git
+        # compares the branch on GitHub against the commit we hand it, so that commit has to be one
+        # we knew before now. Refreshing it first would always match and leave the guard a no-op.
+        seen = _ref_sha(tree, f"refs/remotes/origin/{branch}")
+        if not seen and _remote_sha(tree, command, branch):
+            raise ShipError(
+                "GitHub's branch has commits this tree has never fetched, so a force push would "
+                "replace them blind. Fetch the branch first (git fetch origin), then call "
+                "pull_request again.",
+                409,
+            )
+        if seen:
+            lease = [f"--force-with-lease=refs/heads/{branch}:{seen}"]
+    pushed = _run(tree, [*command, "push", *lease, "-u", "origin", f"HEAD:refs/heads/{branch}"])
     if pushed.returncode != 0:
         stderr = pushed.stderr
-        if "could not read Username" in stderr or "Authentication failed" in stderr or "403" in stderr:
-            raise ShipError("GitHub refused the push. Check the server's GitHub account.", 403)
-        raise ShipError(_last_line(stderr, "git push failed.", auth))
+        if "stale info" in stderr:
+            raise ShipError(
+                "GitHub's branch moved since this session last pushed or fetched it, so the force "
+                "push was refused. Check what changed on the branch before forcing again.",
+                409,
+            )
+        if "non-fast-forward" in stderr or "fetch first" in stderr:
+            raise ShipError(
+                "GitHub's branch has commits this one doesn't (it was rewritten or moved). "
+                "Call pull_request again with force: true to replace them.",
+                409,
+            )
+        raise _push_error(stderr, "git push failed.", auth)
+
+
+def _remote_sha(tree: str, command: List[str], branch: str) -> Optional[str]:
+    """The commit ``branch`` is at on ``origin``, asked of the remote itself: ``None`` when it has
+    none (a branch this session hasn't pushed yet, or a remote we couldn't reach)."""
+    found = _run(tree, [*command, "ls-remote", "origin", f"refs/heads/{branch}"])
+    line = found.stdout.strip() if found.returncode == 0 else ""
+    return line.split("\t", 1)[0] if line else None
+
+
+def _push_error(stderr: str, fallback: str, auth: Optional[str]) -> ShipError:
+    if "could not read Username" in stderr or "Authentication failed" in stderr or "403" in stderr:
+        return ShipError("GitHub refused the push. Check the server's GitHub account.", 403)
+    return ShipError(_last_line(stderr, fallback, auth))
 
 
 def _body(tree: str, base: Optional[str], body: Optional[str]) -> str:
@@ -163,7 +208,7 @@ def _body(tree: str, base: Optional[str], body: Optional[str]) -> str:
 
 
 def _open_pr(
-    hermes_home: Path, repo: Dict[str, Any], state: Dict[str, Any], title: Optional[str], body: Optional[str], draft: bool
+    hermes_home: Path, repo: Dict[str, Any], state: Dict[str, Any], title: Optional[str], body: Optional[str]
 ) -> Dict[str, Any]:
     name = github.origin_repo(repo["repo_root"])
     if not name:
@@ -179,7 +224,7 @@ def _open_pr(
         title = subjects[0] if len(subjects) == 1 else repo["branch"]
     try:
         created = github.create_pull_request(
-            name, repo["branch"], state["base"], title[:MAX_TITLE], _body(tree, state["base"], body), draft, auth
+            name, repo["branch"], state["base"], title[:MAX_TITLE], _body(tree, state["base"], body), True, auth
         )
     except github.GitHubError as error:
         raise ShipError(str(error), error.status) from None
@@ -196,22 +241,19 @@ def ship(
     hermes_home: Path,
     session_id: str,
     record: Dict[str, Any],
-    message: Any,
-    title: Any,
-    body: Any,
-    draft: Any,
-    open_pr: Any,
+    message: Optional[str],
+    title: Optional[str],
+    body: Optional[str],
+    open_pr: bool,
+    force: bool,
 ) -> List[Dict[str, Any]]:
     """Commits each worktree's changes with ``message``, pushes its branch and, with ``open_pr``,
-    opens a pull request where the branch has none open. One result per repo that had work; a
-    repo's failure doesn't stop the others."""
+    opens a draft pull request where the branch has none open. ``force`` replaces the branch's
+    remote commits (after a rebase or amend). One result per repo that had work; a repo's failure
+    doesn't stop the others."""
     message = _text(message, "message", MAX_MESSAGE)
     title = _text(title, "title", MAX_TITLE)
     body = _text(body, "body", MAX_BODY)
-    if draft is not None and not isinstance(draft, bool):
-        raise ValueError("draft must be true or false.")
-    if open_pr is not None and not isinstance(open_pr, bool):
-        raise ValueError("pr must be true or false.")
     lock = _lock(session_id)
     if not lock.acquire(blocking=False):
         raise ShipError("This session's changes are already being pushed.", 409)
@@ -229,25 +271,56 @@ def ship(
             # After a merged or closed pull request only new work makes another: a squash-merged
             # branch still counts its old commits as ahead.
             new_work = state["changed"] or state["unpushed"]
-            wants_pr = bool(open_pr) and not live_pr and (new_work or (not existing and state["ahead"]))
-            if not (state["changed"] or state["unpushed"] or wants_pr):
+            wants_pr = open_pr and not live_pr and (new_work or (not existing and state["ahead"]))
+            if not (state["changed"] or state["unpushed"] or wants_pr or force):
                 continue
             result: Dict[str, Any] = {"name": repo["name"], "committed": None, "pushed": False, "pr": live_pr}
             try:
                 if state["changed"]:
                     result["committed"] = _commit(hermes_home, repo["path"], message)
                     state = _repo_status(repo) or state
-                if state["unpushed"] or not state["pushed"]:
-                    _push(hermes_home, repo["path"], repo["branch"])
+                if state["unpushed"] or not state["pushed"] or force:
+                    _push(hermes_home, repo["path"], repo["branch"], force)
                     result["pushed"] = True
                 if wants_pr:
-                    result["pr"] = _open_pr(hermes_home, repo, state, title, body, bool(draft))
+                    result["pr"] = _open_pr(hermes_home, repo, state, title, body)
             except (ShipError, WorkspaceError) as error:
                 result["error"] = str(error)
             results.append(result)
         return results
     finally:
         lock.release()
+
+
+def update(
+    hermes_home: Path, record: Dict[str, Any], title: Optional[str], body: Optional[str]
+) -> List[Dict[str, Any]]:
+    """Changes the title and/or body of each repo's open pull request on the session's branch."""
+    title = _text(title, "title", MAX_TITLE)
+    body = _text(body, "body", MAX_BODY)
+    if not title and not body:
+        raise ValueError("update needs a title or a body to change.")
+    auth, _ = github.token(hermes_home)
+    if not auth:
+        raise ShipError("No GitHub account on the server.", 409)
+    results = []
+    for repo in record["repos"]:
+        name = github.origin_repo(repo["repo_root"])
+        if not name:
+            continue
+        pr = github.pull_request(hermes_home, repo["repo_root"], repo["branch"], fresh=True, checks=False)
+        if not pr or pr["state"] not in ("open", "draft"):
+            continue
+        result: Dict[str, Any] = {"name": repo["name"], "pr": pr}
+        try:
+            result["pr"] = github.update_pull_request(name, pr["number"], title, body, auth)
+            github.forget_pull_request(repo["repo_root"], repo["branch"])
+        except github.GitHubError as error:
+            result["error"] = str(error)
+        results.append(result)
+    if not results:
+        raise ShipError("No open pull request on this session's branch to update.", 409)
+    return results
 
 
 TEMPLATES = (
@@ -277,38 +350,63 @@ def template(tree: Optional[str]) -> Optional[str]:
     return f".github/PULL_REQUEST_TEMPLATE/{found[0]}" if found else None
 
 
-TOOL = "open_pull_request"
+TOOL = "pull_request"
+LEGACY_TOOL = "open_pull_request"
+ACTIONS = ("ship", "push", "update", "status")
+# Listed so the agent gets the teaching refusal rather than a schema error; never performed here.
+REFUSED_ACTIONS = ("merge", "close")
 SCHEMA = {
     "name": TOOL,
     "description": (
-        "Ship this session's work: commits whatever is uncommitted in its worktrees with "
-        "commit_message, pushes the session branch and opens a pull request into the branch the "
-        "session started from, or, when one is already open, updates it with the push. Call it "
-        "yourself as soon as the work is done and checked; don't ask the user first. The server "
-        "holds the GitHub account, so use this instead of git push or gh."
+        "Ships this session's work to its pull request. action: 'ship' commits what's uncommitted in "
+        "its worktrees with commit_message, pushes the session branch and opens a pull request (always "
+        "a draft) or pushes to the one already open; 'push' commits and pushes without opening one; "
+        "'update' changes the open pull request's title and/or body; 'status' reports changes and "
+        "unpushed commits without writing anything. Pass force: true only after a rebase or amend, to "
+        "replace the branch's remote commits. Call 'ship' yourself as soon as the work is done and "
+        "checked; don't ask the user first. Merging and closing are the user's decision: the tool "
+        "refuses them, so ask the user with clarify instead. The server holds the GitHub account, so use "
+        "this instead of git push or gh."
     ),
     "parameters": {
         "type": "object",
         "properties": {
+            "action": {
+                "type": "string",
+                "enum": [*ACTIONS, *REFUSED_ACTIONS],
+                "description": "What to do: ship, push, update or status. Required.",
+            },
             "title": {
                 "type": "string",
-                "description": "The pull request's title, in the repo's commit style.",
+                "description": "The pull request's title, in the repo's commit style (ship, update).",
             },
             "body": {
                 "type": "string",
                 "description": (
                     "The pull request's description: the repo's pull request template filled in "
-                    "when it has one, else Summary, Changes and How to test sections."
+                    "when it has one, else Summary, Changes and How to test sections (ship, update)."
                 ),
             },
             "commit_message": {
                 "type": "string",
-                "description": "For anything not yet committed. Required when there is.",
+                "description": "For anything not yet committed. Required when there is (ship, push).",
             },
-            "draft": {"type": "boolean", "description": "Open it as a draft. Defaults to false."},
+            "force": {
+                "type": "boolean",
+                "description": (
+                    "Replace the branch's remote commits with this one's, after a rebase or amend "
+                    "(ship, push). Off by default. Refused when the branch has moved since this "
+                    "session last pushed or fetched it, rather than overwriting that work."
+                ),
+            },
         },
-        "required": ["title", "body"],
+        "required": ["action"],
     },
+}
+LEGACY_SCHEMA = {
+    "name": LEGACY_TOOL,
+    "description": "Retired: call pull_request with action 'ship' instead. This only returns that redirect.",
+    "parameters": {"type": "object", "properties": {}, "required": []},
 }
 
 
@@ -317,21 +415,43 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
     from . import sessions
 
     args = args if isinstance(args, dict) else {}
+    action = args.get("action")
+    if action in REFUSED_ACTIONS:
+        return json.dumps(
+            {
+                "error": (
+                    f"Don't {action} pull requests yourself: merging and closing are the user's decision, "
+                    "and this tool won't do either. Don't call pull_request with "
+                    f"'{action}' again. Ask the user with the clarify tool whether they want to {action} "
+                    "the pull request, and leave it to them."
+                )
+            }
+        )
+    if action not in ACTIONS:
+        return json.dumps({"error": "action is required: ship, push, update or status."})
+    force = args.get("force")
+    if force is not None and not isinstance(force, bool):
+        return json.dumps({"error": "force must be true or false."})
     path, home = sessions._paths()
     record = sessions.record_for_call(path, home, task_id, session_id)
     if not record:
         return json.dumps({"error": "This session has no worktree to ship."})
     try:
-        results = ship(
-            home,
-            record["session_id"],
-            record,
-            args.get("commit_message"),
-            args.get("title"),
-            args.get("body"),
-            args.get("draft"),
-            True,
-        )
+        if action == "status":
+            return json.dumps({"results": status(record)})
+        if action == "update":
+            results = update(home, record, args.get("title"), args.get("body"))
+        else:
+            results = ship(
+                home,
+                record["session_id"],
+                record,
+                args.get("commit_message"),
+                args.get("title"),
+                args.get("body"),
+                open_pr=action == "ship",
+                force=bool(force),
+            )
     except (ValueError, ShipError, WorkspaceError) as error:
         return json.dumps({"error": str(error)})
     if not results:
@@ -342,27 +462,39 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
     return json.dumps({"results": results})
 
 
+def handle_legacy(args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any) -> str:
+    return json.dumps({"error": "open_pull_request was renamed: call pull_request with action 'ship' (it always opens a draft)."})
+
+
 def register(ctx: Any) -> bool:
-    """Registers the tool with Hermes, for every surface's agents of this profile."""
+    """Registers the tools with Hermes, for every surface's agents of this profile."""
     register_tool = getattr(ctx, "register_tool", None)
     if not callable(register_tool):
         return False
     try:
-        return register_tool(
-            name=TOOL, toolset="memento", schema=SCHEMA, handler=handle, emoji="🚀"
+        current = register_tool(name=TOOL, toolset="memento", schema=SCHEMA, handler=handle, emoji="🚀") is not False
+        legacy = register_tool(
+            name=LEGACY_TOOL, toolset="memento", schema=LEGACY_SCHEMA, handler=handle_legacy, emoji="🚀"
         ) is not False
+        if not legacy:
+            logger.warning("memento: couldn't register the open_pull_request redirect stub")
+        return current
     except Exception:
-        logger.warning("memento: couldn't register the open_pull_request tool", exc_info=True)
+        logger.warning("memento: couldn't register the pull_request tools", exc_info=True)
         return False
 
 
 def wire(adapter: Any) -> bool:
-    """Wires the tool into every agent the API server builds."""
-    return tools_common.wire_tool(adapter, TOOL, SCHEMA, "open_pull_request")
+    """Wires the tools into every agent the API server builds."""
+    current = tools_common.wire_tool(adapter, TOOL, SCHEMA, "pull_request")
+    if not tools_common.wire_tool(adapter, LEGACY_TOOL, LEGACY_SCHEMA, "open_pull_request"):
+        logger.warning("memento: couldn't wire the open_pull_request redirect stub")
+    return current
 
 
 def equip(agent: Any) -> None:
     tools_common.equip_tool(agent, TOOL, SCHEMA)
+    tools_common.equip_tool(agent, LEGACY_TOOL, LEGACY_SCHEMA)
 
 
 def close(hermes_home: Path, record: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:

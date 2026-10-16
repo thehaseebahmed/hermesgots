@@ -466,3 +466,64 @@ correctness was out of scope — and none of the seven blocks the pull request. 
 branch still owes are not entries here: the overall surface needs Netlify to deploy before
 `claude-sonnet-4-5` reaches its row (entry 1), and the Dexie v14 upgrade has not been exercised on a
 device.
+
+---
+
+# Deferred fixes from the simplify pass on the pull_request tool
+
+A cleanup review of `feat(hermes): give the agent a pull_request tool with actions and drafts` and
+its three follow-up commits (four parallel reviewers: reuse, quality, efficiency, altitude) turned
+up four findings. Two are recorded here instead of applied: each touches shared infrastructure or a
+second module.
+
+The fourth was the force guard: `_push` refreshed the very ref its `--force-with-lease` checked
+against, so the guard could never refuse anything. That one is fixed on this branch, on the decision
+that the lease is against a commit the session knew before now, and that a branch it has never
+pushed or fetched is refused rather than overwritten blind. The same change removed the block's
+`"couldn't find remote ref"` stderr match, since nothing fetches on the way to a push any more.
+
+Everything else the review found is applied on this branch: the app's tool-label map keeps
+`open_pull_request` beside `pull_request` (the plugin keeps the old name resolvable forever, and the
+checked-in replay fixture still carries such a call); `handle()`'s unreachable `update` arm is gone
+(`update()` raises its own 409); `update()` reads the pull request with `checks=False`, which drops
+two GitHub reads whose result it never used; `github._pr_or_error` holds the one
+"the pull request comes back or it's an error" tail both writes need; the `open_pull_request`
+redirect stub no longer gates `pull_request`'s own registration or wiring; `handle()` passes the two
+trailing booleans by keyword; and the mock's turn vocabulary and its live pull-request state match
+the tool again (they are always drafts, so the `"open"` arm was unreachable).
+
+## Careful
+
+### 1. "Still live" is re-written at every call site that looks at a pull request
+
+`("open", "draft")` is now spelled out in four places inside the tool's own path —
+`plugin/ship.py::ship` (`existing["state"] in ("open", "draft")`), `plugin/ship.py::update`,
+`plugin/ship.py::close`, and `plugin/github.py::_live` — and twice more outside it
+(`plugin/alerts.py`, `plugin/merges.py`). `_live` handles the raw API row; every other copy tests a
+normalized dict, so they cannot simply call it today.
+
+- Cost: what counts as a live pull request can drift between six sites; the plugin adds a state or
+  changes draft handling and one copy keeps the old rule.
+- Suggested fix: a `github.is_live(pr)` over the normalized dict (with `_live` delegating to a shared
+  `LIVE_STATES`), then move all six sites onto it.
+- Why it is not applied here: it edits `alerts.py` and `merges.py`, which this change never touched,
+  so it belongs in a pass that can test their own flows.
+
+### 2. `force` is validated in the handler while the text fields validate themselves
+
+`plugin/ship.py::handle` type-checks `force` and answers a JSON error, but `title`, `body` and
+`commit_message` are checked inside `ship()`/`update()` by `_text()`, which raises `ValueError` for
+the handler to catch. A `force: "yes"` therefore comes back through a different path from a
+`title: 42`.
+
+- Cost: two answers to "how does this tool reject bad input", and a later reader copies whichever
+  they find first.
+- Suggested fix: a `_bool()` beside `_text()`, with `ship()` doing the check, so every argument is
+  refused the same way.
+- Why it is not applied here: the handler-level check is defensible for an argument the schema
+  declares a boolean (the schema is what the model sees), so this is a preference rather than a
+  defect, and the reviewers were split on it.
+
+---
+
+Found while simplifying the pull_request tool's own four commits, on this branch.
