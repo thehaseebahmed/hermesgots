@@ -1,6 +1,6 @@
 ---
-import { KINDS, MODES, PERIODS, sampleBoard } from "../lib/board"
-import { modelsList, tokensList } from "../lib/render"
+import { MODES, PERIODS, sampleBoard } from "../lib/board"
+import { modelsLegend, modelsList, tokensList } from "../lib/render"
 
 const sample = sampleBoard()
 const base = (import.meta.env.PUBLIC_COMMUNITY_URL ?? "").replace(/\/+$/, "")
@@ -37,9 +37,7 @@ const loading = '<li class="empty">Loading…</li>'
         hidden={index !== 0}
       >
         <h2>Top tokens spent</h2>
-        <ul class="legend" aria-label="Token types">
-          {KINDS.map((kind) => <li><span class={`dot ${kind.key}`} />{kind.label}</li>)}
-        </ul>
+        <ul class="legend" aria-label="Models" data-list="legend" set:html={endpoint ? "" : modelsLegend(sample.periods[period.id])} />
         <ol class="rows" data-list="tokens" set:html={endpoint ? loading : tokensList(sample.periods[period.id], { live: false })} />
 
         <h2>Top models</h2>
@@ -54,7 +52,7 @@ const loading = '<li class="empty">Loading…</li>'
 
 <script>
   import { PERIODS, readBoard, sampleBoard } from "../lib/board"
-  import { modelsList, tokensList } from "../lib/render"
+  import { modelsLegend, modelsList, tokensList } from "../lib/render"
 
   const root = document.getElementById("board")!
   const badge = document.getElementById("sample-badge")
@@ -92,6 +90,7 @@ const loading = '<li class="empty">Loading…</li>'
   function show(board: ReturnType<typeof sampleBoard>, live: boolean) {
     for (const { id } of PERIODS) {
       const panel = document.getElementById(`panel-${id}`)!
+      panel.querySelector('[data-list="legend"]')!.innerHTML = modelsLegend(board.periods[id])
       panel.querySelector('[data-list="tokens"]')!.innerHTML = tokensList(board.periods[id], { live })
       panel.querySelector('[data-list="models"]')!.innerHTML = modelsList(board.periods[id], { live })
     }

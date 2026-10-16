@@ -1,4 +1,4 @@
-import { KINDS, MODES, type ModelRow, type Period, type Row } from "./board"
+import { MODES, type ModelRow, type Period, type Row } from "./board"
 
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 })
 export const formatTokens = (value: number) => compact.format(value)
@@ -23,9 +23,29 @@ function picture(login: string, index: number, live: boolean) {
   return `<img class="avatar${live ? " round" : ""}" src="${src}" alt="" width="44" height="44" loading="lazy" referrerpolicy="no-referrer" />`
 }
 
-function tokenRow(row: Row, index: number, options: RenderOptions) {
-  const parts = KINDS.map((kind) => ({ ...kind, percent: percent(row[kind.key], row.total) }))
-  const label = parts.map((p) => `${Math.round(p.percent)}% ${p.label.toLowerCase()}`).join(", ")
+/** The period's top models and then others: the slices a person's tokens are split into. */
+function modelSlices(period: Period) {
+  return [
+    ...period.topModels.map((model, i) => ({ label: model, className: `model-${i}` })),
+    { label: "Others", className: "model-others" },
+  ]
+}
+
+export function modelsLegend(period: Period) {
+  if (!period.topModels.length) return ""
+  return modelSlices(period)
+    .map((slice) => `<li><span class="dot ${slice.className}"></span>${escape(slice.label)}</li>`)
+    .join("")
+}
+
+function tokenRow(row: Row, index: number, period: Period, options: RenderOptions) {
+  const parts = row.models.length
+    ? modelSlices(period).map((slice, i) => ({ ...slice, percent: percent(row.models[i] ?? 0, row.total) }))
+    : []
+  const label = parts
+    .filter((p) => p.percent >= 1)
+    .map((p) => `${Math.round(p.percent)}% ${escape(p.label)}`)
+    .join(", ")
   const name = escape(row.login)
   const handle = options.live
     ? `<a href="https://github.com/${encodeURIComponent(row.login)}" rel="noreferrer">${name}</a>`
@@ -35,7 +55,10 @@ function tokenRow(row: Row, index: number, options: RenderOptions) {
   ${picture(row.login, index, options.live)}
   <div class="who">
     <span class="handle"><b>${handle}</b></span>
-    <div class="split" role="img" aria-label="${label}">${parts.map((p) => `<span class="seg ${p.key}" style="width:${p.percent}%"></span>`).join("")}</div>
+    <div class="split" role="img" aria-label="${label}">${parts
+      .filter((p) => p.percent > 0)
+      .map((p) => `<span class="seg ${p.className}" style="width:${p.percent}%"></span>`)
+      .join("")}</div>
   </div>
   <div class="tokens">${formatTokens(row.total)}<small>tokens</small></div>
 </li>`
@@ -61,7 +84,7 @@ const empty = '<li class="empty">No one has shared yet.</li>'
 
 export function tokensList(period: Period, options: RenderOptions) {
   const rows = period.tokens.slice(0, options.limit ?? 10)
-  return rows.length ? rows.map((row, i) => tokenRow(row, i, options)).join("") : empty
+  return rows.length ? rows.map((row, i) => tokenRow(row, i, period, options)).join("") : empty
 }
 
 export function modelsList(period: Period, options: RenderOptions) {

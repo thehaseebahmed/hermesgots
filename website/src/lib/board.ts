@@ -6,21 +6,14 @@
 /** The app's eight bots (`app/src/components/bots.tsx`): the picture is `/bots/<id>.png`. */
 export const BOT_IDS = ["tri", "cubby", "penny", "hex", "stella", "orbi", "gem", "bloom"] as const
 
-/** Token kinds in the order, names and colours the app's usage sheet uses. */
-export const KINDS = [
-  { key: "input", label: "Input" },
-  { key: "output", label: "Output" },
-  { key: "cacheWrite", label: "Cache write" },
-  { key: "cacheRead", label: "Cache read" },
-] as const
-export type Kind = (typeof KINDS)[number]["key"]
+/** How many models a person's tokens are split by; everything else counts as others. */
+export const TOP_MODELS = 5
 
-/** The modes a model's tokens are split by. */
+/** The modes a model's tokens are split by. Theseus runs in Auto, so its tokens count there. */
 export const MODES = [
   { key: "plan", label: "Plan" },
   { key: "auto", label: "Auto" },
   { key: "accept_edits", label: "Accept edits" },
-  { key: "theseus", label: "Theseus" },
   { key: "chat", label: "Chat" },
 ] as const
 export type Mode = (typeof MODES)[number]["key"]
@@ -32,9 +25,11 @@ export const PERIODS = [
 ] as const
 export type PeriodId = (typeof PERIODS)[number]["id"]
 
-export interface Row extends Record<Kind, number> {
+export interface Row {
   login: string
   total: number
+  /** Tokens on each of the period's `topModels`, in order, then on every other model. */
+  models: number[]
 }
 
 export interface ModelRow {
@@ -45,6 +40,7 @@ export interface ModelRow {
 }
 
 export interface Period {
+  topModels: string[]
   tokens: Row[]
   models: ModelRow[]
 }
@@ -91,14 +87,6 @@ function seeded(seed: number) {
 
 const DAYS_IN_PERIOD: Record<PeriodId, number> = { today: 1, week: 7, month: 30 }
 
-/** Cache reads dominate agent work, so most of a total is cache read and the output is the smallest part. */
-function split(total: number, random: () => number): Record<Kind, number> {
-  const output = Math.round(total * (0.02 + random() * 0.03))
-  const input = Math.round(total * (0.05 + random() * 0.07))
-  const cacheWrite = Math.round(total * (0.03 + random() * 0.05))
-  return { input, output, cacheWrite, cacheRead: total - input - output - cacheWrite }
-}
-
 export function sampleBoard(): Board {
   const random = seeded(2026)
   const people = HANDLES.map((login) => ({
@@ -109,27 +97,28 @@ export function sampleBoard(): Board {
   const periods = {} as Board["periods"]
   for (const { id } of PERIODS) {
     const days = DAYS_IN_PERIOD[id]
-    const tokens = people
+    const spent = people
       .map((person) => {
         let total = 0
         for (let day = 0; day < days; day++) total += person.pace * (0.35 + random() * 1.3)
-        return { login: person.login, total: Math.round(total), ...split(Math.round(total), random) }
+        // Each person leans on the popular models, with their own taste on top.
+        const weights = MODELS.map(({ weight }) => weight * (0.4 + random() * 1.2))
+        const all = weights.reduce((a, b) => a + b, 0)
+        return {
+          login: person.login,
+          total: Math.round(total),
+          byModel: weights.map((weight) => Math.round((total * weight) / all)),
+        }
       })
       .sort((a, b) => b.total - a.total)
-    const everything = tokens.reduce((sum, row) => sum + row.total, 0)
-    const models = MODELS.map(({ name, weight }) => {
-      const share = (weight * (0.8 + random() * 0.4)) / 3.25
-      const total = Math.round(everything * share)
+    const models = MODELS.map(({ name, weight }, index) => {
+      const total = spent.reduce((sum, row) => sum + row.byModel[index]!, 0)
       const plan = 0.08 + random() * 0.12
       const accept = 0.15 + random() * 0.2
-      const theseus = random() * 0.06
       const chat = 0.1 + random() * 0.15
-      const auto = Math.max(0, 1 - plan - accept - theseus - chat)
+      const auto = Math.max(0, 1 - plan - accept - chat)
       const modes = Object.fromEntries(
-        Object.entries({ plan, auto, accept_edits: accept, theseus, chat }).map(([k, v]) => [
-          k,
-          Math.round(total * v),
-        ]),
+        Object.entries({ plan, auto, accept_edits: accept, chat }).map(([k, v]) => [k, Math.round(total * v)]),
       ) as Record<Mode, number>
       return {
         model: name,
@@ -138,18 +127,35 @@ export function sampleBoard(): Board {
         modes,
       }
     }).sort((a, b) => b.tokens - a.tokens)
-    periods[id] = { tokens, models }
+    const topModels = models.slice(0, TOP_MODELS).map((row) => row.model)
+    const tokens = spent.map(({ login, total, byModel }) => {
+      const top = topModels.map((name) => byModel[MODELS.findIndex((m) => m.name === name)]!)
+      return { login, total, models: [...top, total - top.reduce((a, b) => a + b, 0)] }
+    })
+    periods[id] = { topModels, tokens, models }
   }
   return { updatedAt: 0, periods }
 }
 
-/** A board read from the community function, checked so a surprise never reaches the page. */
+/**
+ * A board read from the community function, checked so a surprise never reaches the page. A board
+ * built before the split by model has no `topModels`, so its people show without one, and one built
+ * before Theseus joined Auto still carries it apart, so it is folded in here.
+ */
 export function readBoard(value: unknown): Board | null {
   const periods = (value as Board | null)?.periods
   if (!periods) return null
   for (const { id } of PERIODS) {
     const period = periods[id]
     if (!period || !Array.isArray(period.tokens) || !Array.isArray(period.models)) return null
+    if (!Array.isArray(period.topModels)) period.topModels = []
+    for (const row of period.tokens) if (!Array.isArray(row.models)) row.models = []
+    for (const row of period.models) {
+      const modes = row.modes as Record<string, number> | undefined
+      if (!modes || !("theseus" in modes)) continue
+      modes.auto = (modes.auto ?? 0) + (modes.theseus ?? 0)
+      delete modes.theseus
+    }
   }
   return value as Board
 }

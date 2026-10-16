@@ -185,20 +185,29 @@ h1 {
   border-radius: 50%;
 }
 
-.input {
+/* A person's tokens by model: the period's top five, then everything else. */
+.model-0 {
   background: var(--usage-input);
 }
 
-.output {
+.model-1 {
   background: var(--usage-output);
 }
 
-.cacheWrite {
+.model-2 {
   background: var(--usage-cache-write);
 }
 
-.cacheRead {
+.model-3 {
   background: var(--usage-cache-read);
+}
+
+.model-4 {
+  background: var(--merged);
+}
+
+.model-others {
+  background: var(--ring);
 }
 
 .mode-plan {
@@ -211,10 +220,6 @@ h1 {
 
 .mode-accept_edits {
   background: var(--usage-input);
-}
-
-.mode-theseus {
-  background: var(--usage-cache-write);
 }
 
 .mode-chat {
