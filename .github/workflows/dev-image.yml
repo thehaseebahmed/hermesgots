@@ -42,7 +42,7 @@ jobs:
   image:
     name: Build, verify and publish
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
 
@@ -80,7 +80,10 @@ jobs:
           build-args: |
             BUILD_REVISION=${{ github.sha }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # A warm cache is worth having; failing the build for one is not. The export talks to
+          # GitHub's cache API, whose rate limiting shows up as a 10-minute timeout after the
+          # image itself has already been pushed.
+          cache-to: type=gha,mode=max,ignore-error=true,timeout=30m
 
       # The checks CI runs, run inside the image against the checkout: an image that cannot run
       # them is not worth publishing.
