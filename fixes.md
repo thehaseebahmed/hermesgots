@@ -793,3 +793,108 @@ deliberately not entries here, because they were measured and do not hold:
   would halve the route's latency in relative terms — but the plugin calls no `gather` anywhere today,
   both reads are local sqlite opens, and the route runs at most once per turn, so the absolute saving
   is under a millisecond on a path nobody waits for.
+
+---
+
+# Deferred fixes from the simplify pass on the development container image
+
+A cleanup review of the development container image — `Dockerfile`, `.dockerignore`,
+`.github/workflows/dev-image.yml` and the README's "Development container" section — turned up four
+changes worth making that are either wider than this branch or belong to another mechanism. They
+are recorded here instead of applied: the image and its workflow are new and nothing is published
+yet, so each of them decides how the image is distributed rather than how it is built.
+
+Everything else the review found is applied on this branch: the lockfile fetch moved below the
+browser layer it does not feed, only the headless Chromium shell is installed (393 MB no flow could
+reach), the npm cache no longer ships and `python3-venv` is gone, `.dockerignore` ignores what
+`.gitignore` ignores, the workflow rebuilds the image when the four files it is built from change,
+the check set is stated once with `dev-image.yml` named as its owner, the e2e recipe waits for the
+server instead of sleeping five seconds, and the IPv4/`::1` trap now sits in
+`.agents/skills/e2e-testing/` with the other harness traps.
+
+## Risky
+
+### 1. The image is published before the checks that gate it run
+
+`dev-image.yml` builds with `push: ${{ github.event_name != 'pull_request' }}` and runs the checks
+in the step below it, so on a merge to `main` the image is live under `latest` and its `sha-` tag
+before anything runs it: the verify step's own comment ("an image that cannot run them is not worth
+publishing") describes a gate that sits downstream of the thing it gates. The publish path also
+re-downloads what it just uploaded — with `push: true` and `load: false` the docker-container driver
+leaves nothing in the daemon, so the verify step's `docker pull` fetches the whole image back.
+
+- Cost: a broken image reaches every consumer of `latest` before the check that would have caught
+  it, and every publish pays a full image transfer to run a container the runner could have had
+  locally.
+- Suggested fix: build with `load: true, push: false` on both events, run the checks against the
+  local image, then publish in a final step that pushes the tags — the layers are already in the
+  daemon, so nothing is rebuilt. Name the `sha-` tag there instead of taking `head -n1` of the tags
+  output, so the verified subject is a name rather than whichever tag happens to be listed first.
+- Why it is risky: it rearranges the distribution path, the one part of the workflow a pull request
+  never reaches and no run has exercised, and it changes what `:latest` means — a merge would
+  publish an image that has already been verified rather than one that is about to be. That is the
+  branch's decision, not a cleanup pass's.
+
+### 2. The check set has two statements and one owner
+
+`.github/workflows/tests.yml` runs the app's gates, the plugin's tests and the website's build in
+three jobs, and `dev-image.yml`'s verify step restates those commands inside a `sh -lc` string (the
+README's third copy was folded into a pointer by this pass). The image's whole justification is that
+its checks are CI's checks, and nothing keeps the two lists in step: since this branch forked,
+tests.yml grew a BenchLM matching step that the image's verification does not run.
+
+- Cost: a gate added or changed in tests.yml never reaches the image's verification, so the image
+  keeps passing a stale copy of the check set — the drift the verify step exists to catch.
+- Suggested fix: one script owns the list (`.github/scripts/checks.sh`, beside the `scan-plugin.py`
+  that `plugin-scan.yml` already shares) and both the workflow's steps and the in-container verify
+  run it.
+- Why it is risky: pointing `tests.yml` at that script changes the CI every pull request depends
+  on, and the script has to work both on the runner, where `actions/setup-node` and
+  `actions/setup-python` supply the toolchain, and inside the image, where the image does. It wants
+  its own change and its own runs, not a place in a cleanup.
+
+### 3. The toolchain versions have no single owner
+
+Node 22 is pinned in tests.yml (twice) and in the three other workflows; pnpm 10 in `android.yml`,
+`android-release.yml` and `staging.yml` through `pnpm/action-setup`; Playwright 1.63.0 only in the
+Dockerfile, where `app/scripts/e2e/cli.mjs` resolves it at run time and neither `app/package.json`
+nor `website/package.json` carries a `packageManager` or an `engines` field. The image's header
+comment now names the file each version comes from, but nothing makes those files agree.
+
+- Cost: a bump in any one place leaves the image behind while its own header claims the versions
+  match CI's, and the image is the only artefact that records which Playwright the flows run
+  against.
+- Suggested fix: give each version one home the others derive from — `packageManager: "pnpm@10.x"`
+  and `engines.node` in the manifests (which is the field the Dockerfile's corepack note needs),
+  and `playwright` in `app`'s devDependencies so the image installs the browser from the lockfile
+  the app resolves it from.
+- Why it is risky: it edits both manifests, four workflows and the image, and moving Playwright into
+  `app/node_modules` changes how the e2e CLI finds its module — that reaches the flows' own
+  resolution rule, so it is a task of its own.
+
+## Careful
+
+### 4. No artefact owns the container invocation
+
+The README spells out how to give the container the tree, where to mount it and which ports to
+publish, and `dev-image.yml`'s verify step writes the same invocation again. The repo has no
+`.devcontainer`, compose file, Makefile or task runner — AGENTS.md's Commands section describes a
+host checkout only — so the image's contract (mount at `/workspace`, root-owned files, the app on
+15173 and the mocks above it) exists only as prose in two files.
+
+- Cost: every consumer re-derives the invocation, and the two copies differ already — the workflow
+  adds `ASTRO_TELEMETRY_DISABLED=1`, which nothing tells a reader of the README's `docker run`
+  example to set, and only the workflow knows the image must run the check set to be worth
+  publishing.
+- Suggested fix: a `.devcontainer/devcontainer.json` naming the image, the mount, the published
+  ports and the check command, so tooling and humans read one definition; the README then explains
+  only what is container-specific.
+- Why it is risky: it introduces an artefact type the repo does not have and a second way to start
+  the tree, which is a decision about the development environment rather than about this image.
+
+---
+
+Found by the `/simplify-code` pass on this branch. It was a cleanup review, not a bug hunt; the one
+correctness bug it turned up — the workflow's `paths` filter not watching the files the image is
+built from — is fixed on this branch rather than recorded here, and none of the four blocks the
+pull request.
