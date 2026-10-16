@@ -103,6 +103,8 @@ const pluginChats = new Map()
 const pluginChatLists = new Map()
 /** What the plugin's hook saw last per session: one call's prompt, not the turn's sum. */
 const lastCalls = new Map()
+// What model each keyed session's calls ran on, oldest first: what the app draws its dividers from.
+const modelChanges = new Map()
 const transcripts = new Map()
 let lastRowId = 0
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -989,6 +991,14 @@ async function playTurn(req, body, last, out) {
       model: typeof body.model === "string" ? body.model : null,
       provider: typeof body.provider === "string" ? body.provider : null,
     })
+    // Like the plugin's own hook: a row only where this turn asked for a different model than the
+    // session's last one, so the app can draw a divider above the turn it answered with.
+    const model = typeof body.model === "string" ? body.model : null
+    const changes = modelChanges.get(sessionId) ?? []
+    if (model && changes.at(-1)?.model !== model) {
+      changes.push({ at: Date.now(), model, provider: body.provider ?? null })
+      modelChanges.set(sessionId, changes)
+    }
   }
   record(req, { role: "assistant", content: spoken, finish_reason: "stop" })
   return { spoken, prompt_tokens, completion_tokens: pieces }
@@ -1698,6 +1708,7 @@ http
         model: call?.model ?? null,
         provider: call?.provider ?? null,
         at: call ? Date.now() : null,
+        model_changes: modelChanges.get(id) ?? [],
       })
     }
     const usageRoute = /^\/api\/plugins\/memento\/usage$/.exec(url.pathname)
