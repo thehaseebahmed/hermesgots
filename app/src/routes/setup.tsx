@@ -1,20 +1,23 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useNavigate } from "react-router"
-import { FingerprintIcon, LogInIcon } from "lucide-react"
+import { FingerprintIcon, LogInIcon, TrophyIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { RecoveryCodeDialog, UnlockSync } from "@/components/account-settings"
 import { Bot } from "@/components/bot"
+import { SharingNotes } from "@/components/community-settings"
 import { LinkBots } from "@/components/link-bots"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { Switch } from "@/components/ui/switch"
 import { signIn } from "@/lib/account"
+import { joinCommunity, leaveCommunity, useCommunity } from "@/lib/community"
 import { db, getActiveProfile, getSettings, saveSettings } from "@/lib/db"
 import { needsBotSetup, setUpSync, syncNow, useSyncState, type SyncState } from "@/lib/sync"
 import { cn } from "@/lib/utils"
 
-type Step = "sign-in" | "sync" | "checking" | "link"
+type Step = "sign-in" | "sync" | "community" | "checking" | "link"
 
 function isAuthed({ account, vault }: SyncState) {
   return (
@@ -56,7 +59,7 @@ export function SetupGate({ children }: { children: ReactNode }) {
   return <SetupPage recoveryCode={recoveryCode} setRecoveryCode={setRecoveryCode} />
 }
 
-/** First-run setup: sign in, unlock sync, then link a bot from its Hermes host. */
+/** First-run setup: sign in, unlock sync, join the leaderboard, then link a bot from its Hermes host. */
 function SetupPage({
   recoveryCode,
   setRecoveryCode,
@@ -67,7 +70,7 @@ function SetupPage({
   const sync = useSyncState()
   const navigate = useNavigate()
   const profile = useLiveQuery(getActiveProfile, [])
-  const [linkStep, setLinkStep] = useState<"checking" | "link">("checking")
+  const [linkStep, setLinkStep] = useState<"checking" | "community" | "link">("checking")
   const [busy, setBusy] = useState(false)
   const [reachable, setReachable] = useState(false)
   const onReachable = useCallback((ok: boolean) => setReachable(ok), [])
@@ -88,7 +91,7 @@ function SetupPage({
       if (!identity) return void (await saveSettings({ onboarded: true }))
       const { onboarded } = await getSettings()
       if (onboarded === undefined) await saveSettings({ onboarded: !(await needsBotSetup()) })
-      if (!cancelled) setLinkStep("link")
+      if (!cancelled) setLinkStep("community")
     })()
     return () => {
       cancelled = true
@@ -100,7 +103,7 @@ function SetupPage({
     navigate("/", { replace: true })
   }
 
-  const steps: Step[] = ["sign-in", "sync", "link"]
+  const steps: Step[] = ["sign-in", "sync", "community", "link"]
 
   return (
     <div className="flex h-dvh flex-col overflow-y-auto bg-background">
@@ -160,6 +163,8 @@ function SetupPage({
 
         {step === "checking" && <Spinner className="self-center" />}
 
+        {step === "community" && <CommunityStep onDone={() => setLinkStep("link")} />}
+
         {step === "link" && (
           <Section title="Link your bots">
             <LinkBots onReachable={onReachable} />
@@ -172,6 +177,66 @@ function SetupPage({
 
       <RecoveryCodeDialog code={recoveryCode} onDone={() => setRecoveryCode(undefined)} />
     </div>
+  )
+}
+
+/**
+ * Joining the leaderboard is on by default, so a new user is counted unless they turn it off here.
+ * Settings > Community can still leave it later.
+ */
+function CommunityStep({ onDone }: { onDone: () => void }) {
+  const { me, setMe } = useCommunity()
+  const [on, setOn] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const joined = me?.joined === true
+
+  const next = async () => {
+    setBusy(true)
+    try {
+      // A read that failed leaves nothing to compare, so the choice is sent as it stands.
+      if (me !== undefined && on !== joined) {
+        setMe(on ? await joinCommunity() : await leaveCommunity())
+      }
+    } catch (error) {
+      toast.error(
+        error instanceof Error && error.message
+          ? error.message
+          : "Couldn't change that. You can change it in Settings.",
+      )
+    } finally {
+      setBusy(false)
+    }
+    onDone()
+  }
+
+  return (
+    <Section
+      title="Join the leaderboard"
+      description="Climb the public board with your token counts."
+    >
+      <label
+        htmlFor="community-setup"
+        className="flex min-h-14 cursor-pointer items-center gap-4 rounded-3xl bg-card px-5 py-3 text-card-foreground ring-1 ring-foreground/10"
+      >
+        <TrophyIcon className="size-5 shrink-0 text-muted-foreground" />
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate text-base">Join the leaderboard</span>
+          {joined && me.login && (
+            <span className="truncate text-sm text-muted-foreground">Shown as @{me.login}</span>
+          )}
+        </span>
+        <Switch
+          id="community-setup"
+          checked={on}
+          disabled={busy}
+          onCheckedChange={(checked) => setOn(checked)}
+        />
+      </label>
+      <SharingNotes />
+      <Button size="lg" className="h-11" disabled={busy} onClick={next}>
+        Continue
+      </Button>
+    </Section>
   )
 }
 

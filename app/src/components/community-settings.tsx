@@ -19,7 +19,21 @@ const NEVER =
 
 const format = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 })
 
-/** Settings > Community: the opt-in to the public leaderboard. */
+/** What joining shares, and what never leaves the device; shown wherever the join is offered. */
+export function SharingNotes() {
+  return (
+    <div className="flex flex-col gap-3 px-2 text-sm text-muted-foreground">
+      <ul className="flex list-disc flex-col gap-1.5 pl-5">
+        {SHARED.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+      <p>{NEVER}</p>
+    </div>
+  )
+}
+
+/** Settings > Community: the leaderboard switch, on by default from setup and off here. */
 export function CommunitySettings() {
   const { me, setMe } = useCommunity()
   const [busy, setBusy] = useState(false)
@@ -86,14 +100,7 @@ export function CommunitySettings() {
           </Button>
         </>
       ) : (
-        <div className="flex flex-col gap-3 px-2 text-sm text-muted-foreground">
-          <ul className="flex list-disc flex-col gap-1.5 pl-5">
-            {SHARED.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-          <p>{NEVER}</p>
-        </div>
+        <SharingNotes />
       )}
     </div>
   )
