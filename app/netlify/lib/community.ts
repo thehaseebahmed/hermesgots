@@ -15,8 +15,16 @@
 import type { RegistryStore } from "./registry.ts"
 import { sha256 } from "./registry.ts"
 
-export const MODES = ["plan", "auto", "accept_edits", "theseus", "chat"] as const
+export const MODES = ["plan", "auto", "accept_edits", "goal", "chat"] as const
 export type Mode = (typeof MODES)[number]
+/** Modes the app no longer has, counted as the one that took their place. */
+const LEGACY_MODES: Record<string, Mode> = { theseus: "auto" }
+
+/** A reported mode as the board counts it, or null for one it doesn't know. */
+export function modeOf(raw: string): Mode | null {
+  const mode = LEGACY_MODES[raw] ?? raw
+  return (MODES as readonly string[]).includes(mode) ? (mode as Mode) : null
+}
 
 export const KINDS = ["input", "output", "cacheWrite", "cacheRead"] as const
 export type Kind = (typeof KINDS)[number]
@@ -50,9 +58,12 @@ export interface CommunityContext {
   now?: number
 }
 
-export interface Row extends Record<Kind, number> {
+/** One person's tokens, split by the period's top models (`topModels`) and the rest. */
+export interface Row {
   login: string
   total: number
+  models: Record<string, number>
+  others: number
 }
 
 export interface ModelRow {
@@ -65,9 +76,13 @@ export interface ModelRow {
 export type PeriodId = "today" | "week" | "month"
 
 export interface Board {
+  /** The board's shape; a cached board of another is built again. */
+  version: number
   updatedAt: number
-  periods: Record<PeriodId, { tokens: Row[]; models: ModelRow[] }>
+  periods: Record<PeriodId, { topModels: string[]; tokens: Row[]; models: ModelRow[] }>
 }
+
+export const BOARD_VERSION = 2
 
 /** Days kept per member, and the longest period the board shows. */
 export const KEEP_DAYS = 35
@@ -76,6 +91,7 @@ const BOARD_TTL_MS = 5 * 60_000
 const REPORT_GAP_MS = 30_000
 const TOKENS_ROWS = 50
 const MODEL_ROWS = 20
+const TOP_MODELS = 5
 const MAX_BYTES = 256 * 1024
 const MAX_MODELS_PER_DAY = 24
 /** A day no host gets near: a held-back day is dropped, not the report. */
@@ -182,12 +198,13 @@ export function cleanDays(
     for (const [raw, modes] of Object.entries(models as Record<string, unknown>)) {
       const model = modelName(raw)
       if (!model || !modes || typeof modes !== "object") continue
-      for (const [mode, rawCounts] of Object.entries(modes as Record<string, unknown>)) {
-        if (!(MODES as readonly string[]).includes(mode)) continue
+      for (const [raw, rawCounts] of Object.entries(modes as Record<string, unknown>)) {
+        const mode = modeOf(raw)
+        if (!mode) continue
         const counts = cleanCounts(rawCounts)
         if (!counts) return null
         const slot = (day[model] ??= {})
-        const into = (slot[mode as Mode] ??= emptyCounts())
+        const into = (slot[mode] ??= emptyCounts())
         for (const kind of KINDS) into[kind] += counts[kind]
         into.calls += counts.calls
         tokens += sum(counts)
@@ -205,7 +222,9 @@ export function cleanDays(
 function addDay(into: Day, from: Day) {
   for (const [model, modes] of Object.entries(from)) {
     const slot = (into[model] ??= {})
-    for (const [mode, counts] of Object.entries(modes) as [Mode, Counts][]) {
+    for (const [raw, counts] of Object.entries(modes) as [string, Counts][]) {
+      const mode = modeOf(raw)
+      if (!mode) continue
       const target = (slot[mode] ??= emptyCounts())
       for (const kind of KINDS) target[kind] += counts[kind]
       target.calls += counts.calls
@@ -230,23 +249,30 @@ function empty(): Record<Mode, number> {
   return Object.fromEntries(MODES.map((mode) => [mode, 0])) as Record<Mode, number>
 }
 
-/** The board for a set of members: who spent the most, and which models carry the tokens. */
+/**
+ * The board for a set of members: who spent the most, and which models carry the tokens. Each
+ * person's tokens are split by the period's five most used models, so their bars share one legend.
+ */
 export function buildBoard(members: Member[], now: number): Board {
   const periods = {} as Board["periods"]
   for (const period of Object.keys(PERIOD_DAYS) as PeriodId[]) {
     const since = dateOf(now, PERIOD_DAYS[period] - 1)
-    const rows: Row[] = []
+    const people: { login: string; total: number; byModel: Map<string, number> }[] = []
     const models = new Map<string, { tokens: number; users: Set<string>; modes: Record<Mode, number> }>()
     for (const member of members) {
-      const row: Row = { login: member.login, input: 0, output: 0, cacheWrite: 0, cacheRead: 0, total: 0 }
+      const person = { login: member.login, total: 0, byModel: new Map<string, number>() }
       for (const [date, day] of Object.entries(member.days)) {
         if (date < since) continue
         for (const [model, modes] of Object.entries(day)) {
           const entry = models.get(model) ?? { tokens: 0, users: new Set<string>(), modes: empty() }
-          for (const [mode, counts] of Object.entries(modes) as [Mode, Counts][]) {
+          for (const [raw, counts] of Object.entries(modes) as [string, Counts][]) {
+            // A record stored before a mode was renamed still counts, under its new name.
+            const mode = modeOf(raw)
+            if (!mode) continue
             const tokens = sum(counts)
-            for (const kind of KINDS) row[kind] += counts[kind]
-            row.total += tokens
+            if (tokens <= 0) continue
+            person.total += tokens
+            person.byModel.set(model, (person.byModel.get(model) ?? 0) + tokens)
             entry.tokens += tokens
             entry.modes[mode] += tokens
             entry.users.add(member.login)
@@ -254,23 +280,32 @@ export function buildBoard(members: Member[], now: number): Board {
           models.set(model, entry)
         }
       }
-      if (row.total > 0) rows.push(row)
+      if (person.total > 0) people.push(person)
     }
-    periods[period] = {
-      tokens: rows.sort((a, b) => b.total - a.total || a.login.localeCompare(b.login)).slice(0, TOKENS_ROWS),
-      models: [...models]
-        .filter(([, entry]) => entry.tokens > 0)
-        .map(([model, entry]) => ({
-          model,
-          tokens: entry.tokens,
-          users: entry.users.size,
-          modes: entry.modes,
-        }))
-        .sort((a, b) => b.tokens - a.tokens || a.model.localeCompare(b.model))
-        .slice(0, MODEL_ROWS),
-    }
+    const ranked = [...models]
+      .filter(([, entry]) => entry.tokens > 0)
+      .map(([model, entry]) => ({
+        model,
+        tokens: entry.tokens,
+        users: entry.users.size,
+        modes: entry.modes,
+      }))
+      .sort((a, b) => b.tokens - a.tokens || a.model.localeCompare(b.model))
+    const topModels = ranked.slice(0, TOP_MODELS).map((row) => row.model)
+    const tokens = people
+      .sort((a, b) => b.total - a.total || a.login.localeCompare(b.login))
+      .slice(0, TOKENS_ROWS)
+      .map(({ login, total, byModel }) => {
+        const row: Row = { login, total, models: {}, others: 0 }
+        for (const [model, n] of byModel) {
+          if (topModels.includes(model)) row.models[model] = n
+          else row.others += n
+        }
+        return row
+      })
+    periods[period] = { topModels, tokens, models: ranked.slice(0, MODEL_ROWS) }
   }
-  return { updatedAt: now, periods }
+  return { version: BOARD_VERSION, updatedAt: now, periods }
 }
 
 async function body(req: Request): Promise<Record<string, unknown> | null> {
@@ -308,7 +343,9 @@ async function recompute(ctx: CommunityContext, userId: string, login: string, n
 
 async function board(ctx: CommunityContext, now: number): Promise<Board> {
   const cached = await read<Board>(ctx.store, "board")
-  if (cached && now - cached.updatedAt < BOARD_TTL_MS) return cached
+  if (cached && cached.version === BOARD_VERSION && now - cached.updatedAt < BOARD_TTL_MS) {
+    return cached
+  }
   const oldest = dateOf(now, KEEP_DAYS - 1)
   const members: Member[] = []
   for (const { key } of (await ctx.store.list({ prefix: "users/" })).blobs) {

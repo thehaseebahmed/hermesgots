@@ -6,21 +6,15 @@
 /** The app's eight bots (`app/src/components/bots.tsx`): the picture is `/bots/<id>.png`. */
 export const BOT_IDS = ["tri", "cubby", "penny", "hex", "stella", "orbi", "gem", "bloom"] as const
 
-/** Token kinds in the order, names and colours the app's usage sheet uses. */
-export const KINDS = [
-  { key: "input", label: "Input" },
-  { key: "output", label: "Output" },
-  { key: "cacheWrite", label: "Cache write" },
-  { key: "cacheRead", label: "Cache read" },
-] as const
-export type Kind = (typeof KINDS)[number]["key"]
+/** How many models a person's tokens are split by; the rest is "Others". */
+export const TOP_MODELS = 5
 
 /** The modes a model's tokens are split by. */
 export const MODES = [
   { key: "plan", label: "Plan" },
   { key: "auto", label: "Auto" },
   { key: "accept_edits", label: "Accept edits" },
-  { key: "theseus", label: "Theseus" },
+  { key: "goal", label: "Goal" },
   { key: "chat", label: "Chat" },
 ] as const
 export type Mode = (typeof MODES)[number]["key"]
@@ -32,9 +26,12 @@ export const PERIODS = [
 ] as const
 export type PeriodId = (typeof PERIODS)[number]["id"]
 
-export interface Row extends Record<Kind, number> {
+export interface Row {
   login: string
   total: number
+  /** Tokens by the period's top models (`Period.topModels`); the rest is `others`. */
+  models: Record<string, number>
+  others: number
 }
 
 export interface ModelRow {
@@ -45,6 +42,8 @@ export interface ModelRow {
 }
 
 export interface Period {
+  /** The period's most used models, most first, that every row is split by. */
+  topModels: string[]
   tokens: Row[]
   models: ModelRow[]
 }
@@ -91,12 +90,11 @@ function seeded(seed: number) {
 
 const DAYS_IN_PERIOD: Record<PeriodId, number> = { today: 1, week: 7, month: 30 }
 
-/** Cache reads dominate agent work, so most of a total is cache read and the output is the smallest part. */
-function split(total: number, random: () => number): Record<Kind, number> {
-  const output = Math.round(total * (0.02 + random() * 0.03))
-  const input = Math.round(total * (0.05 + random() * 0.07))
-  const cacheWrite = Math.round(total * (0.03 + random() * 0.05))
-  return { input, output, cacheWrite, cacheRead: total - input - output - cacheWrite }
+/** Shares that add up to one, each model's weight pushed up or down a little. */
+function shares(random: () => number) {
+  const raw = MODELS.map(({ weight }) => weight * (0.3 + random() * 1.4))
+  const all = raw.reduce((a, b) => a + b, 0)
+  return raw.map((value) => value / all)
 }
 
 export function sampleBoard(): Board {
@@ -105,28 +103,28 @@ export function sampleBoard(): Board {
     login,
     // Tokens a day at their typical pace: from a light user to a heavy one.
     pace: 2_000_000 + Math.pow(random(), 2.2) * 190_000_000,
+    // Most people lean on a couple of models and never touch some.
+    mix: shares(random).map((share) => (random() < 0.25 ? 0 : share)),
   }))
   const periods = {} as Board["periods"]
   for (const { id } of PERIODS) {
     const days = DAYS_IN_PERIOD[id]
-    const tokens = people
-      .map((person) => {
-        let total = 0
-        for (let day = 0; day < days; day++) total += person.pace * (0.35 + random() * 1.3)
-        return { login: person.login, total: Math.round(total), ...split(Math.round(total), random) }
-      })
-      .sort((a, b) => b.total - a.total)
-    const everything = tokens.reduce((sum, row) => sum + row.total, 0)
-    const models = MODELS.map(({ name, weight }) => {
-      const share = (weight * (0.8 + random() * 0.4)) / 3.25
-      const total = Math.round(everything * share)
+    const spent = people.map((person) => {
+      let total = 0
+      for (let day = 0; day < days; day++) total += person.pace * (0.35 + random() * 1.3)
+      const mix = person.mix.reduce((a, b) => a + b, 0) || 1
+      const byModel = person.mix.map((share) => Math.round((total * share) / mix))
+      return { login: person.login, byModel }
+    })
+    const models = MODELS.map(({ name }, index) => {
+      const total = spent.reduce((sum, person) => sum + person.byModel[index]!, 0)
       const plan = 0.08 + random() * 0.12
       const accept = 0.15 + random() * 0.2
-      const theseus = random() * 0.06
+      const goal = random() * 0.1
       const chat = 0.1 + random() * 0.15
-      const auto = Math.max(0, 1 - plan - accept - theseus - chat)
+      const auto = Math.max(0, 1 - plan - accept - goal - chat)
       const modes = Object.fromEntries(
-        Object.entries({ plan, auto, accept_edits: accept, theseus, chat }).map(([k, v]) => [
+        Object.entries({ plan, auto, accept_edits: accept, goal, chat }).map(([k, v]) => [
           k,
           Math.round(total * v),
         ]),
@@ -134,11 +132,26 @@ export function sampleBoard(): Board {
       return {
         model: name,
         tokens: Object.values(modes).reduce((a, b) => a + b, 0),
-        users: Math.max(1, Math.round(people.length * (0.25 + weight * 0.6))),
+        users: spent.filter((person) => person.byModel[index]! > 0).length,
         modes,
       }
-    }).sort((a, b) => b.tokens - a.tokens)
-    periods[id] = { tokens, models }
+    })
+      .filter((row) => row.tokens > 0)
+      .sort((a, b) => b.tokens - a.tokens)
+    const topModels = models.slice(0, TOP_MODELS).map((row) => row.model)
+    const tokens = spent
+      .map(({ login, byModel }) => {
+        const row: Row = { login, total: 0, models: {}, others: 0 }
+        MODELS.forEach(({ name }, index) => {
+          const n = byModel[index]!
+          row.total += n
+          if (topModels.includes(name)) row.models[name] = n
+          else row.others += n
+        })
+        return row
+      })
+      .sort((a, b) => b.total - a.total)
+    periods[id] = { topModels, tokens, models }
   }
   return { updatedAt: 0, periods }
 }
@@ -149,7 +162,16 @@ export function readBoard(value: unknown): Board | null {
   if (!periods) return null
   for (const { id } of PERIODS) {
     const period = periods[id]
-    if (!period || !Array.isArray(period.tokens) || !Array.isArray(period.models)) return null
+    if (
+      !period ||
+      !Array.isArray(period.topModels) ||
+      !Array.isArray(period.tokens) ||
+      !Array.isArray(period.models) ||
+      // A board from before rows were split by model.
+      period.tokens.some((row) => !row?.models || typeof row.others !== "number")
+    ) {
+      return null
+    }
   }
   return value as Board
 }

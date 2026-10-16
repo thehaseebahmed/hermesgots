@@ -1,6 +1,6 @@
 ---
-import { KINDS, MODES, PERIODS, sampleBoard } from "../lib/board"
-import { modelsList, tokensList } from "../lib/render"
+import { MODES, PERIODS, sampleBoard } from "../lib/board"
+import { modelsList, tokensLegend, tokensList } from "../lib/render"
 
 const sample = sampleBoard()
 const base = (import.meta.env.PUBLIC_COMMUNITY_URL ?? "").replace(/\/+$/, "")
@@ -37,9 +37,7 @@ const loading = '<li class="empty">Loading…</li>'
         hidden={index !== 0}
       >
         <h2>Top tokens spent</h2>
-        <ul class="legend" aria-label="Token types">
-          {KINDS.map((kind) => <li><span class={`dot ${kind.key}`} />{kind.label}</li>)}
-        </ul>
+        <ul class="legend" aria-label="Models" data-list="legend" set:html={endpoint ? "" : tokensLegend(sample.periods[period.id])} />
         <ol class="rows" data-list="tokens" set:html={endpoint ? loading : tokensList(sample.periods[period.id], { live: false })} />
 
         <h2>Top models</h2>
@@ -54,12 +52,30 @@ const loading = '<li class="empty">Loading…</li>'
 
 <script>
   import { PERIODS, readBoard, sampleBoard } from "../lib/board"
-  import { modelsList, tokensList } from "../lib/render"
+  import { modelsList, tokensLegend, tokensList } from "../lib/render"
 
+  // The period last picked on this device, so a return visit opens where the person left off.
+  const STORED = "gots-community-period"
   const root = document.getElementById("board")!
   const badge = document.getElementById("sample-badge")
   const tabs = Array.from(root.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
   const panels = Array.from(root.querySelectorAll<HTMLElement>('[role="tabpanel"]'))
+
+  function remember(period: string) {
+    try {
+      localStorage.setItem(STORED, period)
+    } catch {
+      // Storage blocked: the page still works, it just won't remember.
+    }
+  }
+
+  function stored() {
+    try {
+      return localStorage.getItem(STORED)
+    } catch {
+      return null
+    }
+  }
 
   function select(period: string, focus = false) {
     for (const tab of tabs) {
@@ -74,6 +90,7 @@ const loading = '<li class="empty">Loading…</li>'
   for (const tab of tabs) {
     tab.addEventListener("click", () => {
       select(tab.dataset.period!)
+      remember(tab.dataset.period!)
       history.replaceState(null, "", `#${tab.dataset.period}`)
     })
     tab.addEventListener("keydown", (event) => {
@@ -83,15 +100,20 @@ const loading = '<li class="empty">Loading…</li>'
       event.preventDefault()
       const next = tabs[(index + step + tabs.length) % tabs.length]!
       select(next.dataset.period!, true)
+      remember(next.dataset.period!)
     })
   }
 
-  const wanted = location.hash.slice(1)
-  select(tabs.some((tab) => tab.dataset.period === wanted) ? wanted : tabs[0]!.dataset.period!)
+  // A link to a period wins, then the one last picked here, then the first.
+  const known = (period: string | null) => tabs.some((tab) => tab.dataset.period === period)
+  const fromHash = location.hash.slice(1)
+  const fromStore = stored()
+  select(known(fromHash) ? fromHash : known(fromStore) ? fromStore! : tabs[0]!.dataset.period!)
 
   function show(board: ReturnType<typeof sampleBoard>, live: boolean) {
     for (const { id } of PERIODS) {
       const panel = document.getElementById(`panel-${id}`)!
+      panel.querySelector('[data-list="legend"]')!.innerHTML = tokensLegend(board.periods[id])
       panel.querySelector('[data-list="tokens"]')!.innerHTML = tokensList(board.periods[id], { live })
       panel.querySelector('[data-list="models"]')!.innerHTML = modelsList(board.periods[id], { live })
     }

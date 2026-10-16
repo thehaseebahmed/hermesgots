@@ -139,3 +139,40 @@ test("buildBoard ranks by total", () => {
   assert.deepEqual(board.periods.today.tokens.map((r) => r.login), ["b", "a"])
   assert.equal(board.periods.today.models[0].users, 2)
 })
+
+test("rows are split by the top five models and the rest", () => {
+  const models = { a: 60, b: 50, c: 40, d: 30, e: 20, f: 10, g: 5 }
+  const day = Object.fromEntries(Object.entries(models).map(([m, n]) => [m, { chat: counts(n) }]))
+  const board = buildBoard([{ login: "x", days: { "2026-10-15": day }, updatedAt: NOW }], NOW)
+  const { topModels, tokens } = board.periods.today
+  assert.deepEqual(topModels, ["a", "b", "c", "d", "e"])
+  assert.deepEqual(tokens[0].models, { a: 120, b: 100, c: 80, d: 60, e: 40 })
+  assert.equal(tokens[0].others, 30)
+  assert.equal(tokens[0].total, 430)
+  assert.equal(board.version, 2)
+})
+
+test("Theseus counts as Auto, and Goal is its own mode", () => {
+  const out = cleanDays(
+    { "2026-10-15": { m: { theseus: counts(5), auto: counts(1), goal: counts(2) } } },
+    NOW,
+  )
+  assert.deepEqual(Object.keys(out.days["2026-10-15"].m).sort(), ["auto", "goal"])
+  assert.equal(out.days["2026-10-15"].m.auto.input, 6)
+  // A record stored before the change.
+  const board = buildBoard(
+    [{ login: "x", days: { "2026-10-15": { m: { theseus: counts(5), goal: counts(2) } } }, updatedAt: NOW }],
+    NOW,
+  )
+  assert.equal(board.periods.today.models[0].modes.auto, 10)
+  assert.equal(board.periods.today.models[0].modes.goal, 4)
+  assert.equal("theseus" in board.periods.today.models[0].modes, false)
+})
+
+test("a cached board of an older shape is built again", async () => {
+  const env = setup()
+  env.store.data.set("board", { updatedAt: NOW, periods: {} })
+  const board = await call(env, null, "GET", "board")
+  assert.equal(board.body.version, 2)
+  assert.ok(Array.isArray(board.body.periods.today.topModels))
+})
