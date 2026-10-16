@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { useLiveQuery } from "dexie-react-hooks"
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router"
 import {
   ArrowLeftIcon,
@@ -52,7 +53,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Field, FieldLabel } from "@/components/ui/field"
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import {
   InputGroup,
@@ -88,7 +89,9 @@ import {
   toMarkdown,
   topicAt,
   useMeeting,
+  readyLine,
   useMeetingBot,
+  useMeetingBots,
   useMeetingProjects,
   useMeetings,
   useMeetingsEnabled,
@@ -100,6 +103,7 @@ import {
   type Recap,
   type Topic,
 } from "@/lib/meetings"
+import { getActiveProfile, setActiveProfile } from "@/lib/db"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { useMeetingsPane, type MeetingsPane as PaneState } from "@/lib/pane"
@@ -130,11 +134,11 @@ function Header({
   return (
     <header
       className={cn(
-        "sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur",
+        "sticky top-0 z-10 bg-background/80 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur",
         className,
       )}
     >
-      <div className="mx-auto flex max-w-2xl items-center gap-3">
+      <div className="mx-auto flex max-w-2xl items-center gap-3 px-4">
         {leading}
         <div className="flex min-w-0 flex-1 flex-col">
           {title}
@@ -229,7 +233,8 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
   const open = useSwap()
   const meetings = useMeetings()
   const bot = useMeetingBot()
-  const compact = Boolean(pane?.open)
+  const bots = useMeetingBots()
+  const activeId = useLiveQuery(async () => (await getActiveProfile())?.id, [])
   const [adding, setAdding] = useState(false)
   const [recording, setRecording] = useState(false)
   // A fresh form each time it opens.
@@ -269,15 +274,52 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
       />
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
-        {compact ? (
-          <div className="grid grid-cols-2 gap-3">
-            <Button className="h-11 rounded-full" onClick={() => setRecording(true)}>
+        <section className="relative overflow-hidden rounded-[2rem] border bg-radial-[at_25%_20%] from-primary/15 to-card to-70% p-5">
+          <div className="flex items-center gap-4">
+            <Bot id={bot.botId} animate className="size-20" />
+            <p className="min-w-0 flex-1 text-lg leading-snug font-semibold tracking-tight">
+              {readyLine(bot.botId)}
+            </p>
+          </div>
+          {bots.length > 1 && (
+            <div
+              className="-mx-5 mt-4 flex [scrollbar-width:none] gap-2 overflow-x-auto px-5"
+              role="group"
+              aria-label="Bot"
+            >
+              {bots.map((option) => {
+                const active = option.id === activeId
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => void setActiveProfile(option.id)}
+                    className={cn(
+                      "flex min-h-11 w-20 shrink-0 flex-col items-center gap-1 rounded-3xl border bg-background/70 px-2 py-2 text-xs font-medium transition-colors",
+                      active ? "border-primary bg-primary/10" : "hover:bg-muted",
+                    )}
+                  >
+                    <Bot id={option.botId} className="size-10" />
+                    <span className="w-full truncate text-center">{option.name}</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            <Button
+              size="lg"
+              className="h-12 rounded-full text-base"
+              onClick={() => setRecording(true)}
+            >
               <MicIcon data-icon="inline-start" />
               Record
             </Button>
             <Button
               variant="outline"
-              className="h-11 rounded-full"
+              size="lg"
+              className="h-12 rounded-full bg-background/70 text-base"
               onClick={() => {
                 setForm((n) => n + 1)
                 setAdding(true)
@@ -287,38 +329,7 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
               Upload
             </Button>
           </div>
-        ) : (
-          <section className="relative overflow-hidden rounded-[2rem] border bg-radial-[at_25%_20%] from-primary/15 to-card to-70% p-5">
-            <div className="flex items-center gap-4">
-              <Bot id={bot.botId} animate className="size-20" />
-              <p className="min-w-0 flex-1 text-lg leading-snug font-semibold tracking-tight">
-                {bot.name} is ready when you are.
-              </p>
-            </div>
-            <div className="mt-5 grid grid-cols-2 gap-3">
-              <Button
-                size="lg"
-                className="h-12 rounded-full text-base"
-                onClick={() => setRecording(true)}
-              >
-                <MicIcon data-icon="inline-start" />
-                Record
-              </Button>
-              <Button
-                variant="outline"
-                size="lg"
-                className="h-12 rounded-full bg-background/70 text-base"
-                onClick={() => {
-                  setForm((n) => n + 1)
-                  setAdding(true)
-                }}
-              >
-                <UploadIcon data-icon="inline-start" />
-                Upload
-              </Button>
-            </div>
-          </section>
-        )}
+        </section>
 
         {meetings.length > 0 && (
           <div className="flex flex-col gap-3">
@@ -396,7 +407,7 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
         {groups.map((group) => (
           <section key={group.label} className="flex flex-col gap-2" aria-label={group.label}>
             <h2 className="px-1 text-sm font-medium text-muted-foreground">{group.label}</h2>
-            <ul className="flex flex-col divide-y overflow-hidden rounded-3xl border bg-card">
+            <ul className="flex flex-col">
               {group.meetings.map((meeting) => (
                 <li key={meeting.id}>
                   <MeetingRow
@@ -524,7 +535,7 @@ function MeetingRow({
       onClick={onOpen}
       aria-current={selected || undefined}
       className={cn(
-        "flex min-h-16 w-full items-start gap-3 px-4 py-3.5 text-left transition-colors hover:bg-muted",
+        "-mx-2 flex min-h-16 w-[calc(100%+1rem)] items-start gap-3 rounded-2xl px-2 py-3 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring",
         selected && "bg-muted",
       )}
     >
@@ -639,73 +650,6 @@ const isTranscript = (file: File) =>
 
 const baseName = (name: string) => name.replace(/\.[^.]+$/, "")
 
-/** A place to drop a file, or tap to choose one. */
-function DropZone({
-  accept,
-  icon: Icon,
-  label,
-  file,
-  detail,
-  onFile,
-}: {
-  accept: string
-  icon: typeof FileAudioIcon
-  label: string
-  file?: string
-  detail?: string
-  onFile: (file: File) => void
-}) {
-  const input = useRef<HTMLInputElement>(null)
-  const [over, setOver] = useState(false)
-  return (
-    <>
-      <input
-        ref={input}
-        type="file"
-        accept={accept}
-        className="hidden"
-        onChange={(event) => {
-          const picked = event.target.files?.[0]
-          if (picked) onFile(picked)
-          event.target.value = ""
-        }}
-      />
-      <button
-        type="button"
-        onClick={() => input.current?.click()}
-        onDragOver={(event) => {
-          event.preventDefault()
-          setOver(true)
-        }}
-        onDragLeave={() => setOver(false)}
-        onDrop={(event) => {
-          event.preventDefault()
-          setOver(false)
-          const dropped = event.dataTransfer.files[0]
-          if (dropped) onFile(dropped)
-        }}
-        className={cn(
-          "flex min-h-20 w-full items-center gap-3 rounded-3xl border px-4 py-3 text-left transition-colors hover:bg-muted",
-          !file && "border-dashed",
-          over && "border-primary bg-primary/5",
-        )}
-      >
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
-          <Icon className="size-5" />
-        </span>
-        {file ? (
-          <span className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate font-medium">{file}</span>
-            {detail && <span className="text-sm text-muted-foreground">{detail}</span>}
-          </span>
-        ) : (
-          <span className="flex-1 font-medium">{label}</span>
-        )}
-      </button>
-    </>
-  )
-}
-
 /** A recording or a transcript from the device, by its extension, and the project it's filed under. */
 function Upload({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const go = useSwap()
@@ -784,14 +728,20 @@ function Upload({ open, onOpenChange }: { open: boolean; onOpenChange: (open: bo
             add()
           }}
         >
-          <DropZone
-            accept={`${RECORDING_TYPES},${TRANSCRIPT_TYPES}`}
-            icon={picked && "text" in picked ? FileTextIcon : FileAudioIcon}
-            label="Choose a recording or transcript"
-            file={picked?.file.name}
-            detail={detail}
-            onFile={(file) => void choose(file)}
-          />
+          <Field>
+            <FieldLabel htmlFor="meeting-file">Recording or transcript</FieldLabel>
+            <Input
+              id="meeting-file"
+              type="file"
+              accept={`${RECORDING_TYPES},${TRANSCRIPT_TYPES}`}
+              className="h-11 cursor-pointer py-2 file:mr-3 file:cursor-pointer"
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                if (file) void choose(file)
+              }}
+            />
+            {detail && <FieldDescription>{detail}</FieldDescription>}
+          </Field>
 
           {project && (
             <Field>
@@ -994,18 +944,24 @@ function Recorder({ onClose, onDone }: { onClose: () => void; onDone: (id: strin
           {(["decision", "action", "open"] as MomentKind[]).map((kind) => {
             const count = marks.filter((m) => m.kind === kind).length
             return (
-              <button
+              <Button
                 key={kind}
                 type="button"
+                variant="outline"
                 onClick={() => mark(kind)}
-                className="flex h-20 flex-col items-center justify-center gap-1 rounded-3xl border bg-card text-sm font-semibold shadow-sm transition-transform active:scale-95 motion-reduce:transition-none"
+                className="relative h-20 flex-col gap-1.5 rounded-3xl bg-card text-sm font-semibold shadow-sm active:scale-95 motion-reduce:transition-none"
               >
-                <MomentIcon kind={kind} className="size-5" />
+                <MomentIcon kind={kind} className="size-5 text-foreground" />
                 {MOMENT_LOOK[kind].label}
-                <span className="h-4 text-xs font-medium text-muted-foreground tabular-nums">
-                  {count ? `${count} marked` : ""}
-                </span>
-              </button>
+                {count > 0 && (
+                  <span
+                    className="absolute -top-2 -right-2 flex size-6 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground tabular-nums"
+                    aria-label={`${count} marked`}
+                  >
+                    {count}
+                  </span>
+                )}
+              </Button>
             )
           })}
         </div>
@@ -1665,9 +1621,9 @@ function AskBar({ meeting }: { meeting: Meeting }) {
   return (
     <div
       data-toast-above
-      className="border-t bg-background/90 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur"
+      className="border-t bg-background/90 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur"
     >
-      <div className="mx-auto flex max-w-2xl flex-col gap-2.5">
+      <div className="mx-auto flex max-w-2xl flex-col gap-2.5 px-4">
         {!meeting.chat?.length && (
           <div className="-mx-4 flex [scrollbar-width:none] gap-2 overflow-x-auto px-4">
             {PROMPTS.map(({ icon: Icon, text: prompt }) => (
@@ -1884,57 +1840,59 @@ function TopicView({ meeting, recap, topic }: { meeting: Meeting; recap: Recap; 
 
       <div
         data-toast-above
-        className="px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+        className="pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
         aria-label="Player"
       >
-        <div className="mx-auto flex max-w-2xl flex-col gap-2 rounded-3xl border bg-card px-3 py-2.5 shadow-lg">
-          <div className="flex items-center gap-3">
-            <Button
-              size="icon-lg"
-              className="size-11 shrink-0 rounded-full bg-foreground text-background hover:bg-foreground/90"
-              aria-label={running ? "Pause" : "Play"}
-              onClick={() => {
-                if (position >= topic.end) setPosition(topic.start)
-                setPlaying(!running)
-              }}
-            >
-              {running ? (
-                <PauseIcon className="fill-current" />
-              ) : (
-                <PlayIcon className="ml-0.5 fill-current" />
-              )}
-            </Button>
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate text-sm font-semibold">{topic.title}</span>
-              <span className="text-xs text-muted-foreground tabular-nums">
-                {clock(position)} / {clock(meeting.duration)}
-              </span>
-            </span>
-            <Button
-              variant="secondary"
-              className="h-11 min-w-14 shrink-0 rounded-full tabular-nums"
-              aria-label={`Speed ${speed}×`}
-              onClick={() => setSpeed(SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length])}
-            >
-              {speed}×
-            </Button>
-          </div>
-          <span className="flex h-1 gap-0.5" aria-hidden>
-            {recap.topics.map((t, i) => (
-              <span
-                key={t.id}
-                className="relative overflow-hidden rounded-full bg-muted"
-                style={{ flexGrow: Math.max(1, t.end - t.start), flexBasis: 0 }}
+        <div className="mx-auto max-w-2xl px-4">
+          <div className="flex flex-col gap-2 rounded-3xl border bg-card px-3 py-2.5 shadow-lg">
+            <div className="flex items-center gap-3">
+              <Button
+                size="icon-lg"
+                className="size-11 shrink-0 rounded-full bg-foreground text-background hover:bg-foreground/90"
+                aria-label={running ? "Pause" : "Play"}
+                onClick={() => {
+                  if (position >= topic.end) setPosition(topic.start)
+                  setPlaying(!running)
+                }}
               >
-                <span
-                  className={cn("absolute inset-y-0 left-0", tone(i).dot)}
-                  style={{
-                    width: `${Math.min(100, Math.max(0, ((position - t.start) / Math.max(1, t.end - t.start)) * 100))}%`,
-                  }}
-                />
+                {running ? (
+                  <PauseIcon className="fill-current" />
+                ) : (
+                  <PlayIcon className="ml-0.5 fill-current" />
+                )}
+              </Button>
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-sm font-semibold">{topic.title}</span>
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  {clock(position)} / {clock(meeting.duration)}
+                </span>
               </span>
-            ))}
-          </span>
+              <Button
+                variant="secondary"
+                className="h-11 min-w-14 shrink-0 rounded-full tabular-nums"
+                aria-label={`Speed ${speed}×`}
+                onClick={() => setSpeed(SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length])}
+              >
+                {speed}×
+              </Button>
+            </div>
+            <span className="flex h-1 gap-0.5" aria-hidden>
+              {recap.topics.map((t, i) => (
+                <span
+                  key={t.id}
+                  className="relative overflow-hidden rounded-full bg-muted"
+                  style={{ flexGrow: Math.max(1, t.end - t.start), flexBasis: 0 }}
+                >
+                  <span
+                    className={cn("absolute inset-y-0 left-0", tone(i).dot)}
+                    style={{
+                      width: `${Math.min(100, Math.max(0, ((position - t.start) / Math.max(1, t.end - t.start)) * 100))}%`,
+                    }}
+                  />
+                </span>
+              ))}
+            </span>
+          </div>
         </div>
       </div>
     </div>

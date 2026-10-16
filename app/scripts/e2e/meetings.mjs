@@ -165,7 +165,7 @@ for (const [width, dark] of [
       await page.getByRole("textbox", { name: "Title" }).fill("Plan for the import flow")
       await page.waitForTimeout(1_200)
       await page.getByRole("button", { name: "Decision" }).click()
-      await page.getByText("1 marked").waitFor()
+      await page.getByLabel("1 marked").waitFor()
       await page.getByRole("button", { name: "Notes" }).click()
       await page
         .getByRole("textbox", { name: "Your notes" })
@@ -193,7 +193,10 @@ for (const [width, dark] of [
         .locator("input[type=file]")
         .first()
         .setInputFiles({ name: "standup.wav", mimeType: "audio/wav", buffer: silence() })
-      await page.getByText("standup.wav").waitFor({ timeout: 5_000 })
+      await page.getByRole("button", { name: "Add", exact: true }).isEnabled()
+      await page.waitForFunction(
+        () => document.querySelector("input[type=file]")?.files?.[0]?.name === "standup.wav",
+      )
       assert.equal(await page.getByLabel("Title").count(), 0, "just a file and a project")
       await shot("7-add")
       await page.getByRole("button", { name: "Add", exact: true }).click()

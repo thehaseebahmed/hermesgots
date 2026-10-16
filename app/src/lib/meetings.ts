@@ -3,7 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 
 import { DEFAULT_BOT_ID } from "@/components/bots"
 import { serverConfig } from "@/lib/connection"
-import { getActiveProfile, getSettings } from "@/lib/db"
+import { getActiveProfile, getSettings, listEnabledProfiles } from "@/lib/db"
 import { readProjects, useProjects } from "@/lib/projects"
 import { quietly } from "@/lib/report"
 import { createStore } from "@/lib/store"
@@ -293,7 +293,8 @@ function samples(now: number): Meeting[] {
       projectName: "Gots",
       bot,
       source: "recording",
-      createdAt: now - 3 * HOUR,
+      // Kept inside today even when the clock is just past midnight.
+      createdAt: Math.max(now - 3 * HOUR, new Date(now).setHours(0, 1, 0, 0)),
       duration: 412,
       stage: "ready",
       typed: "beta thu? freeze tue\nandroid push untested!\nsidebar: leave it",
@@ -388,6 +389,26 @@ export function useMeeting(id: string) {
 export function useMeetingBot() {
   const profile = useLiveQuery(getActiveProfile, [])
   return { name: profile?.name || "Cubby", botId: profile?.botId || DEFAULT_BOT_ID }
+}
+
+/** What each bot says while it waits for a meeting to start: polite, with a little edge. */
+const READY_LINES: Record<string, string> = {
+  tri: "Take your time. I'll just sit here, listening twice.",
+  cubby: "Whenever you're ready. I'm sure it'll be riveting.",
+  penny: "Kindly start. I'll keep the beat while you find the point.",
+  hex: "Ready, as ever. Do try to reach a decision this time.",
+  stella: "Begin at your leisure. I'll note who talks the most.",
+  orbi: "Whenever you like. I float, so there's no rush.",
+  gem: "Thinking hard, as requested. Please give me something to think about.",
+  bloom: "I'm all ears. Pleasantries are optional, agendas appreciated.",
+}
+
+export const readyLine = (botId: string) =>
+  READY_LINES[botId] ?? "Ready when you are. Do try to have an agenda."
+
+/** Every bot that can sit in on a meeting, for the cards that switch between them. */
+export function useMeetingBots() {
+  return useLiveQuery(listEnabledProfiles, []) ?? []
 }
 
 /** The active bot's projects to file a meeting under, or the samples when it has none. */
