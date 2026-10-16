@@ -50,7 +50,7 @@ await flow("model-switch", async ({ page, seed, send, lastReply, until, shot }) 
   await send("and again")
   await until(async () => (await divider().count()) === 1, 15_000, "the divider to appear")
   await page.getByText("and again").last().waitFor()
-  assert.equal((await divider().innerText()).trim(), "gpt-5", "the divider names the new model")
+  assert.equal((await divider().innerText()).trim(), gpt, "the divider names the new model")
   const place = await page.evaluate(() => {
     const items = [...document.querySelectorAll("[data-slot=message-scroller-item]")]
     return {
@@ -74,7 +74,7 @@ await flow("model-switch", async ({ page, seed, send, lastReply, until, shot }) 
   // Still there after a reload: the device keeps the list, and reads the host's again on open.
   await page.reload()
   await until(async () => (await divider().count()) === 1, 15_000, "the divider after a reload")
-  assert.equal((await divider().innerText()).trim(), "gpt-5", "the divider survives a reload")
+  assert.equal((await divider().innerText()).trim(), gpt, "the divider survives a reload")
 
   // Picking the same model again changes nothing: no row on the host, no second divider.
   await pick(gpt)
@@ -93,7 +93,7 @@ await flow("model-switch", async ({ page, seed, send, lastReply, until, shot }) 
   await pick(gpt)
   await send("carry on")
   await until(async () => (await divider().count()) === 1, 15_000, "the session's divider")
-  assert.equal((await divider().innerText()).trim(), "gpt-5", "a session names the new model too")
+  assert.equal((await divider().innerText()).trim(), gpt, "a session names the new model too")
   await shot("session")
   pass("a project session shows the divider as well")
 })
