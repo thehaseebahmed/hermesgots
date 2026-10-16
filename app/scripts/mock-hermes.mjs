@@ -51,8 +51,8 @@
 // folder (files_dir) the instructions tell the agent to file its generated files in, with the
 // plugin's library_add tool. From its second turn, or one that
 // says "ship", the agent opens the branch's PRs with the plugin's pull_request tool
-// (GET …/sessions/{id}/prs reads them, newest first and the finished ones included; "draft" in that
-// turn drafts them, and a later turn that says "ship" again opens another, its predecessor merged by
+// (GET …/sessions/{id}/prs reads them, newest first and the finished ones included; they are always
+// drafts, and a later turn that says "ship" again opens another, its predecessor merged by
 // then): "merge" or "close" in a turn sets the live one's state, a merge resolves the session in the
 // chat list, and "break" fails their
 // checks while "pending" runs them for a while before they pass. POST …/close (delete or discard)
@@ -835,7 +835,7 @@ async function playTurn(req, body, last, out) {
   if (workspace && !workspace.closed && shipping) {
     const prId = `call_${randomUUID().slice(0, 8)}`
     const title = "feat: add a dry-run flag to log rotation"
-        const prArgs = { action: "ship", title, body: "## Summary\n\nAdds `--dry-run` to the rotation script.\n\n## Changes\n\n- rotate.py\n\n## How to test\n\nRun it with `--dry-run`.", commit_message: title }
+    const prArgs = { action: "ship", title, body: "## Summary\n\nAdds `--dry-run` to the rotation script.\n\n## Changes\n\n- rotate.py\n\n## How to test\n\nRun it with `--dry-run`.", commit_message: title }
     out.tool({ tool: "pull_request", emoji: "🚀", label: title, toolCallId: prId, status: "running" })
     await sleep(900)
     // A branch's new pull request replaces the open one, which is merged by the time it lands.
@@ -2029,7 +2029,8 @@ http
         if (PRS_FAIL) return json(res, 502, { error: { message: "Couldn't reach GitHub from the server." } })
         // Every pull request the session opened, newest first, the ones it already finished
         // included, as the plugin answers them. The live one's state follows the turns: "merge"
-        // merges it, "close" closes it, "draft" drafted it; "break" fails its checks and "pending"
+        // merges it, "close" closes it, and a new one is always a draft; "break" fails their checks
+        // and "pending"
         // runs them for a while before they pass.
         const turns = userTurns(id)
         const said = (word) => turns.some((r) => new RegExp(word, "i").test(r.content))
@@ -2043,9 +2044,7 @@ http
             ? "closed"
             : said("merge")
               ? "merged"
-              : live.draft
-                ? "draft"
-                : "open"
+              : "draft"
 
         const prs = (workspace?.prs ?? []).map((pr) => ({
           repo: pr.repo,

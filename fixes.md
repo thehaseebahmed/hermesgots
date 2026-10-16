@@ -466,3 +466,97 @@ correctness was out of scope — and none of the seven blocks the pull request. 
 branch still owes are not entries here: the overall surface needs Netlify to deploy before
 `claude-sonnet-4-5` reaches its row (entry 1), and the Dexie v14 upgrade has not been exercised on a
 device.
+
+---
+
+# Deferred fixes from the simplify pass on the pull_request tool
+
+A cleanup review of `feat(hermes): give the agent a pull_request tool with actions and drafts` and
+its three follow-up commits (four parallel reviewers: reuse, quality, efficiency, altitude) turned
+up one finding worth a decision and three worth a later pass. They are recorded here instead of
+applied: the first contradicts a stated requirement, the rest touch shared infrastructure or a
+second module.
+
+Everything else the review found is applied on this branch: the app's tool-label map keeps
+`open_pull_request` beside `pull_request` (the plugin keeps the old name resolvable forever, and the
+checked-in replay fixture still carries such a call); `handle()`'s unreachable `update` arm is gone
+(`update()` raises its own 409); `update()` reads the pull request with `checks=False`, which drops
+two GitHub reads whose result it never used; `github._pr_or_error` holds the one
+"the pull request comes back or it's an error" tail both writes need; the `open_pull_request`
+redirect stub no longer gates `pull_request`'s own registration or wiring; `handle()` passes the two
+trailing booleans by keyword; and the mock's turn vocabulary and its live pull-request state match
+the tool again (they are always drafts, so the `"open"` arm was unreachable).
+
+## Risky
+
+### 1. The force push refreshes the very ref it leases against, so `--force-with-lease` can't refuse
+
+`plugin/ship.py::_push` fetches `refs/heads/<branch>:refs/remotes/origin/<branch>` and *then* pushes
+with a bare `--force-with-lease`. The lease compares the remote ref against that remote-tracking
+ref, which the fetch has just set to the remote's current value — so it always matches and the force
+push overwrites whatever the branch holds, including commits pushed since the session last looked.
+`plugin/README.md` and the run's own text promise the opposite ("a branch that moved on GitHub is
+refused, not overwritten"), and the code comment says the fetch exists so the lease "compares
+against what GitHub holds now", which is exactly why it can refuse nothing.
+
+- Cost: `force: true` silently clobbers concurrent commits on the session branch, while telling the
+  user it won't; the guard is decoration and the docs are wrong about it.
+- Suggested fix: stop refreshing that ref before leasing — keep the expected SHA the session last
+  saw (or read it once, before the rebase) and push
+  `--force-with-lease=refs/heads/<branch>:<sha>`, so a branch that genuinely moved is refused and a
+  stale-info rejection reaches the agent as the 409 the code already has. The same block also tells
+  "the remote branch doesn't exist yet" from a real failure by matching git's English
+  (`"couldn't find remote ref" not in fetched.stderr`), where the module already answers that
+  question directly with `_has_ref` and `github.branch_exists`.
+- Why it is risky: the plan for this work prescribed the fetch-then-lease order, so changing it
+  changes the agreed force-push semantics, and threading the expected SHA in reaches `_repo_status`,
+  `ship()` and `status()`. It is its own decision, not a cleanup.
+
+## Careful
+
+### 2. "Still live" is re-written at every call site that looks at a pull request
+
+`("open", "draft")` is now spelled out in four places inside the tool's own path —
+`plugin/ship.py::ship` (`existing["state"] in ("open", "draft")`), `plugin/ship.py::update`,
+`plugin/ship.py::close`, and `plugin/github.py::_live` — and twice more outside it
+(`plugin/alerts.py`, `plugin/merges.py`). `_live` handles the raw API row; every other copy tests a
+normalized dict, so they cannot simply call it today.
+
+- Cost: what counts as a live pull request can drift between six sites; the plugin adds a state or
+  changes draft handling and one copy keeps the old rule.
+- Suggested fix: a `github.is_live(pr)` over the normalized dict (with `_live` delegating to a shared
+  `LIVE_STATES`), then move all six sites onto it.
+- Why it is not applied here: it edits `alerts.py` and `merges.py`, which this change never touched,
+  so it belongs in a pass that can test their own flows.
+
+### 3. `force` is validated in the handler while the text fields validate themselves
+
+`plugin/ship.py::handle` type-checks `force` and answers a JSON error, but `title`, `body` and
+`commit_message` are checked inside `ship()`/`update()` by `_text()`, which raises `ValueError` for
+the handler to catch. A `force: "yes"` therefore comes back through a different path from a
+`title: 42`.
+
+- Cost: two answers to "how does this tool reject bad input", and a later reader copies whichever
+  they find first.
+- Suggested fix: a `_bool()` beside `_text()`, with `ship()` doing the check, so every argument is
+  refused the same way.
+- Why it is not applied here: the handler-level check is defensible for an argument the schema
+  declares a boolean (the schema is what the model sees), so this is a preference rather than a
+  defect, and the reviewers were split on it.
+
+### 4. The push hand-rolls a second authenticated fetch
+
+`plugin/ship.py::_push`'s force path builds its own `git fetch` with `github.git_auth_args`, while
+`plugin/sessions.py::_fetch_origin` already owns "fetch this origin with the host's token".
+
+- Cost: two places know how to fetch `origin` as the server's GitHub account, with their own refspec,
+  quiet flag and error policy.
+- Suggested fix: give `_fetch_origin` an optional refspec and a mode that surfaces errors, and call
+  it here.
+- Why it is not applied here: the reviewer's own confidence was low — the new fetch is
+  refspec-targeted and deliberately surfaces its failure, where `_fetch_origin` is a best-effort
+  `--prune` — so it is not a drop-in, and item 1 above may delete the call outright.
+
+---
+
+Found while simplifying the pull_request tool's own four commits, on this branch.

@@ -442,10 +442,7 @@ def create_pull_request(
         {"title": title, "head": branch, "base": base, "body": body, "draft": draft},
     )
     # Brand new: its checks haven't started.
-    found = _pr(repo, row, None, checks=False)
-    if not found:
-        raise GitHubError("GitHub didn't return the pull request.")
-    return found
+    return _pr_or_error(repo, row, None)
 
 
 def close_pull_request(repo: str, number: int, auth: str) -> None:
@@ -456,7 +453,12 @@ def update_pull_request(repo: str, number: int, title: Optional[str], body: Opti
     """Sets the given title and/or body of a pull request, leaving the other as it is."""
     fields = {key: value for key, value in (("title", title), ("body", body)) if value is not None}
     row = _request(f"/repos/{repo}/pulls/{number}", auth, "PATCH", fields)
-    found = _pr(repo, row, auth, checks=False)
+    return _pr_or_error(repo, row, auth)
+
+
+def _pr_or_error(repo: str, row: Dict[str, Any], auth: Optional[str], checks: bool = False) -> Dict[str, Any]:
+    """The pull request a write's answer names, or an error when GitHub didn't return one."""
+    found = _pr(repo, row, auth, checks=checks)
     if not found:
         raise GitHubError("GitHub didn't return the pull request.")
     return found

@@ -50,6 +50,7 @@ const KINDS: Record<string, Kind> = {
   search_files: CODE,
   web_search: WEB,
   web_extract: WEB,
+  open_pull_request: OPENED_PR,
   pull_request: OPENED_PR,
 }
 

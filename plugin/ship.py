@@ -285,7 +285,7 @@ def update(
         name = github.origin_repo(repo["repo_root"])
         if not name:
             continue
-        pr = github.pull_request(hermes_home, repo["repo_root"], repo["branch"], fresh=True)
+        pr = github.pull_request(hermes_home, repo["repo_root"], repo["branch"], fresh=True, checks=False)
         if not pr or pr["state"] not in ("open", "draft"):
             continue
         result: Dict[str, Any] = {"name": repo["name"], "pr": pr}
@@ -425,14 +425,12 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
                 args.get("commit_message"),
                 args.get("title"),
                 args.get("body"),
-                action == "ship",
-                bool(force),
+                open_pr=action == "ship",
+                force=bool(force),
             )
     except (ValueError, ShipError, WorkspaceError) as error:
         return json.dumps({"error": str(error)})
     if not results:
-        if action == "update":
-            return json.dumps({"error": "No open pull request to update."})
         return json.dumps({"result": "Nothing to ship: every repo is already pushed with a pull request open."})
     errors = [r["error"] for r in results if r.get("error")]
     if errors:
@@ -454,7 +452,9 @@ def register(ctx: Any) -> bool:
         legacy = register_tool(
             name=LEGACY_TOOL, toolset="memento", schema=LEGACY_SCHEMA, handler=handle_legacy, emoji="🚀"
         ) is not False
-        return current and legacy
+        if not legacy:
+            logger.warning("memento: couldn't register the open_pull_request redirect stub")
+        return current
     except Exception:
         logger.warning("memento: couldn't register the pull_request tools", exc_info=True)
         return False
@@ -463,8 +463,9 @@ def register(ctx: Any) -> bool:
 def wire(adapter: Any) -> bool:
     """Wires the tools into every agent the API server builds."""
     current = tools_common.wire_tool(adapter, TOOL, SCHEMA, "pull_request")
-    legacy = tools_common.wire_tool(adapter, LEGACY_TOOL, LEGACY_SCHEMA, "open_pull_request")
-    return current and legacy
+    if not tools_common.wire_tool(adapter, LEGACY_TOOL, LEGACY_SCHEMA, "open_pull_request"):
+        logger.warning("memento: couldn't wire the open_pull_request redirect stub")
+    return current
 
 
 def equip(agent: Any) -> None:
