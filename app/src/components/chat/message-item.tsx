@@ -14,6 +14,7 @@ import { AttachmentTile, AttachmentViewer } from "@/components/chat/attachments"
 import { Markdown } from "@/components/chat/markdown"
 import { AgentCards } from "@/components/chat/agent-card"
 import { MediaTag } from "@/components/chat/media-image"
+import { ModelChange } from "@/components/chat/model-change"
 import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
 import { ToolGroup } from "@/components/chat/tool-group"
 import { Bot } from "@/components/bot"
@@ -255,6 +256,8 @@ interface MessageItemProps {
   busy?: boolean
   /** A project session's thread: no avatars, and the agent's replies sit on the page, not in bubbles. */
   plain?: boolean
+  /** The model to name above this turn, where its chat's model changed before it. */
+  change?: string
 }
 
 export const MessageItem = memo(function MessageItem({
@@ -264,6 +267,7 @@ export const MessageItem = memo(function MessageItem({
   busy,
   plain,
   simple,
+  change,
 }: MessageItemProps) {
   // Replies type out a word at a time, however Hermes delivers them.
   const content = useReveal(message.role === "assistant" ? message.content : "")
@@ -281,38 +285,41 @@ export const MessageItem = memo(function MessageItem({
     // The plugin starts a host-queued message itself, so it only waits for a Send when paused.
     const paused = message.hostQueued ? Boolean(message.queuePaused) : !busy
     return (
-      <MessageRow align="end">
-        <MessageContent className="items-end gap-1">
-          {message.attachments?.length ? (
-            <SentAttachments attachments={message.attachments} dim={dim} />
-          ) : null}
-          {(message.content || failed) && (
-            <div className="flex w-full min-w-0 items-center justify-end gap-1.5">
-              {/* A message that didn't go keeps its place but not the strength a delivered one has:
+      <>
+        {change && <ModelChange model={change} />}
+        <MessageRow align="end">
+          <MessageContent className="items-end gap-1">
+            {message.attachments?.length ? (
+              <SentAttachments attachments={message.attachments} dim={dim} />
+            ) : null}
+            {(message.content || failed) && (
+              <div className="flex w-full min-w-0 items-center justify-end gap-1.5">
+                {/* A message that didn't go keeps its place but not the strength a delivered one has:
                   it wears the dimmed green a queued message wears, the same cue for a message that
                   isn't through yet, so the two read alike; a mark sits beside the bubble rather than
                   under it, so nothing below a short message reads wider than the message. It says
                   it didn't go and no more. */}
-              {failed && (
-                <AlertCircleIcon
-                  role="img"
-                  aria-label="Not sent"
-                  className="size-4 shrink-0 text-destructive"
-                />
-              )}
-              {message.content && (
-                <Bubble variant="default" align="end" className={dim ? "opacity-60" : undefined}>
-                  <BubbleContent className="px-4 py-2.5 text-[15px] whitespace-pre-wrap">
-                    {message.content}
-                  </BubbleContent>
-                </Bubble>
-              )}
-            </div>
-          )}
-          {queued && <QueuedActions message={message} paused={paused} />}
-          {failed && <FailedActions message={message} />}
-        </MessageContent>
-      </MessageRow>
+                {failed && (
+                  <AlertCircleIcon
+                    role="img"
+                    aria-label="Not sent"
+                    className="size-4 shrink-0 text-destructive"
+                  />
+                )}
+                {message.content && (
+                  <Bubble variant="default" align="end" className={dim ? "opacity-60" : undefined}>
+                    <BubbleContent className="px-4 py-2.5 text-[15px] whitespace-pre-wrap">
+                      {message.content}
+                    </BubbleContent>
+                  </Bubble>
+                )}
+              </div>
+            )}
+            {queued && <QueuedActions message={message} paused={paused} />}
+            {failed && <FailedActions message={message} />}
+          </MessageContent>
+        </MessageRow>
+      </>
     )
   }
 
@@ -434,38 +441,41 @@ export const MessageItem = memo(function MessageItem({
     (message.status === "stopped" && !message.content) ||
     statsShown
   return (
-    <div className="flex flex-col gap-3">
-      {segments.map((segment, i) => {
-        const last = i === segments.length - 1
-        const parts = toParts(
-          content.slice(segment.start, segment.end),
-          segment.tools,
-          segment.start,
-        )
-        return (
-          <Fragment key={breaks[i - 1]?.key ?? "start"}>
-            {i > 0 && breaks[i - 1].node}
-            {(parts.length > 0 || (last && footerShown)) && (
-              <AssistantRow
-                conversationId={message.conversationId}
-                botId={botId}
-                plain={plain}
-                busy={busy}
-                noAvatar={bareError}
-                lift={last && statsShown}
-                parts={parts}
-              >
-                {last && footer}
-              </AssistantRow>
-            )}
-          </Fragment>
-        )
-      })}
-      {/* A pending approval lives in the composer slot; one answered with no place in the text follows the reply. */}
-      {approval?.resolved && approval.contentOffset === undefined && (
-        <ApprovalCard message={message} />
-      )}
-    </div>
+    <>
+      {change && <ModelChange model={change} />}
+      <div className="flex flex-col gap-3">
+        {segments.map((segment, i) => {
+          const last = i === segments.length - 1
+          const parts = toParts(
+            content.slice(segment.start, segment.end),
+            segment.tools,
+            segment.start,
+          )
+          return (
+            <Fragment key={breaks[i - 1]?.key ?? "start"}>
+              {i > 0 && breaks[i - 1].node}
+              {(parts.length > 0 || (last && footerShown)) && (
+                <AssistantRow
+                  conversationId={message.conversationId}
+                  botId={botId}
+                  plain={plain}
+                  busy={busy}
+                  noAvatar={bareError}
+                  lift={last && statsShown}
+                  parts={parts}
+                >
+                  {last && footer}
+                </AssistantRow>
+              )}
+            </Fragment>
+          )
+        })}
+        {/* A pending approval lives in the composer slot; one answered with no place in the text follows the reply. */}
+        {approval?.resolved && approval.contentOffset === undefined && (
+          <ApprovalCard message={message} />
+        )}
+      </div>
+    </>
   )
 }, sameMessage)
 

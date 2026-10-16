@@ -117,6 +117,7 @@ import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { setThreadMuted } from "@/lib/push"
+import { modelChanges } from "@/lib/model-changes"
 import { hostChoice, shortModel, useModelInfo } from "@/lib/model-info"
 import { syncContextWindow, useModelCatalog } from "@/lib/models"
 import {
@@ -276,6 +277,11 @@ export function ChatPage() {
         ...messages.filter((m) => m.status === "queued"),
       ],
     [messages],
+  )
+  // Where this chat's model changed, as the host recorded it: the divider each turn below carries.
+  const changes = useMemo(
+    () => modelChanges(thread ?? [], conversation?.modelChanges),
+    [thread, conversation?.modelChanges],
   )
   // Only a run can be steered, and only on a Hermes that has the route.
   const [steerRoute, setSteerRoute] = useState<{ baseUrl: string; ok: boolean }>()
@@ -761,6 +767,7 @@ export function ChatPage() {
                         botId={profile?.botId}
                         busy={busy}
                         plain={Boolean(session)}
+                        change={changes.get(message.id)}
                       />
                     </MessageScrollerItem>
                   ))}
