@@ -136,7 +136,8 @@ import {
   setSessionMode,
   type RepoRef,
 } from "@/lib/workspace"
-import { SESSION_SUGGESTIONS, SUGGESTIONS } from "@/lib/suggestions"
+import { SUGGESTIONS } from "@/lib/suggestions"
+import { useReadyLine } from "@/lib/greeting"
 import { useBotThreads } from "@/lib/threads"
 import { draftKey } from "@/lib/drafts"
 import { useGoal } from "@/lib/goal"
@@ -153,6 +154,11 @@ const GoalWizard = lazy(() => goalFormUi().then((m) => ({ default: m.GoalWizard 
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
+/** What an unstarted session says, chosen when it shows. */
+function ReadyLine({ sessionId }: { sessionId: string }) {
+  return <p className="max-w-xs text-lg font-medium tracking-tight">{useReadyLine(sessionId)}</p>
+}
+
 function EmptyState({
   name,
   botId,
@@ -163,8 +169,8 @@ function EmptyState({
   name: string
   botId?: string
   configured: boolean
-  /** A project session: its project's name and the repos it will work in. */
-  session?: { title?: string; repos: RepoRef[] }
+  /** A project session not started yet: the repos it will work in. */
+  session?: { id: string; repos: RepoRef[] }
   onPick: (text: string) => void
 }) {
   return (
@@ -172,9 +178,7 @@ function EmptyState({
       <Bot id={botId} animate className="size-24" />
       {session ? (
         <div className="flex max-w-md flex-col items-center gap-3">
-          {session.title && (
-            <h1 className="text-2xl font-semibold tracking-tight">{session.title}</h1>
-          )}
+          <ReadyLine sessionId={session.id} />
           <RepoChips repos={session.repos} />
         </div>
       ) : (
@@ -187,9 +191,9 @@ function EmptyState({
           </p>
         </div>
       )}
-      {configured ? (
+      {session ? null : configured ? (
         <div className="flex max-w-md flex-wrap justify-center gap-2">
-          {(session ? SESSION_SUGGESTIONS : SUGGESTIONS).map((text) => (
+          {SUGGESTIONS.map((text) => (
             <Button
               key={text}
               variant="outline"
@@ -417,6 +421,7 @@ export function ChatPage() {
   // when this tab comes back, and now and then while it's on screen.
   const updatedAt = conversation?.updatedAt
   const hasMessages = (messages?.length ?? 0) > 0
+  const unstarted = Boolean(session) && !hasMessages && !loadingHistory
   // The chat's goal, if it has one: the plugin reads it from Hermes while the chat is open.
   const goal = useGoal(conversation ?? undefined, profile)
   // The agents this chat's agent delegated to, for their cards in the thread.
@@ -697,12 +702,15 @@ export function ChatPage() {
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <ChatHeader
-        title={conversation?.title ?? "New chat"}
-        subtitle={(!simple && activity) || repliesLine || session?.worktree?.branch}
+        // A session not started has no title yet, and its bot is the big one in the middle.
+        title={unstarted ? "" : (conversation?.title ?? "New chat")}
+        subtitle={
+          unstarted ? undefined : (!simple && activity) || repliesLine || session?.worktree?.branch
+        }
         botId={profile?.botId}
         muted={Boolean(conversation?.muted || profile?.muted)}
         // Beside its bot, which already shows the bot's picture.
-        showBot={!(botPath && xl)}
+        showBot={!(botPath && xl) && !unstarted}
         actions={actions}
         leading={
           botPath ? (
@@ -786,7 +794,7 @@ export function ChatPage() {
           name={profile?.name ?? "Hermes"}
           botId={profile?.botId}
           configured={configured}
-          session={session && { title: project?.name, repos: sessionRepos }}
+          session={session && { id: session.id, repos: sessionRepos }}
           onPick={(text) => void send(text).catch(() => {})}
         />
       )}

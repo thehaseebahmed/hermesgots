@@ -176,7 +176,8 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   const filtering = Boolean(query.trim() || chip)
 
   const targets: SessionTarget[] = [...projects.entries()]
-    .filter(([, { project }]) => !project.archived)
+    // A project with no repository has nowhere for a session to work, so it isn't offered.
+    .filter(([, { project }]) => !project.archived && project.folders.some((f) => f.git))
     .map(([key, { profile, project }]) => ({
       key,
       profile,

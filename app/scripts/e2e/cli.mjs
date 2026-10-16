@@ -170,6 +170,11 @@ const FLOWS = {
     script: "regression-code-sessions.mjs",
     about: "Project sessions stay out of Recents and open from Code",
   },
+  "session-empty": {
+    script: "e2e/session-empty.mjs",
+    about:
+      "A session not started shows the big bot and one short line, greets once an hour, and has no header bot or title",
+  },
   prs: {
     script: "e2e/prs.mjs",
     about:
