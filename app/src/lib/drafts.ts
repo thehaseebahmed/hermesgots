@@ -16,9 +16,14 @@ export async function loadDraft(key: string) {
   return pending.get(key) ?? (await db.drafts.get(key))?.text ?? ""
 }
 
+/** The unsent text kept at a draft key, kept up to date. */
+export function useDraftText(key?: string) {
+  return useLiveQuery(() => (key ? db.drafts.get(key) : undefined), [key])?.text
+}
+
 /** A chat's or session's unsent text, kept up to date. */
 export function useDraft(conversationId: string) {
-  return useLiveQuery(() => db.drafts.get(draftKey(conversationId)), [conversationId])?.text
+  return useDraftText(draftKey(conversationId))
 }
 
 export function saveDraft(key: string, text: string) {
@@ -39,17 +44,13 @@ export async function flushDrafts() {
         // A chat deleted while its text waited here keeps no draft.
         const chat = id.startsWith("c:") ? id.slice(2) : undefined
         const live = chat ? await db.conversations.get(chat) : undefined
-        if (!text.trim() || (chat && !live)) {
-          await db.drafts.delete(id)
-          // Sending or deleting clears the draft from the chat record too.
-          if (chat && live?.draftText !== undefined)
-            await updateConversation(chat, { draftText: undefined })
-        } else {
-          await db.drafts.put({ id, text, at: Date.now() })
-          // Mirrors the text onto the chat record, which syncs it to the plugin.
-          if (chat && live && live.draftText !== text)
-            await updateConversation(chat, { draftText: text })
-        }
+        const kept = Boolean(text.trim()) && !(chat && !live)
+        if (kept) await db.drafts.put({ id, text, at: Date.now() })
+        else await db.drafts.delete(id)
+        // The chat record carries the same text, so another device and a reinstall see it.
+        const mirrored = kept ? text : undefined
+        if (chat && live && live.draftText !== mirrored)
+          await updateConversation(chat, { draftText: mirrored })
       }
     })
     .catch(() => undefined)

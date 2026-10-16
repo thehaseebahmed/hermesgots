@@ -14,7 +14,7 @@ import {
   type Account,
 } from "@/lib/account"
 import { hasPluginFeature, mergeChatList } from "@/lib/hermes"
-import { adoptDraft } from "@/lib/drafts"
+import { adoptDraft, draftKey } from "@/lib/drafts"
 import { adoptSessionMode } from "@/lib/workspace"
 import {
   APPEARANCE_FIELDS,
@@ -423,12 +423,17 @@ async function syncAppearance(key: CryptoKey) {
 // A plugin older than the draft_text feature rejects a record over its 16 KB cap, failing the whole
 // merge, so drafts only go to a plugin that advertises the feature, and never in a record over 64 KB.
 const DRAFT_RECORD_CAP = 64 * 1024
+const encoder = new TextEncoder()
 
 async function localChats(profileId: string, drafts: boolean): Promise<Doc<ChatValue>> {
   const doc: Doc<ChatValue> = {}
   for (const c of await db.conversations.where("profileId").equals(profileId).toArray()) {
     const value = Object.fromEntries(CHAT_FIELDS.map((field) => [field, c[field]])) as ChatValue
-    if (!drafts || new TextEncoder().encode(JSON.stringify(value)).length > DRAFT_RECORD_CAP)
+    // Only a record that carries a draft is measured.
+    if (
+      value.draftText !== undefined &&
+      (!drafts || encoder.encode(JSON.stringify(value)).length > DRAFT_RECORD_CAP)
+    )
       delete value.draftText
     doc[c.id] = { at: c.changedAt, value }
   }
@@ -460,9 +465,10 @@ async function applyChats(profileId: string, pull: [string, Entry<ChatValue>][])
         await db.tombstones.delete(`chat:${id}`)
       })
       // A pulled draft fills an empty composer here; it never overwrites text typed on this device.
-      if (entry.value.draftText) await adoptDraft(`c:${id}`, entry.value.draftText)
+      if (entry.value.draftText) await adoptDraft(draftKey(id), entry.value.draftText)
       // A pick made on another device follows the session here, and out to the plugin.
-      if (entry.value.mode && entry.value.mode !== existing?.mode) await adoptSessionMode(id, entry.value.mode)
+      if (entry.value.mode && entry.value.mode !== existing?.mode)
+        await adoptSessionMode(id, entry.value.mode)
     }
   }
 }
@@ -488,7 +494,6 @@ async function pullFallbackChats(key: CryptoKey, profileId: string) {
   return true
 }
 
-/** Syncs a bot's chats with its server's Gots plugin; false when it didn't answer. */
 /** Merges the bot's chat list with its plugin's; the merged list, or undefined when it didn't answer. */
 async function mergePluginChats(profile: Profile) {
   const drafts = await hasPluginFeature(profile, "draft_text")

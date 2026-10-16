@@ -31,10 +31,8 @@ import {
   prepareAttachment,
 } from "@/lib/attachments"
 import type { Attachment } from "@/lib/db"
-import { useLiveQuery } from "dexie-react-hooks"
 
-import { db } from "@/lib/db"
-import { flushDrafts, loadDraft, saveDraft } from "@/lib/drafts"
+import { flushDrafts, loadDraft, saveDraft, useDraftText } from "@/lib/drafts"
 import type { HermesConfig } from "@/lib/hermes"
 import {
   canRecord,
@@ -127,15 +125,13 @@ export function Composer({
     setAttachments([])
   }
   // A draft that syncs in after mount fills the field only while it is still empty and untouched.
-  const syncedDraft = useLiveQuery(() => (draftKey ? db.drafts.get(draftKey) : undefined), [draftKey])?.text
+  const syncedDraft = useDraftText(draftKey)
   useEffect(() => {
     if (!draftKey || !syncedDraft || loaded !== draftKey) return
-    if (stored.current === "" && value === "") {
-      stored.current = syncedDraft
-      setValue(syncedDraft)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [syncedDraft, draftKey, loaded])
+    if (stored.current || value) return
+    stored.current = syncedDraft
+    setValue(syncedDraft)
+  }, [syncedDraft, draftKey, loaded, value])
   useEffect(() => {
     if (!draftKey) return
     let live = true

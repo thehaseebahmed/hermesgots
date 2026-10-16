@@ -898,3 +898,113 @@ Found by the `/simplify-code` pass on this branch. It was a cleanup review, not 
 correctness bug it turned up — the workflow's `paths` filter not watching the files the image is
 built from — is fixed on this branch rather than recorded here, and none of the four blocks the
 pull request.
+
+---
+
+# Deferred fixes from the simplify pass on the drafts and modes sync
+
+A cleanup review of `feat(chat): sync unsent drafts and picked modes through the plugin` and the fix
+that followed it (four parallel reviewers: reuse, quality, efficiency, altitude) turned up five
+findings. Two are recorded here instead of applied: one separates the sync's payload from its merge
+base, the other changes what a plugin refusal costs. The three narrower ones are recorded for the
+same reason — each decides a product question, a cadence or a list's membership, that a cleanup pass
+has no business deciding.
+
+Everything else the review found is applied on this branch: the session-mode push is one helper
+(`workspace.ts::pushSessionMode`) that both the pick and the pull call, so a mode adopted from
+another device actually reaches the plugin — the guard that skipped it compared against the value
+the pull had just written, so the push was dead; the draft mirror's two branches are one; the pulled
+draft key comes from `draftKey` rather than a second `c:` literal; the composer's live draft read is
+`useDraftText` in `drafts.ts` rather than a second `useLiveQuery` over the same row; its adopt effect
+names the state it reads and drops an `eslint-disable`; a record with no draft in it no longer pays
+for the size check, and the encoder is built once; and a stale second JSDoc on `mergePluginChats`
+is gone.
+
+## Risky
+
+### 1. The feature gate strips the draft from the merge base, not only from the payload
+
+`sync.ts::localChats(profileId, drafts)` builds one document that is both the body POSTed to
+`/chats` and the base whose `at` decides which side of the merge wins. `drafts` comes from
+`hasPluginFeature(profile, "draft_text")`, which is false when the plugin is older *and* when its
+`/info` read failed, so a transient failure sends a record that carries the row's `changedAt` and no
+`draftText` — a newer record without the field, which is the shape the merge reads as "this draft was
+cleared".
+
+- Cost: a draft dies on the plugin and on every other device that pulls, on a probe failure the user
+  never sees; the device that typed it still holds the text, but nothing pushes it again until that
+  chat changes for another reason.
+- Suggested fix: separate the two jobs — `mergeChatList` taking the payload and the merge base
+  separately, so only the payload drops `draftText` — or remember the last feature answer and let an
+  unconfirmed probe mean "don't merge against a copy without it" rather than "send one".
+- Why it is risky: it changes `hermes.ts::mergeChatList`'s signature, a function every bot's sync
+  goes through, and the recovery path (the row still holding the text, a later push restoring it)
+  needs the flows run with the probe made to fail, which is not a state any flow can reach today.
+
+### 2. An oversized record fails a whole bot's chat merge on the plugin's measure, not the app's
+
+The app sizes a record with `TextEncoder` (UTF-8 bytes, `sync.ts::DRAFT_RECORD_CAP`); the plugin
+measures `len(json.dumps(value))` with the default `ensure_ascii=True`, where one non-ASCII
+character is six characters and an emoji twelve. Between the two sits a band — roughly 22 KB of
+non-ASCII draft on a 64 KB cap — where the app believes the record fits and `chats._validate`
+refuses it. The refusal is a 4xx for the whole `POST /chats`, so that bot's chat list stops syncing
+until the text shrinks or is sent, not just the draft.
+
+- Cost: the guard does not do what its comment claims, and the failure it exists to prevent arrives
+  as a bot-wide sync stall over a draft nobody would call large.
+- Suggested fix: measure on the plugin's own scale before comparing — escape non-ASCII the way
+  `json.dumps` does, or budget a third of the cap — and let `chats._validate` drop an oversized field
+  and answer 200 with what it dropped, so a refusal can never cost the whole merge.
+- Why it is risky: the app-side half is small, but the plugin-side half changes what a refusal means
+  for every record, and a draft of that size is a case no flow or test covers today.
+
+## Careful
+
+### 3. Typing a draft is a write to the chat list
+
+`drafts.ts::flushDrafts` mirrors the typed text onto the conversation row every 400 ms of typing, so
+a live query over `conversations` re-runs at that rate for as long as someone types, and the sync
+pass it wakes runs 1.5 s later for the same reason. The write is what the feature needs — the row's
+`changedAt` is the plugin's merge clock — so this is a cadence question, not an extra write.
+
+- Cost: the app's busiest screen re-reads the chat list several times a second while the user types,
+  on the path the write budget (`pnpm e2e stream-writes`, `idle-requests`) exists to protect.
+- Suggested fix: mirror on the flush that ends a burst — the visibility/pagehide flush and a slower
+  timer — keeping the per-keystroke path to `db.drafts`, which nothing else reads.
+- Why it is risky: the approved plan named `updateConversation` as the mechanism, and the flows
+  cannot see the difference between a draft syncing a second late and a keystroke early, so it wants
+  the sync's own budget measured before and after.
+
+### 4. Three copies of "this session has started", and the new field is not one of them
+
+`code.ts:61`, `code.tsx:59` and `chat.tsx:540` each spell out the same predicate — `draftAt ||
+updatedAt > createdAt` — while `plugin/cleanup.py:59` spares a chat that carries `draftAt` *or*
+`draftText`. The app writes neither field, so a session whose only content is a draft synced from
+another device is kept by the plugin's sweep and still reads as unstarted in Code.
+
+- Cost: one rule in four places, and a session that exists on the plugin but nowhere in the app —
+  exactly the state the draft sync creates, since a draft reaches a session that has never run.
+- Suggested fix: one exported predicate over the row, `draftText` beside `draftAt` in it if a draft
+  counts (stamping `draftAt` from the same write is the smaller version of the same thing).
+- Why it is risky: list membership is a product decision — the plugin keeps such a session so its
+  draft is not swept, which is not the same as the app offering it — and it moves rows in Code, which
+  `code-sessions.mjs` asserts by position.
+
+### 5. A pulled mode reaches the row unvalidated
+
+`sync.ts::applyChats` writes `entry.value.mode` onto the conversation with the rest of the record
+and the pull's `adoptSessionMode` no longer rewrites it; `db.ts::sessionMode` — which maps `theseus`
+to `auto` and anything unknown to `accept_edits` — is applied when a mode is picked, not here.
+
+- Cost: a plugin that answers with a mode this app does not know puts it on the row, where the mode
+  control's label lookup (`MODE_LABELS`, `mode-menu.tsx:62`) has no entry for it.
+- Suggested fix: validate where the record is applied — a `sessionMode` over the copied field, the
+  way a mode is validated on its way out.
+- Why it is risky: it is a second change inside the generic field-by-field copy every chat record
+  takes, for a value the plugin only ever writes from this app's own vocabulary.
+
+---
+
+Found by the `/simplify-code` pass on this branch. It was a cleanup review, not a bug hunt —
+correctness was out of scope — entry 2 is the one genuine defect it turned up, and none of the five
+blocks the pull request.
