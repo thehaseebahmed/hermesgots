@@ -229,7 +229,7 @@ export function ResearchPage() {
           <MissionTypes value={type} onChange={setType} />
         </section>
 
-        <MissionGroup title="Needs you" missions={waiting} />
+        <MissionGroup title="Waiting on you" missions={waiting} />
         <MissionGroup title="Researching" missions={working} />
         <MissionGroup title="Ready" missions={ready} />
       </div>
@@ -317,7 +317,7 @@ function MissionGroup({ title, missions }: { title: string; missions: Mission[] 
         <span
           className={cn(
             "rounded-full px-1.5 text-xs leading-5 font-semibold tabular-nums",
-            title === "Needs you" ? "bg-warning/15 text-warning" : "bg-muted",
+            title === "Waiting on you" ? "bg-warning/15 text-warning" : "bg-muted",
           )}
         >
           {missions.length}

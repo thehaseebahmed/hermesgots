@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { useLiveQuery } from "dexie-react-hooks"
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router"
 import {
   ArrowLeftIcon,
@@ -11,6 +12,7 @@ import {
   EllipsisIcon,
   FileAudioIcon,
   FileTextIcon,
+  AudioLinesIcon,
   FlagIcon,
   FolderIcon,
   GitBranchIcon,
@@ -25,8 +27,7 @@ import {
   SparklesIcon,
   SquareIcon,
   Trash2Icon,
-  TriangleAlertIcon,
-  UploadIcon,
+  PlusIcon,
   XIcon,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -35,7 +36,7 @@ import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { ExperimentalBadge } from "@/components/experimental-badge"
-import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { FullscreenPopup, Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -52,7 +53,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Field, FieldLabel } from "@/components/ui/field"
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import {
   InputGroup,
@@ -67,7 +68,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { formatRelative } from "@/lib/format"
@@ -88,7 +88,9 @@ import {
   toMarkdown,
   topicAt,
   useMeeting,
+  readyLine,
   useMeetingBot,
+  useMeetingBots,
   useMeetingProjects,
   useMeetings,
   useMeetingsEnabled,
@@ -100,8 +102,10 @@ import {
   type Recap,
   type Topic,
 } from "@/lib/meetings"
+import { getActiveProfile, setActiveProfile } from "@/lib/db"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
+import { useMeetingsPane, type MeetingsPane as PaneState } from "@/lib/pane"
 import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 
@@ -129,11 +133,11 @@ function Header({
   return (
     <header
       className={cn(
-        "sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur",
+        "sticky top-0 z-10 bg-background/80 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur",
         className,
       )}
     >
-      <div className="mx-auto flex max-w-2xl items-center gap-3">
+      <div className="mx-auto flex max-w-2xl items-center gap-3 px-4">
         {leading}
         <div className="flex min-w-0 flex-1 flex-col">
           {title}
@@ -202,17 +206,49 @@ function BotAvatar({ botId, className }: { botId: string; className?: string }) 
 export function MeetingsPage() {
   return (
     <Gate>
-      <MeetingsList />
+      <MeetingsIndex />
     </Gate>
   )
 }
 
-function MeetingsList() {
-  const openDrawer = useOpenDrawer()
-  const navigate = useNavigate()
+/** From `xl` the list is the pane, so this screen is the third pane: the top meeting, or a placeholder. */
+function MeetingsIndex() {
+  const pane = useMeetingsPane()
   const meetings = useMeetings()
-  const bot = useMeetingBot()
+  const now = useNow()
+  if (!pane) return <MeetingsList />
+  const first = meetingGroups(meetings, now)[0]?.meetings[0]
+  if (first) return <Navigate to={`/meetings/${first.id}`} replace />
+  return (
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
+      <AudioLinesIcon className="size-10" aria-hidden />
+      <p>No meetings yet</p>
+    </div>
+  )
+}
+
+/** The list kept on screen beside the open meeting, from `xl` (see `useMeetingsPane`). */
+export function MeetingsPane({ pane }: { pane: PaneState }) {
+  return (
+    <Gate>
+      <MeetingsList pane={pane} />
+    </Gate>
+  )
+}
+
+/** Opening something from the list while one is already open takes its place in the history. */
+function useSwap() {
+  const navigate = useNavigate()
+  const swap = Boolean(useMeetingsPane()?.open)
+  return (to: string) => navigate(to, { replace: swap })
+}
+
+function MeetingsList({ pane }: { pane?: PaneState }) {
+  const openDrawer = useOpenDrawer()
+  const open = useSwap()
+  const meetings = useMeetings()
   const [adding, setAdding] = useState(false)
+  const [recording, setRecording] = useState(false)
   // A fresh form each time it opens.
   const [form, setForm] = useState(0)
   const [query, setQuery] = useState("")
@@ -250,37 +286,6 @@ function MeetingsList() {
       />
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
-        <section className="relative overflow-hidden rounded-[2rem] border bg-radial-[at_25%_20%] from-primary/15 to-card to-70% p-5">
-          <div className="flex items-center gap-4">
-            <Bot id={bot.botId} animate className="size-20" />
-            <p className="min-w-0 flex-1 text-lg leading-snug font-semibold tracking-tight">
-              {bot.name} is ready when you are.
-            </p>
-          </div>
-          <div className="mt-5 grid grid-cols-2 gap-3">
-            <Button
-              size="lg"
-              className="h-12 rounded-full text-base"
-              onClick={() => navigate("/meetings/record")}
-            >
-              <MicIcon data-icon="inline-start" />
-              Record
-            </Button>
-            <Button
-              variant="outline"
-              size="lg"
-              className="h-12 rounded-full bg-background/70 text-base"
-              onClick={() => {
-                setForm((n) => n + 1)
-                setAdding(true)
-              }}
-            >
-              <UploadIcon data-icon="inline-start" />
-              Upload
-            </Button>
-          </div>
-        </section>
-
         {meetings.length > 0 && (
           <div className="flex flex-col gap-3">
             <InputGroup className="h-11 rounded-full bg-background dark:bg-input/30">
@@ -357,14 +362,15 @@ function MeetingsList() {
         {groups.map((group) => (
           <section key={group.label} className="flex flex-col gap-2" aria-label={group.label}>
             <h2 className="px-1 text-sm font-medium text-muted-foreground">{group.label}</h2>
-            <ul className="flex flex-col divide-y overflow-hidden rounded-3xl border bg-card">
+            <ul className="flex flex-col">
               {group.meetings.map((meeting) => (
                 <li key={meeting.id}>
                   <MeetingRow
                     meeting={meeting}
                     now={now}
                     showProject={!project}
-                    onOpen={() => navigate(`/meetings/${meeting.id}`)}
+                    selected={meeting.id === pane?.selected}
+                    onOpen={() => open(`/meetings/${meeting.id}`)}
                   />
                 </li>
               ))}
@@ -373,7 +379,36 @@ function MeetingsList() {
         ))}
       </div>
 
-      <Upload key={form} open={adding} onOpenChange={setAdding} />
+      <div className="pointer-events-none sticky bottom-0 mt-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <div className="mx-auto flex w-full max-w-2xl justify-end">
+          <Button
+            data-toast-above
+            size="lg"
+            className="pointer-events-auto h-12 rounded-full px-5 shadow-lg"
+            onClick={() => {
+              setForm((n) => n + 1)
+              setAdding(true)
+            }}
+          >
+            <PlusIcon /> New meeting
+          </Button>
+        </div>
+      </div>
+      <NewMeeting
+        key={form}
+        open={adding}
+        onOpenChange={setAdding}
+        onRecord={() => setRecording(true)}
+      />
+      {recording && (
+        <Recorder
+          onClose={() => setRecording(false)}
+          onDone={(id) => {
+            setRecording(false)
+            open(`/meetings/${id}`)
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -414,7 +449,7 @@ function meetingGroups(meetings: Meeting[], now: number) {
   const today = day.getTime()
   const yesterday = today - 86_400_000
   const week = today - 6 * 86_400_000
-  const labels = ["Needs you", "In progress", "Today", "Yesterday", "This week", "Earlier"]
+  const labels = ["Waiting on you", "In progress", "Today", "Yesterday", "This week", "Earlier"]
   const of = (m: Meeting) =>
     m.stage === "failed"
       ? 0
@@ -458,11 +493,13 @@ function MeetingRow({
   meeting,
   now,
   showProject,
+  selected,
   onOpen,
 }: {
   meeting: Meeting
   now: number
   showProject: boolean
+  selected: boolean
   onOpen: () => void
 }) {
   const failed = meeting.stage === "failed"
@@ -471,20 +508,20 @@ function MeetingRow({
     <button
       type="button"
       onClick={onOpen}
-      className="flex min-h-16 w-full items-start gap-3 px-4 py-3.5 text-left transition-colors hover:bg-muted"
+      aria-current={selected || undefined}
+      className={cn(
+        "-mx-2 flex min-h-16 w-[calc(100%+1rem)] items-start gap-3 rounded-2xl px-2 py-3 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring",
+        selected && "bg-muted",
+      )}
     >
       <span className="relative mt-0.5 shrink-0">
-        <BotAvatar botId={meeting.bot.botId} className="size-10" />
-        {(isWorking(meeting) || failed) && (
-          <span
-            className={cn(
-              "absolute -right-1 -bottom-1 flex size-5 items-center justify-center rounded-full bg-background ring-2 ring-background",
-              failed ? "text-warning" : "text-muted-foreground",
-            )}
-          >
-            {failed ? <TriangleAlertIcon className="size-3.5" /> : <Spinner className="size-3.5" />}
-          </span>
-        )}
+        <span className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <AudioLinesIcon className="size-5" aria-hidden />
+        </span>
+        <BotAvatar
+          botId={meeting.bot.botId}
+          className="absolute -right-1 -bottom-1 size-5 bg-background ring-2 ring-background"
+        />
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-1">
         <span className="flex items-baseline gap-2">
@@ -584,234 +621,195 @@ const isTranscript = (file: File) =>
 
 const baseName = (name: string) => name.replace(/\.[^.]+$/, "")
 
-/** A place to drop a file, or tap to choose one. */
-function DropZone({
-  accept,
-  icon: Icon,
-  label,
-  file,
-  detail,
-  onFile,
-}: {
-  accept: string
-  icon: typeof FileAudioIcon
-  label: string
-  file?: string
-  detail?: string
-  onFile: (file: File) => void
-}) {
-  const input = useRef<HTMLInputElement>(null)
-  const [over, setOver] = useState(false)
+/** A recording or a transcript from the device, by its extension, and the project it's filed under. */
+function UploadForm({ onAdded }: { onAdded: () => void }) {
+  const go = useSwap()
+  const bot = useMeetingBot()
+  const { projects, project, pick } = usePickedProject()
+  const [picked, setPicked] = useState<
+    { file: File; seconds: number } | { file: File; text: string }
+  >()
+  const parsed = picked && "text" in picked ? parseTranscript(picked.text) : undefined
+
+  const choose = async (file: File) => {
+    if (!isTranscript(file)) {
+      setPicked({ file, seconds: await audioLength(file) })
+      return
+    }
+    if (file.size > MAX_TRANSCRIPT_BYTES) {
+      toast.error("That file is too big for a transcript.")
+      return
+    }
+    setPicked({ file, text: await file.text() })
+  }
+
+  const ready = picked && (!parsed || parsed.lines.length > 0)
+
+  const add = () => {
+    if (!project || !picked || !ready) return
+    const title = baseName(picked.file.name)
+    const meeting = parsed
+      ? createMeeting({
+          title,
+          project,
+          bot,
+          source: "transcript",
+          fileName: picked.file.name,
+          duration: parsed.duration,
+          transcript: parsed.lines,
+        })
+      : createMeeting({
+          title,
+          project,
+          bot,
+          source: "upload",
+          fileName: picked.file.name,
+          duration: "seconds" in picked ? picked.seconds : 0,
+        })
+    onAdded()
+    go(`/meetings/${meeting.id}`)
+  }
+
+  const detail = !picked
+    ? undefined
+    : parsed
+      ? parsed.lines.length
+        ? [
+            `${parsed.lines.length} ${parsed.lines.length === 1 ? "line" : "lines"}`,
+            `${parsed.timed ? "" : "about "}${length(parsed.duration)}`,
+          ].join(" · ")
+        : "No lines found"
+      : [
+          "seconds" in picked && picked.seconds ? length(picked.seconds) : null,
+          sizeText(picked.file.size),
+        ]
+          .filter(Boolean)
+          .join(" · ")
+
   return (
-    <>
-      <input
-        ref={input}
-        type="file"
-        accept={accept}
-        className="hidden"
-        onChange={(event) => {
-          const picked = event.target.files?.[0]
-          if (picked) onFile(picked)
-          event.target.value = ""
-        }}
-      />
-      <button
-        type="button"
-        onClick={() => input.current?.click()}
-        onDragOver={(event) => {
-          event.preventDefault()
-          setOver(true)
-        }}
-        onDragLeave={() => setOver(false)}
-        onDrop={(event) => {
-          event.preventDefault()
-          setOver(false)
-          const dropped = event.dataTransfer.files[0]
-          if (dropped) onFile(dropped)
-        }}
-        className={cn(
-          "flex min-h-20 w-full items-center gap-3 rounded-3xl border px-4 py-3 text-left transition-colors hover:bg-muted",
-          !file && "border-dashed",
-          over && "border-primary bg-primary/5",
-        )}
-      >
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
-          <Icon className="size-5" />
-        </span>
-        {file ? (
-          <span className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate font-medium">{file}</span>
-            {detail && <span className="text-sm text-muted-foreground">{detail}</span>}
-          </span>
-        ) : (
-          <span className="flex-1 font-medium">{label}</span>
-        )}
-      </button>
-    </>
+    <form
+      className="flex flex-col gap-5 px-6"
+      onSubmit={(event) => {
+        event.preventDefault()
+        add()
+      }}
+    >
+      <Field>
+        <FieldLabel htmlFor="meeting-file">Recording or transcript</FieldLabel>
+        <Input
+          id="meeting-file"
+          type="file"
+          accept={`${RECORDING_TYPES},${TRANSCRIPT_TYPES}`}
+          className="h-11 cursor-pointer py-2 file:mr-3 file:cursor-pointer"
+          onChange={(event) => {
+            const file = event.target.files?.[0]
+            if (file) void choose(file)
+          }}
+        />
+        {detail && <FieldDescription>{detail}</FieldDescription>}
+      </Field>
+
+      {project && (
+        <Field>
+          <FieldLabel htmlFor="meeting-project">Project</FieldLabel>
+          <ProjectSelect
+            id="meeting-project"
+            projects={projects}
+            value={project.id}
+            onChange={pick}
+          />
+        </Field>
+      )}
+
+      <Button type="submit" size="lg" className="h-11 rounded-full" disabled={!ready}>
+        Add
+      </Button>
+    </form>
   )
 }
 
-type UploadKind = "recording" | "transcript"
-
-/** A recording or a transcript from the device, its title and the project it's filed under. */
-function Upload({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
-  const navigate = useNavigate()
+/** The bot that will sit in, and the cards to pick another. */
+function BotChoice() {
   const bot = useMeetingBot()
-  const { projects, project, pick } = usePickedProject()
-  const [kind, setKind] = useState<UploadKind>("recording")
-  const [recording, setRecording] = useState<{ file: File; seconds: number }>()
-  const [transcriptFile, setTranscriptFile] = useState<File>()
-  const [text, setText] = useState("")
-  const [title, setTitle] = useState("")
-  const parsed = text.trim() ? parseTranscript(text) : undefined
+  const bots = useMeetingBots()
+  const activeId = useLiveQuery(async () => (await getActiveProfile())?.id, [])
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center gap-4">
+        <Bot id={bot.botId} className="size-16 shrink-0" />
+        <p className="min-w-0 flex-1 text-lg leading-snug font-semibold tracking-tight">
+          {readyLine(bot.botId)}
+        </p>
+      </div>
+      {bots.length > 1 && (
+        <div
+          className="-mx-6 flex [scrollbar-width:none] gap-2 overflow-x-auto px-6"
+          role="group"
+          aria-label="Bot"
+        >
+          {bots.map((option) => {
+            const active = option.id === activeId
+            return (
+              <button
+                key={option.id}
+                type="button"
+                aria-pressed={active}
+                onClick={() => void setActiveProfile(option.id)}
+                className={cn(
+                  "flex min-h-11 w-20 shrink-0 flex-col items-center gap-1 rounded-3xl border px-2 py-2 text-xs font-medium transition-colors",
+                  active ? "border-primary bg-primary/10" : "hover:bg-muted",
+                )}
+              >
+                <Bot id={option.botId} className="size-10" />
+                <span className="w-full truncate text-center">{option.name}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
 
-  const named = (name: string) => setTitle((current) => current || baseName(name))
-
-  const choose = async (file: File) => {
-    if (isTranscript(file)) {
-      setKind("transcript")
-      if (file.size > MAX_TRANSCRIPT_BYTES) {
-        toast.error("That file is too big for a transcript.")
-        return
-      }
-      setTranscriptFile(file)
-      setText(await file.text())
-      named(file.name)
-      return
-    }
-    setKind("recording")
-    setRecording({ file, seconds: await audioLength(file) })
-    named(file.name)
-  }
-
-  const ready = kind === "recording" ? Boolean(recording) : Boolean(parsed?.lines.length)
-
-  const add = () => {
-    if (!project || !ready) return
-    const meeting =
-      kind === "recording" && recording
-        ? createMeeting({
-            title: title.trim() || recording.file.name,
-            project,
-            bot,
-            source: "upload",
-            fileName: recording.file.name,
-            duration: recording.seconds,
-          })
-        : createMeeting({
-            title: title.trim() || defaultTitle(),
-            project,
-            bot,
-            source: "transcript",
-            fileName: transcriptFile?.name,
-            duration: parsed?.duration ?? 0,
-            transcript: parsed?.lines,
-          })
-    onOpenChange(false)
-    navigate(`/meetings/${meeting.id}`)
-  }
-
+/** A new meeting: record one with the bot in the room, or upload a recording or transcript. */
+function NewMeeting({
+  open,
+  onOpenChange,
+  onRecord,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onRecord: () => void
+}) {
   return (
     <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent size="md">
         <PopupHeader className="pb-2">
-          <PopupTitle>Upload a meeting</PopupTitle>
+          <PopupTitle>New meeting</PopupTitle>
         </PopupHeader>
-        <form
-          className="flex flex-col gap-5 px-6"
-          onSubmit={(event) => {
-            event.preventDefault()
-            add()
-          }}
-        >
-          <Tabs value={kind} onValueChange={(value) => setKind(value as UploadKind)}>
-            <TabsList className="w-full">
-              <TabsTrigger value="recording" className="min-h-9">
-                <FileAudioIcon />
-                Recording
-              </TabsTrigger>
-              <TabsTrigger value="transcript" className="min-h-9">
-                <FileTextIcon />
-                Transcript
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="recording" className="pt-4">
-              <DropZone
-                accept={RECORDING_TYPES}
-                icon={FileAudioIcon}
-                label="Choose an audio or video file"
-                file={recording?.file.name}
-                detail={
-                  recording &&
-                  [
-                    recording.seconds ? length(recording.seconds) : null,
-                    sizeText(recording.file.size),
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")
-                }
-                onFile={(file) => void choose(file)}
-              />
-            </TabsContent>
-            <TabsContent value="transcript" className="flex flex-col gap-3 pt-4">
-              <DropZone
-                accept={TRANSCRIPT_TYPES}
-                icon={FileTextIcon}
-                label="Choose a transcript"
-                file={transcriptFile?.name}
-                detail={transcriptFile && sizeText(transcriptFile.size)}
-                onFile={(file) => void choose(file)}
-              />
-              <Textarea
-                value={text}
-                onChange={(event) => {
-                  setText(event.target.value)
-                  if (!event.target.value) setTranscriptFile(undefined)
-                }}
-                placeholder="Or paste it here"
-                aria-label="Transcript"
-                className="max-h-56 min-h-32 font-mono text-[13px] leading-relaxed"
-              />
-              {parsed && (
-                <p className="px-1 text-sm text-muted-foreground" aria-live="polite">
-                  {parsed.lines.length
-                    ? [
-                        `${parsed.lines.length} ${parsed.lines.length === 1 ? "line" : "lines"}`,
-                        `${parsed.timed ? "" : "about "}${length(parsed.duration)}`,
-                      ].join(" · ")
-                    : "No lines found"}
-                </p>
-              )}
-            </TabsContent>
-          </Tabs>
-
-          <Field>
-            <FieldLabel htmlFor="meeting-title">Title</FieldLabel>
-            <Input
-              id="meeting-title"
-              className="h-11"
-              autoComplete="off"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-            />
-          </Field>
-
-          {project && (
-            <Field>
-              <FieldLabel htmlFor="meeting-project">Project</FieldLabel>
-              <ProjectSelect
-                id="meeting-project"
-                projects={projects}
-                value={project.id}
-                onChange={pick}
-              />
-            </Field>
-          )}
-
-          <Button type="submit" size="lg" className="h-11 rounded-full" disabled={!ready}>
-            Add
-          </Button>
-        </form>
+        <Tabs defaultValue="record">
+          <TabsList>
+            <TabsTrigger value="record">Record</TabsTrigger>
+            <TabsTrigger value="upload">Upload</TabsTrigger>
+          </TabsList>
+          <TabsContent value="record" className="flex flex-col gap-5 px-6 pt-5">
+            <BotChoice />
+            <Button
+              size="lg"
+              className="h-11 rounded-full"
+              onClick={() => {
+                onOpenChange(false)
+                onRecord()
+              }}
+            >
+              <MicIcon data-icon="inline-start" />
+              Start recording
+            </Button>
+          </TabsContent>
+          <TabsContent value="upload" className="pt-5">
+            <UploadForm onAdded={() => onOpenChange(false)} />
+          </TabsContent>
+        </Tabs>
       </PopupContent>
     </Popup>
   )
@@ -831,18 +829,11 @@ function useLevel(live: boolean) {
   return live ? level : 0
 }
 
-/** Recording a meeting: the bot listening, what it last heard, and moments marked as they happen. */
-export function RecordPage() {
-  return (
-    <Gate>
-      <Recorder />
-    </Gate>
-  )
-}
-
-function Recorder() {
-  const navigate = useNavigate()
-  const { up } = useNav()
+/**
+ * Recording a meeting, full screen: the bot listening, what it last heard, and moments marked as
+ * they happen. Only mounted while it's open, so every recording starts fresh.
+ */
+function Recorder({ onClose, onDone }: { onClose: () => void; onDone: (id: string) => void }) {
   const bot = useMeetingBot()
   const { projects, project, pick } = usePickedProject()
   const [placeholder] = useState(defaultTitle)
@@ -863,8 +854,8 @@ function Recorder() {
 
   const leave = useCallback(() => {
     if (elapsed > 0) setConfirming(true)
-    else up("/meetings")
-  }, [elapsed, up])
+    else onClose()
+  }, [elapsed, onClose])
   useEffect(() => setBackGuard(() => (leave(), true)), [leave])
 
   const mark = (kind: MomentKind) => {
@@ -883,13 +874,17 @@ function Recorder() {
       typed,
       marks,
     })
-    navigate(`/meetings/${meeting.id}`, { replace: true })
+    onDone(meeting.id)
   }
 
   const heard = heardAt(elapsed)
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-radial-[at_50%_35%] from-primary/15 via-background via-60% to-background">
+    <FullscreenPopup
+      open
+      onOpenChange={(open) => !open && leave()}
+      className="bg-radial-[at_50%_35%] from-primary/15 via-background via-60% to-background"
+    >
       <Header
         className="bg-transparent backdrop-blur-none"
         leading={
@@ -1000,18 +995,24 @@ function Recorder() {
           {(["decision", "action", "open"] as MomentKind[]).map((kind) => {
             const count = marks.filter((m) => m.kind === kind).length
             return (
-              <button
+              <Button
                 key={kind}
                 type="button"
+                variant="outline"
                 onClick={() => mark(kind)}
-                className="flex h-20 flex-col items-center justify-center gap-1 rounded-3xl border bg-card text-sm font-semibold shadow-sm transition-transform active:scale-95 motion-reduce:transition-none"
+                className="relative h-20 flex-col gap-1.5 rounded-3xl bg-card text-sm font-semibold shadow-sm active:scale-95 motion-reduce:transition-none"
               >
-                <MomentIcon kind={kind} className="size-5" />
+                <MomentIcon kind={kind} className="size-5 text-foreground" />
                 {MOMENT_LOOK[kind].label}
-                <span className="h-4 text-xs font-medium text-muted-foreground tabular-nums">
-                  {count ? `${count} marked` : ""}
-                </span>
-              </button>
+                {count > 0 && (
+                  <span
+                    className="absolute -top-2 -right-2 flex size-6 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground tabular-nums"
+                    aria-label={`${count} marked`}
+                  >
+                    {count}
+                  </span>
+                )}
+              </Button>
             )
           })}
         </div>
@@ -1076,13 +1077,13 @@ function Recorder() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep recording</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={() => up("/meetings")}>
+            <AlertDialogAction variant="destructive" onClick={onClose}>
               Discard
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </FullscreenPopup>
   )
 }
 
@@ -1167,6 +1168,7 @@ function MeetingView() {
   const meeting = useMeeting(id)
   const navigate = useNavigate()
   const { up } = useNav()
+  const beside = Boolean(useMeetingsPane())
   const now = useNow()
   const scroller = useRef<HTMLDivElement>(null)
   const back = useCallback(() => up("/meetings"), [up])
@@ -1191,7 +1193,7 @@ function MeetingView() {
     <div className="flex min-h-0 flex-1 flex-col">
       <div ref={scroller} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <Header
-          leading={<BackButton onClick={back} label="Back to Meetings" />}
+          leading={beside ? null : <BackButton onClick={back} label="Back to Meetings" />}
           title={
             <h1 className="truncate text-base font-semibold tracking-tight">{meeting.title}</h1>
           }
@@ -1670,9 +1672,9 @@ function AskBar({ meeting }: { meeting: Meeting }) {
   return (
     <div
       data-toast-above
-      className="border-t bg-background/90 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur"
+      className="border-t bg-background/90 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur"
     >
-      <div className="mx-auto flex max-w-2xl flex-col gap-2.5">
+      <div className="mx-auto flex max-w-2xl flex-col gap-2.5 px-4">
         {!meeting.chat?.length && (
           <div className="-mx-4 flex [scrollbar-width:none] gap-2 overflow-x-auto px-4">
             {PROMPTS.map(({ icon: Icon, text: prompt }) => (
@@ -1889,57 +1891,59 @@ function TopicView({ meeting, recap, topic }: { meeting: Meeting; recap: Recap; 
 
       <div
         data-toast-above
-        className="px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+        className="pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
         aria-label="Player"
       >
-        <div className="mx-auto flex max-w-2xl flex-col gap-2 rounded-3xl border bg-card px-3 py-2.5 shadow-lg">
-          <div className="flex items-center gap-3">
-            <Button
-              size="icon-lg"
-              className="size-11 shrink-0 rounded-full bg-foreground text-background hover:bg-foreground/90"
-              aria-label={running ? "Pause" : "Play"}
-              onClick={() => {
-                if (position >= topic.end) setPosition(topic.start)
-                setPlaying(!running)
-              }}
-            >
-              {running ? (
-                <PauseIcon className="fill-current" />
-              ) : (
-                <PlayIcon className="ml-0.5 fill-current" />
-              )}
-            </Button>
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate text-sm font-semibold">{topic.title}</span>
-              <span className="text-xs text-muted-foreground tabular-nums">
-                {clock(position)} / {clock(meeting.duration)}
-              </span>
-            </span>
-            <Button
-              variant="secondary"
-              className="h-11 min-w-14 shrink-0 rounded-full tabular-nums"
-              aria-label={`Speed ${speed}×`}
-              onClick={() => setSpeed(SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length])}
-            >
-              {speed}×
-            </Button>
-          </div>
-          <span className="flex h-1 gap-0.5" aria-hidden>
-            {recap.topics.map((t, i) => (
-              <span
-                key={t.id}
-                className="relative overflow-hidden rounded-full bg-muted"
-                style={{ flexGrow: Math.max(1, t.end - t.start), flexBasis: 0 }}
+        <div className="mx-auto max-w-2xl px-4">
+          <div className="flex flex-col gap-2 rounded-3xl border bg-card px-3 py-2.5 shadow-lg">
+            <div className="flex items-center gap-3">
+              <Button
+                size="icon-lg"
+                className="size-11 shrink-0 rounded-full bg-foreground text-background hover:bg-foreground/90"
+                aria-label={running ? "Pause" : "Play"}
+                onClick={() => {
+                  if (position >= topic.end) setPosition(topic.start)
+                  setPlaying(!running)
+                }}
               >
-                <span
-                  className={cn("absolute inset-y-0 left-0", tone(i).dot)}
-                  style={{
-                    width: `${Math.min(100, Math.max(0, ((position - t.start) / Math.max(1, t.end - t.start)) * 100))}%`,
-                  }}
-                />
+                {running ? (
+                  <PauseIcon className="fill-current" />
+                ) : (
+                  <PlayIcon className="ml-0.5 fill-current" />
+                )}
+              </Button>
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-sm font-semibold">{topic.title}</span>
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  {clock(position)} / {clock(meeting.duration)}
+                </span>
               </span>
-            ))}
-          </span>
+              <Button
+                variant="secondary"
+                className="h-11 min-w-14 shrink-0 rounded-full tabular-nums"
+                aria-label={`Speed ${speed}×`}
+                onClick={() => setSpeed(SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length])}
+              >
+                {speed}×
+              </Button>
+            </div>
+            <span className="flex h-1 gap-0.5" aria-hidden>
+              {recap.topics.map((t, i) => (
+                <span
+                  key={t.id}
+                  className="relative overflow-hidden rounded-full bg-muted"
+                  style={{ flexGrow: Math.max(1, t.end - t.start), flexBasis: 0 }}
+                >
+                  <span
+                    className={cn("absolute inset-y-0 left-0", tone(i).dot)}
+                    style={{
+                      width: `${Math.min(100, Math.max(0, ((position - t.start) / Math.max(1, t.end - t.start)) * 100))}%`,
+                    }}
+                  />
+                </span>
+              ))}
+            </span>
+          </div>
         </div>
       </div>
     </div>

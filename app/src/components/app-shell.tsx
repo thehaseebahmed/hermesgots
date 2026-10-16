@@ -16,14 +16,14 @@ import { DrawerContext } from "@/components/drawer-context"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { useLarge, useWide } from "@/lib/media"
 import { depth } from "@/lib/nav"
-import { useProjectPane } from "@/lib/pane"
+import { useMeetingsPane, useProjectPane } from "@/lib/pane"
 import { useSidebarCollapsed } from "@/lib/sidebar"
 import { useBotPane, useBotThreads } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 
 /**
  * A list kept on screen, from `xl`, beside what it opened: a project beside its session, or a bot
- * beside its thread. `screen` is the list's own path.
+ * beside its thread, or the meetings beside one meeting. `screen` is the list's own path.
  */
 interface ListPane {
   screen: string
@@ -42,6 +42,9 @@ function screenOf(path: string, large: boolean, pane: ListPane | undefined) {
 
 const BotThreadsPage = lazy(() =>
   import("@/routes/bot-threads").then((m) => ({ default: m.BotThreadsPage })),
+)
+const MeetingsPane = lazy(() =>
+  import("@/routes/meetings").then((m) => ({ default: m.MeetingsPane })),
 )
 const ProjectPage = lazy(() => import("@/routes/project").then((m) => ({ default: m.ProjectPage })))
 
@@ -125,6 +128,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
   const main = useRef<HTMLElement>(null)
   const project = useProjectPane()
   const bot = useBotPane(useBotThreads())
+  const meetings = useMeetingsPane()
   const pane: ListPane | undefined = project
     ? {
         screen: `/code/${project.profileId}/${project.projectId}`,
@@ -137,11 +141,19 @@ export function AppShell({ children }: { children?: ReactNode }) {
           />
         ),
       }
-    : bot && {
-        screen: `/b/${bot.profileId}`,
-        open: Boolean(bot.thread),
-        node: <BotThreadsPage key={bot.profileId} profileId={bot.profileId} thread={bot.thread} />,
-      }
+    : bot
+      ? {
+          screen: `/b/${bot.profileId}`,
+          open: Boolean(bot.thread),
+          node: (
+            <BotThreadsPage key={bot.profileId} profileId={bot.profileId} thread={bot.thread} />
+          ),
+        }
+      : meetings && {
+          screen: "/meetings",
+          open: meetings.open,
+          node: <MeetingsPane pane={meetings} />,
+        }
   usePageTransition(main, pane)
 
   return (
