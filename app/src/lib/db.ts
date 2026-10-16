@@ -585,16 +585,16 @@ db.version(11).stores({ codingRankings: "id" })
 // v12: a recording waiting for its text is kept, under its composer's draft key.
 db.version(12).stores({ dictations: "id" })
 
-// v14: BenchLM overall rankings replace the coding cache. The coding table is dropped; the cache is
-// disposable (24-hour TTL), so the next picker open refetches the overall payload.
-db.version(14).stores({ codingRankings: null, overallRankings: "id" })
-
 // v13: indexes for what was found by reading every row: streaming replies at launch, a chat by its
 // Hermes session (push taps, change events), a thread's replies by role, and the newest change.
 db.version(13).stores({
   conversations: "id, updatedAt, [profileId+updatedAt], projectId, hermesSessionId, changedAt",
   messages: "id, conversationId, [conversationId+createdAt], status, [conversationId+role]",
 })
+
+// v14: BenchLM overall rankings replace the coding cache. The coding table is dropped; the cache is
+// disposable (24-hour TTL), so the next picker open refetches the overall payload.
+db.version(14).stores({ codingRankings: null, overallRankings: "id" })
 
 db.on("populate", (tx) => seedProfile(tx))
 
