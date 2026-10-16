@@ -6,7 +6,21 @@
  * work: the sheet pauses it, resumes it or clears it, and reads back the contract, the quality gates
  * and the judge's last word.
  */
-import { CheckIcon, CircleSlashIcon, ClockIcon, TargetIcon, XIcon } from "lucide-react"
+import { useState } from "react"
+import {
+  CheckIcon,
+  ChevronDownIcon,
+  CircleSlashIcon,
+  ClockIcon,
+  FlagIcon,
+  ListChecksIcon,
+  MapPinOffIcon,
+  OctagonPauseIcon,
+  SignpostIcon,
+  SquareTerminalIcon,
+  TargetIcon,
+  XIcon,
+} from "lucide-react"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
@@ -60,52 +74,75 @@ export function GoalPill({ goal, onClick }: { goal: Goal; onClick: () => void })
   )
 }
 
-/** The goal itself, as the sheet and the card read it back. */
+/** The goal itself, as the sheet and the card read it back. One field at a time, not all at once:
+ * the task is always visible, the contract's other fields fold behind a disclosure. */
 function GoalDetail({ goal }: { goal: Goal }) {
+  const [expanded, setExpanded] = useState(false)
   const fields = [
-    ["Outcome", goal.contract.outcome],
-    ["Prove it with", goal.contract.verification],
-    ["Constraints", goal.contract.constraints],
-    ["Boundaries", goal.contract.boundaries],
-    ["Stop and ask when", goal.contract.stopWhen],
-  ].filter(([, value]) => value) as [string, string][]
+    [SignpostIcon, "Outcome", goal.contract.outcome],
+    [SquareTerminalIcon, "Prove it with", goal.contract.verification],
+    [ListChecksIcon, "Constraints", goal.contract.constraints],
+    [MapPinOffIcon, "Boundaries", goal.contract.boundaries],
+    [FlagIcon, "Stop and ask when", goal.contract.stopWhen],
+  ].filter(([, , value]) => value) as [typeof SignpostIcon, string, string][]
+  const hasMore = fields.length > 0 || goal.subgoals.length > 0 || goal.gates.length > 0
   return (
     <div className="flex flex-col gap-4">
       <p className="text-[15px] leading-6 whitespace-pre-wrap">{goal.text}</p>
-      {(fields.length > 0 || goal.subgoals.length > 0) && (
-        <dl className="flex flex-col gap-3">
-          {fields.map(([label, value]) => (
-            <div key={label} className="flex flex-col gap-0.5">
-              <dt className="text-sm text-muted-foreground">{label}</dt>
-              <dd className="text-[15px] leading-6">{value}</dd>
-            </div>
-          ))}
+      {hasMore && !expanded && (
+        <Button
+          type="button"
+          variant="secondary"
+          className="h-10 w-fit gap-2 rounded-full px-4"
+          onClick={() => setExpanded(true)}
+        >
+          <ChevronDownIcon className="size-4" />
+          Show the contract and gates
+        </Button>
+      )}
+      {expanded && (
+        <div className="flex flex-col gap-5">
+          {fields.length > 0 && (
+            <dl className="flex flex-col gap-3">
+              {fields.map(([Icon, label, value]) => (
+                <div key={label} className="flex items-start gap-2.5">
+                  <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+                  <div className="flex min-w-0 flex-col gap-0.5">
+                    <dt className="text-sm text-muted-foreground">{label}</dt>
+                    <dd className="text-[15px] leading-6">{value}</dd>
+                  </div>
+                </div>
+              ))}
+            </dl>
+          )}
           {goal.subgoals.length > 0 && (
-            <div className="flex flex-col gap-0.5">
-              <dt className="text-sm text-muted-foreground">Steps so far</dt>
-              <dd>
+            <div className="flex items-start gap-2.5">
+              <ListChecksIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+              <div className="flex min-w-0 flex-col gap-0.5">
+                <span className="text-sm text-muted-foreground">Steps so far</span>
                 <ul className="list-disc pl-5 text-[15px] leading-6">
                   {goal.subgoals.map((subgoal) => (
                     <li key={subgoal}>{subgoal}</li>
                   ))}
                 </ul>
-              </dd>
+              </div>
             </div>
           )}
-        </dl>
-      )}
-      {goal.gates.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <span className="text-sm text-muted-foreground">Quality gates</span>
-          <ul className="flex flex-col gap-1">
-            {goal.gates.map((gate) => (
-              <GateRow key={gate.command} gate={gate} />
-            ))}
-          </ul>
+          {goal.gates.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <span className="text-sm text-muted-foreground">Quality gates</span>
+              <ul className="flex flex-col gap-1.5">
+                {goal.gates.map((gate) => (
+                  <GateRow key={gate.command} gate={gate} />
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
       {goal.reason && (
-        <p className="text-sm text-muted-foreground">
+        <p className="flex items-start gap-2 text-sm text-muted-foreground">
+          <TargetIcon className="mt-0.5 size-4 shrink-0" aria-hidden />
           {goal.verdict === "blocked" ? "The judge stopped it: " : "The judge said: "}
           {goal.reason}
         </p>
@@ -172,23 +209,24 @@ export function GoalCard({
   return (
     <Card size="sm" className={CARD}>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
+        <CardTitle className="flex items-center gap-2.5 text-base">
           {paused ? (
-            <CircleSlashIcon className="size-5 text-warning" />
+            <OctagonPauseIcon className="size-5 text-warning" />
           ) : (
-            <TargetIcon className="size-5 text-warning" />
+            <CircleSlashIcon className="size-5 text-warning" />
           )}
           {paused ? "Goal paused" : "Goal blocked"}
         </CardTitle>
       </CardHeader>
-      <CardContent className="flex flex-col gap-1">
+      <CardContent className="flex flex-col gap-1.5">
         <p className="text-[15px] font-medium">{goal.text.split("\n")[0]}</p>
         <p className="text-sm text-muted-foreground">
           {goal.pausedReason ?? goal.reason ?? "It needs you before it can go on."}
         </p>
       </CardContent>
       <CardFooter className="flex flex-col items-stretch gap-2 sm:flex-row-reverse sm:flex-wrap">
-        <Button size="lg" className="h-11" disabled={!profile} onClick={() => void resume()}>
+        <Button size="lg" className="h-11 gap-2" disabled={!profile} onClick={() => void resume()}>
+          <CheckIcon className="size-4" />
           Resume
         </Button>
         <Button variant="secondary" size="lg" className="h-11" onClick={onOpen}>
@@ -254,22 +292,26 @@ export function GoalSheet({
             )}
           </div>
           <GoalDetail goal={goal} />
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 pt-1">
             {goal.status === "paused" ? (
-              <Button disabled={!profile} onClick={() => void act("resume")}>
+              <Button className="gap-2" disabled={!profile} onClick={() => void act("resume")}>
+                <CheckIcon className="size-4" />
                 Resume
               </Button>
             ) : (
               <Button
                 variant="secondary"
+                className="gap-2"
                 disabled={!profile || goal.status !== "active"}
                 onClick={() => void act("pause")}
               >
+                <OctagonPauseIcon className="size-4" />
                 Pause
               </Button>
             )}
             <Button
               variant="ghost"
+              className="gap-2"
               disabled={!profile}
               onClick={() =>
                 answer(async () => {
@@ -279,6 +321,7 @@ export function GoalSheet({
                 })
               }
             >
+              <XIcon className="size-4" />
               Clear
             </Button>
           </div>

@@ -48,8 +48,11 @@ await flow("goal-pill", async ({ page, seed, shot, until }) => {
   )
   const shown = await sheet.innerText()
   assert.match(shown, /make the maze's timer survive a page reload/, "the goal reads back")
-  assert.match(shown, /pnpm lint/, "its quality gate rides along")
-  assert.match(shown, /reloading mid-run keeps the clock/, "and its contract")
+  await sheet.getByRole("button", { name: /Show the contract and gates/ }).click()
+  await sheet.getByText("pnpm lint", { exact: true }).waitFor({ timeout: 5_000 })
+  const expanded = await sheet.innerText()
+  assert.match(expanded, /pnpm lint/, "its quality gate rides along")
+  assert.match(expanded, /reloading mid-run keeps the clock/, "and its contract")
   await shot("sheet")
 
   // Pausing parks the goal: the sheet closes and the card waits on the user.

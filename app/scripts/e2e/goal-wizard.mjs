@@ -34,6 +34,7 @@ await flow("goal-wizard", async ({ page, seed, shot, until }) => {
   await page.getByLabel("Prove it with").fill("pnpm test")
   await page.getByLabel("A gate command").fill("pnpm lint")
   await page.getByRole("button", { name: "Add" }).click()
+  await page.getByRole("button", { name: /More options/ }).click()
   await page.getByRole("radio", { name: "One", exact: true }).click()
   await page.getByRole("radio", { name: "Code", exact: true }).click()
 

@@ -10,7 +10,21 @@
  * keeps going with the app closed.
  */
 import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { PlusIcon, XIcon } from "lucide-react"
+import {
+  ChevronDownIcon,
+  ClockIcon,
+  CodeIcon,
+  EyeIcon,
+  FlagIcon,
+  ListChecksIcon,
+  MapPinOffIcon,
+  PlusIcon,
+  ShieldCheckIcon,
+  SignpostIcon,
+  SquareTerminalIcon,
+  UsersIcon,
+  XIcon,
+} from "lucide-react"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
@@ -50,15 +64,20 @@ const REVIEWER_COUNTS = Array.from({ length: MAX_REVIEWERS + 1 }, (_, n) => n)
 function Field({
   label,
   hint,
+  icon: Icon,
   children,
 }: {
   label: string
   hint?: string
+  icon?: typeof PlusIcon
   children: ReactNode
 }) {
   return (
     <label className="flex flex-col gap-2">
-      <span className="text-sm font-medium">{label}</span>
+      <span className="flex items-center gap-2 text-sm font-medium">
+        {Icon && <Icon className="size-4 text-muted-foreground" aria-hidden />}
+        {label}
+      </span>
       {hint && <span className="-mt-1 text-sm text-muted-foreground">{hint}</span>}
       {children}
     </label>
@@ -150,6 +169,7 @@ export function GoalWizard({
   const [gate, setGate] = useState("")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [more, setMore] = useState(false)
   const skills = useSkillNames(profile, open)
 
   const set = <K extends keyof GoalSpec>(key: K, value: GoalSpec[K]) =>
@@ -196,7 +216,7 @@ export function GoalWizard({
             going on its own until it's done, it's out of turns, or it needs you.
           </p>
 
-          <Field label="What to work towards" hint="One line. This is the goal itself.">
+          <Field label="What to work towards" hint="One line. This is the goal itself." icon={SignpostIcon}>
             <Textarea
               value={spec.task}
               onChange={(event) => set("task", event.target.value)}
@@ -206,7 +226,7 @@ export function GoalWizard({
             />
           </Field>
 
-          <Field label="Done when" hint="What finished looks like. Left out, the goal above is it.">
+          <Field label="Done when" hint="What finished looks like. Left out, the goal above is it." icon={FlagIcon}>
             <Input
               value={spec.outcome}
               onChange={(event) => set("outcome", event.target.value)}
@@ -215,7 +235,7 @@ export function GoalWizard({
             />
           </Field>
 
-          <Field label="Prove it with" hint="The command that has to pass. One line.">
+          <Field label="Prove it with" hint="The command that has to pass. One line." icon={SquareTerminalIcon}>
             <Input
               value={spec.verification}
               onChange={(event) => set("verification", event.target.value)}
@@ -225,7 +245,10 @@ export function GoalWizard({
           </Field>
 
           <div className="flex flex-col gap-2">
-            <span className="text-sm font-medium">Quality gates</span>
+            <span className="flex items-center gap-2 text-sm font-medium">
+              <ListChecksIcon className="size-4 text-muted-foreground" aria-hidden />
+              Quality gates
+            </span>
             <span className="-mt-1 text-sm text-muted-foreground">
               Commands the plugin runs in the session's folder before the goal can be called done.
             </span>
@@ -275,116 +298,152 @@ export function GoalWizard({
             </div>
           </div>
 
-          <Field label="Constraints" hint="Anything else it has to respect.">
-            <Textarea
-              value={spec.constraints}
-              onChange={(event) => set("constraints", event.target.value)}
-              placeholder="Keep the existing design; no new dependencies"
-              className="min-h-20 leading-6"
-            />
-          </Field>
+          {!more && (
+            <Button
+              type="button"
+              variant="secondary"
+              className="h-10 w-fit gap-2 self-start rounded-full px-4"
+              onClick={() => setMore(true)}
+            >
+              <ChevronDownIcon className="size-4" />
+              More options: constraints, reviewers, turn budget
+            </Button>
+          )}
 
-          <Field label="Boundaries" hint="What it must not touch.">
-            <Input
-              value={spec.boundaries}
-              onChange={(event) => set("boundaries", event.target.value)}
-              className="h-11"
-            />
-          </Field>
+          {more && (
+            <div className="flex flex-col gap-6 border-t pt-6">
+              <Field label="Constraints" hint="Anything else it has to respect." icon={ShieldCheckIcon}>
+                <Textarea
+                  value={spec.constraints}
+                  onChange={(event) => set("constraints", event.target.value)}
+                  placeholder="Keep the existing design; no new dependencies"
+                  className="min-h-20 leading-6"
+                />
+              </Field>
 
-          <Field label="Stop and ask when" hint="When it should come back to you instead of guessing.">
-            <Input
-              value={spec.stopWhen}
-              onChange={(event) => set("stopWhen", event.target.value)}
-              placeholder="A schema change is needed"
-              className="h-11"
-            />
-          </Field>
+              <Field label="Boundaries" hint="What it must not touch." icon={MapPinOffIcon}>
+                <Input
+                  value={spec.boundaries}
+                  onChange={(event) => set("boundaries", event.target.value)}
+                  className="h-11"
+                />
+              </Field>
 
-          <div className="flex flex-col gap-2">
-            <span className="text-sm font-medium">Reviews</span>
-            <span className="-mt-1 text-sm text-muted-foreground">
-              Reviewers look at the work in subagents of their own before it's called done.
-            </span>
-            <Segmented
-              label="Reviewers"
-              options={REVIEWER_COUNTS.map((n) => ({
-                id: n,
-                label: n === 0 ? "None" : n === 1 ? "One" : `${n}`,
-              }))}
-              value={spec.reviewers}
-              onChange={(value) => set("reviewers", value)}
-            />
-            {spec.reviewers > 0 && (
-              <>
+              <Field
+                label="Stop and ask when"
+                hint="When it should come back to you instead of guessing."
+                icon={FlagIcon}
+              >
+                <Input
+                  value={spec.stopWhen}
+                  onChange={(event) => set("stopWhen", event.target.value)}
+                  placeholder="A schema change is needed"
+                  className="h-11"
+                />
+              </Field>
+
+              <div className="flex flex-col gap-2">
+                <span className="flex items-center gap-2 text-sm font-medium">
+                  <UsersIcon className="size-4 text-muted-foreground" aria-hidden />
+                  Reviews
+                </span>
+                <span className="-mt-1 text-sm text-muted-foreground">
+                  Reviewers look at the work in subagents of their own before it's called done.
+                </span>
                 <Segmented
-                  label="What they look at"
-                  options={REVIEW_KINDS.map(({ id, label }) => ({ id, label }))}
-                  value={spec.reviewKind}
-                  onChange={(value) => set("reviewKind", value)}
+                  label="Reviewers"
+                  options={REVIEWER_COUNTS.map((n) => ({
+                    id: n,
+                    label: n === 0 ? "None" : n === 1 ? "One" : `${n}`,
+                  }))}
+                  value={spec.reviewers}
+                  onChange={(value) => set("reviewers", value)}
                 />
-                {skills.length > 0 && (
-                  <div className="flex flex-wrap gap-1 pt-1">
-                    {skills.slice(0, 6).map((skill) => (
-                      <button
-                        key={skill.name}
-                        type="button"
-                        onClick={() =>
-                          set(
-                            "reviewSkill",
-                            spec.reviewSkill === skill.name ? "" : skill.name,
-                          )
-                        }
-                        className={cn(
-                          "rounded-full border px-3 py-1 text-sm",
-                          spec.reviewSkill === skill.name
-                            ? "border-primary/40 bg-primary/10 text-foreground"
-                            : "text-muted-foreground",
-                        )}
-                      >
-                        {skill.name}
-                      </button>
-                    ))}
-                  </div>
+                {spec.reviewers > 0 && (
+                  <>
+                    <Segmented
+                      label="What they look at"
+                      options={REVIEW_KINDS.map(({ id, label }) => ({ id, label }))}
+                      value={spec.reviewKind}
+                      onChange={(value) => set("reviewKind", value)}
+                    />
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      {spec.reviewKind === "visual" ? (
+                        <EyeIcon className="size-4" aria-hidden />
+                      ) : (
+                        <CodeIcon className="size-4" aria-hidden />
+                      )}
+                      {spec.reviewKind === "visual"
+                        ? "Checks how it looks"
+                        : spec.reviewKind === "both"
+                          ? "Checks the code and how it looks"
+                          : "Checks the code"}
+                    </div>
+                    {skills.length > 0 && (
+                      <div className="flex flex-wrap gap-1 pt-1">
+                        {skills.slice(0, 6).map((skill) => (
+                          <button
+                            key={skill.name}
+                            type="button"
+                            onClick={() =>
+                              set(
+                                "reviewSkill",
+                                spec.reviewSkill === skill.name ? "" : skill.name,
+                              )
+                            }
+                            className={cn(
+                              "rounded-full border px-3 py-1 text-sm",
+                              spec.reviewSkill === skill.name
+                                ? "border-primary/40 bg-primary/10 text-foreground"
+                                : "text-muted-foreground",
+                            )}
+                          >
+                            {skill.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <Input
+                      value={spec.reviewSkill}
+                      onChange={(event) => set("reviewSkill", event.target.value)}
+                      placeholder="A skill to review with, e.g. requesting-code-review"
+                      className="h-11"
+                      aria-label="Review skill"
+                    />
+                    <Input
+                      value={spec.reviewPrompt}
+                      onChange={(event) => set("reviewPrompt", event.target.value)}
+                      placeholder="Or a brief of your own for them"
+                      className="h-11"
+                      aria-label="Review brief"
+                    />
+                  </>
                 )}
-                <Input
-                  value={spec.reviewSkill}
-                  onChange={(event) => set("reviewSkill", event.target.value)}
-                  placeholder="A skill to review with, e.g. requesting-code-review"
-                  className="h-11"
-                  aria-label="Review skill"
-                />
-                <Input
-                  value={spec.reviewPrompt}
-                  onChange={(event) => set("reviewPrompt", event.target.value)}
-                  placeholder="Or a brief of your own for them"
-                  className="h-11"
-                  aria-label="Review brief"
-                />
-              </>
-            )}
-          </div>
+              </div>
 
-          <Field
-            label="Turn budget"
-            hint={`How many turns it may take before it pauses for you. 1 to ${MAX_TURNS}.`}
-          >
-            <Input
-              type="number"
-              min={1}
-              max={MAX_TURNS}
-              value={String(spec.maxTurns)}
-              onChange={(event) => set("maxTurns", Number(event.target.value) || 0)}
-              className="h-11 w-28"
-            />
-          </Field>
+              <Field
+                label="Turn budget"
+                hint={`How many turns it may take before it pauses for you. 1 to ${MAX_TURNS}.`}
+                icon={ClockIcon}
+              >
+                <Input
+                  type="number"
+                  min={1}
+                  max={MAX_TURNS}
+                  value={String(spec.maxTurns)}
+                  onChange={(event) => set("maxTurns", Number(event.target.value) || 0)}
+                  className="h-11 w-28"
+                />
+              </Field>
 
-          <div className="flex flex-col gap-2 rounded-2xl bg-muted/60 p-3">
-            <span className="text-sm font-medium">What gets set</span>
-            <pre className="max-h-56 overflow-auto text-sm leading-6 whitespace-pre-wrap">
-              {preview || "—"}
-            </pre>
-          </div>
+              <div className="flex flex-col gap-2 rounded-2xl bg-muted/60 p-3">
+                <span className="text-sm font-medium">What gets set</span>
+                <pre className="max-h-56 overflow-auto text-sm leading-6 whitespace-pre-wrap">
+                  {preview || "—"}
+                </pre>
+              </div>
+            </div>
+          )}
 
           {error && (
             <p role="alert" className="text-sm text-destructive">
