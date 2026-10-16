@@ -930,6 +930,8 @@ async function prepareSend(
   if (!profile) return undefined
   const history = await getMessages(conversationId)
   const now = nextAt(history)
+  // The pick in effect, not the profile's advertised default name, which isn't a model id.
+  const sent = conversation.modelChoice ?? profile.modelChoice
   const userMessage: Message = {
     id: queuedId ?? randomId(),
     conversationId,
@@ -947,6 +949,9 @@ async function prepareSend(
     tools: [],
     status: "streaming",
     createdAt: now + 1,
+    // What this device sends the turn with, when the chat has a model picked: its thread places
+    // the turn by it where the host's own record doesn't cover it yet.
+    ...(sent?.model ? { model: sent.model } : {}),
   }
 
   await db.transaction("rw", db.messages, db.conversations, async () => {

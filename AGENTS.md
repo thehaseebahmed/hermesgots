@@ -94,6 +94,7 @@ PR titles follow the same format. Fill in `.github/pull_request_template.md` for
 | `src/lib/media-tags.ts` | Images the agent returns in a reply: its `MEDIA:<path>` tags split out of the text (tags sent together come out as one gallery), each read from the plugin's media route |
 | `src/lib/pricing.ts` | Claude API prices by model id and a project's estimated cost from its token counts |
 | `src/lib/context.ts` | Reads a chat's context use from the Gots plugin |
+| `src/lib/model-changes.ts` | Where a chat's model changed, as its host recorded it: the pure placement rules its thread draws a divider from (`scripts/test-model-changes.mjs`) |
 | `src/lib/provider-usage.ts` | Reads a bot's provider account-usage windows (plan limits, resets) from the Gots plugin, cached on the profile; the banner's notice, its dismiss key and the reset text |
 | `src/lib/agents.ts` | The agents a chat delegated to (`useSessionAgents`, from the plugin), matching each to its `delegate_task` call, and their names |
 | `src/lib/todos.ts` | Reads the agent's todo list for a chat from the Gots plugin (and from a run's live `todo_list` events) |

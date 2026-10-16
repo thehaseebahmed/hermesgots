@@ -1219,13 +1219,23 @@ export async function mergeChatList<T>(
   return body.chats
 }
 
+/** A model one of a chat's calls ran on, as its host recorded it. */
+export interface ModelChange {
+  /** When that call ran, on the host's own clock. */
+  at: number
+  model: string
+  provider?: string
+}
+
 export interface SessionContext {
   /** Prompt tokens of the session's latest model call. */
-  tokens: number
+  tokens?: number
   /** The context window Hermes runs that model with. */
   window?: number
   /** The model that ran the call, as Hermes names it, so the app can tell a switch from it. */
   model?: string
+  /** Every model the session's calls ran on, oldest first, so its thread can show where it changed. */
+  modelChanges?: ModelChange[]
 }
 
 /**
@@ -1245,7 +1255,33 @@ export async function getSessionContext(
     typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined
   const tokens = count(body?.prompt_tokens)
   const model = typeof body?.model === "string" && body.model ? body.model : undefined
-  return tokens ? { tokens, window: count(body?.context_length), model } : null
+  const modelChanges = readChanges(body?.model_changes)
+  // A host that recorded a change but no figure for it still has the list worth showing.
+  if (!tokens && !modelChanges) return null
+  return {
+    ...(tokens ? { tokens } : {}),
+    window: count(body?.context_length),
+    model,
+    ...(modelChanges ? { modelChanges } : {}),
+  }
+}
+
+/** The plugin's `model_changes`, dropping anything that isn't a row. */
+function readChanges(value: unknown): ModelChange[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const changes: ModelChange[] = []
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue
+    const row = raw as Record<string, unknown>
+    if (typeof row.model !== "string" || !row.model) continue
+    if (typeof row.at !== "number" || !Number.isFinite(row.at)) continue
+    changes.push({
+      at: row.at,
+      model: row.model,
+      ...(typeof row.provider === "string" && row.provider ? { provider: row.provider } : {}),
+    })
+  }
+  return changes.length ? changes : undefined
 }
 
 export interface UsageWindow {
