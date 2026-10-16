@@ -34,7 +34,7 @@ import { formatTokens } from "@/lib/format"
 import type { Fallback, ModelProvider } from "@/lib/hermes"
 import { fullModel, hostChoice, shortModel, useModelInfo } from "@/lib/model-info"
 import { modelFacts, useModelCatalog, type Catalog } from "@/lib/models"
-import { isRankings, overallScoreOf, useOverallRankings, type RankingsPayload } from "@/lib/rankings"
+import { overallScoreOf, useOverallRankings, type RankingsPayload } from "@/lib/rankings"
 import { cn } from "@/lib/utils"
 
 /**
@@ -62,7 +62,7 @@ export function ModelPicker({
   const [sort, setSort] = useState<ModelSort>("name")
   // The cached models.dev catalog, live: each row's facts repaint when a refresh lands.
   const catalog = useModelCatalog()
-  // The cached BenchLM coding rankings, live: each row's score repaints when a refresh lands.
+  // The cached BenchLM overall rankings, live: each row's score repaints when a refresh lands.
   const rankings = useOverallRankings()
   const sorted = useMemo(() => sortProviders(providers), [providers])
   // A host with one provider has nothing to choose between, so its models show at once.
@@ -79,14 +79,17 @@ export function ModelPicker({
       .map((p) => {
         const haystack = (m: string) => `${p.name} ${p.slug} ${m}`.toLowerCase()
         const matched = p.models.filter((m) => words.every((w) => haystack(m).includes(w)))
-        // Price ranks by the blended cost, context by the window, BenchLM by the coding score.
+        // Price ranks by the blended cost, context by the window, BenchLM by the overall score.
         return {
           ...p,
           models: sortByFacts(
             sort,
             (m) => ({
               ...modelFacts(catalog, { provider: p.slug, model: m }),
-              benchlm: overallScoreOf(rankings, { provider: p.slug, model: m }),
+              benchlm:
+                sort === "benchlm"
+                  ? overallScoreOf(rankings, { provider: p.slug, model: m })
+                  : undefined,
             }),
             matched,
           ),
@@ -359,10 +362,17 @@ function CapabilityIcon({ label, Icon }: { label: string; Icon: LucideIcon }) {
   )
 }
 
+/** `BenchLM 87`, `BenchLM ?` for a loaded payload with no row, nothing before the payload lands. */
+function benchlmLabel(score: number | undefined, rankings: RankingsPayload | undefined) {
+  if (score !== undefined) return `BenchLM ${Math.round(score)}`
+  // "?" only once the payload is loaded: before that, no score is shown rather than a false miss.
+  return rankings ? "BenchLM ?" : null
+}
+
 /**
  * A model row's muted second line: what models.dev and BenchLM say about it
- * (`BenchLM 87 · 1M · vision · $$$`), `—` when neither lists anything, and no line at all
- * while the catalog is still loading.
+ * (`BenchLM 87 · 1M · <capability icons> · $$$`), `—` when neither lists anything, and no line at
+ * all while the catalog is still loading.
  */
 function modelDetail(
   catalog: Catalog | undefined,
@@ -371,14 +381,7 @@ function modelDetail(
 ) {
   if (!catalog) return undefined
   const { context, vision, reasoning, tier } = modelFacts(catalog, choice)
-  const score = overallScoreOf(rankings, choice)
-  // "?" only once the payload is loaded: before that, no score is shown rather than a false miss.
-  const benchlm =
-    score !== undefined
-      ? `BenchLM ${Math.round(score)}`
-      : rankings && isRankings(rankings)
-        ? "BenchLM ?"
-        : null
+  const benchlm = benchlmLabel(overallScoreOf(rankings, choice), rankings)
   const parts = [
     benchlm,
     context ? formatTokens(context) : null,

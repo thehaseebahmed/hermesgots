@@ -15,7 +15,7 @@ export interface RankingsPayload {
 }
 
 /** The cached payload must carry an items array to be useful. */
-export function isRankings(data: unknown): data is RankingsPayload {
+function isRankings(data: unknown): data is RankingsPayload {
   if (typeof data !== "object" || data === null || Array.isArray(data)) return false
   const items = (data as Record<string, unknown>).items
   return Array.isArray(items)
