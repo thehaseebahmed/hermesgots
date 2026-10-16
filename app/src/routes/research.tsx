@@ -646,7 +646,7 @@ function MissionMenu({
         </PopupContent>
       </Popup>
       <Popup open={rewriting && canRewrite} onOpenChange={setRewriting}>
-        <PopupContent initialFocus={false} className={PICKER_HEIGHT}>
+        <PopupContent initialFocus={false} fixedHeight={PICKER_HEIGHT}>
           <RewritePicker mission={mission} onDone={() => setRewriting(false)} />
         </PopupContent>
       </Popup>

@@ -175,11 +175,15 @@ const MENU_SIZE: Record<PopupSize, string> = {
 
 export function PopupContent({
   className,
+  fixedHeight,
   size = "lg",
   children,
   initialFocus,
 }: {
   className?: string
+  /** A sheet's height that holds between views of its content (a picker's list, then a provider's
+   * models). A menu fits its content instead, so it keeps no empty room under a short view. */
+  fixedHeight?: string
   /** The sheet's or menu's width; a drawer is a third of the viewport whatever this is. */
   size?: PopupSize
   children: ReactNode
@@ -290,6 +294,7 @@ export function PopupContent({
             className={cn(
               "group/popup relative flex max-h-[85dvh] w-full max-w-[640px] flex-col overflow-hidden rounded-t-[28px] bg-popover pb-[max(1.5rem,env(safe-area-inset-bottom))] text-sm text-popover-foreground shadow-lg outline-none",
               SHEET_SIZE[size],
+              fixedHeight,
               // A sheet opened on top of this one stacks on it: this one lifts so a peek shows above
               // the child, its content and handle fading out, and the child's own scrim dims this
               // sheet so the stack reads as layers. Base UI sets the nested count, both heights and

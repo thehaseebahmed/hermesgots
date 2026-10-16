@@ -206,7 +206,7 @@ export function ModelPicker({
           renders inside this sheet's tree so Base UI registers the nesting. */}
       {drilled && form !== "menu" && (
         <Popup open onOpenChange={(next) => !next && setOpenSlug(undefined)}>
-          <PopupContent initialFocus={false} className={PICKER_HEIGHT}>
+          <PopupContent initialFocus={false} fixedHeight={PICKER_HEIGHT}>
             <ProviderModels
               provider={drilled}
               catalog={catalog}
@@ -478,7 +478,7 @@ export function ModelMenu({
         {providers.length > 0 && <ChevronDownIcon className="shrink-0 text-muted-foreground" />}
       </Button>
       <Popup open={open} onOpenChange={setOpen} anchor={button}>
-        <PopupContent initialFocus={false} className={PICKER_HEIGHT}>
+        <PopupContent initialFocus={false} fixedHeight={PICKER_HEIGHT}>
           <ModelPicker
             providers={providers}
             fallback={{
@@ -539,7 +539,7 @@ export function DefaultModelSetting({
         <ChevronDownIcon className="text-muted-foreground" />
       </Button>
       <Popup open={open} onOpenChange={setOpen} anchor={field}>
-        <PopupContent initialFocus={false} className={PICKER_HEIGHT}>
+        <PopupContent initialFocus={false} fixedHeight={PICKER_HEIGHT}>
           <ModelPicker
             providers={providers}
             fallback={{ label: "Default", model: info?.model }}
@@ -640,7 +640,7 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
         onOpenChange={(next) => !next && setOpen(undefined)}
         anchor={opener}
       >
-        <PopupContent initialFocus={false} className={PICKER_HEIGHT}>
+        <PopupContent initialFocus={false} fixedHeight={PICKER_HEIGHT}>
           <ModelPicker
             providers={providers}
             fallback={{ label: "None" }}
