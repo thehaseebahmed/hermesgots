@@ -62,8 +62,8 @@ try {
   await page.goto(`${app}/c/one`)
   await shows("draft for one")
 
-  // An unsent session saved as a draft keeps its text, shown on the project screen.
-  const profileId = await page.evaluate(async () => {
+  // An unsent session saved as a draft keeps its text, shown in Code.
+  await page.evaluate(async () => {
     const { db } = await import("/src/lib/db.ts")
     const profile = (await db.profiles.toArray())[0]
     const at = Date.now()
@@ -77,13 +77,12 @@ try {
       updatedAt: at,
       changedAt: at,
     })
-    return profile.id
   })
   await page.goto(`${app}/c/session`)
   await composer.fill("a session plan")
-  await page.getByRole("button", { name: "Back to project" }).click()
+  await page.getByRole("button", { name: "Back to Code" }).click()
   await page.getByRole("button", { name: "Save draft" }).click()
-  await page.waitForURL(`**/code/${profileId}/p_1a2b3c4d`)
+  await page.waitForURL("**/code")
   await page.getByText("a session plan").waitFor()
   await page.getByText("a session plan").click()
   await page.waitForURL("**/c/session")

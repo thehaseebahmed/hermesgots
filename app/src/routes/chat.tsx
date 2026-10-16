@@ -112,6 +112,7 @@ import { useLive, watchChat } from "@/lib/live"
 import { useSessionRunning } from "@/lib/waiting"
 import { usePoll } from "@/lib/poll"
 import { useXLarge, useWide } from "@/lib/media"
+import { useCodePane, useRememberOpened } from "@/lib/pane"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
@@ -135,7 +136,8 @@ import {
   setSessionMode,
   type RepoRef,
 } from "@/lib/workspace"
-import { SESSION_SUGGESTIONS, SUGGESTIONS } from "@/lib/suggestions"
+import { useReadyLine } from "@/lib/greeting"
+import { DEFAULT_BOT_ID } from "@/components/bots"
 import { useBotThreads } from "@/lib/threads"
 import { draftKey } from "@/lib/drafts"
 import { useGoal } from "@/lib/goal"
@@ -152,58 +154,48 @@ const GoalWizard = lazy(() => goalFormUi().then((m) => ({ default: m.GoalWizard 
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
+/** What a chat or session not started yet says: the greeting, then one of the bot's lines. */
+function ReadyLine({ botId, id }: { botId?: string; id?: string }) {
+  const { greeting, line } = useReadyLine(botId ?? DEFAULT_BOT_ID, id)
+  return (
+    <div className="flex max-w-xs flex-col gap-0.5 text-lg font-medium tracking-tight">
+      {greeting && <p>{greeting}</p>}
+      <p>{line}</p>
+    </div>
+  )
+}
+
 function EmptyState({
-  name,
   botId,
   configured,
   session,
-  onPick,
+  id,
 }: {
-  name: string
   botId?: string
   configured: boolean
-  /** A project session: its project's name and the repos it will work in. */
-  session?: { title?: string; repos: RepoRef[] }
-  onPick: (text: string) => void
+  /** A project session not started yet: the repos it will work in. */
+  session?: { repos: RepoRef[] }
+  /** The chat or session on screen, none for a new chat. */
+  id?: string
 }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 pt-24 pb-8 text-center">
       <Bot id={botId} animate className="size-24" />
-      {session ? (
-        <div className="flex max-w-md flex-col items-center gap-3">
-          {session.title && (
-            <h1 className="text-2xl font-semibold tracking-tight">{session.title}</h1>
-          )}
-          <RepoChips repos={session.repos} />
-        </div>
-      ) : (
-        <div className="space-y-1.5">
-          <h1 className="text-2xl font-semibold tracking-tight">Hey, I'm {name}</h1>
-          <p className="max-w-sm text-sm text-muted-foreground">
-            {configured
-              ? "Ask me anything. I can run tools on your machine and I'll ask before doing anything risky."
-              : "Point Gots at your Hermes Agent API server to start chatting."}
-          </p>
-        </div>
-      )}
       {configured ? (
-        <div className="flex max-w-md flex-wrap justify-center gap-2">
-          {(session ? SESSION_SUGGESTIONS : SUGGESTIONS).map((text) => (
-            <Button
-              key={text}
-              variant="outline"
-              className="h-auto min-h-10 rounded-full whitespace-normal"
-              onClick={() => onPick(text)}
-            >
-              {text}
-            </Button>
-          ))}
+        <div className="flex max-w-md flex-col items-center gap-3">
+          <ReadyLine botId={botId} id={id} />
+          {session && <RepoChips repos={session.repos} />}
         </div>
       ) : (
-        <Button nativeButton={false} render={<Link to="/settings" replace />} size="lg">
-          <SettingsIcon data-icon="inline-start" />
-          Open settings
-        </Button>
+        <>
+          <p className="max-w-sm text-sm text-muted-foreground">
+            Point Gots at your Hermes Agent API server to start chatting.
+          </p>
+          <Button nativeButton={false} render={<Link to="/settings" replace />} size="lg">
+            <SettingsIcon data-icon="inline-start" />
+            Open settings
+          </Button>
+        </>
       )}
     </div>
   )
@@ -241,7 +233,7 @@ export function ChatPage() {
     [id],
   )
   // The route is the chat on screen. The live query keeps its last result until the next one is in,
-  // so a session swapped in place beside its project can still hand back the one before it: nothing
+  // so a session swapped in place beside Code's list can still hand back the one before it: nothing
   // of that session may render or be acted on here — its plan card's Approve would send its plan.
   const conversation = found && found.id !== id ? undefined : found
   // A chat talks to its own bot; a new chat goes to the selected one. Same rule as the row above:
@@ -416,6 +408,7 @@ export function ChatPage() {
   // when this tab comes back, and now and then while it's on screen.
   const updatedAt = conversation?.updatedAt
   const hasMessages = (messages?.length ?? 0) > 0
+  const unstarted = configured && !hasMessages && !loadingHistory
   // The chat's goal, if it has one: the plugin reads it from Hermes while the chat is open.
   const goal = useGoal(conversation ?? undefined, profile)
   // The agents this chat's agent delegated to, for their cards in the thread.
@@ -521,19 +514,19 @@ export function ChatPage() {
   const [leavingWithDraft, setLeavingWithDraft] = useState(false)
   const unsent =
     session !== undefined && messages?.length === 0 && !(session.updatedAt > session.createdAt)
-  const projectPath = session && `/code/${session.profileId}/${session.projectId}`
+  const codePath = session && "/code"
   const leave = () => {
-    if (!session || !projectPath) return
-    if (!unsent) return up(projectPath)
+    if (!session || !codePath) return
+    if (!unsent) return up(codePath)
     if (draftRef.current.trim()) return setLeavingWithDraft(true)
     void deleteConversation(session.id)
-    up(projectPath)
+    up(codePath)
   }
   const leaveRef = useRef(leave)
   useEffect(() => {
     leaveRef.current = leave
   })
-  // Beside its project another session can be picked straight away, with no chance to ask, so a
+  // Beside Code's list another session can be picked straight away, with no chance to ask, so a
   // session left unsent goes, or is kept as a draft when something was typed.
   const shown = useRef(id)
   useEffect(() => {
@@ -554,10 +547,12 @@ export function ChatPage() {
   const botThreads = useBotThreads()
   const botPath =
     botThreads && conversation && !session ? `/b/${conversation.profileId}` : undefined
-  // From `xl` a session opens beside its project, and a thread beside its bot, which they close to.
+  // From `xl` a thread opens beside its bot, which it closes to. A session opens beside Code's list
+  // where there's room, and is then a top-level screen with nothing to go back to.
   const xl = useXLarge()
   const wide = useWide()
-  const beside = xl && Boolean(session)
+  const beside = Boolean(useCodePane()) && Boolean(session)
+  useRememberOpened("code", session?.id)
   // Beside its bot the header drops the picture, so the reply count sits under the title instead.
   const replyCount = messages?.filter((m) => m.role === "assistant").length ?? 0
   const repliesLine =
@@ -571,14 +566,15 @@ export function ChatPage() {
       return true
     })
   }, [botPath, up])
-  // A session sits under its project; a plain chat is top-level, so back leaves the app.
+  // A session sits under Code, unless it's beside it; a plain chat is top-level, so back leaves the
+  // app.
   useEffect(() => {
-    if (!projectPath) return
+    if (!codePath || beside) return
     return setBackGuard(() => {
       leaveRef.current()
       return true
     })
-  }, [projectPath])
+  }, [codePath, beside])
 
   /** Before a session is deleted or discarded: its run, worktrees, pull requests and branches. */
   const closeSession = async () => {
@@ -693,12 +689,15 @@ export function ChatPage() {
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <ChatHeader
-        title={conversation?.title ?? "New chat"}
-        subtitle={(!simple && activity) || repliesLine || session?.worktree?.branch}
+        // Nothing started has no title yet, and its bot is the big one in the middle.
+        title={unstarted ? "" : (conversation?.title ?? "New chat")}
+        subtitle={
+          unstarted ? undefined : (!simple && activity) || repliesLine || session?.worktree?.branch
+        }
         botId={profile?.botId}
         muted={Boolean(conversation?.muted || profile?.muted)}
         // Beside its bot, which already shows the bot's picture.
-        showBot={!(botPath && xl)}
+        showBot={!(botPath && xl) && !unstarted}
         actions={actions}
         leading={
           botPath ? (
@@ -712,15 +711,16 @@ export function ChatPage() {
               {xl ? <XIcon /> : <ArrowLeftIcon />}
             </Button>
           ) : (
-            session && (
+            session &&
+            !beside && (
               <Button
                 variant="outline"
                 size="icon-lg"
                 className="size-11 rounded-full bg-background/80 backdrop-blur"
                 onClick={leave}
-                aria-label={beside ? "Close session" : "Back to project"}
+                aria-label="Back to Code"
               >
-                {beside ? <XIcon /> : <ArrowLeftIcon />}
+                <ArrowLeftIcon />
               </Button>
             )
           )
@@ -778,11 +778,10 @@ export function ChatPage() {
         </div>
       ) : (
         <EmptyState
-          name={profile?.name ?? "Hermes"}
           botId={profile?.botId}
           configured={configured}
-          session={session && { title: project?.name, repos: sessionRepos }}
-          onPick={(text) => void send(text).catch(() => {})}
+          session={session && { repos: sessionRepos }}
+          id={conversation?.id}
         />
       )}
 
@@ -883,7 +882,7 @@ export function ChatPage() {
           </div>
         ) : (
           <Composer
-            // Sessions are swapped in place beside their project; each keeps its own text.
+            // Sessions are swapped in place beside Code's list; each keeps its own text.
             key={session?.id}
             busy={busy}
             disabled={!configured}
@@ -1021,18 +1020,18 @@ export function ChatPage() {
             <AlertDialogAction
               variant="outline"
               onClick={async () => {
-                if (!session || !projectPath) return
+                if (!session || !codePath) return
                 await deleteConversation(session.id)
-                up(projectPath)
+                up(codePath)
               }}
             >
               Delete
             </AlertDialogAction>
             <AlertDialogAction
               onClick={async () => {
-                if (!session || !projectPath) return
+                if (!session || !codePath) return
                 await updateConversation(session.id, { draftAt: Date.now() })
-                up(projectPath)
+                up(codePath)
               }}
             >
               Save draft
@@ -1064,7 +1063,7 @@ export function ChatPage() {
                   await deleteConversation(id)
                 }
                 setDeleting(false)
-                if (projectPath) up(projectPath)
+                if (codePath) up(codePath)
                 else root(botPath ?? "/")
               }}
             >

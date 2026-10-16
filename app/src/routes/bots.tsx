@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { listProfiles } from "@/lib/db"
 
-/** Gallery of every bot, animated and still. Not linked from the UI yet. */
+/** Gallery of every bot, animated and still, with its character. Not linked from the UI yet. */
 export function BotsPage() {
   const inUse = useLiveQuery(async () => new Set((await listProfiles()).map((p) => p.botId)), [])
   return (
@@ -37,6 +37,7 @@ export function BotsPage() {
                 {inUse?.has(bot.id) && <Badge>In use</Badge>}
               </div>
               <p className="text-xs text-muted-foreground">{bot.description}</p>
+              <p className="text-xs">{bot.character}</p>
             </CardContent>
           </Card>
         ))}

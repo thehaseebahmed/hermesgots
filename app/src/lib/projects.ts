@@ -9,7 +9,7 @@ import { createSignal } from "@/lib/store"
  * that hasn't started, so they show the same list, and a read already on its way is joined rather
  * than sent again.
  */
-const lists = new Map<string, HermesProject[]>()
+let lists = new Map<string, HermesProject[]>()
 const reading = new Map<string, Promise<HermesProject[]>>()
 const { subscribe, notify } = createSignal()
 
@@ -20,7 +20,8 @@ export function readProjects(server: HermesConfig): Promise<HermesProject[]> {
   if (!pending) {
     pending = listProjects(server)
       .then((projects) => {
-        lists.set(key, projects)
+        // A new map, so screens reading every server's list see the change.
+        lists = new Map(lists).set(key, projects)
         notify()
         return projects
       })
@@ -34,4 +35,9 @@ export function readProjects(server: HermesConfig): Promise<HermesProject[]> {
 export function useProjects(server: HermesConfig | undefined) {
   const key = server ? connectionKey(server) : ""
   return useSyncExternalStore(subscribe, () => (key ? lists.get(key) : undefined))
+}
+
+/** Every server's projects as last read, by `connectionKey`. */
+export function useAllProjects() {
+  return useSyncExternalStore(subscribe, () => lists)
 }

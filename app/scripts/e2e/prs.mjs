@@ -1,5 +1,5 @@
-// The project's PRs tab: a session that shipped a pull request lists it, and a host that can't
-// reach GitHub leaves the tab as it was — the read fails, so the app keeps the pull requests it
+// The project's Pull requests tab: a session that shipped a pull request lists it, and a host that
+// can't reach GitHub leaves the tab as it was — the read fails, so the app keeps the pull requests it
 // already knows instead of storing "no pull requests" over them (see plugin/github.py's `strict`).
 import { app, assert, flow, mock, pass, runId } from "./lib.mjs"
 
@@ -10,9 +10,9 @@ await flow("prs", async ({ page, profileId, seed, send, stored, until, shot }) =
   page.on("response", (response) => {
     if (response.url().includes("/prs")) statuses.push(response.status())
   })
-  const project = `${app}/code/${profileId}/p_1a2b3c4d`
+  const project = `${app}/projects/${profileId}/p_1a2b3c4d`
 
-  // A session that ships: its pull request lists in the project's PRs tab.
+  // A session that ships: its pull request lists in the project's Pull requests tab.
   const shipped = `prs-ship-${runId()}`
   await seed([{ id: shipped, title: "Rotate the logs", projectId: "p_1a2b3c4d" }])
   await page.goto(`${app}/c/${shipped}`)
@@ -23,10 +23,10 @@ await flow("prs", async ({ page, profileId, seed, send, stored, until, shot }) =
     "the shipped pull request to arrive",
   )
   await page.goto(project)
-  await page.getByRole("tab", { name: "PRs" }).click()
+  await page.getByRole("tab", { name: "Pull requests" }).click()
   await page.locator("main").getByText("#27").waitFor({ timeout: 15_000 })
   await shot("shipped")
-  pass("a shipped pull request lists in the project's PRs tab")
+  pass("a shipped pull request lists in the project's Pull requests tab")
 
   // A host that can't reach GitHub: the read answers an error, and what the app already knows stays.
   // The failure goes on first, so no read of the new session can answer an empty list meanwhile.
@@ -63,7 +63,7 @@ await flow("prs", async ({ page, profileId, seed, send, stored, until, shot }) =
     1,
     "a failed read must not empty the session's pull requests",
   )
-  await page.getByRole("tab", { name: "PRs" }).click()
+  await page.getByRole("tab", { name: "Pull requests" }).click()
   await page.locator("main").getByText("#91").waitFor({ timeout: 15_000 })
   assert.equal(
     await page.getByText("No pull requests yet").count(),

@@ -82,7 +82,7 @@ for (const dark of [false, true]) {
       )
 
       // Every destination is still there, still named, and still a 44px target.
-      for (const name of ["Code", "Research", "Routines", "Settings"]) {
+      for (const name of ["Projects", "Code", "Research", "Routines", "Settings"]) {
         assert.equal(
           await page.getByRole("link", { name }).first().isVisible(),
           true,

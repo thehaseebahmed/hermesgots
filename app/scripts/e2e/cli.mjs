@@ -28,7 +28,8 @@ const FLOWS = {
   },
   approval: {
     script: "e2e/approval.mjs",
-    about: "A project session waits on an approval in the sidebar and its project, then lands under Today",
+    about:
+      "A project session waits on an approval in the sidebar and in Code, then lands under Today",
     alsoPolling: true,
   },
   "approval-missed": {
@@ -38,15 +39,18 @@ const FLOWS = {
   },
   "clarify-missed": {
     script: "e2e/clarify-missed.mjs",
-    about: "A question the host timed out stays in the thread, and asking again has the agent ask afresh",
+    about:
+      "A question the host timed out stays in the thread, and asking again has the agent ask afresh",
   },
   "failed-send": {
     script: "e2e/failed-send.mjs",
-    about: "A message the host never received stays in the thread, marked Failed, to send again or drop",
+    about:
+      "A message the host never received stays in the thread, marked Failed, to send again or drop",
   },
   "plain-error": {
     script: "e2e/plain-error.mjs",
-    about: "A turn that fails before it answers shows as plain text in the chat, with no bot beside it",
+    about:
+      "A turn that fails before it answers shows as plain text in the chat, with no bot beside it",
   },
   reattach: {
     script: "e2e/reattach.mjs",
@@ -55,7 +59,7 @@ const FLOWS = {
   },
   "foreign-run": {
     script: "e2e/foreign-run.mjs",
-    about: "A run started elsewhere shows as running in its project and on the open session screen",
+    about: "A run started elsewhere shows as running in Code and on the open session screen",
     alsoPolling: true,
   },
   "plan-mode": {
@@ -133,11 +137,12 @@ const FLOWS = {
   },
   screens: {
     script: "e2e/screens.mjs",
-    about: "Code, a project, Routines and a chat load at 390 and 1024px, light and dark",
+    about: "Projects, a project, Code, Routines and a chat load at 390 and 1024px, light and dark",
   },
   "sidebar-collapse": {
     script: "e2e/sidebar-collapse.mjs",
-    about: "The sidebar shrinks to an icon rail at 1024px and stays collapsed; phones have no button",
+    about:
+      "The sidebar shrinks to an icon rail at 1024px and stays collapsed; phones have no button",
   },
   research: {
     script: "e2e/research.mjs",
@@ -145,7 +150,8 @@ const FLOWS = {
   },
   panes: {
     script: "e2e/panes.mjs",
-    about: "Meetings and Research: the list beside the item with room for it, one pane without",
+    about:
+      "Projects, Code, Meetings and Research: the list beside the item with room for it, one pane without",
   },
   meetings: {
     script: "e2e/meetings.mjs",
@@ -162,12 +168,17 @@ const FLOWS = {
   },
   "code-sessions": {
     script: "regression-code-sessions.mjs",
-    about: "Project sessions stay out of Recents and open from their project",
+    about: "Project sessions stay out of Recents and open from Code",
+  },
+  "session-empty": {
+    script: "e2e/session-empty.mjs",
+    about:
+      "A chat or session not started shows the big bot, a greeting once an hour and the bot's five lines in turn",
   },
   prs: {
     script: "e2e/prs.mjs",
     about:
-      "A shipped pull request lists in its project's PRs tab; a host that can't reach GitHub keeps the ones it knows",
+      "A shipped pull request lists in its project's Pull requests tab; a host that can't reach GitHub keeps the ones it knows",
   },
   outputs: {
     script: "e2e/outputs.mjs",
