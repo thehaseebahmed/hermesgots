@@ -351,10 +351,8 @@ function sortProviders(providers: ModelProvider[]) {
 function CapabilityIcon({ label, Icon }: { label: string; Icon: LucideIcon }) {
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span aria-label={label} className="inline-flex align-[-2px]">
-          <Icon className="size-3.5" aria-hidden="true" />
-        </span>
+      <TooltipTrigger render={<span aria-label={label} className="inline-flex align-[-2px]" />}>
+        <Icon className="size-3.5" aria-hidden="true" />
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
