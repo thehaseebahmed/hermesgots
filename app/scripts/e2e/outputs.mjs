@@ -27,10 +27,10 @@ await flow("outputs", async ({ page, seed, send, stored, until, shot }) => {
   assert.deepEqual(
     (await stored(id)).map((pr) => [pr.number, pr.state]),
     [
-      [28, "open"],
+      [28, "draft"],
       [27, "merged"],
     ],
-    "the session's whole history comes back, newest first, the finished one included",
+    "the session's whole history comes back, newest first: the live one a draft, since every pull request the tool opens is, and the finished one behind it",
   )
 
   // The pill counts the five files the session filed and its two pull requests together.
@@ -48,7 +48,7 @@ await flow("outputs", async ({ page, seed, send, stored, until, shot }) => {
   await drawer.getByText("#28").waitFor({ timeout: 15_000 })
   const listed = await drawer.locator("ul > li").allInnerTexts()
   assert.equal(listed.length, 2, "both pull requests, listed")
-  assert.match(listed[0], /Open · #28/, "the live one at the top")
+  assert.match(listed[0], /Draft · #28/, "the live one at the top, a draft like every pull request the tool opens")
   assert.match(listed[1], /Merged · #27/, "the finished one below it, newest to oldest")
   assert.equal(
     await drawer.getByText(/^(Open|Done) \(/).count(),
