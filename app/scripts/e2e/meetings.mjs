@@ -105,11 +105,7 @@ for (const [width, dark] of [
       const cards = page.getByRole("group", { name: "Bot" })
       await cards.getByRole("button", { name: "Second", exact: false }).click()
       await page.getByText(/Kindly start/).waitFor({ timeout: 5_000 })
-      assert.equal(
-        await cards.getByRole("button", { name: "Second", exact: false }).getAttribute("aria-pressed"),
-        "true",
-        "the picked bot is marked",
-      )
+      await cards.getByRole("button", { name: "Second", pressed: true }).waitFor({ timeout: 5_000 })
       pass(`${width}: a card switches the bot and its line`)
       await page.getByRole("button", { name: "Start recording" }).waitFor()
       await page.keyboard.press("Escape")
@@ -227,10 +223,7 @@ for (const [width, dark] of [
         .locator("input[type=file]")
         .first()
         .setInputFiles({ name: "standup.wav", mimeType: "audio/wav", buffer: silence() })
-      await page.getByRole("button", { name: "Add", exact: true }).isEnabled()
-      await page.waitForFunction(
-        () => document.querySelector("input[type=file]")?.files?.[0]?.name === "standup.wav",
-      )
+      await page.getByText("standup.wav").waitFor({ timeout: 5_000 })
       assert.equal(await page.getByLabel("Title").count(), 0, "just a file and a project")
       await shot("7-add")
       await page.getByRole("button", { name: "Add", exact: true }).click()
