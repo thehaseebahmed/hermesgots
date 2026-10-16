@@ -34,9 +34,9 @@ export const HOST_WORK_MS = 3_000
 /** An agent a chat delegated to, and a goal's continuation loop, while they work. */
 export const AGENT_WORK_MS = 4_000
 
-/** A chat's goal: its state, its gates and its turn budget. A goal moves between runs, on the
- * plugin's own thread, so the pill reads it often enough to catch the next run starting. */
-export const GOAL_MS = 5_000
+/** A chat's goal: its state, its gates and its turn budget. Every judgment and every continuation
+ * notes a `runs` event, which is what normally re-reads it, so this is only the net under that. */
+export const GOAL_MS = SAFETY_MS
 
 /** How long a known pull request is trusted before it's read again. */
 export const PR_MS = 30_000

@@ -141,9 +141,14 @@ import { draftKey } from "@/lib/drafts"
 import { useGoal } from "@/lib/goal"
 import { AgentsContext, DELEGATE_TOOL, useSessionAgents } from "@/lib/agents"
 
+// Only a chat that has a goal loads its pill, card and sheet.
+const goalUi = () => import("@/components/chat/goal")
+const GoalPill = lazy(() => goalUi().then((m) => ({ default: m.GoalPill })))
+const GoalCard = lazy(() => goalUi().then((m) => ({ default: m.GoalCard })))
+const GoalSheet = lazy(() => goalUi().then((m) => ({ default: m.GoalSheet })))
 // Only a chat that sets one loads the goal wizard.
-const goalUi = () => import("@/components/chat/goal-wizard")
-const GoalWizard = lazy(() => goalUi().then((m) => ({ default: m.GoalWizard })))
+const goalFormUi = () => import("@/components/chat/goal-wizard")
+const GoalWizard = lazy(() => goalFormUi().then((m) => ({ default: m.GoalWizard })))
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
@@ -262,6 +267,7 @@ export function ChatPage() {
   const [outputsOpen, setOutputsOpen] = useState(false)
   // The goal wizard: open, and the task line `/goal <text>` handed it.
   const [goalForm, setGoalForm] = useState<{ open: boolean; task?: string }>({ open: false })
+  const [goalSheet, setGoalSheet] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const [historyMissing, setHistoryMissing] = useState<string>()
 
@@ -427,7 +433,7 @@ export function ChatPage() {
     [agents, baseUrl, apiKey],
   )
   // A paused or blocked goal waits on the user: the turn is over and nothing moves until they do.
-  const goalWaits = Boolean(goal && goal.status === "paused")
+  const goalWaits = Boolean(goal && (goal.status === "paused" || goal.verdict === "blocked"))
   // Only persistent /v1/runs work survives losing the app's connection; legacy streams do not.
   useBreakReminderEligibility(
     isBackgroundSafeRunActive({
@@ -487,6 +493,7 @@ export function ChatPage() {
 
   // `/goal` (or `/goal <what to work towards>`) opens the wizard. A goal lives on the host's
   // session, so a chat that hasn't sent anything yet has nowhere to put one.
+  const server = baseUrl && apiKey ? { baseUrl, apiKey } : null
   const openGoal = (task?: string) => {
     if (!conversation?.hermesSessionId) {
       toast.error("A goal needs a session on the host — send a message first.")
@@ -780,12 +787,18 @@ export function ChatPage() {
       )}
 
       <div data-toast-above className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
-        {(todos.length > 0 || prs.length > 0 || outputs > 0) && (
+        {(todos.length > 0 || goal || prs.length > 0 || outputs > 0) && (
           // One line, centred; wider than the screen it scrolls, from the first pill.
           <div className="-mx-3 flex [scrollbar-width:none] overflow-x-auto px-3 pb-2 sm:-mx-4 sm:px-4 [&::-webkit-scrollbar]:hidden">
             <div className="mx-auto flex w-max max-w-none min-w-full shrink-0 justify-center gap-2">
-              {todos.length > 0 && (
-                <TodosPill items={todos} live={busy} onClick={() => setTodosOpen(true)} />
+              {goal ? (
+                <Suspense fallback={null}>
+                  <GoalPill goal={goal} onClick={() => setGoalSheet(true)} />
+                </Suspense>
+              ) : (
+                todos.length > 0 && (
+                  <TodosPill items={todos} live={busy} onClick={() => setTodosOpen(true)} />
+                )
               )}
               {outputs === 0 && prs.length === 1 ? (
                 // One pull request and nothing filed: the pill itself, opening it on GitHub.
@@ -843,6 +856,18 @@ export function ChatPage() {
         ) : session?.blocked && !busy ? (
           <div className="mx-auto w-full max-w-3xl">
             <BlockedCard reason={session.blocked} />
+          </div>
+        ) : goalWaits && goal && conversation?.hermesSessionId ? (
+          <div className="mx-auto w-full max-w-3xl">
+            <Suspense fallback={null}>
+              <GoalCard
+                goal={goal}
+                profile={server}
+                target={{ id: conversation.id, hermesSessionId: conversation.hermesSessionId }}
+                onOpen={() => setGoalSheet(true)}
+                onStart={(text) => void send(text).catch(() => {})}
+              />
+            </Suspense>
           </div>
         ) : session?.planPending && session.mode === "plan" && !busy ? (
           <div className="mx-auto w-full max-w-3xl">
@@ -924,6 +949,19 @@ export function ChatPage() {
         />
       )}
 
+      {goal && conversation?.hermesSessionId && (
+        <Suspense fallback={null}>
+          <GoalSheet
+            goal={goal}
+            profile={server}
+            target={{ id: conversation.id, hermesSessionId: conversation.hermesSessionId }}
+            open={goalSheet}
+            onOpenChange={setGoalSheet}
+            onStart={(text) => void send(text).catch(() => {})}
+          />
+        </Suspense>
+      )}
+
       {goalForm.open && conversation?.hermesSessionId && (
         <Suspense fallback={null}>
           <GoalWizard
@@ -935,11 +973,7 @@ export function ChatPage() {
               hermesSessionId: conversation.hermesSessionId,
               repos: sessionRepos.map((repo) => repo.name),
             }}
-            profile={
-              profile?.apiKey
-                ? { baseUrl: profile.baseUrl, apiKey: profile.apiKey }
-                : null
-            }
+            profile={server}
             onOpenChange={(open) => setGoalForm({ open })}
             onStart={(text) => void send(text).catch(() => {})}
           />

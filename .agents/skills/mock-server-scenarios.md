@@ -157,7 +157,7 @@ pnpm mock
 | GET | `/api/plugins/memento/info` | Plugin manifest with features list |
 | GET | `/api/plugins/memento/cron/runs?per_job=24` | Ledger-style run history per job |
 | GET | `/api/plugins/memento/github` | `{ connected: true, login: "mock-user" }` or `connected: false` |
-| GET | `/api/plugins/memento/github/repos` | 5 mock repos (memento, theseus, dotfiles, zigbee-bridge, ha-automations) |
+| GET | `/api/plugins/memento/github/repos` | 5 mock repos (memento, maze, dotfiles, zigbee-bridge, ha-automations) |
 | POST | `/api/plugins/memento/projects` | Create project with repos (simulates clone delay) |
 | POST | `/api/plugins/memento/projects/{id}` | Rename/describe project |
 | POST | `/api/plugins/memento/projects/{id}/remove` | Delete project |
@@ -170,6 +170,9 @@ pnpm mock
 | GET | `/api/plugins/memento/runs/live` | Sessions with active runs |
 | POST/GET | `/api/plugins/memento/sessions/{id}/workspace` | Create/read project workspace (worktrees) |
 | POST | `/api/plugins/memento/sessions/{id}/mode` | Change permission mode (accept_edits/auto/plan) |
+| GET | `/api/plugins/memento/sessions/{id}/goal` | The session's goal as Hermes holds it: `{ text, status, turns_used, max_turns, contract, gates, subgoals, verdict, reason, paused_reason, waiting }`, null when it has none |
+| POST | `/api/plugins/memento/sessions/{id}/goal` | Set one: `{ command, gates, max_turns }` (the `/goal` text the wizard composed); answers the goal and the `kick` to send |
+| POST | `/api/plugins/memento/sessions/{id}/goal/control` | `{ action: "pause" \| "resume" \| "clear" }`; resume answers the `kick` to send |
 | POST | `/api/plugins/memento/sessions/{id}/workspace/remove` | Remove worktrees (keeps if "commit" said) |
 | GET | `/api/plugins/memento/sessions/{id}/prs` | PRs per repo after 2 turns |
 

@@ -126,7 +126,7 @@ export async function ensureSessionWorkspace(
     return {
       ...conversation.worktree,
       projectId: conversation.projectId!,
-      mode: sessionMode(conversation.mode) ?? "accept_edits",
+      mode: sessionMode(conversation.mode),
       planPending: Boolean(conversation.planPending),
       planFile: conversation.planFile ?? null,
       blocked: null,

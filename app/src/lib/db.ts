@@ -179,11 +179,13 @@ export interface Conversation {
 export type SessionMode = "accept_edits" | "auto" | "plan"
 
 /**
- * A session's mode as the app works with it. Sessions made before 0.42 stored Theseus as a mode of
- * its own; those read as Auto, which is what carries a goal on.
+ * A session's mode as the app works with it. An unset mode is Accept edits, Hermes's own behaviour;
+ * sessions made before 0.42 stored Theseus as a mode of its own, and those read as Auto, which is
+ * what carries a goal on.
  */
 export function sessionMode(mode: SessionMode | "theseus" | undefined): SessionMode {
-  return mode === "accept_edits" || mode === "plan" ? mode : "auto"
+  if (mode === "theseus") return "auto"
+  return mode === "auto" || mode === "plan" ? mode : "accept_edits"
 }
 
 export type PrState = "open" | "draft" | "merged" | "closed"

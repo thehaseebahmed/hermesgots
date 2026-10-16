@@ -16,7 +16,6 @@ const MOCKS = {
   polling: { port: 18643, env: { MOCK_NO_EVENTS: "1" } },
   legacy: { port: 18644, env: { MOCK_BLOCK_RUN_EVENTS: "1" } },
   "no-dictation": { port: 18645, env: { MOCK_DICTATION: "off" } },
-  theseus: { port: 18646, env: { MOCK_THESEUS: "building" } },
 }
 const APP_PORT = 15173
 
@@ -91,16 +90,14 @@ const FLOWS = {
     about:
       "An agent's images hold their place with a skeleton while they load, in a chat and a project session",
   },
-  "image-captures": {
-    script: "e2e/image-captures.mjs",
-    mock: "theseus",
-    about:
-      "A checkpoint's capture screenshots hold their place while they load, and say so when one can't",
-  },
   "goal-wizard": {
     script: "e2e/goal-wizard.mjs",
     about:
       "/goal opens the wizard: the preview follows the form, and Save sets the goal and sends its kick",
+  },
+  "goal-pill": {
+    script: "e2e/goal-pill.mjs",
+    about: "An active goal shows its pill and sheet; a paused one waits on the user and resumes",
   },
   "image-viewer": {
     script: "e2e/image-viewer.mjs",
