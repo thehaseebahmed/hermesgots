@@ -61,24 +61,22 @@ export function SlashMenu({
               onMouseMove={() => index !== active && onActive(index)}
               onClick={() => onPick(item)}
               className={cn(
-                "flex min-h-11 cursor-pointer flex-col justify-center rounded-2xl px-3 py-2",
+                "grid min-h-11 cursor-pointer grid-cols-[auto_1fr_auto] content-center items-center gap-x-3 rounded-2xl px-3 py-2",
                 index === active && "bg-accent text-accent-foreground",
               )}
             >
               {/* The icon rides the title's line, so a description hangs under the title, not the icon. */}
-              <div className="flex items-center gap-3">
-                <span className="flex h-5 shrink-0 items-center">
-                  <Icon className="size-4 text-muted-foreground" />
-                </span>
-                <div className="min-w-0 flex-1 truncate font-mono text-sm">/{item.name}</div>
-                {item.kind === "skill" && item.category && (
-                  <Badge variant="secondary" className="max-w-28">
-                    <span className="truncate">{item.category}</span>
-                  </Badge>
-                )}
-              </div>
+              <span className="row-start-1 flex h-5 items-center">
+                <Icon className="size-4 text-muted-foreground" />
+              </span>
+              <div className="row-start-1 min-w-0 truncate font-mono text-sm">/{item.name}</div>
+              {item.kind === "skill" && item.category && (
+                <Badge variant="secondary" className="row-start-1 max-w-28">
+                  <span className="truncate">{item.category}</span>
+                </Badge>
+              )}
               {item.description && (
-                <div className="truncate pl-7 text-xs text-muted-foreground">
+                <div className="col-start-2 min-w-0 truncate text-xs text-muted-foreground">
                   {item.description}
                 </div>
               )}
