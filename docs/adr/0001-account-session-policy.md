@@ -10,9 +10,12 @@ Identity's verdict about the stored token itself — a 5xx, a 429, a lost reply.
 applies to the sync function, which answers 5xx rather than 401 when it couldn't check a Bearer
 token, and to both clients' load: a check that fails leaves the session standing on what the stored
 token already names instead of showing the gate. Whose store that is differs — `memento-identity` in
-localStorage on Android, the token cookie `@netlify/identity` keeps in the browser — and on both the
-store is the source of truth, so a store the client has emptied itself is a real sign-out rather than
-a hiccup (the browser's client deletes its cookie when it reads a token as unusable). Two clears of
+localStorage on Android, the token cookie `@netlify/identity` keeps in the browser — and so does who
+clears it: the app clears its own only on Identity's word, while the browser's client deletes its
+cookie itself whenever it can't turn it into an account, and a cookie that expired or was cleared by
+hand goes the same way. So the browser reads its store *after* the call rather than standing on a
+snapshot: a cookie still there is stood on, and an empty one leaves nothing to stand on, whatever
+emptied it — the credentials are gone and that sign-in is real. Two clears of
 the store stay, both Identity's own word: the token it refuses on a trade, and a 401 on `/user` for
 the access token a trade has just issued — nobody else traded that token, so the session really has
 ended.

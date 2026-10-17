@@ -61,7 +61,8 @@ export function claimsOf(access: string): { id: string; email?: string } | null 
 }
 
 /** The account a stored access token proves: it names its owner and nothing else, which is all a
- *  client has to stand on when Identity can't be asked (docs/adr/0001). */
+ *  client has to stand on when Identity can't be asked (docs/adr/0001). Not a proof — nothing here
+ *  verifies the token, and the server vouches for every call it answers. */
 export function storedUser(access: string | null): User | null {
   const claims = access ? claimsOf(access) : null
   return claims ? { id: claims.id, email: claims.email, userMetadata: {}, appMetadata: {} } : null

@@ -159,7 +159,8 @@ async function currentUser() {
 }
 
 /** The account's user: Identity's own answer when it can be asked, and the stored token's owner when
- *  it can't, so a check that fails leaves the session standing (docs/adr/0001). */
+ *  it can't, so a check that fails leaves the session standing on what the store still holds
+ *  (docs/adr/0001). */
 async function identityUser(): Promise<User | null> {
   try {
     return await currentUser()

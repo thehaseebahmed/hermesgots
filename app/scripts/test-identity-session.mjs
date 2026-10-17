@@ -70,6 +70,15 @@ test("a stored token stands in for the account, carrying its owner and nothing m
   })
 })
 
+test("a token with no email still names its owner", () => {
+  assert.deepEqual(storedUser(token({ sub: "user-1" })), {
+    id: "user-1",
+    email: undefined,
+    userMetadata: {},
+    appMetadata: {},
+  })
+})
+
 test("nothing the token can prove is no account at all", () => {
   assert.equal(storedUser(null), null)
   assert.equal(storedUser(""), null)
