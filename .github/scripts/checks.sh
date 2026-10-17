@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# The check set, in one place: the app's gates, the plugin's tests and the website's build.
+# The check set, in one place: the app's gates, the plugin's tests, the website's build and the CI's
+# own tests.
 #
-#   usage: checks.sh app|plugin|website|all          (from the repository root)
+#   usage: checks.sh app|plugin|website|ci|all         (from the repository root)
 #
 # `tests.yml` runs one area per job and the development image runs `all`, to prove the image can run
 # what CI runs. A gate added here reaches both callers; the list used to exist in two places, and had
@@ -47,19 +48,28 @@ website() {
   gate pnpm build
 }
 
+ci() {
+  # The release decision's own logic — the one part of the release flow with something to test. It is
+  # reached from any pull request that touches the CI, so a release check can't break unnoticed
+  # between releases.
+  gate node --test .github/scripts/release.test.mjs
+}
+
 # Each area runs in a subshell: two of them `cd`, and `all` must not start the plugin's tests in the
 # app's directory.
 case "${1:-}" in
   app) (app) ;;
   plugin) (plugin) ;;
   website) (website) ;;
+  ci) (ci) ;;
   all)
     (app)
     (plugin)
     (website)
+    (ci)
     ;;
   *)
-    echo "usage: checks.sh app|plugin|website|all" >&2
+    echo "usage: checks.sh app|plugin|website|ci|all" >&2
     exit 2
     ;;
 esac

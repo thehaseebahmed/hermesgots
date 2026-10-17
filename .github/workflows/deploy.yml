@@ -1,9 +1,14 @@
 name: Deploy
 
-# Production is published from here, not from Netlify's own Git builds, which are off for the app
-# site (two builders for one site would race). `app/dist` is the exact build the Tests workflow just
-# gated, uploaded as an artifact and downloaded again below, so what goes live is what was tested.
-# docs/adr/0003-production-deploys-run-in-github-actions.md has the decision and its consequences.
+# A merge to main gates and deploys a *candidate*: an unpublished Netlify branch deploy aliased
+# `candidate`, which costs none of the team's credits where a production deploy costs 15. Merges
+# publish nothing, so a merge can't reach users on its own.
+# Production is published by running this workflow by hand on main with `promote` on: it gates the
+# same way and then publishes a production deploy (15 credits) of the same build. Netlify's own Git
+# builds are off for the app site, so this is the site's only builder.
+# `app/dist` is the exact build the Tests workflow gated, uploaded as an artifact and downloaded again
+# below, so a candidate and a promotion both carry the tested bytes.
+# docs/adr/0003-deploys-are-built-in-github-actions-and-promoted-by-hand.md has the decision.
 on:
   push:
     branches: [main]
@@ -13,13 +18,20 @@ on:
       - ".github/workflows/deploy.yml"
       # tests.yml is deliberately not here: changing the test workflow doesn't change the app that
       # ships, and its own push trigger already runs it, so listing it would run the suite twice and
-      # publish a deploy of unchanged code.
+      # deploy a candidate of unchanged code.
+  workflow_dispatch:
+    inputs:
+      promote:
+        description: Publish the build on this ref to production (a production deploy costs 15 credits)
+        type: boolean
+        default: false
 
-# One production deploy at a time. Netlify publishes a deploy only once its upload has finished, so
-# a cancelled run leaves the last good one live, and the newer merge's deploy carries the older
-# merge's work with it.
+# One deploy at a time per kind of run. A push's group holds the candidate, where cancelling an older
+# run is what keeps the one alias current. A hand-run gets a group of its own: a merge landing part-way
+# through a deliberate publish must not cancel it, and re-running the gates by hand must not deploy a
+# second candidate alongside the newest merge's.
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: deploy-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -37,6 +49,7 @@ jobs:
 
   deploy:
     name: Deploy to Netlify
+    if: github.event_name == 'push'
     needs: tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -65,16 +78,75 @@ jobs:
           name: app-dist
           path: app/dist
 
-      - name: Deploy to Netlify
-        # netlify.toml keeps base = "app": --dir and --functions are given relative to the repo root,
-        # as staging.yml does. --prod is what publishes the deploy rather than leaving it one of the
-        # site's unpublished ones.
+      - name: Deploy a candidate
+        # netlify.toml keeps base = "app": --dir and --functions are given relative to the repo root.
+        # The alias is what makes this a branch deploy — served at its own URL, out of production's
+        # way. `--prod` is what this deliberately does not pass: that is the call Netlify meters at 15
+        # credits and refuses once a team is out of them.
+        run: |
+          npx --yes netlify-cli@27.12.0 deploy \
+            --dir=app/dist \
+            --functions=app/netlify/functions \
+            --alias candidate \
+            --message "${{ github.sha }} $(git log -1 --format='%s')"
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+
+      - name: What the run made
+        run: .github/scripts/deploy-summary.sh candidate
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+
+  promote:
+    # By hand only, and only when `promote` is on: dispatching without it runs the gates on a ref and
+    # publishes nothing, which is what re-running them is for.
+    name: Publish to production
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.promote == 'true'
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      # The functions are bundled from source at deploy time, so their dependencies have to be here.
+      - name: Install
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      - name: Download the tested build
+        uses: actions/download-artifact@v7
+        with:
+          name: app-dist
+          path: app/dist
+
+      - name: Publish to production
+        # The one call that publishes here, and the one Netlify meters: a team out of credits is
+        # refused on this call alone, as `JSONHTTPError: Forbidden` — the CLI prints the refusal's
+        # `message`, while the credit reason itself is in the body's `error`, which it drops.
         run: |
           npx --yes netlify-cli@27.12.0 deploy \
             --dir=app/dist \
             --functions=app/netlify/functions \
             --prod \
             --message "${{ github.sha }} $(git log -1 --format='%s')"
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+
+      - name: What the run made
+        run: .github/scripts/deploy-summary.sh production
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}

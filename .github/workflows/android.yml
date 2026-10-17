@@ -111,7 +111,13 @@ jobs:
           if [ -f android/app/google-services.json ]; then export VITE_FIREBASE=1; fi
           pnpm build:android
         env:
-          VITE_SITE_URL: ${{ vars.MEMENTO_SITE_URL }}
+          # A tester build signs in and syncs through the candidate deploy of the newest merge; the
+          # release build (android-release.yml) points at production. `candidate--` only resolves on
+          # the site's netlify.app host, so the candidate URL is a variable of its own rather than
+          # MEMENTO_SITE_URL with a prefix — its primary URL is a custom domain, and no branch-deploy
+          # URL can be built from one. Unset, this falls back to production rather than building a
+          # tester app with no sync at all.
+          VITE_SITE_URL: ${{ vars.MEMENTO_CANDIDATE_URL || vars.MEMENTO_SITE_URL }}
 
       - name: Version
         run: |

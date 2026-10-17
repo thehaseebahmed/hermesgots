@@ -1,8 +1,12 @@
 name: Android release
 
-# Runs when a version tag is pushed, or by hand from the Actions tab on a tag or on a branch whose
-# head carries one. The tag is the app's version (v1.2.3 or 1.2.3-beta.1) and must match
-# app/package.json.
+# The signed release APK for a release: a dated tag on main (`v2026.09.17`, cut by `release.yml`), or
+# by hand on such a tag. The tag names the release; the APK's version name comes from
+# `app/package.json` and its version code from that version, because the tag is a date and the app
+# carries its own version (`docs/adr/0004-a-release-is-a-dated-tag-on-main.md`).
+#
+# A release that didn't move the app builds no APK: its version code would be the one the previous
+# release's APK already carried, and a build that repeats it can't install over that one.
 on:
   push:
     tags: ["v*"]
@@ -15,7 +19,61 @@ permissions:
   contents: write
 
 jobs:
+  # The release's tag, and whether the release moved the app. The tag is the pushed one, or — for a
+  # hand-run — the newest release tag on the head commit.
+  changes:
+    name: What changed
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      app: ${{ steps.describe.outputs.app }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The whole history: the previous release's tag is what "moved" is measured against.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          # `release.mjs describe` runs on Node, pinned as CI pins it.
+          node-version: 22
+
+      - name: The release's tag
+        id: tag
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          release='^v[0-9]{4}\.[0-9]{2}\.[0-9]{2}$'
+          if [ "$REF_TYPE" = tag ]; then
+            tag="$REF_NAME"
+          else
+            git fetch --quiet --depth=1 origin '+refs/tags/*:refs/tags/*' || true
+            tag=$(git tag --points-at HEAD | grep -E "$release" | sort | tail -n1 || true)
+          fi
+          if [ -z "$tag" ]; then
+            echo "::error::$REF_NAME has no release tag on its head commit. A release is a dated tag on main, cut by the Release workflow."
+            exit 1
+          fi
+          if ! grep -Eq "$release" <<< "$tag"; then
+            echo "::error::$tag isn't a release tag: a release is dated, like v2026.09.17"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag"
+
+      - name: What this release moved
+        id: describe
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          # The release's own decision, so what publishes the app and what is built here agree.
+          node .github/scripts/release.mjs describe --tag "$TAG"
+
   release:
+    name: Build the release APK
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -26,29 +84,20 @@ jobs:
         working-directory: app
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The tag's own commit, not a branch head that may have moved past it.
+          ref: ${{ needs.changes.outputs.tag }}
 
-      - name: Version from the tag
+      - name: Version from the app
         id: version
         env:
-          REF_TYPE: ${{ github.ref_type }}
-          REF_NAME: ${{ github.ref_name }}
+          TAG: ${{ needs.changes.outputs.tag }}
         run: |
-          semver='^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
-          if [ "$REF_TYPE" = tag ]; then
-            tag="$REF_NAME"
-          else
-            git fetch --quiet --depth=1 origin '+refs/tags/*:refs/tags/*'
-            tag=$(git tag --points-at HEAD | grep -E "$semver" | sort -V | tail -n1 || true)
-          fi
-          if [ -z "$tag" ]; then
-            echo "::error::$REF_NAME has no version tag on its head commit. Tag it (git tag v1.2.3 && git push origin v1.2.3) or run this on the tag."
+          name=$(node -p "require('./package.json').version")
+          if ! grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' <<< "$name"; then
+            echo "::error::app/package.json's version ($name) isn't a version like 0.1.0 or 0.1.0-beta.1"
             exit 1
           fi
-          if ! grep -Eq "$semver" <<< "$tag"; then
-            echo "::error::$tag isn't a version like v1.2.3 or v1.2.3-beta.1"
-            exit 1
-          fi
-          name="${tag#v}"
           core="${name%%-*}"
           IFS=. read -r major minor patch <<< "$core"
           if [ "$minor" -gt 99 ] || [ "$patch" -gt 99 ]; then
@@ -64,18 +113,11 @@ jobs:
             stage=$(grep -Eo '[0-9]+$' <<< "${name#*-}" || echo 0)
             stage=$((10#$stage > 98 ? 98 : 10#$stage))
           fi
-          pkg=$(node -p "require('./package.json').version")
-          if [ "$pkg" != "$name" ]; then
-            echo "::error::$tag doesn't match app/package.json's version ($pkg). Set the version there to $name, commit, and tag that commit."
-            exit 1
-          fi
           code=$((10#$major * 1000000 + 10#$minor * 10000 + 10#$patch * 100 + stage))
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "name=$name" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$([ "$name" = "$core" ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
           echo "ANDROID_VERSION_NAME=$name" >> "$GITHUB_ENV"
           echo "ANDROID_VERSION_CODE=$code" >> "$GITHUB_ENV"
-          echo "Building $name (version code $code) from $tag"
+          echo "Building $name (version code $code) from $TAG"
 
       - name: Signing key
         env:
@@ -115,6 +157,7 @@ jobs:
       - run: pnpm lint
 
       - name: Build web assets and sync them into the Android project
+        # A release build points at production: this is the app users install, not a tester's.
         run: pnpm build:android
         env:
           VITE_SITE_URL: ${{ vars.MEMENTO_SITE_URL }}
@@ -164,17 +207,16 @@ jobs:
           path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
 
+      # The Release workflow writes this release's page and then dispatches this one, so the upload
+      # path is the usual one; a tag pushed by hand has no page yet, and gets one here.
       - name: Attach to the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.version.outputs.tag }}
-          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+          TAG: ${{ needs.changes.outputs.tag }}
           APK: ${{ steps.apk.outputs.path }}
         run: |
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" "$APK" --clobber
           else
-            flags=(--generate-notes --verify-tag)
-            [ "$PRERELEASE" = true ] && flags+=(--prerelease)
-            gh release create "$TAG" "$APK" --title "$TAG" "${flags[@]}"
+            gh release create "$TAG" "$APK" --title "$TAG" --generate-notes --verify-tag
           fi
