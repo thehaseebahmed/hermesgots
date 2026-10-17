@@ -4,24 +4,22 @@ import { CapacitorHttp } from "@capacitor/core"
 import type { User } from "@netlify/identity"
 
 import type { Account } from "@/lib/account"
+import { storedUser, tradeOutcome, type Tokens } from "@/lib/identity-session"
 import { SITE_URL } from "@/lib/native"
 
 /**
  * Identity for the Android app. `@netlify/identity` only talks to the page's own origin, which is
- * `https://localhost` here, so this calls the deploy's GoTrue API directly. Requests go through
+ * `https://localhost` here, so this calls the deploy's Identity API directly. Requests go through
  * native HTTP so CORS doesn't apply. GitHub sign-in runs in a Custom Tab on
  * `public/auth/native.html`, which hands the tokens back through `memento://auth`.
+ *
+ * Identity revokes a refresh token as it spends it, and more than one call site can reach a refresh
+ * in the same tick, so this trades one at a time and re-reads the store before believing a
+ * rejection: only the service's own word about the stored token ends the session (docs/adr/0001).
  */
 
 const IDENTITY = `${SITE_URL}/.netlify/identity`
 const STORAGE_KEY = "memento-identity"
-
-interface Tokens {
-  access: string
-  refresh: string
-  /** Unix ms. */
-  expiresAt: number
-}
 
 const listeners = new Set<(account: Account) => void>()
 let listening = false
@@ -94,15 +92,45 @@ function tokensFrom(params: URLSearchParams | Record<string, unknown>): Tokens |
   }
 }
 
-async function refresh(tokens: Tokens) {
+/** A trade already in flight. Identity revokes a refresh token as it spends it, so a second caller
+ *  replaying the same one would be answered with a rejected token and read that as a sign-out. */
+let inFlight: Promise<Tokens | null> | undefined
+
+/** A token's first characters: enough to tell two trades apart in the console, no use to anyone. */
+function tag(token: string | null | undefined) {
+  return token ? token.slice(0, 6) : null
+}
+
+async function exchange(tokens: Tokens): Promise<Tokens | null> {
   const response = await http("POST", `${IDENTITY}/token`, {
     form: { grant_type: "refresh_token", refresh_token: tokens.refresh },
   })
-  if (response.status >= 500) throw new Error(`Sign-in refresh failed (${response.status})`)
-  const next = response.status === 200 ? tokensFrom(response.data as Record<string, unknown>) : null
-  writeTokens(next)
-  if (!next) notify({ status: "signed-out" })
-  return next
+  const stored = readTokens()
+  const outcome = tradeOutcome(response.status, tokens.refresh, stored?.refresh ?? null)
+  console.debug("[memento] identity refresh", {
+    outcome,
+    status: response.status,
+    spent: tag(tokens.refresh),
+    stored: tag(stored?.refresh),
+  })
+  if (outcome === "renewed") {
+    const next = tokensFrom(response.data as Record<string, unknown>)
+    if (!next) throw new Error("Sign-in refresh gave no tokens")
+    writeTokens(next)
+    return next
+  }
+  if (outcome === "swapped") return stored
+  if (outcome === "retry") throw new Error(`Sign-in refresh failed (${response.status})`)
+  writeTokens(null)
+  notify({ status: "signed-out" })
+  return null
+}
+
+function refresh(tokens: Tokens) {
+  inFlight ??= exchange(tokens).finally(() => {
+    inFlight = undefined
+  })
+  return inFlight
 }
 
 /** A current access token, refreshed when it is about to expire (or `force`d after a 401). */
@@ -130,6 +158,18 @@ async function currentUser() {
   return toUser(response.data as Record<string, unknown>)
 }
 
+/** The account's user: Identity's own answer when it can be asked, and the stored token's owner when
+ *  it can't, so a check that fails leaves the session standing on what the store still holds
+ *  (docs/adr/0001). */
+async function identityUser(): Promise<User | null> {
+  try {
+    return await currentUser()
+  } catch (error) {
+    console.debug("[memento] identity unverified", error)
+    return storedUser(readTokens()?.access ?? null)
+  }
+}
+
 function notify(account: Account) {
   listeners.forEach((listener) => listener(account))
 }
@@ -140,7 +180,7 @@ async function onAppUrl(url: string) {
   void Browser.close().catch(() => {})
   if (!tokens) return
   writeTokens(tokens)
-  const user = await currentUser().catch(() => null)
+  const user = await identityUser()
   notify(user ? { status: "signed-in", user } : { status: "signed-out" })
 }
 
@@ -160,7 +200,7 @@ export async function loadNativeAccount(): Promise<Account> {
   } catch {
     return { status: "unavailable" }
   }
-  const user = await currentUser().catch(() => null)
+  const user = await identityUser()
   return user ? { status: "signed-in", user } : { status: "signed-out" }
 }
 

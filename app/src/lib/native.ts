@@ -68,7 +68,7 @@ export const SITE_URL = (import.meta.env.VITE_SITE_URL ?? "").replace(/\/+$/, ""
 const NATIVE_AUTH = "memento-native-auth"
 
 /**
- * GoTrue returns to the page that started sign-in, `/auth/native.html`. If it lands on the site
+ * Identity returns to the page that started sign-in, `/auth/native.html`. If it lands on the site
  * root instead, send the tokens on to that page so they reach the app, not this browser.
  */
 export function handBackNativeSignIn() {
