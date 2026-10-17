@@ -1,12 +1,21 @@
 // Settings: replacing a recovery code. This device holds no data key and the account has no passkey,
 // so the app asks for the current code; the new wrapper is written before the new code is shown and
 // the old one is retired only once the new one has been copied, over the version it just wrote. Both
-// steps are the one dialog, and the code fits a line on a phone.
-import { app, assert, assertOneLine, pass, signedIn, setUpBot } from "./lib.mjs"
+// steps are the one dialog, and the code fits a line on a phone while a small one wraps it — at a
+// hyphen, between two of its groups rather than through one.
+import {
+  app,
+  assert,
+  assertBreakAtHyphen,
+  assertOneLine,
+  pass,
+  signedIn,
+  setUpBot,
+} from "./lib.mjs"
 
 const USER_ID = "11111111-2222-4333-8444-555555555555"
 
-async function scenario(name, { width, dark }) {
+async function scenario(name, { width, dark, narrow = false }) {
   // A vault holder the stub serves and takes writes to, seeded below the way a returning device's
   // is: a code-wrapped key on the server, its unwrapped copy on this device.
   const held = {}
@@ -63,7 +72,16 @@ async function scenario(name, { width, dark }) {
     const shown = (await page.locator("code").first().innerText()).trim()
     assert.match(shown, /^[0-9A-Z]{5}(-[0-9A-Z]{5}){4}$/, `a new recovery code for ${name}`)
     assert.notEqual(shown, seeded.code, `the new code differs from the old, for ${name}`)
-    await assertOneLine(page.locator("[role=alertdialog] code"), `the new code for ${name}`)
+    // One line wherever there's room for it; a small phone wraps it, and it wraps at a hyphen.
+    if (narrow) {
+      const lines = await assertBreakAtHyphen(
+        page.locator("[role=alertdialog] code"),
+        `the new code for ${name}`,
+      )
+      assert.ok(lines.length > 1, `the new code for ${name} wraps on a small phone`)
+    } else {
+      await assertOneLine(page.locator("[role=alertdialog] code"), `the new code for ${name}`)
+    }
     await shot(`${name}-new-code`)
 
     // The old code still works until the new one is handled: both wrappers are on the server.
@@ -83,12 +101,20 @@ async function scenario(name, { width, dark }) {
 
     // The old wrapper is dropped over the version the first write left, and the new one stays.
     for (let i = 0; i < 20 && vaults.length < before + 2; i++) await page.waitForTimeout(100)
-    assert.equal(vaults.length, before + 2, `the old code is retired in a second write, for ${name}`)
+    assert.equal(
+      vaults.length,
+      before + 2,
+      `the old code is retired in a second write, for ${name}`,
+    )
     const wrappers = vaults[before + 1].wrappers ?? []
     assert.equal(wrappers.length, 1, `one wrapper left for ${name}`)
     assert.equal(wrappers[0].kind, "recovery", `the code left is a recovery code, for ${name}`)
     assert.notEqual(wrappers[0].iv, seeded.iv, `the old wrapper is the one dropped, for ${name}`)
-    assert.equal(held.data.wrappers.length, 1, `the vault served now holds one wrapper, for ${name}`)
+    assert.equal(
+      held.data.wrappers.length,
+      1,
+      `the vault served now holds one wrapper, for ${name}`,
+    )
     await shot(`${name}-done`)
 
     assert.deepEqual(errors, [], `page errors for ${name}`)
@@ -103,3 +129,4 @@ async function scenario(name, { width, dark }) {
 
 await scenario("recovery-code-rotation-390-light", { width: 390, dark: false })
 await scenario("recovery-code-rotation-1024-dark", { width: 1024, dark: true })
+await scenario("recovery-code-rotation-320-light", { width: 320, dark: false, narrow: true })

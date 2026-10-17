@@ -292,3 +292,35 @@ export async function assertOneLine(locator, what) {
   }))
   assert.ok(height <= line * 1.3, `${what} is on one line (${height}px of ${line}px)`)
 }
+
+/**
+ * Fails unless the text wraps only after a hyphen, so a code too wide for its box breaks between its
+ * groups rather than inside one. Returns the lines it found, for a caller that also cares how many.
+ */
+export async function assertBreakAtHyphen(locator, what) {
+  const lines = await locator.evaluate((el) => {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+    const found = []
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      for (let index = 0; index < node.data.length; index++) {
+        const range = document.createRange()
+        range.setStart(node, index)
+        range.setEnd(node, index + 1)
+        found.push({
+          char: node.data[index],
+          top: Math.round(range.getBoundingClientRect().top),
+        })
+      }
+    }
+    const lines = []
+    for (const { char, top } of found) {
+      if (lines.at(-1)?.top !== top) lines.push({ top, text: "" })
+      lines.at(-1).text += char
+    }
+    return lines.map((line) => line.text)
+  })
+  assert.ok(lines.length > 0, `${what} has text to measure`)
+  for (const line of lines.slice(0, -1))
+    assert.ok(line.endsWith("-"), `${what} breaks at a hyphen, not "${line}"`)
+  return lines
+}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { Fragment, useEffect, useRef, useState } from "react"
 import {
   CheckIcon,
   CopyIcon,
@@ -290,10 +290,25 @@ export function RecoveryCode({
     }
     onCopied?.()
   }
+  const groups = code.split("-")
   return (
     <div className="flex items-center gap-1 rounded-2xl bg-muted py-3 pr-1 pl-3">
-      <code ref={text} className="min-w-0 flex-1 font-mono text-sm select-all">
-        {code}
+      {/* Centred, so a code too wide for the box is two tidy lines rather than one broken one. Each
+          hyphen carries a break opportunity of its own: the browser won't offer one at "…-7…" (a
+          hyphen before a digit is not a break in its eyes), so without a `wbr` a code runs under the
+          button instead of wrapping. */}
+      <code ref={text} className="min-w-0 flex-1 text-center font-mono text-sm select-all">
+        {groups.map((group, index) => (
+          <Fragment key={index}>
+            {group}
+            {index < groups.length - 1 && (
+              <>
+                -
+                <wbr />
+              </>
+            )}
+          </Fragment>
+        ))}
       </code>
       <Button
         variant="ghost"
@@ -308,11 +323,90 @@ export function RecoveryCode({
   )
 }
 
+/** The code as a card of its own: shown, held until it's been copied, and the button that goes on. */
+function RecoveryCodeStep({
+  code,
+  title,
+  action,
+  onDone,
+}: {
+  code: string
+  title: string
+  action: string
+  onDone: () => void
+}) {
+  const { copied, noteCopied } = useCopiedCode(code)
+  return (
+    <>
+      <AlertDialogHeader>
+        <AlertDialogTitle>{title}</AlertDialogTitle>
+        <AlertDialogDescription>
+          Save it. It's the only way back into your chats on a new device.
+        </AlertDialogDescription>
+      </AlertDialogHeader>
+      <RecoveryCode code={code} copied={copied} onCopied={noteCopied} />
+      <AlertDialogFooter>
+        <AlertDialogAction disabled={!copied} onClick={onDone}>
+          {action}
+        </AlertDialogAction>
+      </AlertDialogFooter>
+    </>
+  )
+}
+
+/** Asks for the code that can still open the account, before a new one replaces it. */
+function AskForCode({
+  busy,
+  onSubmit,
+  onCancel,
+}: {
+  busy: boolean
+  onSubmit: (code: string) => void
+  onCancel: () => void
+}) {
+  // The field goes with the step: showing the code unmounts it, so the next round starts empty
+  // rather than holding the code that was just retired.
+  const [current, setCurrent] = useState("")
+  return (
+    <form
+      className="grid gap-6"
+      onSubmit={(event) => {
+        event.preventDefault()
+        onSubmit(current)
+      }}
+    >
+      <AlertDialogHeader>
+        <AlertDialogTitle>Enter your current recovery code</AlertDialogTitle>
+      </AlertDialogHeader>
+      <Input
+        aria-label="Current recovery code"
+        autoFocus
+        autoComplete="off"
+        autoCapitalize="characters"
+        autoCorrect="off"
+        spellCheck={false}
+        placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
+        className="font-mono"
+        value={current}
+        onChange={(event) => setCurrent(event.target.value)}
+      />
+      <AlertDialogFooter>
+        <AlertDialogCancel disabled={busy} onClick={onCancel}>
+          Cancel
+        </AlertDialogCancel>
+        <AlertDialogAction type="submit" disabled={busy || !current.trim()}>
+          Continue
+        </AlertDialogAction>
+      </AlertDialogFooter>
+    </form>
+  )
+}
+
 /**
  * Replacing a recovery code: one dialog for both steps, first asking for the code that can still open
  * the account, then showing the new one and waiting for it to be copied. A form in an AlertDialog is
- * the exception here (AGENTS.md asks for a Popup): the two steps are one card, and the code the
- * second step shows is the answer to the first.
+ * the exception here, recorded in `docs/adr/0005-a-recovery-code-is-compulsory-a-passkey-is-optional.md`:
+ * the two steps are one card, and the code the second step shows is the answer to the first.
  */
 function RotationDialog({
   open,
@@ -329,68 +423,26 @@ function RotationDialog({
   onCurrentCode: (code: string) => void
   onDone: () => void
 }) {
-  const [current, setCurrent] = useState("")
-  const { copied, noteCopied } = useCopiedCode(code)
   return (
     <AlertDialog open={open} onOpenChange={(open) => !open && onCancel()}>
+      {/* The dialog's own width is a phone's, which a code overflows: take what the screen gives. */}
       <AlertDialogContent className="data-[size=default]:max-w-[calc(100%-1.5rem)]">
         {code ? (
-          <>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Your new recovery code</AlertDialogTitle>
-              <AlertDialogDescription>
-                Save it. It's the only way back into your chats on a new device.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <RecoveryCode code={code} copied={copied} onCopied={noteCopied} />
-            <AlertDialogFooter>
-              <AlertDialogAction disabled={!copied} onClick={onDone}>
-                Use this code
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </>
+          <RecoveryCodeStep
+            code={code}
+            title="Your new recovery code"
+            action="Use this code"
+            onDone={onDone}
+          />
         ) : (
-          <form
-            className="grid gap-6"
-            onSubmit={(event) => {
-              event.preventDefault()
-              onCurrentCode(current)
-            }}
-          >
-            <AlertDialogHeader>
-              <AlertDialogTitle>Enter your current recovery code</AlertDialogTitle>
-            </AlertDialogHeader>
-            <Input
-              aria-label="Current recovery code"
-              autoFocus
-              autoComplete="off"
-              autoCapitalize="characters"
-              autoCorrect="off"
-              spellCheck={false}
-              placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
-              className="font-mono"
-              value={current}
-              onChange={(event) => setCurrent(event.target.value)}
-            />
-            <AlertDialogFooter>
-              <AlertDialogCancel disabled={busy} onClick={onCancel}>
-                Cancel
-              </AlertDialogCancel>
-              <AlertDialogAction type="submit" disabled={busy || !current.trim()}>
-                Continue
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </form>
+          <AskForCode busy={busy} onSubmit={onCurrentCode} onCancel={onCancel} />
         )}
       </AlertDialogContent>
     </AlertDialog>
   )
 }
 
-/**
- * Shows a freshly made recovery code and won't close until it's been copied: the code is the only
- * way back into sync without a passkey, so skipping it silently loses an account's recovery.
- */
+/** The code a vault this device is turning on waits on, shown over the card that asked for it. */
 export function RecoveryCodeDialog({
   code,
   title = "Your recovery code",
@@ -402,22 +454,10 @@ export function RecoveryCodeDialog({
   action?: string
   onDone: () => void
 }) {
-  const { copied, noteCopied } = useCopiedCode(code)
   return (
     <AlertDialog open={Boolean(code)}>
-      <AlertDialogContent className="data-[size=default]:max-w-[calc(100%-1.5rem)]">
-        <AlertDialogHeader>
-          <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription>
-            Save it. It's the only way back into your chats on a new device.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <RecoveryCode code={code ?? ""} copied={copied} onCopied={noteCopied} />
-        <AlertDialogFooter>
-          <AlertDialogAction disabled={!copied} onClick={onDone}>
-            {action}
-          </AlertDialogAction>
-        </AlertDialogFooter>
+      <AlertDialogContent>
+        <RecoveryCodeStep code={code ?? ""} title={title} action={action} onDone={onDone} />
       </AlertDialogContent>
     </AlertDialog>
   )
