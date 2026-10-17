@@ -61,9 +61,11 @@ const user = { id: "11111111-2222-4333-8444-555555555555", email: "tester@exampl
 
 /**
  * A browser signed in to Identity with the sync, community and Identity routes stubbed, for a flow
- * that has to start before the wizard: `vault` says whether the account already has one, `vaults`
- * collects every vault PUT and `joins` every leaderboard join, and `shot(name)` saves a screenshot.
- * The caller closes `browser`.
+ * that has to start before the wizard: `vault` is "missing" for a first run, "exists" for an account
+ * that already has one, or a holder `{ data }` the flow seeds — that stub then behaves like the sync
+ * function, serving what it holds and taking writes with etags, so a flow can watch a vault change
+ * over several writes. `vaults` collects every vault PUT and `joins` every leaderboard join, and
+ * `shot(name)` saves a screenshot. The caller closes `browser`.
  */
 export async function signedIn({ width = 1440, dark = false, vault = "exists" } = {}) {
   const browser = await chromium.launch({ headless: !headed, args: ["--no-sandbox"] })
@@ -95,16 +97,28 @@ export async function signedIn({ width = 1440, dark = false, vault = "exists" } 
   await context.addCookies([{ name: "nf_jwt", value: session.token.access_token, url: app }])
 
   const vaults = []
+  // A vault the flow seeds (`{ data }`) is served like the sync function's: written over its etag,
+  // and what it holds changes with each write.
+  const held = typeof vault === "object" ? vault : undefined
+  let etag = "v1"
   await context.route("**/.netlify/functions/sync?**", async (route) => {
     const request = route.request()
+    const doc = new URL(request.url()).searchParams.get("doc")
     if (request.method() === "PUT") {
       const body = request.postDataJSON()
-      if (new URL(request.url()).searchParams.get("doc") === "vault") vaults.push(body.data)
+      if (doc === "vault") {
+        vaults.push(body.data)
+        if (held) {
+          if (body.etag && body.etag !== etag) return route.fulfill({ status: 412, json: {} })
+          held.data = body.data
+          etag = `v${Number(etag.slice(1)) + 1}`
+        }
+      }
       return route.fulfill({ json: { ok: true } })
     }
-    if (vault === "missing") return route.fulfill({ status: 404, json: { error: "missing" } })
-    if (request.url().includes("doc=vault"))
-      return route.fulfill({ json: { data: {}, etag: "v1" } })
+    const data = held ? held.data : {}
+    if (doc === "vault" && (held ? data !== undefined : vault !== "missing"))
+      return route.fulfill({ json: { data, etag } })
     return route.fulfill({ status: 404, json: { error: "missing" } })
   })
 

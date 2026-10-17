@@ -192,6 +192,11 @@ const FLOWS = {
     about:
       "Setup always issues a recovery code, offers the passkey beside it, and gates Continue on copying it",
   },
+  "recovery-code-rotation": {
+    script: "e2e/recovery-code-rotation.mjs",
+    about:
+      "Replacing a recovery code in Settings: the current one is asked for, and the old retires once the new is copied",
+  },
   prs: {
     script: "e2e/prs.mjs",
     about:
