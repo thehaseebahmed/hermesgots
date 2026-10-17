@@ -10,7 +10,8 @@ import {
 
 import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
-import { optionId, type SkillsState, type SlashItem } from "@/lib/slash"
+import { optionId, type SlashItem } from "@/lib/slash"
+import type { SkillsState } from "@/lib/skills"
 import { cn } from "@/lib/utils"
 
 const COMMAND_ICONS = {

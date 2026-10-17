@@ -1,7 +1,7 @@
 import Dexie, { type EntityTable, type Transaction } from "dexie"
 
 import { BOTS, LEGACY_BOT_IDS } from "@/components/bots"
-import type { ModelChange, ProviderUsage } from "@/lib/hermes"
+import type { ModelChange, ProviderUsage, Skill } from "@/lib/hermes"
 import { randomId } from "@/lib/utils"
 
 export type ThemePreference = "system" | "light" | "dark"
@@ -437,6 +437,13 @@ export interface OverallRankings {
   fetchedAt: number
 }
 
+/** The skills one bot last listed, kept so the composer's `/` menu opens on them (`skills.ts`). */
+export interface CachedSkills {
+  /** The connection the list belongs to (one bot's server and key). */
+  id: string
+  skills: Skill[]
+}
+
 /** Carries a default for every appearance switch, so reading one never needs a fallback. */
 export const DEFAULT_SETTINGS: Settings & Appearance = {
   id: "settings",
@@ -463,6 +470,7 @@ export const db = new Dexie("memento") as Dexie & {
   modelsDevCatalog: EntityTable<ModelsDevCatalog, "id">
   overallRankings: EntityTable<OverallRankings, "id">
   dictations: EntityTable<SavedDictation, "id">
+  skills: EntityTable<CachedSkills, "id">
 }
 
 db.version(1).stores({
@@ -627,6 +635,9 @@ db.version(15).upgrade((tx) =>
       delete conversation.todos
     }),
 )
+
+// v16: the skills the bot last listed, so the composer's `/` menu opens on them offline.
+db.version(16).stores({ skills: "id" })
 
 db.on("populate", (tx) => seedProfile(tx))
 
