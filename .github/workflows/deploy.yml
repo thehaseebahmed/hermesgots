@@ -11,7 +11,9 @@ on:
       - "app/**"
       - "netlify.toml"
       - ".github/workflows/deploy.yml"
-      - ".github/workflows/tests.yml"
+      # tests.yml is deliberately not here: changing the test workflow doesn't change the app that
+      # ships, and its own push trigger already runs it, so listing it would run the suite twice and
+      # publish a deploy of unchanged code.
 
 # One production deploy at a time. Netlify publishes a deploy only once its upload has finished, so
 # a cancelled run leaves the last good one live, and the newer merge's deploy carries the older
@@ -57,7 +59,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Download the tested build
-        uses: actions/download-artifact@v8
+        # Same major as the upload in tests.yml, and as android-release.yml's.
+        uses: actions/download-artifact@v7
         with:
           name: app-dist
           path: app/dist
@@ -71,7 +74,7 @@ jobs:
             --dir=app/dist \
             --functions=app/netlify/functions \
             --prod \
-            --message "$(git log -1 --format='%h %s')"
+            --message "${{ github.sha }} $(git log -1 --format='%s')"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
