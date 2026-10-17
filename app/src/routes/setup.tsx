@@ -5,6 +5,7 @@ import { FingerprintIcon, LogInIcon, TrophyIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { RecoveryCode, UnlockSync } from "@/components/account-settings"
+import { useCopiedCode } from "@/components/copied-code"
 import { Bot } from "@/components/bot"
 import { SharingNotes } from "@/components/community-settings"
 import { LinkBots } from "@/components/link-bots"
@@ -80,7 +81,7 @@ function SetupPage({
   const profile = useLiveQuery(getActiveProfile, [])
   const [linkStep, setLinkStep] = useState<"checking" | "community" | "link">("checking")
   const [busy, setBusy] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const { copied, noteCopied } = useCopiedCode(setup?.recoveryCode)
   const [reachable, setReachable] = useState(false)
   const onReachable = useCallback((ok: boolean) => setReachable(ok), [])
 
@@ -181,7 +182,7 @@ function SetupPage({
             title="Your recovery code"
             description="Save it. It's the only way back into your chats on a new device."
           >
-            <RecoveryCode code={setup.recoveryCode} onCopied={() => setCopied(true)} />
+            <RecoveryCode code={setup.recoveryCode} copied={copied} onCopied={noteCopied} />
             {supportsPasskeys() && (
               <Button
                 variant="outline"

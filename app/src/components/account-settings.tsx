@@ -11,6 +11,7 @@ import {
 import { toast } from "sonner"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { useCopiedCode } from "@/components/copied-code"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -294,10 +295,15 @@ export function UnlockSync() {
 }
 
 /** A recovery code with the copy button that marks it handled. */
-export function RecoveryCode({ code, onCopied }: { code: string; onCopied?: () => void }) {
-  // Which code was copied, so a new one starts unhandled without an effect.
-  const [copiedCode, setCopiedCode] = useState<string>()
-  const copied = copiedCode === code
+export function RecoveryCode({
+  code,
+  copied,
+  onCopied,
+}: {
+  code: string
+  copied: boolean
+  onCopied?: () => void
+}) {
   const text = useRef<HTMLElement>(null)
   const copy = async () => {
     try {
@@ -310,7 +316,6 @@ export function RecoveryCode({ code, onCopied }: { code: string; onCopied?: () =
       selection?.removeAllRanges()
       selection?.addRange(range)
     }
-    setCopiedCode(code)
     onCopied?.()
   }
   return (
@@ -338,26 +343,25 @@ export function RecoveryCode({ code, onCopied }: { code: string; onCopied?: () =
 export function RecoveryCodeDialog({
   code,
   title = "Your recovery code",
-  description = "Save it. It's the only way back into your chats on a new device.",
   action = "I've saved it",
   onDone,
 }: {
   code?: string
   title?: string
-  description?: string
   action?: string
   onDone: () => void
 }) {
-  const [copiedCode, setCopiedCode] = useState<string>()
-  const copied = Boolean(code) && copiedCode === code
+  const { copied, noteCopied } = useCopiedCode(code)
   return (
     <AlertDialog open={Boolean(code)}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription>{description}</AlertDialogDescription>
+          <AlertDialogDescription>
+            Save it. It's the only way back into your chats on a new device.
+          </AlertDialogDescription>
         </AlertDialogHeader>
-        <RecoveryCode code={code ?? ""} onCopied={() => setCopiedCode(code)} />
+        <RecoveryCode code={code ?? ""} copied={copied} onCopied={noteCopied} />
         <AlertDialogFooter>
           <AlertDialogAction disabled={!copied} onClick={onDone}>
             {action}

@@ -188,6 +188,24 @@ async function refreshVault() {
   })
 }
 
+/**
+ * Writes the vault with `change` applied, reading it fresh for each attempt: another device may
+ * have written first (the etag then fails the put), and the vault is left fresh either way so the
+ * next caller doesn't write over a stale one. False means every attempt lost the race.
+ */
+async function writeVault(change: (vault: Vault) => Vault, attempts = 3) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (!remoteVault) return false
+    const { vault, etag } = remoteVault
+    if (await putDoc("vault", change(vault), etag)) {
+      await refreshVault()
+      return true
+    }
+    await refreshVault()
+  }
+  return false
+}
+
 async function keep(dataKey: CryptoKey) {
   const id = userId()
   if (!id) throw new Error("Sign in first.")
@@ -266,31 +284,17 @@ export async function rotateRecoveryCode(currentCode?: string) {
   sessionKey = dataKey
   const code = newRecoveryCode()
   const wrapper = await recoveryWrapper(dataKey, code)
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const { vault, etag } = remoteVault
-    if (await putDoc("vault", { ...vault, wrappers: [...vault.wrappers, wrapper] }, etag)) {
-      await refreshVault()
-      return {
-        code,
-        confirm: async () => {
-          for (let attempt = 0; attempt < 3; attempt++) {
-            if (!remoteVault) return
-            const { vault, etag } = remoteVault
-            const wrappers = vault.wrappers.filter(
-              (w) => w.kind !== "recovery" || w.iv === wrapper.iv,
-            )
-            if (await putDoc("vault", { ...vault, wrappers }, etag)) {
-              await refreshVault()
-              return
-            }
-            await refreshVault()
-          }
-        },
-      }
-    }
-    await refreshVault()
+  const added = await writeVault((vault) => ({ ...vault, wrappers: [...vault.wrappers, wrapper] }))
+  if (!added) throw new Error("Couldn't save the new recovery code. Try again.")
+  return {
+    code,
+    confirm: async () => {
+      await writeVault((vault) => ({
+        ...vault,
+        wrappers: vault.wrappers.filter((w) => w.kind !== "recovery" || w.iv === wrapper.iv),
+      }))
+    },
   }
-  throw new Error("Couldn't save the new recovery code. Try again.")
 }
 
 export async function unlockSyncWithPasskey() {
@@ -308,16 +312,10 @@ export async function addPasskey() {
   if (!remoteVault) throw new Error("Sync isn't set up yet.")
   const dataKey = sessionKey ?? (await unlockWithPasskey(remoteVault.vault))
   sessionKey = dataKey
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const { vault, etag } = remoteVault
-    const wrapper = await passkeyWrapper(dataKey, vault, passkeyUser())
-    if (await putDoc("vault", { ...vault, wrappers: [...vault.wrappers, wrapper] }, etag)) {
-      await refreshVault()
-      return
-    }
-    await refreshVault()
-  }
-  throw new Error("Couldn't save the passkey. Try again.")
+  // Minted once, outside the write: the prompt is a user's, not a retry's.
+  const wrapper = await passkeyWrapper(dataKey, remoteVault.vault, passkeyUser())
+  const added = await writeVault((vault) => ({ ...vault, wrappers: [...vault.wrappers, wrapper] }))
+  if (!added) throw new Error("Couldn't save the passkey. Try again.")
 }
 
 export function canAddPasskey() {
