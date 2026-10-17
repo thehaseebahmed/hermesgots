@@ -2,7 +2,9 @@ name: BenchLM id check
 
 on:
   schedule:
-    - cron: "0 3 * * *"
+    # Weekly, not daily: the ids move when BenchLM's own data does, the check edits one issue in
+    # place, and it gates nothing.
+    - cron: "0 3 * * 1"
   workflow_dispatch:
 
 permissions:
