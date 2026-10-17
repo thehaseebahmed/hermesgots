@@ -74,7 +74,7 @@ UI primitives in `src/components/ui` are shadcn `base-maia` components. Add more
 
 ### Development container
 
-`Dockerfile` builds an image with everything the app, the plugin and the website need — Node 22, pnpm 10, Python 3.13 (with the plugin tests' `cryptography`) and headless Chromium for the e2e flows. `.github/workflows/dev-image.yml` builds it on every pull request and publishes it on a push to `main`:
+`Dockerfile` builds an image with everything the app, the plugin and the website need — Node 22, pnpm 10, Python 3.13 (with the plugin tests' `cryptography`) and headless Chromium for the e2e flows. `.github/workflows/dev-image.yml` builds it on every pull request and publishes it on a push to `main`, and only after those checks have run against the image it just built:
 
 ```bash
 docker pull ghcr.io/thehaseebahmed/gots-dev:latest
@@ -88,13 +88,13 @@ docker run --rm -it -p 15173:15173 -p 8642:8642 -v "$PWD:/workspace" -w /workspa
 # inside the container: cd app && pnpm install && pnpm dev -- --host 0.0.0.0
 ```
 
-The app's checks, run in the container:
+The checks, in the container, are the checks CI runs: `.github/scripts/checks.sh` owns that list and both `tests.yml` and `dev-image.yml` call it.
 
 ```bash
-docker run --rm -v "$PWD:/workspace" -w /workspace gots-dev sh -lc "cd app && pnpm install --frozen-lockfile && pnpm lint && pnpm typecheck && node scripts/test-community.mjs && pnpm build"
+docker run --rm -v "$PWD:/workspace" -w /workspace gots-dev bash .github/scripts/checks.sh all
 ```
 
-The plugin's and the website's take the same shape — `python3 -m unittest discover -s plugin/tests`, and `cd website && pnpm install --frozen-lockfile && pnpm build`. `dev-image.yml` runs them against the image itself; `AGENTS.md` lists them for a host checkout.
+`all` is the app's gates, the plugin's tests and the website's build; `app`, `plugin` and `website` on their own are what `tests.yml` runs, one area per job. `AGENTS.md` lists the commands for a host checkout.
 
 An e2e flow drives the dev server itself, so start it bound to IPv4 in the same container first: the harness probes the port over IPv4 while Vite binds `::1` unless told otherwise — the trap `.agents/skills/e2e-testing/` lists under Gotchas.
 

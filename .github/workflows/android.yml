@@ -84,8 +84,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # `pnpm lint` is not repeated here: the App gates job lints the same commit, and the pull
-      # requests that reach this workflow always touch app/**.
+      # `pnpm lint` is not repeated here: it covers `app/src`, which `tests.yml`'s App gates job lints
+      # whenever the diff includes it, and a native-only diff — what this job mostly builds — has no
+      # app source in it to lint.
 
       - name: Firebase config
         if: env.FIREBASE_GOOGLE_SERVICES != ''
@@ -116,7 +117,7 @@ jobs:
         run: |
           sha="${COMMIT_REF::7}"
           echo "ANDROID_VERSION_CODE=${{ github.run_number }}" >> "$GITHUB_ENV"
-          echo "ANDROID_VERSION_NAME=$(node -p 'require(\"./package.json\").version')-$sha" >> "$GITHUB_ENV"
+          echo "ANDROID_VERSION_NAME=$(node -p 'require("./package.json").version')-$sha" >> "$GITHUB_ENV"
 
       # One Gradle invocation for both: a daemon-less run pays its startup and configuration cost
       # each time, so the static check and the packaging build share one.

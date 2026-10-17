@@ -65,7 +65,7 @@ jobs:
       - name: Install the plugin's test dependencies
         run: python3 -m pip install cryptography
       - name: Run the plugin tests
-        run: python3 -m unittest discover -s plugin/tests
+        run: bash .github/scripts/checks.sh plugin
 
   app:
     name: App gates
@@ -83,27 +83,10 @@ jobs:
           # The pnpm store, so an install is a link rather than a fresh download every run.
           cache: pnpm
           cache-dependency-path: app/pnpm-lock.yaml
-      - name: Install
-        run: pnpm install --frozen-lockfile
-        working-directory: app
-      - name: Lint
-        run: pnpm lint
-        working-directory: app
-      - name: Typecheck
-        run: pnpm typecheck
-        working-directory: app
-      - name: Community function tests
-        run: node scripts/test-community.mjs
-        working-directory: app
-      - name: BenchLM matching tests
-        run: node --experimental-strip-types --test scripts/test-bench-matching.mjs scripts/test-benchlm-check.mjs
-        working-directory: app
-      - name: Identity session tests
-        run: node --experimental-strip-types --test scripts/test-identity-session.mjs
-        working-directory: app
-      - name: Build
-        run: pnpm build
-        working-directory: app
+      # The gates live in `.github/scripts/checks.sh`, which the development image's verification
+      # runs too: one list, so a gate added for the runner reaches the image as well.
+      - name: App gates
+        run: bash .github/scripts/checks.sh app
 
   website:
     name: Website build
@@ -124,9 +107,5 @@ jobs:
           node-version: 22
           cache: pnpm
           cache-dependency-path: website/pnpm-lock.yaml
-      - name: Install
-        run: pnpm install --frozen-lockfile
-        working-directory: website
       - name: Typecheck and build
-        run: pnpm build
-        working-directory: website
+        run: bash .github/scripts/checks.sh website

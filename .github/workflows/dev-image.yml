@@ -1,8 +1,10 @@
 name: Dev image
 
 # The development container is built from `Dockerfile` and published to the GitHub Container
-# Registry. A pull request builds and verifies it; only a push to `main` publishes it, the same
-# line `android.yml` draws between a build check and a distribution.
+# Registry. A pull request builds it; only a push to `main` publishes it, the same line `android.yml`
+# draws between a build check and a distribution. Nothing is published until the checks have run
+# against the image they gate — and a pull request runs them when the image's own recipe moved, while
+# a lockfile change (which rebuilds the image without changing what runs inside it) only builds.
 on:
   push:
     branches: [main]
@@ -39,8 +41,37 @@ env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/gots-dev
 
 jobs:
+  # Whether the image's own recipe moved. A merge and a hand dispatch always verify — a dispatch is a
+  # publishing event on `main` and has to earn `latest`; a pull request verifies when the answer is
+  # yes, and when the diff can't be worked out at all (the rule the shared script applies).
+  changes:
+    name: What changed
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.filter.outputs.image }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The whole history, so the base commit is there to diff against.
+          fetch-depth: 0
+
+      - name: Diff against the base
+        id: filter
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.sha }}
+        run: |
+          areas=$(bash "$GITHUB_WORKSPACE/.github/scripts/changed-areas.sh" "$BASE" "$HEAD")
+          image=false
+          while IFS= read -r area; do
+            if [ "$area" = image ]; then image=true; fi
+          done <<< "$areas"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "image=$image"
+
   image:
     name: Build, verify and publish
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -65,16 +96,22 @@ jobs:
             type=sha,format=short
             type=raw,value=latest,enable={{is_default_branch}}
 
+      - name: Name the image under test
+        id: subject
+        # The `sha-` tag metadata names, spelled out, so the checks below run against a name rather
+        # than whichever tag the tags output happens to list first.
+        run: echo "tag=${IMAGE}:sha-$(echo "$GITHUB_SHA" | cut -c1-7)" >> "$GITHUB_OUTPUT"
+
       - name: Build
         id: build
         uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
-          push: ${{ github.event_name != 'pull_request' }}
-          # A pull request has no registry credentials to pull from, so it verifies the image
-          # this runner just built.
-          load: ${{ github.event_name == 'pull_request' }}
+          # Built and loaded into the daemon, never pushed from here: publishing is the last step,
+          # after the checks have run against this image.
+          push: false
+          load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
@@ -82,31 +119,31 @@ jobs:
           cache-from: type=gha
           # A warm cache is worth having; failing the build for one is not. The export talks to
           # GitHub's cache API, whose rate limiting shows up as a 10-minute timeout after the
-          # image itself has already been pushed.
+          # image itself has already been built.
           cache-to: type=gha,mode=max,ignore-error=true,timeout=30m
 
-      # The app's gates, the plugin's tests and the website's build, run inside the image against
-      # the checkout: an image that cannot run them is not worth publishing. `tests.yml` owns that
-      # set — a gate added there does not reach this list on its own (see fixes.md).
+      # The app's gates, the plugin's tests and the website's build, run inside the image against the
+      # checkout: an image that cannot run them is not worth publishing. `.github/scripts/checks.sh`
+      # owns that set and `tests.yml` runs the same script, so a gate added for the runner reaches
+      # the image's verification too.
       - name: Verify the image
+        if: github.event_name != 'pull_request' || needs.changes.outputs.image == 'true'
         run: |
-          image=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
-          if [ "${{ github.event_name }}" != "pull_request" ]; then docker pull "$image"; fi
           docker run --rm -v "$PWD:/workspace" -w /workspace -e ASTRO_TELEMETRY_DISABLED=1 \
-            "$image" sh -lc '
-              set -e
-              cd app
-              pnpm install --frozen-lockfile
-              pnpm lint
-              pnpm typecheck
-              node scripts/test-community.mjs
-              pnpm build
-              cd ..
-              python3 -m unittest discover -s plugin/tests
-              cd website
-              pnpm install --frozen-lockfile
-              pnpm build
-            '
+            "${{ steps.subject.outputs.tag }}" bash .github/scripts/checks.sh all
+
+      - name: Publish the image
+        id: publish
+        if: github.event_name != 'pull_request'
+        # The tags the build loaded: its layers are in the daemon, so this pushes rather than
+        # rebuilds, and it happens only now that the checks have passed.
+        run: |
+          while IFS= read -r tag; do
+            if [ -n "$tag" ]; then docker push "$tag"; fi
+          done <<< "${{ steps.meta.outputs.tags }}"
+          digest=$(docker inspect --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}' \
+            "${{ steps.subject.outputs.tag }}")
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Summary
         if: always()
@@ -118,6 +155,7 @@ jobs:
             echo "| --- | --- |"
             echo "| Image | \`${{ env.IMAGE }}\` |"
             echo "| Tags | $(echo "${{ steps.meta.outputs.tags }}" | tr '\n' ' ') |"
+            echo "| Verified | ${{ github.event_name != 'pull_request' || needs.changes.outputs.image == 'true' }} |"
             echo "| Published | ${{ github.event_name != 'pull_request' }} |"
-            echo "| Digest | \`${{ steps.build.outputs.digest }}\` |"
+            echo "| Digest | \`${{ steps.publish.outputs.digest || steps.build.outputs.digest }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"

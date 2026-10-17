@@ -10,12 +10,15 @@ lives *inside* the jobs: a `changes` job publishes what moved and each gate job 
 condition. That shape is load-bearing rather than incidental — a job skipped by a condition reports
 Success, while a workflow skipped by `paths:` leaves its required check pending forever, and `main`
 requires checks to pass. A push to `main` then keeps a reduced run: the plugin tests and the app
-gates, which the pull request already proved on the merge commit, and not the website build, which
-Netlify performs on the same merge. Unattended checks follow the same reasoning and give up their
-frequency rather than a merge's check: the BenchLM id check is weekly. The dev image runs the other
-way round, and is the one place where a *fuller* run is the point: it verifies an image it built
-locally before publishing its tags, on every `main` run whatever triggered the build, so that a
-dependency bump cannot put an unverified image under `latest`.
+gates, when the diff touches them — the pull request already proved them on the merge commit — and
+never the website build, which Netlify performs on the same merge. Unattended checks follow the same
+reasoning and give up their frequency rather than a merge's check: the BenchLM id check is weekly.
+The dev image runs the other way round, and is the one place where a *fuller* run is the point: it
+verifies an image it built locally before publishing its tags, on every `main` run whatever
+triggered the build, so that a dependency bump cannot put an unverified image under `latest`. A pull
+request, which publishes nothing, runs those checks only when the image's own recipe moved
+(`Dockerfile`, `.dockerignore` or the workflow): a lockfile change rebuilds the image without
+changing what runs inside it, so there is nothing new to verify.
 
 ## Considered options
 
@@ -35,9 +38,18 @@ dependency bump cannot put an unverified image under `latest`.
 
 ## Consequences
 
-- A gate whose paths fall outside `app/`, `plugin/` and `website/` needs its own case in the
-  `changes` job, or it never runs. That failure is silent — a check that does not run is not a check
-  that fails — so a new gate's first run has to be watched.
+- **The diff is read in one place.** `.github/scripts/changed-areas.sh` answers what moved, in a
+  fixed vocabulary — `app`, `plugin`, `website`, `native`, `image` — and each workflow maps that
+  onto its own jobs. A gate whose paths fall outside those areas needs a case there, or it never
+  runs: that failure is silent (a check that does not run is not a check that fails), so a new gate's
+  first run has to be watched. A diff that cannot be worked out answers with every area, for the same
+  reason.
+- **The check set has one owner.** `.github/scripts/checks.sh` holds the app's gates, the plugin's
+  tests and the website's build; `tests.yml` runs one area per job and the image's verification runs
+  `all`. The two statements had already drifted by the time the image was written (its verification
+  was missing a step the app's gates had grown), so a gate added to the script now reaches both. The
+  cost is that the script has to work in both places: it calls the tools their environment supplies
+  and installs nothing but the dependencies an area installs for itself.
 - The jobs keep the names `main`'s required checks were configured with. Renaming a job or a
   workflow means updating those settings in the same change, or pull requests hang on a check that
   will never report.
