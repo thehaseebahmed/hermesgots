@@ -138,7 +138,7 @@ The function stores data in Netlify Blobs (store `memento-sync`), which needs no
 
 `android/` wraps this same app with [Capacitor](https://capacitorjs.com). Two workflows build it:
 
-- **Android** (`.github/workflows/android.yml`) builds a debug APK on every push to `main` and every push to a pull request into `main`. Builds from `main` also go to testers (below).
+- **Android** (`.github/workflows/android.yml`) builds a debug APK on every push to `main`, and checks a pull request with Gradle's `lintDebug` — building the APK too when the native project or `capacitor.config.ts` moved. Builds from `main` also go to testers (below).
 - **Android release** (`.github/workflows/android-release.yml`) builds the signed release APK. It runs when a version tag is pushed, and the tag becomes the app's version, so it must match `app/package.json`: set the version there, commit, then tag that commit (`git tag v0.1.0-beta && git push origin v0.1.0-beta`). To run it again, pick the tag (or a branch whose head carries it) under **Actions → Android release → Run workflow**. The APK is attached to the run and to the tag's GitHub release, which is created as a prerelease when the version has a suffix like `-beta`.
 
 One-time setup:

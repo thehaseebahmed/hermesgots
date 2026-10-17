@@ -20,7 +20,35 @@ permissions:
   contents: read
 
 jobs:
+  # Whether the native project itself moved. A pull request that only touches the app's TypeScript
+  # gets the static checks; packaging an APK is what main pays for, since only a push distributes it.
+  changes:
+    name: What changed
+    runs-on: ubuntu-latest
+    outputs:
+      native: ${{ steps.filter.outputs.native }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The whole history, so the base commit is there to diff against.
+          fetch-depth: 0
+
+      - name: Diff against the base
+        id: filter
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.sha }}
+        run: |
+          areas=$(bash "$GITHUB_WORKSPACE/.github/scripts/changed-areas.sh" "$BASE" "$HEAD")
+          native=false
+          while IFS= read -r area; do
+            if [ "$area" = native ]; then native=true; fi
+          done <<< "$areas"
+          echo "native=$native" >> "$GITHUB_OUTPUT"
+          echo "native=$native"
+
   apk:
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -56,7 +84,8 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm lint
+      # `pnpm lint` is not repeated here: the App gates job lints the same commit, and the pull
+      # requests that reach this workflow always touch app/**.
 
       - name: Firebase config
         if: env.FIREBASE_GOOGLE_SERVICES != ''
@@ -87,21 +116,31 @@ jobs:
         run: |
           sha="${COMMIT_REF::7}"
           echo "ANDROID_VERSION_CODE=${{ github.run_number }}" >> "$GITHUB_ENV"
-          echo "ANDROID_VERSION_NAME=$(node -p 'require("./package.json").version')-$sha" >> "$GITHUB_ENV"
+          echo "ANDROID_VERSION_NAME=$(node -p 'require(\"./package.json\").version')-$sha" >> "$GITHUB_ENV"
 
-      - name: Build debug APK
+      # One Gradle invocation for both: a daemon-less run pays its startup and configuration cost
+      # each time, so the static check and the packaging build share one.
+      - name: Gradle checks
         working-directory: app/android
         env:
+          EVENT: ${{ github.event_name }}
+          NATIVE_CHANGED: ${{ needs.changes.outputs.native }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/release.keystore"
-            echo "$KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+          # A pull request touching only the app's TypeScript is checked, not packaged; anything on
+          # main is packaged, because that is the build Firebase distributes to testers.
+          tasks=lintDebug
+          if [ "$EVENT" = "push" ] || [ "$NATIVE_CHANGED" = "true" ]; then
+            tasks="$tasks assembleDebug"
+            if [ -n "$KEYSTORE_BASE64" ]; then
+              export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/release.keystore"
+              echo "$KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+            fi
           fi
           status=0
-          ./gradlew assembleDebug --no-daemon || status=$?
+          ./gradlew $tasks --no-daemon || status=$?
           rm -f "$RUNNER_TEMP/release.keystore"
           exit $status
 
