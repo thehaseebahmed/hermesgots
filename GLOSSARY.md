@@ -21,8 +21,12 @@ The key that encrypts what syncs. The server can only hold it wrapped by a passk
 _Avoid_: sync key, master password, encryption account
 
 **Sync**:
-The encrypted copy of your bots, appearance switches and chat lists, kept for you on the server.
+The encrypted copy of your bots, appearance switches and chat lists, kept for you on the sync server.
 _Avoid_: backup, cloud, account data
+
+**Sync server**:
+The site that holds the synced copy: the origin Gots is read from in the browser, and the site the Android app was built for.
+_Avoid_: backend, cloud, host, "the server"
 
 **Recovery code**:
 The code that comes with every vault and is the only way into sync on a device without a passkey; on Android, the only way in at all. Setup always issues one, and Settings can replace it with a fresh code.
