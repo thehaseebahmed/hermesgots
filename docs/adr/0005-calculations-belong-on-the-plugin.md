@@ -84,8 +84,9 @@ before the next read lands and offline still shows it.
 
 ## Consequences
 
-- A derived fact has one author. Anywhere the app and the plugin disagreed, the plugin is right, and
-  the disagreement is a bug to fix rather than a race to paper over.
+- A derived fact has one author. Anywhere the app and the plugin disagreed, the plugin is right, and the
+  disagreement is a bug to fix rather than a race to paper over.
+- The clusters still to move, with the order and the work order for each, live in `migrations/`.
 - The plugin's version becomes load-bearing for what a screen shows, not only for how it behaves. The
   app's feature checks and `MIN_PLUGIN_VERSION` are the compatibility story, with one version bump once
   the clusters that matter have landed.

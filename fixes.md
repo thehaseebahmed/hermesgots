@@ -1051,7 +1051,9 @@ list's own progress and each item's depth, which the plugin states with the list
 (`plugin/todos.py::progress_of` / `depth_of`, `GET sessions/{id}/todos`) and the app no longer works out
 (`src/components/chat/todos.tsx`, `src/lib/todos.ts`). The three below are recorded rather than applied:
 each changes a route, a capability gate and a stored shape, so each is its own decision, and the app has
-to keep working against plugins already installed in the field.
+to keep working against plugins already installed in the field. `migrations/` holds the work order for
+each one — the contract, the steps, the pitfalls the first cluster taught and the definition of done —
+and `migrations/index.md` names the order to do them in.
 
 ## Risky
 
