@@ -315,6 +315,7 @@ export function ChatPage() {
   const tracked = Boolean(profile?.apiKey && !profile.disabled)
   const live = conversation?.liveContext
   const todos = (tracked && conversation?.todos?.items) || []
+  const todoProgress = tracked ? conversation?.todos?.progress : undefined
   // A session of a Hermes Project: works in its worktree, with a mode, a PR and a resolved state.
   const session = conversation?.projectId ? conversation : undefined
   // The files the session filed in its library, as the pill above the composer counts them.
@@ -807,7 +808,12 @@ export function ChatPage() {
                 </Suspense>
               ) : (
                 todos.length > 0 && (
-                  <TodosPill items={todos} live={busy} onClick={() => setTodosOpen(true)} />
+                  <TodosPill
+                    items={todos}
+                    progress={todoProgress}
+                    live={busy}
+                    onClick={() => setTodosOpen(true)}
+                  />
                 )
               )}
               {outputs === 0 && prs.length === 1 ? (
@@ -949,7 +955,13 @@ export function ChatPage() {
         usage={usage}
         providerUsage={providerUsage}
       />
-      <TodosSheet open={todosOpen} onOpenChange={setTodosOpen} items={todos} live={busy} />
+      <TodosSheet
+        open={todosOpen}
+        onOpenChange={setTodosOpen}
+        items={todos}
+        progress={todoProgress}
+        live={busy}
+      />
       {session && (
         <OutputsDrawer
           open={outputsOpen}

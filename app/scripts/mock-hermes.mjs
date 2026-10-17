@@ -1123,6 +1123,28 @@ function streamEvents(req, res, profile, since) {
 
 const sessionOf = (req, body) => req.headers["x-hermes-session-id"] ?? body?.session_id
 
+// As the plugin states a list: each item's depth under its parents (capped), and the list's progress.
+const MAX_TODO_DEPTH = 3
+function depthOf(todos) {
+  const parents = new Map(todos.map((todo) => [String(todo.id), todo.parent]))
+  return todos.map((todo) => {
+    let depth = 0
+    let parent = todo.parent
+    const seen = new Set([String(todo.id)])
+    while (parent && parents.has(String(parent)) && !seen.has(String(parent)) && depth < MAX_TODO_DEPTH) {
+      seen.add(String(parent))
+      depth += 1
+      parent = parents.get(String(parent))
+    }
+    return { ...todo, id: String(todo.id), depth }
+  })
+}
+
+function progressOf(todos) {
+  const counted = todos.filter((todo) => todo.status !== "cancelled")
+  return { done: counted.filter((todo) => todo.status === "completed").length, total: counted.length }
+}
+
 // The plugin's queue (outbox.py): per session, what waits, what it started, and the run body to
 // start a leftover steer with. It starts the next item when the session's run is over, unless the
 // last run was stopped after the user last sent one.
@@ -1740,7 +1762,15 @@ http
       const id = decodeURIComponent(sessionTodos[1])
       const row = (transcripts.get(id) ?? []).findLast((r) => r.role === "tool" && r.tool_name === "todo_list")
       const found = row ? JSON.parse(row.content) : null
-      return json(res, 200, { object: "memento.todos", session_id: id, revision: found?.revision ?? null, todos: found?.todos ?? null })
+      // As the plugin states it: the list, each item's depth and the list's own progress.
+      const todos = found ? depthOf(found.todos ?? []) : null
+      return json(res, 200, {
+        object: "memento.todos",
+        session_id: id,
+        revision: found?.revision ?? null,
+        todos,
+        progress: todos ? progressOf(todos) : null,
+      })
     }
     const sessionAgents = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/agents$/.exec(url.pathname)
     if (PLUGIN && !profile && req.method === "GET" && sessionAgents) {

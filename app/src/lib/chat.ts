@@ -306,7 +306,7 @@ function streamHandlers(turn: Turn): StreamHandlers {
         existing.status = event.status
         if (event.status !== "running") existing.endedAt = Date.now()
         if (event.status === "completed")
-          void onTodoTool(turn.conversationId, existing.tool, event.result)
+          void onTodoTool(turn.conversationId, existing.tool)
         // A question's full result is written when it's answered; the stream's preview is cut short.
         if (event.result && !(existing.tool === "clarify" && existing.result))
           existing.result = event.result
@@ -431,7 +431,7 @@ async function transcriptReader(turn: Turn) {
     // The transcript holds a todo call's whole result, so its list shows while the turn runs.
     for (const tool of draft.tools)
       if (tool.status === "completed" && !done.has(tool.toolCallId))
-        void onTodoTool(conversationId, tool.tool, tool.result)
+        void onTodoTool(conversationId, tool.tool)
     if (reply.reasoning) draft.reasoning = reply.reasoning
     if (reply.content) draft.content = reply.content
     touch()

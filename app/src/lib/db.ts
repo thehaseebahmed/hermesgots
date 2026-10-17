@@ -136,10 +136,10 @@ export interface Conversation {
   /** Newest Hermes transcript row this device has caught up to. Local only; never synced. */
   hermesTip?: number
   /**
-   * The agent's own todo list (its `todo_list` tool) and when this device last set it. Local only;
-   * every device reads it from the Gots plugin.
+   * The agent's own todo list (its `todo_list` tool), the progress the plugin worked out with it, and
+   * when this device last set it. Local only; every device reads it from the Gots plugin.
    */
-  todos?: { revision: number; items: Todo[]; at: number }
+  todos?: { revision: number; items: Todo[]; progress?: TodoProgress; at: number }
   /** A model the user picked for this chat from its host's configured ones; unset runs the bot's. */
   modelChoice?: ModelChoice
   /** The Hermes Project this chat is a session of (works in its own worktree). */
@@ -232,7 +232,18 @@ export interface Todo {
   status: TodoStatus
   /** Another item's id, making this one its subtask. */
   parent?: string
+  /** How far it sits under its parents, as the plugin worked it out; 0 when it is a root. */
+  depth: number
 }
+
+/** A todo list's progress, as the plugin worked it out: a cancelled item counts for neither. */
+export interface TodoProgress {
+  done: number
+  total: number
+}
+
+/** How deep a subtask may indent, the same cap the plugin states each item's depth under. */
+export const MAX_TODO_DEPTH = 3
 
 export interface ToolEvent {
   toolCallId: string
@@ -604,6 +615,18 @@ db.version(13).stores({
 // v14: BenchLM overall rankings replace the coding cache. The coding table is dropped; the cache is
 // disposable (24-hour TTL), so the next picker open refetches the overall payload.
 db.version(14).stores({ codingRankings: null, overallRankings: "id" })
+
+// v15: a todo list carries the progress and the depths the plugin worked out with it. A list stored
+// before that has neither, and nothing here may work them out, so it goes: the next read brings the
+// list back with them.
+db.version(15).upgrade((tx) =>
+  tx
+    .table("conversations")
+    .filter((conversation: Record<string, unknown>) => "todos" in conversation)
+    .modify((conversation: Record<string, unknown>) => {
+      delete conversation.todos
+    }),
+)
 
 db.on("populate", (tx) => seedProfile(tx))
 

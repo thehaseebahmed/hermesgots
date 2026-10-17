@@ -1,31 +1,23 @@
 import { connectionKey } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { db } from "@/lib/db"
-import { getSessionTodos, parseTodos, type SessionTodos } from "@/lib/hermes"
+import { getSessionTodos, type SessionTodos } from "@/lib/hermes"
 import { TODO_TOOLS } from "@/lib/tools"
 
 /** Bots whose plugin has no todos route (an older plugin). */
 const unsupported = cooldown()
-/** How long a list from the live stream beats the plugin's, whose transcript may not have it yet. */
-const LIVE_MS = 10_000
 /**
  * Reads the list again a moment after a todo tool call, since Hermes writes the transcript row the
  * plugin reads only after the tool round; one attempt often lands too early.
  */
 const TODO_RETRY_MS = [1500, 5000]
 
-async function store(conversationId: string, todos: SessionTodos | null, live: boolean) {
+async function store(conversationId: string, todos: SessionTodos | null) {
   const current = (await db.conversations.get(conversationId))?.todos
   if (
-    !live &&
-    current &&
-    Date.now() - current.at < LIVE_MS &&
-    current.revision > (todos?.revision ?? -1)
-  )
-    return
-  if (
     current?.revision === todos?.revision &&
-    JSON.stringify(current?.items) === JSON.stringify(todos?.items)
+    JSON.stringify(current?.items) === JSON.stringify(todos?.items) &&
+    JSON.stringify(current?.progress) === JSON.stringify(todos?.progress)
   )
     return
   // Not through updateConversation: this is local, so it mustn't move the sync clock.
@@ -61,23 +53,17 @@ export async function refreshTodos(conversationId: string) {
     return
   }
   unsupported.clear(key)
-  await store(conversationId, todos, false)
+  await store(conversationId, todos)
 }
 
 /**
- * Picks up a todo tool call from a run's live events. The preview is cut at 500 characters, so a
- * long list only arrives once the plugin reads the transcript, which Hermes writes after the round.
+ * A todo tool call just finished, so the list it wrote is worth reading again. The result the stream
+ * carries is a preview and nothing is read out of it here: the plugin has the whole list, and it is
+ * read a beat later, once Hermes has flushed the transcript row.
  */
-export async function onTodoTool(conversationId: string, tool: string, preview?: string) {
-  if (!TODO_TOOLS.has(tool) && !(tool === "tool_call" && preview?.includes('"todos"'))) return
+export async function onTodoTool(conversationId: string, tool: string) {
+  if (!TODO_TOOLS.has(tool)) return
   // Only lists the plugin can bring back on every device, so the chat shows the same everywhere.
   if (!(await tracked(conversationId))) return
-  let todos = null
-  try {
-    todos = preview ? parseTodos(JSON.parse(preview)) : null
-  } catch {
-    // Cut short; the plugin has the whole list.
-  }
-  if (todos) await store(conversationId, todos, true)
   for (const ms of TODO_RETRY_MS) window.setTimeout(() => void refreshTodos(conversationId), ms)
 }

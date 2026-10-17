@@ -9,7 +9,9 @@ import type {
   PrState,
   SessionMode,
   Todo,
+  TodoProgress,
 } from "@/lib/db"
+import { MAX_TODO_DEPTH } from "@/lib/db"
 import type { Doc } from "@/lib/merge"
 import type { ModelUsage } from "@/lib/pricing"
 import { isNative } from "@/lib/native"
@@ -1346,13 +1348,15 @@ export async function getProviderUsage(
 export interface SessionTodos {
   revision: number
   items: Todo[]
+  /** The list's progress, as the plugin worked it out; unset from a plugin older than 0.48. */
+  progress?: TodoProgress
 }
 
 const TODO_STATUSES = new Set<string>(["pending", "in_progress", "completed", "cancelled"])
 
-/** Reads a `todo_list` result (`{ todos, revision }`), or null when it isn't one. */
+/** Reads a `todo_list` result (`{ todos, revision, progress }`), or null when it isn't one. */
 export function parseTodos(value: unknown): SessionTodos | null {
-  const body = value as { todos?: unknown; revision?: unknown } | null
+  const body = value as { todos?: unknown; revision?: unknown; progress?: unknown } | null
   if (!body || !Array.isArray(body.todos)) return null
   const items: Todo[] = []
   for (const raw of body.todos) {
@@ -1361,6 +1365,8 @@ export function parseTodos(value: unknown): SessionTodos | null {
       continue
     if (!TODO_STATUSES.has(raw.status)) continue
     const parent = raw.parent
+    const depth =
+      typeof raw.depth === "number" && raw.depth > 0 ? Math.min(raw.depth, MAX_TODO_DEPTH) : 0
     items.push({
       id: String(id),
       content: raw.content,
@@ -1368,10 +1374,19 @@ export function parseTodos(value: unknown): SessionTodos | null {
       ...(typeof parent === "string" || typeof parent === "number"
         ? { parent: String(parent) }
         : {}),
+      depth,
     })
   }
   const revision = typeof body.revision === "number" && body.revision >= 0 ? body.revision : 0
-  return { revision, items }
+  return { revision, items, ...(readProgress(body.progress) ?? {}) }
+}
+
+/** The progress the plugin sent, or undefined when it didn't: never worked out here. */
+function readProgress(value: unknown): { progress: TodoProgress } | undefined {
+  const body = value as { done?: unknown; total?: unknown } | null
+  if (!body || typeof body?.done !== "number" || typeof body?.total !== "number") return undefined
+  if (body.done < 0 || body.total < 0 || body.done > body.total) return undefined
+  return { progress: { done: body.done, total: body.total } }
 }
 
 /**

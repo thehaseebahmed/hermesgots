@@ -3,32 +3,8 @@ import { CheckIcon, PauseIcon, XIcon } from "lucide-react"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
-import type { Todo } from "@/lib/db"
+import type { Todo, TodoProgress } from "@/lib/db"
 import { cn } from "@/lib/utils"
-
-function progress(items: Todo[]) {
-  const counted = items.filter((item) => item.status !== "cancelled")
-  return {
-    done: counted.filter((item) => item.status === "completed").length,
-    total: counted.length,
-  }
-}
-
-/** How deep each item sits under its parents, so subtasks indent. */
-function depths(items: Todo[]) {
-  const parents = new Map(items.map((item) => [item.id, item.parent]))
-  return items.map((item) => {
-    let depth = 0
-    let parent = item.parent
-    const seen = new Set([item.id])
-    while (parent && parents.has(parent) && !seen.has(parent) && depth < 3) {
-      seen.add(parent)
-      depth += 1
-      parent = parents.get(parent)
-    }
-    return depth
-  })
-}
 
 function Ring({ value }: { value: number }) {
   const radius = 8
@@ -71,16 +47,20 @@ const stalled = (item: Todo, live: boolean) => item.status === "in_progress" && 
 /** The agent's progress through its todo list, for the pill row above the composer; opens the list. */
 export function TodosPill({
   items,
+  progress,
   live,
   onClick,
 }: {
   items: Todo[]
+  /** The list's progress, as the plugin worked it out; an older plugin reports none. */
+  progress?: TodoProgress
   live: boolean
   onClick: () => void
 }) {
-  const { done, total } = progress(items)
   // A part-filled ring reads as a spinner, so a list the agent stopped on shows it paused.
   const stopped = items.some((item) => stalled(item, live))
+  const done = progress?.done ?? 0
+  const total = progress?.total ?? 0
   return (
     <Button
       type="button"
@@ -91,9 +71,9 @@ export function TodosPill({
       {stopped ? (
         <PauseIcon className="size-5 text-muted-foreground" aria-label="Stopped" />
       ) : (
-        <Ring value={total ? done / total : 0} />
+        progress && <Ring value={total ? done / total : 0} />
       )}
-      {done}/{total} todos
+      {progress ? `${done}/${total} todos` : "todos"}
     </Button>
   )
 }
@@ -134,22 +114,23 @@ export function TodosSheet({
   open,
   onOpenChange,
   items,
+  progress,
   live,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   items: Todo[]
+  /** The list's progress, as the plugin worked it out; an older plugin reports none. */
+  progress?: TodoProgress
   /** A turn is running, so an item in progress is being worked on. */
   live: boolean
 }) {
-  const { done, total } = progress(items)
-  const levels = depths(items)
   return (
     <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent>
         <PopupHeader className="pb-2">
           <PopupTitle className="tabular-nums">
-            {done}/{total} todos complete
+            {progress ? `${progress.done}/${progress.total} todos complete` : "Todos"}
           </PopupTitle>
         </PopupHeader>
         <div className="px-6">
@@ -163,7 +144,7 @@ export function TodosSheet({
               <li
                 key={item.id}
                 className="flex gap-3"
-                style={{ paddingInlineStart: `${levels[index] * 1.5}rem` }}
+                style={{ paddingInlineStart: `${item.depth * 1.5}rem` }}
               >
                 <div className="relative w-7 shrink-0">
                   <div className="flex h-11 items-center">
