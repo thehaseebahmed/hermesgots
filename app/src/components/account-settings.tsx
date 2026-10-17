@@ -33,6 +33,7 @@ import {
   rotateRecoveryCode,
   setUpSync,
   signOut,
+  type PendingSetup,
   syncNow,
   unlockSyncWithPasskey,
   unlockSyncWithRecoveryCode,
@@ -49,7 +50,7 @@ function message(error: unknown) {
 export function AccountSettings() {
   const sync = useSyncState()
   const [busy, setBusy] = useState(false)
-  const [recoveryCode, setRecoveryCode] = useState<string>()
+  const [pending, setPending] = useState<PendingSetup>()
   const [rotation, setRotation] = useState<{ code: string; confirm: () => Promise<void> }>()
   const [verifying, setVerifying] = useState(false)
   const [currentCode, setCurrentCode] = useState("")
@@ -121,12 +122,7 @@ export function AccountSettings() {
               <Button
                 className="self-start"
                 disabled={busy}
-                onClick={() =>
-                  run(async () => {
-                    const result = await setUpSync()
-                    setRecoveryCode(result.recoveryCode)
-                  })
-                }
+                onClick={() => run(async () => setPending(await setUpSync()))}
               >
                 <FingerprintIcon data-icon="inline-start" />
                 Turn on sync
@@ -179,7 +175,14 @@ export function AccountSettings() {
         )}
       </CardContent>
 
-      <RecoveryCodeDialog code={recoveryCode} onDone={() => setRecoveryCode(undefined)} />
+      <RecoveryCodeDialog
+        code={pending?.recoveryCode}
+        onDone={() => {
+          const setup = pending
+          setPending(undefined)
+          run(async () => setup?.confirm())
+        }}
+      />
       <RecoveryCodeDialog
         code={rotation?.code}
         title="Your new recovery code"

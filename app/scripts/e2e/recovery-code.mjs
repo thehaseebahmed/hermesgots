@@ -82,14 +82,23 @@ async function scenario(name, { width, dark }) {
     assert.equal(await cont.isDisabled(), true, "Continue waits for the code to be copied")
     // A device that can hold a passkey is offered one, but never requires it.
     assert.ok(
-      await page.getByRole("button", { name: "Add a passkey too" }).isVisible(),
+      await page.getByRole("button", { name: "Add a passkey" }).isVisible(),
       "the passkey is offered beside the code",
     )
 
     await page.getByRole("button", { name: "Copy recovery code" }).click()
+    // The clipboard write settles asynchronously, so the button enables a tick later.
+    for (let i = 0; i < 20 && (await cont.isDisabled()); i++) await page.waitForTimeout(50)
     assert.equal(await cont.isDisabled(), false, "copying the code lets setup go on")
 
-    // Turning on sync wrote a vault wrapped by the code alone: no passkey prompt was answered.
+    // Nothing is written until the code has been handled, so a tab closed here leaves no vault
+    // wrapped by a code nobody saw.
+    assert.equal(vaults.length, 0, `no vault written before the code is copied, for ${name}`)
+
+    await cont.click()
+    await page.getByRole("heading", { name: "Join the leaderboard" }).waitFor({ timeout: 15_000 })
+
+    // Continuing wrote a vault wrapped by the code alone: no passkey prompt was answered.
     assert.equal(vaults.length, 1, `one vault written for ${name}`)
     const wrappers = vaults[0].wrappers ?? []
     assert.deepEqual(
@@ -97,9 +106,6 @@ async function scenario(name, { width, dark }) {
       ["recovery"],
       `the vault holds only the recovery wrapper for ${name}`,
     )
-
-    await cont.click()
-    await page.getByRole("heading", { name: "Join the leaderboard" }).waitFor({ timeout: 15_000 })
     await shot("community")
     assert.deepEqual(errors, [], `page errors for ${name}`)
     pass(`${name}: sync starts with a recovery code, the passkey only offered`)

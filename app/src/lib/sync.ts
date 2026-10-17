@@ -204,26 +204,43 @@ function passkeyUser() {
   return { id: user.id, name, displayName: user.name ?? name }
 }
 
+/** A first run held in memory until its recovery code has been copied. */
+export interface PendingSetup {
+  recoveryCode: string
+  /** Adds this device's passkey to the vault about to be written. Cancelling changes nothing. */
+  addPasskey: () => Promise<void>
+  /** Writes the vault, its inbox and this device's key. */
+  confirm: () => Promise<void>
+}
+
 /**
- * First-time setup: a new data key wrapped by a recovery code. A passkey is added afterwards from
- * the code step (`addPasskey`), so a prompt the user can cancel can never stop setup or leave them
- * without the one wrapper that outlives this device.
+ * First-time setup: a new data key wrapped by a recovery code. Nothing reaches the server until
+ * `confirm`, so a tab closed on the code screen leaves no vault wrapped by a code nobody saw — the
+ * device simply starts again. The optional passkey joins the same in-memory vault for the same
+ * reason: a prompt the user can cancel can never stop setup or strand the account.
  */
-export async function setUpSync() {
+export async function setUpSync(): Promise<PendingSetup> {
   const dataKey = await generateDataKey()
   const vault = newVault()
   const recoveryCode = newRecoveryCode()
   vault.wrappers.push(await recoveryWrapper(dataKey, recoveryCode))
   const { inbox, privateKey } = await newInbox(dataKey, inboxAad())
   vault.inbox = inbox
-  if (!(await putDoc("vault", vault))) {
-    await refreshVault()
-    throw new Error("Sync was already set up from another device. Unlock it instead.")
+  return {
+    recoveryCode,
+    addPasskey: async () => {
+      vault.wrappers.push(await passkeyWrapper(dataKey, vault, passkeyUser()))
+    },
+    confirm: async () => {
+      if (!(await putDoc("vault", vault))) {
+        await refreshVault()
+        throw new Error("Sync was already set up from another device. Unlock it instead.")
+      }
+      await refreshVault()
+      await db.vault.put({ id: "inbox", userId: userId()!, key: privateKey, keyId: inbox.keyId })
+      await keep(dataKey)
+    },
   }
-  await refreshVault()
-  await db.vault.put({ id: "inbox", userId: userId()!, key: privateKey, keyId: inbox.keyId })
-  await keep(dataKey)
-  return { recoveryCode }
 }
 
 /** Whether this device holds the key (or a passkey to unwrap it), so it can mint a new code. */
@@ -262,7 +279,10 @@ export async function rotateRecoveryCode(currentCode?: string) {
             const wrappers = vault.wrappers.filter(
               (w) => w.kind !== "recovery" || w.iv === wrapper.iv,
             )
-            if (await putDoc("vault", { ...vault, wrappers }, etag)) return
+            if (await putDoc("vault", { ...vault, wrappers }, etag)) {
+              await refreshVault()
+              return
+            }
             await refreshVault()
           }
         },
