@@ -39,6 +39,28 @@ await flow("slash-skills", async ({ page, shot }) => {
     "a picked skill is hoisted to the front of the message",
   )
 
+  // A command is offered only when its token is the whole message: `/new` with text after it isn't,
+  // since running it would clear the composer and drop that text — while the skills are still there.
+  await composer.fill("/new do the thing")
+  await composer.press("Home")
+  await page.waitForTimeout(500)
+  const withTextAfter = await menu.getByRole("option").allInnerTexts()
+  assert.ok(withTextAfter.length > 0, "the token still offers the skills")
+  assert.ok(
+    withTextAfter.every((text) => !/^\/new\b/.test(text)),
+    "a command with text after it isn't offered",
+  )
+  await shot("command-not-alone")
+
+  // Alone, it is the command the composer's own action runs.
+  await composer.fill("/new")
+  await page.waitForTimeout(500)
+  const alone = await menu.getByRole("option").allInnerTexts()
+  assert.ok(
+    alone.some((text) => /^\/new\b/.test(text)),
+    "a command alone in the message is offered",
+  )
+
   // A slash inside a word is a path or a URL, not a skill.
   await composer.fill("see and/or the docs at https://example.com/a/b")
   await page.waitForTimeout(500)

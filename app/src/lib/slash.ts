@@ -52,8 +52,8 @@ export interface SlashToken {
   end: number
   /** What has been typed after the `/`, up to the caret. */
   query: string
-  /** Whether the token is the message's first text. */
-  first: boolean
+  /** Whether the token is the whole message: nothing but whitespace around it. */
+  alone: boolean
 }
 
 /**
@@ -70,17 +70,20 @@ export function slashToken(text: string, caret: number): SlashToken | null {
   const query = text.slice(start + 1, caret)
   // A second slash makes this a path or a URL the user is writing, not a command: no skill has one.
   if (query.includes("/")) return null
-  return { start, end, query, first: text.slice(0, start).trim() === "" }
+  const alone = `${text.slice(0, start)}${text.slice(end)}`.trim() === ""
+  return { start, end, query, alone }
 }
 
 /**
- * Commands by name prefix — and only from the front of the message, where running one means what the
- * composer has always done — then the skills, in tiers: an exact name, a name the query starts, a
- * name that contains it, a fuzzy name, a category, a description. Ties keep their order.
+ * Commands by name prefix — and only when the token is the whole message, which is the shape the
+ * composer's own actions take (`localCommand`, `goalCommand`), so the menu never offers one that
+ * running would drop the rest of the message for — then the skills, in tiers: an exact name, a name
+ * the query starts, a name that contains it, a fuzzy name, a category, a description. Ties keep
+ * their order.
  */
 export function rankSlashItems(items: SlashItem[], token: SlashToken): SlashItem[] {
   const query = token.query.toLowerCase()
-  const commands = token.first
+  const commands = token.alone
     ? items.filter(
         (item) => item.kind === "command" && (!query || item.name.toLowerCase().startsWith(query)),
       )

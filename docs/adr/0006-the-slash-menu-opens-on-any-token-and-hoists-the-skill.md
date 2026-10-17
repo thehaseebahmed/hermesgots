@@ -2,7 +2,7 @@
 
 The composer's slash menu used to need the slash at the very start of the composer with nothing after
 it but a single word — `/gri` opened it, `/grill the tests` and `fix /grill` did not. Discovery was
-therefore limited to the one position where a skill is also *invocable*, and a skill whose name the
+therefore limited to the one position where a skill is also _invocable_, and a skill whose name the
 user half-remembers could only be found by starting the message over. The menu now opens from a slash
 that begins any token: the start of the message, or just after a space or a newline. The query is that
 token up to the cursor, and only that token is rewritten when something is picked. A slash inside a
@@ -16,18 +16,21 @@ anywhere, and the composer guarantees the position the bot's host needs.
 
 Commands are not treated this way. `new`, `goal` and `settings` run immediately and clear the composer,
 and `steer` and `queue` change how the message is sent; picking one from the middle of a sentence would
-throw the sentence away, so commands match only when their token is the message's first text. The
-menu's commands are the ones the composer's own actions own; everything else a slash can reach is a
-skill.
+throw the sentence away, so a command is offered only when its token is the whole message — the same
+shape the composer's own actions already require of it (`localCommand`, `goalCommand`), which is what
+keeps the menu from offering something that acting on would silently drop the rest of. The menu's
+commands are the ones the composer's own actions own; everything else a slash can reach is a skill.
 
 The list is filtered by name, category and description, ranked in tiers: an exact name first, then a
 name the query starts, then a name that contains it, then a fuzzy (subsequence) name match, then a
 category match, then a description match. Ties keep the plugin's own order. Escape closes the menu for
-that token until its text changes; when nothing matches, the menu is not shown.
+that token until its text changes, or until there is no token left for it to belong to; when nothing
+matches, the menu is not shown.
 
 The bot's skills are cached on the device, one last-known list per bot, so the menu opens with the
-skills already in it and refetches in the background; a failed read leaves the cached list in place. The
-goal wizard's review picker reads the same cached list.
+skills already in it and refetches in the background; a failed read leaves the cached list in place. A
+plugin that has no skills route is left alone for `MISSING_ROUTE_MS` like every other route-missing read
+in the app, rather than re-asked at each open. The goal wizard's review picker reads the same cached list.
 
 The list is as tall as the room above the composer and never more than 45% of what's on screen, up to
 the 288px it has always been. On a phone with the keyboard up that is about four rows, which scroll;
@@ -55,9 +58,11 @@ on a tablet or a desktop nothing changes.
   could outrank it, and the two do different things — one is sent to the bot, the other is Gots acting.
 - **Commands matching from any token.** Rejected: `/new` typed mid-sentence would run and clear a draft
   the user is still writing.
-- **`localStorage` for the cached list**, which needs no schema change. Rejected: bots already have a
-  per-connection cache convention in Dexie, and a skill list is per bot and belongs with the rest of
-  what a bot owns rather than beside the device-only settings keys.
+- **`localStorage` for the cached list**, which needs no schema change. Rejected: a skill list is per
+  bot, and the place a bot's own state lives is the database that syncs and deletes with it — the
+  per-connection caches that exist today are this page's memory, not the device's, so a reload threw
+  them away; the device-only keys are for settings the user picked, and deleting a bot has to take its
+  list with it.
 - **Refetching only after a TTL, or only when the plugin's version moves.** Rejected: a refresh on each
   open is one request behind a menu the user just asked for, and a TTL leaves a skill installed minutes
   ago invisible for as long as the window lasts.

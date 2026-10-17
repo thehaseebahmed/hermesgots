@@ -55,11 +55,14 @@ export function SlashMenu({
     const measure = () => {
       const bottom = box.current?.getBoundingClientRect().bottom
       if (bottom === undefined) return
-      // The keyboard isn't part of the layout viewport, so what's visible is the visual one.
+      // The keyboard isn't part of the layout viewport, so what's visible is the visual one. The
+      // floor only lifts the list up to the room there is: it never wins over the measurement, or
+      // the first rows would sit above the screen with nothing able to scroll them back.
       const viewport = window.visualViewport
       const visible = viewport?.height ?? window.innerHeight
       const above = bottom - (viewport?.offsetTop ?? 0) - CLEARANCE
-      setRoom(Math.min(MAX_ROOM, Math.max(Math.min(above, visible * SCREEN_SHARE), MIN_ROOM)))
+      const cap = Math.min(above, visible * SCREEN_SHARE, MAX_ROOM)
+      setRoom(Math.max(cap, Math.min(MIN_ROOM, above)))
     }
     measure()
     // The composer grows upward with what it carries (attachment tiles, wrapped text), which moves

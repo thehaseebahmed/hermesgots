@@ -1,4 +1,4 @@
-import { MISSING_ROUTE_MS } from "@/lib/freshness"
+import { MISSING_ROUTE_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import { getPluginFeatures, HermesError, type HermesConfig } from "@/lib/hermes"
 
 /**
@@ -21,7 +21,9 @@ export function cooldown(ms = MISSING_ROUTE_MS) {
  */
 export async function lacksRoute(server: HermesConfig, error: unknown, feature: string) {
   if (!(error instanceof HermesError) || (error.status && error.status !== 404)) return false
-  return getPluginFeatures(server).then(
+  // Bounded like every other read to a host: a probe that hangs would leave the caller's promise
+  // unsettled for as long as the page lives, and its caller reads a timeout as "not that answer".
+  return getPluginFeatures(server, AbortSignal.timeout(READ_TIMEOUT_MS)).then(
     (features) => !features.includes(feature),
     () => false,
   )

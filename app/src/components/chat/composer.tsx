@@ -204,14 +204,23 @@ export function Composer({
     !disabled &&
     (items.length > 0 || skills.status !== "ok")
   const activeIndex = Math.min(active, Math.max(items.length - 1, 0))
+  // The caret follows the field. A pick places it (`caretWanted`); anything else that writes the
+  // value — a restored draft, dictation, a message handed back after a failed send — leaves it
+  // where the field put it, so the menu tracks the text the user is in and not where the mirror
+  // last saw them (a draft opening with `/` must not offer to clear itself).
   useEffect(() => {
-    const at = caretWanted.current
-    if (at === null || textarea.current?.value !== value) return
+    const field = textarea.current
+    if (!field || field.value !== value) return
+    const wanted = caretWanted.current
     caretWanted.current = null
-    textarea.current.focus()
-    textarea.current.setSelectionRange(at, at)
-    setCaret(at)
-  }, [value])
+    if (wanted !== null) {
+      field.focus()
+      field.setSelectionRange(wanted, wanted)
+      if (wanted !== caret) setCaret(wanted)
+      return
+    }
+    if (field.selectionStart !== caret) setCaret(field.selectionStart)
+  }, [value, caret])
 
   const runCommand = (command: LocalCommand, rest?: string) => {
     setValue("")
@@ -499,8 +508,12 @@ export function Composer({
           value={value}
           onChange={(event) => {
             setValue(event.target.value)
-            setCaret(event.target.selectionStart ?? event.target.value.length)
+            const at = event.target.selectionStart ?? event.target.value.length
+            setCaret(at)
             setActive(0)
+            // An Escape belongs to the token it was pressed on: once there is no token left, the
+            // next one is a fresh start (a cleared and retyped `/gr` opens the menu again).
+            if (!slashToken(event.target.value, at)) setDismissed(null)
           }}
           // A caret moved without a keystroke — a click, an arrow key — moves the menu with it.
           onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}

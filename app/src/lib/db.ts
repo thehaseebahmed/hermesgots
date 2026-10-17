@@ -1,6 +1,7 @@
 import Dexie, { type EntityTable, type Transaction } from "dexie"
 
 import { BOTS, LEGACY_BOT_IDS } from "@/components/bots"
+import { connectionKey } from "@/lib/connection"
 import type { ModelChange, ProviderUsage, Skill } from "@/lib/hermes"
 import { randomId } from "@/lib/utils"
 
@@ -727,16 +728,20 @@ export async function deleteProfile(id: string, { remote = false, last = false }
     db.tombstones,
     db.drafts,
     db.dictations,
+    db.skills,
   ]
   return db.transaction("rw", tables, async () => {
     const alone = (await db.profiles.count()) <= 1
     if (alone && !last) return false
+    const profile = await db.profiles.get(id)
     const ids = await conversationsOf(id).primaryKeys()
     await db.messages.where("conversationId").anyOf(ids).delete()
     // Unsent text and recordings, the chats' and the bot's new thread's.
     const keys = [...ids.map((chat) => `c:${chat}`), `new:${id}`]
     await db.drafts.bulkDelete(keys)
     await db.dictations.bulkDelete(keys)
+    // The bot's own device state, keyed by its server: a twin bot sharing the connection refills it.
+    if (profile) await db.skills.delete(connectionKey(profile))
     await db.conversations.bulkDelete(ids)
     await db.profiles.delete(id)
     if (!remote) await db.tombstones.put({ id: `bot:${id}`, deletedAt: Date.now(), profileId: id })
@@ -814,6 +819,7 @@ export async function clearAllData() {
     db.vault,
     db.drafts,
     db.dictations,
+    db.skills,
   ]
   await db.transaction("rw", tables, async () => {
     await Promise.all(tables.map((table) => table.clear()))

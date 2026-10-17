@@ -1123,3 +1123,79 @@ rather than a calculation, and the plugin's version and the app's `MIN_PLUGIN_VE
 the decision is one bump once the clusters that matter have landed, and the todo cluster degrades on its
 own — an older plugin sends no progress, and the app shows the list without a count instead of working one
 out.
+
+---
+
+# Deferred fixes from the simplify pass on the composer's `/` menu
+
+A cleanup review of `feat(chat): a slash anywhere opens the skill menu, skills cached on device` and
+`feat(chat): size the slash menu to the room the screen gives it` (four parallel reviewers: reuse,
+quality, efficiency, altitude). Everything else the review found is applied on the branch — the
+route-missing cooldown, the row dropped with its bot, the caret following the field, the commands
+matching the whole message, the height never exceeding the room it measured, the bounded `lacksRoute`
+probe and the noted failures. Four findings are recorded instead, because each is wider than a cleanup
+pass.
+
+## Risky
+
+### 1. The capability probe answers one question for six readers
+
+`hasPluginFeature` (`src/lib/hermes.ts`) turns a failed `/info` into `false`, exactly as it reports a
+plugin whose features really lack the route. Five readers still ask it the wrong question —
+`media-tags.ts` (an image silently does not load), `fallbacks.ts`, `research.ts` (a blip tells the user
+the plugin needs updating), `sync.ts` (draft text silently off) and `chat.ts` (a queued message held
+here instead of on the host) — while the skills read is the one that now asks `lacksRoute` instead, so
+the repo has two answers to one question.
+
+- Cost: a transient failure reads as "this host has no such feature" in five screens, each of which
+  shows or withholds something on the strength of it.
+- Suggested fix: give the probe a third answer — a `/info` that could not be asked returns `null`
+  (unknown), `false` only for a list that really lacks the feature — and have every caller read unknown
+  as "keep what we have", which is the rule the skills read now implements.
+- Why it is risky: a shared contract change across five screens and their tests.
+
+### 2. `skills.ts` hand-rolls the per-connection store the app already has
+
+The module keeps a `Map` of answers and a `Map` of in-flight promises, and reads the answer map during
+render from a hook each consumer wraps in its own state. The tree's shape for that is a module store
+(`store.ts`'s `createSignal` + `useSyncExternalStore`, with `usePoll` for the refresh), which is how
+`dictation.ts` and `projects.ts` cache one read per connection and share it with every consumer.
+`hermes.ts` and `agent-card.tsx` are two more copies of it.
+
+- Cost: the composer and the goal wizard each hold their own snapshot of one shared value, so a later
+  reader can miss an update; a change to the sharing rule has to be made in each copy.
+- Suggested fix: reshape the loader on `dictation.ts`, keeping the pure matching and hoisting in
+  `slash.ts` where they belong.
+- Why it is risky: refactor-sized, and the two maps plus the row write are correct today.
+
+### 3. The menu's height re-derives what the positioning layer publishes
+
+The list measures the room above the composer itself (four constants, a `ResizeObserver` and four
+viewport listeners). Base UI's positioner already computes `--available-height` from a keyboard-aware
+viewport rect, and the app's own menus use it (`popup.tsx`, `ui/dropdown-menu.tsx`, `ui/select.tsx`).
+The constant also now lives in three places: the component, the browser flow's assertions and the ADR.
+
+- Cost: layout code that must stay in step with the framework's own measurement, and numbers the flow
+  restates rather than pins.
+- Suggested fix: render the list inside the app's positioned pop-up and size it with
+  `max-h-(--available-height)`; failing that, have the flow import the constants instead of repeating
+  them.
+- Why it is risky: moving the list into a portal changes focus retention and the
+  `aria-controls`/`aria-activedescendant` wiring the inline element gets for free.
+
+## Not entries
+
+- **The e2e restates the layout numbers** (`288`, `520 * 0.5` against `SCREEN_SHARE = 0.45`), so the
+  assertions cannot catch a constant drift. Recorded in the suggested fix above rather than as its own
+  entry: the same decision (where the numbers live) covers both.
+- **`rankSlashItems` and the skill-item map re-run on every composer render** while a token exists,
+  which includes the chunks of a streaming reply. Measured as microseconds against the list re-render
+  beside it, and a memo would have to key on four values because each render makes a fresh array — not
+  worth the machinery, and a number quoted for it would be a guess.
+
+---
+
+Found by the `/simplify-code` pass on this branch. It was a cleanup review, not a bug hunt: the
+reviewers did turn up two real defects — a draft beginning with `/` opening the menu with the caret
+mirrored at 0, and a first-token command offered under text that running it would have dropped — and
+both are fixed above rather than deferred, because each is the behaviour the design already promised.
