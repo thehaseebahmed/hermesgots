@@ -7,6 +7,7 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { formatTokens } from "@/lib/format"
 import { useWide } from "@/lib/media"
 import { useModelsDevUnreachable } from "@/lib/models"
+import { useNow } from "@/lib/threads"
 import {
   NOTICE_REMAINING_PERCENT,
   resetsAtText,
@@ -22,7 +23,7 @@ export interface ContextUsage {
   /** Prompt tokens of the session's latest model call. */
   tokens?: number
   window?: number
-  /** The model the window is for: the one the chat runs next, as its pill names it. */
+  /** The model the window is for: the one the chat runs next, as `provider/model`. */
   model?: string
 }
 
@@ -133,7 +134,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
-function WindowRow({ window }: { window: UsageWindowView }) {
+function WindowRow({ window, now }: { window: UsageWindowView; now: number }) {
   const pct = window.usedPercent
   const near = pct >= 100 - NOTICE_REMAINING_PERCENT
   return (
@@ -149,7 +150,7 @@ function WindowRow({ window }: { window: UsageWindowView }) {
       </Meter.Track>
       {window.resetsAt && (
         <span className="text-sm text-muted-foreground tabular-nums">
-          Resets in {resetsInText(window.resetsAt)} ({resetsAtText(window.resetsAt)})
+          Resets in {resetsInText(window.resetsAt, now)} ({resetsAtText(window.resetsAt)})
         </span>
       )}
       {window.detail && <span className="text-sm text-muted-foreground">{window.detail}</span>}
@@ -171,6 +172,8 @@ export function LimitBanner({
   // A phone's banner leaves out the window's name: "Approaching Limit" is enough to send the
   // reader to the sheet, which names every window.
   const wide = useWide()
+  // The line counts down while the banner is up: an "in 3d 4h" that never moves is wrong by then.
+  const now = useNow()
   const text = exhausted
     ? wide
       ? `${notice.label} Limit Reached`
@@ -201,7 +204,9 @@ export function LimitBanner({
       <div className="flex flex-col">
         <span>{text}</span>
         {notice.resetsAt && (
-          <span className="text-muted-foreground">Resets at {resetsAtText(notice.resetsAt)}</span>
+          <span className="text-muted-foreground tabular-nums">
+            Resets in {resetsInText(notice.resetsAt, now)}
+          </span>
         )}
       </div>
     </Banner>
@@ -222,6 +227,8 @@ export function UsageSheet({
   const unreachable = useModelsDevUnreachable()
   const filled = fraction(usage)
   const windows = windowViews(providerUsage)
+  // The reset lines count down while the sheet is open.
+  const now = useNow()
 
   return (
     <Popup open={open} onOpenChange={onOpenChange}>
@@ -232,6 +239,11 @@ export function UsageSheet({
         <div className="flex flex-col gap-6 px-6 text-[15px]">
           {!usage.tracked && <Banner>Context tracking needs the Gots plugin.</Banner>}
           <Section title="Context">
+            {/* What the meter measures, named in a box of its own: the model is picked in the
+                composer's pill, so this one only reads. */}
+            <div className="rounded-xl border bg-background px-3 py-2">
+              <span className="block truncate">{usage.model ?? "Model"}</span>
+            </div>
             {!usage.tracked || usage.window ? (
               <Meter.Root value={filled * 100} className="flex flex-col gap-2.5">
                 <div className="flex items-baseline justify-between gap-4">
@@ -250,7 +262,6 @@ export function UsageSheet({
                   />
                 </Meter.Track>
                 <span className="text-sm text-muted-foreground tabular-nums">
-                  {usage.model ? `${usage.model} · ` : ""}
                   {formatTokens(usage.tokens ?? 0)} of{" "}
                   {usage.window ? formatTokens(usage.window) : "—"} tokens
                 </span>
@@ -269,7 +280,7 @@ export function UsageSheet({
           {windows.length > 0 && (
             <Section title="Limits">
               {windows.map((w) => (
-                <WindowRow key={w.label} window={w} />
+                <WindowRow key={w.label} window={w} now={now} />
               ))}
             </Section>
           )}

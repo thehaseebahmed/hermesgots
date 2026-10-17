@@ -51,3 +51,11 @@ _Avoid_: client-side computation
 **Session state**:
 What a project session is doing — idle, working, waiting on the user, or closed by the user as resolved or discarded. Composed from the host's run status and this device's own marks, not derived from one source.
 _Avoid_: status, state machine
+
+**Usage window**:
+One thing a provider account can run out of, as that provider measures it: a period, which resets, or a balance, which doesn't.
+_Avoid_: quota, plan limit, usage bar
+
+**Limit notice**:
+The warning above a chat's composer that a provider account is nearly out of usage, or out of it.
+_Avoid_: alert, limit banner, usage warning

@@ -14,7 +14,9 @@
 // GET /api/plugins/memento/usage?provider=… serves two windows (Session + Weekly) whose
 // used_percent is MOCK_USAGE_PERCENT (default 94 so the composer banner shows; 0 → no windows), and
 // one Ollama Cloud account's monthly allowance with a purchased-credits detail when the provider is
-// ollama-cloud (the picker lists that provider too).
+// ollama-cloud (the picker lists that provider too). A read carrying &percent=N sets that figure for
+// every later read — and &percent= clears it — so a flow can move an account from approaching to
+// out without restarting the mock.
 // Images the agent returns come from GET /api/plugins/memento/media?path=… (a .png path, unless it
 // names something missing), and saying "image" has the agent answer with a MEDIA tag: one for the
 // chart it serves and one for a file that isn't there.
@@ -1076,6 +1078,10 @@ const pushSubscriptions = new Map()
 const hostModels = new Map()
 // The fallback models the plugin's `fallbacks` route recorded, per profile.
 const fallbacksOf = new Map()
+// The provider figure every later usage read serves, set by `usage?percent=N` and cleared by
+// `percent=`: a dev-only override, so an e2e flow can move an account from approaching to out
+// without restarting the mock (which the env alone can't do mid-run).
+let usagePercent = null
 // The providers the picker lists (see /api/model/options below): a model from one of these can
 // become the host's model or one of its fallbacks.
 const PICKER_PROVIDERS = ["openrouter", "anthropic", "ollama-cloud"]
@@ -1737,7 +1743,14 @@ http
     const usageRoute = /^\/api\/plugins\/memento\/usage$/.exec(url.pathname)
     if (PLUGIN && !profile && req.method === "GET" && usageRoute) {
       const provider = url.searchParams.get("provider") || ""
-      const pct = Number(process.env.MOCK_USAGE_PERCENT ?? 94)
+      // A flow can move the account with `?percent=N`; the app's own reads (no percent) then serve
+      // that figure until `?percent=` clears it back to MOCK_USAGE_PERCENT.
+      const asked = url.searchParams.get("percent")
+      if (asked !== null) {
+        const value = Number(asked)
+        usagePercent = asked === "" || !Number.isFinite(value) ? null : value
+      }
+      const pct = usagePercent ?? Number(process.env.MOCK_USAGE_PERCENT ?? 94)
       // Like a provider's, a window resets at a fixed time, so reading it again changes nothing.
       const next = (ms) => new Date(Math.ceil((Date.now() + 1) / ms) * ms).toISOString()
       const ollama = provider === "ollama-cloud"

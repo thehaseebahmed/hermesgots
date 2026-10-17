@@ -1049,9 +1049,9 @@ deliberately not entries, because neither has a fix the tree can hold today:
 worked out on the host, and names the clusters to move. One of them landed with that decision: the todo
 list's own progress and each item's depth, which the plugin states with the list
 (`plugin/todos.py::progress_of` / `depth_of`, `GET sessions/{id}/todos`) and the app no longer works out
-(`src/components/chat/todos.tsx`, `src/lib/todos.ts`). The three below are recorded rather than applied:
-each changes a route, a capability gate and a stored shape, so each is its own decision, and the app has
-to keep working against plugins already installed in the field. `migrations/` holds the work order for
+(`src/components/chat/todos.tsx`, `src/lib/todos.ts`). The four below are recorded rather than applied:
+the first three each change a route, a capability gate and a stored shape, so each is its own decision, and
+the app has to keep working against plugins already installed in the field. `migrations/` holds the work order for
 each one — the contract, the steps, the pitfalls the first cluster taught and the definition of done —
 and `migrations/index.md` names the order to do them in.
 
@@ -1113,6 +1113,28 @@ every device works out its own verdicts from whatever text it happens to hold.
   on every stored tool row and a Dexie bump — and it moves when a verdict appears: the change stream
   carries no content by design, so a verdict arrives on the next read rather than with the event that
   announces the round.
+
+### 4. The limit notice infers that an account is out from the windows it holds
+
+`limitNotice` (`src/lib/provider-usage.ts:73`) decides that a bot's provider account is out from the
+windows the route returned — `tightestOf` over them, with a window that carries no reset time counted as
+a balance rather than a period (`isBalance`, `:50`). That rule is an inference about the account where
+core already states the fact: `AccountUsageWindow.scope` marks a window `account` (exhausting it exhausts
+the whole login) or `model` (it caps one model family, and core's own words are that it "can never imply
+the account is out of quota"), and `plugin/usage.py::serialize` drops the field before the app sees a
+window. So a spent model-scoped window — anthropic's Opus week beside a healthy Sonnet week — reads as the
+account being out while the account is fine, on a fetcher whose model-scoped windows are routine.
+
+- Cost: the strongest wording the app has, "Limit Reached", is wrong on that account, and nothing in the
+  windows in hand says whether it should have been.
+- Suggested fix: `serialize` keeps `scope` on the wire (an added field an older app ignores) and
+  `tightestWindow` skips a window core marks `model` when deciding the account is out — the sheet still
+  states every window, the model-scoped one included.
+- Why it is risky: every window a fetcher marks `model` would then stay silent, which is the right reading
+  of core's own words but is not yet proven against a live account, and the app has to treat the field as
+  optional (an older plugin sends none, and today's behaviour is what it gets). The balance rule beside it
+  covers what users on Ollama Cloud and OpenRouter hit without a plugin change, so the field can wait for a
+  model-scoped false alarm to be reported. Recorded, not applied.
 
 ---
 
