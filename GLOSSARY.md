@@ -25,8 +25,12 @@ The encrypted copy of your bots, appearance switches and chat lists, kept for yo
 _Avoid_: backup, cloud, account data
 
 **Recovery code**:
-The code that unlocks sync on a device with no passkey; on Android, the only way in.
+The code that comes with every vault and is the only way into sync on a device without a passkey; on Android, the only way in at all. Setup always issues one, and Settings can replace it with a fresh code.
 _Avoid_: backup code, recovery phrase, seed
+
+**Passkey**:
+An optional way to unlock sync on a device whose authenticator can hold one, sitting beside the recovery code and never in place of it.
+_Avoid_: biometric login, fingerprint login, WebAuthn credential
 
 **Sync locked**:
 The account session is intact but this device holds no vault key, so sync stays off until it is unlocked (the step Gots shows as "Unlock sync").

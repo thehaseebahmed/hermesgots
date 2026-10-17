@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   CheckIcon,
   CopyIcon,
   FingerprintIcon,
+  KeyIcon,
   LogInIcon,
   LogOutIcon,
   RefreshCwIcon,
@@ -28,6 +29,8 @@ import { formatRelative } from "@/lib/format"
 import {
   addPasskey,
   canAddPasskey,
+  canRotateRecoveryCode,
+  rotateRecoveryCode,
   setUpSync,
   signOut,
   syncNow,
@@ -47,6 +50,9 @@ export function AccountSettings() {
   const sync = useSyncState()
   const [busy, setBusy] = useState(false)
   const [recoveryCode, setRecoveryCode] = useState<string>()
+  const [rotation, setRotation] = useState<{ code: string; confirm: () => Promise<void> }>()
+  const [verifying, setVerifying] = useState(false)
+  const [currentCode, setCurrentCode] = useState("")
 
   const { account } = sync
   if (account.status === "loading" || account.status === "unavailable") return null
@@ -61,6 +67,8 @@ export function AccountSettings() {
       setBusy(false)
     }
   }
+
+  const rotate = (code?: string) => run(async () => setRotation(await rotateRecoveryCode(code)))
 
   return (
     <Card className="rounded-3xl">
@@ -156,6 +164,14 @@ export function AccountSettings() {
                       Add passkey
                     </Button>
                   )}
+                  <Button
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => (canRotateRecoveryCode() ? void rotate() : setVerifying(true))}
+                  >
+                    <KeyIcon data-icon="inline-start" />
+                    New recovery code
+                  </Button>
                 </div>
               </div>
             )}
@@ -164,6 +180,55 @@ export function AccountSettings() {
       </CardContent>
 
       <RecoveryCodeDialog code={recoveryCode} onDone={() => setRecoveryCode(undefined)} />
+      <RecoveryCodeDialog
+        code={rotation?.code}
+        title="Your new recovery code"
+        description="Save this code — the one you had stops working once you confirm."
+        action="Use this code"
+        onDone={() => {
+          const confirm = rotation?.confirm
+          setRotation(undefined)
+          if (confirm) void confirm().catch((error) => toast.error(message(error)))
+        }}
+      />
+      <AlertDialog open={verifying} onOpenChange={setVerifying}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Enter your current recovery code</AlertDialogTitle>
+            <AlertDialogDescription>
+              This device can't unwrap sync by itself, so it needs the code you already have.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <form
+            className="flex flex-col gap-3"
+            onSubmit={(event) => {
+              event.preventDefault()
+              run(async () => {
+                setRotation(await rotateRecoveryCode(currentCode))
+                setVerifying(false)
+                setCurrentCode("")
+              })
+            }}
+          >
+            <Input
+              aria-label="Current recovery code"
+              autoComplete="off"
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
+              className="font-mono"
+              value={currentCode}
+              onChange={(event) => setCurrentCode(event.target.value)}
+            />
+            <AlertDialogFooter>
+              <Button type="submit" disabled={busy || !currentCode.trim()}>
+                Continue
+              </Button>
+            </AlertDialogFooter>
+          </form>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   )
 }
@@ -230,41 +295,74 @@ export function UnlockSync() {
   )
 }
 
-/** Shows a freshly made recovery code until the user confirms they saved it. */
-export function RecoveryCodeDialog({ code, onDone }: { code?: string; onDone: () => void }) {
-  const [copied, setCopied] = useState(false)
+/** A recovery code with the copy button that marks it handled. */
+export function RecoveryCode({ code, onCopied }: { code: string; onCopied?: () => void }) {
+  // Which code was copied, so a new one starts unhandled without an effect.
+  const [copiedCode, setCopiedCode] = useState<string>()
+  const copied = copiedCode === code
+  const text = useRef<HTMLElement>(null)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(code)
+    } catch {
+      // A browser that refuses the clipboard still gets the code selected to copy by hand.
+      const range = document.createRange()
+      if (text.current) range.selectNodeContents(text.current)
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+    }
+    setCopiedCode(code)
+    onCopied?.()
+  }
+  return (
+    <div className="flex items-center gap-2 rounded-2xl bg-muted p-3">
+      <code ref={text} className="min-w-0 flex-1 font-mono text-sm select-all">
+        {code}
+      </code>
+      <Button
+        variant="ghost"
+        size="icon-lg"
+        className="size-11 shrink-0"
+        aria-label="Copy recovery code"
+        onClick={copy}
+      >
+        {copied ? <CheckIcon /> : <CopyIcon />}
+      </Button>
+    </div>
+  )
+}
+
+/**
+ * Shows a freshly made recovery code and won't close until it's been copied: the code is the only
+ * way back into sync without a passkey, so skipping it silently loses an account's recovery.
+ */
+export function RecoveryCodeDialog({
+  code,
+  title = "Your recovery code",
+  description = "Save it. It's the only way back into your chats on a new device.",
+  action = "I've saved it",
+  onDone,
+}: {
+  code?: string
+  title?: string
+  description?: string
+  action?: string
+  onDone: () => void
+}) {
+  const [copiedCode, setCopiedCode] = useState<string>()
+  const copied = Boolean(code) && copiedCode === code
   return (
     <AlertDialog open={Boolean(code)}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Your recovery code</AlertDialogTitle>
-          <AlertDialogDescription>
-            Save this code. It's the only way back in without your passkey.
-          </AlertDialogDescription>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
-        <div className="flex items-center gap-2 rounded-2xl bg-muted p-3">
-          <code className="min-w-0 flex-1 font-mono text-sm select-all">{code}</code>
-          <Button
-            variant="ghost"
-            size="icon-lg"
-            className="size-11 shrink-0"
-            aria-label="Copy recovery code"
-            onClick={async () => {
-              await navigator.clipboard.writeText(code ?? "")
-              setCopied(true)
-            }}
-          >
-            {copied ? <CheckIcon /> : <CopyIcon />}
-          </Button>
-        </div>
+        <RecoveryCode code={code ?? ""} onCopied={() => setCopiedCode(code)} />
         <AlertDialogFooter>
-          <AlertDialogAction
-            onClick={() => {
-              setCopied(false)
-              onDone()
-            }}
-          >
-            I've saved it
+          <AlertDialogAction disabled={!copied} onClick={onDone}>
+            {action}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

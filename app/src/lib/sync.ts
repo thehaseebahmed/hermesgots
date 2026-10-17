@@ -33,7 +33,6 @@ import {
 import { mergeDocs, type Doc, type Entry } from "@/lib/merge"
 import { syncRegistry } from "@/lib/registry"
 import {
-  PrfUnsupportedError,
   generateDataKey,
   hasPasskeys,
   lockDown,
@@ -205,17 +204,14 @@ function passkeyUser() {
   return { id: user.id, name, displayName: user.name ?? name }
 }
 
-/** First-time setup: a new data key, wrapped by a passkey when it can be, and a recovery code. */
+/**
+ * First-time setup: a new data key wrapped by a recovery code. A passkey is added afterwards from
+ * the code step (`addPasskey`), so a prompt the user can cancel can never stop setup or leave them
+ * without the one wrapper that outlives this device.
+ */
 export async function setUpSync() {
   const dataKey = await generateDataKey()
   const vault = newVault()
-  let passkey = true
-  try {
-    vault.wrappers.push(await passkeyWrapper(dataKey, vault, passkeyUser()))
-  } catch (error) {
-    if (!(error instanceof PrfUnsupportedError)) throw error
-    passkey = false
-  }
   const recoveryCode = newRecoveryCode()
   vault.wrappers.push(await recoveryWrapper(dataKey, recoveryCode))
   const { inbox, privateKey } = await newInbox(dataKey, inboxAad())
@@ -227,7 +223,54 @@ export async function setUpSync() {
   await refreshVault()
   await db.vault.put({ id: "inbox", userId: userId()!, key: privateKey, keyId: inbox.keyId })
   await keep(dataKey)
-  return { recoveryCode, passkey }
+  return { recoveryCode }
+}
+
+/** Whether this device holds the key (or a passkey to unwrap it), so it can mint a new code. */
+export function canRotateRecoveryCode() {
+  return Boolean(sessionKey) || state.passkeys
+}
+
+/**
+ * Mints a new recovery code: the new wrapper is written first and the old ones are dropped only
+ * from `confirm`, once the user has copied it. A save that fails halfway therefore leaves both
+ * codes working rather than leaving the account with neither.
+ */
+export async function rotateRecoveryCode(currentCode?: string) {
+  if (!remoteVault) throw new Error("Sync isn't set up yet.")
+  const dataKey =
+    sessionKey ??
+    (state.passkeys
+      ? await unlockWithPasskey(remoteVault.vault)
+      : currentCode
+        ? await unlockWithRecoveryCode(remoteVault.vault, currentCode)
+        : undefined)
+  if (!dataKey) throw new Error("Enter your current recovery code.")
+  sessionKey = dataKey
+  const code = newRecoveryCode()
+  const wrapper = await recoveryWrapper(dataKey, code)
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { vault, etag } = remoteVault
+    if (await putDoc("vault", { ...vault, wrappers: [...vault.wrappers, wrapper] }, etag)) {
+      await refreshVault()
+      return {
+        code,
+        confirm: async () => {
+          for (let attempt = 0; attempt < 3; attempt++) {
+            if (!remoteVault) return
+            const { vault, etag } = remoteVault
+            const wrappers = vault.wrappers.filter(
+              (w) => w.kind !== "recovery" || w.iv === wrapper.iv,
+            )
+            if (await putDoc("vault", { ...vault, wrappers }, etag)) return
+            await refreshVault()
+          }
+        },
+      }
+    }
+    await refreshVault()
+  }
+  throw new Error("Couldn't save the new recovery code. Try again.")
 }
 
 export async function unlockSyncWithPasskey() {

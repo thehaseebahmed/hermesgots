@@ -4,7 +4,7 @@ import { useNavigate } from "react-router"
 import { FingerprintIcon, LogInIcon, TrophyIcon } from "lucide-react"
 import { toast } from "sonner"
 
-import { RecoveryCodeDialog, UnlockSync } from "@/components/account-settings"
+import { RecoveryCode, UnlockSync } from "@/components/account-settings"
 import { Bot } from "@/components/bot"
 import { SharingNotes } from "@/components/community-settings"
 import { LinkBots } from "@/components/link-bots"
@@ -14,7 +14,15 @@ import { Switch } from "@/components/ui/switch"
 import { signIn } from "@/lib/account"
 import { joinCommunity, leaveCommunity, useCommunity } from "@/lib/community"
 import { db, getActiveProfile, getSettings, saveSettings } from "@/lib/db"
-import { needsBotSetup, setUpSync, syncNow, useSyncState, type SyncState } from "@/lib/sync"
+import {
+  addPasskey,
+  needsBotSetup,
+  setUpSync,
+  syncNow,
+  useSyncState,
+  type SyncState,
+} from "@/lib/sync"
+import { supportsPasskeys } from "@/lib/vault"
 import { cn } from "@/lib/utils"
 
 type Step = "sign-in" | "sync" | "community" | "checking" | "link"
@@ -72,6 +80,7 @@ function SetupPage({
   const profile = useLiveQuery(getActiveProfile, [])
   const [linkStep, setLinkStep] = useState<"checking" | "community" | "link">("checking")
   const [busy, setBusy] = useState(false)
+  const [copied, setCopied] = useState(false)
   const [reachable, setReachable] = useState(false)
   const onReachable = useCallback((ok: boolean) => setReachable(ok), [])
 
@@ -98,6 +107,33 @@ function SetupPage({
     }
   }, [authed, recoveryCode, identity])
 
+  const fail = (error: unknown) =>
+    toast.error(error instanceof Error ? error.message : "Something went wrong.")
+
+  const turnOn = async () => {
+    setBusy(true)
+    try {
+      setRecoveryCode((await setUpSync()).recoveryCode)
+    } catch (error) {
+      fail(error)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const addPasskeyToo = async () => {
+    setBusy(true)
+    try {
+      await addPasskey()
+      toast.success("Passkey added")
+    } catch (error) {
+      // Cancelling the prompt is a choice, not a failure: the code is already the way in.
+      if (!(error instanceof DOMException && error.name === "NotAllowedError")) fail(error)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const finish = async () => {
     await saveSettings({ onboarded: true })
     navigate("/", { replace: true })
@@ -122,28 +158,43 @@ function SetupPage({
           </Section>
         )}
 
-        {step === "sync" && (
+        {step === "sync" && recoveryCode && (
+          <Section
+            title="Your recovery code"
+            description="Save it. It's the only way back into your chats on a new device."
+          >
+            <RecoveryCode code={recoveryCode} onCopied={() => setCopied(true)} />
+            {supportsPasskeys() && (
+              <Button
+                variant="outline"
+                size="lg"
+                className="h-11"
+                disabled={busy}
+                onClick={addPasskeyToo}
+              >
+                <FingerprintIcon data-icon="inline-start" />
+                Add a passkey too
+              </Button>
+            )}
+            <Button
+              size="lg"
+              className="h-11"
+              disabled={!copied}
+              onClick={() => setRecoveryCode(undefined)}
+            >
+              Continue
+            </Button>
+          </Section>
+        )}
+
+        {step === "sync" && !recoveryCode && (
           <Section
             title={sync.vault === "locked" ? "Unlock sync" : "Turn on sync"}
             description="Your bots, API keys and chat titles are encrypted on this device before they're stored."
           >
             {sync.vault === "unknown" && !sync.error && <Spinner className="self-center" />}
             {sync.vault === "missing" && (
-              <Button
-                size="lg"
-                className="h-11 self-center"
-                disabled={busy}
-                onClick={async () => {
-                  setBusy(true)
-                  try {
-                    setRecoveryCode((await setUpSync()).recoveryCode)
-                  } catch (error) {
-                    toast.error(error instanceof Error ? error.message : "Something went wrong.")
-                  } finally {
-                    setBusy(false)
-                  }
-                }}
-              >
+              <Button size="lg" className="h-11 self-center" disabled={busy} onClick={turnOn}>
                 <FingerprintIcon data-icon="inline-start" />
                 Turn on sync
               </Button>
@@ -174,8 +225,6 @@ function SetupPage({
           </Section>
         )}
       </div>
-
-      <RecoveryCodeDialog code={recoveryCode} onDone={() => setRecoveryCode(undefined)} />
     </div>
   )
 }
