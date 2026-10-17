@@ -535,6 +535,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 "session_id": session_id,
                 "revision": found["revision"] if found else None,
                 "todos": found["todos"] if found else None,
+                "progress": found["progress"] if found else None,
             }
         )
 

@@ -23,6 +23,8 @@ MAX_CONTENT_CHARS = 4000
 # Hermes skips bigger results when it restores a list (MAX_TODO_RESULT_CHARS).
 MAX_RESULT_CHARS = 512_000
 TOOL_NAMES = ("todo_list", "todo")
+# How deep a subtask may indent, the same cap the app draws with.
+MAX_DEPTH = 3
 
 
 def _call_id(tool_call: Any) -> Optional[str]:
@@ -75,7 +77,38 @@ def _items(raw: List[Any]) -> List[Dict[str, str]]:
         items.append(item)
         if len(items) >= MAX_ITEMS:
             break
+    depth_of(items)
     return items
+
+
+def depth_of(items: List[Dict[str, Any]]) -> None:
+    """How far each item sits under its parents, in place.
+
+    A subtask indents by it, so it is the host's to state: the app draws the list it is given. A parent
+    that isn't in the list, or a loop, stops at the root, and nothing indents past ``MAX_DEPTH``.
+    """
+    parents = {item["id"]: item.get("parent") for item in items}
+    for item in items:
+        depth = 0
+        seen = {item["id"]}
+        parent = item.get("parent")
+        while parent and parent in parents and parent not in seen and depth < MAX_DEPTH:
+            seen.add(parent)
+            depth += 1
+            parent = parents[parent]
+        item["depth"] = depth
+
+
+def progress_of(items: List[Dict[str, Any]]) -> Dict[str, int]:
+    """The list's own progress: how many are done of those that still count, as the app shows it.
+
+    A cancelled item is not work any more, so it leaves both numbers.
+    """
+    counted = [item for item in items if item.get("status") != "cancelled"]
+    return {
+        "done": len([item for item in counted if item.get("status") == "completed"]),
+        "total": len(counted),
+    }
 
 
 def read(db: Any, session_id: str) -> Optional[Dict[str, Any]]:
@@ -104,9 +137,11 @@ def read(db: Any, session_id: str) -> Optional[Dict[str, Any]]:
         if not isinstance(data, dict) or not isinstance(data.get("todos"), list):
             continue
         revision = data.get("revision")
+        items = _items(data["todos"])
         return {
             "revision": revision if isinstance(revision, int) and revision >= 0 else 0,
-            "todos": _items(data["todos"]),
+            "todos": items,
+            "progress": progress_of(items),
         }
     return None
 
