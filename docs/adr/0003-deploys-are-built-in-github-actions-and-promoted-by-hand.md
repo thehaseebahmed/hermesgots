@@ -5,7 +5,8 @@ Netlify's own Git builds are off for the app's site, so this repo is its only bu
 Tests workflow as its gate — the same diff-gated jobs a pull request runs, so an app-only merge runs
 the app gates and nothing else — and then deploys an *unpublished* Netlify branch deploy, aliased
 `candidate`, at `candidate--<site>.netlify.app`. Nothing publishes from a merge. Production moves only
-when someone runs that workflow by hand on `main` with `promote` on: the same gate, and then a
+when someone runs that workflow by hand on `main` with `promote` on — for a publish between releases —
+or by cutting a release, which publishes what moved (ADR 0004): the same gate, and then a
 production deploy of the same build. What is deployed either way is the `app/dist` the Tests app job
 built and uploaded as an artifact, downloaded again in the deploying job rather than rebuilt, so what
 ships is what was tested; the job still checks out and installs the app's dependencies because the
