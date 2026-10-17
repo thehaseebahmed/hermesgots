@@ -56,6 +56,96 @@ export async function setUpBot(page) {
   }, mock)
 }
 
+/** The signed-in account the wizard flows start from. */
+const user = { id: "11111111-2222-4333-8444-555555555555", email: "tester@example.com" }
+
+/**
+ * A browser signed in to Identity with the sync, community and Identity routes stubbed, for a flow
+ * that has to start before the wizard: `vault` says whether the account already has one, `vaults`
+ * collects every vault PUT and `joins` every leaderboard join, and `shot(name)` saves a screenshot.
+ * The caller closes `browser`.
+ */
+export async function signedIn({ width = 1440, dark = false, vault = "exists" } = {}) {
+  const browser = await chromium.launch({ headless: !headed, args: ["--no-sandbox"] })
+  const context = await browser.newContext({
+    viewport: { width, height: width < 768 ? 844 : 768 },
+    colorScheme: dark ? "dark" : "light",
+  })
+  const now = Math.floor(Date.now() / 1000)
+  const expires = now + 3600
+  const jwtPayload = Buffer.from(JSON.stringify({ sub: user.id, exp: expires })).toString(
+    "base64url",
+  )
+  const session = {
+    ...user,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    url: `${app}/.netlify/identity`,
+    token: {
+      access_token: `h.${jwtPayload}.s`,
+      token_type: "bearer",
+      expires_at: expires * 1000,
+      refresh_token: "r",
+    },
+  }
+  await context.addInitScript(
+    (session) => localStorage.setItem("gotrue.user", JSON.stringify(session)),
+    session,
+  )
+  await context.addCookies([{ name: "nf_jwt", value: session.token.access_token, url: app }])
+
+  const vaults = []
+  await context.route("**/.netlify/functions/sync?**", async (route) => {
+    const request = route.request()
+    if (request.method() === "PUT") {
+      const body = request.postDataJSON()
+      if (new URL(request.url()).searchParams.get("doc") === "vault") vaults.push(body.data)
+      return route.fulfill({ json: { ok: true } })
+    }
+    if (vault === "missing") return route.fulfill({ status: 404, json: { error: "missing" } })
+    if (request.url().includes("doc=vault"))
+      return route.fulfill({ json: { data: {}, etag: "v1" } })
+    return route.fulfill({ status: 404, json: { error: "missing" } })
+  })
+
+  const joins = []
+  await context.route("**/.netlify/functions/community?**", async (route) => {
+    const url = new URL(route.request().url())
+    if (url.searchParams.get("route") !== "join") return route.fulfill({ json: { joined: false } })
+    joins.push(route.request().method())
+    return route.fulfill({
+      json: { joined: true, login: "tester", totals: { today: 0, week: 0, month: 0 } },
+    })
+  })
+
+  // Identity's settings say which sign-in providers are on; without GitHub the app is unavailable.
+  await context.route("**/.netlify/identity/**", (route) =>
+    route.request().url().endsWith("/settings")
+      ? route.fulfill({
+          json: { external: { github: true }, autoconfirm: false, disable_signup: false },
+        })
+      : route.fulfill({ status: 500, body: "" }),
+  )
+
+  const page = await context.newPage()
+  const errors = []
+  page.on("pageerror", (error) => errors.push(error.message))
+  return {
+    browser,
+    context,
+    page,
+    session,
+    vaults,
+    joins,
+    errors,
+    async shot(name) {
+      if (!shots) return
+      mkdirSync(shots, { recursive: true })
+      await page.screenshot({ path: `${shots}/${name}.png` })
+    },
+  }
+}
+
 function helpers(page) {
   const composer = page.getByRole("textbox").last()
   return {

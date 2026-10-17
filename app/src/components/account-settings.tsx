@@ -10,6 +10,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
+import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -186,7 +187,6 @@ export function AccountSettings() {
       <RecoveryCodeDialog
         code={rotation?.code}
         title="Your new recovery code"
-        description="Save this code — the one you had stops working once you confirm."
         action="Use this code"
         onDone={() => {
           const confirm = rotation?.confirm
@@ -194,16 +194,13 @@ export function AccountSettings() {
           if (confirm) void confirm().catch((error) => toast.error(message(error)))
         }}
       />
-      <AlertDialog open={verifying} onOpenChange={setVerifying}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Enter your current recovery code</AlertDialogTitle>
-            <AlertDialogDescription>
-              This device can't unwrap sync by itself, so it needs the code you already have.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+      <Popup open={verifying} onOpenChange={setVerifying}>
+        <PopupContent>
+          <PopupHeader className="pb-2">
+            <PopupTitle>Enter your current recovery code</PopupTitle>
+          </PopupHeader>
           <form
-            className="flex flex-col gap-3"
+            className="flex flex-col gap-3 px-4 pb-4 sm:px-6"
             onSubmit={(event) => {
               event.preventDefault()
               run(async () => {
@@ -224,14 +221,12 @@ export function AccountSettings() {
               value={currentCode}
               onChange={(event) => setCurrentCode(event.target.value)}
             />
-            <AlertDialogFooter>
-              <Button type="submit" disabled={busy || !currentCode.trim()}>
-                Continue
-              </Button>
-            </AlertDialogFooter>
+            <Button type="submit" className="h-11" disabled={busy || !currentCode.trim()}>
+              Continue
+            </Button>
           </form>
-        </AlertDialogContent>
-      </AlertDialog>
+        </PopupContent>
+      </Popup>
     </Card>
   )
 }
