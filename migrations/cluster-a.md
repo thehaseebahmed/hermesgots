@@ -48,5 +48,17 @@ indentation (how deep it sits under its parents). Both are facts about the list,
 
 - `plugin/tests/test_todos.py`: depth under a parent, an orphan parent, a loop, the cap, a cancelled item,
   the newest list winning, a bare tool row being refused, another tool's call not answering for ours.
-- Flows: `pnpm e2e todos` and `pnpm e2e todos-legacy` assert the pill reads `N/M todos`. They were **not**
-  run when this landed (no browser in that environment) — run them if this path is touched again.
+- Flows: `pnpm e2e todos` and `pnpm e2e todos-legacy` assert the pill reads `N/M todos` while the reply
+  streams — from the run's events on one mock, from the transcript on the other. Both pass (each reports
+  "the todo list showed 3 items while the reply ran").
+- Budget guards: `pnpm e2e stream-writes` (16 writes in 4.3s, budget 6/s) and `pnpm e2e idle-requests`
+  (11 requests in 65s, budget 12) — the re-read after a `todo_list` call adds no idle traffic.
+- Driving the flows in a browser-less sandbox: pair the module with the browser revision it expects —
+  `PLAYWRIGHT_MODULE=/opt/data/cache/pw/node_modules/playwright/index.mjs` (1.63.0) with
+  `PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright` (chromium 1243) — and start the dev server bound to IPv4
+  (`node_modules/.bin/vite --host 127.0.0.1 --port 15173 --strictPort`) before the CLI, whose readiness
+  probe fetches `localhost` and would otherwise miss an IPv6-only listener.
+- Verified end to end against a doctored route (a payload the app could never compute: 3 items but
+  `progress { done: 1, total: 5 }` and a depth of 2) and against a route with neither field: the pill and
+  sheet read `1/5 todos` and indent the nested item by 48px, and an older plugin's list shows no count, no
+  ring and no indentation — nothing is worked out locally in either case.
