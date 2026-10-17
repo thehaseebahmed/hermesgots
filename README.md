@@ -1,7 +1,7 @@
 # Gots
 
 <p align="center">
-  <a href="https://app.netlify.com/projects/hermes-companion/deploys"><img alt="Netlify Status" src="https://api.netlify.com/api/v1/badges/5e7733ce-e51d-4d60-adc3-c0e5b8fdb5e5/deploy-status"></a>
+  <a href="https://app.netlify.com/projects/hermesgots/deploys"><img alt="Netlify Status" src="https://api.netlify.com/api/v1/badges/5e7733ce-e51d-4d60-adc3-c0e5b8fdb5e5/deploy-status"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-black.svg"></a>
 </p>
 
@@ -114,7 +114,7 @@ The container runs as root, so an install inside it leaves root-owned `node_modu
 
 ### This repo's own site
 
-The site this repo deploys for itself is published by GitHub Actions, not by Netlify's Git builds, which are off for that site: `.github/workflows/deploy.yml` runs the Tests workflow on a merge to `main` that touches `app/**` or `netlify.toml`, then publishes the `app/dist` that run built and uploaded with `netlify deploy --prod`, against the site in `NETLIFY_SITE_ID` and `NETLIFY_AUTH_TOKEN` (`docs/adr/0003-production-deploys-run-in-github-actions.md`). Two builders for one site would race for its published deploy, so a fork that would rather have Netlify build should delete that workflow and connect the repo as above. `.github/workflows/staging.yml` deploys any branch to the `staging` alias by hand — the preview environment production no longer has, since stopping the Git builds also stops Netlify's per-PR deploy previews.
+The site this repo deploys for itself is deployed by GitHub Actions, not by Netlify's Git builds, which are off for that site: `.github/workflows/deploy.yml` runs the Tests workflow on a merge to `main` that touches `app/**` or `netlify.toml`, then deploys the `app/dist` that run built and uploaded as an unpublished Netlify branch deploy aliased `candidate` (`candidate--<site>.netlify.app`), against the site in `NETLIFY_SITE_ID` and `NETLIFY_AUTH_TOKEN` (`docs/adr/0003-deploys-are-built-in-github-actions-and-promoted-by-hand.md`). Nothing publishes on its own: production moves when you open the site's deploys page, pick a deploy and **Publish deploy** it, which creates no new deploy and so costs none of the plan's credits, where a production deploy costs 15 and a branch deploy none. Lock production publishing in Netlify (deploy locks, or auto publishing off) so a stray `--prod` can't publish behind your back, and read the run's summary for the candidate and the deploys page. Two builders for one site would race for its published deploy, so a fork that would rather have Netlify build should delete that workflow and connect the repo as above. With the Git builds stopped there are no per-PR deploy previews for the app any more: a merge's candidate is the preview, and a per-PR alias deploy would be the change that brings them back.
 
 To turn on sync:
 

@@ -1,9 +1,13 @@
 name: Deploy
 
-# Production is published from here, not from Netlify's own Git builds, which are off for the app
-# site (two builders for one site would race). `app/dist` is the exact build the Tests workflow just
-# gated, uploaded as an artifact and downloaded again below, so what goes live is what was tested.
-# docs/adr/0003-production-deploys-run-in-github-actions.md has the decision and its consequences.
+# A merge to main builds, gates and deploys a *candidate*: an unpublished Netlify branch deploy
+# aliased `candidate`, which costs none of the team's credits where a production deploy costs 15.
+# Production is published by hand from the site's deploys page, so this workflow never publishes and
+# a merge can't reach users on its own. Netlify's own Git builds are off for the app site, and its
+# production publishing is locked, so nothing publishes without a person.
+# `app/dist` is the exact build the Tests workflow just gated, uploaded as an artifact and downloaded
+# again below, so the candidate carries the tested bytes.
+# docs/adr/0003-deploys-are-built-in-github-actions-and-promoted-by-hand.md has the decision.
 on:
   push:
     branches: [main]
@@ -13,11 +17,11 @@ on:
       - ".github/workflows/deploy.yml"
       # tests.yml is deliberately not here: changing the test workflow doesn't change the app that
       # ships, and its own push trigger already runs it, so listing it would run the suite twice and
-      # publish a deploy of unchanged code.
+      # deploy a candidate of unchanged code.
 
-# One production deploy at a time. Netlify publishes a deploy only once its upload has finished, so
-# a cancelled run leaves the last good one live, and the newer merge's deploy carries the older
-# merge's work with it.
+# One candidate at a time. The alias holds the newest merge's deploy, so cancelling an older run is
+# what keeps it current; an upload cancelled mid-flight never moves the alias, and a newer merge's
+# deploy carries the older merge's work with it.
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: true
@@ -66,15 +70,42 @@ jobs:
           path: app/dist
 
       - name: Deploy to Netlify
-        # netlify.toml keeps base = "app": --dir and --functions are given relative to the repo root,
-        # as staging.yml does. --prod is what publishes the deploy rather than leaving it one of the
-        # site's unpublished ones.
+        # netlify.toml keeps base = "app": --dir and --functions are given relative to the repo root.
+        # The alias is what makes this a branch deploy — published at its own URL, out of production's
+        # way. `--prod` is what this deliberately does not pass: that is the call Netlify meters at 15
+        # credits, blocks once a team is out of them, and publishes with nobody asking.
         run: |
           npx --yes netlify-cli@27.12.0 deploy \
             --dir=app/dist \
             --functions=app/netlify/functions \
-            --prod \
+            --alias candidate \
             --message "${{ github.sha }} $(git log -1 --format='%s')"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+
+      - name: What to promote
+        # Publishing is a person's job, so the run hands over the two links that step takes: the alias
+        # URL to look at, and the site's deploys page to publish from. Both come from the variable the
+        # Android builds already use for the site's URL; the step says so rather than printing a link
+        # that goes nowhere when it is unset.
+        env:
+          SITE_URL: ${{ vars.MEMENTO_SITE_URL }}
+        run: |
+          site="${SITE_URL%/}"
+          host="${site#*://}"
+          {
+            echo "### Nothing published — this is a candidate"
+            echo
+            echo "An unpublished Netlify branch deploy, aliased \`candidate\`, which moves neither the"
+            echo "site's live version nor its published deploy."
+            if [[ "$host" == *.netlify.app ]]; then
+              echo
+              echo "- Check it: https://candidate--${host}"
+              echo "- Promote it: https://app.netlify.com/projects/${host%.netlify.app}/deploys"
+            else
+              echo
+              echo "Set the \`MEMENTO_SITE_URL\` repository variable to link the candidate and the deploys"
+              echo "page here."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
