@@ -9,4 +9,6 @@ re-reads the store before believing a rejection, and keeps the session on anythi
 Identity's verdict about the stored token itself — a 5xx, a 429, a lost reply. The same reading
 applies to the sync function, which answers 5xx rather than 401 when it couldn't check a Bearer
 token, and to a failed check at load, which leaves the session standing on what the stored token
-already names instead of showing the gate.
+already names instead of showing the gate. Two clears of the store stay, both Identity's own word:
+the token it refuses on a trade, and a 401 on `/user` for the access token a trade has just issued —
+nobody else traded that token, so the session really has ended.

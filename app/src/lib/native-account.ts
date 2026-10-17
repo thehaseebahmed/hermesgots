@@ -9,7 +9,7 @@ import { SITE_URL } from "@/lib/native"
 
 /**
  * Identity for the Android app. `@netlify/identity` only talks to the page's own origin, which is
- * `https://localhost` here, so this calls the deploy's GoTrue API directly. Requests go through
+ * `https://localhost` here, so this calls the deploy's Identity API directly. Requests go through
  * native HTTP so CORS doesn't apply. GitHub sign-in runs in a Custom Tab on
  * `public/auth/native.html`, which hands the tokens back through `memento://auth`.
  *
