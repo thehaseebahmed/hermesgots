@@ -112,6 +112,10 @@ The container runs as root, so an install inside it leaves root-owned `node_modu
 
 `netlify.toml` is included (base `app`, build `pnpm build`, publish `dist`, SPA fallback, service-worker cache headers). In Netlify, choose **Add new site → Import an existing project**, pick this repo, and deploy. Then add the site's URL to `API_SERVER_CORS_ORIGINS`.
 
+### This repo's own site
+
+The site this repo deploys for itself is published by GitHub Actions, not by Netlify's Git builds, which are off for that site: `.github/workflows/deploy.yml` runs the Tests workflow on a merge to `main` that touches `app/**` or `netlify.toml`, then publishes the `app/dist` that run built and uploaded with `netlify deploy --prod`, against the site in `NETLIFY_SITE_ID` and `NETLIFY_AUTH_TOKEN` (`docs/adr/0003-production-deploys-run-in-github-actions.md`). Two builders for one site would race for its published deploy, so a fork that would rather have Netlify build should delete that workflow and connect the repo as above. `.github/workflows/staging.yml` deploys any branch to the `staging` alias by hand — the preview environment production no longer has, since stopping the Git builds also stops Netlify's per-PR deploy previews.
+
 To turn on sync:
 
 1. **Project configuration → Identity**: enable Identity.
