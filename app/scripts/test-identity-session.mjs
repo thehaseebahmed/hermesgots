@@ -20,6 +20,11 @@ test("a token Identity declined while the store still holds it ends the session"
   assert.equal(tradeOutcome(401, "spent", "spent"), "ended")
 })
 
+test("a 403 is Identity refusing the token, the way the function reads one", () => {
+  assert.equal(tradeOutcome(403, "spent", "replacement"), "swapped")
+  assert.equal(tradeOutcome(403, "spent", "spent"), "ended")
+})
+
 test("a rejection with no token left in the store is already the end", () => {
   assert.equal(tradeOutcome(400, "spent", null), "ended")
 })

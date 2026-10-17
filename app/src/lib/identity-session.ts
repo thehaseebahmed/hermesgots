@@ -34,7 +34,8 @@ export function tradeOutcome(
 ): TradeOutcome {
   if (status === 200) return "renewed"
   if (status >= 500 || status === 429) return "retry"
-  if (status === 400 || status === 401) {
+  // 403 belongs with the refusals: `bearerUser` reads Identity's 403 as "not signed in" too.
+  if (status === 400 || status === 401 || status === 403) {
     return storedRefresh && storedRefresh !== spentRefresh ? "swapped" : "ended"
   }
   return "retry"
