@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react"
 
 import { connectionKey } from "@/lib/connection"
+import { lacksRoute } from "@/lib/cooldown"
 import { db } from "@/lib/db"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
-import { hasPluginFeature, listSkills, type HermesConfig, type Skill } from "@/lib/hermes"
+import { listSkills, type HermesConfig, type Skill } from "@/lib/hermes"
 
 export type SkillsState =
   { status: "loading" } | { status: "ok"; skills: Skill[] } | { status: "error" }
@@ -22,18 +23,21 @@ function readSkills(config: HermesConfig, key: string): Promise<Skill[]> {
   const pending = inFlight.get(key)
   if (pending) return pending
   const request = (async () => {
-    // A plugin without the route (an older one) has no skills to offer, so don't ask it: the menu
-    // shows the commands alone either way, and a bot whose host can't list skills keeps quiet.
-    const lists = await hasPluginFeature(config, "skills")
-    // Nothing is remembered for a bot that can't list skills, so an upgraded plugin fills it in.
-    if (!lists) return []
-    const skills = await listSkills(config, AbortSignal.timeout(READ_TIMEOUT_MS))
-    memory.set(key, skills)
-    // Don't write what didn't change: a fresh row would wake anything reading this one.
-    if (JSON.stringify(await readStored(key)) !== JSON.stringify(skills)) {
-      await db.skills.put({ id: key, skills })
+    try {
+      const skills = await listSkills(config, AbortSignal.timeout(READ_TIMEOUT_MS))
+      memory.set(key, skills)
+      // Don't write what didn't change: a fresh row would wake anything reading this one.
+      if (JSON.stringify(await readStored(key)) !== JSON.stringify(skills)) {
+        await db.skills.put({ id: key, skills })
+      }
+      return skills
+    } catch (error) {
+      // A plugin with no skills route (an older one) has none to offer, so the menu shows the commands
+      // alone and nothing is remembered for it, leaving room for an upgraded plugin to fill it in.
+      // A host that is away, busy or slow is not that answer: the cached list stands and this read fails.
+      if (await lacksRoute(config, error, "skills")) return []
+      throw error
     }
-    return skills
   })().finally(() => inFlight.delete(key))
   inFlight.set(key, request)
   return request

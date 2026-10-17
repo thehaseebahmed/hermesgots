@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import {
   CornerDownRightIcon,
   ListPlusIcon,
@@ -22,6 +22,15 @@ const COMMAND_ICONS = {
   queue: ListPlusIcon,
 }
 
+/** The list's tallest, whatever the screen: the room above the composer caps it below this. */
+const MAX_ROOM = 288
+/** The least it shrinks to, under three rows, before it gives way to scrolling instead. */
+const MIN_ROOM = 132
+/** Kept clear above the list, so its first row never sits against the top of the screen. */
+const CLEARANCE = 16
+/** No more of the screen than this: on a phone with the keyboard up, four rows scroll instead. */
+const SCREEN_SHARE = 0.45
+
 export function SlashMenu({
   id,
   items,
@@ -37,17 +46,52 @@ export function SlashMenu({
   onPick: (item: SlashItem) => void
   onActive: (index: number) => void
 }) {
+  const box = useRef<HTMLDivElement>(null)
+  const [room, setRoom] = useState(MAX_ROOM)
+  // The menu hangs off the composer's top edge, so its lower edge is fixed: what it may be tall is
+  // the room above it, and a share of what's on screen — a phone with the keyboard up has little of
+  // either, and the list has to give way and scroll rather than run off the top of the screen.
+  useLayoutEffect(() => {
+    const measure = () => {
+      const bottom = box.current?.getBoundingClientRect().bottom
+      if (bottom === undefined) return
+      // The keyboard isn't part of the layout viewport, so what's visible is the visual one.
+      const viewport = window.visualViewport
+      const visible = viewport?.height ?? window.innerHeight
+      const above = bottom - (viewport?.offsetTop ?? 0) - CLEARANCE
+      setRoom(Math.min(MAX_ROOM, Math.max(Math.min(above, visible * SCREEN_SHARE), MIN_ROOM)))
+    }
+    measure()
+    // The composer grows upward with what it carries (attachment tiles, wrapped text), which moves
+    // the room; so does the keyboard, which only the visual viewport hears about.
+    const observer = new ResizeObserver(measure)
+    if (box.current?.parentElement) observer.observe(box.current.parentElement)
+    window.addEventListener("resize", measure)
+    window.visualViewport?.addEventListener("resize", measure)
+    window.visualViewport?.addEventListener("scroll", measure)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener("resize", measure)
+      window.visualViewport?.removeEventListener("resize", measure)
+      window.visualViewport?.removeEventListener("scroll", measure)
+    }
+  }, [])
+
   useEffect(() => {
     document.getElementById(optionId(id, active))?.scrollIntoView({ block: "nearest" })
   }, [id, active])
 
   return (
-    <div className="absolute inset-x-0 bottom-full mb-2 overflow-hidden rounded-3xl border bg-popover text-popover-foreground shadow-lg shadow-black/5">
+    <div
+      ref={box}
+      className="absolute inset-x-0 bottom-full mb-2 overflow-hidden rounded-3xl border bg-popover text-popover-foreground shadow-lg shadow-black/5"
+    >
       <ul
         id={id}
         role="listbox"
         aria-label="Commands and skills"
-        className="max-h-72 overflow-y-auto p-1.5"
+        style={{ maxHeight: room }}
+        className="overflow-y-auto p-1.5"
       >
         {items.map((item, index) => {
           const Icon = item.kind === "command" ? COMMAND_ICONS[item.name] : SparklesIcon

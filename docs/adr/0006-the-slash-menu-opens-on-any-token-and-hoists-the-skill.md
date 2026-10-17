@@ -29,6 +29,10 @@ The bot's skills are cached on the device, one last-known list per bot, so the m
 skills already in it and refetches in the background; a failed read leaves the cached list in place. The
 goal wizard's review picker reads the same cached list.
 
+The list is as tall as the room above the composer and never more than 45% of what's on screen, up to
+the 288px it has always been. On a phone with the keyboard up that is about four rows, which scroll;
+on a tablet or a desktop nothing changes.
+
 ## Considered options
 
 - **Inserting the skill where the cursor is.** Rejected: a slash anywhere but the front of the message
@@ -57,13 +61,21 @@ goal wizard's review picker reads the same cached list.
 - **Refetching only after a TTL, or only when the plugin's version moves.** Rejected: a refresh on each
   open is one request behind a menu the user just asked for, and a TTL leaves a skill installed minutes
   ago invisible for as long as the window lasts.
+- **A fixed height for the list** (the 288px it had). Rejected: on a phone the keyboard can leave about
+  500px of screen, and a list that tall puts its first rows above the top of it, where nothing scrolls
+  them back into reach.
+- **`hasPluginFeature` to decide whether to ask for skills at all.** Rejected: it answers `false` for a
+  host that couldn't be reached just as it does for a plugin that lacks the route, so a blip would read
+  as "this bot has no skills" and empty a menu that had them; `lacksRoute` is the one that tells the two
+  apart, and only a route the plugin really lacks leaves the commands alone.
 
 ## Consequences
 
 - A skill the user installed moments ago appears the second time the menu is opened, on a device that
   already has a list; the first open on a fresh device shows the commands and the loading line.
-- A bot that can't list skills (an older plugin, a host that errors) keeps the commands and shows no
-  skills, and never an error, as before — the cache holds what was last known rather than a failure.
+- A bot whose plugin has no skills route (an older plugin) keeps the commands and shows no skills, and
+  never an error, as before. A bot that is merely unreachable keeps what it had: the cached list stands
+  and the menu goes on working without the host, which is what "kept on failure" has to mean.
 - The slash menu's entries, the token rules and the ranking are pure functions of the text, the cursor
   and the cached list, so they can be tested without a browser and without a bot; the composer keeps
   only the wiring.

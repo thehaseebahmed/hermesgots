@@ -54,5 +54,35 @@ await flow("slash-skills", async ({ page, shot }) => {
   await shot("cached")
   await page.unroute("**/api/plugins/memento/**")
 
+  // The list is only as tall as the room above the composer and a share of what's on screen: a small
+  // display — a phone with the keyboard up — gets a shorter one that scrolls, never one that runs
+  // off the top. It grows back when the screen does.
+  await composer.fill("/")
+  await menu.waitFor({ timeout: 10_000 })
+  const tall = (await menu.boundingBox()).height
+  assert.equal(Math.round(tall), 288, "a tall screen gets the list at its usual height")
+
+  await page.setViewportSize({ width: 390, height: 520 })
+  await page.waitForTimeout(400)
+  const short = await menu.boundingBox()
+  const shortComposer = await composer.boundingBox()
+  assert.ok(
+    short.height < tall,
+    `a small screen gets a shorter list (${Math.round(short.height)}px, was ${Math.round(tall)}px)`,
+  )
+  assert.ok(
+    short.height <= 520 * 0.5,
+    `and no more than half of it (${Math.round(short.height)}px of 520px)`,
+  )
+  assert.ok(short.y >= 0, `the list stays on screen (its top at ${Math.round(short.y)}px)`)
+  assert.ok(short.y + short.height <= shortComposer.y + 1, "and hangs off the composer's top edge")
+  await shot("small-screen")
+
+  // Back on a tall screen the list is what it always was.
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.waitForTimeout(400)
+  const grown = (await menu.boundingBox()).height
+  assert.equal(Math.round(grown), 288, "and grows back with the screen")
+
   pass(`the / menu listed ${FIXTURE.length} skills from the plugin route, and kept them offline`)
 })
