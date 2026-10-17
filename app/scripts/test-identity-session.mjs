@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { claimsOf, tradeOutcome } from "../src/lib/identity-session.ts"
+import { claimsOf, storedUser, tradeOutcome } from "../src/lib/identity-session.ts"
 
 /** A JWT-shaped token carrying `claims`, which is all the app reads one for. */
 const token = (claims) =>
@@ -59,4 +59,20 @@ test("what isn't a token names nobody", () => {
   assert.equal(claimsOf(""), null)
   assert.equal(claimsOf("not-a-token"), null)
   assert.equal(claimsOf("header.@@not-base64@@.signature"), null)
+})
+
+test("a stored token stands in for the account, carrying its owner and nothing more", () => {
+  assert.deepEqual(storedUser(token({ sub: "user-1", email: "a@example.com" })), {
+    id: "user-1",
+    email: "a@example.com",
+    userMetadata: {},
+    appMetadata: {},
+  })
+})
+
+test("nothing the token can prove is no account at all", () => {
+  assert.equal(storedUser(null), null)
+  assert.equal(storedUser(""), null)
+  assert.equal(storedUser("not-a-token"), null)
+  assert.equal(storedUser(token({ email: "a@example.com" })), null)
 })

@@ -1,9 +1,13 @@
 /**
- * The rules for the account session's stored tokens, on the Android app's own Identity calls.
+ * The rules for the account's stored session tokens, as both the Android app and the browser read
+ * them: what a refresh trade means, and who a stored token names.
  *
- * Imports only `./base64url.ts`, which is itself import-free, so `scripts/test-identity-session.mjs`
- * can exercise it under `node --experimental-strip-types`, the way `model-changes.ts` is tested.
+ * Its only runtime import is `./base64url.ts`, which is itself import-free, so
+ * `scripts/test-identity-session.mjs` can exercise it under `node --experimental-strip-types`, the way
+ * `model-changes.ts` is tested.
  */
+
+import type { User } from "@netlify/identity"
 
 import { fromBase64Url } from "./base64url.ts"
 
@@ -54,6 +58,13 @@ export function claimsOf(access: string): { id: string; email?: string } | null 
   } catch {
     return null
   }
+}
+
+/** The account a stored access token proves: it names its owner and nothing else, which is all a
+ *  client has to stand on when Identity can't be asked (docs/adr/0001). */
+export function storedUser(access: string | null): User | null {
+  const claims = access ? claimsOf(access) : null
+  return claims ? { id: claims.id, email: claims.email, userMetadata: {}, appMetadata: {} } : null
 }
 
 function decode(part: string) {

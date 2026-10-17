@@ -9,6 +9,7 @@ import {
   type User,
 } from "@netlify/identity"
 
+import { storedUser } from "@/lib/identity-session"
 import { isNative, SITE_URL } from "@/lib/native"
 import {
   loadNativeAccount,
@@ -57,7 +58,31 @@ export async function loadAccount(): Promise<Account> {
   } catch {
     // An expired or reused callback leaves the user signed out; the card offers sign-in again.
   }
-  const user = await getUser().catch(() => null)
+  return browserAccount()
+}
+
+/** The access token `@netlify/identity` keeps for the page, in a cookie it makes readable to it: what
+ *  this client has to prove a session with when the identity service can't be asked. */
+function storedToken() {
+  const match = /(?:^|;\s*)nf_jwt=([^;]*)/.exec(document.cookie)
+  return match ? decodeURIComponent(match[1]) : null
+}
+
+/**
+ * The account: Identity's own answer, or what the stored token still proves. The store is the source
+ * of truth, so a check that fails leaves the session standing instead of showing the gate
+ * (docs/adr/0001) — and a store `@netlify/identity` has emptied is a real sign-out, since it deletes
+ * this cookie itself when it reads a token as unusable.
+ */
+async function browserAccount(): Promise<Account> {
+  try {
+    const user = await getUser()
+    if (user) return { status: "signed-in", user }
+  } catch (error) {
+    // Identity couldn't be asked. The stored token still names its owner, so the app runs.
+    console.debug("[memento] identity unverified", error)
+  }
+  const user = storedUser(storedToken())
   return user ? { status: "signed-in", user } : { status: "signed-out" }
 }
 

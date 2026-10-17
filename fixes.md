@@ -1015,13 +1015,14 @@ blocks the pull request.
 
 A cleanup review of `fix(sync): don't sign out when a refresh token was already spent` and its two
 follow-ups (four parallel reviewers: reuse, quality, efficiency, altitude) turned up four findings.
-Two are recorded here instead of applied: the first wants somewhere to keep the last account the app
-saw, and the second belongs to the browser client this branch did not touch.
+One is recorded here instead of applied: it wants somewhere to keep the last account the app saw.
 
 Everything else the review found is applied on this branch: the base64url decode is one import-free
 `src/lib/base64url.ts` rather than a copy in `push.ts` and another in `identity-session.ts`; "Identity's
 answer, else the stored token's owner" is one `identityUser()` instead of a silent copy in `onAppUrl`
-and a logged copy in `loadNativeAccount`; and the function's two `Sign in first` answers come from one
+and a logged copy in `loadNativeAccount`; the account a stored token proves is built once, in
+`identity-session.ts::storedUser`, and read by both clients, so the browser's load no longer signs a
+user out over a check it couldn't make; and the function's two `Sign in first` answers come from one
 `signInFirst()`. The efficiency pass found nothing worth changing: the token store is re-read per call
 on purpose (the re-read before believing a rejection is the branch's own policy), `getUser()` precedes
 the Bearer call only when a cookie is present, where it makes no request at all, and `inFlight` is
@@ -1049,31 +1050,10 @@ renders: `pictureUrl` is undefined, so the avatar blanks (`routes/settings.tsx:7
   The stub is also correct as far as it goes — the branch's decision was that a check which cannot be
   made must not end the session, not that the account has to render well on that path.
 
-## Careful
-
-### 2. The browser load still reads a failed check as signed-out
-
-`app/src/lib/account.ts:60` is the browser's `loadAccount` tail: `getUser().catch(() => null)` mapped
-to `signed-out` — the sibling of the Android path this branch fixed, and the same policy read two
-ways. A browser whose account can't be read is shown the sign-in gate, while the Android app keeps
-running.
-
-- Cost: the class of symptom the report named — a check that could not be made ending the session —
-  is closed on one client and left open on the other, so the two disagree about one policy, and a
-  reader of the new `identityUser` has to find the browser's copy to learn it was not changed.
-- Suggested fix: the same reading on both clients — "unverified" keeps the session and lets the app
-  run — including whatever the browser can prove about the user with no service, as `claimsOf` does
-  for the native store.
-- Why it is risky: it changes the other client's gate, and the exposure there is much narrower —
-  `@netlify/identity`'s `getUser()` answers from a locally cached session, so failing to read it is
-  less likely than a native HTTP call failing, and the browser's trade path never clears the session
-  (`callFunction` retries `refreshSession()` and surfaces the 401). Worth doing as a change to the
-  browser client with the flows run over it, not as part of a cleanup of the Android one.
-
 ---
 
 Found by the `/simplify-code` pass on this branch. It was a cleanup review, not a bug hunt —
-correctness was out of scope — and neither entry blocks the pull request. Two findings are
+correctness was out of scope — and the entry does not block the pull request. Two findings are
 deliberately not entries, because neither has a fix the tree can hold today:
 
 - **Identity's refusal statuses are read once per bundle.** `tradeOutcome` (`identity-session.ts:40`)
@@ -1084,3 +1064,11 @@ deliberately not entries, because neither has a fix the tree can hold today:
 - **A third base64url copy the shared module cannot reach.** `netlify/lib/fcm.ts:140` carries the
   encoder half of the pair `push.ts` used to hold, in the functions bundle, under the same boundary —
   so extracting `src/lib/base64url.ts` leaves that one where it is.
+- **The browser's client destroys its own session on a failed check, and that one is upstream.**
+  `@netlify/identity`'s `hydrateSession` (`dist/main.js:603-637`) reads the account on a page load and,
+  on any failure, calls `deleteBrowserAuthCookies()` before returning null — so one transient failure
+  during a load ends a session that was perfectly good, and `account.ts` can do nothing about it: the
+  cookie is gone by the time the app can look, which is why the app reads the store *after* the call
+  and signs the user out when it is empty (the credentials really are gone, and a silent GitHub
+  re-sign-in is one tap). Telling a refused token from an unreachable service needs the library to
+  stop collapsing the two.

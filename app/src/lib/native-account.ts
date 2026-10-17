@@ -4,7 +4,7 @@ import { CapacitorHttp } from "@capacitor/core"
 import type { User } from "@netlify/identity"
 
 import type { Account } from "@/lib/account"
-import { claimsOf, tradeOutcome, type Tokens } from "@/lib/identity-session"
+import { storedUser, tradeOutcome, type Tokens } from "@/lib/identity-session"
 import { SITE_URL } from "@/lib/native"
 
 /**
@@ -158,14 +158,6 @@ async function currentUser() {
   return toUser(response.data as Record<string, unknown>)
 }
 
-/** Who the stored access token names, for when Identity can't be reached: the device's own proof of
- *  who it is, so a hiccup never sends the user back to the sign-in gate. */
-function storedOwner(): User | null {
-  const tokens = readTokens()
-  const claims = tokens ? claimsOf(tokens.access) : null
-  return claims ? { id: claims.id, email: claims.email, userMetadata: {}, appMetadata: {} } : null
-}
-
 /** The account's user: Identity's own answer when it can be asked, and the stored token's owner when
  *  it can't, so a check that fails leaves the session standing (docs/adr/0001). */
 async function identityUser(): Promise<User | null> {
@@ -173,7 +165,7 @@ async function identityUser(): Promise<User | null> {
     return await currentUser()
   } catch (error) {
     console.debug("[memento] identity unverified", error)
-    return storedOwner()
+    return storedUser(readTokens()?.access ?? null)
   }
 }
 
