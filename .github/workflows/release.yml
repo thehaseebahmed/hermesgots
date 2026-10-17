@@ -1,0 +1,124 @@
+name: Release
+
+# A release is an annotated dated tag on main's head — v2026.09.17 — cut by this workflow: it runs the
+# release's checks and only then creates and pushes the tag, so a tag cannot exist without them. The
+# checks are the decision in `.github/scripts/release.mjs` — the app doesn't demand a newer plugin than
+# the release carries, every artifact whose code moved had its version bumped, and the date isn't one
+# already released — and `docs/adr/0004-a-release-is-a-dated-tag-on-main.md` is the decision itself.
+#
+# The tag publishes what moved: the app to production (15 credits) and the signed release APK, both
+# only when app/** moved, because a release publishes what changed rather than re-publishing bytes that
+# are already live. Nobody deploys the plugin — a release records its version, and it is installed with
+# `hermes plugins install thehaseebahmed/memento/plugin --ref v2026.09.17`. The GitHub release carries
+# the record: the commit, the versions, and what moved.
+#
+# The publishes are dispatched at the tag from here rather than triggered by it: a push made with a
+# run's own token doesn't start another workflow, so a tag this workflow pushes would publish nothing.
+# Both are the workflows a hand-run uses, and dispatching them is also how a publish that was refused
+# (a team out of credits is refused on the production deploy alone) is run again — see the notes.
+#
+# A merge still publishes nothing: the candidate Deploy posts on a merge is the development and testing
+# state (ADR 0003).
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: The release's date, as YYYY.MM.DD (empty means today)
+        type: string
+        default: ""
+
+# One release at a time, and a release is never cancelled: it is deliberate, and half of it — a tag
+# without its publish, or the reverse — is worse than waiting.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  # To push the tag and write the release page.
+  contents: write
+  # To dispatch the workflows that publish at the tag.
+  actions: write
+
+jobs:
+  cut:
+    name: Cut the release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      tag: ${{ steps.decide.outputs.tag }}
+      app: ${{ steps.decide.outputs.app }}
+      plugin: ${{ steps.decide.outputs.plugin }}
+    steps:
+      - name: Only from main
+        run: |
+          # A release is main's head, so a tag can't be cut from a branch that isn't it.
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::A release is cut from main's head: run this workflow on main (this run is on ${GITHUB_REF_NAME})."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          # The whole history: the previous release's tag, and its two version files, are what the
+          # decision measures this one against.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          # The decision runs on Node, pinned as CI pins it, rather than the runner's default.
+          node-version: 22
+
+      - name: The release's checks
+        id: decide
+        env:
+          # Empty means today, in UTC — the same clock the runner keeps.
+          DATE: ${{ inputs.date }}
+        run: |
+          date="$DATE"
+          [ -n "$date" ] || date=$(date -u +%Y.%m.%d)
+          node .github/scripts/release.mjs decide \
+            --date "$date" \
+            --site-url "${{ vars.MEMENTO_SITE_URL }}" \
+            --notes "$RUNNER_TEMP/release-notes.md"
+
+      - name: Tag it
+        env:
+          TAG: ${{ steps.decide.outputs.tag }}
+        run: |
+          # Annotated, so the tag carries who cut it and when. A tag is never moved afterwards.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Gots $TAG"
+          git push origin "$TAG"
+
+      - name: The release page
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.decide.outputs.tag }}
+        run: |
+          # The record: what this release contains, what it installs as, and how to publish it again.
+          # Written before the publishes are dispatched, so the page is there for the APK to attach to.
+          # Running this workflow again refuses at the checks — the tag exists now — so a publish that
+          # was refused is run again with the command the notes carry, not by re-running this.
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file "$RUNNER_TEMP/release-notes.md" --verify-tag
+          fi
+
+      - name: Publish what moved
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP: ${{ steps.decide.outputs.app }}
+          TAG: ${{ steps.decide.outputs.tag }}
+        run: |
+          if [ "$APP" != true ]; then
+            echo "The app didn't change in this release: nothing is published, and no APK is built."
+            echo "The plugin is the release's own version, installed at the ref $TAG."
+            exit 0
+          fi
+          # Both run against the tag's own commit, and both are the workflows a hand-run uses: Deploy
+          # with `promote` on publishes the production deploy, and Android release builds the signed
+          # APK and attaches it to this release.
+          gh workflow run deploy.yml --ref "$TAG" -f promote=true
+          gh workflow run android-release.yml --ref "$TAG"

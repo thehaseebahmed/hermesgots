@@ -39,6 +39,7 @@ jobs:
       app: ${{ steps.filter.outputs.app }}
       plugin: ${{ steps.filter.outputs.plugin }}
       website: ${{ steps.filter.outputs.website }}
+      ci: ${{ steps.filter.outputs.ci }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -52,20 +53,22 @@ jobs:
           HEAD: ${{ github.sha }}
         run: |
           areas=$(bash "$GITHUB_WORKSPACE/.github/scripts/changed-areas.sh" "$BASE" "$HEAD")
-          app=false plugin=false website=false
+          app=false plugin=false website=false ci=false
           while IFS= read -r area; do
             case "$area" in
               app) app=true ;;
               plugin) plugin=true ;;
               website) website=true ;;
+              ci) ci=true ;;
             esac
           done <<< "$areas"
           {
             echo "app=$app"
             echo "plugin=$plugin"
             echo "website=$website"
+            echo "ci=$ci"
           } >> "$GITHUB_OUTPUT"
-          echo "app=$app plugin=$plugin website=$website"
+          echo "app=$app plugin=$plugin website=$website ci=$ci"
 
   plugin:
     name: Plugin tests
@@ -103,15 +106,31 @@ jobs:
       - name: App gates
         run: bash .github/scripts/checks.sh app
 
-      # Deploy publishes this exact build, so it is uploaded for a push only (a pull request ships
-      # nothing) and Deploy's download fails rather than publishing a stale app/dist.
+      # Deploy publishes this exact build, so it is uploaded for anything but a pull request: a push's
+      # candidate deploy and a hand-run promotion both download it, and a release's publish runs as a
+      # hand-run of Deploy — the upload is what makes that download possible.
       - name: Upload the build for the deploy
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v7
         with:
           name: app-dist
           path: app/dist
           if-no-files-found: error
+
+  # The CI's own logic: the release decision `.github/workflows/release.yml` calls. `.github/**` answers
+  # every area, so this runs on any pull request that can have touched it.
+  ci:
+    name: CI checks
+    needs: changes
+    if: needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: CI checks
+        run: bash .github/scripts/checks.sh ci
 
   website:
     name: Website build

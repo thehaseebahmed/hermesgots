@@ -3,7 +3,10 @@
 A release is an annotated dated tag on `main`'s head — `v2026.09.17` — cut by
 `.github/workflows/release.yml`, dispatched with the date (defaulting to today). The workflow runs the
 release's checks first and only creates and pushes the tag when they pass, so a tag cannot exist
-without them; the tag then triggers the publishes. One dated tag names one release of the app and the
+without them. The publishes are dispatched at that tag by the same workflow rather than triggered by
+the tag's own push — a push made with a run's own token starts no other workflow, so a tag it pushed
+would publish nothing — and both are the workflows a hand-run uses, which is also how a refused
+publish is run again. One dated tag names one release of the app and the
 plugin, and the GitHub release carries the record: the commit, the app's version, the plugin's
 version, and which of them moved since the previous dated tag.
 
@@ -33,9 +36,12 @@ in the release notes refers to.
 1. The app's `MIN_PLUGIN_VERSION` is newer than the plugin's version in the same tag — the release
    would ship an app demanding a plugin it doesn't contain.
 2. An artifact whose code moved since the previous release hasn't had its version bumped
-   (`app/package.json` for `app/**`, `plugin/plugin.yaml` for `plugin/**`). For the app this is also
+   (`app/package.json` for `app/**`, `plugin/plugin.yaml` for `plugin/**`), and never downwards: a
+   build installs over the one before it only if its version is higher. For the app this is also
    what keeps the APK's version code increasing.
 3. The dated tag already exists.
+4. The date isn't a date — not `YYYY.MM.DD`, not a day a calendar has, or one still in the future,
+   where a typo'd year would otherwise tag a release that hasn't happened.
 
 ## What "the same version" means here
 
@@ -84,8 +90,9 @@ human-facing warning about an out-of-date plugin. The release adds the one check
   a release is that release's version over a newer commit.
 - A release's app publish costs 15 credits and, while the team's credits are out, is refused. The checks
   run before the tag exists but the publish runs after it, so a refused publish leaves the tag standing
-  with nothing published from it: re-run that tag's publish once the block clears, or publish by hand
-  (`promote`) and let the next release be the record. A tag is never moved to fix this.
+  with nothing published from it: run that tag's publish again once the block clears
+  (`gh workflow run deploy.yml --ref v2026.09.17 -f promote=true`), or let the next release be the
+  record. A tag is never moved to fix this.
 - A release the app has to be rolled back from is a rollback like any other — publish an older
   production deploy (ADR 0003). The tag stays as the record of what was cut.
 - An installed plugin is only ever updated by its owner, so the app's `MIN_PLUGIN_VERSION` warning and

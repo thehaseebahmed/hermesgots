@@ -138,12 +138,24 @@ The function stores data in Netlify Blobs (store `memento-sync`), which needs no
   - A compromised deploy could ship code that reads the key once you unlock, which is inherent to encryption in a web app.
   - Lose every passkey and the recovery code, and the synced copy can't be recovered. Each device's local copy remains.
 
+### Releases
+
+A **release** is an annotated dated tag on `main`'s head — `v2026.09.17` — cut by **Actions → Release → Run workflow** (leave the date empty for today). The workflow runs the release's checks first and only then creates and pushes the tag, so a tag can't exist without them; a date on which nothing under `app/**` or `plugin/**` moved is refused, and the run says why. The checks are in `.github/scripts/release.mjs`: the app must not need a plugin newer than the release carries, each artifact whose code moved must have had its version bumped — and never downwards, since a build installs over the last one only if its version is higher — and the date must not be one already released.
+
+The tag then publishes what moved: the app to production (15 credits, as above) and the signed release APK (see [Android app](#android-app)), both only when `app/**` moved, because the other releases carry bytes that are already live. Nobody deploys the plugin: a release records its version, and it's installed at the tag — `hermes plugins install thehaseebahmed/memento/plugin --ref v2026.09.17`. The GitHub release carries the record: the commit, the versions, and what moved. The website isn't part of a release; Netlify publishes it on every merge.
+
+If the app's publish was refused — a team out of credits is refused on the production deploy alone — the tag stands. Publish it afterwards with:
+
+```bash
+gh workflow run deploy.yml --ref v2026.09.17 -f promote=true
+```
+
 ## Android app
 
 `android/` wraps this same app with [Capacitor](https://capacitorjs.com). Two workflows build it:
 
 - **Android** (`.github/workflows/android.yml`) builds a debug APK on every push to `main`, and checks a pull request with Gradle's `lintDebug` — building the APK too when the native project or `capacitor.config.ts` moved. Builds from `main` also go to testers (below), and a debug build's sign-in and sync go through the candidate deploy (`MEMENTO_CANDIDATE_URL`), not production.
-- **Android release** (`.github/workflows/android-release.yml`) builds the signed release APK. It runs when a version tag is pushed, and the tag becomes the app's version, so it must match `app/package.json`: set the version there, commit, then tag that commit (`git tag v0.1.0-beta && git push origin v0.1.0-beta`). To run it again, pick the tag (or a branch whose head carries it) under **Actions → Android release → Run workflow**. The APK is attached to the run and to the tag's GitHub release, which is created as a prerelease when the version has a suffix like `-beta`.
+- **Android release** (`.github/workflows/android-release.yml`) builds the signed release APK for a release: a dated tag on `main` (`v2026.09.17`, cut by `.github/workflows/release.yml` — see [Releases](#releases)). The tag names the release, so the APK's version name comes from `app/package.json` (bump it before cutting one, or the release's own checks refuse), and it's built only when the release moved `app/**`, since the version code comes from a version that otherwise no release bumped. To build one by hand, pick a release tag under **Actions → Android release → Run workflow**. The APK is attached to the run and to the tag's GitHub release.
 
 One-time setup:
 
@@ -160,7 +172,7 @@ One-time setup:
    - variable (optional): `MEMENTO_CANDIDATE_URL` (e.g. `https://candidate--<your-site>.netlify.app`), the `candidate` branch deploy of this repo's own site. A debug build signs in and syncs through this instead, so testers exercise the newest merge; unset, it falls back to `MEMENTO_SITE_URL`. It's a variable of its own because `candidate--` only resolves on the netlify.app host.
 3. Add `https://localhost` (the app's origin) to `API_SERVER_CORS_ORIGINS` on each Hermes server.
 
-Debug builds are signed with the same key when the secret is there, so each one installs over the last; without it (e.g. pull requests from forks) they use a throwaway debug key. A release won't build without the key. A release's version code comes from its tag and is always higher than a debug build's, so a release installs over a debug build but not the other way round.
+Debug builds are signed with the same key when the secret is there, so each one installs over the last; without it (e.g. pull requests from forks) they use a throwaway debug key. A release won't build without the key. A release's version code comes from `app/package.json`'s version and is always higher than a debug build's, so a release installs over a debug build but not the other way round.
 
 ### Testers (Firebase App Distribution)
 

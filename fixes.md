@@ -821,7 +821,7 @@ for the server instead of sleeping five seconds, and the IPv4/`::1` trap now sit
 
 ### 1. The toolchain versions have no single owner
 
-Node 22 is pinned in tests.yml (twice) and in four other workflows; pnpm 10 in `tests.yml`,
+Node 22 is pinned in `tests.yml` (three times: the app gates, the website build and the CI checks) and in `android.yml`, `android-release.yml` (twice), `deploy.yml` (twice) and `release.yml`; pnpm 10 in `tests.yml`,
 `android.yml`, `android-release.yml` and `deploy.yml` through `pnpm/action-setup`;
 netlify-cli 27.12.0 in `deploy.yml`; Playwright 1.63.0
 only in the Dockerfile, where `app/scripts/e2e/cli.mjs` resolves it at run time and neither
