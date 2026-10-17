@@ -2,11 +2,26 @@ name: Tests
 
 on:
   pull_request:
+  # Pushes to main that reach production are gated by Deploy, which calls this workflow. These paths
+  # are the rest: the areas this workflow's own `changes` job answers for, plus any CI change, which
+  # `.github/scripts/changed-areas.sh` answers with every area — minus the one file Deploy's trigger
+  # owns, so a push is tested by one run or the other rather than by both.
   push:
     branches: [main]
+    paths:
+      - "plugin/**"
+      - "website/**"
+      - ".github/**"
+      - "!.github/workflows/deploy.yml"
+  workflow_call:
+    inputs:
+      concurrency_suffix:
+        description: "Appended to the concurrency group so a call from another workflow doesn't cancel that workflow's own run, or the run it was called for, when one push starts both."
+        type: string
+        default: ""
 
 concurrency:
-  group: tests-${{ github.ref }}
+  group: tests-${{ github.ref }}${{ inputs.concurrency_suffix }}
   cancel-in-progress: true
 
 jobs:
@@ -87,6 +102,16 @@ jobs:
       # runs too: one list, so a gate added for the runner reaches the image as well.
       - name: App gates
         run: bash .github/scripts/checks.sh app
+
+      # Deploy publishes this exact build, so it is uploaded for a push only (a pull request ships
+      # nothing) and Deploy's download fails rather than publishing a stale app/dist.
+      - name: Upload the build for the deploy
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v7
+        with:
+          name: app-dist
+          path: app/dist
+          if-no-files-found: error
 
   website:
     name: Website build

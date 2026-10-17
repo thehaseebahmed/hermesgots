@@ -1,0 +1,80 @@
+name: Deploy
+
+# Production is published from here, not from Netlify's own Git builds, which are off for the app
+# site (two builders for one site would race). `app/dist` is the exact build the Tests workflow just
+# gated, uploaded as an artifact and downloaded again below, so what goes live is what was tested.
+# docs/adr/0003-production-deploys-run-in-github-actions.md has the decision and its consequences.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "netlify.toml"
+      - ".github/workflows/deploy.yml"
+      # tests.yml is deliberately not here: changing the test workflow doesn't change the app that
+      # ships, and its own push trigger already runs it, so listing it would run the suite twice and
+      # publish a deploy of unchanged code.
+
+# One production deploy at a time. Netlify publishes a deploy only once its upload has finished, so
+# a cancelled run leaves the last good one live, and the newer merge's deploy carries the older
+# merge's work with it.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    # The whole suite — plugin, app gates and website — gates the deploy. A push to main runs the
+    # Tests workflow itself only for the paths this one doesn't cover, so an app merge is tested
+    # once; the suffix keeps this call in a concurrency group of its own, clear of that run's.
+    name: Tests
+    uses: ./.github/workflows/tests.yml
+    with:
+      concurrency_suffix: -deploy
+
+  deploy:
+    name: Deploy to Netlify
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      # The functions are bundled from source at deploy time, so their dependencies have to be here.
+      - name: Install
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      - name: Download the tested build
+        # Same major as the upload in tests.yml, and as android-release.yml's.
+        uses: actions/download-artifact@v7
+        with:
+          name: app-dist
+          path: app/dist
+
+      - name: Deploy to Netlify
+        # netlify.toml keeps base = "app": --dir and --functions are given relative to the repo root,
+        # as staging.yml does. --prod is what publishes the deploy rather than leaving it one of the
+        # site's unpublished ones.
+        run: |
+          npx --yes netlify-cli@27.12.0 deploy \
+            --dir=app/dist \
+            --functions=app/netlify/functions \
+            --prod \
+            --message "${{ github.sha }} $(git log -1 --format='%s')"
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
