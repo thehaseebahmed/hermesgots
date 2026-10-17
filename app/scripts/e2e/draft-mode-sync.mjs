@@ -27,7 +27,12 @@ await flow("draft-mode-sync", async ({ page, seed, until, shot }) => {
     20_000,
     "the typed draft to reach the plugin's chat record",
   )
-  assert.equal((await record())?.mode, "plan", "the picked mode reaches the chat record")
+  // The pick is its own write, so it syncs on the pass after the draft's, not with it.
+  await until(
+    async () => (await record())?.mode === "plan",
+    20_000,
+    "the picked mode to reach the plugin's chat record",
+  )
   pass("typing and a mode pick reach the plugin's chat record")
 
   // This device loses its copy of the chat; the plugin's copy arrives on the next pull.
