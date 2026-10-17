@@ -187,6 +187,16 @@ const FLOWS = {
     script: "e2e/onboarding.mjs",
     about: "The setup wizard's Join the leaderboard step: on by default, and Continue joins or not",
   },
+  "recovery-code": {
+    script: "e2e/recovery-code.mjs",
+    about:
+      "Setup always issues a recovery code, offers the passkey beside it, and gates Continue on copying it",
+  },
+  "recovery-code-rotation": {
+    script: "e2e/recovery-code-rotation.mjs",
+    about:
+      "Replacing a recovery code in Settings: one dialog asks for the current one, then shows the new one",
+  },
   prs: {
     script: "e2e/prs.mjs",
     about:

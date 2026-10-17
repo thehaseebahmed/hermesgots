@@ -4,7 +4,8 @@ import { useNavigate } from "react-router"
 import { FingerprintIcon, LogInIcon, TrophyIcon } from "lucide-react"
 import { toast } from "sonner"
 
-import { RecoveryCodeDialog, UnlockSync } from "@/components/account-settings"
+import { RecoveryCode, UnlockSync } from "@/components/account-settings"
+import { useCopiedCode } from "@/components/copied-code"
 import { Bot } from "@/components/bot"
 import { SharingNotes } from "@/components/community-settings"
 import { LinkBots } from "@/components/link-bots"
@@ -14,7 +15,15 @@ import { Switch } from "@/components/ui/switch"
 import { signIn } from "@/lib/account"
 import { joinCommunity, leaveCommunity, useCommunity } from "@/lib/community"
 import { db, getActiveProfile, getSettings, saveSettings } from "@/lib/db"
-import { needsBotSetup, setUpSync, syncNow, useSyncState, type SyncState } from "@/lib/sync"
+import {
+  needsBotSetup,
+  setUpSync,
+  syncNow,
+  useSyncState,
+  type PendingSetup,
+  type SyncState,
+} from "@/lib/sync"
+import { PrfUnsupportedError, supportsPasskeys } from "@/lib/vault"
 import { cn } from "@/lib/utils"
 
 type Step = "sign-in" | "sync" | "community" | "checking" | "link"
@@ -35,8 +44,8 @@ export function SetupGate({ children }: { children: ReactNode }) {
   const noBots = useLiveQuery(needsBotSetup, [])
   // Signing out clears it, so a data key here means this device was set up and unlocked before.
   const unlockedBefore = useLiveQuery(async () => Boolean(await db.vault.get("key")), [])
-  // Held here so the dialog outlives the wizard if unlocking is all this device needed.
-  const [recoveryCode, setRecoveryCode] = useState<string>()
+  // A first run waiting for its code to be copied. Nothing is written until it's confirmed.
+  const [setup, setSetup] = useState<PendingSetup>()
 
   const { account } = sync
   const waiting =
@@ -55,23 +64,24 @@ export function SetupGate({ children }: { children: ReactNode }) {
   }
   // Without Identity nothing can link, so the seed bot is set up by hand in Settings instead.
   const linking = account.status !== "unavailable" && noBots
-  if (isAuthed(sync) && onboarded && !linking && !recoveryCode) return children
-  return <SetupPage recoveryCode={recoveryCode} setRecoveryCode={setRecoveryCode} />
+  if (isAuthed(sync) && onboarded && !linking && !setup) return children
+  return <SetupPage setup={setup} setSetup={setSetup} />
 }
 
 /** First-run setup: sign in, unlock sync, join the leaderboard, then link a bot from its Hermes host. */
 function SetupPage({
-  recoveryCode,
-  setRecoveryCode,
+  setup,
+  setSetup,
 }: {
-  recoveryCode?: string
-  setRecoveryCode: (code?: string) => void
+  setup?: PendingSetup
+  setSetup: (setup?: PendingSetup) => void
 }) {
   const sync = useSyncState()
   const navigate = useNavigate()
   const profile = useLiveQuery(getActiveProfile, [])
   const [linkStep, setLinkStep] = useState<"checking" | "community" | "link">("checking")
   const [busy, setBusy] = useState(false)
+  const { copied, noteCopied } = useCopiedCode(setup?.recoveryCode)
   const [reachable, setReachable] = useState(false)
   const onReachable = useCallback((ok: boolean) => setReachable(ok), [])
 
@@ -79,11 +89,11 @@ function SetupPage({
   const identity = account.status !== "unavailable"
   const authed = isAuthed(sync)
   const step: Step =
-    account.status === "signed-out" ? "sign-in" : !authed || recoveryCode ? "sync" : linkStep
+    account.status === "signed-out" ? "sign-in" : !authed || setup ? "sync" : linkStep
 
   // Once in, a returning user's bots arrive through sync and there's nothing left to set up.
   useEffect(() => {
-    if (!authed || recoveryCode) return
+    if (!authed || setup) return
     let cancelled = false
     void (async () => {
       await syncNow()
@@ -96,7 +106,52 @@ function SetupPage({
     return () => {
       cancelled = true
     }
-  }, [authed, recoveryCode, identity])
+  }, [authed, setup, identity])
+
+  const fail = (error: unknown) =>
+    toast.error(error instanceof Error ? error.message : "Something went wrong.")
+
+  const turnOn = async () => {
+    setBusy(true)
+    try {
+      setSetup(await setUpSync())
+    } catch (error) {
+      fail(error)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const onAddPasskey = async () => {
+    if (!setup) return
+    setBusy(true)
+    try {
+      await setup.addPasskey()
+      toast.success("Passkey added")
+    } catch (error) {
+      // Backing out of the prompt, or an authenticator that can't do PRF, is a choice to go on
+      // with the code alone rather than a failure of the step.
+      const chosen =
+        (error instanceof DOMException && error.name === "NotAllowedError") ||
+        error instanceof PrfUnsupportedError
+      if (!chosen) fail(error)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const save = async () => {
+    if (!setup) return
+    setBusy(true)
+    try {
+      await setup.confirm()
+      setSetup(undefined)
+    } catch (error) {
+      fail(error)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const finish = async () => {
     await saveSettings({ onboarded: true })
@@ -122,28 +177,38 @@ function SetupPage({
           </Section>
         )}
 
-        {step === "sync" && (
+        {step === "sync" && setup && (
+          <Section
+            title="Your recovery code"
+            description="Save it. It's the only way back into your chats on a new device."
+          >
+            <RecoveryCode code={setup.recoveryCode} copied={copied} onCopied={noteCopied} />
+            {supportsPasskeys() && (
+              <Button
+                variant="outline"
+                size="lg"
+                className="h-11"
+                disabled={busy}
+                onClick={onAddPasskey}
+              >
+                <FingerprintIcon data-icon="inline-start" />
+                Add a passkey
+              </Button>
+            )}
+            <Button size="lg" className="h-11" disabled={!copied || busy} onClick={save}>
+              Continue
+            </Button>
+          </Section>
+        )}
+
+        {step === "sync" && !setup && (
           <Section
             title={sync.vault === "locked" ? "Unlock sync" : "Turn on sync"}
             description="Your bots, API keys and chat titles are encrypted on this device before they're stored."
           >
             {sync.vault === "unknown" && !sync.error && <Spinner className="self-center" />}
             {sync.vault === "missing" && (
-              <Button
-                size="lg"
-                className="h-11 self-center"
-                disabled={busy}
-                onClick={async () => {
-                  setBusy(true)
-                  try {
-                    setRecoveryCode((await setUpSync()).recoveryCode)
-                  } catch (error) {
-                    toast.error(error instanceof Error ? error.message : "Something went wrong.")
-                  } finally {
-                    setBusy(false)
-                  }
-                }}
-              >
+              <Button size="lg" className="h-11 self-center" disabled={busy} onClick={turnOn}>
                 <FingerprintIcon data-icon="inline-start" />
                 Turn on sync
               </Button>
@@ -174,8 +239,6 @@ function SetupPage({
           </Section>
         )}
       </div>
-
-      <RecoveryCodeDialog code={recoveryCode} onDone={() => setRecoveryCode(undefined)} />
     </div>
   )
 }

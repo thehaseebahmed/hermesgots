@@ -33,7 +33,6 @@ import {
 import { mergeDocs, type Doc, type Entry } from "@/lib/merge"
 import { syncRegistry } from "@/lib/registry"
 import {
-  PrfUnsupportedError,
   generateDataKey,
   hasPasskeys,
   lockDown,
@@ -189,6 +188,24 @@ async function refreshVault() {
   })
 }
 
+/**
+ * Writes the vault with `change` applied, reading it fresh for each attempt: another device may
+ * have written first (the etag then fails the put), and the vault is left fresh either way so the
+ * next caller doesn't write over a stale one. False means every attempt lost the race.
+ */
+async function writeVault(change: (vault: Vault) => Vault, attempts = 3) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (!remoteVault) return false
+    const { vault, etag } = remoteVault
+    if (await putDoc("vault", change(vault), etag)) {
+      await refreshVault()
+      return true
+    }
+    await refreshVault()
+  }
+  return false
+}
+
 async function keep(dataKey: CryptoKey) {
   const id = userId()
   if (!id) throw new Error("Sign in first.")
@@ -205,29 +222,79 @@ function passkeyUser() {
   return { id: user.id, name, displayName: user.name ?? name }
 }
 
-/** First-time setup: a new data key, wrapped by a passkey when it can be, and a recovery code. */
-export async function setUpSync() {
+/** A first run held in memory until its recovery code has been copied. */
+export interface PendingSetup {
+  recoveryCode: string
+  /** Adds this device's passkey to the vault about to be written. Cancelling changes nothing. */
+  addPasskey: () => Promise<void>
+  /** Writes the vault, its inbox and this device's key. */
+  confirm: () => Promise<void>
+}
+
+/**
+ * First-time setup: a new data key wrapped by a recovery code. Nothing reaches the server until
+ * `confirm`, so a tab closed on the code screen leaves no vault wrapped by a code nobody saw — the
+ * device simply starts again. The optional passkey joins the same in-memory vault for the same
+ * reason: a prompt the user can cancel can never stop setup or strand the account.
+ */
+export async function setUpSync(): Promise<PendingSetup> {
   const dataKey = await generateDataKey()
   const vault = newVault()
-  let passkey = true
-  try {
-    vault.wrappers.push(await passkeyWrapper(dataKey, vault, passkeyUser()))
-  } catch (error) {
-    if (!(error instanceof PrfUnsupportedError)) throw error
-    passkey = false
-  }
   const recoveryCode = newRecoveryCode()
   vault.wrappers.push(await recoveryWrapper(dataKey, recoveryCode))
   const { inbox, privateKey } = await newInbox(dataKey, inboxAad())
   vault.inbox = inbox
-  if (!(await putDoc("vault", vault))) {
-    await refreshVault()
-    throw new Error("Sync was already set up from another device. Unlock it instead.")
+  return {
+    recoveryCode,
+    addPasskey: async () => {
+      vault.wrappers.push(await passkeyWrapper(dataKey, vault, passkeyUser()))
+    },
+    confirm: async () => {
+      if (!(await putDoc("vault", vault))) {
+        await refreshVault()
+        throw new Error("Sync was already set up from another device. Unlock it instead.")
+      }
+      await refreshVault()
+      await db.vault.put({ id: "inbox", userId: userId()!, key: privateKey, keyId: inbox.keyId })
+      await keep(dataKey)
+    },
   }
-  await refreshVault()
-  await db.vault.put({ id: "inbox", userId: userId()!, key: privateKey, keyId: inbox.keyId })
-  await keep(dataKey)
-  return { recoveryCode, passkey }
+}
+
+/** Whether this device holds the key (or a passkey to unwrap it), so it can mint a new code. */
+export function canRotateRecoveryCode() {
+  return Boolean(sessionKey) || state.passkeys
+}
+
+/**
+ * Mints a new recovery code: the new wrapper is written first and the old ones are dropped only
+ * from `confirm`, once the user has copied it. A save that fails halfway therefore leaves both
+ * codes working rather than leaving the account with neither.
+ */
+export async function rotateRecoveryCode(currentCode?: string) {
+  if (!remoteVault) throw new Error("Sync isn't set up yet.")
+  const dataKey =
+    sessionKey ??
+    (state.passkeys
+      ? await unlockWithPasskey(remoteVault.vault)
+      : currentCode
+        ? await unlockWithRecoveryCode(remoteVault.vault, currentCode)
+        : undefined)
+  if (!dataKey) throw new Error("Enter your current recovery code.")
+  sessionKey = dataKey
+  const code = newRecoveryCode()
+  const wrapper = await recoveryWrapper(dataKey, code)
+  const added = await writeVault((vault) => ({ ...vault, wrappers: [...vault.wrappers, wrapper] }))
+  if (!added) throw new Error("Couldn't save the new recovery code. Try again.")
+  return {
+    code,
+    confirm: async () => {
+      await writeVault((vault) => ({
+        ...vault,
+        wrappers: vault.wrappers.filter((w) => w.kind !== "recovery" || w.iv === wrapper.iv),
+      }))
+    },
+  }
 }
 
 export async function unlockSyncWithPasskey() {
@@ -245,16 +312,10 @@ export async function addPasskey() {
   if (!remoteVault) throw new Error("Sync isn't set up yet.")
   const dataKey = sessionKey ?? (await unlockWithPasskey(remoteVault.vault))
   sessionKey = dataKey
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const { vault, etag } = remoteVault
-    const wrapper = await passkeyWrapper(dataKey, vault, passkeyUser())
-    if (await putDoc("vault", { ...vault, wrappers: [...vault.wrappers, wrapper] }, etag)) {
-      await refreshVault()
-      return
-    }
-    await refreshVault()
-  }
-  throw new Error("Couldn't save the passkey. Try again.")
+  // Minted once, outside the write: the prompt is a user's, not a retry's.
+  const wrapper = await passkeyWrapper(dataKey, remoteVault.vault, passkeyUser())
+  const added = await writeVault((vault) => ({ ...vault, wrappers: [...vault.wrappers, wrapper] }))
+  if (!added) throw new Error("Couldn't save the passkey. Try again.")
 }
 
 export function canAddPasskey() {

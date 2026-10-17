@@ -56,6 +56,110 @@ export async function setUpBot(page) {
   }, mock)
 }
 
+/** The signed-in account the wizard flows start from. */
+const user = { id: "11111111-2222-4333-8444-555555555555", email: "tester@example.com" }
+
+/**
+ * A browser signed in to Identity with the sync, community and Identity routes stubbed, for a flow
+ * that has to start before the wizard: `vault` is "missing" for a first run, "exists" for an account
+ * that already has one, or a holder `{ data }` the flow seeds — that stub then behaves like the sync
+ * function, serving what it holds and taking writes with etags, so a flow can watch a vault change
+ * over several writes. `vaults` collects every vault PUT and `joins` every leaderboard join, and
+ * `shot(name)` saves a screenshot. The caller closes `browser`.
+ */
+export async function signedIn({ width = 1440, dark = false, vault = "exists" } = {}) {
+  const browser = await chromium.launch({ headless: !headed, args: ["--no-sandbox"] })
+  const context = await browser.newContext({
+    viewport: { width, height: width < 768 ? 844 : 768 },
+    colorScheme: dark ? "dark" : "light",
+  })
+  const now = Math.floor(Date.now() / 1000)
+  const expires = now + 3600
+  const jwtPayload = Buffer.from(JSON.stringify({ sub: user.id, exp: expires })).toString(
+    "base64url",
+  )
+  const session = {
+    ...user,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    url: `${app}/.netlify/identity`,
+    token: {
+      access_token: `h.${jwtPayload}.s`,
+      token_type: "bearer",
+      expires_at: expires * 1000,
+      refresh_token: "r",
+    },
+  }
+  await context.addInitScript(
+    (session) => localStorage.setItem("gotrue.user", JSON.stringify(session)),
+    session,
+  )
+  await context.addCookies([{ name: "nf_jwt", value: session.token.access_token, url: app }])
+
+  const vaults = []
+  // A vault the flow seeds (`{ data }`) is served like the sync function's: written over its etag,
+  // and what it holds changes with each write.
+  const held = typeof vault === "object" ? vault : undefined
+  let etag = "v1"
+  await context.route("**/.netlify/functions/sync?**", async (route) => {
+    const request = route.request()
+    const doc = new URL(request.url()).searchParams.get("doc")
+    if (request.method() === "PUT") {
+      const body = request.postDataJSON()
+      if (doc === "vault") {
+        vaults.push(body.data)
+        if (held) {
+          if (body.etag && body.etag !== etag) return route.fulfill({ status: 412, json: {} })
+          held.data = body.data
+          etag = `v${Number(etag.slice(1)) + 1}`
+        }
+      }
+      return route.fulfill({ json: { ok: true } })
+    }
+    const data = held ? held.data : {}
+    if (doc === "vault" && (held ? data !== undefined : vault !== "missing"))
+      return route.fulfill({ json: { data, etag } })
+    return route.fulfill({ status: 404, json: { error: "missing" } })
+  })
+
+  const joins = []
+  await context.route("**/.netlify/functions/community?**", async (route) => {
+    const url = new URL(route.request().url())
+    if (url.searchParams.get("route") !== "join") return route.fulfill({ json: { joined: false } })
+    joins.push(route.request().method())
+    return route.fulfill({
+      json: { joined: true, login: "tester", totals: { today: 0, week: 0, month: 0 } },
+    })
+  })
+
+  // Identity's settings say which sign-in providers are on; without GitHub the app is unavailable.
+  await context.route("**/.netlify/identity/**", (route) =>
+    route.request().url().endsWith("/settings")
+      ? route.fulfill({
+          json: { external: { github: true }, autoconfirm: false, disable_signup: false },
+        })
+      : route.fulfill({ status: 500, body: "" }),
+  )
+
+  const page = await context.newPage()
+  const errors = []
+  page.on("pageerror", (error) => errors.push(error.message))
+  return {
+    browser,
+    context,
+    page,
+    session,
+    vaults,
+    joins,
+    errors,
+    async shot(name) {
+      if (!shots) return
+      mkdirSync(shots, { recursive: true })
+      await page.screenshot({ path: `${shots}/${name}.png` })
+    },
+  }
+}
+
 function helpers(page) {
   const composer = page.getByRole("textbox").last()
   return {
@@ -176,3 +280,47 @@ function helpers(page) {
 }
 
 export const pass = (text) => console.log(`PASS: ${text}`)
+
+/**
+ * Fails unless the element's text fits on one line. Its height is compared with a line, since a block
+ * reports a single client rect whether it wraps or not.
+ */
+export async function assertOneLine(locator, what) {
+  const { height, line } = await locator.evaluate((el) => ({
+    height: el.getBoundingClientRect().height,
+    line: parseFloat(getComputedStyle(el).lineHeight),
+  }))
+  assert.ok(height <= line * 1.3, `${what} is on one line (${height}px of ${line}px)`)
+}
+
+/**
+ * Fails unless the text wraps only after a hyphen, so a code too wide for its box breaks between its
+ * groups rather than inside one. Returns the lines it found, for a caller that also cares how many.
+ */
+export async function assertBreakAtHyphen(locator, what) {
+  const lines = await locator.evaluate((el) => {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+    const found = []
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      for (let index = 0; index < node.data.length; index++) {
+        const range = document.createRange()
+        range.setStart(node, index)
+        range.setEnd(node, index + 1)
+        found.push({
+          char: node.data[index],
+          top: Math.round(range.getBoundingClientRect().top),
+        })
+      }
+    }
+    const lines = []
+    for (const { char, top } of found) {
+      if (lines.at(-1)?.top !== top) lines.push({ top, text: "" })
+      lines.at(-1).text += char
+    }
+    return lines.map((line) => line.text)
+  })
+  assert.ok(lines.length > 0, `${what} has text to measure`)
+  for (const line of lines.slice(0, -1))
+    assert.ok(line.endsWith("-"), `${what} breaks at a hyphen, not "${line}"`)
+  return lines
+}
