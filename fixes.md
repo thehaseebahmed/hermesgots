@@ -1040,3 +1040,84 @@ deliberately not entries, because neither has a fix the tree can hold today:
   and signs the user out when it is empty (the credentials really are gone, and a silent GitHub
   re-sign-in is one tap). Telling a refused token from an unreachable service needs the library to
   stop collapsing the two.
+
+---
+
+# Deferred: the app-level calculations still to move to the plugin
+
+`docs/adr/0005-calculations-belong-on-the-plugin.md` decides that a fact a bot's host could work out is
+worked out on the host, and names the clusters to move. One of them landed with that decision: the todo
+list's own progress and each item's depth, which the plugin states with the list
+(`plugin/todos.py::progress_of` / `depth_of`, `GET sessions/{id}/todos`) and the app no longer works out
+(`src/components/chat/todos.tsx`, `src/lib/todos.ts`). The three below are recorded rather than applied:
+each changes a route, a capability gate and a stored shape, so each is its own decision, and the app has
+to keep working against plugins already installed in the field.
+
+## Risky
+
+### 1. The context window is still resolved in the app
+
+`contextWindow` (`src/lib/context.ts:19`) picks between three sources: the window recorded on the profile
+(`:25`, written per device by `syncContextWindow`, `src/lib/models.ts:269`), Hermes's own window for the
+call that ran the session (`:27`) and models.dev's for the model the chat runs next (`:28`, through
+`modelFacts`). The plugin already answers the middle one — `context.py` keeps `context_length` per session
+and returns it with the model — so one chat can show the plugin's figure and, before that model's first
+call, the catalogue's, disagreeing with a second device that has a different catalogue cache.
+
+- Cost: the window a chat is measured against is a device-local answer for a fact the host holds, and a
+  chat on a fresh catalogued device can show one before Hermes has run the model at all.
+- Suggested fix: the plugin resolves the window (Hermes's own figure, and models.dev where the model has
+  no call yet, fetched and cached on the host) and `GET sessions/{id}/context` returns it; the app drops
+  `contextWindow`'s catalogue branch, the profile's `contextWindow` / `contextModel` fields and
+  `syncContextWindow`'s lookup, keeping only what the route sent.
+- Why it is risky: the plugin gains an outbound models.dev dependency and an ETag cache it has never had,
+  with its own way of being unreachable. The app keeps its catalogue for the model picker's cost tiers and
+  modalities, so this leaves two fetchers of the same public payload by design (ADR 0005) — and the
+  catalogue is what a brand-new chat shows the window from today, so removing the app's branch changes
+  what that chat shows.
+
+### 2. Usage cost is still priced in the app
+
+`src/lib/pricing.ts` holds a hand-maintained Claude price table and `estimateCost`, used for the project's
+total and each session's share (`src/components/project-usage.tsx:81`, `:169`), with a `partial` marker for
+usage no price covers. The plugin's usage route already reads Hermes's own figures per session and per
+model (`plugin/projects.py:330`, `COALESCE(actual_cost_usd, estimated_cost_usd)`), so the same tokens can
+carry Hermes's price where it has one and the app's table everywhere else.
+
+- Cost: two prices for one figure. A session Hermes priced with its own list and one the app prices from a
+  table checked by hand disagree on the same screen, and the table is only ever as new as its last edit.
+- Suggested fix: delete the table and the `partial` marker, and let the plugin price — Hermes's own figure
+  first, models.dev's prices multiplied by the token counts where Hermes has none — returning a cost per
+  session and per project that the app formats and sorts on.
+- Why it is risky: it applies a price where Hermes deliberately left none, and models.dev's prices are the
+  provider list's own rather than what a given plan bills (the file's own comment on Bedrock and Vertex).
+  Whether an available approximation beats no figure is the decision this entry waits on.
+
+### 3. Tool results are still interpreted in the app
+
+`src/lib/tools.ts` reads a call's JSON result whole or cut short (`Reader`, `:110`), decides why it failed
+(`failureReason`, `:249`), reads its exit code (`:268`) and counts a todo call's tasks (`:63`).
+`patchStats` (`src/lib/history.ts:133`) counts the lines a patch added and removed, and runs both while a
+run streams (`src/lib/chat.ts:315`) and when a transcript row is imported (`src/lib/history.ts:305`), so
+every device works out its own verdicts from whatever text it happens to hold.
+
+- Cost: a verdict is read from the stream's 500-character preview on the device watching a run and from
+  the whole transcript on one importing it later, so the same call can read differently between devices,
+  and the plugin — which can see the full result for every call — is asked none of it.
+- Suggested fix: a plugin route per session answering each call's verdict by `tool_call_id` (its envelope,
+  why it failed, its exit code, the lines a patch moved and whether it created a file), read when an event
+  says the session moved; the app's `Reader`, `failureReason`, `exitCode`, `taskCount` and `patchStats` go.
+- Why it is risky: it is the widest of the three — a route that walks a whole transcript per read, a shape
+  on every stored tool row and a Dexie bump — and it moves when a verdict appears: the change stream
+  carries no content by design, so a verdict arrives on the next read rather than with the event that
+  announces the round.
+
+---
+
+Deferred by the same decision, each for the reason given: the app's model picker still derives its cost
+tiers and modalities from its own models.dev cache (ADR 0005, considered options), `sessionState`
+(`src/lib/workspace.ts:307`) stays a composition of the host's run status with this device's own marks
+rather than a calculation, and the plugin's version and the app's `MIN_PLUGIN_VERSION` are not bumped yet:
+the decision is one bump once the clusters that matter have landed, and the todo cluster degrades on its
+own — an older plugin sends no progress, and the app shows the list without a count instead of working one
+out.

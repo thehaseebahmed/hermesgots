@@ -35,3 +35,15 @@ _Avoid_: biometric login, fingerprint login, WebAuthn credential
 **Sync locked**:
 The account session is intact but this device holds no vault key, so sync stays off until it is unlocked (the step Gots shows as "Unlock sync").
 _Avoid_: signed out, re-login, locked account
+
+**Derived fact**:
+Something worked out about a bot's data rather than read straight from it — how many tasks are done, what a context is measured against, what usage cost, why a tool call failed.
+_Avoid_: calculated value, computed field, aggregate
+
+**App-level calculation**:
+A derived fact worked out in the app from what a bot's host holds. Gots doesn't have any: a fact a host could work out is worked out on the host.
+_Avoid_: client-side computation
+
+**Session state**:
+What a project session is doing — idle, working, waiting on the user, or closed by the user as resolved or discarded. Composed from the host's run status and this device's own marks, not derived from one source.
+_Avoid_: status, state machine
