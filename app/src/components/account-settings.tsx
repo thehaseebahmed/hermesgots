@@ -60,6 +60,9 @@ export function AccountSettings() {
   if (account.status === "loading" || account.status === "unavailable") return null
 
   const run = async (action: () => Promise<void>) => {
+    // A button is disabled while it's busy, but Enter in a dialog's field still submits its form:
+    // without this, asking for a new recovery code twice would start two of them.
+    if (busy) return
     setBusy(true)
     try {
       await action()

@@ -19,7 +19,11 @@ async function scenario(name, { width, dark, narrow = false }) {
   // A vault holder the stub serves and takes writes to, seeded below the way a returning device's
   // is: a code-wrapped key on the server, its unwrapped copy on this device.
   const held = {}
-  const { browser, page, vaults, errors, shot } = await signedIn({ width, dark, vault: held })
+  const { browser, context, page, vaults, errors, shot } = await signedIn({
+    width,
+    dark,
+    vault: held,
+  })
   try {
     await page.goto(app)
     const seeded = await page.evaluate(async (id) => {
@@ -60,8 +64,19 @@ async function scenario(name, { width, dark, narrow = false }) {
       document.querySelector("[role=alertdialog]").dataset.step = "ask"
     })
     assert.equal(vaults.length, before, `nothing written before the current code, for ${name}`)
-    await page.getByRole("textbox", { name: "Current recovery code" }).fill(seeded.code)
-    await page.getByRole("button", { name: "Continue" }).click()
+    // Submitting with Enter, twice, as an impatient user does. The write is held back so the second
+    // lands while the first is still in flight: a disabled button must not be the only thing
+    // stopping a second rotation.
+    let heldBack = 0
+    await context.route("**/.netlify/functions/sync?**", async (route) => {
+      heldBack += 1
+      await new Promise((resolve) => setTimeout(resolve, 400))
+      await route.fallback()
+    })
+    const field = page.getByRole("textbox", { name: "Current recovery code" })
+    await field.fill(seeded.code)
+    await field.press("Enter")
+    await field.press("Enter")
 
     await page.getByText("Your new recovery code").waitFor({ timeout: 15_000 })
     assert.equal(
@@ -85,7 +100,12 @@ async function scenario(name, { width, dark, narrow = false }) {
     await shot(`${name}-new-code`)
 
     // The old code still works until the new one is handled: both wrappers are on the server.
-    assert.equal(vaults.length, before + 1, `one write to show a new code, for ${name}`)
+    assert.equal(
+      vaults.length,
+      before + 1,
+      `one write to show a new code, however often it's asked for, for ${name}`,
+    )
+    assert.ok(heldBack > 0, `the write was held back for ${name} (${heldBack})`)
     assert.deepEqual(
       (vaults[before].wrappers ?? []).map((wrapper) => wrapper.kind),
       ["recovery", "recovery"],
