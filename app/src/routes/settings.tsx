@@ -90,7 +90,7 @@ import {
   usePushFeatures,
 } from "@/lib/push"
 import type { PushCategory, PushFeature } from "@/lib/push-kinds"
-import { isOnline } from "@/lib/registry"
+import { isOnline, siteUrl } from "@/lib/registry"
 import { forgetLocalKey, useSyncState } from "@/lib/sync"
 import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
@@ -500,6 +500,9 @@ function DeveloperSettings() {
       </Group>
       {isNative && pushAvailable() && <TestPushRow />}
       <Group>
+        <SyncServerRow />
+      </Group>
+      <Group>
         {bots?.map((bot) => (
           <LiveRow key={bot.id} bot={bot} />
         ))}
@@ -539,6 +542,14 @@ function TestPushRow() {
         />
       </button>
     </Group>
+  )
+}
+
+function SyncServerRow() {
+  return (
+    <div className={rowClass}>
+      <RowText title="Sync server" subtitle={siteUrl() || "Not set"} />
+    </div>
   )
 }
 
