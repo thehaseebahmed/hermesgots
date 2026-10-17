@@ -166,6 +166,17 @@ function storedOwner(): User | null {
   return claims ? { id: claims.id, email: claims.email, userMetadata: {}, appMetadata: {} } : null
 }
 
+/** The account's user: Identity's own answer when it can be asked, and the stored token's owner when
+ *  it can't, so a check that fails leaves the session standing (docs/adr/0001). */
+async function identityUser(): Promise<User | null> {
+  try {
+    return await currentUser()
+  } catch (error) {
+    console.debug("[memento] identity unverified", error)
+    return storedOwner()
+  }
+}
+
 function notify(account: Account) {
   listeners.forEach((listener) => listener(account))
 }
@@ -176,7 +187,7 @@ async function onAppUrl(url: string) {
   void Browser.close().catch(() => {})
   if (!tokens) return
   writeTokens(tokens)
-  const user = await currentUser().catch(() => storedOwner())
+  const user = await identityUser()
   notify(user ? { status: "signed-in", user } : { status: "signed-out" })
 }
 
@@ -196,16 +207,8 @@ export async function loadNativeAccount(): Promise<Account> {
   } catch {
     return { status: "unavailable" }
   }
-  try {
-    const user = await currentUser()
-    return user ? { status: "signed-in", user } : { status: "signed-out" }
-  } catch (error) {
-    // Identity couldn't be asked. The stored token still names its owner, so the session stands and
-    // the app runs; anything else would show the gate for a hiccup (docs/adr/0001).
-    console.debug("[memento] identity unverified", error)
-    const owner = storedOwner()
-    return owner ? { status: "signed-in", user: owner } : { status: "signed-out" }
-  }
+  const user = await identityUser()
+  return user ? { status: "signed-in", user } : { status: "signed-out" }
 }
 
 export function watchNativeAccount(callback: (account: Account) => void) {

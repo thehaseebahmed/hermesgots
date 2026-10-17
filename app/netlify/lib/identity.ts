@@ -30,6 +30,11 @@ async function bearerUser(req: Request, authorization: string): Promise<BearerCh
   }
 }
 
+/** What a caller without a session gets, whether it carried no token or Identity declined one. */
+function signInFirst() {
+  return Response.json({ error: "Sign in first" }, { status: 401 })
+}
+
 /**
  * The signed-in user behind a request, or an error response. Writes need the site's own origin
  * unless they carry a Bearer header.
@@ -41,13 +46,13 @@ export async function requireUser(
   const bearer = /^Bearer\s/i.test(authorization)
   const cookie = await getUser()
   if (!cookie) {
-    if (!bearer) return Response.json({ error: "Sign in first" }, { status: 401 })
+    if (!bearer) return signInFirst()
     const check = await bearerUser(req, authorization)
     // "Couldn't check" is not "not signed in": the app keeps its session on a 5xx (docs/adr/0001).
     if (check.kind === "unreachable") {
       return Response.json({ error: "Couldn't check the session" }, { status: 503 })
     }
-    if (check.kind === "declined") return Response.json({ error: "Sign in first" }, { status: 401 })
+    if (check.kind === "declined") return signInFirst()
     return check.user
   }
   // The origin check stops cookie-carrying cross-site writes. A Bearer header can't be attached by

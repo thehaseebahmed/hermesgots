@@ -1008,3 +1008,79 @@ to `auto` and anything unknown to `accept_edits` — is applied when a mode is p
 Found by the `/simplify-code` pass on this branch. It was a cleanup review, not a bug hunt —
 correctness was out of scope — entry 2 is the one genuine defect it turned up, and none of the five
 blocks the pull request.
+
+---
+
+# Deferred fixes from the simplify pass on the account session
+
+A cleanup review of `fix(sync): don't sign out when a refresh token was already spent` and its two
+follow-ups (four parallel reviewers: reuse, quality, efficiency, altitude) turned up four findings.
+Two are recorded here instead of applied: the first wants somewhere to keep the last account the app
+saw, and the second belongs to the browser client this branch did not touch.
+
+Everything else the review found is applied on this branch: the base64url decode is one import-free
+`src/lib/base64url.ts` rather than a copy in `push.ts` and another in `identity-session.ts`; "Identity's
+answer, else the stored token's owner" is one `identityUser()` instead of a silent copy in `onAppUrl`
+and a logged copy in `loadNativeAccount`; and the function's two `Sign in first` answers come from one
+`signInFirst()`. The efficiency pass found nothing worth changing: the token store is re-read per call
+on purpose (the re-read before believing a rejection is the branch's own policy), `getUser()` precedes
+the Bearer call only when a cookie is present, where it makes no request at all, and `inFlight` is
+cleared in a `.finally` so it retains no tokens.
+
+## Risky
+
+### 1. The fallback account is a stub, so an unverified load loses the avatar and the name
+
+`native-account.ts:163::storedOwner` builds a `User` from the stored access token's claims alone
+(`{ id, email, userMetadata: {}, appMetadata: {} }`), and `identityUser` (`native-account.ts:171`)
+hands it to the app whenever Identity can't be asked — the path this branch added so a hiccup never
+shows the sign-in gate. Every field those claims don't carry is missing from the account the app then
+renders: `pictureUrl` is undefined, so the avatar blanks (`routes/settings.tsx:756`,
+`components/account-settings.tsx:83`), and `name` is gone.
+
+- Cost: a session that survives a hiccup survives in a visibly degraded form, and the degradation
+  lasts as long as Identity is unreachable — a device that loads offline shows an account with no face
+  and no name, which reads as a half-signed-in state rather than as a session that is intact.
+- Suggested fix: keep the last full `User` beside the tokens — `currentUser()` has one whenever the
+  app is online — and let `storedOwner()` return that, falling back to the claims stub only when
+  nothing better was ever stored, so the fallback is the real account rather than a constructed one.
+- Why it is risky: it changes what the session store holds, so it wants the same single-flight and
+  re-read discipline the tokens have, plus a migration for a device whose store predates the field.
+  The stub is also correct as far as it goes — the branch's decision was that a check which cannot be
+  made must not end the session, not that the account has to render well on that path.
+
+## Careful
+
+### 2. The browser load still reads a failed check as signed-out
+
+`app/src/lib/account.ts:60` is the browser's `loadAccount` tail: `getUser().catch(() => null)` mapped
+to `signed-out` — the sibling of the Android path this branch fixed, and the same policy read two
+ways. A browser whose account can't be read is shown the sign-in gate, while the Android app keeps
+running.
+
+- Cost: the class of symptom the report named — a check that could not be made ending the session —
+  is closed on one client and left open on the other, so the two disagree about one policy, and a
+  reader of the new `identityUser` has to find the browser's copy to learn it was not changed.
+- Suggested fix: the same reading on both clients — "unverified" keeps the session and lets the app
+  run — including whatever the browser can prove about the user with no service, as `claimsOf` does
+  for the native store.
+- Why it is risky: it changes the other client's gate, and the exposure there is much narrower —
+  `@netlify/identity`'s `getUser()` answers from a locally cached session, so failing to read it is
+  less likely than a native HTTP call failing, and the browser's trade path never clears the session
+  (`callFunction` retries `refreshSession()` and surfaces the 401). Worth doing as a change to the
+  browser client with the flows run over it, not as part of a cleanup of the Android one.
+
+---
+
+Found by the `/simplify-code` pass on this branch. It was a cleanup review, not a bug hunt —
+correctness was out of scope — and neither entry blocks the pull request. Two findings are
+deliberately not entries, because neither has a fix the tree can hold today:
+
+- **Identity's refusal statuses are read once per bundle.** `tradeOutcome` (`identity-session.ts:40`)
+  and `bearerUser` (`netlify/lib/identity.ts:22`) each decide that 401 and 403 are Identity's own word,
+  joined by a comment rather than an import. The app and the functions are separate bundles and nothing
+  under `netlify/` imports from `src/` (checked), so a shared predicate has no home both can reach;
+  what is duplicated is two lines in two runtimes.
+- **A third base64url copy the shared module cannot reach.** `netlify/lib/fcm.ts:140` carries the
+  encoder half of the pair `push.ts` used to hold, in the functions bundle, under the same boundary —
+  so extracting `src/lib/base64url.ts` leaves that one where it is.

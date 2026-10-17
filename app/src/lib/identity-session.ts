@@ -1,9 +1,11 @@
 /**
  * The rules for the account session's stored tokens, on the Android app's own Identity calls.
  *
- * Free of runtime imports so `scripts/test-identity-session.mjs` can exercise it under
- * `node --experimental-strip-types`, the way `model-changes.ts` is tested.
+ * Imports only `./base64url.ts`, which is itself import-free, so `scripts/test-identity-session.mjs`
+ * can exercise it under `node --experimental-strip-types`, the way `model-changes.ts` is tested.
  */
+
+import { fromBase64Url } from "./base64url.ts"
 
 export interface Tokens {
   access: string
@@ -55,7 +57,5 @@ export function claimsOf(access: string): { id: string; email?: string } | null 
 }
 
 function decode(part: string) {
-  const base64 = part.replace(/-/g, "+").replace(/_/g, "/")
-  const binary = atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "="))
-  return new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)))
+  return new TextDecoder().decode(fromBase64Url(part))
 }
