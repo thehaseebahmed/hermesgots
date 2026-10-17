@@ -13,7 +13,8 @@ on:
       - ".dockerignore"
       - ".github/workflows/dev-image.yml"
       # The image's second-heaviest layer is the pnpm store, warmed from these four: a dependency
-      # bump changes what the image carries, so it has to rebuild and re-verify it.
+      # bump changes what the image carries, so it has to rebuild. Whether that is worth verifying is
+      # the recipe's business rather than the lockfile's — see the verify step's condition.
       - "app/package.json"
       - "app/pnpm-lock.yaml"
       - "website/package.json"

@@ -41,9 +41,9 @@ changing what runs inside it, so there is nothing new to verify.
 - **The diff is read in one place.** `.github/scripts/changed-areas.sh` answers what moved, in a
   fixed vocabulary — `app`, `plugin`, `website`, `native`, `image` — and each workflow maps that
   onto its own jobs. A gate whose paths fall outside those areas needs a case there, or it never
-  runs: that failure is silent (a check that does not run is not a check that fails), so a new gate's
-  first run has to be watched. A diff that cannot be worked out answers with every area, for the same
-  reason.
+  runs: that failure is silent (a check that does not run is not a check that fails), so a new
+  gate's first run has to be watched. A diff that cannot be worked out answers with every area, for
+  the same reason.
 - **The check set has one owner.** `.github/scripts/checks.sh` holds the app's gates, the plugin's
   tests and the website's build; `tests.yml` runs one area per job and the image's verification runs
   `all`. The two statements had already drifted by the time the image was written (its verification

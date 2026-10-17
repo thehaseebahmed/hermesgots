@@ -821,11 +821,12 @@ for the server instead of sleeping five seconds, and the IPv4/`::1` trap now sit
 
 ### 1. The toolchain versions have no single owner
 
-Node 22 is pinned in tests.yml (twice) and in the three other workflows; pnpm 10 in `android.yml`,
-`android-release.yml` and `staging.yml` through `pnpm/action-setup`; Playwright 1.63.0 only in the
-Dockerfile, where `app/scripts/e2e/cli.mjs` resolves it at run time and neither `app/package.json`
-nor `website/package.json` carries a `packageManager` or an `engines` field. The image's header
-comment now names the file each version comes from, but nothing makes those files agree.
+Node 22 is pinned in tests.yml (twice) and in the three other workflows; pnpm 10 in `tests.yml`,
+`android.yml`, `android-release.yml` and `staging.yml` through `pnpm/action-setup`; Playwright 1.63.0
+only in the Dockerfile, where `app/scripts/e2e/cli.mjs` resolves it at run time and neither
+`app/package.json` nor `website/package.json` carries a `packageManager` or an `engines` field. The
+image's header comment now names the file each version comes from, but nothing makes those files
+agree.
 
 - Cost: a bump in any one place leaves the image behind while its own header claims the versions
   match CI's, and the image is the only artefact that records which Playwright the flows run
