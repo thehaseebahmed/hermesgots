@@ -238,6 +238,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "cron_runs",
                     "session_label",
                     "chats",
+                    "draft_text",
                     "context",
                     "todos",
                     "projects",

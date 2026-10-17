@@ -31,7 +31,8 @@ import {
   prepareAttachment,
 } from "@/lib/attachments"
 import type { Attachment } from "@/lib/db"
-import { flushDrafts, loadDraft, saveDraft } from "@/lib/drafts"
+
+import { flushDrafts, loadDraft, saveDraft, useDraftText } from "@/lib/drafts"
 import type { HermesConfig } from "@/lib/hermes"
 import {
   canRecord,
@@ -123,6 +124,14 @@ export function Composer({
     setValue("")
     setAttachments([])
   }
+  // A draft that syncs in after mount fills the field only while it is still empty and untouched.
+  const syncedDraft = useDraftText(draftKey)
+  useEffect(() => {
+    if (!draftKey || !syncedDraft || loaded !== draftKey) return
+    if (stored.current || value) return
+    stored.current = syncedDraft
+    setValue(syncedDraft)
+  }, [syncedDraft, draftKey, loaded, value])
   useEffect(() => {
     if (!draftKey) return
     let live = true

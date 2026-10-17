@@ -146,13 +146,15 @@ export interface Conversation {
   projectId?: string
   /** When the user saved the session as a draft. Synced, so the plugin's cleanup spares it. */
   draftAt?: number
+  /** The unsent text in this chat's composer. Synced through the chat record, so another device and a reinstall see it. */
+  draftText?: string
   /** Marked done by the user, or by the plugin once its pull request merged; the composer gives way until it's reopened. */
   resolvedAt?: number
   /** Moved to the project's Discarded pile: its pull request closed and its branch deleted. */
   discardedAt?: number
   /** Its pushes are muted. Synced through the chat list, which is where the plugin reads it. */
   muted?: boolean
-  /** Permission mode, as the plugin last reported it. Local only; the plugin holds it. */
+  /** Permission mode. The plugin holds it live; the user's saved pick also travels in the chat record. */
   mode?: SessionMode
   /**
    * The session's worktrees (one per repo of the project, all on `branch`), from the plugin, and

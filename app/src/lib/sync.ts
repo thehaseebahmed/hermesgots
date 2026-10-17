@@ -13,7 +13,9 @@ import {
   watchAccount,
   type Account,
 } from "@/lib/account"
-import { mergeChatList } from "@/lib/hermes"
+import { hasPluginFeature, mergeChatList } from "@/lib/hermes"
+import { adoptDraft, draftKey } from "@/lib/drafts"
+import { adoptSessionMode } from "@/lib/workspace"
 import {
   APPEARANCE_FIELDS,
   DEFAULT_PROFILE,
@@ -81,6 +83,8 @@ const CHAT_FIELDS = [
   "resolvedAt",
   "discardedAt",
   "draftAt",
+  "draftText",
+  "mode",
   "modelChoice",
   "muted",
 ] as const
@@ -416,13 +420,22 @@ async function syncAppearance(key: CryptoKey) {
   }
 }
 
-async function localChats(profileId: string): Promise<Doc<ChatValue>> {
+// A plugin older than the draft_text feature rejects a record over its 16 KB cap, failing the whole
+// merge, so drafts only go to a plugin that advertises the feature, and never in a record over 64 KB.
+const DRAFT_RECORD_CAP = 64 * 1024
+const encoder = new TextEncoder()
+
+async function localChats(profileId: string, drafts: boolean): Promise<Doc<ChatValue>> {
   const doc: Doc<ChatValue> = {}
   for (const c of await db.conversations.where("profileId").equals(profileId).toArray()) {
-    doc[c.id] = {
-      at: c.changedAt,
-      value: Object.fromEntries(CHAT_FIELDS.map((field) => [field, c[field]])) as ChatValue,
-    }
+    const value = Object.fromEntries(CHAT_FIELDS.map((field) => [field, c[field]])) as ChatValue
+    // Only a record that carries a draft is measured.
+    if (
+      value.draftText !== undefined &&
+      (!drafts || encoder.encode(JSON.stringify(value)).length > DRAFT_RECORD_CAP)
+    )
+      delete value.draftText
+    doc[c.id] = { at: c.changedAt, value }
   }
   const tombstones = await db.tombstones.where("id").startsWith("chat:").toArray()
   for (const tombstone of tombstones.filter((t) => t.profileId === profileId)) {
@@ -451,6 +464,11 @@ async function applyChats(profileId: string, pull: [string, Entry<ChatValue>][])
         } as Conversation)
         await db.tombstones.delete(`chat:${id}`)
       })
+      // A pulled draft fills an empty composer here; it never overwrites text typed on this device.
+      if (entry.value.draftText) await adoptDraft(draftKey(id), entry.value.draftText)
+      // A pick made on another device follows the session here, and out to the plugin.
+      if (entry.value.mode && entry.value.mode !== existing?.mode)
+        await adoptSessionMode(id, entry.value.mode)
     }
   }
 }
@@ -471,15 +489,15 @@ async function settleChatTombstones(profileId: string, merged: Doc<ChatValue>) {
 async function pullFallbackChats(key: CryptoKey, profileId: string) {
   const remote = await readDoc<ChatValue>(key, `chats/${profileId}`)
   if (!remote.etag) return false
-  const local = await localChats(profileId)
+  const local = await localChats(profileId, false)
   await applyChats(profileId, mergeDocs(remote.entries, local).pull)
   return true
 }
 
-/** Syncs a bot's chats with its server's Gots plugin; false when it didn't answer. */
 /** Merges the bot's chat list with its plugin's; the merged list, or undefined when it didn't answer. */
 async function mergePluginChats(profile: Profile) {
-  const local = await localChats(profile.id)
+  const drafts = await hasPluginFeature(profile, "draft_text")
+  const local = await localChats(profile.id, drafts)
   try {
     const merged = await mergeChatList(profile, local, AbortSignal.timeout(READ_TIMEOUT_MS))
     return { local, merged }

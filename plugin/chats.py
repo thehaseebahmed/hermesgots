@@ -2,7 +2,9 @@
 
 Each record is ``{at, deleted?, value?}`` keyed by chat id, the same shape the app merges with:
 ``at`` is the chat's change clock, and the newer record wins, deletions included. Hermes keeps the
-transcripts; this keeps what it has no place for (titles the user typed, ...).
+transcripts; this keeps what it has no place for (titles the user typed, unsent composer text as
+``draftText``, a session's picked permission ``mode``, ...). A value is opaque JSON here; the app
+reads those fields back.
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ from . import events
 from .store import connect
 
 MAX_ID_LENGTH = 256
-MAX_VALUE_BYTES = 16 * 1024
+MAX_VALUE_BYTES = 64 * 1024
 
 
 class InvalidChats(ValueError):

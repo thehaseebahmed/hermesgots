@@ -7,6 +7,7 @@ import {
   prIsLive,
   prKey,
   sessionMode,
+  updateConversation,
   type Conversation,
   type PullRequestRef,
   type SessionMode,
@@ -229,18 +230,29 @@ export async function refreshPrs(conversationId: string, { force = false } = {})
 export async function setSessionMode(conversationId: string, mode: SessionMode) {
   const conversation = await db.conversations.get(conversationId)
   if (!conversation) return
-  await db.conversations.update(conversationId, { mode, planPending: false })
+  await updateConversation(conversationId, { mode, planPending: false })
+  await pushSessionMode(conversation, mode)
+}
+
+/** Adopts a mode pulled from another device and pushes it to the plugin, as a pick does. */
+export async function adoptSessionMode(conversationId: string, mode: SessionMode) {
+  const conversation = await db.conversations.get(conversationId)
+  if (!conversation) return
+  await pushSessionMode(conversation, mode)
+}
+
+/** Tells the plugin which mode its session runs in, the way a pick here does. */
+async function pushSessionMode(conversation: Conversation, mode: SessionMode) {
   const profile = await db.profiles.get(conversation.profileId)
-  if (profile?.apiKey && !profile.disabled) {
-    try {
-      await store(
-        conversationId,
-        await setWorkspaceMode(profile, conversation.hermesSessionId, mode),
-      )
-    } catch (error) {
-      // Before the first turn there's nothing on the plugin yet; the first turn carries the mode.
-      if (!(error instanceof HermesError && error.status === 404)) throw error
-    }
+  if (!profile?.apiKey || profile.disabled) return
+  try {
+    await store(
+      conversation.id,
+      await setWorkspaceMode(profile, conversation.hermesSessionId, mode),
+    )
+  } catch (error) {
+    // Before the first turn there's nothing on the plugin yet; the first turn carries the mode.
+    if (!(error instanceof HermesError && error.status === 404)) throw error
   }
 }
 

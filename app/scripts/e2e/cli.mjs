@@ -206,6 +206,10 @@ const FLOWS = {
     script: "regression-drafts.mjs",
     about: "Composer drafts are kept per chat and cleared on send",
   },
+  "draft-mode-sync": {
+    script: "e2e/draft-mode-sync.mjs",
+    about: "A composer draft and a picked mode sync through the plugin's chat record",
+  },
   submission: {
     script: "regression-submission.mjs",
     about: "Concurrent sends start one run and get one reply",
