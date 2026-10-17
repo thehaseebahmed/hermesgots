@@ -16,3 +16,7 @@ passkey joins that same in-memory vault. Because the code is the recovery story 
 convenience, Settings can rotate it: a new wrapper is written and shown first, and the old one is
 only dropped once the user confirms they've copied the new one, so a failed save can't leave an
 account with no code at all.
+
+Replacing it from Settings is one dialog doing both steps, asking for the code that can still open
+the account and then showing the new one. That is the one place a form sits in a confirmation rather
+than in a pop-up sheet.
