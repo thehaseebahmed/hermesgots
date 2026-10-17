@@ -10,11 +10,11 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
-import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { useCopiedCode } from "@/components/copied-code"
 import {
   AlertDialog,
   AlertDialogAction,
+  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -54,8 +54,7 @@ export function AccountSettings() {
   const [busy, setBusy] = useState(false)
   const [pending, setPending] = useState<PendingSetup>()
   const [rotation, setRotation] = useState<{ code: string; confirm: () => Promise<void> }>()
-  const [verifying, setVerifying] = useState(false)
-  const [currentCode, setCurrentCode] = useState("")
+  const [asking, setAsking] = useState(false)
 
   const { account } = sync
   if (account.status === "loading" || account.status === "unavailable") return null
@@ -71,7 +70,10 @@ export function AccountSettings() {
     }
   }
 
-  const rotate = (code?: string) => run(async () => setRotation(await rotateRecoveryCode(code)))
+  const rotate = () =>
+    canRotateRecoveryCode()
+      ? void run(async () => setRotation(await rotateRecoveryCode()))
+      : setAsking(true)
 
   return (
     <Card className="rounded-3xl">
@@ -162,11 +164,7 @@ export function AccountSettings() {
                       Add passkey
                     </Button>
                   )}
-                  <Button
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() => (canRotateRecoveryCode() ? void rotate() : setVerifying(true))}
-                  >
+                  <Button variant="outline" disabled={busy} onClick={rotate}>
                     <KeyIcon data-icon="inline-start" />
                     New recovery code
                   </Button>
@@ -185,49 +183,23 @@ export function AccountSettings() {
           run(async () => setup?.confirm())
         }}
       />
-      <RecoveryCodeDialog
+      <RotationDialog
+        open={asking || Boolean(rotation)}
         code={rotation?.code}
-        title="Your new recovery code"
-        action="Use this code"
+        busy={busy}
+        onCancel={() => setAsking(false)}
+        onCurrentCode={(code) =>
+          void run(async () => {
+            setRotation(await rotateRecoveryCode(code))
+            setAsking(false)
+          })
+        }
         onDone={() => {
           const confirm = rotation?.confirm
           setRotation(undefined)
           if (confirm) void confirm().catch((error) => toast.error(message(error)))
         }}
       />
-      <Popup open={verifying} onOpenChange={setVerifying}>
-        <PopupContent>
-          <PopupHeader className="pb-2">
-            <PopupTitle>Enter your current recovery code</PopupTitle>
-          </PopupHeader>
-          <form
-            className="flex flex-col gap-3 px-4 pb-4 sm:px-6"
-            onSubmit={(event) => {
-              event.preventDefault()
-              run(async () => {
-                setRotation(await rotateRecoveryCode(currentCode))
-                setVerifying(false)
-                setCurrentCode("")
-              })
-            }}
-          >
-            <Input
-              aria-label="Current recovery code"
-              autoComplete="off"
-              autoCapitalize="characters"
-              autoCorrect="off"
-              spellCheck={false}
-              placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
-              className="font-mono"
-              value={currentCode}
-              onChange={(event) => setCurrentCode(event.target.value)}
-            />
-            <Button type="submit" className="h-11" disabled={busy || !currentCode.trim()}>
-              Continue
-            </Button>
-          </form>
-        </PopupContent>
-      </Popup>
     </Card>
   )
 }
@@ -319,7 +291,7 @@ export function RecoveryCode({
     onCopied?.()
   }
   return (
-    <div className="flex items-center gap-2 rounded-2xl bg-muted p-3">
+    <div className="flex items-center gap-1 rounded-2xl bg-muted py-3 pr-1 pl-3">
       <code ref={text} className="min-w-0 flex-1 font-mono text-sm select-all">
         {code}
       </code>
@@ -333,6 +305,85 @@ export function RecoveryCode({
         {copied ? <CheckIcon /> : <CopyIcon />}
       </Button>
     </div>
+  )
+}
+
+/**
+ * Replacing a recovery code: one dialog for both steps, first asking for the code that can still open
+ * the account, then showing the new one and waiting for it to be copied. A form in an AlertDialog is
+ * the exception here (AGENTS.md asks for a Popup): the two steps are one card, and the code the
+ * second step shows is the answer to the first.
+ */
+function RotationDialog({
+  open,
+  code,
+  busy,
+  onCancel,
+  onCurrentCode,
+  onDone,
+}: {
+  open: boolean
+  code?: string
+  busy: boolean
+  onCancel: () => void
+  onCurrentCode: (code: string) => void
+  onDone: () => void
+}) {
+  const [current, setCurrent] = useState("")
+  const { copied, noteCopied } = useCopiedCode(code)
+  return (
+    <AlertDialog open={open} onOpenChange={(open) => !open && onCancel()}>
+      <AlertDialogContent className="data-[size=default]:max-w-[calc(100%-1.5rem)]">
+        {code ? (
+          <>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Your new recovery code</AlertDialogTitle>
+              <AlertDialogDescription>
+                Save it. It's the only way back into your chats on a new device.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <RecoveryCode code={code} copied={copied} onCopied={noteCopied} />
+            <AlertDialogFooter>
+              <AlertDialogAction disabled={!copied} onClick={onDone}>
+                Use this code
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </>
+        ) : (
+          <form
+            className="grid gap-6"
+            onSubmit={(event) => {
+              event.preventDefault()
+              onCurrentCode(current)
+            }}
+          >
+            <AlertDialogHeader>
+              <AlertDialogTitle>Enter your current recovery code</AlertDialogTitle>
+            </AlertDialogHeader>
+            <Input
+              aria-label="Current recovery code"
+              autoFocus
+              autoComplete="off"
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
+              className="font-mono"
+              value={current}
+              onChange={(event) => setCurrent(event.target.value)}
+            />
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={busy} onClick={onCancel}>
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction type="submit" disabled={busy || !current.trim()}>
+                Continue
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </form>
+        )}
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }
 
@@ -354,7 +405,7 @@ export function RecoveryCodeDialog({
   const { copied, noteCopied } = useCopiedCode(code)
   return (
     <AlertDialog open={Boolean(code)}>
-      <AlertDialogContent>
+      <AlertDialogContent className="data-[size=default]:max-w-[calc(100%-1.5rem)]">
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>

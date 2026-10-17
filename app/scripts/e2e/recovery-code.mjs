@@ -2,7 +2,7 @@
 // addition, nothing is written until the code has been copied, and Continue waits for that copy.
 // A passkey that can't be made — a prompt backed out of, or an authenticator without PRF — is a
 // quiet choice to go on with the code alone, and a device that can't hold one isn't offered one.
-import { app, assert, pass, signedIn } from "./lib.mjs"
+import { app, assert, assertOneLine, pass, signedIn } from "./lib.mjs"
 
 async function scenario(name, { width, dark, credentials, passkeys = true }) {
   // No vault on the account yet: this is a first run.
@@ -25,6 +25,7 @@ async function scenario(name, { width, dark, credentials, passkeys = true }) {
     await page.getByRole("heading", { name: "Your recovery code" }).waitFor({ timeout: 15_000 })
     const code = await page.locator("code").first().innerText()
     assert.match(code.trim(), /^[0-9A-Z]{5}(-[0-9A-Z]{5}){4}$/, `a recovery code for ${name}`)
+    await assertOneLine(page.locator("code").first(), `the code for ${name}`)
     await shot(`${name}-code`)
 
     const cont = page.getByRole("button", { name: "Continue" })

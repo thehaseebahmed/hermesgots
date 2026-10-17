@@ -1,7 +1,8 @@
 // Settings: replacing a recovery code. This device holds no data key and the account has no passkey,
 // so the app asks for the current code; the new wrapper is written before the new code is shown and
-// the old one is retired only once the new one has been copied, over the version it just wrote.
-import { app, assert, pass, signedIn, setUpBot } from "./lib.mjs"
+// the old one is retired only once the new one has been copied, over the version it just wrote. Both
+// steps are the one dialog, and the code fits a line on a phone.
+import { app, assert, assertOneLine, pass, signedIn, setUpBot } from "./lib.mjs"
 
 const USER_ID = "11111111-2222-4333-8444-555555555555"
 
@@ -32,20 +33,37 @@ async function scenario(name, { width, dark }) {
     // Unlocking may have added the vault's inbox; from here nothing is written until it's asked for.
     await page.waitForTimeout(1000)
     const before = vaults.length
-    await rotate.click()
 
-    // Nothing here can unwrap the key, so the pop-up asks for the code before anything is written.
+    // Backing out of the dialog asks for nothing and writes nothing.
+    await rotate.click()
+    await page.getByText("Enter your current recovery code").waitFor({ timeout: 15_000 })
+    await page.getByRole("button", { name: "Cancel" }).click()
+    await page.getByText("Enter your current recovery code").waitFor({ state: "detached" })
+    assert.equal(vaults.length, before, `cancelling writes nothing, for ${name}`)
+
+    await rotate.click()
+    // Nothing here can unwrap the key, so the dialog asks for the code before anything is written.
     await page.getByText("Enter your current recovery code").waitFor({ timeout: 15_000 })
     await page.waitForTimeout(500)
     await shot(`${name}-ask`)
+    // Which dialog this is, so that the one showing the new code can be checked against it.
+    await page.evaluate(() => {
+      document.querySelector("[role=alertdialog]").dataset.step = "ask"
+    })
     assert.equal(vaults.length, before, `nothing written before the current code, for ${name}`)
     await page.getByRole("textbox", { name: "Current recovery code" }).fill(seeded.code)
     await page.getByRole("button", { name: "Continue" }).click()
 
     await page.getByText("Your new recovery code").waitFor({ timeout: 15_000 })
+    assert.equal(
+      await page.locator("[role=alertdialog][data-step=ask]").count(),
+      1,
+      `the same dialog shows the new code, for ${name}`,
+    )
     const shown = (await page.locator("code").first().innerText()).trim()
     assert.match(shown, /^[0-9A-Z]{5}(-[0-9A-Z]{5}){4}$/, `a new recovery code for ${name}`)
     assert.notEqual(shown, seeded.code, `the new code differs from the old, for ${name}`)
+    await assertOneLine(page.locator("[role=alertdialog] code"), `the new code for ${name}`)
     await shot(`${name}-new-code`)
 
     // The old code still works until the new one is handled: both wrappers are on the server.

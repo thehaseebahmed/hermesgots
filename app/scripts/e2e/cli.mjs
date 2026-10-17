@@ -195,7 +195,7 @@ const FLOWS = {
   "recovery-code-rotation": {
     script: "e2e/recovery-code-rotation.mjs",
     about:
-      "Replacing a recovery code in Settings: the current one is asked for, and the old retires once the new is copied",
+      "Replacing a recovery code in Settings: one dialog asks for the current one, then shows the new one",
   },
   prs: {
     script: "e2e/prs.mjs",

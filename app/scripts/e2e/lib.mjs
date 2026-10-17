@@ -280,3 +280,15 @@ function helpers(page) {
 }
 
 export const pass = (text) => console.log(`PASS: ${text}`)
+
+/**
+ * Fails unless the element's text fits on one line. Its height is compared with a line, since a block
+ * reports a single client rect whether it wraps or not.
+ */
+export async function assertOneLine(locator, what) {
+  const { height, line } = await locator.evaluate((el) => ({
+    height: el.getBoundingClientRect().height,
+    line: parseFloat(getComputedStyle(el).lineHeight),
+  }))
+  assert.ok(height <= line * 1.3, `${what} is on one line (${height}px of ${line}px)`)
+}
