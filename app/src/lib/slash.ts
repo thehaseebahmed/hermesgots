@@ -131,10 +131,11 @@ export function nameSpread(name: string, query: string): number | null {
 }
 
 /**
- * A picked skill goes to the front of the message, with the rest of what was typed after it: a skill
- * runs only from there, so one picked mid-sentence has to move to be one at all.
+ * A picked item goes to the front of the message, with the rest of what was typed after it: a skill
+ * runs only from there, and a send-mode command takes the message the same way, so one picked
+ * mid-sentence has to move to be one at all.
  */
-export function hoistSkill(text: string, token: SlashToken, name: string) {
+export function hoistItem(text: string, token: SlashToken, name: string) {
   const rest = `${text.slice(0, token.start)}${text.slice(token.end)}`.trim()
   const next = rest ? `/${name} ${rest}` : `/${name} `
   return { text: next, caret: next.length }

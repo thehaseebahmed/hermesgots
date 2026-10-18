@@ -46,7 +46,7 @@ import {
   LOCAL_COMMANDS,
   SEND_COMMANDS,
   goalCommand,
-  hoistSkill,
+  hoistItem,
   isSendMode,
   localCommand,
   optionId,
@@ -228,7 +228,7 @@ export function Composer({
   const pick = (item: SlashItem) => {
     if (item.kind === "command" && !isSendMode(item.name)) return runCommand(item.name)
     if (!token) return
-    const next = hoistSkill(value, token, item.name)
+    const next = hoistItem(value, token, item.name)
     caretWanted.current = next.caret
     setDismissed(false)
     setValue(next.text)

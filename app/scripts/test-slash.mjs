@@ -4,7 +4,7 @@ import test from "node:test"
 import {
   LOCAL_COMMANDS,
   SEND_COMMANDS,
-  hoistSkill,
+  hoistItem,
   nameSpread,
   rankSlashItems,
   slashToken,
@@ -159,7 +159,7 @@ test("a skill no longer matches when nothing in it does", () => {
 
 test("a picked skill goes to the front of the message, the rest following it", () => {
   const text = "fix the tests /gri"
-  assert.deepEqual(hoistSkill(text, slashToken(text, text.length), "grill-with-docs"), {
+  assert.deepEqual(hoistItem(text, slashToken(text, text.length), "grill-with-docs"), {
     text: "/grill-with-docs fix the tests",
     caret: 30,
   })
@@ -167,9 +167,9 @@ test("a picked skill goes to the front of the message, the rest following it", (
 
 test("a picked skill at the front leaves the rest of the message where it was", () => {
   const text = "/gri the report"
-  assert.deepEqual(hoistSkill(text, slashToken(text, 4), "goal"), {
+  assert.deepEqual(hoistItem(text, slashToken(text, 4), "goal"), {
     text: "/goal the report",
     caret: 16,
   })
-  assert.deepEqual(hoistSkill("/gri", tokenAt("/gri"), "plan"), { text: "/plan ", caret: 6 })
+  assert.deepEqual(hoistItem("/gri", tokenAt("/gri"), "plan"), { text: "/plan ", caret: 6 })
 })
