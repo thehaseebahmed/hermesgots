@@ -30,9 +30,9 @@ why it is not working yet and offers the way to grant it. Any other server carri
 reason: Hermes's own ``error`` text rides along whatever the state word, so a server a Hermes plugin
 provides keeps the word ``plugin`` and still says why it failed.
 
-This module owns every verb of the ``/mcp`` routes (#249): the read, the toggle and the removal are
-written, and ``catalogue``, ``install`` and ``start_access`` belong here too — the Catalogue with
-installed/enabled per entry, adding one from it through Hermes's connection-card path (never
+This module owns every verb of the ``/mcp`` routes (#249): the read, the toggle, the removal and the
+Catalogue are written, and ``install`` and ``start_access`` belong here too — adding a server from
+the Catalogue through Hermes's connection-card path (never
 ``install_entry``, which can prompt on stdin and open a curses checklist in the host process), and
 starting the Server access flow. The read takes
 the profile's home-and-secrets scope (``hermes_cli.web_server_profiles._config_profile_scope``) —
@@ -57,6 +57,14 @@ when the same server is added again. Reconcile follows, so the removed server's 
 torn down and the bot's next turn can't use it. It refuses a server a Hermes plugin provides for the
 same reason the toggle does, and an unknown one.
 
+``catalogue`` answers what Hermes's own Catalogue offers this bot — every entry Hermes's own
+``list_catalog`` returns, each marked with whether the profile already has it (Hermes's own
+``installed_servers``, read once for the whole list, inside the profile's scope). It is a read of the
+browsing half of adding a server: it connects nothing, writes nothing and never touches a value an
+entry declares, so opening it cannot change the bot. A host whose Hermes has no catalogue module
+raises ``McpError`` with a 501, and ``browsable()`` is that same check for the ``info`` payload's
+gate, so an older Host is a Bot with no Add action rather than an error.
+
 Every Hermes symbol is imported late, inside the call that needs it, because a plugin loads before
 the CLI package exists. A host that moved one raises ImportError, which becomes an ``McpError`` the
 route answers as a 501; ``available()`` is that same check, for the ``info`` payload's feature gate.
@@ -64,7 +72,7 @@ route answers as a 501; ``available()`` is that same check, for the ``info`` pay
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # Hermes's runtime status words (``tools.mcp_tool_discovery.get_mcp_status``) in Gots' words.
 # Anything else — ``connected``, ``configured``, ``lazy``, or a word a newer Hermes adds — is on.
@@ -145,6 +153,26 @@ def _hermes_remove() -> Dict[str, Any]:
     except ImportError as error:
         raise McpError(UNAVAILABLE, 501) from error
     return {**hermes, "uninstall": uninstall_entry, "oauth": get_manager}
+
+
+def _hermes_catalogue() -> Dict[str, Any]:
+    """Hermes's own Catalogue, imported at call time: a plugin loads before the CLI does.
+
+    The entries Hermes offers (``list_catalog``) and its own read of the profile's servers
+    (``installed_servers``), a config read and so inside the profile's read scope. Nothing here
+    writes, installs or probes anything, so a missing one is a 501 rather than a failure: the app
+    then offers no Add action on that Host.
+    """
+    try:
+        from hermes_cli.mcp_catalog import installed_servers, list_catalog
+        from hermes_cli.web_server_profiles import _config_profile_scope
+    except ImportError as error:
+        raise McpError(UNAVAILABLE, 501) from error
+    return {
+        "scope": _config_profile_scope,
+        "list": list_catalog,
+        "installed": installed_servers,
+    }
 
 
 def available() -> Optional[str]:
@@ -247,6 +275,71 @@ def remove(profile: Optional[str], name: str) -> List[Dict[str, Any]]:
         hermes["oauth"]().remove(name)
         hermes["reconcile"]()
         return _all_rows(hermes)
+
+
+def browsable() -> Optional[str]:
+    """Why this host's Catalogue can't be browsed from here, or None when it can.
+
+    Browsing needs Hermes's catalogue module and the profile's read scope, which is a different set
+    from the read's: a host can list a bot's servers without offering the Catalogue at all. ``info``
+    advertises this as its own feature, so that host's Bot gets no Add action rather than one whose
+    every tap is a 501.
+    """
+    try:
+        _hermes_catalogue()
+    except McpError as error:
+        return str(error)
+    return None
+
+
+# Every feature this module answers for, with the check that says why a host can't offer it: one row
+# per control, because each needs its own built-ins (see each check above). ``info`` advertises
+# exactly the features whose check passes, so a feature is declared here once rather than named by
+# hand beside its gate, in the payload and on the screen.
+FEATURES: Tuple[Tuple[str, Callable[[], Optional[str]]], ...] = (
+    ("mcps", available),
+    ("mcps_write", writable),
+    ("mcps_remove", removable),
+    ("mcps_catalogue", browsable),
+)
+
+
+def catalogue(profile: Optional[str]) -> List[Dict[str, Any]]:
+    """Every Catalogue entry ``profile`` is offered, A to Z, each marked with whether it has one.
+
+    Hermes's own ``list_catalog`` is the entries — a manifest dir its own CI and approval process
+    curate — and its own read of the profile's servers is the mark, so it says what Hermes itself
+    would. An entry is reported by name and what Hermes says it is; one whose description is
+    missing or empty reads as an empty one rather than being dropped, and the app shows its name
+    alone.
+
+    ``profile`` is a profile name, or None for the process's own. Blocking — the catalogue reads a
+    directory of manifests and the profile's config, and the scope may hydrate an external secret
+    source — so call it from a worker thread, never the event loop. Nothing is added, connected,
+    probed or written by this, and no value an entry declares is read or answered: it is the
+    browsing half of adding a server, and opening it cannot change the bot.
+    """
+    hermes = _hermes_catalogue()
+    with hermes["scope"](profile):
+        servers = hermes["installed"]()
+        entries = [_catalogue_entry(entry, servers) for entry in hermes["list"]()]
+    return sorted(entries, key=lambda entry: entry["name"])
+
+
+def _catalogue_entry(entry: Any, servers: Dict[str, Any]) -> Dict[str, Any]:
+    """One of Hermes's ``CatalogEntry`` objects in the app's own shape. Call it inside the scope.
+
+    ``servers`` is the profile's servers, read once for the whole Catalogue rather than per entry:
+    Hermes's own per-entry check (``is_installed`` is ``name in installed_servers()``) reads the
+    profile's config on every call, so asking it once per entry would load and expand that config
+    once per entry on a list that can run to dozens.
+    """
+    name = getattr(entry, "name", "")
+    return {
+        "name": name,
+        "description": getattr(entry, "description", "") or "",
+        "installed": name in servers,
+    }
 
 
 def _writable_server(hermes: Dict[str, Any], name: str) -> None:

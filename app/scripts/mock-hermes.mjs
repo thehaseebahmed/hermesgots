@@ -79,8 +79,9 @@
 // plugin/dictation.py with faster-whisper; MOCK_DICTATION=off reports it unavailable (the mic hides)
 // and MOCK_DICTATION=fail answers every clip with an error. GET /__mock/dictation lists the clips it
 // was sent (size, type, hint and the text before each), for the regression script.
-// GET /api/plugins/memento/mcp lists the bot's MCP servers, POST …/mcp/{name}/enabled switches one
-// and DELETE …/mcp/{name} takes one away (held in `mcpRemoved` apart from the definition above),
+// GET /api/plugins/memento/mcp lists the bot's MCP servers, …/mcp/catalogue the Catalogue Hermes
+// offers with each entry marked as the bot's own servers have it, POST …/mcp/{name}/enabled switches
+// one and DELETE …/mcp/{name} takes one away (held in `mcpRemoved` apart from the definition above),
 // with MOCK_MCP=off a plugin that has neither route nor feature; POST /__mock/mcp puts back every
 // server a flow removed.
 // Research missions (GET and POST /api/plugins/memento/research, …/research/{id} and its actions)
@@ -362,6 +363,23 @@ const MCP_SERVERS = [
 // that made it (there is nothing to add it with yet), so it is cleared through POST /__mock/mcp.
 const mcpRemoved = new Set()
 const mcpRows = () => MCP_SERVERS.filter((server) => !mcpRemoved.has(server.name))
+// Hermes's Catalogue, as the plugin's own read reports it: every entry Hermes offers, each marked
+// with whether this bot's config already has it — the same servers the screen lists.
+const MCP_CATALOGUE = [
+  { name: "github", description: "Open, review and land pull requests." },
+  { name: "google-drive", description: "Search and read files in Drive." },
+  { name: "linear", description: "Read and update Linear issues." },
+  { name: "notion", description: "Read and write Notion pages." },
+  { name: "postgres", description: "Query a Postgres database." },
+  { name: "sentry", description: "Triage Sentry issues." },
+  { name: "slack", description: "Read and post in Slack channels." },
+  { name: "stripe", description: "Inspect payments, invoices and subscriptions." },
+]
+const mcpCatalogue = () =>
+  MCP_CATALOGUE.map((entry) => ({
+    ...entry,
+    installed: mcpRows().some((row) => row.name === entry.name),
+  }))
 // The server a write is for, or null once the refusal has been answered: a name the bot's config
 // doesn't have, or one a Hermes plugin provides, which Hermes refuses to modify. Both writes — the
 // toggle and the removal — answer the plugin's own refusal the same way, so both ask this.
@@ -1469,7 +1487,7 @@ http
       return json(res, 200, {
         name: "memento",
         version: PLUGIN_VERSION,
-        features: ["cron_runs", "session_label", "chats", "draft_text", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "goal", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "skills", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : []), ...(MCPS ? ["mcps", "mcps_write", "mcps_remove"] : [])],
+        features: ["cron_runs", "session_label", "chats", "draft_text", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "goal", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "skills", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : []), ...(MCPS ? ["mcps", "mcps_write", "mcps_remove", "mcps_catalogue"] : [])],
         clarify: true,
         hooks: true,
         goal:
@@ -1498,6 +1516,12 @@ http
     // the plugin's prefix carries the profile and is stripped just above.
     if (PLUGIN && MCPS && !profile && url.pathname === "/api/plugins/memento/mcp") {
       return json(res, 200, { object: { servers: mcpRows() } })
+    }
+    // Hermes's Catalogue for that same screen's Add action: every entry Hermes offers, each marked
+    // with whether this bot already has it. A read only — nothing is added by it, and no value an
+    // entry declares is answered.
+    if (PLUGIN && MCPS && !profile && url.pathname === "/api/plugins/memento/mcp/catalogue") {
+      return json(res, 200, { object: { entries: mcpCatalogue() } })
     }
     // Flipping one of those servers on or off. The write lands on the row the app renders back, and
     // the mock's own list follows it so a later read agrees. A server a Hermes plugin provides can't

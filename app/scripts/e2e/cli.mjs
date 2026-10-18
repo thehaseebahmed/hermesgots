@@ -137,7 +137,12 @@ const FLOWS = {
   "mcps-gate": {
     script: "e2e/mcps-gate.mjs",
     about:
-      "A bot whose plugin answers without `mcps` has no row in its editor, and its screen's URL returns to the bot",
+      "A bot whose plugin answers without `mcps` has no row in its editor, its screen's URL returns to the bot, and the controls each advertises apart are offered apart",
+  },
+  "mcps-catalogue": {
+    script: "e2e/mcps-catalogue.mjs",
+    about:
+      "A Bot's Add action opens Hermes's Catalogue, marking the entries it already has, and a search narrows it",
   },
   "mcps-remove": {
     script: "e2e/mcps-remove.mjs",

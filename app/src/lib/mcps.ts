@@ -3,23 +3,28 @@
  * the device. The screen reads once on open and again only while a server is in a state that moves
  * on its own — connecting, or waiting on Server access — and `setEnabled` switches one on or off
  * through the plugin, replacing that row with the state the change landed in, while `remove` takes
- * one away and replaces the whole list with what the Host says is left. The row and the screen
- * exist only where the plugin advertises the feature, and a row's switch and its removal only where
- * it advertises that it can write, so a Bot whose Hermes is behind has neither and is sent back to
- * its editor, while a Bot whose Host hasn't answered yet is left to answer rather than flashing its
- * screen away. A plugin without the route is left alone like every other optional one.
+ * one away and replaces the whole list with what the Host says is left. `useMcpCatalogue` is the
+ * browsing half of adding one: the entries the Host's Hermes offers, read once each time it is
+ * opened, marking the ones this Bot already has and adding nothing. The row and the screen
+ * exist only where the plugin advertises the feature, and a row's switch, its removal and the Add
+ * action only where it advertises that it can write, so a Bot whose Hermes is behind has neither and
+ * is sent back to its editor, while a Bot whose Host hasn't answered yet is left to answer rather
+ * than flashing its screen away. A plugin without the route is left alone like every other optional
+ * one.
  */
 import { useCallback, useState, useSyncExternalStore } from "react"
 
-import { connectionKey } from "@/lib/connection"
+import { connectionKey, serverConfig } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { MCP_WORK_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import {
   getPluginFeatureList,
+  listMcpCatalogue,
   listMcpServers,
   removeMcpServer,
   setMcpServerEnabled,
   type HermesConfig,
+  type McpCatalogueEntry,
   type McpServer,
   type McpState,
 } from "@/lib/hermes"
@@ -27,14 +32,20 @@ import { usePoll } from "@/lib/poll"
 import { noteFailure } from "@/lib/report"
 import { createSignal } from "@/lib/store"
 
-/** The feature the plugin advertises when its Hermes can list a profile's MCP servers. */
-const FEATURE = "mcps"
+/**
+ * Every MCP feature this screen asks its Bot's Host about, by the key it answers under: `list` gates
+ * the screen itself, and the switch, the removal and the Catalogue each have their own, because each
+ * needs a different set of Hermes built-ins and a host may advertise one without another.
+ */
+export const MCP_FEATURES = {
+  list: "mcps",
+  write: "mcps_write",
+  removable: "mcps_remove",
+  catalogue: "mcps_catalogue",
+} as const
 
-/** The feature it advertises when its Hermes can switch one too; the switch needs its own built-ins. */
-const WRITE_FEATURE = "mcps_write"
-
-/** The feature it advertises when it can also remove one; a removal needs two built-ins more. */
-const REMOVE_FEATURE = "mcps_remove"
+/** What each of those features this Bot's Host answered (see `McpFeatureAnswer`). */
+export type McpFeatureAnswers = Record<keyof typeof MCP_FEATURES, McpFeatureAnswer>
 
 /** Gots' own word for each state a server can be in; Hermes's finer states collapse into these. */
 export const MCP_STATE_WORDS: Record<McpState, string> = {
@@ -54,6 +65,27 @@ function keepsReading(servers: McpServer[] | undefined) {
   return Boolean(
     servers?.some((server) => server.state === "connecting" || server.state === "needs_access"),
   )
+}
+
+/**
+ * Lands one of the screen's reads in `set`, or hands its failure to `failed`. Nothing is set or
+ * noted once the read was abandoned — a poll that ended, because the screen closed or the connection
+ * changed, must not write over its successor's answer — and a failure leaves what the screen has, so
+ * an unreachable Host doesn't take it down with it.
+ */
+function landRead<T>(
+  read: (signal: AbortSignal) => Promise<T>,
+  signal: AbortSignal,
+  set: (next: T) => void,
+  failed: (error: unknown) => void,
+) {
+  read(signal)
+    .then((next) => {
+      if (!signal.aborted) set(next)
+    })
+    .catch((error: unknown) => {
+      if (!signal.aborted) failed(error)
+    })
 }
 
 // The feature lists the connections' plugins answered; only a real answer is remembered, so a Host
@@ -78,16 +110,12 @@ async function readFeature(config: HermesConfig) {
 export type McpFeatureAnswer = "unknown" | "yes" | "no"
 
 /**
- * What this Bot's plugin answered about its MCP servers: `list` for the feature the read needs,
- * `write` for the switch, and `removable` for the removal, each of which needs a different set of
- * Hermes built-ins and so is advertised apart from the others. One read of the plugin's features
- * answers all three.
+ * What this Bot's plugin answered about its MCP servers: the feature each control needs — `list` for
+ * the screen itself, `write` for the switch, `removable` for the removal and `catalogue` for browsing
+ * Hermes's Catalogue, each needing a different set of Hermes built-ins and so advertised apart from
+ * the others. One read of the plugin's features answers them all.
  */
-export function useMcpFeatureAnswers(server: McpServerConfig): {
-  list: McpFeatureAnswer
-  write: McpFeatureAnswer
-  removable: McpFeatureAnswer
-} {
+export function useMcpFeatureAnswers(server: McpServerConfig): McpFeatureAnswers {
   const baseUrl = server?.baseUrl ?? ""
   const apiKey = server?.apiKey ?? ""
   const key = baseUrl && apiKey ? connectionKey({ baseUrl, apiKey }) : ""
@@ -96,14 +124,15 @@ export function useMcpFeatureAnswers(server: McpServerConfig): {
     if (!features) return "unknown"
     return features.includes(feature) ? "yes" : "no"
   }
-  const list = useSyncExternalStore(subscribe, () => read(FEATURE))
-  const write = useSyncExternalStore(subscribe, () => read(WRITE_FEATURE))
-  const removable = useSyncExternalStore(subscribe, () => read(REMOVE_FEATURE))
+  const list = useSyncExternalStore(subscribe, () => read(MCP_FEATURES.list))
+  const write = useSyncExternalStore(subscribe, () => read(MCP_FEATURES.write))
+  const removable = useSyncExternalStore(subscribe, () => read(MCP_FEATURES.removable))
+  const catalogue = useSyncExternalStore(subscribe, () => read(MCP_FEATURES.catalogue))
   usePoll(() => void readFeature({ baseUrl, apiKey }), false, [baseUrl, apiKey], {
     active: Boolean(key),
     onShow: false,
   })
-  return { list, write, removable }
+  return { list, write, removable, catalogue }
 }
 
 /** What this Bot's plugin answered about its MCP servers (see `McpFeatureAnswer`). */
@@ -132,27 +161,27 @@ const unsupported = cooldown()
  */
 export function useMcpServers(server: McpServerConfig, active: boolean) {
   const [servers, setServers] = useState<McpServer[] | undefined>(undefined)
-  const baseUrl = server?.baseUrl ?? ""
-  const apiKey = server?.apiKey ?? ""
-  const config = { baseUrl, apiKey }
+  const config = serverConfig(server)
+  const { baseUrl, apiKey } = config
   const key = baseUrl && apiKey ? connectionKey(config) : ""
   usePoll(
     (signal) => {
       if (unsupported.cooling(key)) return
-      listMcpServers(config, signal)
-        .then((next) => {
-          if (signal.aborted) return
+      landRead(
+        () => listMcpServers(config, signal),
+        signal,
+        (next) => {
           unsupported.clear(key)
           setServers(next)
-        })
-        .catch((error: unknown) => {
-          if (signal.aborted) return
+        },
+        (error) => {
           // An older plugin has no route to read: nothing is shown, and it is asked again later.
-          void lacksRoute(config, error, FEATURE).then((missing) => {
+          void lacksRoute(config, error, MCP_FEATURES.list).then((missing) => {
             if (missing) return unsupported.start(key)
             noteFailure("Reading the bot's MCP servers", error)
           })
-        })
+        },
+      )
     },
     keepsReading(servers) ? MCP_WORK_MS : false,
     [key],
@@ -185,4 +214,32 @@ export function useMcpServers(server: McpServerConfig, active: boolean) {
     [baseUrl, apiKey],
   )
   return { servers, setEnabled, remove }
+}
+
+/**
+ * Hermes's Catalogue as this Bot's Host offers it, read when the Catalogue is opened and again each
+ * time it is opened: the entries Hermes offers, each marked with whether this Bot already has it.
+ * Undefined until a read lands, and left as it was if one fails — an unreachable Host must not take
+ * the sheet down with it. Nothing is added and nothing is polled: the Catalogue is a read of what
+ * could be added, so nothing in it moves on its own.
+ */
+export function useMcpCatalogue(server: McpServerConfig, active: boolean) {
+  const [entries, setEntries] = useState<McpCatalogueEntry[] | undefined>(undefined)
+  const config = serverConfig(server)
+  const key = config.baseUrl && config.apiKey ? connectionKey(config) : ""
+  usePoll(
+    (signal) => {
+      landRead(
+        () => listMcpCatalogue(config, signal),
+        signal,
+        setEntries,
+        (error) => noteFailure("Reading the catalogue", error),
+      )
+    },
+    false,
+    [key],
+    // Opening it is the whole trigger: the once-a-read is not repeated for the page coming back.
+    { active: active && Boolean(key), onShow: false },
+  )
+  return entries
 }

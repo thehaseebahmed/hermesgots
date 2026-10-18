@@ -1311,3 +1311,88 @@ ticket asks for by name. Nothing to change; the reasoning lives in the module an
 
 Found by the `/simplify-code` pass on this branch. It was a cleanup review, not a bug hunt —
 correctness was out of scope — and none of the findings blocks the pull request.
+
+---
+
+# Deferred fixes from the reviews on browsing the MCP Catalogue
+
+Two reviews of `feat(settings): browse a bot's Catalogue from its MCP screen` — `/simplify-code`'s
+four parallel reviewers (reuse, quality, efficiency, altitude) and `/code-review`'s two independent
+passes (the repo's documented standards, and the ticket with its parent spec) — turned up changes
+that are wider than this branch or belong to another mechanism. They are recorded here instead of
+applied.
+
+Everything else both reviews found is applied on this branch. From `/simplify-code`: the sheet's
+search field is the shared `ItemSearch` (`src/components/item-list.tsx`) rather than a fourth
+hand-built copy of `InputGroup` + `SearchIcon`; `useMcpCatalogue` reads once per open
+(`onShow: false`, as the feature answers already did) instead of again on every tab refocus; both
+hooks take their connection through `serverConfig()` rather than rebuilding the `{baseUrl, apiKey}`
+prologue, and now share the read body itself (`landRead`, which owns the never-set-after-abandoning
+rule) with the servers hook; the `enabled` mark is gone from the answer the plugin, the mock and the
+app carry, since the screen marks Added from `installed` alone; and the entry read is one expression
+(`getattr(entry, "description", "") or ""`) with the test fake shaped like Hermes's own
+`CatalogEntry`, whose `description` is a required field.
+
+From `/code-review`: the plugin's route reference (`plugin/README.md`) documents
+`GET /mcp/catalogue` beside the other MCP routes, and `plugin/mcp.py`'s module docstring no longer
+names a built-in the code doesn't call. The findings about *where a thing is declared* are applied
+too: `plugin/mcp.py`'s `FEATURES` table (`:294`) is now the one place a feature and its gate are
+named, with `info` deriving its advertised list from it rather than naming the four in the payload
+beside three local booleans (`plugin/__init__.py:241`, `:290`), and the app's `MCP_FEATURES` record
+(`app/src/lib/mcps.ts:35`) is the one place a key and its feature string are tied, with
+`useMcpFeatureAnswers` reading every subscription from it. The catalogue also takes Hermes's own read
+of the profile's servers once for the whole list (`installed_servers()`, pinned by
+`test_the_whole_catalogue_costs_one_read_of_the_profile`) where it asked Hermes's per-entry check
+once per entry: N config loads become one, which is the mechanism the notes document rather than a
+measurement — Hermes isn't installed in the container this branch was written in, so the wall-clock
+saving is unmeasured.
+
+## Rejected, with the evidence
+
+- **Project each entry through Hermes's own `_catalog_entry_json`** — the shape the notes recommend
+  for a UI (`notes/mcp-servers/hermes-mcp-internals.md:281-286`). That projection emits each entry's
+  declared values (`required_env`, `url`, `args`, `post_install`, `auth_type`), and this read's
+  contract is the opposite: "no value an entry declares is read or answered"
+  (`plugin/mcp.py::catalogue`'s docstring, and the ticket's read-only scope). The reduced
+  name/description/installed shape is the boundary the ticket asks for, not drift from Hermes's
+  shape. Re-opening this is only right for the add step, which owns declared values.
+- **Keep the `enabled` mark and surface it, rather than dropping it.** `#249`'s API contract names
+  this route as "the Catalogue, with installed/enabled per entry and each entry's declared values",
+  and this read answers `installed` alone. The ticket this branch implements (`#253`) asks for the
+  entries and "the ones this Bot already has", and nothing on the screen reads either of the other
+  two: `enabled` would be a field no reader has, and the declared values are what the add step
+  (`#254`) has to show, since they are what a person chooses between. The reduced shape is the
+  ticket's boundary; the rest of the parent's row arrives with the step that needs it.
+
+## Not entries
+
+- **`ServerRow` hand-builds what `RowText` now provides** (`app/src/routes/mcps.tsx:190` against
+  `:300`). It predates this branch — the title/subtitle span arrived with the read's screen
+  (`git blame`: `bb1e70e`) — and the two rows on this screen are not the same anatomy (a server row
+  carries a state badge and controls between the text and the end), so this is one screen's row shape
+  rather than a duplicated component.
+- **The mock cannot turn off one MCP feature**, so `mcps-gate` rewrites the `info` answer in the
+  browser (`app/scripts/e2e/mcps-gate.mjs:23`) and this branch adds a fourth call to it (`:108`),
+  while the mock's own `/mcp/catalogue` route (`app/scripts/mock-hermes.mjs:1523`) is only ever
+  exercised with the feature on (`:1490` ties all four to one switch). The fix is a feature setter in
+  the mock plus a home in `scripts/e2e/lib.mjs` for `gate()`, which is the e2e harness rather than
+  this flow; `gate()` moves when a second flow needs it.
+- **The plugin's routes and handlers stay one per verb** (`plugin/__init__.py:396`, `:1192`). The
+  `FEATURES` table could name each feature's route and handler too, but every route keeps its own
+  handler — the write reads a body, the removal takes a name from the path and answers the list it
+  left — and its own method, so the table would replace three `add_get`/`add_post`/`add_delete` lines
+  with a loop over tuples: the wiring pointing at itself rather than a declaration. What the review
+  found — a feature named by hand beside its gate, in the payload and on the screen — is fixed.
+- **The plugin-answer envelope is unwrapped per reader** (`app/src/lib/hermes.ts:400`,
+  `:493`). One `parsePluginObject(value, key, mapper)` would cover them, but the same shape recurs
+  across the file's other plugin reads, so the helper is a change to that whole client rather than to
+  this read.
+
+---
+
+Found by `/simplify-code`'s four parallel reviewers and `/code-review`'s two independent passes on
+browsing the MCP Catalogue. `/simplify-code` was a cleanup review and `/code-review`'s spec pass
+checked the ticket's own acceptance criteria — all met — so neither was a bug hunt, and none of the
+findings blocks the pull request. Every finding either landed on the branch or is recorded above;
+the plugin suite and the four browser flows that cover this screen were re-run after the last of
+them.
