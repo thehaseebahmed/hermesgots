@@ -64,9 +64,12 @@ await flow("history-generations", async ({ page, seed, until, shot }) => {
   pass("two turns from another device show once each")
 
   // The host compacts the session in place: the carried tail comes back under fresh row ids, behind
-  // the task-list notice row, and the rows before it leave the active transcript.
+  // the task-list notice row, and the rows before it leave the active transcript. The tail is the
+  // newest turns — both of them here, since what a user reports is a whole block of the thread
+  // repeating, not one turn of it.
   const rows = await transcript(sessionId)
-  const carried = rows.length - rows.findLastIndex((r) => r.role === "user")
+  const users = rows.flatMap((row, i) => (row.role === "user" ? [i] : []))
+  const carried = rows.length - users[users.length - 2]
   const compacted = await fetch(`${mock}/__mock/compact`, {
     method: "POST",
     headers: auth,
@@ -75,8 +78,10 @@ await flow("history-generations", async ({ page, seed, until, shot }) => {
   assert.equal(compacted.status, 200, "the host compacts the session")
   await shot("compacted")
 
-  // Catch-up, the way reopening the chat runs it.
+  // Catch-up, the way it runs in an open chat: the compaction's rows reach a thread this device has
+  // already drawn, and its live queries redraw from the write.
   await page.goto(`${app}/c/${chatId}`)
+  await page.getByText("second turn's work").first().waitFor({ timeout: 20_000 })
   await page.evaluate(
     async (id) => (await import("/src/lib/history.ts")).reconcileHistory(id),
     chatId,
@@ -99,13 +104,10 @@ await flow("history-generations", async ({ page, seed, until, shot }) => {
     replies,
     `the compaction adds no reply: ${summary}`,
   )
-  await page.goto(`${app}/c/${chatId}`)
-  await page.getByText("second turn's work").first().waitFor({ timeout: 15_000 })
+  // And what is drawn: a beat for the live queries, then the thread as it reads.
+  await page.waitForTimeout(2000)
   const drawn = await page.evaluate(() => document.body.innerText)
-  assert.equal(
-    drawn.split("second turn's work").length - 1,
-    1,
-    "the carried turn is drawn once on screen",
-  )
+  for (const text of ["first turn's work", "second turn's work"])
+    assert.equal(drawn.split(text).length - 1, 1, `"${text}" is drawn once: ${drawn.slice(-400)}`)
   pass("a compaction the device already showed leaves its turns shown once")
 })

@@ -1463,6 +1463,14 @@ typed, and it is the one row in the thread that no device ever sent.
   really began with a bracket. The flow's mock would have to emit Hermes's real wording rather than a
   paraphrase, since the match is textual.
 
+## Not entries
+
+- **A carried row Hermes didn't stamp with a time** (`history.ts:706`, `:737`) is added as it always
+  was, since the recognition is by time. Every row in the reporter's transcript carries one, and the
+  only other thing on a row that survives a re-emission is its text — a match on text alone cannot
+  tell a compaction's copy from a user who really sent the same message twice, which is the case the
+  match exists to keep apart.
+
 ---
 
 Found while diagnosing the duplicated and misplaced turns in a long chat, against the reporter's own
