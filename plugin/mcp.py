@@ -501,14 +501,17 @@ def install(profile: Optional[str], name: str, values: Dict[str, str]) -> List[D
             # written anything yet.
             raise McpError(str(error), 400) from error
         secrets = {value["name"] for value in declared if value["secret"]}
-        for key, value in collected.items():
-            if key not in secrets:
-                block = hermes["inline"](block, key, value)
+        # Split first, then write in the order the half-added guarantee needs: the block carries the
+        # plain values before it is saved, and the secrets reach the profile's environment only once
+        # that save has landed.
+        plain = {key: value for key, value in collected.items() if key not in secrets}
+        secret = {key: value for key, value in collected.items() if key in secrets}
+        for key, value in plain.items():
+            block = hermes["inline"](block, key, value)
         if not hermes["save_server"](name, block):
             raise McpError(_refusal(hermes, name, block))
-        for key, value in collected.items():
-            if key in secrets:
-                hermes["save_env"](key, value)
+        for key, value in secret.items():
+            hermes["save_env"](key, value)
         hermes["reconcile"]()
         return _all_rows(hermes)
 

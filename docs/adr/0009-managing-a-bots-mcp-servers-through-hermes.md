@@ -6,9 +6,12 @@ every read and write goes through Hermes's own in-process functions (`hermes_cli
 `hermes_cli.mcp_config`, `tools.mcp_tool_discovery`) inside that profile's write scope
 (`config_write_scope(profile)`), never through Gots editing the YAML itself and never through the
 dashboard's `/api/mcp/*` routes, which answer only on the host's loopback with a rotating token the
-app cannot reach. An install uses Hermes's card-style path (`card_install_config` → probe →
+app cannot reach. An install uses Hermes's card-style path (`card_install_config` →
 `_save_mcp_server` → `save_env_value`) rather than `install_entry`, which can fall back to a bare
-stdin prompt and open a curses checklist inside the host process, and each write is followed by
+stdin prompt and open a curses checklist inside the host process; `card_install_config` is the card's
+own block builder without the prompts, the probe and the tool checklist a terminal owns, so whether
+the server then works is read from Hermes's own status — the row's state and reason — rather than
+probed at install time. Each write is followed by
 `reconcile_mcp_servers_with_config()` for that profile, which is Hermes's own unconsented reconcile —
 so the change is live without Gots invoking the consent-gated `/reload-mcp`, which invalidates the
 prompt cache.

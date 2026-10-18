@@ -405,11 +405,14 @@ const MCP_CATALOGUE = [
       "Server 'unvetted' was NOT saved: its command fetches a script over the network and runs it.",
   },
 ]
+// Whether this bot already has one of the Catalogue's entries: the one place that question is
+// answered, so the list, an entry read and an install can never disagree about it.
+const mcpInstalled = (name) => mcpRows().some((row) => row.name === name)
 const mcpCatalogue = () =>
   MCP_CATALOGUE.map((entry) => ({
     name: entry.name,
     description: entry.description,
-    installed: mcpRows().some((row) => row.name === entry.name),
+    installed: mcpInstalled(entry.name),
   }))
 // One entry of that Catalogue, as the plugin's own entry read answers it: the values its manifest
 // declares, each reported as required or not, secret or not, with the default it pins (never one for
@@ -421,7 +424,7 @@ const mcpCatalogueEntry = (name) => {
   return {
     name: entry.name,
     description: entry.description,
-    installed: mcpRows().some((row) => row.name === entry.name),
+    installed: mcpInstalled(entry.name),
     values: (entry.values ?? []).map((value) => ({
       name: value.name,
       prompt: value.prompt,
@@ -461,7 +464,7 @@ const mcpInstall = (res, name, values) => {
     if (value.secret !== false && values[value.name]) mcpEnv.set(value.name, values[value.name])
   }
   mcpRemoved.delete(entry.name)
-  if (!mcpRows().some((row) => row.name === entry.name)) {
+  if (!mcpInstalled(entry.name)) {
     mcpAdded.set(entry.name, {
       name: entry.name,
       state: "on",
