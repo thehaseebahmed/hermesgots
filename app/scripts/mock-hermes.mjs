@@ -79,6 +79,10 @@
 // plugin/dictation.py with faster-whisper; MOCK_DICTATION=off reports it unavailable (the mic hides)
 // and MOCK_DICTATION=fail answers every clip with an error. GET /__mock/dictation lists the clips it
 // was sent (size, type, hint and the text before each), for the regression script.
+// GET /api/plugins/memento/mcp lists the bot's MCP servers, POST …/mcp/{name}/enabled switches one
+// and DELETE …/mcp/{name} takes one away (held in `mcpRemoved` apart from the definition above),
+// with MOCK_MCP=off a plugin that has neither route nor feature; POST /__mock/mcp puts back every
+// server a flow removed.
 // Research missions (GET and POST /api/plugins/memento/research, …/research/{id} and its actions)
 // live in mock-research.mjs.
 //
@@ -353,6 +357,28 @@ const MCP_SERVERS = [
   { name: "notion", state: "needs_access", enabled: true, source: "config", reason: null },
   { name: "filesystem", state: "plugin", enabled: true, source: "plugin", reason: null },
 ]
+// The servers a flow has removed, held apart from the definition above so the rest of the suite
+// still finds every one of them: a removal is the one change here that isn't put back by the flow
+// that made it (there is nothing to add it with yet), so it is cleared through POST /__mock/mcp.
+const mcpRemoved = new Set()
+const mcpRows = () => MCP_SERVERS.filter((server) => !mcpRemoved.has(server.name))
+// The server a write is for, or null once the refusal has been answered: a name the bot's config
+// doesn't have, or one a Hermes plugin provides, which Hermes refuses to modify. Both writes — the
+// toggle and the removal — answer the plugin's own refusal the same way, so both ask this.
+const mcpWritableServer = (res, name) => {
+  const server = mcpRows().find((row) => row.name === name)
+  if (!server) {
+    json(res, 400, { error: { message: `No MCP server named '${name}' on this bot.` } })
+    return null
+  }
+  if (server.source === "plugin") {
+    json(res, 400, {
+      error: { message: `${name} is provided by a Hermes plugin, so it can't be changed.` },
+    })
+    return null
+  }
+  return server
+}
 
 /** How long a pull request's checks run after a turn says "pending", before they pass. */
 const PENDING_CHECK_S = 12
@@ -1443,7 +1469,7 @@ http
       return json(res, 200, {
         name: "memento",
         version: PLUGIN_VERSION,
-        features: ["cron_runs", "session_label", "chats", "draft_text", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "goal", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "skills", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : []), ...(MCPS ? ["mcps", "mcps_write"] : [])],
+        features: ["cron_runs", "session_label", "chats", "draft_text", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "goal", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "skills", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : []), ...(MCPS ? ["mcps", "mcps_write", "mcps_remove"] : [])],
         clarify: true,
         hooks: true,
         goal:
@@ -1471,7 +1497,7 @@ http
     // The Bot's MCP servers for a screen of its own. The `/p/<profile>` copy lands here too, since
     // the plugin's prefix carries the profile and is stripped just above.
     if (PLUGIN && MCPS && !profile && url.pathname === "/api/plugins/memento/mcp") {
-      return json(res, 200, { object: { servers: MCP_SERVERS } })
+      return json(res, 200, { object: { servers: mcpRows() } })
     }
     // Flipping one of those servers on or off. The write lands on the row the app renders back, and
     // the mock's own list follows it so a later read agrees. A server a Hermes plugin provides can't
@@ -1480,18 +1506,25 @@ http
     if (PLUGIN && MCPS && !profile && mcpEnabled && req.method === "POST") {
       const name = decodeURIComponent(mcpEnabled[1])
       const { enabled } = await readBody(req)
-      const server = MCP_SERVERS.find((row) => row.name === name)
       if (typeof enabled !== "boolean")
         return json(res, 400, { error: { message: 'Body must be {"enabled": true} or {"enabled": false}' } })
-      if (!server) return json(res, 400, { error: { message: `No MCP server named '${name}' on this bot.` } })
-      if (server.source === "plugin")
-        return json(res, 400, {
-          error: { message: `${name} is provided by a Hermes plugin, so it can't be changed.` },
-        })
+      const server = mcpWritableServer(res, name)
+      if (!server) return
       server.state = enabled ? "on" : "off"
       server.enabled = enabled
       server.reason = null
       return json(res, 200, { object: { server } })
+    }
+    // Taking one away, the way the plugin's own DELETE does: the server goes and the answer is what
+    // the bot has left, so the app's list is the mock's own and not the row it guessed was gone. A
+    // server a Hermes plugin provides, or one that isn't there, answers the plugin's own refusal.
+    const mcpRemove = url.pathname.match(/^\/api\/plugins\/memento\/mcp\/([^/]+)$/)
+    if (PLUGIN && MCPS && !profile && mcpRemove && req.method === "DELETE") {
+      const name = decodeURIComponent(mcpRemove[1])
+      const server = mcpWritableServer(res, name)
+      if (!server) return
+      mcpRemoved.add(name)
+      return json(res, 200, { object: { servers: mcpRows() } })
     }
     // Web Push: the mock keeps subscriptions but sends nothing.
     if (PLUGIN && !profile && req.method === "POST" && url.pathname === "/api/plugins/memento/push") {
@@ -1969,6 +2002,12 @@ http
         if (name) reason.project = name
       }
       return json(res, 200, { object: "memento.runs", sessions, run_ids, waiting })
+    }
+    if (url.pathname === "/__mock/mcp" && req.method === "POST") {
+      // Dev only: puts back every MCP server a flow has removed, so the rest of the suite still
+      // finds the mock's whole list (there is nothing to add one back with through the app yet).
+      mcpRemoved.clear()
+      return json(res, 200, { object: { servers: mcpRows() } })
     }
     if (url.pathname === "/__mock/dictation" && req.method === "GET") {
       return json(res, 200, { clips: dictationClips })

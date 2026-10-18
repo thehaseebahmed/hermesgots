@@ -2,11 +2,12 @@
  * A bot's MCP servers, read from its Host's Gots plugin (`GET <plugin>/mcp`), with nothing kept on
  * the device. The screen reads once on open and again only while a server is in a state that moves
  * on its own — connecting, or waiting on Server access — and `setEnabled` switches one on or off
- * through the plugin, replacing that row with the state the change landed in. The row and the screen
- * exist only where the plugin advertises the feature, and a row's switch only where it advertises
- * that it can write, so a Bot whose Hermes is behind has neither and is sent back to its editor,
- * while a Bot whose Host hasn't answered yet is left to answer rather than flashing its screen away.
- * A plugin without the route is left alone like every other optional one.
+ * through the plugin, replacing that row with the state the change landed in, while `remove` takes
+ * one away and replaces the whole list with what the Host says is left. The row and the screen
+ * exist only where the plugin advertises the feature, and a row's switch and its removal only where
+ * it advertises that it can write, so a Bot whose Hermes is behind has neither and is sent back to
+ * its editor, while a Bot whose Host hasn't answered yet is left to answer rather than flashing its
+ * screen away. A plugin without the route is left alone like every other optional one.
  */
 import { useCallback, useState, useSyncExternalStore } from "react"
 
@@ -16,6 +17,7 @@ import { MCP_WORK_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import {
   getPluginFeatureList,
   listMcpServers,
+  removeMcpServer,
   setMcpServerEnabled,
   type HermesConfig,
   type McpServer,
@@ -30,6 +32,9 @@ const FEATURE = "mcps"
 
 /** The feature it advertises when its Hermes can switch one too; the switch needs its own built-ins. */
 const WRITE_FEATURE = "mcps_write"
+
+/** The feature it advertises when it can also remove one; a removal needs two built-ins more. */
+const REMOVE_FEATURE = "mcps_remove"
 
 /** Gots' own word for each state a server can be in; Hermes's finer states collapse into these. */
 export const MCP_STATE_WORDS: Record<McpState, string> = {
@@ -73,13 +78,15 @@ async function readFeature(config: HermesConfig) {
 export type McpFeatureAnswer = "unknown" | "yes" | "no"
 
 /**
- * What this Bot's plugin answered about its MCP servers: `list` for the feature the read needs, and
- * `write` for the switch, which needs a different set of Hermes built-ins and so is advertised apart
- * from it. One read of the plugin's features answers both.
+ * What this Bot's plugin answered about its MCP servers: `list` for the feature the read needs,
+ * `write` for the switch, and `removable` for the removal, each of which needs a different set of
+ * Hermes built-ins and so is advertised apart from the others. One read of the plugin's features
+ * answers all three.
  */
 export function useMcpFeatureAnswers(server: McpServerConfig): {
   list: McpFeatureAnswer
   write: McpFeatureAnswer
+  removable: McpFeatureAnswer
 } {
   const baseUrl = server?.baseUrl ?? ""
   const apiKey = server?.apiKey ?? ""
@@ -91,11 +98,12 @@ export function useMcpFeatureAnswers(server: McpServerConfig): {
   }
   const list = useSyncExternalStore(subscribe, () => read(FEATURE))
   const write = useSyncExternalStore(subscribe, () => read(WRITE_FEATURE))
+  const removable = useSyncExternalStore(subscribe, () => read(REMOVE_FEATURE))
   usePoll(() => void readFeature({ baseUrl, apiKey }), false, [baseUrl, apiKey], {
     active: Boolean(key),
     onShow: false,
   })
-  return { list, write }
+  return { list, write, removable }
 }
 
 /** What this Bot's plugin answered about its MCP servers (see `McpFeatureAnswer`). */
@@ -118,8 +126,9 @@ const unsupported = cooldown()
  * The Bot's MCP servers, read once when the screen opens and again only while one is connecting or
  * waiting on Server access. Undefined until a read lands; a read that fails leaves what the screen
  * has, since an unreachable Host must not take the screen down with it. `setEnabled` switches one
- * server on or off on the Host and replaces its row with the state the change landed in; a write
- * that fails is thrown for the screen to report, leaving the row as it was.
+ * server on or off on the Host and replaces its row with the state the change landed in, and
+ * `remove` takes one away and replaces the list with the servers the Host says are left; a write
+ * that fails is thrown for the screen to report, leaving the list as it was.
  */
 export function useMcpServers(server: McpServerConfig, active: boolean) {
   const [servers, setServers] = useState<McpServer[] | undefined>(undefined)
@@ -162,5 +171,18 @@ export function useMcpServers(server: McpServerConfig, active: boolean) {
     },
     [baseUrl, apiKey],
   )
-  return { servers, setEnabled }
+  const remove = useCallback(
+    async (name: string) => {
+      // The Host's own answer is what the list becomes, so a row that went and one that moved with
+      // it cannot disagree with the Bot's servers.
+      const left = await removeMcpServer(
+        { baseUrl, apiKey },
+        name,
+        AbortSignal.timeout(WRITE_TIMEOUT_MS),
+      )
+      setServers(left)
+    },
+    [baseUrl, apiKey],
+  )
+  return { servers, setEnabled, remove }
 }
