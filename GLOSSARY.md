@@ -92,8 +92,7 @@ The permission an MCP server needs from the service it talks to. It is given in 
 _Avoid_: authorization, OAuth, sign in, connect
 
 **Model pick**:
-The model a chat sends its turns with — the chat's own pick, else its bot's. Gots' own setting, and a
-wish: what runs is the host's.
+The model a chat sends its turns with — the chat's own pick, else its bot's. Gots' own setting, and a wish: what runs is the host's.
 _Avoid_: model choice, selected model, current model
 
 **Model change**:

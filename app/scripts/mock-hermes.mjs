@@ -1105,8 +1105,9 @@ const HOST_DEFAULT_MODEL = "anthropic/claude-sonnet-4.5"
 const configuredModel = (key) => (key ? `mock-model-${key}` : HOST_DEFAULT_MODEL)
 const hostModel = (key) => hostModels.get(key ?? "")?.model ?? configuredModel(key)
 const hostProvider = (key) => hostModels.get(key ?? "")?.provider ?? null
-// The profile a request is for, from its `/p/<name>/` prefix (the default profile has none).
-const PROFILE_PATH = /^\/p\/([^/]+)(?=\/)/
+// The profile a request is for, from its `/p/<name>/` segment (the default profile has none). The
+// plugin's own routes carry it after `/api/plugins/memento`, so it is matched anywhere in the path.
+const PROFILE_PATH = /(?:^|\/)p\/([^/]+)(?=\/)/
 const profileOf = (req) => PROFILE_PATH.exec(req.url ?? "")?.[1] ?? ""
 // The fallback models the plugin's `fallbacks` route recorded, per profile.
 const fallbacksOf = new Map()

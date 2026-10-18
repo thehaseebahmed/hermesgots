@@ -33,23 +33,28 @@ function heldFor(profile: Profile, current: ModelChoice | undefined) {
   return !current || profile.contextModel === fullModel(current)
 }
 
+/** The read in flight per chat, if any, which the next ask waits on rather than racing. */
+const inFlight = new Map<string, Promise<void>>()
+
 /**
  * Reads a chat's context use from its server's Gots plugin, which sees every model call, so each
  * device shows the same exact figure. Hermes's API has nothing to work it out from, so chats without
  * the plugin aren't tracked.
+ *
+ * A turn's end and the send right after it can ask for the same record at once. One read runs at a
+ * time per chat and the second follows the first: joining it instead would hand back a read that
+ * started before the turn ended, leaving that turn's row out, and two at once would let the older
+ * answer land last and put an older list back.
  */
-/**
- * The read in flight per chat, if any: a turn's end and the send that follows it can ask for the same
- * record at the same moment, and a second request would only race the first — the older answer landing
- * last puts an older list back.
- */
-const refreshing = new Map<string, Promise<void>>()
-
 export function refreshContext(conversationId: string): Promise<void> {
-  const pending = refreshing.get(conversationId)
-  if (pending) return pending
-  const read = readContext(conversationId).finally(() => refreshing.delete(conversationId))
-  refreshing.set(conversationId, read)
+  const previous = inFlight.get(conversationId) ?? Promise.resolve()
+  const read = previous
+    .catch(() => {})
+    .then(() => readContext(conversationId))
+    .finally(() => {
+      if (inFlight.get(conversationId) === read) inFlight.delete(conversationId)
+    })
+  inFlight.set(conversationId, read)
   return read
 }
 

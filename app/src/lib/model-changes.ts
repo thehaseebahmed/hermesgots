@@ -76,7 +76,9 @@ function turnModel(
 /**
  * The dividers to draw, as a map of message id to the model to name above it: the first message of
  * each turn whose known model differs from the previous known one. A turn neither the host nor a
- * pick covers stays unknown, and unknown never counts as different — so no divider is ever wrong.
+ * pick covers stays unknown, and unknown never counts as different, so a model is never invented. The
+ * newest turn's pick can still name one the host did not run, until that turn's own row lands
+ * (ADR 0010); the row that arrives with the turn below it corrects it.
  */
 export function modelChanges(messages: Message[], changes?: ModelChange[]): Map<string, string> {
   const dividers = new Map<string, string>()

@@ -109,6 +109,18 @@ test("so a switch shows from the moment its turn starts, not when the turn ends"
   assert.deepEqual([...modelChanges(thread, [change(100, sonnet)])], [["u2", gpt]])
 })
 
+test("a turn still being written keeps its pick even with a newer turn below it", () => {
+  // The queued case in ADR 0010: the turn that started while an older one streamed ends, so `end` is
+  // finite and only `running` can carry the pick — the host hasn't named that turn's call yet.
+  const thread = [
+    ...turn(1, 100),
+    message("u2", "user", 200),
+    message("a2", "assistant", 201, { model: gpt, status: "streaming" }),
+    ...turn(3, 300, gpt),
+  ]
+  assert.deepEqual([...modelChanges(thread, [change(100, sonnet)])], [["u2", gpt]])
+})
+
 test("the host's own row for the newest turn replaces its pick", () => {
   // The turn asked for one model and the host ran a third: its row inside the turn is the word on what
   // happened, so the divider names that, not the pick. (Rows only exist where the model differs from

@@ -1235,7 +1235,7 @@ already has to describe the split, crediting `model-changes.ts` for a read it do
   left where the other read scheduling lives.
 - Why it is risky: it splits a shared write path (the missing-route branch clears both fields
   together) and moves a read's scheduling into a second owner, which the ADR deliberately kept in one
-  place. ADR 0009 settles the *exception* (one fired, unawaited read on a send); which function fires
+  place. ADR 0010 settles the *exception* (one fired, unawaited read on a send); which function fires
   it is the part it does not.
 
 ## Not entries

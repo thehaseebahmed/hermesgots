@@ -113,6 +113,9 @@ await flow("model-switch", async ({ page, seed, send, lastReply, until, shot }) 
     const { db } = await import("/src/lib/db.ts")
     await db.conversations.update(id, { modelChanges: undefined })
   }, chatId())
+  // The wipe has to stick: the turn-end read lands after `done()`, and were it to write the record
+  // back the next send would have nothing to ask for — the divider would come from the old path.
+  await until(async () => (await stored(chatId())).length === 0, 3_000, "the record to be cleared")
   await pick(gpt)
   await send("carry on")
   // One poll for both facts: a divider up while the turn is still being written is the whole point, so
