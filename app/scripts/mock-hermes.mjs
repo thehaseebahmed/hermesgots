@@ -1005,7 +1005,8 @@ async function playTurn(req, body, last, out) {
   const prompt_tokens = calls * (6000 + Math.round(transcript / 4))
   if (keyed) {
     // The model that ran: what the turn asked for, else the host's own — the plugin's hook records a
-    // row for every call either way, so a chat whose turns were never picked for still has rows.
+    // row for a session's first call and again whenever the model differs from the last row, so a chat
+    // whose turns were never picked for still has one.
     const key = profileOf(req)
     const model = typeof body.model === "string" ? body.model : hostModel(key)
     const provider = typeof body.provider === "string" ? body.provider : hostProvider(key)

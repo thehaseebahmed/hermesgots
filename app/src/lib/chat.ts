@@ -306,8 +306,7 @@ function streamHandlers(turn: Turn): StreamHandlers {
       if (existing) {
         existing.status = event.status
         if (event.status !== "running") existing.endedAt = Date.now()
-        if (event.status === "completed")
-          void onTodoTool(turn.conversationId, existing.tool)
+        if (event.status === "completed") void onTodoTool(turn.conversationId, existing.tool)
         // A question's full result is written when it's answered; the stream's preview is cut short.
         if (event.result && !(existing.tool === "clarify" && existing.result))
           existing.result = event.result
@@ -1013,8 +1012,8 @@ export async function sendMessage(
   const config = serverConfig(profile)
   // A turn can only be divided from the one above it, and the host's record is the only thing that can
   // name a turn this device never picked a model for. So ask for it as the turn opens, rather than
-  // waiting for the turn's own end to read it: a switch then shows while a long turn runs. Fired, not
-  // awaited — a read never sits on the send path.
+  // waiting for the turn's own end to read it: a switch then shows while a long turn runs. Fired and
+  // never awaited, the one read started here: the send waits on no read.
   if (unknownLastTurn(history, conversation.modelChanges)) void refreshContext(conversationId)
   const turn = openTurn(conversationId, config, reply, false, controller)
   const { status, sendFailed } = await runTurn(turn, async () => {

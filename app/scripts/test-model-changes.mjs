@@ -5,6 +5,7 @@ import { modelChanges, unknownLastTurn } from "../src/lib/model-changes.ts"
 
 const sonnet = "anthropic/claude-sonnet-4.5"
 const gpt = "openai/gpt-5"
+const gemini = "google/gemini-2.5-pro"
 
 const message = (id, role, createdAt, extra = {}) => ({
   id,
@@ -109,10 +110,20 @@ test("so a switch shows from the moment its turn starts, not when the turn ends"
 })
 
 test("the host's own row for the newest turn replaces its pick", () => {
-  // The pick never reached the host: its call is recorded running the model it was already on.
+  // The turn asked for one model and the host ran a third: its row inside the turn is the word on what
+  // happened, so the divider names that, not the pick. (Rows only exist where the model differs from
+  // the last one, as the plugin's hook writes them — never two in a row for the same model.)
   const thread = [...turn(1, 100), ...turn(2, 200, gpt)]
-  const dividers = modelChanges(thread, [change(100, sonnet), change(250, sonnet)])
-  assert.deepEqual([...dividers], [])
+  const dividers = modelChanges(thread, [change(100, sonnet), change(250, gemini)])
+  assert.deepEqual([...dividers], [["u2", gemini]])
+})
+
+test("a turn the host recorded nothing for keeps its pick", () => {
+  // The record's silence is not an answer for a turn it hasn't spoken for yet: the pick is the newer
+  // word on what runs, and the record's own row replaces it the moment a read brings one.
+  const thread = [...turn(1, 100), ...turn(2, 200, gpt)]
+  const dividers = modelChanges(thread, [change(100, sonnet)])
+  assert.deepEqual([...dividers], [["u2", gpt]])
 })
 
 test("a turn with a newer one below it keeps the model the host carried into it", () => {

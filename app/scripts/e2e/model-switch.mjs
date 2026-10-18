@@ -115,8 +115,14 @@ await flow("model-switch", async ({ page, seed, send, lastReply, until, shot }) 
   }, chatId())
   await pick(gpt)
   await send("carry on")
-  await until(async () => (await divider().count()) === 1, 3_000, "the divider while the turn runs")
-  assert.equal((await lastReply(chatId()))?.status, "streaming", "shown while the turn still runs")
+  // One poll for both facts: a divider up while the turn is still being written is the whole point, so
+  // they have to be true at the same instant to count.
+  await until(
+    async () =>
+      (await divider().count()) === 1 && (await lastReply(chatId()))?.status === "streaming",
+    3_000,
+    "the divider while the turn runs",
+  )
   assert.equal((await divider().innerText()).trim(), gpt, "and names the model it was sent with")
   await shot("blank")
   pass("a switch this device has no model for shows as the turn opens")
