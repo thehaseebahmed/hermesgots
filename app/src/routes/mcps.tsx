@@ -405,17 +405,21 @@ function McpEntryForm({
 
   return (
     <>
-      <PopupHeader className="pl-16">
+      {/* The back control and the title share one row so the two line up: an absolutely placed control
+          beside a centred title leaves the title off the sheet's middle and the control sitting low. */}
+      <PopupHeader className="flex-row items-center gap-2 pl-2 text-left">
         <Button
           variant="ghost"
           size="icon-lg"
-          className="absolute top-1.5 left-2 size-11"
+          className="size-11 shrink-0"
           aria-label="Catalogue"
           onClick={onBack}
         >
           <ArrowLeftIcon />
         </Button>
-        <PopupTitle>{name}</PopupTitle>
+        <div className="min-w-0 flex-1">
+          <PopupTitle className="justify-start text-left">{name}</PopupTitle>
+        </div>
       </PopupHeader>
       <div className="flex flex-col gap-4 px-6 pt-2 pb-4">
         {/* A read that came back an error: said, rather than left as a form with nothing in it. */}
@@ -425,15 +429,18 @@ function McpEntryForm({
         <FieldGroup>
           {entry?.values.map((value) => (
             <Field key={value.name} data-value={value.name} data-required={value.required}>
-              <FieldLabel htmlFor={`mcp-value-${value.name}`}>
+              <FieldLabel htmlFor={value.set ? undefined : `mcp-value-${value.name}`}>
                 {value.name}
                 {value.required && !value.set && <Badge variant="outline">Required</Badge>}
+                {/* The Host answers only whether it holds a value for a declared one, never the value
+                    itself, so a value it already has is a word beside the name rather than a control
+                    stretched across the field. */}
+                {value.set && <Badge variant="secondary">Set</Badge>}
               </FieldLabel>
-              {value.set ? (
-                <Badge variant="secondary">Set</Badge>
-              ) : (
+              {!value.set && (
                 <Input
                   id={`mcp-value-${value.name}`}
+                  className="h-11"
                   // A credential is masked as it is typed; a plain value is not.
                   type={value.secret ? "password" : "text"}
                   autoComplete="off"
