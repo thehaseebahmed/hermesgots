@@ -66,17 +66,28 @@ export function SlashMenu({
     }
     measure()
     // The composer grows upward with what it carries (attachment tiles, wrapped text), which moves
-    // the room; so does the keyboard, which only the visual viewport hears about.
+    // the room; so does the keyboard, which only the visual viewport hears about. A viewport that
+    // moves fires those per frame at most, so the room is read on the frame: one rect a frame while
+    // a phone's keyboard or a scroll is moving, however many events arrive inside it.
+    let frame = 0
+    const soon = () => {
+      if (frame) return
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        measure()
+      })
+    }
     const observer = new ResizeObserver(measure)
     if (box.current?.parentElement) observer.observe(box.current.parentElement)
-    window.addEventListener("resize", measure)
-    window.visualViewport?.addEventListener("resize", measure)
-    window.visualViewport?.addEventListener("scroll", measure)
+    window.addEventListener("resize", soon)
+    window.visualViewport?.addEventListener("resize", soon)
+    window.visualViewport?.addEventListener("scroll", soon)
     return () => {
+      cancelAnimationFrame(frame)
       observer.disconnect()
-      window.removeEventListener("resize", measure)
-      window.visualViewport?.removeEventListener("resize", measure)
-      window.visualViewport?.removeEventListener("scroll", measure)
+      window.removeEventListener("resize", soon)
+      window.visualViewport?.removeEventListener("resize", soon)
+      window.visualViewport?.removeEventListener("scroll", soon)
     }
   }, [])
 
