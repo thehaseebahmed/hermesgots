@@ -74,6 +74,8 @@ elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` l
 | `fallback-models` | A bot's fallback models are recorded on its host from its settings: two picks in order, one removed, and no third offered |
 | `mcps` | A bot's editor row opens its MCP servers, with Gots' own state words, a failed one's reason, a switch per server it owns flipped off and back on, and an empty state, at phone and tablet widths |
 | `mcps-gate` | A bot whose plugin answers without `mcps` has neither the row nor the screen (its screen's URL lands back on the bot), and one that lists servers without `mcps_write` lists them with no switch: no console error either way |
+| `mcps-remove` | A removal is offered on each of a bot's own MCP servers and on none a Hermes plugin provides, a cancel sends nothing, and a confirmed one takes the server away with the list showing what is left, at phone and tablet widths, light and dark |
+| `mcps-catalogue` | The Add action opens Hermes's Catalogue with every entry the host offers, each one the bot already has marked Added, a search narrowing it by name and by Hermes's own description, a search matching nothing saying so, reopening showing every entry again, and nothing added, at phone and tablet widths, light and dark |
 
 The new flows live in `app/scripts/e2e/`. The older ones are `app/scripts/regression-*.mjs`, which
 the CLI runs by name.

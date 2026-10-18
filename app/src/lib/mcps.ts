@@ -32,17 +32,20 @@ import { usePoll } from "@/lib/poll"
 import { noteFailure } from "@/lib/report"
 import { createSignal } from "@/lib/store"
 
-/** The feature the plugin advertises when its Hermes can list a profile's MCP servers. */
-const FEATURE = "mcps"
+/**
+ * Every MCP feature this screen asks its Bot's Host about, by the key it answers under: `list` gates
+ * the screen itself, and the switch, the removal and the Catalogue each have their own, because each
+ * needs a different set of Hermes built-ins and a host may advertise one without another.
+ */
+export const MCP_FEATURES = {
+  list: "mcps",
+  write: "mcps_write",
+  removable: "mcps_remove",
+  catalogue: "mcps_catalogue",
+} as const
 
-/** The feature it advertises when its Hermes can switch one too; the switch needs its own built-ins. */
-const WRITE_FEATURE = "mcps_write"
-
-/** The feature it advertises when it can also remove one; a removal needs two built-ins more. */
-const REMOVE_FEATURE = "mcps_remove"
-
-/** The feature it advertises when it can read Hermes's Catalogue too; browsing has its own built-ins. */
-const CATALOGUE_FEATURE = "mcps_catalogue"
+/** What each of those features this Bot's Host answered (see `McpFeatureAnswer`). */
+export type McpFeatureAnswers = Record<keyof typeof MCP_FEATURES, McpFeatureAnswer>
 
 /** Gots' own word for each state a server can be in; Hermes's finer states collapse into these. */
 export const MCP_STATE_WORDS: Record<McpState, string> = {
@@ -62,6 +65,27 @@ function keepsReading(servers: McpServer[] | undefined) {
   return Boolean(
     servers?.some((server) => server.state === "connecting" || server.state === "needs_access"),
   )
+}
+
+/**
+ * Lands one of the screen's reads in `set`, or hands its failure to `failed`. Nothing is set or
+ * noted once the read was abandoned — a poll that ended, because the screen closed or the connection
+ * changed, must not write over its successor's answer — and a failure leaves what the screen has, so
+ * an unreachable Host doesn't take it down with it.
+ */
+function landRead<T>(
+  read: (signal: AbortSignal) => Promise<T>,
+  signal: AbortSignal,
+  set: (next: T) => void,
+  failed: (error: unknown) => void,
+) {
+  read(signal)
+    .then((next) => {
+      if (!signal.aborted) set(next)
+    })
+    .catch((error: unknown) => {
+      if (!signal.aborted) failed(error)
+    })
 }
 
 // The feature lists the connections' plugins answered; only a real answer is remembered, so a Host
@@ -86,17 +110,12 @@ async function readFeature(config: HermesConfig) {
 export type McpFeatureAnswer = "unknown" | "yes" | "no"
 
 /**
- * What this Bot's plugin answered about its MCP servers: `list` for the feature the read needs,
- * `write` for the switch, `removable` for the removal, and `catalogue` for browsing Hermes's
- * Catalogue — each of which needs a different set of Hermes built-ins and so is advertised apart
- * from the others. One read of the plugin's features answers them all.
+ * What this Bot's plugin answered about its MCP servers: the feature each control needs — `list` for
+ * the screen itself, `write` for the switch, `removable` for the removal and `catalogue` for browsing
+ * Hermes's Catalogue, each needing a different set of Hermes built-ins and so advertised apart from
+ * the others. One read of the plugin's features answers them all.
  */
-export function useMcpFeatureAnswers(server: McpServerConfig): {
-  list: McpFeatureAnswer
-  write: McpFeatureAnswer
-  removable: McpFeatureAnswer
-  catalogue: McpFeatureAnswer
-} {
+export function useMcpFeatureAnswers(server: McpServerConfig): McpFeatureAnswers {
   const baseUrl = server?.baseUrl ?? ""
   const apiKey = server?.apiKey ?? ""
   const key = baseUrl && apiKey ? connectionKey({ baseUrl, apiKey }) : ""
@@ -105,10 +124,10 @@ export function useMcpFeatureAnswers(server: McpServerConfig): {
     if (!features) return "unknown"
     return features.includes(feature) ? "yes" : "no"
   }
-  const list = useSyncExternalStore(subscribe, () => read(FEATURE))
-  const write = useSyncExternalStore(subscribe, () => read(WRITE_FEATURE))
-  const removable = useSyncExternalStore(subscribe, () => read(REMOVE_FEATURE))
-  const catalogue = useSyncExternalStore(subscribe, () => read(CATALOGUE_FEATURE))
+  const list = useSyncExternalStore(subscribe, () => read(MCP_FEATURES.list))
+  const write = useSyncExternalStore(subscribe, () => read(MCP_FEATURES.write))
+  const removable = useSyncExternalStore(subscribe, () => read(MCP_FEATURES.removable))
+  const catalogue = useSyncExternalStore(subscribe, () => read(MCP_FEATURES.catalogue))
   usePoll(() => void readFeature({ baseUrl, apiKey }), false, [baseUrl, apiKey], {
     active: Boolean(key),
     onShow: false,
@@ -148,20 +167,21 @@ export function useMcpServers(server: McpServerConfig, active: boolean) {
   usePoll(
     (signal) => {
       if (unsupported.cooling(key)) return
-      listMcpServers(config, signal)
-        .then((next) => {
-          if (signal.aborted) return
+      landRead(
+        () => listMcpServers(config, signal),
+        signal,
+        (next) => {
           unsupported.clear(key)
           setServers(next)
-        })
-        .catch((error: unknown) => {
-          if (signal.aborted) return
+        },
+        (error) => {
           // An older plugin has no route to read: nothing is shown, and it is asked again later.
-          void lacksRoute(config, error, FEATURE).then((missing) => {
+          void lacksRoute(config, error, MCP_FEATURES.list).then((missing) => {
             if (missing) return unsupported.start(key)
             noteFailure("Reading the bot's MCP servers", error)
           })
-        })
+        },
+      )
     },
     keepsReading(servers) ? MCP_WORK_MS : false,
     [key],
@@ -209,15 +229,12 @@ export function useMcpCatalogue(server: McpServerConfig, active: boolean) {
   const key = config.baseUrl && config.apiKey ? connectionKey(config) : ""
   usePoll(
     (signal) => {
-      listMcpCatalogue(config, signal)
-        .then((next) => {
-          if (signal.aborted) return
-          setEntries(next)
-        })
-        .catch((error: unknown) => {
-          if (signal.aborted) return
-          noteFailure("Reading the catalogue", error)
-        })
+      landRead(
+        () => listMcpCatalogue(config, signal),
+        signal,
+        setEntries,
+        (error) => noteFailure("Reading the catalogue", error),
+      )
     },
     false,
     [key],

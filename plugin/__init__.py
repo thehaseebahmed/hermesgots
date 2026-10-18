@@ -236,12 +236,14 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # Catalogue are advertised apart from it and from each other, because each needs a different
         # set of built-ins — a host that can list servers may still not be able to switch one, one
         # that can switch may predate the removal, and one may have no Catalogue to add from — and
-        # must not offer a control that can't work.
+        # must not offer a control that can't work. Which built-ins each needs is mcp.py's table.
         # Off the loop: the checks import them.
         serves_mcps = await asyncio.to_thread(mcp.available) is None
-        writes_mcps = serves_mcps and await asyncio.to_thread(mcp.writable) is None
-        removes_mcps = writes_mcps and await asyncio.to_thread(mcp.removable) is None
-        browses_mcps = serves_mcps and await asyncio.to_thread(mcp.browsable) is None
+        mcp_features = [
+            name
+            for name, gate in mcp.FEATURES
+            if serves_mcps and await asyncio.to_thread(gate) is None
+        ]
         return web.json_response(
             {
                 "name": "memento",
@@ -287,10 +289,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "research_rewrite",
                     "community",
                     # Hermes's own MCP built-ins, and the MCP screen with them; see mcp.py.
-                    *(["mcps"] if serves_mcps else []),
-                    *(["mcps_write"] if writes_mcps else []),
-                    *(["mcps_remove"] if removes_mcps else []),
-                    *(["mcps_catalogue"] if browses_mcps else []),
+                    *mcp_features,
                 ],
                 "clarify": asks,
                 "todo_tool": todo_tool,
@@ -397,36 +396,30 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "This Hermes version can't list skills from here.", 501)
         return web.json_response({"object": "list", "data": skills})
 
-    async def list_mcp_servers(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        # The read runs Hermes's own MCP readers inside this bot's profile scope and connects
-        # nothing; a host without those built-ins is a 501, never a 500. See mcp.py.
-        profile = request_profile()
-        try:
-            servers = await asyncio.to_thread(mcp.read, profile)
-        except mcp.McpError as error:
-            return _error(web, str(error), error.status)
-        except ImportError:
-            return _error(web, mcp.UNAVAILABLE, 501)
-        return web.json_response({"object": {"servers": servers}})
+    def mcp_read(call: Any, key: str) -> Any:
+        """A read of Hermes's own MCP machinery: the guard, this bot's profile, the answer's key.
 
-    async def list_mcp_catalogue(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        # Hermes's own Catalogue, read inside this bot's profile scope: the entries it offers and
-        # whether this bot already has each. Nothing is added, connected or written by it; a host
-        # without Hermes's catalogue module is a 501, never a 500. See mcp.py.
-        profile = request_profile()
-        try:
-            entries = await asyncio.to_thread(mcp.catalogue, profile)
-        except mcp.McpError as error:
-            return _error(web, str(error), error.status)
-        except ImportError:
-            return _error(web, mcp.UNAVAILABLE, 501)
-        return web.json_response({"object": {"entries": entries}})
+        The reads share this shape — and the 501 for a host whose Hermes has moved the built-in the
+        call needs — so each route declares only its call and the key its answer carries. The call
+        runs inside ``profile``'s scope and connects nothing; see mcp.py.
+        """
+
+        async def handler(request: "web.Request") -> "web.Response":
+            denied = unauthorized(request)
+            if denied is not None:
+                return denied
+            try:
+                rows = await asyncio.to_thread(call, request_profile())
+            except mcp.McpError as error:
+                return _error(web, str(error), error.status)
+            except ImportError:
+                return _error(web, mcp.UNAVAILABLE, 501)
+            return web.json_response({"object": {key: rows}})
+
+        return handler
+
+    list_mcp_servers = mcp_read(mcp.read, "servers")
+    list_mcp_catalogue = mcp_read(mcp.catalogue, "entries")
 
     async def set_mcp_server_enabled(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)

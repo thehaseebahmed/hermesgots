@@ -59,11 +59,11 @@ same reason the toggle does, and an unknown one.
 
 ``catalogue`` answers what Hermes's own Catalogue offers this bot — every entry Hermes's own
 ``list_catalog`` returns, each marked with whether the profile already has it (Hermes's own
-``is_installed``, read inside the profile's scope). It is a read of the browsing
-half of adding a server: it connects nothing, writes nothing and never touches a value an entry
-declares, so opening it cannot change the bot. A host whose Hermes has no catalogue module raises
-``McpError`` with a 501, and ``browsable()`` is that same check for the ``info`` payload's gate, so
-an older Host is a Bot with no Add action rather than an error.
+``installed_servers``, read once for the whole list, inside the profile's scope). It is a read of the
+browsing half of adding a server: it connects nothing, writes nothing and never touches a value an
+entry declares, so opening it cannot change the bot. A host whose Hermes has no catalogue module
+raises ``McpError`` with a 501, and ``browsable()`` is that same check for the ``info`` payload's
+gate, so an older Host is a Bot with no Add action rather than an error.
 
 Every Hermes symbol is imported late, inside the call that needs it, because a plugin loads before
 the CLI package exists. A host that moved one raises ImportError, which becomes an ``McpError`` the
@@ -72,7 +72,7 @@ route answers as a 501; ``available()`` is that same check, for the ``info`` pay
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # Hermes's runtime status words (``tools.mcp_tool_discovery.get_mcp_status``) in Gots' words.
 # Anything else — ``connected``, ``configured``, ``lazy``, or a word a newer Hermes adds — is on.
@@ -158,20 +158,20 @@ def _hermes_remove() -> Dict[str, Any]:
 def _hermes_catalogue() -> Dict[str, Any]:
     """Hermes's own Catalogue, imported at call time: a plugin loads before the CLI does.
 
-    The entries Hermes offers (``list_catalog``) and, per entry, whether this profile already has one
-    (``is_installed``), which is a config read and so wants the profile's read scope. Nothing here
+    The entries Hermes offers (``list_catalog``) and its own read of the profile's servers
+    (``installed_servers``), a config read and so inside the profile's read scope. Nothing here
     writes, installs or probes anything, so a missing one is a 501 rather than a failure: the app
     then offers no Add action on that Host.
     """
     try:
-        from hermes_cli.mcp_catalog import is_installed, list_catalog
+        from hermes_cli.mcp_catalog import installed_servers, list_catalog
         from hermes_cli.web_server_profiles import _config_profile_scope
     except ImportError as error:
         raise McpError(UNAVAILABLE, 501) from error
     return {
         "scope": _config_profile_scope,
         "list": list_catalog,
-        "installed": is_installed,
+        "installed": installed_servers,
     }
 
 
@@ -292,14 +292,26 @@ def browsable() -> Optional[str]:
     return None
 
 
+# Every feature this module answers for, with the check that says why a host can't offer it: one row
+# per control, because each needs its own built-ins (see each check above). ``info`` advertises
+# exactly the features whose check passes, so a feature is declared here once rather than named by
+# hand beside its gate, in the payload and on the screen.
+FEATURES: Tuple[Tuple[str, Callable[[], Optional[str]]], ...] = (
+    ("mcps", available),
+    ("mcps_write", writable),
+    ("mcps_remove", removable),
+    ("mcps_catalogue", browsable),
+)
+
+
 def catalogue(profile: Optional[str]) -> List[Dict[str, Any]]:
     """Every Catalogue entry ``profile`` is offered, A to Z, each marked with whether it has one.
 
     Hermes's own ``list_catalog`` is the entries — a manifest dir its own CI and approval process
-    curate — and ``is_installed`` is its own read of the profile's config, so the mark says what
-    Hermes itself would. An entry is reported by name and what Hermes says it is; one whose
-    description is missing or empty reads as an empty one rather than being dropped, and the app
-    shows its name alone.
+    curate — and its own read of the profile's servers is the mark, so it says what Hermes itself
+    would. An entry is reported by name and what Hermes says it is; one whose description is
+    missing or empty reads as an empty one rather than being dropped, and the app shows its name
+    alone.
 
     ``profile`` is a profile name, or None for the process's own. Blocking — the catalogue reads a
     directory of manifests and the profile's config, and the scope may hydrate an external secret
@@ -309,19 +321,24 @@ def catalogue(profile: Optional[str]) -> List[Dict[str, Any]]:
     """
     hermes = _hermes_catalogue()
     with hermes["scope"](profile):
-        entries = [
-            _catalogue_entry(entry, hermes["installed"]) for entry in hermes["list"]()
-        ]
+        servers = hermes["installed"]()
+        entries = [_catalogue_entry(entry, servers) for entry in hermes["list"]()]
     return sorted(entries, key=lambda entry: entry["name"])
 
 
-def _catalogue_entry(entry: Any, installed: Any) -> Dict[str, Any]:
-    """One of Hermes's ``CatalogEntry`` objects in the app's own shape. Call it inside the scope."""
+def _catalogue_entry(entry: Any, servers: Dict[str, Any]) -> Dict[str, Any]:
+    """One of Hermes's ``CatalogEntry`` objects in the app's own shape. Call it inside the scope.
+
+    ``servers`` is the profile's servers, read once for the whole Catalogue rather than per entry:
+    Hermes's own per-entry check (``is_installed`` is ``name in installed_servers()``) reads the
+    profile's config on every call, so asking it once per entry would load and expand that config
+    once per entry on a list that can run to dozens.
+    """
     name = getattr(entry, "name", "")
     return {
         "name": name,
         "description": getattr(entry, "description", "") or "",
-        "installed": bool(installed(name)),
+        "installed": name in servers,
     }
 
 

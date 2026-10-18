@@ -38,6 +38,7 @@ def hermes(
     forgotten=None,
     env_writes=None,
     catalogue=None,
+    reads=None,
 ):
     """Hermes's MCP built-ins for one test, faked the way the module imports them.
 
@@ -67,8 +68,9 @@ def hermes(
     the values, so a removal that wrote one shows up in the assertions rather than passing quietly.
 
     ``catalogue`` is what Hermes's own ``list_catalog`` offers — ``{name, description}`` dicts, shaped
-    into the entry objects its own ``CatalogEntry`` dataclass is — and ``is_installed`` reads the same
-    ``store`` the profile's config does, as Hermes's own does.
+    into the entry objects its own ``CatalogEntry`` dataclass is — and ``installed_servers`` reads the
+    same ``store`` the profile's config does, as Hermes's own does. ``reads`` is a list it appends to
+    on every call, so a test can assert the whole Catalogue costs one read rather than one per entry.
 
     The scopes the read enters land on ``hermes_cli.web_server_profiles``'s ``scopes``, and the
     scopes the write enters on ``hermes_cli.web_routers._common``'s ``write_scopes`` — Hermes's own
@@ -232,12 +234,14 @@ def hermes(
         """Hermes's own Catalogue: its entry objects, which carry a name and a description."""
         return [types.SimpleNamespace(**{"description": "", **entry}) for entry in (catalogue or [])]
 
-    def is_installed(name):
-        """Hermes's own read of the profile's config: a server it has an entry for is installed."""
-        return name in store
+    def installed_servers():
+        """Hermes's own read of the profile's config: the servers it has an entry for."""
+        if reads is not None:
+            reads.append(scopes[-1] if scopes else None)
+        return dict(store)
 
     catalog.list_catalog = list_catalog
-    catalog.is_installed = is_installed
+    catalog.installed_servers = installed_servers
 
     oauth = types.ModuleType("tools.mcp_oauth_manager")
     oauth.get_manager = get_manager
@@ -825,6 +829,28 @@ class McpCatalogueTests(unittest.TestCase):
             found,
         )
 
+    def test_the_whole_catalogue_costs_one_read_of_the_profile(self):
+        """The mark is Hermes's own, taken from one read of the profile's servers, inside its scope.
+
+        Hermes's per-entry check reads the profile's config on every call, so marking a catalogue
+        entry by entry would load and expand that config once per entry.
+        """
+        reads = []
+        stubs = hermes(
+            servers={"github": {"command": "npx"}},
+            catalogue=[
+                {"name": "slack", "description": "Read and post in Slack channels."},
+                {"name": "github", "description": "Open, review and land pull requests."},
+                {"name": "postgres", "description": "Query a Postgres database."},
+            ],
+            reads=reads,
+        )
+        with mock.patch.dict(sys.modules, stubs):
+            found = mcp.catalogue("bot-a")
+        self.assertEqual(["bot-a"], reads)
+        # A to Z: github is the one this bot's config has.
+        self.assertEqual([True, False, False], [entry["installed"] for entry in found])
+
     def test_an_entry_with_no_description_reads_as_an_empty_one(self):
         """An entry Hermes says nothing about carries an empty description; the app shows its name."""
         stubs = hermes(catalogue=[{"name": "bare"}])
@@ -914,6 +940,18 @@ class McpFeatureGateTests(unittest.TestCase):
             self.assertIsNone(mcp.writable())
             self.assertIsNone(mcp.removable())
             self.assertIsNone(mcp.browsable())
+
+    def test_the_features_are_declared_once_with_their_own_check(self):
+        """The table ``info`` advertises from: every feature this module answers for and its gate."""
+        self.assertEqual(
+            [
+                ("mcps", mcp.available),
+                ("mcps_write", mcp.writable),
+                ("mcps_remove", mcp.removable),
+                ("mcps_catalogue", mcp.browsable),
+            ],
+            list(mcp.FEATURES),
+        )
 
     def test_a_host_that_can_only_read_still_lists_its_servers(self):
         """The write's built-ins are a different set from the read's, so this combination is real."""

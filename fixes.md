@@ -1314,81 +1314,38 @@ correctness was out of scope — and none of the findings blocks the pull reques
 
 ---
 
-# Deferred fixes from the simplify pass on browsing the MCP Catalogue
+# Deferred fixes from the reviews on browsing the MCP Catalogue
 
-A cleanup review of `feat(settings): browse a bot's Catalogue from its MCP screen` (the same four
-parallel reviewers: reuse, quality, efficiency, altitude) turned up three changes worth making that
-are wider than this branch or belong to a second mechanism. They are recorded here instead of
+Two reviews of `feat(settings): browse a bot's Catalogue from its MCP screen` — `/simplify-code`'s
+four parallel reviewers (reuse, quality, efficiency, altitude) and `/code-review`'s two independent
+passes (the repo's documented standards, and the ticket with its parent spec) — turned up changes
+that are wider than this branch or belong to another mechanism. They are recorded here instead of
 applied.
 
-Everything else the review found is applied on this branch: the sheet's search field is the shared
-`ItemSearch` (`src/components/item-list.tsx`) rather than a fourth hand-built copy of
-`InputGroup` + `SearchIcon`; `useMcpCatalogue` reads once per open (`onShow: false`, as the feature
-answers already did) instead of again on every tab refocus; both hooks take their connection through
-`serverConfig()` rather than rebuilding the `{baseUrl, apiKey}` prologue; the `enabled` mark is gone
-from the answer the plugin, the mock and the app carry, since the screen marks Added from `installed`
-alone; and the entry read is one expression (`getattr(entry, "description", "") or ""`) with the test
-fake shaped like Hermes's own `CatalogEntry`, whose `description` is a required field.
+Everything else both reviews found is applied on this branch. From `/simplify-code`: the sheet's
+search field is the shared `ItemSearch` (`src/components/item-list.tsx`) rather than a fourth
+hand-built copy of `InputGroup` + `SearchIcon`; `useMcpCatalogue` reads once per open
+(`onShow: false`, as the feature answers already did) instead of again on every tab refocus; both
+hooks take their connection through `serverConfig()` rather than rebuilding the `{baseUrl, apiKey}`
+prologue, and now share the read body itself (`landRead`, which owns the never-set-after-abandoning
+rule) with the servers hook; the `enabled` mark is gone from the answer the plugin, the mock and the
+app carry, since the screen marks Added from `installed` alone; and the entry read is one expression
+(`getattr(entry, "description", "") or ""`) with the test fake shaped like Hermes's own
+`CatalogEntry`, whose `description` is a required field.
 
-## Risky
-
-### 1. One place declares an MCP feature, five places wire it
-
-`plugin/mcp.py` answers each feature with its own gate (`available()`, `writable()`, `removable()`,
-`browsable()` at `:178`, `:187`, `:202`, `:280`) over its own importer (`_hermes()`,
-`_hermes_write()`, `_hermes_remove()`, `_hermes_catalogue()` at `:93`, `:111`, `:140`, `:158`), and
-`plugin/__init__.py` repeats the answer a third and fourth time — the `serves_mcps`/`browses_mcps`
-line (`:244`) and the `info` feature literals (`:293`) — with the handler and the route a fifth and
-sixth (`:400`, `:415`, `:1195`). The app repeats it once more as a constant per feature and a field
-per feature (`app/src/lib/mcps.ts:36-45`, `:94`).
-
-- Cost: a new MCP verb is six edits in three files, and nothing ties a gate to its own route, so an
-  import set that drifts from its handler is invisible until a host answers 501.
-- Suggested fix: one table per side — the plugin's mapping a feature name to the built-ins it needs,
-  its route and its handler; the app's `MCP_FEATURES` record the hook's answer is built from — so a
-  verb is declared once and the gates and the `info` answer are derived from it.
-- Why it is risky: it rewrites the per-verb gating this branch's three sibling tickets added and the
-  app hook beside it, so its diff is several times this one's and every existing gate test has to be
-  re-pinned. The import sets themselves stay per verb: the earlier pass on the removal left them that
-  way on purpose (see its notes above), and the fix here is the wiring, not the sets.
-
-### 2. The catalogue read asks Hermes for the profile's config once per entry
-
-`plugin/mcp.py::catalogue` (`:295`) calls `is_installed(name)` for each entry in the catalogue.
-Hermes's own `is_installed` is `name in installed_servers()`, and `installed_servers()` delegates to
-`_get_mcp_servers()` → `load_config()`, which returns a fresh deepcopy of the merged
-`DEFAULT_CONFIG` + `config.yaml` + managed scope, env-expanded, with no cache
-(`notes/mcp-servers/hermes-mcp-internals.md:108-110`, `:132-138`). A catalogue of N entries is N
-config loads, where the module's own servers read deliberately reads once and projects
-(`plugin/mcp.py:381`, one `hermes["status"](servers)` call for every row).
-
-- Cost: a read that only browses scales with the size of Hermes's catalogue — the deeper its
-  catalogue, the more full config parses one opening of the sheet costs.
-- Suggested fix: read `installed_servers()` once inside the scope and mark each entry
-  `name in servers`, the same "read once, project per row" shape `_rows` uses.
-- Why it is risky: it replaces a call to Hermes's own `is_installed` with the plugin deriving the
-  mark from the same dict, which the plugin notes and ADR 0009 push against, and the neighbouring
-  shape — `server_enabled(cfg)`, which Hermes's `is_enabled` body also calls — would put a second
-  `enabled` reader beside `_enabled` (`plugin/mcp.py:405`). Hermes is not installed in the container
-  this branch was written in, so the load count is the notes' documented mechanism rather than a
-  measurement, and the wall-clock saving is unmeasured.
-
-## Careful
-
-### 3. The app's feature answers are four hand-listed fields
-
-`app/src/lib/mcps.ts:94` returns `{list, write, removable, catalogue}` from four
-`useSyncExternalStore` subscriptions (`:108-111`) over four constants (`:36-45`), the screen
-destructures all four (`app/src/routes/mcps.tsx:71`), and the plugin's verdict and the mock's are two
-more hand-kept literals (`plugin/__init__.py:293`, `app/scripts/mock-hermes.mjs:1490`). Nothing ties
-the returned key `catalogue` to the string `CATALOGUE_FEATURE`.
-
-- Cost: one more MCP control touches the hook's signature, its subscriptions and every call site,
-  and a key wired to the wrong constant is a silent wrong answer rather than a failure.
-- Suggested fix: one `MCP_FEATURES` record (key → feature string) that the hook's returned object is
-  built from, or an `answerFor(feature)` so a caller asks by name.
-- Why it is risky: it changes a hook the switch and the removal rows already call, so its diff
-  reaches the sibling tickets' code this branch otherwise never touches.
+From `/code-review`: the plugin's route reference (`plugin/README.md`) documents
+`GET /mcp/catalogue` beside the other MCP routes, and `plugin/mcp.py`'s module docstring no longer
+names a built-in the code doesn't call. The findings about *where a thing is declared* are applied
+too: `plugin/mcp.py`'s `FEATURES` table (`:294`) is now the one place a feature and its gate are
+named, with `info` deriving its advertised list from it rather than naming the four in the payload
+beside three local booleans (`plugin/__init__.py:241`, `:290`), and the app's `MCP_FEATURES` record
+(`app/src/lib/mcps.ts:35`) is the one place a key and its feature string are tied, with
+`useMcpFeatureAnswers` reading every subscription from it. The catalogue also takes Hermes's own read
+of the profile's servers once for the whole list (`installed_servers()`, pinned by
+`test_the_whole_catalogue_costs_one_read_of_the_profile`) where it asked Hermes's per-entry check
+once per entry: N config loads become one, which is the mechanism the notes document rather than a
+measurement — Hermes isn't installed in the container this branch was written in, so the wall-clock
+saving is unmeasured.
 
 ## Rejected, with the evidence
 
@@ -1399,10 +1356,13 @@ the returned key `catalogue` to the string `CATALOGUE_FEATURE`.
   (`plugin/mcp.py::catalogue`'s docstring, and the ticket's read-only scope). The reduced
   name/description/installed shape is the boundary the ticket asks for, not drift from Hermes's
   shape. Re-opening this is only right for the add step, which owns declared values.
-- **Keep the `enabled` mark and surface it, rather than dropping it.** The other half of the same
-  finding was applied instead, in the direction the review preferred: the field is gone from the
-  plugin's answer, the mock's and the app's type, since nothing on the screen reads it and #254 owns
-  the add step that would.
+- **Keep the `enabled` mark and surface it, rather than dropping it.** `#249`'s API contract names
+  this route as "the Catalogue, with installed/enabled per entry and each entry's declared values",
+  and this read answers `installed` alone. The ticket this branch implements (`#253`) asks for the
+  entries and "the ones this Bot already has", and nothing on the screen reads either of the other
+  two: `enabled` would be a field no reader has, and the declared values are what the add step
+  (`#254`) has to show, since they are what a person chooses between. The reduced shape is the
+  ticket's boundary; the rest of the parent's row arrives with the step that needs it.
 
 ## Not entries
 
@@ -1417,6 +1377,12 @@ the returned key `catalogue` to the string `CATALOGUE_FEATURE`.
   exercised with the feature on (`:1490` ties all four to one switch). The fix is a feature setter in
   the mock plus a home in `scripts/e2e/lib.mjs` for `gate()`, which is the e2e harness rather than
   this flow; `gate()` moves when a second flow needs it.
+- **The plugin's routes and handlers stay one per verb** (`plugin/__init__.py:396`, `:1192`). The
+  `FEATURES` table could name each feature's route and handler too, but every route keeps its own
+  handler — the write reads a body, the removal takes a name from the path and answers the list it
+  left — and its own method, so the table would replace three `add_get`/`add_post`/`add_delete` lines
+  with a loop over tuples: the wiring pointing at itself rather than a declaration. What the review
+  found — a feature named by hand beside its gate, in the payload and on the screen — is fixed.
 - **The plugin-answer envelope is unwrapped per reader** (`app/src/lib/hermes.ts:400`,
   `:493`). One `parsePluginObject(value, key, mapper)` would cover them, but the same shape recurs
   across the file's other plugin reads, so the helper is a change to that whole client rather than to
@@ -1424,7 +1390,9 @@ the returned key `catalogue` to the string `CATALOGUE_FEATURE`.
 
 ---
 
-Found by the `/simplify-code` pass on browsing the MCP Catalogue. It was a cleanup review, not a bug
-hunt — correctness was out of scope — and none of the findings blocks the pull request. The one
-efficiency finding it left unapplied is entry 2; the four browser flows that cover this screen and
-the plugin suite were re-run after the pass.
+Found by `/simplify-code`'s four parallel reviewers and `/code-review`'s two independent passes on
+browsing the MCP Catalogue. `/simplify-code` was a cleanup review and `/code-review`'s spec pass
+checked the ticket's own acceptance criteria — all met — so neither was a bug hunt, and none of the
+findings blocks the pull request. Every finding either landed on the branch or is recorded above;
+the plugin suite and the four browser flows that cover this screen were re-run after the last of
+them.
