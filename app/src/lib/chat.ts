@@ -1269,7 +1269,7 @@ export async function queueMessage(
 }
 
 /** Hermes's transcript times are its own clock's, in whole seconds. */
-const CLOCK_SLACK_MS = 5000
+export const CLOCK_SLACK_MS = 5000
 
 const ACTIVE_RUN = new Set(["queued", "running", "waiting_for_approval", "stopping"])
 
