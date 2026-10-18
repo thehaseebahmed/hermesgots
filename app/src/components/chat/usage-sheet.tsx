@@ -252,9 +252,7 @@ export function UsageSheet({
                 <div className="flex items-baseline justify-between gap-4">
                   <Meter.Label className="font-medium">Context window</Meter.Label>
                   <span className="text-muted-foreground tabular-nums">
-                    {usage.tokens || !usage.tracked
-                      ? `${Math.round(filled * 100)}% used`
-                      : "Not used yet"}
+                    {Math.round(filled * 100)}% used
                   </span>
                 </div>
                 <Meter.Track className="h-2 overflow-hidden rounded-full bg-background">

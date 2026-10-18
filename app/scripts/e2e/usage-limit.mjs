@@ -96,6 +96,7 @@ await flow("usage-limit", async ({ page, profileId, seed, until, shot }) => {
   )
   const tokens = (await sheet.locator("text=/ of .* tokens$/").first().textContent()) ?? ""
   assert.doesNotMatch(tokens, /openrouter/, "the meter's own line carries the count alone")
+  assert.doesNotMatch(sheetText, /Not used yet/, "the meter states its percentage and nothing else")
   assert.ok(
     sheetText.indexOf("Session") < sheetText.indexOf("Weekly"),
     "the sheet keeps the route's order",
