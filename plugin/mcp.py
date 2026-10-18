@@ -59,7 +59,7 @@ same reason the toggle does, and an unknown one.
 
 ``catalogue`` answers what Hermes's own Catalogue offers this bot — every entry Hermes's own
 ``list_catalog`` returns, each marked with whether the profile already has it (Hermes's own
-``is_installed`` and ``is_enabled``, read inside the profile's scope). It is a read of the browsing
+``is_installed``, read inside the profile's scope). It is a read of the browsing
 half of adding a server: it connects nothing, writes nothing and never touches a value an entry
 declares, so opening it cannot change the bot. A host whose Hermes has no catalogue module raises
 ``McpError`` with a 501, and ``browsable()`` is that same check for the ``info`` payload's gate, so
