@@ -1106,7 +1106,8 @@ const configuredModel = (key) => (key ? `mock-model-${key}` : HOST_DEFAULT_MODEL
 const hostModel = (key) => hostModels.get(key ?? "")?.model ?? configuredModel(key)
 const hostProvider = (key) => hostModels.get(key ?? "")?.provider ?? null
 // The profile a request is for, from its `/p/<name>/` prefix (the default profile has none).
-const profileOf = (req) => /^\/p\/([^/]+)(?=\/)/.exec(req.url ?? "")?.[1] ?? ""
+const PROFILE_PATH = /^\/p\/([^/]+)(?=\/)/
+const profileOf = (req) => PROFILE_PATH.exec(req.url ?? "")?.[1] ?? ""
 // The fallback models the plugin's `fallbacks` route recorded, per profile.
 const fallbacksOf = new Map()
 // The provider figure every later usage read serves, set by `usage?percent=N` and cleared by
@@ -1208,7 +1209,13 @@ function pumpQueue(sessionId) {
   if (latest?.status === "cancelled" && (latest.endedAt ?? 0) > queue.resumedAt) return
   queue.items.shift()
   // As the plugin does, with the key the app queued it with.
-  const run = startRun({ headers: { "idempotency-key": next.id, authorization: queue.authorization } }, { ...next.body, session_id: sessionId })
+  const run = startRun(
+    {
+      url: queue.url,
+      headers: { "idempotency-key": next.id, authorization: queue.authorization },
+    },
+    { ...next.body, session_id: sessionId },
+  )
   queue.sent.push({ ...next, run_id: run.id, sent_at: Date.now() })
   noteEvent("session", sessionId)
 }
@@ -1242,7 +1249,11 @@ function startRun(req, body) {
   const input = Array.isArray(body.input) ? body.input : [{ role: "user", content: String(body.input ?? "") }]
   const last = durable(input.at(-1)?.content)
   // Rows go to the session named in the body, as on Hermes.
-  const sessionReq = { headers: { ...req.headers, "x-hermes-session-id": body.session_id } }
+  // The url rides along: the profile is read off it when the turn records the model it ran.
+  const sessionReq = {
+    url: req.url,
+    headers: { ...req.headers, "x-hermes-session-id": body.session_id },
+  }
   // Steers the agent has read and not yet answered.
   let heard = []
   if (run.sessionId)
@@ -1356,7 +1367,7 @@ http
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`)
     if (req.method === "OPTIONS") return res.writeHead(200, cors).end()
     // Like a gateway with multiplex_profiles: other profiles live under /p/<profile>/.
-    const profile = /^\/p\/([^/]+)(?=\/)/.exec(url.pathname)?.[1]
+    const profile = PROFILE_PATH.exec(url.pathname)?.[1]
     if (profile) url.pathname = url.pathname.slice(profile.length + 3)
     // The plugin's own prefix carries the profile, since Hermes's /p/<profile>/ catch-all comes first.
     const pluginProfile = /^\/api\/plugins\/memento\/p\/([^/]+)(?=\/)/.exec(url.pathname)?.[1]
@@ -1871,6 +1882,8 @@ http
         const { input: _input, ...template } = body
         queue.template = { ...template, session_id: id }
         queue.authorization = req.headers.authorization
+        // The url too: a queued turn records the model it ran under its own profile.
+        queue.url = req.url
         const item = { id: `q_${randomUUID().replace(/-/g, "").slice(0, 20)}`, text: String(text ?? ""), attachments: attachments ?? [], created_at: Date.now(), body: { ...body, session_id: id } }
         queue.items.push(item)
         noteEvent("session", id)

@@ -97,8 +97,6 @@ wish: what runs is the host's.
 _Avoid_: model choice, selected model, current model
 
 **Model change**:
-The host's record of the models a chat's calls ran on, one row per change. A thread's divider is drawn
-from these, wherever they name a turn; where they don't — the newest turn, or one still being written —
-the model this device sent it with stands until the host has recorded the call.
+The host's record of the models a chat's calls ran on, one row per change. A thread's divider is drawn from these, wherever they name a turn; where they don't — the newest turn, or one still being written — the model this device sent it with stands until the host has recorded the call.
 _Avoid_: model switch, model update, fallback
 

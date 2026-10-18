@@ -38,7 +38,22 @@ function heldFor(profile: Profile, current: ModelChoice | undefined) {
  * device shows the same exact figure. Hermes's API has nothing to work it out from, so chats without
  * the plugin aren't tracked.
  */
-export async function refreshContext(conversationId: string) {
+/**
+ * The read in flight per chat, if any: a turn's end and the send that follows it can ask for the same
+ * record at the same moment, and a second request would only race the first — the older answer landing
+ * last puts an older list back.
+ */
+const refreshing = new Map<string, Promise<void>>()
+
+export function refreshContext(conversationId: string): Promise<void> {
+  const pending = refreshing.get(conversationId)
+  if (pending) return pending
+  const read = readContext(conversationId).finally(() => refreshing.delete(conversationId))
+  refreshing.set(conversationId, read)
+  return read
+}
+
+async function readContext(conversationId: string): Promise<void> {
   const conversation = await db.conversations.get(conversationId)
   const profile = conversation && (await db.profiles.get(conversation.profileId))
   // Keyless chats have no session id Hermes knows.

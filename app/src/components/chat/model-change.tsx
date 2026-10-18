@@ -5,9 +5,9 @@
  */
 
 /**
- * One squiggle per side, each stretched to its half of the row. Ten humps is a rule at any row width,
- * rather than a texture that thickens as the screen widens; the stroke keeps its own width where that
- * stretch would otherwise thin it, and its round ends keep the humps soft.
+ * One squiggle per side, stretched to its half of the row: ten humps a side is a rule at any width,
+ * where more of them at a fixed size read as a texture. The stroke keeps its own width through that
+ * stretch rather than thinning with it, and its round ends keep the humps soft.
  */
 const RISE = " q 0.625 -2 1.25 0 q 0.625 2 1.25 0"
 const HUMPS = 10

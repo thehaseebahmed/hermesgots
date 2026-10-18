@@ -661,7 +661,7 @@ async function finishTurn(turn: Turn, usage: TurnUsage | undefined, sendFailed =
   await turn.close()
   if (!sendFailed) {
     noteFollowUps(conversationId)
-    void refreshContext(conversationId)
+    void refreshContext(conversationId).catch(quietly("Reading a chat's context"))
     void refreshChatProviderUsage(conversationId).catch(quietly("Reading provider limits"))
     void refreshTodos(conversationId)
   }
@@ -1011,10 +1011,11 @@ export async function sendMessage(
 
   const config = serverConfig(profile)
   // A turn can only be divided from the one above it, and the host's record is the only thing that can
-  // name a turn this device never picked a model for. So ask for it as the turn opens, rather than
-  // waiting for the turn's own end to read it: a switch then shows while a long turn runs. Fired and
-  // never awaited, the one read started here: the send waits on no read.
-  if (unknownLastTurn(history, conversation.modelChanges)) void refreshContext(conversationId)
+  // name a turn this device never picked a model for: ask for it as the turn opens, so a switch shows
+  // while a long turn runs. Fired and never awaited, the one read started here. A bot with no key has
+  // no session on the host to read.
+  if (config.apiKey && unknownLastTurn(history, conversation.modelChanges))
+    void refreshContext(conversationId).catch(quietly("Reading a chat's context"))
   const turn = openTurn(conversationId, config, reply, false, controller)
   const { status, sendFailed } = await runTurn(turn, async () => {
     // Without a key Hermes keeps no session under our id, so nothing would sync or resume.

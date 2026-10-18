@@ -44,13 +44,12 @@ function readTurns(messages: Message[]): Turn[] {
  * the turn — the one being written, or the newest one, whose call may not be recorded yet — this
  * device's own pick stands, as it does in the pill. Failing all that, the model this device sent it
  * with. `end` is where the turn's call is known to have run by — the next turn's opening, or unbounded
- * for the turn still at the end of the thread.
+ * for the turn still at the end of the thread, which is what says the host may not have its call yet.
  */
 function turnModel(
   turn: Turn,
   changes: ModelChange[] | undefined,
   end: number,
-  latest: boolean,
 ): ModelChange | undefined {
   const recorded = changes ?? []
   const start = turn.first.createdAt
@@ -64,12 +63,13 @@ function turnModel(
     if (change.at >= start) break
     carried = change
   }
-  // The record named nothing inside this turn, which for the newest one means the host may simply not
-  // have recorded it yet: the pick is the newer word on what it runs, and the record's own row for the
-  // turn replaces it the moment it lands. A turn with a newer one below it has been answered for, and
-  // there the carried model stands — no row inside it means the pick never reached the host at all.
-  if (turn.sent && (turn.running || latest)) return { at: start, model: turn.sent }
-  if (carried) return carried
+  // The record named nothing inside this turn, which for the last turn — or one still being written —
+  // means the host may simply not have recorded it yet: the pick is the newer word on what it runs, and
+  // the record's own row for the turn replaces it the moment it lands. A turn with a newer one below it
+  // has been answered for, and there the carried model stands — no row inside it means the pick never
+  // reached the host at all.
+  const pick = turn.sent && (turn.running || end === Infinity)
+  if (carried && !pick) return carried
   return turn.sent ? { at: start, model: turn.sent } : undefined
 }
 
@@ -84,7 +84,7 @@ export function modelChanges(messages: Message[], changes?: ModelChange[]): Map<
   let carried: string | undefined
   for (const [index, turn] of turns.entries()) {
     const end = turns[index + 1]?.first.createdAt ?? Infinity
-    const model = turnModel(turn, changes, end, index === turns.length - 1)?.model
+    const model = turnModel(turn, changes, end)?.model
     if (model && carried && !sameModel(carried, model)) dividers.set(turn.first.id, model)
     if (model) carried = model
   }
@@ -99,5 +99,5 @@ export function modelChanges(messages: Message[], changes?: ModelChange[]): Map<
  */
 export function unknownLastTurn(messages: Message[], changes?: ModelChange[]): boolean {
   const last = readTurns(messages).at(-1)
-  return last !== undefined && turnModel(last, changes, Infinity, true) === undefined
+  return last !== undefined && turnModel(last, changes, Infinity) === undefined
 }
