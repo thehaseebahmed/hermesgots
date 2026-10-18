@@ -15,7 +15,7 @@ class PluginImportTests(unittest.TestCase):
     MODULES = [
         "alerts", "attachments", "chats", "clarify", "cleanup",
         "clones", "community", "context", "delegation", "events", "github", "goal",
-        "host_model", "link", "media", "merges", "outbox", "skill_catalog",
+        "host_model", "link", "mcp", "media", "merges", "outbox", "skill_catalog",
         "projects", "repos", "sessions", "push", "ship",
         "stream", "todos", "usage",
     ]
