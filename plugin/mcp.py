@@ -531,6 +531,15 @@ def _entry_detail(found: Any, installed: bool, get_env: Callable[[str], Any]) ->
     }
 
 
+def _value_shape(spec: Any) -> Dict[str, Any]:
+    """What both the form and an add's own checks read of one declared value: the Hermes defaults."""
+    return {
+        "name": getattr(spec, "name", ""),
+        "required": getattr(spec, "required", True) is not False,
+        "secret": getattr(spec, "secret", True) is not False,
+    }
+
+
 def _declared_value(spec: Any, get_env: Callable[[str], Any]) -> Dict[str, Any]:
     """One value an entry declares, as the form is built from it.
 
@@ -541,10 +550,8 @@ def _declared_value(spec: Any, get_env: Callable[[str], Any]) -> Dict[str, Any]:
     """
     secret = getattr(spec, "secret", True) is not False
     return {
-        "name": getattr(spec, "name", ""),
+        **_value_shape(spec),
         "prompt": getattr(spec, "prompt", "") or "",
-        "required": getattr(spec, "required", True) is not False,
-        "secret": secret,
         "default": "" if secret else (getattr(spec, "default", "") or ""),
         "set": bool(get_env(getattr(spec, "name", ""))),
     }
@@ -552,14 +559,7 @@ def _declared_value(spec: Any, get_env: Callable[[str], Any]) -> Dict[str, Any]:
 
 def _declared(found: Any) -> List[Dict[str, Any]]:
     """What one entry declares, in the app's own shape: what an add checks its values against."""
-    return [
-        {
-            "name": getattr(spec, "name", ""),
-            "required": getattr(spec, "required", True) is not False,
-            "secret": getattr(spec, "secret", True) is not False,
-        }
-        for spec in _env_specs(found)
-    ]
+    return [_value_shape(spec) for spec in _env_specs(found)]
 
 
 def _env_specs(found: Any) -> List[Any]:
@@ -575,9 +575,9 @@ def _collected(
     """The values an add will write, or the 400 that refuses it before anything is built.
 
     Configuring one MCP is not a general environment-writing primitive, so a key the entry doesn't
-    declare, and so is a name Hermes's own writer would refuse — before
-    the block is built, before the profile's environment is touched and before anything is cloned or
-    written. A value the entry declares required that is neither given nor already held by the bot is
+    declare is refused like a name Hermes's own writer would refuse one — before the block is built,
+    before the profile's environment is touched and before anything is cloned or written. A value the
+    entry declares required that is neither given nor already held by the bot is
     the same refusal, which is the Host's own backstop for the form's own check. "Already held" is
     asked of Hermes's environment read for every declared value, secrets and plain ones alike: a plain
     value lives inlined in the configuration rather than in `.env`, so it is only ever found there when
