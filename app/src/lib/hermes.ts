@@ -446,6 +446,26 @@ export async function setMcpServerEnabled(
   return server
 }
 
+/**
+ * Takes one of the bot's MCP servers away on its Host (the Gots plugin's `DELETE /mcp/<name>`),
+ * answering the servers the bot has left. The Host removes the server the way `hermes mcp remove`
+ * does — its configuration, the directory it cloned and its stored Server access — keeps the values
+ * in the bot's profile environment, and makes the removal live for the bot's next turn; a server a
+ * Hermes plugin provides, or one the bot doesn't have, is refused there.
+ */
+export async function removeMcpServer(
+  config: HermesConfig,
+  name: string,
+  signal?: AbortSignal,
+): Promise<McpServer[]> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/mcp/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+    headers: headers(config),
+    signal,
+  })
+  return parseMcpServers(await response.json())
+}
+
 /** A provider the host has credentials for, and the models Hermes offers on it. */
 export interface ModelProvider {
   /** What Hermes takes as a run's `provider`. */

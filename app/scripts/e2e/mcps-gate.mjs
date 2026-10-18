@@ -3,8 +3,10 @@
 // row in its editor at all, and the screen's own URL brings the user back to the Bot instead of
 // leaving them on a blank page. A Bot whose plugin lists servers but doesn't advertise `mcps_write`
 // — a Hermes whose write built-ins are missing — still lists them, with no switch on any row rather
-// than one whose every tap could only come back refused. The `info` answer is the only thing that
-// changes; nothing logs an error.
+// than one whose every tap could only come back refused. One that switches them but doesn't
+// advertise `mcps_remove` — a plugin older than the removal — keeps its switch and offers no
+// removal, for the same reason. The `info` answer is the only thing that changes; nothing logs an
+// error.
 import { app, assert, flow, pass } from "./lib.mjs"
 
 const run = async ({ page, profileId, shot }) => {
@@ -79,10 +81,30 @@ const run = async ({ page, profileId, shot }) => {
   )
   await shot("no-switches")
 
+  // A plugin that can switch a Bot's servers but predates the removal: the switch is offered and no
+  // row offers a removal, rather than a removal whose every tap could only come back a 404. The
+  // plugin that first shipped the switch is exactly that host.
+  await gate("mcps_remove")
+  await page.goto(`${app}${editor}`)
+  await page.getByRole("link", { name: "MCP servers" }).waitFor({ timeout: 15_000 })
+  await page.goto(`${app}${screen}`)
+  await page.locator('[data-mcp="github"]').waitFor({ timeout: 15_000 })
+  assert.equal(
+    await page.getByRole("switch").count(),
+    5,
+    "the Bot's own servers still have a switch",
+  )
+  assert.equal(
+    await page.getByRole("button", { name: /^Remove / }).count(),
+    0,
+    "a Host that can't remove one offers no removal",
+  )
+  await shot("no-removals")
+
   assert.deepEqual(errors, [], `no error in the console (${errors.join("; ")})`)
 }
 
 await flow("mcps-gate", run)
 pass(
-  "a Bot whose plugin answers without `mcps` has no MCP servers row and its screen's URL returns to the Bot, one that lists servers without `mcps_write` lists them with no switch, and no error is logged",
+  "a Bot whose plugin answers without `mcps` has no MCP servers row and its screen's URL returns to the Bot, one that lists servers without `mcps_write` lists them with no switch, one that switches them without `mcps_remove` keeps its switch and offers no removal, and no error is logged",
 )

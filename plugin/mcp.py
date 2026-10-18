@@ -30,11 +30,11 @@ why it is not working yet and offers the way to grant it. Any other server carri
 reason: Hermes's own ``error`` text rides along whatever the state word, so a server a Hermes plugin
 provides keeps the word ``plugin`` and still says why it failed.
 
-This module owns every verb of the ``/mcp`` routes (#249): the read and the toggle are written, and
-``catalogue``, ``install``, ``remove`` and ``start_access`` belong here too — the Catalogue with
+This module owns every verb of the ``/mcp`` routes (#249): the read, the toggle and the removal are
+written, and ``catalogue``, ``install`` and ``start_access`` belong here too — the Catalogue with
 installed/enabled per entry, adding one from it through Hermes's connection-card path (never
-``install_entry``, which can prompt on stdin and open a curses checklist in the host process),
-removing one the way ``hermes mcp remove`` does, and starting the Server access flow. The read takes
+``install_entry``, which can prompt on stdin and open a curses checklist in the host process), and
+starting the Server access flow. The read takes
 the profile's home-and-secrets scope (``hermes_cli.web_server_profiles._config_profile_scope``) —
 deliberately not ``_profile_scope``, which swaps the skills module's globals under a process-global
 lock for the whole body. A write takes that scope too, under Hermes's config write scope
@@ -47,6 +47,15 @@ consent-gated reload (``/reload-mcp``), which tears every server down and invali
 cache, and it refuses a server a Hermes plugin provides, because Hermes will not modify one. Nothing
 else of a server's configuration — its transport, command, URL, environment, auth — is touched, so
 switching a server off and back on leaves it exactly as it was.
+
+``remove`` takes a server away the way ``hermes mcp remove`` does, and answers what the profile has
+left so the app's list is the Host's own answer rather than the row it guessed was gone: the
+catalogue's own uninstall (``uninstall_entry`` — the configuration entry and the directory Hermes
+cloned for it) and Hermes's OAuth manager, which drops the stored Server access and evicts the
+provider cached in this process. The values in the profile's ``.env`` stay, because Hermes reuses one
+when the same server is added again. Reconcile follows, so the removed server's live connection is
+torn down and the bot's next turn can't use it. It refuses a server a Hermes plugin provides for the
+same reason the toggle does, and an unknown one.
 
 Every Hermes symbol is imported late, inside the call that needs it, because a plugin loads before
 the CLI package exists. A host that moved one raises ImportError, which becomes an ``McpError`` the
@@ -94,10 +103,11 @@ def _hermes() -> Dict[str, Any]:
 def _hermes_write() -> Dict[str, Any]:
     """Hermes's own MCP writers beside the readers, imported at call time.
 
-    Only ``set_enabled`` needs these: the config read and write, the config write scope (the read
-    scope plus Hermes's config-mutation lock) and the reconcile that makes a change live. They are
-    imported separately from ``_hermes``'s readers, so a host that can list servers but lacks the
-    writers still lists them; a host missing any of these raises ``McpError`` with a 501.
+    An import of the config read and write, the config write scope (the read scope plus Hermes's
+    config-mutation lock) and the reconcile that makes a change live. They are imported separately
+    from ``_hermes``'s readers, so a host that can list servers but lacks the writers still lists
+    them; a host missing any of these raises ``McpError`` with a 501, and the app advertises no
+    switch on it.
     """
     try:
         from hermes_cli.config import load_config, save_config
@@ -119,6 +129,24 @@ def _hermes_write() -> Dict[str, Any]:
     }
 
 
+def _hermes_remove() -> Dict[str, Any]:
+    """The writers plus the two calls a removal needs beside them, imported at call time.
+
+    A removal takes a server away the way ``hermes mcp remove`` does, so it needs two more of
+    Hermes's own: the catalogue's uninstall, which drops the configuration entry and the directory
+    Hermes cloned for it, and the process-wide OAuth manager, which drops the server's stored Server
+    access. Both are older than the writers, but a host can have the writers without them, so they
+    are their own set and ``removable`` advertises it apart from the switch.
+    """
+    hermes = _hermes_write()
+    try:
+        from hermes_cli.mcp_catalog import uninstall_entry
+        from tools.mcp_oauth_manager import get_manager
+    except ImportError as error:
+        raise McpError(UNAVAILABLE, 501) from error
+    return {**hermes, "uninstall": uninstall_entry, "oauth": get_manager}
+
+
 def available() -> Optional[str]:
     """Why this host's MCP servers can't be read from here, or None when they can."""
     try:
@@ -131,13 +159,29 @@ def available() -> Optional[str]:
 def writable() -> Optional[str]:
     """Why this host's MCP servers can't be switched from here, or None when they can.
 
-    The write's built-ins are a different set from the read's — the config scope and the reconcile
-    arrived with the dashboard's MCP routes, where the cached status read is newer — so a host can
-    list servers and still not switch one. ``info`` advertises this as its own feature, so the app
-    offers a switch only where one can work.
+    The switch needs Hermes's config read and write, the config write scope and the reconcile, which
+    is a different set from the read's: the scope and the reconcile arrived with the dashboard's MCP
+    routes, where the cached status read is newer. ``info`` advertises this as its own feature, so a
+    host that can list servers but not switch one offers no switch.
     """
     try:
         _hermes_write()
+    except McpError as error:
+        return str(error)
+    return None
+
+
+def removable() -> Optional[str]:
+    """Why this host's MCP servers can't be removed from here, or None when they can.
+
+    A removal needs the switch's writers plus the catalogue's uninstall and the OAuth manager, and a
+    host can have the first without the second — the plugin that first shipped the switch is exactly
+    that host — so this is its own gate rather than part of ``writable``'s. ``info`` advertises it as
+    its own feature too, so a bot whose plugin predates the removal offers no removal rather than one
+    whose every tap is a 404.
+    """
+    try:
+        _hermes_remove()
     except McpError as error:
         return str(error)
     return None
@@ -153,9 +197,7 @@ def read(profile: Optional[str]) -> List[Dict[str, Any]]:
     """
     hermes = _hermes()
     with hermes["scope"](profile):
-        servers, owners = hermes["sources"](hermes["servers"]())
-        found = _rows(hermes, servers, owners)
-    return sorted(found, key=lambda server: server["name"])
+        return _all_rows(hermes)
 
 
 def set_enabled(profile: Optional[str], name: str, enabled: bool) -> Dict[str, Any]:
@@ -175,15 +217,49 @@ def set_enabled(profile: Optional[str], name: str, enabled: bool) -> Dict[str, A
     """
     hermes = _hermes_write()
     with hermes["scope"](profile):
-        servers, owners = hermes["sources"](hermes["servers"]())
-        if name not in servers:
-            raise McpError(f"No MCP server named {name!r} on this bot.", 400)
-        if owners.get(name):
-            raise McpError(f"{name} is provided by a Hermes plugin, so it can't be changed.", 400)
+        _writable_server(hermes, name)
         _write_flag(hermes, name, enabled)
         hermes["reconcile"]()
         servers, owners = hermes["sources"](hermes["servers"]())
         return _rows(hermes, servers, owners, only=name)[0]
+
+
+def remove(profile: Optional[str], name: str) -> List[Dict[str, Any]]:
+    """Take one of ``profile``'s MCP servers away, and answer the servers it has left.
+
+    Matches ``hermes mcp remove``: the server's configuration entry and the directory Hermes cloned
+    for it go through the catalogue's own uninstall, and its stored Server access is dropped through
+    Hermes's OAuth manager, which evicts the provider cached in this process too. The values in the
+    profile's ``.env`` stay, because Hermes reuses one when the same server is added again. Hermes's
+    own reconcile then runs for that profile, so the server's live connection is torn down and the
+    bot's next turn can't use it; the consent-gated reload is never invoked. A server the profile
+    doesn't have, or one a Hermes plugin provides (which Hermes will not modify), is refused.
+
+    ``profile`` is a profile name, or None for the process's own. Blocking — config I/O, a directory
+    removal and a reconcile, which takes a per-home lock and can back off for minutes — so call it
+    from a worker thread, never the event loop. Answers the profile's remaining servers as ``read``
+    shapes them, so the app's list is the Host's own answer rather than the row it dropped.
+    """
+    hermes = _hermes_remove()
+    with hermes["scope"](profile):
+        _writable_server(hermes, name)
+        hermes["uninstall"](name, purge_install_dir=True)
+        hermes["oauth"]().remove(name)
+        hermes["reconcile"]()
+        return _all_rows(hermes)
+
+
+def _writable_server(hermes: Dict[str, Any], name: str) -> None:
+    """Refuse a server the profile doesn't have, or one a Hermes plugin provides.
+
+    Hermes will not modify a server a plugin provides, so neither a switch nor a removal can land on
+    one; both writes ask this the same way, and answer the same 400 for each.
+    """
+    servers, owners = hermes["sources"](hermes["servers"]())
+    if name not in servers:
+        raise McpError(f"No MCP server named {name!r} on this bot.", 400)
+    if owners.get(name):
+        raise McpError(f"{name} is provided by a Hermes plugin, so it can't be changed.", 400)
 
 
 def _write_flag(hermes: Dict[str, Any], name: str, enabled: bool) -> None:
@@ -208,6 +284,16 @@ def _write_flag(hermes: Dict[str, Any], name: str, enabled: bool) -> None:
         raise McpError(f"{name}'s configuration isn't a mapping, so it can't be changed.", 400)
     entry["enabled"] = bool(enabled)
     hermes["save"](config)
+
+
+def _all_rows(hermes: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Every one of the profile's servers as a row, in name order — what a read answers.
+
+    Both the read and a removal answer this shape, so the order the app's list is in lives here
+    rather than in each of them. Call it inside the profile's scope.
+    """
+    servers, owners = hermes["sources"](hermes["servers"]())
+    return sorted(_rows(hermes, servers, owners), key=lambda server: server["name"])
 
 
 def _rows(

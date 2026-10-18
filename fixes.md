@@ -1258,3 +1258,56 @@ Found by the `/simplify-code` pass on the model divider. It was a cleanup review
 it did surface one real defect of this branch's own making: the mock's leaf read the profile off a
 request object with no url, so a named profile's turn recorded the default profile's model. Fixed
 above rather than deferred — it is the fidelity the mock exists for.
+
+---
+
+# Deferred fixes from the simplify pass on removing an MCP server
+
+A cleanup review of `feat(settings): remove an MCP server from its row` (four parallel reviewers:
+reuse, quality, efficiency, altitude) turned up nine findings. Five are applied on this branch, three
+are narrower than an entry and sit under **Not entries** with the reasoning that declined them, and
+one is rejected outright with the evidence that settled it.
+
+Everything else the review found is applied on this branch: the read and a removal answer through one
+`mcp._all_rows`, so the order the app's list is in has one owner instead of one `sorted(...)` tail in
+two functions; the mock's two MCP writes ask one `mcpWritableServer` for the lookup and the two
+refusals, so the plugin's wording is hand-copied in one place instead of two; the feature *answer* is
+named `removable`, so the screen no longer aliases it against `useMcpServers`'s `remove` action; the
+confirmation holds the server's name rather than the row it came from, so one row can't disagree with
+the list it is drawn in; and `/info` checks the removal's gate only once the switch's has passed,
+since `_hermes_remove` is `_hermes_write` plus two imports and cannot succeed where that failed.
+
+## Rejected, with the evidence
+
+### The removal may drift from `hermes mcp remove`
+
+The altitude pass read `plugin/mcp.py::remove` reassembling Hermes's own removal out of granular
+built-ins (the catalogue's uninstall, the OAuth manager, the reconcile) rather than calling a single
+Hermes entry point, and flagged a drift risk. Read at the source the branch pins
+(`NousResearch/hermes-agent` at `bb834a2c`), `hermes_cli/mcp_config.py::cmd_mcp_remove` does exactly
+those two things — `_remove_mcp_server(name)` and `get_manager().remove(name)` — wrapped in a
+confirmation prompt and console output a route may not run. There is no third step to drift from, and
+`uninstall_entry` adds the one thing the CLI leaves behind (the directory Hermes cloned), which the
+ticket asks for by name. Nothing to change; the reasoning lives in the module and PR notes.
+
+## Not entries
+
+- **The flow's mock reset ignores its own response** (`app/scripts/e2e/mcps-remove.mjs`, the
+  `finally`'s `POST /__mock/mcp`). A reset that fails leaves the removed server in the mock for the
+  next flow, which then fails as a missing fixture rather than as a failed reset. It is the house
+  pattern — `prs.mjs` and `plan-mode.mjs` reset the same way — so the fix is a shared dev-only helper
+  for every flow that resets state, not a change to one of them.
+- **The hook's two write callbacks restate their config and timeout** (`app/src/lib/mcps.ts`,
+  `setEnabled` and `remove`). Each needs its own `AbortSignal.timeout(...)` — a shared signal would
+  expire and abort the second call — and the callbacks' dep arrays are the primitives, which is why
+  neither reads the `config` object the poll already builds. A shared wrapper would save a few
+  characters and put the signal's lifetime one indirection away from the call that needs it.
+- **`_hermes_write()` re-imports the readers rather than building on `_hermes()`**
+  (`plugin/mcp.py`). The two sets genuinely differ — the read takes the profile's secret scope, the
+  write Hermes's config write scope — and each 501 names the built-ins its own caller needed, so the
+  split is the module's contract rather than a third layering idiom.
+
+---
+
+Found by the `/simplify-code` pass on this branch. It was a cleanup review, not a bug hunt —
+correctness was out of scope — and none of the findings blocks the pull request.

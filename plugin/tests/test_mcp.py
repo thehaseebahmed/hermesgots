@@ -1,10 +1,11 @@
-"""Tests for the read of a bot's MCP servers (``plugin/mcp.py``).
+"""Tests for the read, the toggle and the removal of a bot's MCP servers (``plugin/mcp.py``).
 
 Hermes's own MCP built-ins — the profile scope, the config reader, the split between a profile's
-servers and a Hermes plugin's, the cached runtime status read, and the stored-access check — are
-stood in for through ``sys.modules`` (the ``test_skills.py`` pattern), so each test asserts only
-this module's own rules: the state word each of Hermes's states becomes, the Host's own reason on a
-failure, the profile scope the read ran in, and that a host without the built-ins advertises
+servers and a Hermes plugin's, the cached runtime status read, the stored-access check, the
+catalogue's own uninstall and the OAuth manager — are stood in for through ``sys.modules`` (the
+``test_skills.py`` pattern), so each test asserts only this module's own rules: the state word each
+of Hermes's states becomes, the Host's own reason on a failure, the profile scope the read or the
+write ran in, what a removal takes with it, and that a host without the built-ins advertises
 nothing.
 
 Run: python3 -m unittest plugin.tests.test_mcp -v
@@ -29,8 +30,12 @@ def hermes(
     plugin_servers=None,
     owners=None,
     tokens=None,
+    env=None,
     reconcile=None,
     saved=None,
+    uninstalled=None,
+    forgotten=None,
+    env_writes=None,
 ):
     """Hermes's MCP built-ins for one test, faked the way the module imports them.
 
@@ -47,6 +52,17 @@ def hermes(
     assert both the saved flag and the scope the write ran in. The config load and save round-trip
     through one ``store``, as Hermes's own do: a write lands in the store, so a read after it sees
     the change.
+
+    ``uninstalled`` is a list the removal's uninstall appends ``(profile, name, purge_install_dir)``
+    to, and ``forgotten`` one the OAuth manager appends ``(profile, name)`` to; each refuses when it
+    is None, so a read or a toggle that reached for a removal fails the test. The uninstall takes the
+    entry out of the ``store`` and the manager takes the name out of the stored-access set, as
+    Hermes's own do.
+
+    ``env`` is the profile's ``.env`` — the values a server's configuration needs — and
+    ``env_writes`` a list Hermes's environment writer appends ``(profile, key)`` to. A removal must
+    leave both alone, since Hermes reuses a value when the same server is added again; the fake keeps
+    the values, so a removal that wrote one shows up in the assertions rather than passing quietly.
 
     The scopes the read enters land on ``hermes_cli.web_server_profiles``'s ``scopes``, and the
     scopes the write enters on ``hermes_cli.web_routers._common``'s ``write_scopes`` — Hermes's own
@@ -84,6 +100,8 @@ def hermes(
     runtime = dict(runtime or {})
     errors = dict(errors or {})
     access = set(tokens or ())
+    env = env if env is not None else {}
+    env_writes = env_writes if env_writes is not None else []
 
     def _get_mcp_servers():
         return {name: entry(cfg) for name, cfg in store.items()}
@@ -142,11 +160,42 @@ def hermes(
     def _oauth_tokens_present(name):
         return name in access
 
+    def uninstall_entry(name, *, purge_install_dir=True):
+        """Hermes's own uninstall: the config entry (through its own write) and its clone dir."""
+        if uninstalled is None:
+            raise AssertionError("the read must not remove a server")
+        uninstalled.append((write_scopes[-1] if write_scopes else None, name, purge_install_dir))
+        if name not in store:
+            return False
+        save_config({"mcp_servers": {other: entry(cfg) for other, cfg in store.items() if other != name}})
+        return True
+
+    class _OAuthManager:
+        """Hermes's own process-wide OAuth manager: the stored access, and the cached provider."""
+
+        def remove(self, name, *, hermes_home=None):
+            if forgotten is None:
+                raise AssertionError("the read must not drop a server's stored access")
+            forgotten.append((write_scopes[-1] if write_scopes else None, name))
+            access.discard(name)
+
+    def get_manager():
+        return _OAuthManager()
+
     def _refuse(what):
         def refuse(*_args, **_kwargs):
             raise AssertionError(f"the read must not {what}")
 
         return refuse
+
+    # Hermes's own environment writer (the profile's `.env`), which a removal must not reach for: the
+    # values stay so adding the server again doesn't mean finding its key a second time.
+    def get_env_value(key):
+        return env.get(key)
+
+    def save_env_value(key, value):
+        env_writes.append((write_scopes[-1] if write_scopes else None, key))
+        env[key] = value
 
     config = types.ModuleType("hermes_cli.mcp_config")
     config._get_mcp_servers = _get_mcp_servers
@@ -157,6 +206,8 @@ def hermes(
     config_module = types.ModuleType("hermes_cli.config")
     config_module.load_config = load_config
     config_module.save_config = save_config
+    config_module.get_env_value = get_env_value
+    config_module.save_env_value = save_env_value
 
     routers = types.ModuleType("hermes_cli.web_routers")
     router_common = types.ModuleType("hermes_cli.web_routers._common")
@@ -168,6 +219,12 @@ def hermes(
     profiles._config_profile_scope = _config_profile_scope
     profiles.scopes = scopes
 
+    catalog = types.ModuleType("hermes_cli.mcp_catalog")
+    catalog.uninstall_entry = uninstall_entry
+
+    oauth = types.ModuleType("tools.mcp_oauth_manager")
+    oauth.get_manager = get_manager
+
     discovery = types.ModuleType("tools.mcp_tool_discovery")
     discovery.get_mcp_status = get_mcp_status
     discovery.discover_mcp_tools = _refuse("connect a server")
@@ -178,10 +235,12 @@ def hermes(
 
     return {
         "hermes_cli.config": config_module,
+        "hermes_cli.mcp_catalog": catalog,
         "hermes_cli.mcp_config": config,
         "hermes_cli.web_routers": routers,
         "hermes_cli.web_routers._common": router_common,
         "hermes_cli.web_server_profiles": profiles,
+        "tools.mcp_oauth_manager": oauth,
         "tools.mcp_tool_discovery": discovery,
         "tui_gateway.mcp_rpc_helpers": helpers,
     }
@@ -558,11 +617,167 @@ class McpToggleTests(unittest.TestCase):
         self.assertEqual(501, caught.exception.status)
 
 
+class McpRemoveTests(unittest.TestCase):
+    """Taking one of a bot's MCP servers away (``mcp.remove``)."""
+
+    def test_removing_a_server_takes_its_entry_and_answers_what_is_left(self):
+        uninstalled, forgotten, reconcile, saved = [], [], [], []
+        stubs = hermes(
+            servers={
+                "obsolete": {"command": "npx", "args": ["-y", "old"]},
+                "kept": {"url": "https://db.example/mcp", "env": {"PGPASSWORD": "${PG_PASSWORD}"}},
+            },
+            reconcile=reconcile,
+            saved=saved,
+            uninstalled=uninstalled,
+            forgotten=forgotten,
+        )
+        with mock.patch.dict(sys.modules, stubs):
+            left = mcp.remove("bot-a", "obsolete")
+            after = mcp.read("bot-a")
+        # The list is what the Host has left, and the entry is gone from the config it wrote.
+        self.assertEqual([("kept", "on")], rows(left))
+        self.assertEqual([("kept", "on")], rows(after))
+        self.assertNotIn("obsolete", saved[-1][1]["mcp_servers"])
+        # Hermes's own uninstall is what removed it, asked to purge the directory it cloned too.
+        self.assertEqual([("bot-a", "obsolete", True)], uninstalled)
+        # The server that stayed keeps everything of its own, its environment values included.
+        self.assertEqual(
+            {"url": "https://db.example/mcp", "env": {"PGPASSWORD": "${PG_PASSWORD}"}},
+            saved[-1][1]["mcp_servers"]["kept"],
+        )
+
+    def test_a_servers_stored_server_access_goes_with_it(self):
+        """``hermes mcp remove`` drops the stored access too, so adding it again needs it granted."""
+        forgotten, uninstalled = [], []
+        stubs = hermes(
+            servers={"drive": {"url": "https://drive.example/mcp", "auth": "oauth"}},
+            tokens=["drive"],
+            reconcile=[],
+            uninstalled=uninstalled,
+            forgotten=forgotten,
+        )
+        with mock.patch.dict(sys.modules, stubs):
+            before = mcp.read("bot-a")
+            left = mcp.remove("bot-a", "drive")
+        self.assertEqual([("drive", "on")], rows(before))
+        self.assertEqual([], left)
+        self.assertEqual([("bot-a", "drive")], forgotten)
+
+    def test_the_removal_and_its_reconcile_run_inside_the_given_profile_scope(self):
+        """The scope is what keeps one bot's removal from touching another bot's servers."""
+        uninstalled, forgotten, reconcile = [], [], []
+        stubs = hermes(
+            servers={"one": {"command": "npx"}, "two": {"command": "npx"}},
+            reconcile=reconcile,
+            uninstalled=uninstalled,
+            forgotten=forgotten,
+        )
+        with mock.patch.dict(sys.modules, stubs):
+            mcp.remove("bot-a", "one")
+            mcp.remove("bot-b", "two")
+        # Each removal entered its own profile's scope — Hermes's own config write scope, not the
+        # read's — and everything it ran ran inside that scope, not after it.
+        self.assertEqual(["bot-a", "bot-b"], stubs["hermes_cli.web_routers._common"].write_scopes)
+        self.assertEqual([("bot-a", "one", True), ("bot-b", "two", True)], uninstalled)
+        self.assertEqual([("bot-a", "one"), ("bot-b", "two")], forgotten)
+        self.assertEqual(["bot-a", "bot-b"], reconcile)
+        self.assertEqual([], stubs["hermes_cli.web_server_profiles"].scopes)
+
+    def test_a_server_a_hermes_plugin_provides_is_refused(self):
+        """Hermes refuses to modify those, so the removal must not try."""
+        uninstalled, forgotten, reconcile = [], [], []
+        stubs = hermes(
+            plugin_servers={"theirs": {"command": "plugin-srv"}},
+            owners={"theirs": "gots-extras"},
+            uninstalled=uninstalled,
+            forgotten=forgotten,
+            reconcile=reconcile,
+        )
+        with mock.patch.dict(sys.modules, stubs):
+            with self.assertRaises(mcp.McpError) as caught:
+                mcp.remove("bot-a", "theirs")
+        self.assertEqual(400, caught.exception.status)
+        self.assertEqual([], uninstalled)
+        self.assertEqual([], forgotten)
+        self.assertEqual([], reconcile)
+
+    def test_an_unknown_server_is_refused(self):
+        uninstalled, forgotten = [], []
+        stubs = hermes(
+            servers={"github": {"command": "npx"}},
+            reconcile=[],
+            uninstalled=uninstalled,
+            forgotten=forgotten,
+        )
+        with mock.patch.dict(sys.modules, stubs):
+            with self.assertRaises(mcp.McpError) as caught:
+                mcp.remove("bot-a", "nope")
+        self.assertEqual(400, caught.exception.status)
+        self.assertEqual([], uninstalled)
+        self.assertEqual([], forgotten)
+
+    def test_the_removal_never_connects_a_server(self):
+        """``discover_mcp_tools`` refuses in the fakes; a removal that reached for it would fail here."""
+        stubs = hermes(
+            servers={"srv": {"command": "npx"}}, reconcile=[], uninstalled=[], forgotten=[]
+        )
+        with mock.patch.dict(sys.modules, stubs):
+            left = mcp.remove("bot-a", "srv")
+        self.assertEqual([], left)
+
+    def test_the_removal_leaves_the_values_in_the_profiles_environment(self):
+        """The values in the profile's ``.env`` stay, so adding the server again means no new key.
+
+        Hermes's own uninstall drops the configuration entry and the directory it cloned and nothing
+        else, and the removal writes no value back: the profile's environment writer is never called.
+        """
+        env = {"PG_PASSWORD": "already-found-once"}
+        env_writes = []
+        stubs = hermes(
+            servers={"obsolete": {"command": "npx", "env": {"PGPASSWORD": "${PG_PASSWORD}"}}},
+            env=env,
+            env_writes=env_writes,
+            reconcile=[],
+            uninstalled=[],
+            forgotten=[],
+        )
+        with mock.patch.dict(sys.modules, stubs):
+            mcp.remove("bot-a", "obsolete")
+        self.assertEqual([], env_writes)
+        self.assertEqual({"PG_PASSWORD": "already-found-once"}, env)
+
+    def test_a_host_without_the_removals_built_ins_refuses_with_501(self):
+        """The removal's own built-ins are what its *own* gate covers, not the switch's.
+
+        A missing one leaves the list and the switch alone where they don't need it — the read's own
+        gate is its own test — and takes the removal out of the ``info`` payload and off the ``remove``
+        route.
+        """
+        for missing in (
+            "hermes_cli.config",
+            "hermes_cli.mcp_catalog",
+            "hermes_cli.web_routers._common",
+            "tools.mcp_oauth_manager",
+            "tools.mcp_tool_discovery",
+            "tui_gateway.mcp_rpc_helpers",
+        ):
+            with self.subTest(missing=missing):
+                stubs = hermes(servers={"srv": {"command": "npx"}}, reconcile=[])
+                stubs[missing] = None
+                with mock.patch.dict(sys.modules, stubs):
+                    self.assertIsInstance(mcp.removable(), str)
+                    with self.assertRaises(mcp.McpError) as caught:
+                        mcp.remove("bot-a", "srv")
+                self.assertEqual(501, caught.exception.status)
+
+
 class McpFeatureGateTests(unittest.TestCase):
     def test_the_hosts_built_ins_are_available(self):
         with mock.patch.dict(sys.modules, hermes()):
             self.assertIsNone(mcp.available())
             self.assertIsNone(mcp.writable())
+            self.assertIsNone(mcp.removable())
 
     def test_a_host_that_can_only_read_still_lists_its_servers(self):
         """The write's built-ins are a different set from the read's, so this combination is real."""
@@ -592,6 +807,23 @@ class McpFeatureGateTests(unittest.TestCase):
                     with self.assertRaises(mcp.McpError) as caught:
                         mcp.set_enabled("bot-a", "srv", False)
                 self.assertEqual(501, caught.exception.status)
+
+    def test_a_host_that_can_switch_but_not_remove_still_offers_the_switch(self):
+        """The plugin that first shipped the switch is exactly that host, and must keep its switch.
+
+        A removal needs two built-ins the switch doesn't, so the two are gated apart: a bot whose
+        plugin predates the removal gets a switch and no removal, rather than a removal whose every
+        tap would be a 404.
+        """
+        for missing in ("hermes_cli.mcp_catalog", "tools.mcp_oauth_manager"):
+            with self.subTest(missing=missing):
+                stubs = hermes(servers={"srv": {"command": "npx"}}, reconcile=[])
+                stubs[missing] = None
+                with mock.patch.dict(sys.modules, stubs):
+                    self.assertIsNone(mcp.writable())
+                    answered = mcp.set_enabled("bot-a", "srv", False)
+                    self.assertEqual(("srv", "off"), (answered["name"], answered["state"]))
+                    self.assertIsInstance(mcp.removable(), str)
 
     def test_the_feature_is_unavailable_when_a_built_in_is_missing(self):
         for missing in (

@@ -139,6 +139,11 @@ const FLOWS = {
     about:
       "A bot whose plugin answers without `mcps` has no row in its editor, and its screen's URL returns to the bot",
   },
+  "mcps-remove": {
+    script: "e2e/mcps-remove.mjs",
+    about:
+      "A removal is offered on each of a bot's own MCP servers and none a Hermes plugin provides, asks first, and leaves the list showing what is left",
+  },
   "fallbacks-silent-host": {
     script: "e2e/fallbacks-silent-host.mjs",
     about: "A host that never answers a fallback write gives the field back instead of wedging it",
