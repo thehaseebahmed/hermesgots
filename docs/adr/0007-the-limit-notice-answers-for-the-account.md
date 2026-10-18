@@ -29,7 +29,7 @@ picked.
   app sees a window — so a spent model-scoped week still reads as the account being out. Sending it is
   the exact fix for that case and it waits: a wire fact whose only consumer is this one rule, arriving
   behind a plugin release, for a case the balance rule (which needs no plugin change, and works against
-  every plugin already installed) does not cover. Recorded in `fixes.md`.
+  every plugin already installed) does not cover. Recorded as the exception below.
 - **Let the sheet carry it, and warn about nothing in the composer.** Rejected: the warning earns its
   place above the composer of a chat that has turns to send, and a state the user has not been told about
   is not one they will go looking for.
@@ -38,7 +38,20 @@ picked.
 
 ## Consequences
 
-- A spent model-scoped window still reads as the account being out, until `scope` reaches the app
-  (`fixes.md`).
+- A spent model-scoped window still reads as the account being out; that is the exception recorded below.
 - The banner's reset line is relative and ticks, so it is honest for as long as it is up; the sheet keeps
   the absolute time in parentheses beside it, since a drawer is read rather than watched.
+
+## The exception this records
+
+A spent **model-scoped** window — Anthropic's Opus week, spent beside a healthy Sonnet week — still reads as
+the account being out, and it is accepted for now rather than fixed. Hermes core marks every window it
+reports with `AccountUsageWindow.scope`, `account` or `model` (the second "can never imply the account is
+out of quota"), and `plugin/usage.py::serialize` drops that field, so an app holding only `label`,
+`used_percent`, `resets_at` and `detail` cannot tell one kind of window from the other. Two reasons it
+waits: the balance rule above needs no plugin change and works against every plugin already in the field,
+which is where the reported trouble has been; and passing over every window core marks `model` is the right
+reading of core's own words but is not yet proven against a live model-scoped account. When such a false
+alarm is reported, the fix is `serialize` keeping `scope` on the wire — an added field an older app ignores
+— and the notice passing over a window core marks `model` when it decides the account is out, with the
+sheet still stating that window like any other. The app has to treat the field as optional either way.

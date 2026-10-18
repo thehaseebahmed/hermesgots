@@ -1,11 +1,11 @@
 # Migrations: moving the app's calculations to the plugin
 
-These files are the remaining work of `docs/adr/0005-calculations-belong-on-the-plugin.md`, split so an
+These files are the remaining work of `docs/adr/0006-calculations-belong-on-the-plugin.md`, split so an
 agent can pick one up without re-deriving the design. Each is a work order: the goal, what the code does
 today, the contract to build, the steps, the pitfalls that bit the first cluster, and how to know it is
 done.
 
-Read `docs/adr/0005-calculations-belong-on-the-plugin.md` first — it is the decision these follow, and it
+Read `docs/adr/0006-calculations-belong-on-the-plugin.md` first — it is the decision these follow, and it
 names what stays in the app. `fixes.md`'s last pass is the same three clusters in shorter form; when a
 cluster lands, **delete its entry there** and correct any `AGENTS.md` sentence that describes the old
 behaviour (that file is a second copy of the truth and goes stale silently).
@@ -48,7 +48,7 @@ Gates before every commit: `python3 -m unittest discover -s plugin/tests` from t
 Hermes, so it runs anywhere), then `pnpm lint`, `pnpm typecheck` and `pnpm build` from `app/`, plus the
 browser flows for anything touching chats, sessions, polling or sync (`pnpm e2e <flow>`, `pnpm e2e list`).
 
-`docs/adr/0005-...` settled one thing that constrains all of them: **the change stream stays
+`docs/adr/0006-...` settled one thing that constrains all of them: **the change stream stays
 content-free.** `plugin/events.py` writes rows with no payload and the plugin holds no tool result at hook
 time, so a derived fact reaches the app on the next read of its route. An event (or the trigger cluster A
 used: the tool call itself, then a retry timer) only tells the app *when* to read.

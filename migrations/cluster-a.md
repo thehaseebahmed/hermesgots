@@ -42,7 +42,7 @@ indentation (how deep it sits under its parents). Both are facts about the list,
 - The mock mirror: `depthOf` / `progressOf` in `app/scripts/mock-hermes.mjs` duplicate the plugin's rules,
   because the mock *is* the plugin for the flows (`pnpm e2e todos`, `todos-legacy`).
 - The docs sweep: `AGENTS.md`'s todo paragraph and layout row, `plugin/README.md`'s route line, and
-  `docs/adr/0005-calculations-belong-on-the-plugin.md` all describe the new behaviour in the same commit.
+  `docs/adr/0006-calculations-belong-on-the-plugin.md` all describe the new behaviour in the same commit.
 
 ## Tests it left behind
 
