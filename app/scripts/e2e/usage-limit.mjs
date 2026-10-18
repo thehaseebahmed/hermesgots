@@ -79,7 +79,7 @@ await flow("usage-limit", async ({ page, profileId, seed, until, shot }) => {
   assert.doesNotMatch(approaching, /Resets at/, "a clock time is never the line under the banner")
   await shot("approaching")
 
-  // The sheet's Context half: the model in a box of its own, the meter under it, and the token line
+  // The sheet's Context half: the model in a row of its own, the meter under it, and the token line
   // no longer repeating the model.
   await page.getByRole("button", { name: "View usage" }).click()
   const sheet = page.getByRole("dialog")
@@ -87,8 +87,8 @@ await flow("usage-limit", async ({ page, profileId, seed, until, shot }) => {
   await settled(page)
   const sheetText = (await sheet.textContent()) ?? ""
   assert.ok(
-    sheetText.includes("openrouter/anthropic/claude-sonnet-4.5"),
-    `the model shows in a box of its own, as provider/model: the sheet reads ${sheetText.slice(0, 120)}`,
+    sheetText.includes("Current Model") && sheetText.includes("openrouter/anthropic/claude-sonnet-4.5"),
+    `the model shows in a row of its own, as provider/model: the sheet reads ${sheetText.slice(0, 120)}`,
   )
   assert.ok(
     sheetText.indexOf("openrouter/") < sheetText.indexOf("Context window"),

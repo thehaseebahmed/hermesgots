@@ -15,10 +15,11 @@ dismissing "Approaching Monthly Limit" no longer silences the "Monthly Limit Rea
 becomes; and the notice's own line counts down — "Resets in 3d 4h", on a minute tick — where it used to
 print the clock time that window resets at.
 
-The sheet's Context half names the model in a read-only box above its meter, `provider/model` as the
-app's `fullModel` writes it. The meter is what the model's window measures; naming the model in the
-token line under it made one line carry both facts, and the model is not a fact the sheet can change —
-the composer's pill is where a model is picked.
+The sheet's Context half states the model the way a Limits row states itself — the label `Current Model`,
+with `provider/model` as the app's `fullModel` writes it on the line under it, above the meter. The meter
+is what that model's window measures; naming the model in the token line under it made one line carry
+both facts, and the model is not a fact the sheet can change: the composer's pill is where a model is
+picked.
 
 ## Considered options
 

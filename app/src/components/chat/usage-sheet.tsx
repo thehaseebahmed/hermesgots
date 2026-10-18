@@ -239,10 +239,13 @@ export function UsageSheet({
         <div className="flex flex-col gap-6 px-6 text-[15px]">
           {!usage.tracked && <Banner>Context tracking needs the Gots plugin.</Banner>}
           <Section title="Context">
-            {/* What the meter measures, named in a box of its own: the model is picked in the
-                composer's pill, so this one only reads. */}
-            <div className="rounded-xl border bg-background px-3 py-2">
-              <span className="block truncate">{usage.model ?? "Model"}</span>
+            {/* What the meter measures, stated the way a Limits row states itself: a label, then
+                its line. The model is picked in the composer's pill, so this one only reads. */}
+            <div className="flex flex-col gap-1">
+              <span className="font-medium">Current Model</span>
+              <span className="truncate text-sm text-muted-foreground">
+                {usage.model ?? "Not set"}
+              </span>
             </div>
             {!usage.tracked || usage.window ? (
               <Meter.Root value={filled * 100} className="flex flex-col gap-2.5">
