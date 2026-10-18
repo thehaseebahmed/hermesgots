@@ -432,6 +432,16 @@ function withTranscriptDetails(local: ToolEvent[], fromHermes: ToolEvent[]) {
 }
 
 /**
+ * The transcript's tool details folded into the reply this device already drew, for a turn it kept:
+ * what the stream recorded stays, and its calls gain what only the transcript carries.
+ */
+function withReplyDetails(local: Message, reply: Message | undefined) {
+  if (!local.tools?.length || !reply?.tools?.length) return
+  const tools = withTranscriptDetails(local.tools, reply.tools)
+  return tools ? { ...local, tools } : undefined
+}
+
+/**
  * The reply so far of the running turn that `userContent` started, from the transcript Hermes
  * writes after every tool round. For a client that can't read the run's events.
  */
@@ -762,9 +772,9 @@ async function reconcile(conversationId: string) {
             reasoning: local.reasoning ?? reply.reasoning,
             steers: local.steers ?? reply.steers,
           })
-        } else if (local?.role === "assistant" && local.tools?.length && reply?.tools?.length) {
-          const tools = withTranscriptDetails(local.tools, reply.tools)
-          if (tools) writes.push({ ...local, tools })
+        } else if (local?.role === "assistant") {
+          const merged = withReplyDetails(local, reply)
+          if (merged) writes.push(merged)
         }
         continue
       }
@@ -772,7 +782,7 @@ async function reconcile(conversationId: string) {
       // times untouched, so a turn this device already holds comes back looking new. Adopt it where it
       // stands — remembering the row it now has, so the next catch-up matches by id — rather than
       // adding a second copy of it around whatever the user sent since.
-      const twin =
+      const carried =
         at === undefined
           ? undefined
           : current.find(
@@ -785,19 +795,14 @@ async function reconcile(conversationId: string) {
                   ? m.hermesAt === at
                   : Math.abs(m.createdAt - at) <= CLOCK_SLACK_MS),
             )
-      if (twin) {
-        adopted.add(twin.id)
-        writes.push({ ...twin, hermesRowId: user.hermesRowId, hermesAt: at })
-        floor = turnEnd(twin)
-        const local = current[current.indexOf(twin) + 1]
-        if (
-          local?.role === "assistant" &&
-          local.status !== "streaming" &&
-          local.tools?.length &&
-          reply?.tools?.length
-        ) {
-          const tools = withTranscriptDetails(local.tools, reply.tools)
-          if (tools) writes.push({ ...local, tools })
+      if (carried) {
+        adopted.add(carried.id)
+        writes.push({ ...carried, hermesRowId: user.hermesRowId, hermesAt: at })
+        floor = turnEnd(carried)
+        const local = current[current.indexOf(carried) + 1]
+        if (local?.role === "assistant" && local.status !== "streaming") {
+          const merged = withReplyDetails(local, reply)
+          if (merged) writes.push(merged)
         }
         continue
       }
