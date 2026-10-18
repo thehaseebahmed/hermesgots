@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import events, push
+from .sessions import chat_session
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,6 @@ TICK_SECONDS = 2
 PING_SECONDS = 20
 CRON_SECONDS = 4
 TITLE_WATCH_SECONDS = 90
-COMPRESSION_DEPTH = 32
 CRON_JOB_FIELDS = (
     "id",
     "name",
@@ -66,23 +66,6 @@ async def cron_mark(profile: str) -> Any:
     mark = await asyncio.to_thread(_cron_mark)
     _cron[profile] = [now, mark]
     return mark
-
-
-def chat_session(db: Any, session_id: str) -> str:
-    """The session a chat started as. Compression moves a chat on to a child session, and Gots
-    only knows the first."""
-    get = getattr(db, "get_session", None)
-    if not callable(get):
-        return session_id
-    current = session_id
-    for _ in range(COMPRESSION_DEPTH):
-        row = get(current) or {}
-        parent_id = row.get("parent_session_id")
-        parent = parent_id and get(parent_id)
-        if not parent or parent.get("end_reason") != "compression":
-            break
-        current = parent_id
-    return current
 
 
 def sse_headers(adapter: Any, request: Any) -> Dict[str, str]:

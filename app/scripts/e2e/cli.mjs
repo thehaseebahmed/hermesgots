@@ -75,6 +75,11 @@ const FLOWS = {
     about: "A run started elsewhere shows as running in Code and on the open session screen",
     alsoPolling: true,
   },
+  "compressed-run": {
+    script: "e2e/compressed-run.mjs",
+    about: "A compressed chat another device started loads its transcript and follows its run on a device that never saw it",
+    alsoPolling: true,
+  },
   "plan-mode": {
     script: "e2e/plan-mode.mjs",
     about:
