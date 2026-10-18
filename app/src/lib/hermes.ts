@@ -514,6 +514,106 @@ export async function listMcpCatalogue(
   return parseMcpCatalogue(await response.json())
 }
 
+/** One value a Catalogue entry declares, as its manifest has it and the form is built from it. */
+export interface McpCatalogueValue {
+  /** The value's own name (the environment variable the entry's manifest declares). */
+  name: string
+  /** What the manifest asks for, in its own words. */
+  prompt: string
+  /** Whether the entry can be added with nothing in it. */
+  required: boolean
+  /** Whether it holds a credential, so its field is masked. */
+  secret: boolean
+  /** The default the manifest pins, which the form fills in; a secret never carries one. */
+  default: string
+  /** Whether this Bot already holds a value for it. Its content is never asked for. */
+  set: boolean
+}
+
+/** One Catalogue entry with the values it declares, as the plugin's entry read reports it. */
+export interface McpCatalogueEntryDetail extends McpCatalogueEntry {
+  values: McpCatalogueValue[]
+}
+
+/** One declared value as the plugin reports it, or nothing for one Gots has no name for. */
+function parseMcpCatalogueValue(raw: unknown): McpCatalogueValue | undefined {
+  const value = raw as Record<string, unknown> | null
+  if (typeof value?.name !== "string" || !value.name) return undefined
+  // A Host that says nothing about a value is read the way Hermes's own manifest defaults are:
+  // required and secret, the stricter of the two answers.
+  const secret = value.secret !== false
+  return {
+    name: value.name,
+    prompt: typeof value.prompt === "string" ? value.prompt : "",
+    required: value.required !== false,
+    secret,
+    // A secret's default is not a thing Gots will fill in, whatever the Host says: the field is
+    // masked, so a credential prefilled into it would be one on screen. The plugin never sends one,
+    // and this is the client half of the same rule.
+    default: !secret && typeof value.default === "string" ? value.default : "",
+    set: value.set === true,
+  }
+}
+
+/**
+ * Reads the plugin's entry answer (`{"object": {"entry": {...}}}`) into the one entry with its
+ * declared values: an entry with no name is nothing at all, and so is a value with no name, while
+ * one the Host says nothing about is read as required and secret rather than as an optional, plain
+ * field the user might skip.
+ */
+export function parseMcpCatalogueEntryDetail(value: unknown): McpCatalogueEntryDetail | undefined {
+  const raw = (value as { object?: { entry?: Record<string, unknown> } } | null)?.object?.entry
+  const entry = parseMcpCatalogueEntry(raw)
+  if (!entry) return undefined
+  const values = Array.isArray(raw?.values)
+    ? raw.values
+        .map(parseMcpCatalogueValue)
+        .filter((row): row is McpCatalogueValue => row !== undefined)
+    : []
+  return { ...entry, values }
+}
+
+/**
+ * One entry of Hermes's Catalogue with the values it declares (the Gots plugin's
+ * `GET /mcp/catalogue/<name>`): what the form that adds it is built from. The Host reports only
+ * whether it already holds a value for each one — never the value — so nothing the user gave it
+ * ever comes back to the screen.
+ */
+export async function getMcpCatalogueEntry(
+  config: HermesConfig,
+  name: string,
+  signal?: AbortSignal,
+): Promise<McpCatalogueEntryDetail | undefined> {
+  const response = await request(
+    `${pluginRoot(config.baseUrl)}/mcp/catalogue/${encodeURIComponent(name)}`,
+    { headers: headers(config), signal },
+  )
+  return parseMcpCatalogueEntryDetail(await response.json())
+}
+
+/**
+ * Adds one of the Catalogue's entries to the bot on its Host (the Gots plugin's `POST /mcp/install`),
+ * answering every server the bot has afterwards. `values` is what the form collected, by the name
+ * each value declares; the Host writes the server's configuration, puts the values it declares
+ * secret in the bot's profile environment and makes the add live for the bot's next turn. An entry it
+ * doesn't have, a value it doesn't declare, one of its required values left empty and a
+ * configuration its own validator refuses are each refused there, with the Host's reason.
+ */
+export async function installMcpServer(
+  config: HermesConfig,
+  name: string,
+  values: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<McpServer[]> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/mcp/install`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ name, values }),
+    signal,
+  })
+  return parseMcpServers(await response.json())
+}
+
 /** A provider the host has credentials for, and the models Hermes offers on it. */
 export interface ModelProvider {
   /** What Hermes takes as a run's `provider`. */

@@ -16,6 +16,7 @@ const ENTRIES = [
   "sentry",
   "slack",
   "stripe",
+  "unvetted",
 ]
 const ADDED = ["github", "linear", "notion", "postgres", "sentry"]
 

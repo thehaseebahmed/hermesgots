@@ -92,8 +92,8 @@ const run = async ({ page, profileId, shot, until }) => {
 
     assert.deepEqual(errors, [], `no error in the console (${errors.join("; ")})`)
   } finally {
-    // The rest of the suite finds the mock's whole list again: there is nothing to add a server back
-    // with through the app yet (#253/#254).
+    // The rest of the suite finds the mock's whole list again — the removed server is put back, and
+    // anything #254's add flow left behind with it.
     await fetch(`${mock}/__mock/mcp`, { method: "POST" })
   }
 }

@@ -358,13 +358,23 @@ const MCP_SERVERS = [
   { name: "notion", state: "needs_access", enabled: true, source: "config", reason: null },
   { name: "filesystem", state: "plugin", enabled: true, source: "plugin", reason: null },
 ]
-// The servers a flow has removed, held apart from the definition above so the rest of the suite
-// still finds every one of them: a removal is the one change here that isn't put back by the flow
-// that made it (there is nothing to add it with yet), so it is cleared through POST /__mock/mcp.
+// The servers a flow has removed and the ones it has added, held apart from the definition above so
+// the rest of the suite still finds every one of them: an add and a removal are the changes here
+// that aren't put back by the flow that made them, so both are cleared through POST /__mock/mcp.
 const mcpRemoved = new Set()
-const mcpRows = () => MCP_SERVERS.filter((server) => !mcpRemoved.has(server.name))
+const mcpAdded = new Map()
+const mcpRows = () => [
+  ...MCP_SERVERS.filter((server) => !mcpRemoved.has(server.name)),
+  ...mcpAdded.values(),
+]
+// The values a bot's profile environment holds, by name: what an add writes for the values an entry
+// declares secret, and what the entry read reports as **set** — never the value itself. One is held
+// from the start, so a form for an entry that declares it shows that it is set rather than a field.
+const mcpEnv = new Map([["SLACK_SIGNING_SECRET", "already-found-once"]])
 // Hermes's Catalogue, as the plugin's own read reports it: every entry Hermes offers, each marked
-// with whether this bot's config already has it — the same servers the screen lists.
+// with whether this bot's config already has it — the same servers the screen lists. An entry that
+// declares values carries what its manifest asks for (a secret's default is never answered, as
+// Hermes's own form leaves one out), and one Hermes's own validator refuses says so.
 const MCP_CATALOGUE = [
   { name: "github", description: "Open, review and land pull requests." },
   { name: "google-drive", description: "Search and read files in Drive." },
@@ -372,14 +382,97 @@ const MCP_CATALOGUE = [
   { name: "notion", description: "Read and write Notion pages." },
   { name: "postgres", description: "Query a Postgres database." },
   { name: "sentry", description: "Triage Sentry issues." },
-  { name: "slack", description: "Read and post in Slack channels." },
+  {
+    name: "slack",
+    description: "Read and post in Slack channels.",
+    values: [
+      { name: "SLACK_BOT_TOKEN", prompt: "Slack bot token", required: true, secret: true },
+      {
+        name: "SLACK_CHANNEL",
+        prompt: "Channel to post to by default",
+        required: false,
+        secret: false,
+        default: "#general",
+      },
+      { name: "SLACK_SIGNING_SECRET", prompt: "Slack signing secret", required: true, secret: true },
+    ],
+  },
   { name: "stripe", description: "Inspect payments, invoices and subscriptions." },
+  {
+    name: "unvetted",
+    description: "A server whose configuration Hermes refuses.",
+    refused:
+      "Server 'unvetted' was NOT saved: its command fetches a script over the network and runs it.",
+  },
 ]
 const mcpCatalogue = () =>
   MCP_CATALOGUE.map((entry) => ({
-    ...entry,
+    name: entry.name,
+    description: entry.description,
     installed: mcpRows().some((row) => row.name === entry.name),
   }))
+// One entry of that Catalogue, as the plugin's own entry read answers it: the values its manifest
+// declares, each reported as required or not, secret or not, with the default it pins (never one for
+// a secret) and whether this bot already holds a value for it. A value the bot holds is reported as
+// set and nothing else — its content never leaves the host.
+const mcpCatalogueEntry = (name) => {
+  const entry = MCP_CATALOGUE.find((candidate) => candidate.name === name)
+  if (!entry) return null
+  return {
+    name: entry.name,
+    description: entry.description,
+    installed: mcpRows().some((row) => row.name === entry.name),
+    values: (entry.values ?? []).map((value) => ({
+      name: value.name,
+      prompt: value.prompt,
+      required: value.required !== false,
+      secret: value.secret !== false,
+      default: value.secret ? "" : (value.default ?? ""),
+      set: mcpEnv.has(value.name),
+    })),
+  }
+}
+// Adding one of those entries, refused the way the plugin's own add refuses: an entry the Catalogue
+// doesn't have, a value it doesn't declare, a required value left empty and a configuration Hermes's
+// own validator refuses each answer with the reason, and none of them leaves anything half-added.
+const mcpInstall = (res, name, values) => {
+  const entry = MCP_CATALOGUE.find((candidate) => candidate.name === name)
+  if (!entry) {
+    return json(res, 400, { error: { message: `Hermes's Catalogue has no entry named '${name}'.` } })
+  }
+  const declared = new Set((entry.values ?? []).map((value) => value.name))
+  for (const key of Object.keys(values)) {
+    if (!declared.has(key))
+      return json(res, 400, { error: { message: `${entry.name} does not declare the value ${key}.` } })
+  }
+  const missing = (entry.values ?? []).find(
+    (value) =>
+      value.required !== false && !mcpEnv.has(value.name) && !(values[value.name] ?? "").trim(),
+  )
+  if (missing) {
+    return json(res, 400, {
+      error: { message: `${missing.name} is required but no value was provided.` },
+    })
+  }
+  if (entry.refused) return json(res, 400, { error: { message: entry.refused } })
+  // The values the entry declares secret land in the bot's environment; the rest are inlined into
+  // its configuration, which the mock stands for with the row the list shows.
+  for (const value of entry.values ?? []) {
+    if (value.secret !== false && values[value.name]) mcpEnv.set(value.name, values[value.name])
+  }
+  mcpRemoved.delete(entry.name)
+  if (!mcpRows().some((row) => row.name === entry.name)) {
+    mcpAdded.set(entry.name, {
+      name: entry.name,
+      state: "on",
+      enabled: true,
+      source: "config",
+      reason: null,
+    })
+  }
+  return json(res, 200, { object: { servers: mcpRows() } })
+}
+
 // The server a write is for, or null once the refusal has been answered: a name the bot's config
 // doesn't have, or one a Hermes plugin provides, which Hermes refuses to modify. Both writes — the
 // toggle and the removal — answer the plugin's own refusal the same way, so both ask this.
@@ -1487,7 +1580,7 @@ http
       return json(res, 200, {
         name: "memento",
         version: PLUGIN_VERSION,
-        features: ["cron_runs", "session_label", "chats", "draft_text", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "goal", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "skills", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : []), ...(MCPS ? ["mcps", "mcps_write", "mcps_remove", "mcps_catalogue"] : [])],
+        features: ["cron_runs", "session_label", "chats", "draft_text", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "goal", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "skills", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : []), ...(MCPS ? ["mcps", "mcps_write", "mcps_remove", "mcps_catalogue", "mcps_add"] : [])],
         clarify: true,
         hooks: true,
         goal:
@@ -1522,6 +1615,29 @@ http
     // entry declares is answered.
     if (PLUGIN && MCPS && !profile && url.pathname === "/api/plugins/memento/mcp/catalogue") {
       return json(res, 200, { object: { entries: mcpCatalogue() } })
+    }
+    // One of those entries with the values it declares, for the form its pick opens: what each is
+    // called, whether it is required and secret, the default it pins and — for a value this bot
+    // already holds — that it is set, never the value. An entry the Catalogue has no such name for
+    // answers the plugin's own refusal.
+    const mcpEntry = url.pathname.match(/^\/api\/plugins\/memento\/mcp\/catalogue\/([^/]+)$/)
+    if (PLUGIN && MCPS && !profile && mcpEntry && req.method === "GET") {
+      const entry = mcpCatalogueEntry(decodeURIComponent(mcpEntry[1]))
+      if (!entry)
+        return json(res, 400, {
+          error: { message: `Hermes's Catalogue has no entry named '${decodeURIComponent(mcpEntry[1])}'.` },
+        })
+      return json(res, 200, { object: { entry } })
+    }
+    // Adding a Catalogue entry to this bot, the way the plugin's own add does it: the values the
+    // entry declares land in its environment, the server joins its config, and the answer is what
+    // the bot has now, so the app's list is the mock's own and not the row it guessed at.
+    if (PLUGIN && MCPS && !profile && url.pathname === "/api/plugins/memento/mcp/install" && req.method === "POST") {
+      const { name, values } = await readBody(req)
+      if (typeof name !== "string" || !name) {
+        return json(res, 400, { error: { message: "Body must be {\"name\": \"<entry>\"}." } })
+      }
+      return mcpInstall(res, name, values && typeof values === "object" ? values : {})
     }
     // Flipping one of those servers on or off. The write lands on the row the app renders back, and
     // the mock's own list follows it so a later read agrees. A server a Hermes plugin provides can't
@@ -2028,9 +2144,13 @@ http
       return json(res, 200, { object: "memento.runs", sessions, run_ids, waiting })
     }
     if (url.pathname === "/__mock/mcp" && req.method === "POST") {
-      // Dev only: puts back every MCP server a flow has removed, so the rest of the suite still
-      // finds the mock's whole list (there is nothing to add one back with through the app yet).
+      // Dev only: puts back every MCP server a flow has removed and takes away every one a flow has
+      // added, so the rest of the suite still finds the mock's whole list. The values an add wrote
+      // are put back to the one the mock holds from the start, for the same reason.
       mcpRemoved.clear()
+      mcpAdded.clear()
+      mcpEnv.clear()
+      mcpEnv.set("SLACK_SIGNING_SECRET", "already-found-once")
       return json(res, 200, { object: { servers: mcpRows() } })
     }
     if (url.pathname === "/__mock/dictation" && req.method === "GET") {

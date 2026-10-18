@@ -149,6 +149,11 @@ const FLOWS = {
     about:
       "A removal is offered on each of a bot's own MCP servers and none a Hermes plugin provides, asks first, and leaves the list showing what is left",
   },
+  "mcps-add": {
+    script: "e2e/mcps-add.mjs",
+    about:
+      "Picking a Catalogue entry opens a form of the values it declares, an add writes the server and shows it, and the screen reports a value as set without ever showing its content",
+  },
   "fallbacks-silent-host": {
     script: "e2e/fallbacks-silent-host.mjs",
     about: "A host that never answers a fallback write gives the field back instead of wedging it",

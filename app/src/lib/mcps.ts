@@ -3,28 +3,34 @@
  * the device. The screen reads once on open and again only while a server is in a state that moves
  * on its own — connecting, or waiting on Server access — and `setEnabled` switches one on or off
  * through the plugin, replacing that row with the state the change landed in, while `remove` takes
- * one away and replaces the whole list with what the Host says is left. `useMcpCatalogue` is the
- * browsing half of adding one: the entries the Host's Hermes offers, read once each time it is
- * opened, marking the ones this Bot already has and adding nothing. The row and the screen
- * exist only where the plugin advertises the feature, and a row's switch, its removal and the Add
- * action only where it advertises that it can write, so a Bot whose Hermes is behind has neither and
- * is sent back to its editor, while a Bot whose Host hasn't answered yet is left to answer rather
- * than flashing its screen away. A plugin without the route is left alone like every other optional
- * one.
+ * one away and `install` adds one from the Catalogue, each replacing the whole list with what the
+ * Host says the bot has after it. The adding half is its own pair of reads: `useMcpCatalogue` is the
+ * entries the Host's Hermes offers, each marked with whether this Bot already has it, and
+ * `useMcpCatalogueEntry` is one of them with the values it declares, read when its form is opened.
+ * The row and the screen exist only where the plugin advertises the feature, a row's switch, its
+ * removal and the Add action each only where the plugin advertises that one — the switch's
+ * `mcps_write`, the removal's `mcps_remove`, and the Add action and the form behind it only where
+ * both `mcps_catalogue` and `mcps_add` are advertised, since the action's whole work is the adding —
+ * so a Bot whose Hermes is behind loses exactly the control it couldn't use, while a Bot whose Host
+ * hasn't answered yet is left to answer rather than flashing its screen away. A plugin without the
+ * route is left alone like every other optional one.
  */
 import { useCallback, useState, useSyncExternalStore } from "react"
 
 import { connectionKey, serverConfig } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
-import { MCP_WORK_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
+import { MCP_INSTALL_MS, MCP_WORK_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import {
+  getMcpCatalogueEntry,
   getPluginFeatureList,
+  installMcpServer,
   listMcpCatalogue,
   listMcpServers,
   removeMcpServer,
   setMcpServerEnabled,
   type HermesConfig,
   type McpCatalogueEntry,
+  type McpCatalogueEntryDetail,
   type McpServer,
   type McpState,
 } from "@/lib/hermes"
@@ -34,14 +40,16 @@ import { createSignal } from "@/lib/store"
 
 /**
  * Every MCP feature this screen asks its Bot's Host about, by the key it answers under: `list` gates
- * the screen itself, and the switch, the removal and the Catalogue each have their own, because each
- * needs a different set of Hermes built-ins and a host may advertise one without another.
+ * the screen itself, and the switch, the removal, the Catalogue and adding from it each have their
+ * own, because each needs a different set of Hermes built-ins and a host may advertise one without
+ * another.
  */
 export const MCP_FEATURES = {
   list: "mcps",
   write: "mcps_write",
   removable: "mcps_remove",
   catalogue: "mcps_catalogue",
+  add: "mcps_add",
 } as const
 
 /** What each of those features this Bot's Host answered (see `McpFeatureAnswer`). */
@@ -111,9 +119,10 @@ export type McpFeatureAnswer = "unknown" | "yes" | "no"
 
 /**
  * What this Bot's plugin answered about its MCP servers: the feature each control needs — `list` for
- * the screen itself, `write` for the switch, `removable` for the removal and `catalogue` for browsing
- * Hermes's Catalogue, each needing a different set of Hermes built-ins and so advertised apart from
- * the others. One read of the plugin's features answers them all.
+ * the screen itself, `write` for the switch, `removable` for the removal, `catalogue` for browsing
+ * Hermes's Catalogue and `add` for adding one from it, each needing a different set of Hermes
+ * built-ins and so advertised apart from the others. One read of the plugin's features answers them
+ * all.
  */
 export function useMcpFeatureAnswers(server: McpServerConfig): McpFeatureAnswers {
   const baseUrl = server?.baseUrl ?? ""
@@ -128,11 +137,12 @@ export function useMcpFeatureAnswers(server: McpServerConfig): McpFeatureAnswers
   const write = useSyncExternalStore(subscribe, () => read(MCP_FEATURES.write))
   const removable = useSyncExternalStore(subscribe, () => read(MCP_FEATURES.removable))
   const catalogue = useSyncExternalStore(subscribe, () => read(MCP_FEATURES.catalogue))
+  const add = useSyncExternalStore(subscribe, () => read(MCP_FEATURES.add))
   usePoll(() => void readFeature({ baseUrl, apiKey }), false, [baseUrl, apiKey], {
     active: Boolean(key),
     onShow: false,
   })
-  return { list, write, removable, catalogue }
+  return { list, write, removable, catalogue, add }
 }
 
 /** What this Bot's plugin answered about its MCP servers (see `McpFeatureAnswer`). */
@@ -155,9 +165,10 @@ const unsupported = cooldown()
  * The Bot's MCP servers, read once when the screen opens and again only while one is connecting or
  * waiting on Server access. Undefined until a read lands; a read that fails leaves what the screen
  * has, since an unreachable Host must not take the screen down with it. `setEnabled` switches one
- * server on or off on the Host and replaces its row with the state the change landed in, and
- * `remove` takes one away and replaces the list with the servers the Host says are left; a write
- * that fails is thrown for the screen to report, leaving the list as it was.
+ * server on or off on the Host and replaces its row with the state the change landed in, while
+ * `remove` takes one away and `install` adds one from the Catalogue, each replacing the list with the
+ * servers the Host says the bot has; a write that fails is thrown for the screen to report, leaving
+ * the list as it was.
  */
 export function useMcpServers(server: McpServerConfig, active: boolean) {
   const [servers, setServers] = useState<McpServer[] | undefined>(undefined)
@@ -213,7 +224,21 @@ export function useMcpServers(server: McpServerConfig, active: boolean) {
     },
     [baseUrl, apiKey],
   )
-  return { servers, setEnabled, remove }
+  const install = useCallback(
+    async (name: string, values: Record<string, string>) => {
+      // Adding one may clone and install the entry's own repository, so it is given longer than a
+      // switch's write is; the Host's own answer is what the list becomes, as it is after a removal.
+      const left = await installMcpServer(
+        { baseUrl, apiKey },
+        name,
+        values,
+        AbortSignal.timeout(MCP_INSTALL_MS),
+      )
+      setServers(left)
+    },
+    [baseUrl, apiKey],
+  )
+  return { servers, setEnabled, remove, install }
 }
 
 /**
@@ -242,4 +267,47 @@ export function useMcpCatalogue(server: McpServerConfig, active: boolean) {
     { active: active && Boolean(key), onShow: false },
   )
   return entries
+}
+
+/**
+ * One of those entries with the values it declares, read when its form is opened and again each time
+ * it is opened: what the form is built from. `entry` is undefined until a read lands, and `failed`
+ * says the read that was meant to answer it came back an error — so the form can say so rather than
+ * standing there as an empty stub. An answer for a different entry is not handed back: a form opened
+ * on one entry must never draw the values of the entry before it, and nothing is added by reading
+ * this.
+ */
+export function useMcpCatalogueEntry(
+  server: McpServerConfig,
+  name: string | undefined,
+  active: boolean,
+): { entry?: McpCatalogueEntryDetail; failed: boolean } {
+  const [entry, setEntry] = useState<McpCatalogueEntryDetail | undefined>(undefined)
+  const [failedFor, setFailedFor] = useState<string | undefined>(undefined)
+  const config = serverConfig(server)
+  const key = config.baseUrl && config.apiKey ? connectionKey(config) : ""
+  usePoll(
+    (signal) => {
+      landRead(
+        () => getMcpCatalogueEntry(config, name ?? "", signal),
+        signal,
+        (found) => {
+          setEntry(found)
+          setFailedFor(undefined)
+        },
+        (error) => {
+          setFailedFor(name)
+          noteFailure("Reading a catalogue entry", error)
+        },
+      )
+    },
+    false,
+    [key, name],
+    // Opening a form is the whole trigger, as it is for the Catalogue itself.
+    { active: active && Boolean(key) && Boolean(name), onShow: false },
+  )
+  return {
+    entry: name !== undefined && entry?.name === name ? entry : undefined,
+    failed: name !== undefined && failedFor === name,
+  }
 }
