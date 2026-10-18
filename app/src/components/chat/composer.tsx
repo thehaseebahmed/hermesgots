@@ -43,15 +43,20 @@ import {
   type DictationAvailability,
 } from "@/lib/dictation"
 import {
+  LOCAL_COMMANDS,
+  SEND_COMMANDS,
   goalCommand,
+  hoistItem,
   isSendMode,
   localCommand,
   optionId,
+  rankSlashItems,
   sendMode,
-  useSlashItems,
+  slashToken,
   type LocalCommand,
   type SlashItem,
 } from "@/lib/slash"
+import { useSkills } from "@/lib/skills"
 import { randomId } from "@/lib/utils"
 
 const HOLD_MS = 400
@@ -152,8 +157,13 @@ export function Composer({
     saveDraft(draftKey, value)
   }, [value, draftKey, loaded])
   useEffect(() => onDraft?.(value), [value, onDraft])
+  // The token whose menu the user closed with Escape: it stays shut until the text changes.
   const [dismissed, setDismissed] = useState(false)
   const [active, setActive] = useState(0)
+  // Where the caret is, so the `/` menu follows it rather than the whole field.
+  const [caret, setCaret] = useState(0)
+  // Where a pick wants the caret, placed once the new text is in the field.
+  const caretWanted = useRef<number | null>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
   const listId = useId()
   const dictationInfo = useDictationInfo(connection)
@@ -178,24 +188,50 @@ export function Composer({
   // What Enter does now, so the button says so.
   const steering = steersNow(value, attachments.length)
 
-  const query = /^\/(\S*)$/.exec(value)?.[1]
-  const slash = useSlashItems(query !== undefined && !disabled, query ?? "", connection, busy)
+  // The menu follows the caret: a `/` that begins a word opens it, wherever in the message it is.
+  const token = slashToken(value, caret)
+  const skills = useSkills(connection, Boolean(token) && !disabled)
+  const skillItems: SlashItem[] =
+    skills.status === "ok" ? skills.skills.map((skill) => ({ kind: "skill", ...skill })) : []
+  const items = token
+    ? rankSlashItems([...LOCAL_COMMANDS, ...(busy ? SEND_COMMANDS : []), ...skillItems], token)
+    : []
+  // Escape closes the menu until the text changes: any edit opens it again, and so does a new `/`.
   const menuOpen =
-    query !== undefined &&
-    !dismissed &&
-    !disabled &&
-    (slash.items.length > 0 || slash.status !== "ok")
-  const activeIndex = Math.min(active, Math.max(slash.items.length - 1, 0))
+    token !== null && !dismissed && !disabled && (items.length > 0 || skills.status !== "ok")
+  const activeIndex = Math.min(active, Math.max(items.length - 1, 0))
+  // The caret follows the field. A pick places it (`caretWanted`); anything else that writes the
+  // value — a restored draft, dictation, a message handed back after a failed send — leaves it
+  // where the field put it, so the menu tracks the text the user is in and not where the mirror
+  // last saw them (a draft opening with `/` must not offer to clear itself).
+  useEffect(() => {
+    const field = textarea.current
+    if (!field || field.value !== value) return
+    const wanted = caretWanted.current
+    caretWanted.current = null
+    if (wanted !== null) {
+      field.focus()
+      field.setSelectionRange(wanted, wanted)
+      if (wanted !== caret) setCaret(wanted)
+      return
+    }
+    if (field.selectionStart !== caret) setCaret(field.selectionStart)
+  }, [value, caret])
 
   const runCommand = (command: LocalCommand, rest?: string) => {
     setValue("")
     onCommand(command, rest)
   }
 
+  // A picked skill goes to the front of the message, with the rest of what was typed after it; a
+  // send mode carries the message the same way, and both are what the host reads as one.
   const pick = (item: SlashItem) => {
     if (item.kind === "command" && !isSendMode(item.name)) return runCommand(item.name)
-    setValue(`/${item.name} `)
-    textarea.current?.focus()
+    if (!token) return
+    const next = hoistItem(value, token, item.name)
+    caretWanted.current = next.caret
+    setDismissed(false)
+    setValue(next.text)
   }
 
   const submitText = (raw: string) => {
@@ -356,8 +392,8 @@ export function Composer({
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing) return
-    if (menuOpen && slash.items.length > 0) {
-      const count = slash.items.length
+    if (menuOpen && items.length > 0) {
+      const count = items.length
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault()
         setActive((activeIndex + (event.key === "ArrowDown" ? 1 : count - 1)) % count)
@@ -365,7 +401,7 @@ export function Composer({
       }
       if ((event.key === "Enter" && !event.shiftKey) || event.key === "Tab") {
         event.preventDefault()
-        pick(slash.items[activeIndex])
+        pick(items[activeIndex])
         return
       }
     }
@@ -433,9 +469,9 @@ export function Composer({
       {menuOpen && (
         <SlashMenu
           id={listId}
-          items={slash.items}
+          items={items}
           active={activeIndex}
-          status={slash.status}
+          status={skills.status}
           onPick={pick}
           onActive={setActive}
         />
@@ -468,9 +504,15 @@ export function Composer({
           value={value}
           onChange={(event) => {
             setValue(event.target.value)
+            const at = event.target.selectionStart ?? event.target.value.length
+            setCaret(at)
             setActive(0)
-            if (!event.target.value.startsWith("/")) setDismissed(false)
+            // An Escape belongs to the text it was pressed on: editing is the user asking for the
+            // menu back, whether they typed in the token, cleared it or replaced the whole message.
+            setDismissed(false)
           }}
+          // A caret moved without a keystroke — a click, an arrow key — moves the menu with it.
+          onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
           onKeyDown={onKeyDown}
           enterKeyHint="send"
           role={menuOpen ? "combobox" : undefined}
@@ -478,7 +520,7 @@ export function Composer({
           aria-controls={menuOpen ? listId : undefined}
           aria-autocomplete={menuOpen ? "list" : undefined}
           aria-activedescendant={
-            menuOpen && slash.items.length ? optionId(listId, activeIndex) : undefined
+            menuOpen && items.length ? optionId(listId, activeIndex) : undefined
           }
           placeholder={
             disabled

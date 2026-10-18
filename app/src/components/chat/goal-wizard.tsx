@@ -9,7 +9,7 @@
  * A goal runs in Auto: the plugin judges each finished turn and posts the next run itself, so it
  * keeps going with the app closed.
  */
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useMemo, useState, type ReactNode } from "react"
 import {
   ChevronDownIcon,
   ClockIcon,
@@ -31,7 +31,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
-import { listSkills, type HermesConfig, type Skill } from "@/lib/hermes"
+import { type HermesConfig } from "@/lib/hermes"
 import {
   composeGoal,
   MAX_REVIEWERS,
@@ -42,6 +42,7 @@ import {
   type GoalSpec,
   type ReviewKind,
 } from "@/lib/goal"
+import { useSkills } from "@/lib/skills"
 import { cn } from "@/lib/utils"
 
 /** What the wizard needs of the chat it sets a goal for. */
@@ -117,25 +118,13 @@ function Segmented<T extends string | number>({
   )
 }
 
-/** The host's skills, for the review picker; empty while they load or when none answer. */
+/** The host's skills, for the review picker, from the same list the composer's menu reads. */
 function useSkillNames(config: HermesConfig | null, open: boolean) {
-  const [skills, setSkills] = useState<Skill[] | null>(null)
-  const baseUrl = config?.baseUrl
-  const apiKey = config?.apiKey
-  useEffect(() => {
-    if (!open || !baseUrl || !apiKey) return
-    let cancelled = false
-    listSkills({ baseUrl, apiKey }).then(
-      (found) => !cancelled && setSkills(found),
-      () => !cancelled && setSkills([]),
-    )
-    return () => {
-      cancelled = true
-    }
-  }, [open, baseUrl, apiKey])
+  const state = useSkills(config, open)
+  const found = state.status === "ok" ? state.skills : null
   return useMemo(
-    () => (skills ?? []).filter((skill) => /review|verif|test|check|audit/i.test(skill.name)),
-    [skills],
+    () => (found ?? []).filter((skill) => /review|verif|test|check|audit/i.test(skill.name)),
+    [found],
   )
 }
 
@@ -216,7 +205,11 @@ export function GoalWizard({
             going on its own until it's done, it's out of turns, or it needs you.
           </p>
 
-          <Field label="What to work towards" hint="One line. This is the goal itself." icon={SignpostIcon}>
+          <Field
+            label="What to work towards"
+            hint="One line. This is the goal itself."
+            icon={SignpostIcon}
+          >
             <Textarea
               value={spec.task}
               onChange={(event) => set("task", event.target.value)}
@@ -226,7 +219,11 @@ export function GoalWizard({
             />
           </Field>
 
-          <Field label="Done when" hint="What finished looks like. Left out, the goal above is it." icon={FlagIcon}>
+          <Field
+            label="Done when"
+            hint="What finished looks like. Left out, the goal above is it."
+            icon={FlagIcon}
+          >
             <Input
               value={spec.outcome}
               onChange={(event) => set("outcome", event.target.value)}
@@ -235,7 +232,11 @@ export function GoalWizard({
             />
           </Field>
 
-          <Field label="Prove it with" hint="The command that has to pass. One line." icon={SquareTerminalIcon}>
+          <Field
+            label="Prove it with"
+            hint="The command that has to pass. One line."
+            icon={SquareTerminalIcon}
+          >
             <Input
               value={spec.verification}
               onChange={(event) => set("verification", event.target.value)}
@@ -312,7 +313,11 @@ export function GoalWizard({
 
           {more && (
             <div className="flex flex-col gap-6 border-t pt-6">
-              <Field label="Constraints" hint="Anything else it has to respect." icon={ShieldCheckIcon}>
+              <Field
+                label="Constraints"
+                hint="Anything else it has to respect."
+                icon={ShieldCheckIcon}
+              >
                 <Textarea
                   value={spec.constraints}
                   onChange={(event) => set("constraints", event.target.value)}
@@ -386,10 +391,7 @@ export function GoalWizard({
                             key={skill.name}
                             type="button"
                             onClick={() =>
-                              set(
-                                "reviewSkill",
-                                spec.reviewSkill === skill.name ? "" : skill.name,
-                              )
+                              set("reviewSkill", spec.reviewSkill === skill.name ? "" : skill.name)
                             }
                             className={cn(
                               "rounded-full border px-3 py-1 text-sm",

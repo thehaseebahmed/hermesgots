@@ -1,9 +1,3 @@
-import { useEffect, useState } from "react"
-
-import { connectionKey } from "@/lib/connection"
-import { READ_TIMEOUT_MS } from "@/lib/freshness"
-import { hasPluginFeature, listSkills, type HermesConfig, type Skill } from "@/lib/hermes"
-
 export type LocalCommand = "new" | "settings" | "goal"
 /** Commands that carry the message after them, while a reply runs. */
 export type SendMode = "steer" | "queue"
@@ -48,80 +42,103 @@ export function localCommand(text: string): LocalCommand | null {
     : null
 }
 
-export type SkillsState =
-  { status: "loading" } | { status: "ok"; skills: Skill[] } | { status: "error" }
+const isSpace = (char: string | undefined) => char === undefined || /\s/.test(char)
 
-// One request per server for the life of the page; a failure is forgotten so the next open retries.
-const requests = new Map<string, Promise<Skill[]>>()
-const loaded = new Map<string, Skill[]>()
-
-function cacheKey({ baseUrl, apiKey }: HermesConfig) {
-  return connectionKey({ baseUrl, apiKey })
+/** The `/`-token a caret sits in: `/gr` in `fix /gr|ill the tests`. */
+export interface SlashToken {
+  /** Where the token's `/` is. */
+  start: number
+  /** One past the token's last character: the whitespace after it, or the text's end. */
+  end: number
+  /** What has been typed after the `/`, up to the caret. */
+  query: string
+  /** Whether the token is the whole message: nothing but whitespace around it. */
+  alone: boolean
 }
 
-async function loadSkills(config: HermesConfig) {
-  const key = cacheKey(config)
-  let pending = requests.get(key)
-  if (!pending) {
-    // A plugin without the route (an older one) has no skills to offer, so don't ask it: the menu
-    // shows the commands alone either way, and a bot whose host can't list skills keeps quiet.
-    pending = hasPluginFeature(config, "skills").then((lists) =>
-      lists ? listSkills(config, AbortSignal.timeout(READ_TIMEOUT_MS)) : [],
-    )
-    requests.set(key, pending)
-    pending.catch(() => requests.delete(key))
-  }
-  return pending
+/**
+ * The token the caret is in, or null when it isn't sitting in one. A token starts at the `/` that
+ * begins a word — the message's first character, or the one after a space or a newline — so the
+ * slash in `and/or`, `https://…` or `/usr/local/bin` never opens the menu.
+ */
+export function slashToken(text: string, caret: number): SlashToken | null {
+  let start = caret
+  while (start > 0 && !isSpace(text[start - 1])) start--
+  if (text[start] !== "/") return null
+  let end = caret
+  while (end < text.length && !isSpace(text[end])) end++
+  const query = text.slice(start + 1, caret)
+  // A second slash makes this a path or a URL the user is writing, not a command: no skill has one.
+  if (query.includes("/")) return null
+  const alone = `${text.slice(0, start)}${text.slice(end)}`.trim() === ""
+  return { start, end, query, alone }
 }
 
-function matches(items: SlashItem[], query: string) {
-  const q = query.toLowerCase()
-  if (!q) return items
-  const starts: SlashItem[] = []
-  const contains: SlashItem[] = []
-  for (const item of items) {
-    const name = item.name.toLowerCase()
-    if (name.startsWith(q)) starts.push(item)
-    else if (name.includes(q) || item.description?.toLowerCase().includes(q)) contains.push(item)
-  }
-  return [...starts, ...contains]
+/**
+ * Commands by name prefix — and only when the token is the whole message, which is the shape the
+ * composer's own actions take (`localCommand`, `goalCommand`), so the menu never offers one that
+ * running would drop the rest of the message for — then the skills, in tiers: an exact name, a name
+ * the query starts, a name that contains it, a fuzzy name, a category, a description. Ties keep
+ * their order.
+ */
+export function rankSlashItems(items: SlashItem[], token: SlashToken): SlashItem[] {
+  const query = token.query.toLowerCase()
+  const commands = token.alone
+    ? items.filter(
+        (item) => item.kind === "command" && (!query || item.name.toLowerCase().startsWith(query)),
+      )
+    : []
+  const skills = items.filter((item): item is SkillItem => item.kind === "skill")
+  if (!query) return [...commands, ...skills]
+  const ranked = skills
+    .map((item, order) => ({ item, order, ...matchOf(item, query) }))
+    .filter((row) => row.tier > 0)
+    .sort((a, b) => a.tier - b.tier || a.score - b.score || a.order - b.order)
+  return [...commands, ...ranked.map((row) => row.item)]
 }
 
-/** Local commands plus Hermes's skills, filtered by `query`. Skills load the first time it opens. */
-export function useSlashItems(open: boolean, query: string, config: HermesConfig, busy = false) {
-  const key = cacheKey(config)
-  const [result, setResult] = useState<{ key: string; state: SkillsState } | null>(null)
-  const cached = loaded.get(key)
-  const state: SkillsState =
-    result?.key === key
-      ? result.state
-      : cached
-        ? { status: "ok", skills: cached }
-        : { status: "loading" }
+type SkillItem = Extract<SlashItem, { kind: "skill" }>
 
-  const { baseUrl, apiKey } = config
-  useEffect(() => {
-    if (!open) return
-    let cancelled = false
-    const key = cacheKey({ baseUrl, apiKey })
-    loadSkills({ baseUrl, apiKey }).then(
-      (skills) => {
-        loaded.set(key, skills)
-        if (!cancelled) setResult({ key, state: { status: "ok", skills } })
-      },
-      () => !cancelled && setResult({ key, state: { status: "error" } }),
-    )
-    return () => {
-      cancelled = true
-    }
-  }, [open, baseUrl, apiKey])
+function matchOf(skill: SkillItem, query: string): { tier: number; score: number } {
+  const name = skill.name.toLowerCase()
+  if (name === query) return { tier: 1, score: 0 }
+  if (name.startsWith(query)) return { tier: 2, score: 0 }
+  if (name.includes(query)) return { tier: 3, score: 0 }
+  const spread = nameSpread(name, query)
+  if (spread !== null) return { tier: 4, score: spread }
+  if ((skill.category ?? "").toLowerCase().includes(query)) return { tier: 5, score: 0 }
+  if ((skill.description ?? "").toLowerCase().includes(query)) return { tier: 6, score: 0 }
+  return { tier: 0, score: 0 }
+}
 
-  const skills: SlashItem[] =
-    state.status === "ok" ? state.skills.map((skill) => ({ kind: "skill", ...skill })) : []
-  return {
-    items: matches([...LOCAL_COMMANDS, ...(busy ? SEND_COMMANDS : []), ...skills], query),
-    status: state.status,
+/**
+ * How far apart a query's characters land in a name — 0 when they sit together, more for every
+ * character skipped between them — or null when they are not all there in order. That is how `gril`
+ * finds `grill`.
+ */
+export function nameSpread(name: string, query: string): number | null {
+  let at = 0
+  let first = -1
+  let last = -1
+  for (const char of query) {
+    const found = name.indexOf(char, at)
+    if (found < 0) return null
+    if (first < 0) first = found
+    last = found
+    at = found + 1
   }
+  return last - first + 1 - query.length
+}
+
+/**
+ * A picked item goes to the front of the message, with the rest of what was typed after it: a skill
+ * runs only from there, and a send-mode command takes the message the same way, so one picked
+ * mid-sentence has to move to be one at all.
+ */
+export function hoistItem(text: string, token: SlashToken, name: string) {
+  const rest = `${text.slice(0, token.start)}${text.slice(token.end)}`.trim()
+  const next = rest ? `/${name} ${rest}` : `/${name} `
+  return { text: next, caret: next.length }
 }
 
 export function optionId(listId: string, index: number) {

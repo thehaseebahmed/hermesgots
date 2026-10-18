@@ -52,6 +52,17 @@ _Avoid_: client-side computation
 What a project session is doing — idle, working, waiting on the user, or closed by the user as resolved or discarded. Composed from the host's run status and this device's own marks, not derived from one source.
 _Avoid_: status, state machine
 
+**Command**:
+Something Gots itself does from the composer: a new chat, the goal wizard, settings, or how a message sent mid-reply goes. A command never reaches the agent as a message.
+_Avoid_: slash command, action, app skill
+
+**Skill**:
+One of a bot's named capabilities, written `/name` at the front of a message. Gots offers them from the slash menu; the bot's Hermes profile is what runs them.
+_Avoid_: command, tool, plugin
+
+**Slash menu**:
+The list over the composer that a slash opens: the commands and the bot's skills.
+_Avoid_: autocomplete, command palette, picker
 **Usage window**:
 One thing a provider account can run out of, as that provider measures it: a period, which resets, or a balance, which doesn't.
 _Avoid_: quota, plan limit, usage bar
