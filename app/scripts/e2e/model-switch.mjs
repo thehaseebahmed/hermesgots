@@ -1,5 +1,6 @@
 // A chat's model changed mid-thread: the pill under the composer picks a new one, and the thread
-// draws a divider naming it above the turn it answered with — after a reload too, and in a session.
+// draws a divider naming it above the turn it answered with — after a reload too, in a session, and
+// as the turn opens where the host's record hasn't reached this device yet.
 import { app, assert, flow, mock, pass } from "./lib.mjs"
 
 await flow("model-switch", async ({ page, seed, send, lastReply, until, shot }) => {
@@ -59,6 +60,9 @@ await flow("model-switch", async ({ page, seed, send, lastReply, until, shot }) 
     }
   })
   assert.equal(place.divider, place.turn, "and sits above the turn it answered with")
+  // The host records the turn's own call as it runs, and this device reads that record when the turn
+  // ends, so both lists are only complete once it has — the divider no longer waits for that.
+  await done()
   assert.deepEqual(
     (await hosted(id)).map((c) => c.model),
     [sonnet, gpt],
@@ -96,4 +100,33 @@ await flow("model-switch", async ({ page, seed, send, lastReply, until, shot }) 
   assert.equal((await divider().innerText()).trim(), gpt, "a session names the new model too")
   await shot("session")
   pass("a project session shows the divider as well")
+
+  // A session whose first turn was sent with nothing picked: the host ran its own model, and this
+  // device has no pick to name it by, so the switch's divider can only come from the host's record —
+  // asked for as the turn opens, not when the turn it started ends. An empty store is what a device
+  // that hasn't read the record looks like: the row is on the host, not on us yet.
+  await seed([{ id: "e2e-model-switch-blank", title: "Switch blank", projectId: "p_1a2b3c4d" }])
+  await page.goto(`${app}/c/e2e-model-switch-blank`)
+  await send("start the work")
+  await done()
+  await page.evaluate(async (id) => {
+    const { db } = await import("/src/lib/db.ts")
+    await db.conversations.update(id, { modelChanges: undefined })
+  }, chatId())
+  // The wipe has to stick: the turn-end read lands after `done()`, and were it to write the record
+  // back the next send would have nothing to ask for — the divider would come from the old path.
+  await until(async () => (await stored(chatId())).length === 0, 3_000, "the record to be cleared")
+  await pick(gpt)
+  await send("carry on")
+  // One poll for both facts: a divider up while the turn is still being written is the whole point, so
+  // they have to be true at the same instant to count.
+  await until(
+    async () =>
+      (await divider().count()) === 1 && (await lastReply(chatId()))?.status === "streaming",
+    3_000,
+    "the divider while the turn runs",
+  )
+  assert.equal((await divider().innerText()).trim(), gpt, "and names the model it was sent with")
+  await shot("blank")
+  pass("a switch this device has no model for shows as the turn opens")
 })

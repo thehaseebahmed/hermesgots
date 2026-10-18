@@ -1199,3 +1199,62 @@ Found by the `/simplify-code` pass on this branch. It was a cleanup review, not 
 reviewers did turn up two real defects — a draft beginning with `/` opening the menu with the caret
 mirrored at 0, and a first-token command offered under text that running it would have dropped — and
 both are fixed above rather than deferred, because each is the behaviour the design already promised.
+
+# Deferred fixes from the simplify pass on the model divider
+
+A cleanup review of the model-divider branch (`fix(chat): ask the host for a chat's model record as a
+turn opens`, its restyle and its test follow-up; four parallel reviewers: reuse, quality, efficiency,
+altitude) turned up one change too wide for a cleanup pass. It is recorded here instead of applied:
+it moves where a read is scheduled, which is a decision of its own.
+
+Everything else the review found is applied on this branch: the unit case that repeated an existing
+one byte for byte is gone (the count is 15, not 16), `turnModel` lost its fourth argument and its
+duplicated return, the context read it fires is coalesced per chat and now carries the house timeout,
+the send path skips the whole thing for a bot with no key, the mock parses the profile path once for
+both the request handler and the leaf that records the model (and carries the url on the turns its
+run and queue paths synthesise), the divider's comment no longer claims the wave is unscaled, and the
+glossary entry is one line like the rest of that file.
+
+## Risky
+
+### 1. The model record has no read of its own
+
+`src/lib/context.ts::refreshContext` is documented as reading a chat's *context use*, and it happens
+to carry `model_changes` because the plugin's one route answers both. The send path now fires that
+function to get the record, so the model list's read depends on the context ring's function — its
+write of `liveContext`, and its clear of both fields when the route is missing — and it fires
+outside the accounting that owns this policy: `src/lib/history.ts::followUps` and `noteFollowUps` are
+where "when a chat's follow-up reads run" is decided and recorded, and the root `AGENTS.md`'s layout row
+already has to describe the split, crediting `model-changes.ts` for a read it does not perform.
+
+- Cost: three modules to consult to answer "where does a chat read the host's record", and the next
+  caller that needs the record repeats the reach-through. The request-budget flows
+  (`pnpm e2e idle-requests`) have a hole where a read is not recorded as a follow-up.
+- Suggested fix: a `refreshModelChanges(conversationId)` sharing `getSessionContext` and writing only
+  `modelChanges`, with `refreshContext` composing it (one HTTP request, unchanged), and the "when"
+  left where the other read scheduling lives.
+- Why it is risky: it splits a shared write path (the missing-route branch clears both fields
+  together) and moves a read's scheduling into a second owner, which the ADR deliberately kept in one
+  place. ADR 0010 settles the *exception* (one fired, unawaited read on a send); which function fires
+  it is the part it does not.
+
+## Not entries
+
+- **`hostModel` and `hostProvider` read the same row twice** (`scripts/mock-hermes.mjs`). A single
+  accessor would do, but the pair defaults differently (`?? HOST_DEFAULT_MODEL` against `?? null`) and
+  both call sites use them together; the duplication is a dev-only mock's, and low confidence.
+- **The rationale lives in three comments and the ADR.** The call-site comment was trimmed to why the
+  read is fired there; the docstring keeps the predicate's own account, which is what a reader of
+  `unknownLastTurn` needs without opening the ADR.
+- **`unknownLastTurn` re-walks the thread through `turnModel`.** Deliberate: the gate and the
+  placement must answer the same question, so they share the one function rather than growing a
+  second rule that can disagree with it.
+- **The e2e's blank scenario repeats the seed → pick → send shape above it.** That is what a scenario
+  script is; the flows have no shared page-side scenario helper by design.
+
+---
+
+Found by the `/simplify-code` pass on the model divider. It was a cleanup review, not a bug hunt, but
+it did surface one real defect of this branch's own making: the mock's leaf read the profile off a
+request object with no url, so a named profile's turn recorded the default profile's model. Fixed
+above rather than deferred — it is the fidelity the mock exists for.

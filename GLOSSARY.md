@@ -90,3 +90,12 @@ _Avoid_: store, marketplace, directory, library
 **Server access**:
 The permission an MCP server needs from the service it talks to. It is given in a browser on the bot's host, never in Gots.
 _Avoid_: authorization, OAuth, sign in, connect
+
+**Model pick**:
+The model a chat sends its turns with — the chat's own pick, else its bot's. Gots' own setting, and a wish: what runs is the host's.
+_Avoid_: model choice, selected model, current model
+
+**Model change**:
+The host's record of the models a chat's calls ran on, one row per change. A thread's divider is drawn from these, wherever they name a turn; where they don't — the newest turn, or one still being written — the model this device sent it with stands until the host has recorded the call.
+_Avoid_: model switch, model update, fallback
+

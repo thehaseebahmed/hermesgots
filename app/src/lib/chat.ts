@@ -51,6 +51,7 @@ import { refreshContext } from "@/lib/context"
 import { refreshChatProviderUsage } from "@/lib/provider-usage"
 import { liveTurn, noteFollowUps, patchStats, reconcileHistory } from "@/lib/history"
 import { isLive } from "@/lib/live"
+import { unknownLastTurn } from "@/lib/model-changes"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { quietly } from "@/lib/report"
 import { randomId } from "@/lib/utils"
@@ -305,8 +306,7 @@ function streamHandlers(turn: Turn): StreamHandlers {
       if (existing) {
         existing.status = event.status
         if (event.status !== "running") existing.endedAt = Date.now()
-        if (event.status === "completed")
-          void onTodoTool(turn.conversationId, existing.tool)
+        if (event.status === "completed") void onTodoTool(turn.conversationId, existing.tool)
         // A question's full result is written when it's answered; the stream's preview is cut short.
         if (event.result && !(existing.tool === "clarify" && existing.result))
           existing.result = event.result
@@ -661,7 +661,7 @@ async function finishTurn(turn: Turn, usage: TurnUsage | undefined, sendFailed =
   await turn.close()
   if (!sendFailed) {
     noteFollowUps(conversationId)
-    void refreshContext(conversationId)
+    void refreshContext(conversationId).catch(quietly("Reading a chat's context"))
     void refreshChatProviderUsage(conversationId).catch(quietly("Reading provider limits"))
     void refreshTodos(conversationId)
   }
@@ -1010,6 +1010,12 @@ export async function sendMessage(
     .map((m) => ({ role: m.role, content: attachmentsText(m.content, m.attachments) }))
 
   const config = serverConfig(profile)
+  // A turn can only be divided from the one above it, and the host's record is the only thing that can
+  // name a turn this device never picked a model for: ask for it as the turn opens, so a switch shows
+  // while a long turn runs. Fired and never awaited, the one read started here. A bot with no key has
+  // no session on the host to read.
+  if (config.apiKey && unknownLastTurn(history, conversation.modelChanges))
+    void refreshContext(conversationId).catch(quietly("Reading a chat's context"))
   const turn = openTurn(conversationId, config, reply, false, controller)
   const { status, sendFailed } = await runTurn(turn, async () => {
     // Without a key Hermes keeps no session under our id, so nothing would sync or resume.

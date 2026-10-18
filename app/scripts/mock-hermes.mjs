@@ -1004,9 +1004,12 @@ async function playTurn(req, body, last, out) {
   const calls = /clean|delete|\bask\b/i.test(last) ? 3 : 2
   const prompt_tokens = calls * (6000 + Math.round(transcript / 4))
   if (keyed) {
-    // What the turn asked for, so a switched model reads back as the one that ran.
-    const model = typeof body.model === "string" ? body.model : null
-    const provider = typeof body.provider === "string" ? body.provider : null
+    // The model that ran: what the turn asked for, else the host's own — the plugin's hook records a
+    // row for a session's first call and again whenever the model differs from the last row, so a chat
+    // whose turns were never picked for still has one.
+    const key = profileOf(req)
+    const model = typeof body.model === "string" ? body.model : hostModel(key)
+    const provider = typeof body.provider === "string" ? body.provider : hostProvider(key)
     lastCalls.set(sessionId, {
       prompt_tokens: 6000 + Math.round(transcript / 4),
       output_tokens: pieces,
@@ -1014,8 +1017,8 @@ async function playTurn(req, body, last, out) {
       model,
       provider,
     })
-    // Like the plugin's own hook: a row only where this turn asked for a different model than the
-    // session's last one, so the app can draw a divider above the turn it answered with.
+    // Like the plugin's own hook: a row only where the model that ran differs from the session's last
+    // one, so the app can draw a divider above the turn it answered with.
     const changes = modelChanges.get(sessionId) ?? []
     if (model && changes.at(-1)?.model !== model) {
       changes.push({ at: Date.now(), model, provider })
@@ -1095,6 +1098,17 @@ const STALL_EVENTS_MS = Number(process.env.MOCK_STALL_EVENTS_MS ?? 0)
 const pushSubscriptions = new Map()
 // The main model the plugin's `model` route set, per profile ("" is the default one).
 const hostModels = new Map()
+// What the host runs when a turn asks for no model: the one picked for this profile, else the model
+// its endpoint is configured with. The plugin's hook records a call either way, so a chat whose turns
+// were never picked for still has rows to read.
+const HOST_DEFAULT_MODEL = "anthropic/claude-sonnet-4.5"
+const configuredModel = (key) => (key ? `mock-model-${key}` : HOST_DEFAULT_MODEL)
+const hostModel = (key) => hostModels.get(key ?? "")?.model ?? configuredModel(key)
+const hostProvider = (key) => hostModels.get(key ?? "")?.provider ?? null
+// The profile a request is for, from its `/p/<name>/` segment (the default profile has none). The
+// plugin's own routes carry it after `/api/plugins/memento`, so it is matched anywhere in the path.
+const PROFILE_PATH = /(?:^|\/)p\/([^/]+)(?=\/)/
+const profileOf = (req) => PROFILE_PATH.exec(req.url ?? "")?.[1] ?? ""
 // The fallback models the plugin's `fallbacks` route recorded, per profile.
 const fallbacksOf = new Map()
 // The provider figure every later usage read serves, set by `usage?percent=N` and cleared by
@@ -1196,7 +1210,13 @@ function pumpQueue(sessionId) {
   if (latest?.status === "cancelled" && (latest.endedAt ?? 0) > queue.resumedAt) return
   queue.items.shift()
   // As the plugin does, with the key the app queued it with.
-  const run = startRun({ headers: { "idempotency-key": next.id, authorization: queue.authorization } }, { ...next.body, session_id: sessionId })
+  const run = startRun(
+    {
+      url: queue.url,
+      headers: { "idempotency-key": next.id, authorization: queue.authorization },
+    },
+    { ...next.body, session_id: sessionId },
+  )
   queue.sent.push({ ...next, run_id: run.id, sent_at: Date.now() })
   noteEvent("session", sessionId)
 }
@@ -1230,7 +1250,11 @@ function startRun(req, body) {
   const input = Array.isArray(body.input) ? body.input : [{ role: "user", content: String(body.input ?? "") }]
   const last = durable(input.at(-1)?.content)
   // Rows go to the session named in the body, as on Hermes.
-  const sessionReq = { headers: { ...req.headers, "x-hermes-session-id": body.session_id } }
+  // The url rides along: the profile is read off it when the turn records the model it ran.
+  const sessionReq = {
+    url: req.url,
+    headers: { ...req.headers, "x-hermes-session-id": body.session_id },
+  }
   // Steers the agent has read and not yet answered.
   let heard = []
   if (run.sessionId)
@@ -1344,7 +1368,7 @@ http
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`)
     if (req.method === "OPTIONS") return res.writeHead(200, cors).end()
     // Like a gateway with multiplex_profiles: other profiles live under /p/<profile>/.
-    const profile = /^\/p\/([^/]+)(?=\/)/.exec(url.pathname)?.[1]
+    const profile = PROFILE_PATH.exec(url.pathname)?.[1]
     if (profile) url.pathname = url.pathname.slice(profile.length + 3)
     // The plugin's own prefix carries the profile, since Hermes's /p/<profile>/ catch-all comes first.
     const pluginProfile = /^\/api\/plugins\/memento\/p\/([^/]+)(?=\/)/.exec(url.pathname)?.[1]
@@ -1357,9 +1381,8 @@ http
     }
     if (url.pathname === "/api/model/options") {
       // Named profiles report a model models.dev doesn't know, so no window is found for it.
-      const configured = profile ? `mock-model-${profile}` : "anthropic/claude-sonnet-4.5"
-      const set = hostModels.get(profile ?? "")
-      const model = set?.model ?? configured
+      const configured = configuredModel(profile)
+      const model = hostModel(profile)
       // Hermes's picker inventory: a skeleton row without credentials is left out of the picker.
       const providers = [
         {
@@ -1394,7 +1417,7 @@ http
         },
       ]
       if (url.searchParams.get("refresh") === "true") customProbed = true
-      return json(res, 200, { model, provider: set?.provider ?? "openrouter", providers })
+      return json(res, 200, { model, provider: hostProvider(profile) ?? "openrouter", providers })
     }
     if (url.pathname === "/api/jobs") {
       const all = url.searchParams.get("include_disabled") === "true"
@@ -1860,6 +1883,8 @@ http
         const { input: _input, ...template } = body
         queue.template = { ...template, session_id: id }
         queue.authorization = req.headers.authorization
+        // The url too: a queued turn records the model it ran under its own profile.
+        queue.url = req.url
         const item = { id: `q_${randomUUID().replace(/-/g, "").slice(0, 20)}`, text: String(text ?? ""), attachments: attachments ?? [], created_at: Date.now(), body: { ...body, session_id: id } }
         queue.items.push(item)
         noteEvent("session", id)

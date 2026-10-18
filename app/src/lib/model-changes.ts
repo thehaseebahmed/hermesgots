@@ -14,6 +14,8 @@ interface Turn {
   first: { id: string; createdAt: number }
   /** The model this device started the turn with, which only a reply carries. */
   sent?: string
+  /** The turn's reply is still being written: its own call hasn't run, so the host has said nothing. */
+  running?: boolean
 }
 
 /** A thread's turns in order: one opens at its user message, or at its reply when the user row isn't loaded. */
@@ -23,19 +25,26 @@ function readTurns(messages: Message[]): Turn[] {
     const open = turns[turns.length - 1]
     if (message.role === "user" || !open) {
       // A reply whose user row wasn't loaded opens the turn, and is its own device's pick.
-      turns.push({ first: message, ...(message.model ? { sent: message.model } : {}) })
+      turns.push({
+        first: message,
+        ...(message.model ? { sent: message.model } : {}),
+        ...(message.status === "streaming" ? { running: true } : {}),
+      })
       continue
     }
     if (message.model) open.sent = message.model
+    if (message.status === "streaming") open.running = true
   }
   return turns
 }
 
 /**
  * The model a turn ran on. The host's record wins where it covers the turn: the change its own
- * first call fired, else the model in effect when the turn opened. Failing both, the model this
- * device sent it with. `end` is where the turn's call is known to have run by — the next turn's
- * opening, or unbounded for the turn still at the end of the thread.
+ * first call fired, else the model in effect when the turn opened. Where the record hasn't spoken for
+ * the turn — the one being written, or the newest one, whose call may not be recorded yet — this
+ * device's own pick stands, as it does in the pill. Failing all that, the model this device sent it
+ * with. `end` is where the turn's call is known to have run by — the next turn's opening, or unbounded
+ * for the turn still at the end of the thread, which is what says the host may not have its call yet.
  */
 function turnModel(
   turn: Turn,
@@ -54,14 +63,22 @@ function turnModel(
     if (change.at >= start) break
     carried = change
   }
-  if (carried) return carried
+  // The record named nothing inside this turn, which for the last turn — or one still being written —
+  // means the host may simply not have recorded it yet: the pick is the newer word on what it runs, and
+  // the record's own row for the turn replaces it the moment it lands. A turn with a newer one below it
+  // has been answered for, and there the carried model stands — no row inside it means the pick never
+  // reached the host at all.
+  const pick = turn.sent && (turn.running || end === Infinity)
+  if (carried && !pick) return carried
   return turn.sent ? { at: start, model: turn.sent } : undefined
 }
 
 /**
  * The dividers to draw, as a map of message id to the model to name above it: the first message of
  * each turn whose known model differs from the previous known one. A turn neither the host nor a
- * pick covers stays unknown, and unknown never counts as different — so no divider is ever wrong.
+ * pick covers stays unknown, and unknown never counts as different, so a model is never invented. The
+ * newest turn's pick can still name one the host did not run, until that turn's own row lands
+ * (ADR 0010); the row that arrives with the turn below it corrects it.
  */
 export function modelChanges(messages: Message[], changes?: ModelChange[]): Map<string, string> {
   const dividers = new Map<string, string>()
@@ -74,4 +91,15 @@ export function modelChanges(messages: Message[], changes?: ModelChange[]): Map<
     if (model) carried = model
   }
   return dividers
+}
+
+/**
+ * Whether the last turn of a thread is one the app can't name a model for — the case a read of the
+ * host's record fixes, and the only one. The next turn can be divided from this one and nothing else,
+ * so a chat asks its host for the record as a turn opens where this is true, rather than leaving the
+ * switch unknown until the turn it started ends.
+ */
+export function unknownLastTurn(messages: Message[], changes?: ModelChange[]): boolean {
+  const last = readTurns(messages).at(-1)
+  return last !== undefined && turnModel(last, changes, Infinity) === undefined
 }

@@ -1306,7 +1306,9 @@ export async function getSessionContext(
 ): Promise<SessionContext | null> {
   const response = await request(
     `${pluginRoot(config.baseUrl)}/sessions/${encodeURIComponent(sessionId)}/context`,
-    { headers: headers(config) },
+    // Bounded like every other read: this one is fired as a turn is sent too, where a hung host would
+    // leave a reply's divider unknown and the request pending for the life of the page.
+    { headers: headers(config), signal: AbortSignal.timeout(READ_TIMEOUT_MS) },
   )
   const body = await response.json()
   const count = (value: unknown) =>
@@ -1755,8 +1757,7 @@ export function parseGoal(raw: any): Goal | null {
   const contract = body.contract ?? {}
   return {
     text: str(body.goal),
-    status:
-      status === "paused" || status === "done" || status === "cleared" ? status : "active",
+    status: status === "paused" || status === "done" || status === "cleared" ? status : "active",
     turnsUsed: typeof body.turns_used === "number" ? body.turns_used : 0,
     maxTurns: typeof body.max_turns === "number" ? body.max_turns : 0,
     contract: {
