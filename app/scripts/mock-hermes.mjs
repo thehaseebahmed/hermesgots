@@ -1004,9 +1004,11 @@ async function playTurn(req, body, last, out) {
   const calls = /clean|delete|\bask\b/i.test(last) ? 3 : 2
   const prompt_tokens = calls * (6000 + Math.round(transcript / 4))
   if (keyed) {
-    // What the turn asked for, so a switched model reads back as the one that ran.
-    const model = typeof body.model === "string" ? body.model : null
-    const provider = typeof body.provider === "string" ? body.provider : null
+    // The model that ran: what the turn asked for, else the host's own — the plugin's hook records a
+    // row for every call either way, so a chat whose turns were never picked for still has rows.
+    const key = profileOf(req)
+    const model = typeof body.model === "string" ? body.model : hostModel(key)
+    const provider = typeof body.provider === "string" ? body.provider : hostProvider(key)
     lastCalls.set(sessionId, {
       prompt_tokens: 6000 + Math.round(transcript / 4),
       output_tokens: pieces,
@@ -1014,8 +1016,8 @@ async function playTurn(req, body, last, out) {
       model,
       provider,
     })
-    // Like the plugin's own hook: a row only where this turn asked for a different model than the
-    // session's last one, so the app can draw a divider above the turn it answered with.
+    // Like the plugin's own hook: a row only where the model that ran differs from the session's last
+    // one, so the app can draw a divider above the turn it answered with.
     const changes = modelChanges.get(sessionId) ?? []
     if (model && changes.at(-1)?.model !== model) {
       changes.push({ at: Date.now(), model, provider })
@@ -1095,6 +1097,15 @@ const STALL_EVENTS_MS = Number(process.env.MOCK_STALL_EVENTS_MS ?? 0)
 const pushSubscriptions = new Map()
 // The main model the plugin's `model` route set, per profile ("" is the default one).
 const hostModels = new Map()
+// What the host runs when a turn asks for no model: the one picked for this profile, else the model
+// its endpoint is configured with. The plugin's hook records a call either way, so a chat whose turns
+// were never picked for still has rows to read.
+const HOST_DEFAULT_MODEL = "anthropic/claude-sonnet-4.5"
+const configuredModel = (key) => (key ? `mock-model-${key}` : HOST_DEFAULT_MODEL)
+const hostModel = (key) => hostModels.get(key ?? "")?.model ?? configuredModel(key)
+const hostProvider = (key) => hostModels.get(key ?? "")?.provider ?? null
+// The profile a request is for, from its `/p/<name>/` prefix (the default profile has none).
+const profileOf = (req) => /^\/p\/([^/]+)(?=\/)/.exec(req.url ?? "")?.[1] ?? ""
 // The fallback models the plugin's `fallbacks` route recorded, per profile.
 const fallbacksOf = new Map()
 // The provider figure every later usage read serves, set by `usage?percent=N` and cleared by
@@ -1357,9 +1368,8 @@ http
     }
     if (url.pathname === "/api/model/options") {
       // Named profiles report a model models.dev doesn't know, so no window is found for it.
-      const configured = profile ? `mock-model-${profile}` : "anthropic/claude-sonnet-4.5"
-      const set = hostModels.get(profile ?? "")
-      const model = set?.model ?? configured
+      const configured = configuredModel(profile)
+      const model = hostModel(profile)
       // Hermes's picker inventory: a skeleton row without credentials is left out of the picker.
       const providers = [
         {
@@ -1394,7 +1404,7 @@ http
         },
       ]
       if (url.searchParams.get("refresh") === "true") customProbed = true
-      return json(res, 200, { model, provider: set?.provider ?? "openrouter", providers })
+      return json(res, 200, { model, provider: hostProvider(profile) ?? "openrouter", providers })
     }
     if (url.pathname === "/api/jobs") {
       const all = url.searchParams.get("include_disabled") === "true"

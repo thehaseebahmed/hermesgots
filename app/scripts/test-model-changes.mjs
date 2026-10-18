@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { modelChanges } from "../src/lib/model-changes.ts"
+import { modelChanges, unknownLastTurn } from "../src/lib/model-changes.ts"
 
 const sonnet = "anthropic/claude-sonnet-4.5"
 const gpt = "openai/gpt-5"
@@ -91,4 +91,42 @@ test("a turn whose user row isn't loaded still counts its reply's model", () => 
 
 test("an empty thread has nothing to draw", () => {
   assert.deepEqual([...modelChanges([], [change(100, sonnet)])], [])
+})
+
+test("the newest turn takes its pick where the host hasn't named its own call", () => {
+  const thread = [...turn(1, 100), ...turn(2, 200, gpt)]
+  const dividers = modelChanges(thread, [change(100, sonnet)])
+  assert.deepEqual([...dividers], [["u2", gpt]])
+})
+
+test("so a switch shows from the moment its turn starts, not when the turn ends", () => {
+  const thread = [
+    ...turn(1, 100),
+    message("u2", "user", 200),
+    message("a2", "assistant", 201, { model: gpt, status: "streaming" }),
+  ]
+  assert.deepEqual([...modelChanges(thread, [change(100, sonnet)])], [["u2", gpt]])
+})
+
+test("the host's own row for the newest turn replaces its pick", () => {
+  // The pick never reached the host: its call is recorded running the model it was already on.
+  const thread = [...turn(1, 100), ...turn(2, 200, gpt)]
+  const dividers = modelChanges(thread, [change(100, sonnet), change(250, sonnet)])
+  assert.deepEqual([...dividers], [])
+})
+
+test("a turn with a newer one below it keeps the model the host carried into it", () => {
+  const thread = [...turn(1, 100), ...turn(2, 200, gpt), ...turn(3, 300)]
+  const dividers = modelChanges(thread, [change(100, sonnet)])
+  assert.deepEqual([...dividers], [])
+})
+
+test("the record is asked for only where nothing names the turn above the next one", () => {
+  // Nothing at all names it: a read of the host's record could, so the next turn asks for it.
+  assert.equal(unknownLastTurn([...turn(1, 100)], []), true)
+  // The host has named it.
+  assert.equal(unknownLastTurn([...turn(1, 100)], [change(100, sonnet)]), false)
+  // This device sent the turn with a pick of its own.
+  assert.equal(unknownLastTurn([...turn(1, 100, sonnet)], []), false)
+  assert.equal(unknownLastTurn([], []), false)
 })

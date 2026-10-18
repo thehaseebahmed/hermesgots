@@ -94,7 +94,7 @@ PR titles follow the same format. Fill in `.github/pull_request_template.md` for
 | `src/lib/media-tags.ts` | Images the agent returns in a reply: its `MEDIA:<path>` tags split out of the text (tags sent together come out as one gallery), each read from the plugin's media route |
 | `src/lib/pricing.ts` | Claude API prices by model id and a project's estimated cost from its token counts |
 | `src/lib/context.ts` | Reads a chat's context use from the Gots plugin |
-| `src/lib/model-changes.ts` | Where a chat's model changed, as its host recorded it: the pure placement rules its thread draws a divider from (`scripts/test-model-changes.mjs`) |
+| `src/lib/model-changes.ts` | Where a chat's model changed: the pure placement rules its thread draws a divider from — the host's record of what each call ran on, and, for the newest turn, the model this device sent it with — and the rule the send path reads to decide whether to ask the host for that record (`scripts/test-model-changes.mjs`) |
 | `src/lib/provider-usage.ts` | Reads a bot's provider account-usage windows (plan limits, resets) from the Gots plugin, cached on the profile; the banner's notice (a claim about the account, not one window), its dismiss key and the reset text |
 | `src/lib/agents.ts` | The agents a chat delegated to (`useSessionAgents`, from the plugin), matching each to its `delegate_task` call, and their names |
 | `src/lib/todos.ts` | Reads the agent's todo list for a chat from the Gots plugin — the list, its progress and each item's depth — and re-reads it just after a `todo_list` call; nothing is read out of the run's result preview |

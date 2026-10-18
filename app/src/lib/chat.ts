@@ -51,6 +51,7 @@ import { refreshContext } from "@/lib/context"
 import { refreshChatProviderUsage } from "@/lib/provider-usage"
 import { liveTurn, noteFollowUps, patchStats, reconcileHistory } from "@/lib/history"
 import { isLive } from "@/lib/live"
+import { unknownLastTurn } from "@/lib/model-changes"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { quietly } from "@/lib/report"
 import { randomId } from "@/lib/utils"
@@ -1010,6 +1011,11 @@ export async function sendMessage(
     .map((m) => ({ role: m.role, content: attachmentsText(m.content, m.attachments) }))
 
   const config = serverConfig(profile)
+  // A turn can only be divided from the one above it, and the host's record is the only thing that can
+  // name a turn this device never picked a model for. So ask for it as the turn opens, rather than
+  // waiting for the turn's own end to read it: a switch then shows while a long turn runs. Fired, not
+  // awaited — a read never sits on the send path.
+  if (unknownLastTurn(history, conversation.modelChanges)) void refreshContext(conversationId)
   const turn = openTurn(conversationId, config, reply, false, controller)
   const { status, sendFailed } = await runTurn(turn, async () => {
     // Without a key Hermes keeps no session under our id, so nothing would sync or resume.
