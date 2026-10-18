@@ -47,6 +47,7 @@ import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { OnlineDot } from "@/components/bot-card"
 import { LinkSheet } from "@/components/link-bots"
+import { Group, RowText, linkRowClass, rowClass, Screen } from "@/components/settings-chrome"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { ExperimentalBadge } from "@/components/experimental-badge"
 import { FeedbackSheet } from "@/components/feedback"
@@ -602,53 +603,6 @@ function SectionScreen({
             <BotSection profiles={profiles} botId={botId} onDeleted={() => root("/settings")} />
           )}
     </Screen>
-  )
-}
-
-function Screen({
-  title,
-  leading,
-  className,
-  children,
-}: {
-  title: string
-  leading?: ReactNode
-  className?: string
-  children: ReactNode
-}) {
-  return (
-    <div className={cn("flex min-h-0 flex-1 flex-col overflow-y-auto", className)}>
-      <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
-        <div className="mx-auto flex min-h-11 max-w-2xl items-center gap-3">
-          {leading}
-          <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
-        </div>
-      </header>
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pb-[max(2rem,env(safe-area-inset-bottom))]">
-        {children}
-      </div>
-    </div>
-  )
-}
-
-function Group({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-px overflow-hidden rounded-3xl bg-border ring-1 ring-foreground/10 *:rounded-none">
-      {children}
-    </div>
-  )
-}
-
-const rowClass =
-  "flex min-h-14 w-full items-center gap-4 bg-card px-5 py-3 text-left text-card-foreground"
-const linkRowClass = cn(rowClass, "transition-colors hover:bg-muted")
-
-function RowText({ title, subtitle }: { title: ReactNode; subtitle?: ReactNode }) {
-  return (
-    <span className="flex min-w-0 flex-1 flex-col">
-      <span className="truncate text-base">{title}</span>
-      {subtitle && <span className="line-clamp-2 text-sm text-muted-foreground">{subtitle}</span>}
-    </span>
   )
 }
 

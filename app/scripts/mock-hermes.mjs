@@ -10,7 +10,9 @@
 // The plugin also keeps the chat list (GET and POST /api/plugins/memento/chats, newer record wins) and
 // labels a chat as Gots's on POST /api/plugins/memento/sessions/{id}/label. Its
 // GET /api/plugins/memento/sessions/{id}/context reports a keyed session's latest model call, and
-// GET /api/plugins/memento/skills serves the composer's `/` menu (three skills, no profile scope).
+// GET /api/plugins/memento/skills serves the composer's `/` menu (three skills, no profile scope),
+// and GET /api/plugins/memento/mcp the Bot's MCP servers a screen of its own lists (name, state,
+// source, and the Host's own reason on a failed one; MOCK_MCP=off is a Hermes whose plugin can't).
 // GET /api/plugins/memento/usage?provider=… serves two windows (Session + Weekly) whose
 // used_percent is MOCK_USAGE_PERCENT (default 94 so the composer banner shows; 0 → no windows), and
 // one Ollama Cloud account's monthly allowance with a purchased-credits detail when the provider is
@@ -333,6 +335,23 @@ const PLUGIN = process.env.MOCK_NO_PLUGIN !== "1"
 // MOCK_RESEARCH_WRITERS=off a host that doesn't let a mission be rewritten with another model.
 const RESEARCH = process.env.MOCK_RESEARCH !== "0"
 const RESEARCH_WRITERS = process.env.MOCK_RESEARCH_WRITERS !== "off"
+// A bot's MCP servers, as the plugin's read reports them: each with Gots' own state word, the source
+// it comes from, and the Host's own reason on a failed one. Every word the screen renders has a row.
+// MOCK_MCP=off is a Hermes whose plugin can't offer them at all: no route and no `mcps` feature.
+const MCPS = process.env.MOCK_MCP !== "off"
+const MCP_SERVERS = [
+  { name: "github", state: "on", source: "config", reason: null },
+  { name: "postgres", state: "off", source: "config", reason: null },
+  { name: "linear", state: "connecting", source: "config", reason: null },
+  {
+    name: "sentry",
+    state: "failed",
+    source: "config",
+    reason: "Connection refused: nothing is listening on localhost:3100.",
+  },
+  { name: "notion", state: "needs_access", source: "config", reason: null },
+  { name: "filesystem", state: "plugin", source: "plugin", reason: null },
+]
 
 /** How long a pull request's checks run after a turn says "pending", before they pass. */
 const PENDING_CHECK_S = 12
@@ -1400,7 +1419,7 @@ http
       return json(res, 200, {
         name: "memento",
         version: PLUGIN_VERSION,
-        features: ["cron_runs", "session_label", "chats", "draft_text", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "goal", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "skills", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : [])],
+        features: ["cron_runs", "session_label", "chats", "draft_text", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "goal", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "skills", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : []), ...(MCPS ? ["mcps"] : [])],
         clarify: true,
         hooks: true,
         goal:
@@ -1424,6 +1443,11 @@ http
           { name: "plan", description: "Write a step-by-step plan before touching anything.", category: null },
         ],
       })
+    }
+    // The Bot's MCP servers for a screen of its own. The `/p/<profile>` copy lands here too, since
+    // the plugin's prefix carries the profile and is stripped just above.
+    if (PLUGIN && MCPS && !profile && url.pathname === "/api/plugins/memento/mcp") {
+      return json(res, 200, { object: { servers: MCP_SERVERS } })
     }
     // Web Push: the mock keeps subscriptions but sends nothing.
     if (PLUGIN && !profile && req.method === "POST" && url.pathname === "/api/plugins/memento/push") {
