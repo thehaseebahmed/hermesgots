@@ -99,3 +99,34 @@ _Avoid_: model choice, selected model, current model
 The host's record of the models a chat's calls ran on, one row per change. A thread's divider is drawn from these, wherever they name a turn; where they don't — the newest turn, or one still being written — the model this device sent it with stands until the host has recorded the call.
 _Avoid_: model switch, model update, fallback
 
+**AFK**:
+A project being worked without its user present. On, Gots claims its ready tasks and works them one at a time until the switch is turned off.
+_Avoid_: autopilot, unattended mode, auto mode, yolo
+
+**Ready task**:
+A task the user has marked for an agent to work, by the tracker's `ready-for-agent` mark.
+_Avoid_: approved, agent-ready, todo, queued
+
+**Task**:
+One specified piece of work on a project, carried by one of that project's GitHub issues. AFK works one task per session.
+_Avoid_: ticket, work item, card, job
+
+**Blocker**:
+A task that has to be closed before another one can start.
+_Avoid_: dependency, prerequisite, upstream
+
+**Frontier**:
+The ready tasks that can be started now: their blockers are all closed, and nobody has claimed them.
+_Avoid_: backlog, queue, ready list, board
+
+**Claim**:
+Taking a task so nothing else picks it up. A claimed task is out of the frontier.
+_Avoid_: assign, lock, pickup
+
+**In review**:
+A task whose pull request is open and waiting on the user.
+_Avoid_: pending, awaiting merge, PR open
+
+**gots-got-it**:
+The mark Gots leaves on a task it has claimed.
+_Avoid_: claimed, in-progress, assigned, taken
