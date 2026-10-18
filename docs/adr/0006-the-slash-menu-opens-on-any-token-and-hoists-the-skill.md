@@ -23,8 +23,11 @@ commands are the ones the composer's own actions own; everything else a slash ca
 
 The list is filtered by name, category and description, ranked in tiers: an exact name first, then a
 name the query starts, then a name that contains it, then a fuzzy (subsequence) name match, then a
-category match, then a description match. Ties keep the plugin's own order. Escape closes the menu until
-the text changes; when nothing matches, the menu is not shown.
+category match, then a description match. Ties keep the plugin's own order. A caret on the slash
+itself is inside the token, so the query is empty and the menu lists everything; a pick rewrites that
+token whole, and typing there inserts in front of the slash either way, so the boundary is left as it
+falls rather than closed. Escape closes the menu until the text changes; when nothing matches, the menu
+is not shown.
 
 The bot's skills are cached on the device, one last-known list per bot, so the menu opens with the
 skills already in it and refetches in the background; the list a read brings replaces the one held, and

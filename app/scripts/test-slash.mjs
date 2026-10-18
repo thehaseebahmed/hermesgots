@@ -46,6 +46,13 @@ test("a slash that begins a word mid-message is a token, and knows it isn't alon
   })
 })
 
+test("a caret on the slash is inside the token, and the query it asks for is empty", () => {
+  assert.deepEqual(tokenAt("/gr", 0), { start: 0, end: 3, query: "", alone: true })
+  assert.deepEqual(tokenAt("fix /gr", 4), { start: 4, end: 7, query: "", alone: false })
+  // One character left of the token isn't in it, so there is no menu there.
+  assert.equal(tokenAt("fix /gr", 3), null)
+})
+
 test("a new line starts a token just as a space does", () => {
   const text = "fix the tests\n/grill"
   assert.equal(slashToken(text, text.length)?.query, "grill")
