@@ -5,8 +5,10 @@
 // — a Hermes whose write built-ins are missing — still lists them, with no switch on any row rather
 // than one whose every tap could only come back refused. One that switches them but doesn't
 // advertise `mcps_remove` — a plugin older than the removal — keeps its switch and offers no
-// removal, for the same reason. The `info` answer is the only thing that changes; nothing logs an
-// error.
+// removal, for the same reason. A Host that can do all that but has no Catalogue to read — a Hermes
+// without the module the Add action needs — keeps its screen and offers no Add action, again so no
+// control is offered that could only fail. The `info` answer is the only thing that changes; nothing
+// logs an error.
 import { app, assert, flow, pass } from "./lib.mjs"
 
 const run = async ({ page, profileId, shot }) => {
@@ -101,10 +103,29 @@ const run = async ({ page, profileId, shot }) => {
   )
   await shot("no-removals")
 
+  // A plugin that lists and switches a Bot's servers but has no Catalogue to add from: the screen is
+  // the same, with no Add action on it, rather than one whose every tap could only be a 501.
+  await gate("mcps_catalogue")
+  await page.goto(`${app}${editor}`)
+  await page.getByRole("link", { name: "MCP servers" }).waitFor({ timeout: 15_000 })
+  await page.goto(`${app}${screen}`)
+  await page.locator('[data-mcp="github"]').waitFor({ timeout: 15_000 })
+  assert.equal(
+    await page.getByRole("button", { name: "Add a server" }).count(),
+    0,
+    "a Host with no Catalogue offers no Add action",
+  )
+  assert.equal(
+    await page.getByRole("switch").count(),
+    5,
+    "and its servers keep their switch",
+  )
+  await shot("no-catalogue")
+
   assert.deepEqual(errors, [], `no error in the console (${errors.join("; ")})`)
 }
 
 await flow("mcps-gate", run)
 pass(
-  "a Bot whose plugin answers without `mcps` has no MCP servers row and its screen's URL returns to the Bot, one that lists servers without `mcps_write` lists them with no switch, one that switches them without `mcps_remove` keeps its switch and offers no removal, and no error is logged",
+  "a Bot whose plugin answers without `mcps` has no MCP servers row and its screen's URL returns to the Bot, one that lists servers without `mcps_write` lists them with no switch, one that switches them without `mcps_remove` keeps its switch and offers no removal, one with no Catalogue offers no Add action, and no error is logged",
 )

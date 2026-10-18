@@ -1,12 +1,13 @@
-"""Tests for the read, the toggle and the removal of a bot's MCP servers (``plugin/mcp.py``).
+"""Tests for the read, the toggle, the removal and the Catalogue of a bot's MCP servers
+(``plugin/mcp.py``).
 
 Hermes's own MCP built-ins — the profile scope, the config reader, the split between a profile's
 servers and a Hermes plugin's, the cached runtime status read, the stored-access check, the
-catalogue's own uninstall and the OAuth manager — are stood in for through ``sys.modules`` (the
-``test_skills.py`` pattern), so each test asserts only this module's own rules: the state word each
-of Hermes's states becomes, the Host's own reason on a failure, the profile scope the read or the
-write ran in, what a removal takes with it, and that a host without the built-ins advertises
-nothing.
+catalogue's own uninstall and its list, the OAuth manager — are stood in for through ``sys.modules``
+(the ``test_skills.py`` pattern), so each test asserts only this module's own rules: the state word
+each of Hermes's states becomes, the Host's own reason on a failure, the profile scope the read or
+the write ran in, what a removal takes with it, which Catalogue entries the profile already has, and
+that a host without the built-ins advertises nothing.
 
 Run: python3 -m unittest plugin.tests.test_mcp -v
 """
@@ -36,6 +37,7 @@ def hermes(
     uninstalled=None,
     forgotten=None,
     env_writes=None,
+    catalogue=None,
 ):
     """Hermes's MCP built-ins for one test, faked the way the module imports them.
 
@@ -63,6 +65,10 @@ def hermes(
     ``env_writes`` a list Hermes's environment writer appends ``(profile, key)`` to. A removal must
     leave both alone, since Hermes reuses a value when the same server is added again; the fake keeps
     the values, so a removal that wrote one shows up in the assertions rather than passing quietly.
+
+    ``catalogue`` is what Hermes's own ``list_catalog`` offers — ``{name, description}`` dicts, shaped
+    into the entry objects its own ``CatalogEntry`` dataclass is — and ``is_installed``/``is_enabled``
+    read the same ``store`` the profile's config does, as Hermes's own do.
 
     The scopes the read enters land on ``hermes_cli.web_server_profiles``'s ``scopes``, and the
     scopes the write enters on ``hermes_cli.web_routers._common``'s ``write_scopes`` — Hermes's own
@@ -221,6 +227,23 @@ def hermes(
 
     catalog = types.ModuleType("hermes_cli.mcp_catalog")
     catalog.uninstall_entry = uninstall_entry
+
+    def list_catalog():
+        """Hermes's own Catalogue: its entry objects, which carry a name and a description."""
+        return [types.SimpleNamespace(**entry) for entry in (catalogue or [])]
+
+    def is_installed(name):
+        """Hermes's own read of the profile's config: a server it has an entry for is installed."""
+        return name in store
+
+    def is_enabled(name):
+        """Hermes's own: installed and not switched off (an entry of nothing reads as not enabled)."""
+        cfg = store.get(name)
+        return bool(cfg) and (cfg if isinstance(cfg, dict) else {}).get("enabled", True) is not False
+
+    catalog.list_catalog = list_catalog
+    catalog.is_installed = is_installed
+    catalog.is_enabled = is_enabled
 
     oauth = types.ModuleType("tools.mcp_oauth_manager")
     oauth.get_manager = get_manager
@@ -772,12 +795,136 @@ class McpRemoveTests(unittest.TestCase):
                 self.assertEqual(501, caught.exception.status)
 
 
+class McpCatalogueTests(unittest.TestCase):
+    """Browsing Hermes's Catalogue for a bot (``mcp.catalogue``): a read, and nothing else."""
+
+    def test_every_entry_is_listed_sorted_with_whether_the_bot_has_it(self):
+        """An entry the bot's config has reads as installed, one it has switched off as not enabled."""
+        stubs = hermes(
+            servers={"github": {"command": "npx"}, "postgres": {"url": "https://db.example/mcp", "enabled": False}},
+            catalogue=[
+                {"name": "slack", "description": "Read and post in Slack channels."},
+                {"name": "github", "description": "Open, review and land pull requests."},
+                {"name": "postgres", "description": "Query a Postgres database."},
+            ],
+        )
+        with mock.patch.dict(sys.modules, stubs):
+            found = mcp.catalogue("bot-a")
+        self.assertEqual(
+            [
+                {
+                    "name": "github",
+                    "description": "Open, review and land pull requests.",
+                    "installed": True,
+                    "enabled": True,
+                },
+                {
+                    "name": "postgres",
+                    "description": "Query a Postgres database.",
+                    "installed": True,
+                    "enabled": False,
+                },
+                {
+                    "name": "slack",
+                    "description": "Read and post in Slack channels.",
+                    "installed": False,
+                    "enabled": False,
+                },
+            ],
+            found,
+        )
+
+    def test_an_entry_with_no_description_reads_as_an_empty_one(self):
+        """Hermes carries no description for some entries; the app shows the name on its own."""
+        stubs = hermes(catalogue=[{"name": "bare"}])
+        with mock.patch.dict(sys.modules, stubs):
+            found = mcp.catalogue("bot-a")
+        self.assertEqual(
+            [{"name": "bare", "description": "", "installed": False, "enabled": False}], found
+        )
+
+    def test_an_empty_catalogue_answers_an_empty_list(self):
+        with mock.patch.dict(sys.modules, hermes()):
+            self.assertEqual([], mcp.catalogue("bot-a"))
+
+    def test_the_catalogue_runs_inside_the_given_profile_scope(self):
+        """The scope is what keeps one bot's catalogue from marking another bot's entries."""
+        stubs = hermes(catalogue=[{"name": "slack", "description": "Slack."}])
+        with mock.patch.dict(sys.modules, stubs):
+            mcp.catalogue("bot-a")
+            mcp.catalogue(None)
+        self.assertEqual(["bot-a", None], stubs["hermes_cli.web_server_profiles"].scopes)
+
+    def test_browsing_the_catalogue_writes_nothing(self):
+        """The fakes' writers refuse where they can be reached; this proves none was asked for."""
+        env_writes, saved, reconcile = [], [], []
+        stubs = hermes(
+            servers={"github": {"command": "npx"}},
+            catalogue=[{"name": "github", "description": "GitHub."}, {"name": "slack", "description": "Slack."}],
+            env_writes=env_writes,
+            saved=saved,
+            reconcile=reconcile,
+        )
+        with mock.patch.dict(sys.modules, stubs):
+            mcp.catalogue("bot-a")
+        self.assertEqual([], saved)
+        self.assertEqual([], env_writes)
+        self.assertEqual([], reconcile)
+        # Nothing entered Hermes's config write scope: a read never takes the config lock.
+        self.assertEqual([], stubs["hermes_cli.web_routers._common"].write_scopes)
+
+    def test_the_bot_is_unchanged_by_browsing_it(self):
+        """The read reports the profile's config without touching it, so the bot has what it had."""
+        stubs = hermes(
+            servers={"github": {"command": "npx"}},
+            catalogue=[{"name": "github", "description": "GitHub."}, {"name": "slack", "description": "Slack."}],
+            reconcile=[],
+        )
+        with mock.patch.dict(sys.modules, stubs):
+            marked = {entry["name"]: entry["installed"] for entry in mcp.catalogue("bot-a")}
+            after = mcp.read("bot-a")
+        self.assertEqual({"github": True, "slack": False}, marked)
+        self.assertEqual([("github", "on")], rows(after))
+
+    def test_a_host_without_the_catalogue_built_ins_offers_none(self):
+        """A host whose Hermes has no Catalogue offers no Add action, and the route is a 501."""
+        for missing in ("hermes_cli.mcp_catalog", "hermes_cli.web_server_profiles"):
+            with self.subTest(missing=missing):
+                stubs = hermes(servers={"srv": {"command": "npx"}}, catalogue=[{"name": "slack"}])
+                stubs[missing] = None
+                with mock.patch.dict(sys.modules, stubs):
+                    self.assertIsInstance(mcp.browsable(), str)
+                    with self.assertRaises(mcp.McpError) as caught:
+                        mcp.catalogue("bot-a")
+                self.assertEqual(501, caught.exception.status)
+
+    def test_a_host_whose_catalogue_module_lost_a_function_is_a_501(self):
+        """Hermes's own module, with the read moved out of it: the same 501 as a missing module."""
+        stubs = hermes(catalogue=[{"name": "slack"}])
+        del stubs["hermes_cli.mcp_catalog"].list_catalog
+        with mock.patch.dict(sys.modules, stubs):
+            self.assertIsInstance(mcp.browsable(), str)
+            with self.assertRaises(mcp.McpError) as caught:
+                mcp.catalogue("bot-a")
+        self.assertEqual(501, caught.exception.status)
+
+    def test_browsing_and_the_servers_read_are_gated_apart(self):
+        """The Catalogue's built-ins aren't the read's: a host with one and not the other is real."""
+        stubs = hermes(servers={"srv": {"command": "npx"}}, catalogue=[{"name": "slack"}])
+        del stubs["hermes_cli.mcp_catalog"].list_catalog
+        with mock.patch.dict(sys.modules, stubs):
+            self.assertIsNone(mcp.available())
+            self.assertEqual([("srv", "on")], rows(mcp.read("bot-a")))
+            self.assertIsInstance(mcp.browsable(), str)
+
+
 class McpFeatureGateTests(unittest.TestCase):
     def test_the_hosts_built_ins_are_available(self):
         with mock.patch.dict(sys.modules, hermes()):
             self.assertIsNone(mcp.available())
             self.assertIsNone(mcp.writable())
             self.assertIsNone(mcp.removable())
+            self.assertIsNone(mcp.browsable())
 
     def test_a_host_that_can_only_read_still_lists_its_servers(self):
         """The write's built-ins are a different set from the read's, so this combination is real."""

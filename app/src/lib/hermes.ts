@@ -466,6 +466,57 @@ export async function removeMcpServer(
   return parseMcpServers(await response.json())
 }
 
+/** One entry of Hermes's Catalogue, as the Gots plugin's read reports it. */
+export interface McpCatalogueEntry {
+  name: string
+  /** What the entry is, in Hermes's own words; an entry with nothing to say carries an empty one. */
+  description: string
+  /** Whether this bot already has it — the Host's own read of the bot's configuration. */
+  installed: boolean
+  /** Whether its configuration leaves it on; false for one the bot doesn't have at all. */
+  enabled: boolean
+}
+
+/** One catalogue entry as the plugin reports it, or nothing for one Gots has no name for. */
+function parseMcpCatalogueEntry(raw: unknown): McpCatalogueEntry | undefined {
+  const entry = raw as Record<string, unknown> | null
+  if (typeof entry?.name !== "string" || !entry.name) return undefined
+  return {
+    name: entry.name,
+    description: typeof entry.description === "string" ? entry.description : "",
+    installed: entry.installed === true,
+    enabled: entry.enabled === true,
+  }
+}
+
+/**
+ * Reads the plugin's catalogue answer (`{"object": {"entries": [...]}}`) into the entries the
+ * Catalogue lists: an entry with no name is dropped, and so is anything that isn't an entry at all.
+ */
+export function parseMcpCatalogue(value: unknown): McpCatalogueEntry[] {
+  const rows = (value as { object?: { entries?: unknown } } | null)?.object?.entries
+  if (!Array.isArray(rows)) return []
+  return rows
+    .map(parseMcpCatalogueEntry)
+    .filter((entry): entry is McpCatalogueEntry => entry !== undefined)
+}
+
+/**
+ * Hermes's Catalogue as this bot's Host offers it (the Gots plugin's `GET /mcp/catalogue`): every
+ * entry, each marked with whether the bot already has it. A read only — nothing is added, and an
+ * entry's declared values are never part of it.
+ */
+export async function listMcpCatalogue(
+  config: HermesConfig,
+  signal?: AbortSignal,
+): Promise<McpCatalogueEntry[]> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/mcp/catalogue`, {
+    headers: headers(config),
+    signal,
+  })
+  return parseMcpCatalogue(await response.json())
+}
+
 /** A provider the host has credentials for, and the models Hermes offers on it. */
 export interface ModelProvider {
   /** What Hermes takes as a run's `provider`. */

@@ -232,14 +232,16 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if denied is not None:
             return denied
         # The MCP screen is advertised only where Hermes's own MCP built-ins import, so a bot whose
-        # Hermes is too old gets no row rather than an error; the switch and the removal are
-        # advertised apart from it and from each other, because each needs a different set of
-        # built-ins — a host that can list servers may still not be able to switch one, and one that
-        # can switch may predate the removal — and must not offer a control that can't work.
+        # Hermes is too old gets no row rather than an error; the switch, the removal and the
+        # Catalogue are advertised apart from it and from each other, because each needs a different
+        # set of built-ins — a host that can list servers may still not be able to switch one, one
+        # that can switch may predate the removal, and one may have no Catalogue to add from — and
+        # must not offer a control that can't work.
         # Off the loop: the checks import them.
         serves_mcps = await asyncio.to_thread(mcp.available) is None
         writes_mcps = serves_mcps and await asyncio.to_thread(mcp.writable) is None
         removes_mcps = writes_mcps and await asyncio.to_thread(mcp.removable) is None
+        browses_mcps = serves_mcps and await asyncio.to_thread(mcp.browsable) is None
         return web.json_response(
             {
                 "name": "memento",
@@ -288,6 +290,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     *(["mcps"] if serves_mcps else []),
                     *(["mcps_write"] if writes_mcps else []),
                     *(["mcps_remove"] if removes_mcps else []),
+                    *(["mcps_catalogue"] if browses_mcps else []),
                 ],
                 "clarify": asks,
                 "todo_tool": todo_tool,
@@ -408,6 +411,22 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except ImportError:
             return _error(web, mcp.UNAVAILABLE, 501)
         return web.json_response({"object": {"servers": servers}})
+
+    async def list_mcp_catalogue(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        # Hermes's own Catalogue, read inside this bot's profile scope: the entries it offers and
+        # whether this bot already has each. Nothing is added, connected or written by it; a host
+        # without Hermes's catalogue module is a 501, never a 500. See mcp.py.
+        profile = request_profile()
+        try:
+            entries = await asyncio.to_thread(mcp.catalogue, profile)
+        except mcp.McpError as error:
+            return _error(web, str(error), error.status)
+        except ImportError:
+            return _error(web, mcp.UNAVAILABLE, 501)
+        return web.json_response({"object": {"entries": entries}})
 
     async def set_mcp_server_enabled(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1174,6 +1193,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/fallbacks", get_fallbacks)
     app.router.add_get(f"{PREFIX}/skills", list_skills)
     app.router.add_get(f"{PREFIX}/mcp", list_mcp_servers)
+    app.router.add_get(f"{PREFIX}/mcp/catalogue", list_mcp_catalogue)
     app.router.add_post(f"{PREFIX}/mcp/{{name}}/enabled", set_mcp_server_enabled)
     app.router.add_delete(f"{PREFIX}/mcp/{{name}}", remove_mcp_server)
     app.router.add_post(f"{PREFIX}/fallbacks", set_fallbacks)
