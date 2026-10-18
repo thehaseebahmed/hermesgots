@@ -86,6 +86,11 @@ const FLOWS = {
     about:
       "A session opened mid-turn from another device loads whole turns, pages back twice and keeps one reply",
   },
+  "history-generations": {
+    script: "e2e/history-generations.mjs",
+    about:
+      "A session compacted while this device already showed its turns keeps each of them shown once",
+  },
   "question-from-push": {
     script: "e2e/question-from-push.mjs",
     about:

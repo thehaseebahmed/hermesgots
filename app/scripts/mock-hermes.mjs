@@ -2184,6 +2184,29 @@ http
       PRS_FAIL = !!fail
       return json(res, 200, { ok: true })
     }
+    // Dev only: POST { session_id, rows } compacts a session in place the way Hermes's does. What it
+    // carried is re-emitted under fresh row ids with its payloads and timestamps untouched, behind the
+    // task-list notice row compression writes at the boundary, and the rows before the tail leave the
+    // active transcript. A device that already showed those turns meets them again as new rows.
+    if (url.pathname === "/__mock/compact" && req.method === "POST") {
+      const { session_id: sessionId, rows = 50 } = await readBody(req)
+      const stored = transcripts.get(sessionId)
+      if (!stored) return json(res, 404, { error: { message: "Session not found" } })
+      const carried = stored.slice(-rows).map((row) => ({ ...row, id: ++lastRowId }))
+      transcripts.set(sessionId, [
+        {
+          id: ++lastRowId,
+          session_id: sessionId,
+          timestamp: Date.now() / 1000,
+          role: "user",
+          content:
+            "[Your active task list was preserved across context compression]\n" +
+            "Reload the skills listed below before acting on these tasks.",
+        },
+        ...carried,
+      ])
+      return json(res, 200, { ok: true, rows: carried.length })
+    }
     const sessionRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/(workspace|workspace\/remove|mode|prs|library|close|goal|goal\/control)$/.exec(url.pathname)
     if (PLUGIN && !profile && sessionRoute) {
       const id = decodeURIComponent(sessionRoute[1])
