@@ -1396,3 +1396,90 @@ checked the ticket's own acceptance criteria — all met — so neither was a bu
 findings blocks the pull request. Every finding either landed on the branch or is recorded above;
 the plugin suite and the four browser flows that cover this screen were re-run after the last of
 them.
+
+---
+
+# Deferred: a message sent as a stop takes effect is steered into the turn being stopped
+
+The diagnosis of the duplicated and misplaced turns in a long chat separated two mechanisms. One is
+fixed on the branch that recorded it: Hermes's compaction re-emits the carried tail under fresh row
+ids, and catch-up adopted each copy as a new turn, so a turn the device already had was appended
+again. The other is how a message reaches the middle of a turn at all — a plain send while a reply is
+live is stored as a *steer*, and the composer decides which it is from one local flag.
+
+## Risky
+
+### 1. "This run is live" is a local row's status, and a stop does not change it
+
+`app/src/components/chat/composer.tsx:182-183` sends as a steer when `busy` is set, `onSteer` exists,
+no files are attached and the pick (or the setting) says steer; `busy` is `Boolean(streaming)` over
+the local rows (`app/src/routes/chat.tsx:270-271`), where `streaming` is the row whose status is
+`streaming`. `steerable` (`app/src/routes/chat.tsx:302`) narrows that to a run id and a host that has
+the route, and `onSteer` (`:914`) hands the text to `steerText` (`app/src/lib/chat.ts:1481`), which
+queues it and then calls `steerQueued` (`:1449`) — and `steerQueued` steers whenever the turn still
+carries a `runId` (`:1451`, `:1463`). `stopMessage` (`app/src/lib/chat.ts:1496`) fires `stopRun` and
+aborts the stream but records nothing the composer can read, and the row's status only clears when
+the abort unwinds through the turn's own `finally`. So between the tap and that unwind, and against a
+host whose run keeps going after a best-effort stop, a send is steered into the run being stopped
+rather than starting a turn: the host appends the text inside that turn — the reporter's transcript
+holds exactly such a `steer` row mid-turn — and every device that reads the transcript afterwards
+shows it there. That is the "my message landed in the middle of a turn I had stopped" half of the
+report.
+
+- Cost: a message sent after ending a reply is stuck inside it — its position, and any follow-up the
+  steer carries — and no screen says it went that way. The app has no answer to "this run was
+  stopped" separate from "this run is live", which is also why a steer can be offered under a reply
+  the host has already ended while its row is still open here.
+- Suggested fix: record the stop when `stopMessage` runs — a `stopped` mark on the turn, cleared
+  when the next turn opens, or the pending `stopRun` promise awaited by the send path — and read it
+  in one predicate the three sites share: the composer's steer branch, `chat.tsx`'s `steerable` and
+  `steerQueued`'s `runId` check. A send during or after a stop then queues as its own turn instead of
+  steering into a dead one.
+- Why it is risky: it changes what the composer does with a send on the app's busiest screen, and the
+  queue's path (`queueMessage`, `app/src/lib/chat.ts`) then receives messages that today never become
+  rows. Steering is a deliberate model — a setting (`steerByDefault`), a queue action and the row it
+  leaves in the thread — so the change has to keep an explicit steer working, which means separating
+  "the run is live" from "the user asked to steer". No flow sends while a stop is taking effect, so
+  one has to be written with it.
+
+### 2. The note a compaction writes into the transcript renders as the user's own message
+
+Hermes marks the seam a compaction leaves with a row addressed to the model — "the active task list was
+preserved", "still in progress" — stored as a `user` row. `isNotice` (`app/src/lib/history.ts:192`)
+recognises only the `[System:` form, so a turn-start row like this one is neither skipped nor folded:
+`toMessages` maps it to a user message and the thread draws it in a user bubble, exactly as the
+reporter's screenshot shows between the two copies of the same turn sequence. It is not text the user
+typed, and it is the one row in the thread that no device ever sent.
+
+- Cost: a long chat that has been compacted shows a message in the user's own voice that they never
+  wrote, at the seam where their turns were carried across — and, because it starts a turn, it can
+  also take a reply's place in the thread's ordering until a real turn follows it.
+- Suggested fix: widen the notice rule to the shapes Hermes writes for a session-internal seam (the
+  `[System:` rows it already knows, and the task-list preservation note), keeping it a predicate over
+  the row's text so nothing else changes; `history-generations` then asserts the marker is not drawn
+  as a user message, which is the case a compaction flow can hold.
+- Why it is risky: it decides what a user is allowed to see of Hermes's own bookkeeping, and the
+  widening has to be exact — a rule loose enough to catch the note could swallow a message a user
+  really began with a bracket. The flow's mock would have to emit Hermes's real wording rather than a
+  paraphrase, since the match is textual.
+
+## Not entries
+
+- **A carried row Hermes didn't stamp with a time** (`history.ts:706`, `:737`) is added as it always
+  was, since the recognition is by time. Every row in the reporter's transcript carries one, and the
+  only other thing on a row that survives a re-emission is its text — a match on text alone cannot
+  tell a compaction's copy from a user who really sent the same message twice, which is the case the
+  match exists to keep apart.
+
+---
+
+Found while diagnosing the duplicated and misplaced turns in a long chat, against the reporter's own
+transcript (its rows carry the re-emitted compaction generations). The duplication is fixed on that
+branch; the two below are not, and the steer-as-a-plain-send model the first sits inside is the user's
+setting rather than a defect. Both came out of reading the same transcript and a review of the fix
+rather than from a repro of their own: what is verified is the shape above — one local status decides
+the send's kind and a stop leaves it set, and a seam row Hermes writes as a `user` note is drawn as the
+user's message — read in the tree and matched against the transcript and the reporter's screenshot. The
+four chat flows (`chat-message`, `reattach`, `history-pages` and the branch's new `history-generations`)
+all pass, and none of them stops a reply and sends in the same breath, or asserts what a compaction's
+seam row looks like.

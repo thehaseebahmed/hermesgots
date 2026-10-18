@@ -7,7 +7,7 @@ import {
   type Message,
   type ToolEvent,
 } from "@/lib/db"
-import { refreshQueue } from "@/lib/chat"
+import { CLOCK_SLACK_MS, refreshQueue } from "@/lib/chat"
 import { FOLLOW_UP_MS, JUST_FOLLOWED_UP_MS } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
 import { refreshContext } from "@/lib/context"
@@ -285,6 +285,9 @@ export function toMessages(
         status: "done",
         createdAt,
         hermesRowId: row.id,
+        // Its row's own time, kept apart from `createdAt` (which a catch-up may floor): a compaction
+        // re-emits this row under a fresh id with the time untouched, and this is what says so.
+        ...(row.timestamp ? { hermesAt: createdAt } : {}),
       })
       continue
     }
@@ -426,6 +429,16 @@ function withTranscriptDetails(local: ToolEvent[], fromHermes: ToolEvent[]) {
     return next
   })
   return changed ? tools : undefined
+}
+
+/**
+ * The transcript's tool details folded into the reply this device already drew, for a turn it kept:
+ * what the stream recorded stays, and its calls gain what only the transcript carries.
+ */
+function withReplyDetails(local: Message, reply: Message | undefined) {
+  if (!local.tools?.length || !reply?.tools?.length) return
+  const tools = withTranscriptDetails(local.tools, reply.tools)
+  return tools ? { ...local, tools } : undefined
 }
 
 /**
@@ -698,7 +711,15 @@ async function reconcile(conversationId: string) {
     const unmatched = current.filter(
       (m) => m.role === "user" && m.status === "done" && rowIdOf(m, sessionId) === undefined,
     )
+    // Each fetched row's own time, in ms: what a turn is recognised by when a compaction has
+    // re-emitted its rows under fresh ids.
+    const hostAt = new Map(
+      rows.map((row) => [row.id, row.timestamp ? Math.round(row.timestamp * 1000) : undefined]),
+    )
     let next = 0
+    // The local turns this pass has already paired with a row: a compaction's copy of a turn must not
+    // pair with a local message that an earlier row of the same page already took.
+    const adopted = new Set<string>()
     // Inserted turns sort after what precedes them on Hermes, whatever this device's clock says.
     let floor = 0
     const turnEnd = (user: Message) => {
@@ -726,10 +747,16 @@ async function reconcile(conversationId: string) {
         }
         continue
       }
+      const at = user.hermesRowId !== undefined ? hostAt.get(user.hermesRowId) : undefined
       const match = unmatched.findIndex((m, i) => i >= next && m.content === user.content)
       if (match >= 0) {
         next = match + 1
-        writes.push({ ...unmatched[match], hermesRowId: user.hermesRowId })
+        adopted.add(unmatched[match].id)
+        writes.push({
+          ...unmatched[match],
+          hermesRowId: user.hermesRowId,
+          ...(at !== undefined ? { hermesAt: at } : {}),
+        })
         floor = turnEnd(unmatched[match])
         // A turn streamed here without its events has no tool calls; the transcript's fill it in.
         const local = current[current.indexOf(unmatched[match]) + 1]
@@ -745,9 +772,37 @@ async function reconcile(conversationId: string) {
             reasoning: local.reasoning ?? reply.reasoning,
             steers: local.steers ?? reply.steers,
           })
-        } else if (local?.role === "assistant" && local.tools?.length && reply?.tools?.length) {
-          const tools = withTranscriptDetails(local.tools, reply.tools)
-          if (tools) writes.push({ ...local, tools })
+        } else if (local?.role === "assistant") {
+          const merged = withReplyDetails(local, reply)
+          if (merged) writes.push(merged)
+        }
+        continue
+      }
+      // Hermes's compaction carries the newest turns forward under fresh row ids with their text and
+      // times untouched, so a turn this device already holds comes back looking new. Adopt it where it
+      // stands — remembering the row it now has, so the next catch-up matches by id — rather than
+      // adding a second copy of it around whatever the user sent since.
+      const carried =
+        at === undefined
+          ? undefined
+          : current.find(
+              (m) =>
+                !adopted.has(m.id) &&
+                m.role === "user" &&
+                m.status === "done" &&
+                m.content === user.content &&
+                (m.hermesAt !== undefined
+                  ? m.hermesAt === at
+                  : Math.abs(m.createdAt - at) <= CLOCK_SLACK_MS),
+            )
+      if (carried) {
+        adopted.add(carried.id)
+        writes.push({ ...carried, hermesRowId: user.hermesRowId, hermesAt: at })
+        floor = turnEnd(carried)
+        const local = current[current.indexOf(carried) + 1]
+        if (local?.role === "assistant" && local.status !== "streaming") {
+          const merged = withReplyDetails(local, reply)
+          if (merged) writes.push(merged)
         }
         continue
       }

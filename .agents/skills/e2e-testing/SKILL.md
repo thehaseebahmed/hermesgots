@@ -55,6 +55,7 @@ elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` l
 | `approval` | A project session waiting on an approval shows in the sidebar's Waiting for input and its project's Waiting on you. Both move it to Idle once it's allowed |
 | `reattach` | A reply still streaming when the page reloads picks its run up again and finishes |
 | `history-pages` | A session opened mid-turn from another device loads the running turn whole, pages back a turn longer than a page twice, and keeps one reply per turn, at the end; a chat an older version split is mended by Load earlier. Main showed the running turn twice |
+| `history-generations` | A session compacted on the host while this device already showed its turns keeps each of them shown once, in the thread and on screen, across a carried tail of two turns. Main showed the carried turns twice, around the messages sent since |
 | `question-from-push` | A question opened from a notification in a chat not loaded here shows as waiting from the first frame, never "No answer", then its form; a chat not on the device yet opens once the chat list syncs. Main showed "No answer" and sent the second home |
 | `live-poll` | `runs/live` is read by one shared poll: at most 3 times in 25s with the session, its project and the sidebar open. Main read it 4 times |
 | `photo-progress` | A message with a photo shows its reply's tool calls while it runs, on the `legacy` mock where the app follows the turn in the transcript. Main showed none |

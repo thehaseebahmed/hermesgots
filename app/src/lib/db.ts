@@ -367,6 +367,12 @@ export interface Message {
   createdAt: number
   /** The Hermes transcript row a user message was matched to, once the device has seen it. */
   hermesRowId?: number
+  /**
+   * When that row was written, on the host's clock. A compaction re-emits the carried tail under fresh
+   * row ids with their times untouched, so this, not the row id, is what identifies a turn the device
+   * already holds when a later catch-up meets it again.
+   */
+  hermesAt?: number
   /** The run behind a reply and its last event seen, so a dropped stream can pick up again. */
   runId?: string
   runSeq?: number
