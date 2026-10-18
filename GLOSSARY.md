@@ -26,7 +26,7 @@ _Avoid_: backup, cloud, account data
 
 **Sync server**:
 The site that holds the synced copy: the origin Gots is read from in the browser, and the site the Android app was built for.
-_Avoid_: backend, cloud, host, "the server"
+_Avoid_: backend, cloud, "the server"
 
 **Recovery code**:
 The code that comes with every vault and is the only way into sync on a device without a passkey; on Android, the only way in at all. Setup always issues one, and Settings can replace it with a fresh code.
@@ -70,3 +70,23 @@ _Avoid_: quota, plan limit, usage bar
 **Limit notice**:
 The warning above a chat's composer that a provider account is nearly out of usage, or out of it.
 _Avoid_: alert, limit banner, usage warning
+
+**Bot**:
+One Hermes profile the user has linked to Gots: its own agent, skills and settings, reached at the host it runs on.
+_Avoid_: profile, agent, assistant
+
+**Host**:
+The machine a bot's Hermes runs on: where its profiles, its MCP servers and the keys they use live.
+_Avoid_: server, backend, machine
+
+**MCP server**:
+A source of abilities a bot's host runs and the bot draws from, added and switched on one bot at a time.
+_Avoid_: connector, integration, plugin, tool
+
+**Catalogue**:
+The MCP servers Hermes offers to add, as the host knows them.
+_Avoid_: store, marketplace, directory, library
+
+**Server access**:
+The permission an MCP server needs from the service it talks to. It is given in a browser on the bot's host, never in Gots.
+_Avoid_: authorization, OAuth, sign in, connect
