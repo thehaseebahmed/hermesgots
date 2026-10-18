@@ -1,18 +1,23 @@
 // The composer's `/` menu lists the bot's skills from the Gots plugin, not from Hermes's /v1/skills:
 // the list is kept on the device, a slash that begins any word opens it, and picking a skill puts it
-// at the front of the message, which is the only place the host runs one from.
+// at the front of the message, which is the only place the host runs one from. It runs twice, as a
+// laptop in the light and as a phone in the dark, where the list is at its shortest.
 import { assert, flow, pass } from "./lib.mjs"
 
 const FIXTURE = ["github-pr-workflow", "log-triage", "plan"]
 
-await flow("slash-skills", async ({ page, until, shot }) => {
+const run = async ({ page, until, shot }) => {
+  // What the app reads, and what it says about it: a failure a read carries on from is noted to the
+  // console, which is the only trace a read that leaves the held list in place ever leaves.
   const plugin = []
   const hermes = []
+  const noted = []
   page.on("request", (request) => {
     const path = new URL(request.url()).pathname
     if (path.endsWith("/skills") && path.includes("plugins/memento")) plugin.push(path)
     if (path === "/v1/skills") hermes.push(path)
   })
+  page.on("console", (message) => noted.push(message.text()))
   const composer = page.getByLabel("Message")
   const menu = page.getByRole("listbox", { name: "Commands and skills" })
 
@@ -43,28 +48,35 @@ await flow("slash-skills", async ({ page, until, shot }) => {
   // since running it would clear the composer and drop that text — while the skills are still there.
   await composer.fill("/new do the thing")
   await composer.press("Home")
-  await page.waitForTimeout(500)
-  const withTextAfter = await menu.getByRole("option").allInnerTexts()
-  assert.ok(withTextAfter.length > 0, "the token still offers the skills")
-  assert.ok(
-    withTextAfter.every((text) => !/^\/new\b/.test(text)),
-    "a command with text after it isn't offered",
+  await until(
+    async () => {
+      const texts = await menu.getByRole("option").allInnerTexts()
+      return texts.length > 0 && texts.every((text) => !/^\/new\b/.test(text))
+    },
+    10_000,
+    "the skills behind the token, with no command on offer",
   )
   await shot("command-not-alone")
 
-  // Alone, it is the command the composer's own action runs.
-  await composer.fill("/new")
-  await page.waitForTimeout(500)
-  const alone = await menu.getByRole("option").allInnerTexts()
-  assert.ok(
-    alone.some((text) => /^\/new\b/.test(text)),
-    "a command alone in the message is offered",
+  // Alone, it is the command the composer's own action runs. Typed as a user replaces a whole
+  // message: `fill` writes the field and leaves the app's own state to keep it, which a synthetic
+  // write can lose — while a keystroke is one the app has to answer.
+  await composer.press("Control+a")
+  await composer.type("/new")
+  await until(async () => (await composer.inputValue()) === "/new", 5_000, "the composer to hold /new")
+  await until(
+    async () => (await menu.getByRole("option").allInnerTexts()).some((t) => /^\/new\b/.test(t)),
+    10_000,
+    "a command alone in the message to be offered",
   )
 
   // A slash inside a word is a path or a URL, not a skill.
   await composer.fill("see and/or the docs at https://example.com/a/b")
-  await page.waitForTimeout(500)
-  assert.equal(await menu.isVisible(), false, "a slash inside a word leaves the menu closed")
+  await until(
+    async () => !(await menu.isVisible()),
+    5_000,
+    "the menu to close on a slash inside a word",
+  )
 
   // Escape closes the menu until the text changes — and replacing the whole message is a change, so
   // the same text typed again is a new token that opens it.
@@ -75,8 +87,7 @@ await flow("slash-skills", async ({ page, until, shot }) => {
     "the skills to arrive behind the first open",
   )
   await composer.press("Escape")
-  await page.waitForTimeout(200)
-  assert.equal(await menu.isVisible(), false, "Escape closes the menu")
+  await until(async () => !(await menu.isVisible()), 5_000, "Escape to close the menu")
   await composer.press("Control+a")
   await composer.type("/plan")
   await until(
@@ -85,7 +96,9 @@ await flow("slash-skills", async ({ page, until, shot }) => {
     "the menu to come back once the text changed",
   )
 
-  // The list is on the device, and a read that fails doesn't take the list the page already has.
+  // The list is on the device, and a read that fails doesn't take the list the page already has. The
+  // read's own failure is what to wait for: the held list standing still is the behaviour, so nothing
+  // on screen marks the moment.
   await composer.fill("/")
   await menu.waitFor({ timeout: 10_000 })
   const asked = plugin.length
@@ -93,7 +106,11 @@ await flow("slash-skills", async ({ page, until, shot }) => {
   await composer.fill("")
   await composer.fill("/")
   await until(() => plugin.length > asked, 10_000, "a read behind the second open")
-  await page.waitForTimeout(500)
+  await until(
+    () => noted.some((text) => text.includes("Reading the bot's skills failed")),
+    10_000,
+    "the failed read to be noted",
+  )
   assert.ok(
     await menu.getByRole("option", { name: /\/plan\b/ }).isVisible(),
     "a read that fails leaves the held list standing",
@@ -145,7 +162,11 @@ await flow("slash-skills", async ({ page, until, shot }) => {
   assert.equal(Math.round(tall), 288, "a tall screen gets the list at its usual height")
 
   await page.setViewportSize({ width: 390, height: 520 })
-  await page.waitForTimeout(400)
+  await until(
+    async () => (await menu.boundingBox()).height < tall,
+    5_000,
+    "the list to be measured against the smaller screen",
+  )
   const short = await menu.boundingBox()
   const shortComposer = await composer.boundingBox()
   assert.ok(
@@ -162,9 +183,19 @@ await flow("slash-skills", async ({ page, until, shot }) => {
 
   // Back on a tall screen the list is what it always was.
   await page.setViewportSize({ width: 390, height: 900 })
-  await page.waitForTimeout(400)
-  const grown = (await menu.boundingBox()).height
-  assert.equal(Math.round(grown), 288, "and grows back with the screen")
+  const grown = await until(
+    async () => {
+      const height = Math.round((await menu.boundingBox()).height)
+      return height === 288 ? height : null
+    },
+    5_000,
+    "the list to grow back with the screen",
+  )
+  assert.equal(grown, 288, "and grows back with the screen")
+}
 
-  pass(`the / menu listed ${FIXTURE.length} skills from the plugin route, and kept them offline`)
-})
+await flow("slash-skills", run)
+await flow("slash-skills-phone-dark", run, { viewport: { width: 390, height: 844 }, dark: true })
+pass(
+  `the / menu listed ${FIXTURE.length} skills from the plugin route and kept them offline, on a laptop in the light and a phone 390px wide in the dark`,
+)
