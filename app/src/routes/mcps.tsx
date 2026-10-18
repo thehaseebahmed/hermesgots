@@ -455,7 +455,12 @@ function McpEntryForm({
             </Field>
           ))}
         </FieldGroup>
-        <Button disabled={adding || !entry} onClick={() => void add()}>
+        <Button
+          size="lg"
+          className="h-11 rounded-full"
+          disabled={adding || !entry}
+          onClick={() => void add()}
+        >
           Add
         </Button>
       </div>
