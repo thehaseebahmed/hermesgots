@@ -340,17 +340,18 @@ const RESEARCH_WRITERS = process.env.MOCK_RESEARCH_WRITERS !== "off"
 // MOCK_MCP=off is a Hermes whose plugin can't offer them at all: no route and no `mcps` feature.
 const MCPS = process.env.MOCK_MCP !== "off"
 const MCP_SERVERS = [
-  { name: "github", state: "on", source: "config", reason: null },
-  { name: "postgres", state: "off", source: "config", reason: null },
-  { name: "linear", state: "connecting", source: "config", reason: null },
+  { name: "github", state: "on", enabled: true, source: "config", reason: null },
+  { name: "postgres", state: "off", enabled: false, source: "config", reason: null },
+  { name: "linear", state: "connecting", enabled: true, source: "config", reason: null },
   {
     name: "sentry",
     state: "failed",
+    enabled: true,
     source: "config",
     reason: "Connection refused: nothing is listening on localhost:3100.",
   },
-  { name: "notion", state: "needs_access", source: "config", reason: null },
-  { name: "filesystem", state: "plugin", source: "plugin", reason: null },
+  { name: "notion", state: "needs_access", enabled: true, source: "config", reason: null },
+  { name: "filesystem", state: "plugin", enabled: true, source: "plugin", reason: null },
 ]
 
 /** How long a pull request's checks run after a turn says "pending", before they pass. */
@@ -1442,7 +1443,7 @@ http
       return json(res, 200, {
         name: "memento",
         version: PLUGIN_VERSION,
-        features: ["cron_runs", "session_label", "chats", "draft_text", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "goal", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "skills", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : []), ...(MCPS ? ["mcps"] : [])],
+        features: ["cron_runs", "session_label", "chats", "draft_text", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "goal", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "skills", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : []), ...(MCPS ? ["mcps", "mcps_write"] : [])],
         clarify: true,
         hooks: true,
         goal:
@@ -1488,6 +1489,7 @@ http
           error: { message: `${name} is provided by a Hermes plugin, so it can't be changed.` },
         })
       server.state = enabled ? "on" : "off"
+      server.enabled = enabled
       server.reason = null
       return json(res, 200, { object: { server } })
     }

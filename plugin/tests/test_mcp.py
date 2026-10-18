@@ -48,13 +48,15 @@ def hermes(
     through one ``store``, as Hermes's own do: a write lands in the store, so a read after it sees
     the change.
 
-    The scopes the read and the write enter land on ``hermes_cli.web_server_profiles``'s ``scopes``,
-    so a test can assert which profile's they ran in. ``discover_mcp_tools`` refuses: a read or a
-    write that reached for one to start or stop a server fails the test instead of connecting
-    something.
+    The scopes the read enters land on ``hermes_cli.web_server_profiles``'s ``scopes``, and the
+    scopes the write enters on ``hermes_cli.web_routers._common``'s ``write_scopes`` — Hermes's own
+    config write scope — so a test can assert which profile's each ran in. ``discover_mcp_tools``
+    refuses: a read or a write that reached for one to start or stop a server fails the test instead
+    of connecting something.
     """
 
     scopes = []
+    write_scopes = []
     saved = saved if saved is not None else []
 
     @contextlib.contextmanager
@@ -62,38 +64,52 @@ def hermes(
         scopes.append(profile)
         yield
 
+    @contextlib.contextmanager
+    def _write_profile_scope(profile):
+        """Hermes's own config write scope: the read scope under the config lock.
+
+        It is recorded separately from the read's, so a write that entered the read's scope instead
+        of Hermes's own fails the tests rather than passing on the scope's argument alone.
+        """
+        write_scopes.append(profile)
+        yield
+
     # Hermes's own config read and write: the block round-trips through one store, so the flag a
-    # write sets is what the next read reports.
-    store = {name: dict(cfg) for name, cfg in (servers or {}).items()}
+    # write sets is what the next read reports. A server's entry is whatever the YAML holds — a bare
+    # `name:` with nothing under it reads back as None, which the module has to survive.
+    def entry(cfg):
+        return dict(cfg) if isinstance(cfg, dict) else cfg
+
+    store = {name: entry(cfg) for name, cfg in (servers or {}).items()}
     runtime = dict(runtime or {})
     errors = dict(errors or {})
     access = set(tokens or ())
 
     def _get_mcp_servers():
-        return {name: dict(cfg) for name, cfg in store.items()}
+        return {name: entry(cfg) for name, cfg in store.items()}
 
     def load_config():
-        return {"mcp_servers": {name: dict(cfg) for name, cfg in store.items()}}
+        return {"mcp_servers": {name: entry(cfg) for name, cfg in store.items()}}
 
     def save_config(config):
-        saved.append((scopes[-1] if scopes else None, config))
+        saved.append((write_scopes[-1] if write_scopes else None, config))
         block = config.get("mcp_servers", {})
         store.clear()
-        store.update({name: dict(cfg) for name, cfg in block.items()})
+        store.update({name: entry(cfg) for name, cfg in block.items()})
 
     def reconcile_mcp_servers_with_config():
         if reconcile is None:
             raise AssertionError("the read must not reconcile servers")
-        reconcile.append(scopes[-1] if scopes else None)
+        reconcile.append(write_scopes[-1] if write_scopes else None)
         return {"registered": [], "unregistered": []}
 
     def server_configs_with_sources(config_servers):
         """Hermes's split: the profile's own servers, plus the ones a plugin provides."""
-        found = {name: dict(cfg) for name, cfg in config_servers.items()}
+        found = {name: entry(cfg) for name, cfg in config_servers.items()}
         found_owners = {name: None for name in found}
         for name, cfg in (plugin_servers or {}).items():
             if name not in found:
-                found[name] = dict(cfg)
+                found[name] = entry(cfg)
                 found_owners[name] = (owners or {}).get(name)
         return found, found_owners
 
@@ -107,6 +123,7 @@ def hermes(
         found = _get_mcp_servers() if configured is None else configured
         rows = []
         for name, cfg in found.items():
+            cfg = cfg if isinstance(cfg, dict) else {}
             enabled = cfg.get("enabled", True) is not False
             word = runtime.get(name, "configured" if enabled else "disabled")
             row = {
@@ -135,15 +152,16 @@ def hermes(
     config._get_mcp_servers = _get_mcp_servers
     config._oauth_tokens_present = _oauth_tokens_present
 
-    # The write's own modules: Hermes's config read/write and the config write scope (the read scope
-    # under Hermes's config lock, recorded on the same ``scopes`` the read's is).
+    # The write's own modules: Hermes's config read/write and its config write scope, which is the
+    # read's scope under Hermes's config lock. Its recorder is the write's own (see above).
     config_module = types.ModuleType("hermes_cli.config")
     config_module.load_config = load_config
     config_module.save_config = save_config
 
     routers = types.ModuleType("hermes_cli.web_routers")
     router_common = types.ModuleType("hermes_cli.web_routers._common")
-    router_common.config_write_scope = _config_profile_scope
+    router_common.config_write_scope = _write_profile_scope
+    router_common.write_scopes = write_scopes
     routers._common = router_common
 
     profiles = types.ModuleType("hermes_cli.web_server_profiles")
@@ -190,9 +208,9 @@ class McpReadTests(unittest.TestCase):
             found = mcp.read("bot-a")
         self.assertEqual(
             [
-                {"name": "alpha", "state": "on", "source": "config", "reason": None},
-                {"name": "mid", "state": "off", "source": "config", "reason": None},
-                {"name": "zeta", "state": "on", "source": "config", "reason": None},
+                {"name": "alpha", "state": "on", "enabled": True, "source": "config", "reason": None},
+                {"name": "mid", "state": "off", "enabled": False, "source": "config", "reason": None},
+                {"name": "zeta", "state": "on", "enabled": True, "source": "config", "reason": None},
             ],
             found,
         )
@@ -207,6 +225,23 @@ class McpReadTests(unittest.TestCase):
         with mock.patch.dict(sys.modules, hermes(servers={"off": {"command": "srv", "enabled": False}})):
             found = mcp.read("bot-a")
         self.assertEqual([("off", "off")], rows(found))
+
+    def test_the_servers_own_flag_is_reported_beside_its_state_word(self):
+        """The word is Hermes's cached runtime and can lag the flag, so the row carries the flag too.
+
+        A server whose config is switched off while its cached state still reads ``connecting`` is
+        the case: the app drives the switch from ``enabled``, so it agrees with what a toggle wrote.
+        """
+        with mock.patch.dict(
+            sys.modules,
+            hermes(
+                servers={"srv": {"command": "srv", "enabled": False}},
+                runtime={"srv": "connecting"},
+            ),
+        ):
+            found = mcp.read("bot-a")
+        self.assertEqual([("srv", "connecting")], rows(found))
+        self.assertIs(False, found[0]["enabled"])
 
     def test_a_server_hermes_reports_nothing_for_reads_as_on(self):
         """A status read that says nothing about a configured server is not an off server."""
@@ -248,7 +283,8 @@ class McpReadTests(unittest.TestCase):
         ):
             found = mcp.read("bot-a")
         self.assertEqual(
-            [{"name": "drive", "state": "needs_access", "source": "config", "reason": None}], found
+            [{"name": "drive", "state": "needs_access", "enabled": True, "source": "config", "reason": None}],
+            found,
         )
 
     def test_a_stored_access_token_reads_as_on(self):
@@ -274,7 +310,7 @@ class McpReadTests(unittest.TestCase):
         ):
             found = mcp.read("bot-a")
         self.assertEqual(
-            [{"name": "drive", "state": "on", "source": "config", "reason": None}], found
+            [{"name": "drive", "state": "on", "enabled": True, "source": "config", "reason": None}], found
         )
 
     def test_a_connected_oauth_server_reads_as_on_from_the_status_word_alone(self):
@@ -321,7 +357,7 @@ class McpReadTests(unittest.TestCase):
         ):
             found = mcp.read("bot-a")
         self.assertEqual(
-            {"name": "theirs", "state": "plugin", "source": "plugin", "reason": None},
+            {"name": "theirs", "state": "plugin", "enabled": True, "source": "plugin", "reason": None},
             {server["name"]: server for server in found}["theirs"],
         )
 
@@ -342,6 +378,7 @@ class McpReadTests(unittest.TestCase):
             {
                 "name": "theirs",
                 "state": "plugin",
+                "enabled": True,
                 "source": "plugin",
                 "reason": "spawn failed",
             },
@@ -359,7 +396,8 @@ class McpReadTests(unittest.TestCase):
         ):
             found = mcp.read("bot-a")
         self.assertEqual(
-            {"name": "theirs", "state": "plugin", "source": "plugin", "reason": None}, found[0]
+            {"name": "theirs", "state": "plugin", "enabled": True, "source": "plugin", "reason": None},
+            found[0],
         )
 
     def test_an_empty_profile_answers_an_empty_list(self):
@@ -396,7 +434,8 @@ class McpToggleTests(unittest.TestCase):
             answered = mcp.set_enabled("bot-a", "github", False)
             after = mcp.read("bot-a")
         self.assertEqual(
-            {"name": "github", "state": "off", "source": "config", "reason": None}, answered
+            {"name": "github", "state": "off", "enabled": False, "source": "config", "reason": None},
+            answered,
         )
         self.assertEqual([("github", "off")], rows(after))
         self.assertIs(False, saved[-1][1]["mcp_servers"]["github"]["enabled"])
@@ -411,6 +450,7 @@ class McpToggleTests(unittest.TestCase):
         with mock.patch.dict(sys.modules, stubs):
             answered = mcp.set_enabled("bot-a", "github", True)
         self.assertEqual("on", answered["state"])
+        self.assertIs(True, answered["enabled"])
         self.assertIs(True, saved[-1][1]["mcp_servers"]["github"]["enabled"])
 
     def test_the_write_and_the_reconcile_run_inside_the_given_profile_scope(self):
@@ -420,9 +460,12 @@ class McpToggleTests(unittest.TestCase):
         with mock.patch.dict(sys.modules, stubs):
             mcp.set_enabled("bot-a", "srv", False)
             mcp.set_enabled("bot-b", "srv", False)
-        # Each write entered its own profile's scope, and the reconcile ran inside that scope, not
-        # after it — so neither bot's toggle could touch the other's servers.
+        # Each write entered its own profile's scope — Hermes's own config write scope, not the
+        # read's — and the reconcile ran inside that scope, not after it, so neither bot's toggle
+        # could touch the other's servers.
+        self.assertEqual(["bot-a", "bot-b"], stubs["hermes_cli.web_routers._common"].write_scopes)
         self.assertEqual(["bot-a", "bot-b"], [scope for scope, _config in saved])
+        self.assertEqual([], stubs["hermes_cli.web_server_profiles"].scopes)
         self.assertEqual(["bot-a", "bot-b"], reconcile)
 
     def test_switching_off_and_back_on_leaves_the_servers_other_keys_alone(self):
@@ -484,6 +527,26 @@ class McpToggleTests(unittest.TestCase):
             answered = mcp.set_enabled("bot-a", "srv", False)
         self.assertEqual("off", answered["state"])
 
+    def test_a_servers_entry_that_is_empty_is_given_the_flag(self):
+        """A bare `name:` in the YAML reads back as None; the write must not fail on it."""
+        saved = []
+        stubs = hermes(servers={"github": None}, reconcile=[], saved=saved)
+        with mock.patch.dict(sys.modules, stubs):
+            answered = mcp.set_enabled("bot-a", "github", False)
+        self.assertEqual("off", answered["state"])
+        self.assertIs(False, answered["enabled"])
+        self.assertEqual({"enabled": False}, saved[-1][1]["mcp_servers"]["github"])
+
+    def test_a_servers_entry_that_is_not_a_mapping_is_refused(self):
+        """Writing the flag would mean dropping whatever the entry holds, so it is refused instead."""
+        saved = []
+        stubs = hermes(servers={"weird": "nonsense"}, reconcile=[], saved=saved)
+        with mock.patch.dict(sys.modules, stubs):
+            with self.assertRaises(mcp.McpError) as caught:
+                mcp.set_enabled("bot-a", "weird", False)
+        self.assertEqual(400, caught.exception.status)
+        self.assertEqual([], saved)
+
     def test_a_host_without_the_write_built_ins_refuses_with_501(self):
         """A host that can list servers but has no writers still lists them, and refuses a toggle."""
         stubs = hermes(servers={"srv": {"command": "npx"}}, reconcile=[])
@@ -499,6 +562,36 @@ class McpFeatureGateTests(unittest.TestCase):
     def test_the_hosts_built_ins_are_available(self):
         with mock.patch.dict(sys.modules, hermes()):
             self.assertIsNone(mcp.available())
+            self.assertIsNone(mcp.writable())
+
+    def test_a_host_that_can_only_read_still_lists_its_servers(self):
+        """The write's built-ins are a different set from the read's, so this combination is real."""
+        for missing in ("hermes_cli.config", "hermes_cli.web_routers._common"):
+            with self.subTest(missing=missing):
+                stubs = hermes(servers={"srv": {"command": "npx"}}, reconcile=[])
+                stubs[missing] = None
+                with mock.patch.dict(sys.modules, stubs):
+                    self.assertIsNone(mcp.available())
+                    self.assertEqual([("srv", "on")], rows(mcp.read("bot-a")))
+                    self.assertIsInstance(mcp.writable(), str)
+
+    def test_the_switch_is_unavailable_when_a_write_built_in_is_missing(self):
+        """``writable()`` is the gate the ``info`` payload's second feature is advertised from."""
+        for missing in (
+            "hermes_cli.config",
+            "hermes_cli.web_routers._common",
+            "tools.mcp_tool_discovery",
+            "tui_gateway.mcp_rpc_helpers",
+        ):
+            with self.subTest(missing=missing):
+                stubs = hermes(servers={"srv": {"command": "npx"}}, reconcile=[])
+                stubs[missing] = None
+                with mock.patch.dict(sys.modules, stubs):
+                    self.assertIsInstance(mcp.writable(), str)
+                    self.assertTrue(mcp.writable())
+                    with self.assertRaises(mcp.McpError) as caught:
+                        mcp.set_enabled("bot-a", "srv", False)
+                self.assertEqual(501, caught.exception.status)
 
     def test_the_feature_is_unavailable_when_a_built_in_is_missing(self):
         for missing in (

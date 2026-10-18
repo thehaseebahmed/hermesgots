@@ -2,8 +2,9 @@
 // /settings/bots/<botId>/mcps, which lists every server with Gots' own state word, shows the Host's
 // own reason on a failed one, carries a switch on each of the bot's own servers and none on the one
 // a Hermes plugin provides, and says so when the Bot has none. Flipping a switch writes it and the
-// row shows the state it lands in. Back returns to the Bot, and the screen reads once on open, again
-// only while a server is connecting or waiting on Server access. Phone and tablet, light and dark.
+// row shows the state it lands in. The switch is there only where the plugin advertises that it can
+// write, which the mock does. Back returns to the Bot, and the screen reads once on open, again only
+// while a server is connecting or waiting on Server access. Phone and tablet, light and dark.
 import { app, assert, flow, pass } from "./lib.mjs"
 
 // What the mock's `mcp` route answers, and the word the screen renders for each state.
@@ -56,25 +57,28 @@ const run = async ({ page, profileId, shot, until }) => {
   await shot("servers")
 
   // Flipping a switch writes the flag for this bot, and the row shows the state it lands in without a
-  // manual refresh. Flipping it back leaves the bot as it was, so the mock's state survives the run.
-  const github = page.getByRole("switch", { name: "github on" })
+  // manual refresh. The flow reads the state it starts in and puts it back, so the mock's state is
+  // left as it was found whichever way round that is.
+  const github = page.getByRole("switch", { name: "github", exact: true })
   const checked = async () => (await github.getAttribute("aria-checked")) === "true"
-  assert.ok(await checked(), "a server that is on reads as on")
+  const readsAs = (word) =>
+    page.locator('[data-mcp="github"]').getByText(word, { exact: true }).isVisible()
+  const before = await checked()
   await github.click()
   await until(
-    () => page.locator('[data-mcp="github"]').getByText("off", { exact: true }).isVisible(),
+    () => readsAs(before ? "off" : "on"),
     15_000,
-    "the toggled server to read as off",
+    `the toggled server to read as ${before ? "off" : "on"}`,
   )
-  assert.equal(await checked(), false, "the switch follows the state it landed in")
-  await shot("toggled-off")
+  assert.equal(await checked(), !before, "the switch follows the state it landed in")
+  await shot("toggled")
   await github.click()
   await until(
-    () => page.locator('[data-mcp="github"]').getByText("on", { exact: true }).isVisible(),
+    () => readsAs(before ? "on" : "off"),
     15_000,
-    "the toggled server to read as on again",
+    `the toggled server to read as ${before ? "on" : "off"} again`,
   )
-  assert.ok(await checked(), "switching it back on restores it")
+  assert.equal(await checked(), before, "switching it back restores it")
 
   // A server that is connecting is watched: the screen reads again on its own, so the state it
   // lands in shows without anything being tapped.

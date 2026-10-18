@@ -72,8 +72,8 @@ elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` l
 | `goal-pill` | A set goal keeps its pill and sheet; pausing waits on the user with a card, and Resume sends the kick again |
 | `image-viewer` | A photo opened from a message holds its own box while it decodes |
 | `fallback-models` | A bot's fallback models are recorded on its host from its settings: two picks in order, one removed, and no third offered |
-| `mcps` | A bot's editor row opens its MCP servers, listed read-only with Gots' own state words, a failed one's reason and an empty state, at phone and tablet widths |
-| `mcps-gate` | A bot whose plugin answers without `mcps` has neither the row nor the screen: its screen's URL lands back on the bot, with no console error |
+| `mcps` | A bot's editor row opens its MCP servers, with Gots' own state words, a failed one's reason, a switch per server it owns flipped off and back on, and an empty state, at phone and tablet widths |
+| `mcps-gate` | A bot whose plugin answers without `mcps` has neither the row nor the screen (its screen's URL lands back on the bot), and one that lists servers without `mcps_write` lists them with no switch: no console error either way |
 
 The new flows live in `app/scripts/e2e/`. The older ones are `app/scripts/regression-*.mjs`, which
 the CLI runs by name.

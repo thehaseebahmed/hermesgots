@@ -3,16 +3,16 @@
  * the device. The screen reads once on open and again only while a server is in a state that moves
  * on its own — connecting, or waiting on Server access — and `setEnabled` switches one on or off
  * through the plugin, replacing that row with the state the change landed in. The row and the screen
- * exist only where the plugin advertises the feature, so a Bot whose Hermes is behind has neither
- * and is sent back to its editor, while a Bot whose Host hasn't answered yet is left to answer
- * rather than flashing its screen away. A plugin without the route is left alone like every other
- * optional one.
+ * exist only where the plugin advertises the feature, and a row's switch only where it advertises
+ * that it can write, so a Bot whose Hermes is behind has neither and is sent back to its editor,
+ * while a Bot whose Host hasn't answered yet is left to answer rather than flashing its screen away.
+ * A plugin without the route is left alone like every other optional one.
  */
 import { useCallback, useState, useSyncExternalStore } from "react"
 
 import { connectionKey } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
-import { MCP_WORK_MS } from "@/lib/freshness"
+import { MCP_WORK_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import {
   getPluginFeatureList,
   listMcpServers,
@@ -27,6 +27,9 @@ import { createSignal } from "@/lib/store"
 
 /** The feature the plugin advertises when its Hermes can list a profile's MCP servers. */
 const FEATURE = "mcps"
+
+/** The feature it advertises when its Hermes can switch one too; the switch needs its own built-ins. */
+const WRITE_FEATURE = "mcps_write"
 
 /** Gots' own word for each state a server can be in; Hermes's finer states collapse into these. */
 export const MCP_STATE_WORDS: Record<McpState, string> = {
@@ -48,9 +51,9 @@ function keepsReading(servers: McpServer[] | undefined) {
   )
 }
 
-// The connections whose plugin has answered, and what it said; only a real answer is remembered, so
-// a Host that was away is asked again the next time its editor is opened.
-const answered = new Map<string, "yes" | "no">()
+// The feature lists the connections' plugins answered; only a real answer is remembered, so a Host
+// that was away is asked again the next time its editor is opened.
+const answered = new Map<string, string[]>()
 const { subscribe, notify } = createSignal()
 
 async function readFeature(config: HermesConfig) {
@@ -59,28 +62,45 @@ async function readFeature(config: HermesConfig) {
   const features = await getPluginFeatureList(config)
   // No answer at all (the Host couldn't be read): nothing is remembered, so it is asked again.
   if (!features) return
-  answered.set(key, features.includes(FEATURE) ? "yes" : "no")
+  answered.set(key, features)
   notify()
 }
 
 /**
- * What a Bot's plugin answered about listing its MCP servers: `yes` it advertises the feature, `no`
- * it answered without it (a Hermes that can't list them at all), and `unknown` while there is no
- * answer yet — which is nothing to act on rather than a Bot without the feature.
+ * What a Bot's plugin answered about a feature: `yes` it advertises it, `no` it answered without it,
+ * and `unknown` while there is no answer yet — which is nothing to act on rather than an absence.
  */
 export type McpFeatureAnswer = "unknown" | "yes" | "no"
 
-/** What this Bot's plugin answered about its MCP servers (see `McpFeatureAnswer`). */
-export function useMcpFeatureAnswer(server: McpServerConfig): McpFeatureAnswer {
-  const key = server?.baseUrl && server?.apiKey ? connectionKey(server) : ""
+/**
+ * What this Bot's plugin answered about its MCP servers: `list` for the feature the read needs, and
+ * `write` for the switch, which needs a different set of Hermes built-ins and so is advertised apart
+ * from it. One read of the plugin's features answers both.
+ */
+export function useMcpFeatureAnswers(server: McpServerConfig): {
+  list: McpFeatureAnswer
+  write: McpFeatureAnswer
+} {
   const baseUrl = server?.baseUrl ?? ""
   const apiKey = server?.apiKey ?? ""
-  const answer = useSyncExternalStore(subscribe, () => (key && answered.get(key)) || "unknown")
+  const key = baseUrl && apiKey ? connectionKey({ baseUrl, apiKey }) : ""
+  const read = (feature: string): McpFeatureAnswer => {
+    const features = key ? answered.get(key) : undefined
+    if (!features) return "unknown"
+    return features.includes(feature) ? "yes" : "no"
+  }
+  const list = useSyncExternalStore(subscribe, () => read(FEATURE))
+  const write = useSyncExternalStore(subscribe, () => read(WRITE_FEATURE))
   usePoll(() => void readFeature({ baseUrl, apiKey }), false, [baseUrl, apiKey], {
     active: Boolean(key),
     onShow: false,
   })
-  return answer
+  return { list, write }
+}
+
+/** What this Bot's plugin answered about its MCP servers (see `McpFeatureAnswer`). */
+export function useMcpFeatureAnswer(server: McpServerConfig): McpFeatureAnswer {
+  return useMcpFeatureAnswers(server).list
 }
 
 /**
@@ -131,7 +151,13 @@ export function useMcpServers(server: McpServerConfig, active: boolean) {
   )
   const setEnabled = useCallback(
     async (name: string, enabled: boolean) => {
-      const row = await setMcpServerEnabled({ baseUrl, apiKey }, name, enabled)
+      // A host that never answers is given up on, so a row's save can't wedge the switch disabled.
+      const row = await setMcpServerEnabled(
+        { baseUrl, apiKey },
+        name,
+        enabled,
+        AbortSignal.timeout(WRITE_TIMEOUT_MS),
+      )
       setServers((current) => current?.map((server) => (server.name === row.name ? row : server)))
     },
     [baseUrl, apiKey],

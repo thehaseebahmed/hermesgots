@@ -232,8 +232,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if denied is not None:
             return denied
         # The MCP screen is advertised only where Hermes's own MCP built-ins import, so a bot whose
-        # Hermes is too old gets no row rather than an error. Off the loop: the check imports them.
+        # Hermes is too old gets no row rather than an error; the switch is advertised apart from it,
+        # because the write's built-ins are a different set from the read's — a host that can list
+        # servers may still not be able to switch one, and must not offer a switch that can't work.
+        # Off the loop: the checks import them.
         serves_mcps = await asyncio.to_thread(mcp.available) is None
+        writes_mcps = serves_mcps and await asyncio.to_thread(mcp.writable) is None
         return web.json_response(
             {
                 "name": "memento",
@@ -280,6 +284,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "community",
                     # Hermes's own MCP built-ins, and the MCP screen with them; see mcp.py.
                     *(["mcps"] if serves_mcps else []),
+                    *(["mcps_write"] if writes_mcps else []),
                 ],
                 "clarify": asks,
                 "todo_tool": todo_tool,

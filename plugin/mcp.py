@@ -16,7 +16,10 @@ declares ``auth: oauth`` and has no stored access is **needs_access**, and a ser
 provides is **plugin** — the app shows that one read-only, with no control that would change it.
 An absent ``enabled`` key reads as on, because Hermes's own reader
 (``tools.mcp_tool_common.mcp_server_enabled``) is what computes the status word mapped here, and it
-defaults an absent key to true. Nothing about the tools a server brings is reported.
+defaults an absent key to true. Every row carries that flag as its own ``enabled`` boolean beside
+the word, and the app's switch is driven by the flag rather than by the word: the word is cached
+runtime and can still read ``connecting`` for a server the config has just switched off. Nothing
+about the tools a server brings is reported.
 
 **A live connection outranks Server access, and Server access outranks a failure.** A server Hermes
 reports connected is working, token or not, so it reads **on**: the stored-access check is applied
@@ -125,6 +128,21 @@ def available() -> Optional[str]:
     return None
 
 
+def writable() -> Optional[str]:
+    """Why this host's MCP servers can't be switched from here, or None when they can.
+
+    The write's built-ins are a different set from the read's — the config scope and the reconcile
+    arrived with the dashboard's MCP routes, where the cached status read is newer — so a host can
+    list servers and still not switch one. ``info`` advertises this as its own feature, so the app
+    offers a switch only where one can work.
+    """
+    try:
+        _hermes_write()
+    except McpError as error:
+        return str(error)
+    return None
+
+
 def read(profile: Optional[str]) -> List[Dict[str, Any]]:
     """Every MCP server ``profile`` has, sorted by name, each with its state and source.
 
@@ -169,13 +187,25 @@ def set_enabled(profile: Optional[str], name: str, enabled: bool) -> Dict[str, A
 
 
 def _write_flag(hermes: Dict[str, Any], name: str, enabled: bool) -> None:
-    """Set one server's ``enabled`` flag in the profile's config, leaving every other key alone."""
+    """Set one server's ``enabled`` flag in the profile's config, leaving every other key alone.
+
+    A bare ``mcp_servers:`` in the YAML reads as null, so a block that isn't a mapping is made into
+    one rather than failing; an entry that is neither null nor a mapping is refused, because writing
+    the flag would mean dropping whatever it holds.
+    """
     config = hermes["load"]()
-    block = config.setdefault("mcp_servers", {})
+    if not isinstance(config, dict):
+        raise McpError("This bot's config couldn't be read, so its MCP servers can't be changed.")
+    block = config.get("mcp_servers")
+    if not isinstance(block, dict):
+        block = {}
+        config["mcp_servers"] = block
     entry = block.get(name)
-    if not isinstance(entry, dict):
+    if entry is None:
         entry = {}
         block[name] = entry
+    if not isinstance(entry, dict):
+        raise McpError(f"{name}'s configuration isn't a mapping, so it can't be changed.", 400)
     entry["enabled"] = bool(enabled)
     hermes["save"](config)
 
@@ -197,16 +227,29 @@ def _rows(
 
 
 def _server(name: str, cfg: Any, owner: Optional[str], status: Any, tokens_present: Any) -> Dict[str, Any]:
-    """One server in the app's own shape: Gots' state word, where it comes from, any reason."""
+    """One server in the app's own shape: Gots' state word, whether it is on, where it comes from."""
     cfg = cfg if isinstance(cfg, dict) else {}
     status = status if isinstance(status, dict) else {}
     state = _state(name, cfg, owner, status, tokens_present)
     return {
         "name": name,
         "state": state,
+        "enabled": _enabled(cfg),
         "source": "plugin" if owner else "config",
         "reason": _reason(state, status),
     }
+
+
+def _enabled(cfg: Dict[str, Any]) -> bool:
+    """Whether a server's configuration leaves it on.
+
+    Hermes's own reader (``tools.mcp_tool_common.mcp_server_enabled``) defaults an absent, null or
+    unparseable ``enabled`` key to true, and so does this. The app drives a row's switch from this
+    rather than from the state word: the word is Hermes's cached runtime, which can still read
+    ``connecting`` or ``failed`` for a server the config has just switched off, while the flag is
+    what a toggle writes and so what the switch has to agree with.
+    """
+    return cfg.get("enabled", True) is not False
 
 
 def _reason(state: str, status: Dict[str, Any]) -> Optional[str]:

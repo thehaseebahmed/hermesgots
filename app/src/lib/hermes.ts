@@ -367,6 +367,8 @@ export type McpState = "on" | "off" | "connecting" | "failed" | "needs_access" |
 export interface McpServer {
   name: string
   state: McpState
+  /** Whether the bot's configuration leaves it on; a Host that doesn't say is read as on. */
+  enabled: boolean
   /** Where it comes from: the bot's own configuration, or a Hermes plugin that provides it. */
   source: "config" | "plugin"
   /** The Host's own failure text, on a failed one. */
@@ -375,31 +377,35 @@ export interface McpServer {
 
 const MCP_STATES = new Set<string>(["on", "off", "connecting", "failed", "needs_access", "plugin"])
 
+/** One row as the plugin reports it, or nothing for one Gots has no name or word for. */
+function parseMcpServerRow(raw: unknown): McpServer | undefined {
+  const row = raw as Record<string, unknown> | null
+  if (typeof row?.name !== "string" || !row.name || !MCP_STATES.has(String(row.state)))
+    return undefined
+  const state = row.state as McpState
+  return {
+    name: row.name,
+    state,
+    // A host that doesn't report the flag is one whose state word is the only answer there is.
+    enabled: typeof row.enabled === "boolean" ? row.enabled : state !== "off",
+    source: row.source === "plugin" ? "plugin" : "config",
+    ...(typeof row.reason === "string" && row.reason ? { reason: row.reason } : {}),
+  }
+}
+
 /**
  * Reads the plugin's `mcp` answer (`{"object": {"servers": [...]}}`) into the servers the screen
  * lists: a row with no name, or a state Gots has no word for, is dropped, and so is an empty reason.
  */
 export function parseMcpServers(value: unknown): McpServer[] {
-  const envelope = (value as { object?: { servers?: unknown } } | null)?.object
-  const rows = envelope?.servers
+  const rows = (value as { object?: { servers?: unknown } } | null)?.object?.servers
   if (!Array.isArray(rows)) return []
-  const servers: McpServer[] = []
-  for (const raw of rows as Record<string, unknown>[]) {
-    if (typeof raw?.name !== "string" || !raw.name || !MCP_STATES.has(String(raw.state))) continue
-    servers.push({
-      name: raw.name,
-      state: raw.state as McpState,
-      source: raw.source === "plugin" ? "plugin" : "config",
-      ...(typeof raw.reason === "string" && raw.reason ? { reason: raw.reason } : {}),
-    })
-  }
-  return servers
+  return rows.map(parseMcpServerRow).filter((server): server is McpServer => server !== undefined)
 }
 
 /** Reads the plugin's `mcp` write answer (`{"object": {"server": {...}}}`) into the one server. */
 export function parseMcpServer(value: unknown): McpServer | undefined {
-  const server = (value as { object?: { server?: unknown } } | null)?.object?.server
-  return parseMcpServers({ object: { servers: server === undefined ? [] : [server] } })[0]
+  return parseMcpServerRow((value as { object?: { server?: unknown } } | null)?.object?.server)
 }
 
 /** The MCP servers the bot's Hermes profile has, read from the Gots plugin. */
