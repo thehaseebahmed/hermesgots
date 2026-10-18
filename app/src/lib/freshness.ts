@@ -48,6 +48,10 @@ export const SESSION_REREAD_MS = 60_000
 /** How long a known library count is trusted before it's read again. */
 export const LIBRARY_MS = 60_000
 
+/** A bot's MCP servers, while a server is connecting or waiting on Server access: a state that moves
+ * on its own is watched; one the screen can't change is read once on open and left. */
+export const MCP_WORK_MS = 3_000
+
 /** The Code and Routines lists. */
 export const LIST_MS = 60_000
 /** Whether the host can hold a goal (Hermes's `/goal`, through the plugin). */

@@ -361,6 +361,53 @@ export async function listSkills(config: HermesConfig, signal?: AbortSignal): Pr
     : []
 }
 
+/** A bot's MCP server, as the Gots plugin's read reports it: its state in Gots' own words. */
+export type McpState = "on" | "off" | "connecting" | "failed" | "needs_access" | "plugin"
+
+export interface McpServer {
+  name: string
+  state: McpState
+  /** Where it comes from: the bot's own configuration, or a Hermes plugin that provides it. */
+  source: "config" | "plugin"
+  /** The Host's own failure text, on a failed one. */
+  reason?: string
+}
+
+const MCP_STATES = new Set<string>(["on", "off", "connecting", "failed", "needs_access", "plugin"])
+
+/**
+ * Reads the plugin's `mcp` answer (`{"object": {"servers": [...]}}`) into the servers the screen
+ * lists: a row with no name, or a state Gots has no word for, is dropped, and so is an empty reason.
+ */
+export function parseMcpServers(value: unknown): McpServer[] {
+  const envelope = (value as { object?: { servers?: unknown } } | null)?.object
+  const rows = envelope?.servers
+  if (!Array.isArray(rows)) return []
+  const servers: McpServer[] = []
+  for (const raw of rows as Record<string, unknown>[]) {
+    if (typeof raw?.name !== "string" || !raw.name || !MCP_STATES.has(String(raw.state))) continue
+    servers.push({
+      name: raw.name,
+      state: raw.state as McpState,
+      source: raw.source === "plugin" ? "plugin" : "config",
+      ...(typeof raw.reason === "string" && raw.reason ? { reason: raw.reason } : {}),
+    })
+  }
+  return servers
+}
+
+/** The MCP servers the bot's Hermes profile has, read from the Gots plugin. */
+export async function listMcpServers(
+  config: HermesConfig,
+  signal?: AbortSignal,
+): Promise<McpServer[]> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/mcp`, {
+    headers: headers(config),
+    signal,
+  })
+  return parseMcpServers(await response.json())
+}
+
 /** A provider the host has credentials for, and the models Hermes offers on it. */
 export interface ModelProvider {
   /** What Hermes takes as a run's `provider`. */
@@ -679,8 +726,12 @@ export async function getPluginFeatures(
 
 const pluginFeatures = new Map<string, Promise<string[] | null>>()
 
-/** `getPluginFeatures`, asked once per server and key; a failed ask is tried again next time. */
-export async function hasPluginFeature(config: HermesConfig, feature: string) {
+/**
+ * The features the Gots plugin on the bot's server advertises (`info`'s `features`), asked once per
+ * server and key. **null** is the Host not answering — a different answer from a plugin that
+ * answered without the feature — and a failed ask is dropped, so the next caller asks again.
+ */
+export function getPluginFeatureList(config: HermesConfig): Promise<string[] | null> {
   const key = connectionKey(config)
   let pending = pluginFeatures.get(key)
   if (!pending) {
@@ -688,7 +739,12 @@ export async function hasPluginFeature(config: HermesConfig, feature: string) {
     pluginFeatures.set(key, pending)
     void pending.then((found) => found || pluginFeatures.delete(key))
   }
-  return Boolean((await pending)?.includes(feature))
+  return pending
+}
+
+/** `getPluginFeatureList`, for one feature. */
+export async function hasPluginFeature(config: HermesConfig, feature: string) {
+  return Boolean((await getPluginFeatureList(config))?.includes(feature))
 }
 
 /** A message waiting on the Hermes host for the session's run to finish. */

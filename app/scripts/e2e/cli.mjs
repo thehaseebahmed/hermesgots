@@ -129,6 +129,16 @@ const FLOWS = {
     about:
       "A bot's fallback models are recorded on its host: two picks in order, one removed, no third",
   },
+  mcps: {
+    script: "e2e/mcps.mjs",
+    about:
+      "A bot's MCP servers list from its editor row, read-only, with every state word, at phone and tablet widths",
+  },
+  "mcps-gate": {
+    script: "e2e/mcps-gate.mjs",
+    about:
+      "A bot whose plugin answers without `mcps` has no row in its editor, and its screen's URL returns to the bot",
+  },
   "fallbacks-silent-host": {
     script: "e2e/fallbacks-silent-host.mjs",
     about: "A host that never answers a fallback write gives the field back instead of wedging it",

@@ -37,6 +37,7 @@ from . import (
     host_model,
     library,
     link,
+    mcp,
     media,
     model_changes,
     merges,
@@ -230,6 +231,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         denied = unauthorized(request)
         if denied is not None:
             return denied
+        # The MCP screen is advertised only where Hermes's own MCP built-ins import, so a bot whose
+        # Hermes is too old gets no row rather than an error. Off the loop: the check imports them.
+        serves_mcps = await asyncio.to_thread(mcp.available) is None
         return web.json_response(
             {
                 "name": "memento",
@@ -274,6 +278,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "research_followup",
                     "research_rewrite",
                     "community",
+                    # Hermes's own MCP built-ins, and the MCP screen with them; see mcp.py.
+                    *(["mcps"] if serves_mcps else []),
                 ],
                 "clarify": asks,
                 "todo_tool": todo_tool,
@@ -379,6 +385,21 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except ImportError:
             return _error(web, "This Hermes version can't list skills from here.", 501)
         return web.json_response({"object": "list", "data": skills})
+
+    async def list_mcp_servers(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        # The read runs Hermes's own MCP readers inside this bot's profile scope and connects
+        # nothing; a host without those built-ins is a 501, never a 500. See mcp.py.
+        profile = request_profile()
+        try:
+            servers = await asyncio.to_thread(mcp.read, profile)
+        except mcp.McpError as error:
+            return _error(web, str(error), error.status)
+        except ImportError:
+            return _error(web, mcp.UNAVAILABLE, 501)
+        return web.json_response({"object": {"servers": servers}})
 
     async def set_fallbacks(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1107,6 +1128,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/model", set_host_model)
     app.router.add_get(f"{PREFIX}/fallbacks", get_fallbacks)
     app.router.add_get(f"{PREFIX}/skills", list_skills)
+    app.router.add_get(f"{PREFIX}/mcp", list_mcp_servers)
     app.router.add_post(f"{PREFIX}/fallbacks", set_fallbacks)
     app.router.add_get(f"{PREFIX}/github", github_status)
     app.router.add_get(f"{PREFIX}/github/repos", github_repos)

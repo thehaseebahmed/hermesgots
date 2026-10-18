@@ -1,12 +1,21 @@
 import { useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { EyeIcon, EyeOffIcon, PlugZapIcon, Trash2Icon } from "lucide-react"
+import {
+  ChevronRightIcon,
+  EyeIcon,
+  EyeOffIcon,
+  PlugZapIcon,
+  ServerIcon,
+  Trash2Icon,
+} from "lucide-react"
+import { Link } from "react-router"
 import { toast } from "sonner"
 
 import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BOTS } from "@/components/bots"
 import { DefaultModelSetting, FallbackModelsSetting } from "@/components/chat/model-picker"
+import { Group, RowText, linkRowClass } from "@/components/settings-chrome"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -47,6 +56,7 @@ import {
 } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { checkHealth, getPluginVersion, listModels } from "@/lib/hermes"
+import { useMcpFeature } from "@/lib/mcps"
 import { setDefaultModel } from "@/lib/model-info"
 import { syncContextWindow } from "@/lib/models"
 import { setBotMuted } from "@/lib/push"
@@ -182,6 +192,8 @@ export function BotEditor({
   const [showKey, setShowKey] = useState(false)
   const [models, setModels] = useState<string[]>([])
   const [connection, setConnection] = useState<Connection>({ state: "idle" })
+  // The Bot's MCP servers are a screen of its own; its row exists only where the plugin can list them.
+  const mcpServers = useMcpFeature(profile)
 
   // Local drafts so typing isn't fighting the live query; persisted on every change.
   const [name, setName] = useState(profile.name)
@@ -355,6 +367,16 @@ export function BotEditor({
       )}
 
       <FallbackModelsSetting profile={profile} />
+
+      {mcpServers && (
+        <Group>
+          <Link to={`/settings/bots/${profile.id}/mcps`} className={linkRowClass}>
+            <ServerIcon className="size-5 shrink-0 text-muted-foreground" />
+            <RowText title="MCP servers" />
+            <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
+          </Link>
+        </Group>
+      )}
 
       <div className="flex flex-wrap items-center gap-3">
         <Button onClick={test} disabled={connection.state === "testing" || profile.disabled}>
