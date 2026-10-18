@@ -45,7 +45,8 @@ export function windowViews(usage: ProviderUsageData | undefined): UsageWindowVi
 /**
  * A window with no reset time is a balance, not a period: bought credits, which a spent allowance
  * draws on. Nothing about it runs out with the clock, so it is what keeps an account working after
- * the period above it is spent.
+ * the period above it is spent. The route carries the key either way — an ISO time, or a null for a
+ * balance — so a window without one is a balance rather than a period the app couldn't date.
  */
 function isBalance(window: UsageWindowView) {
   return window.resetsAt === undefined

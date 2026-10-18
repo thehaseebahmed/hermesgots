@@ -1,7 +1,7 @@
 // The limit notice above the composer: a window's percentage is not the account running out. A
 // spent allowance beside credits in hand shows nothing, a spent account with nothing behind it says
 // so, a dismissal doesn't outlive the state it dismissed, and the reset line counts down ("Resets in
-// 3d 4h", never a clock time). The Usage sheet names the model in a box of its own, above the meter.
+// 3d 4h", never a clock time). The Usage sheet names the model in a row of its own, above the meter.
 import { app, assert, flow, mock, pass } from "./lib.mjs"
 
 /** Moves the mock's account to `percent` for every later read; "" puts it back to the env's figure. */
@@ -11,8 +11,12 @@ const accountAt = (percent) =>
   )
 
 const alerts = (page) => page.locator("[data-slot=alert]")
-/** The notice's own text, or null while there is none. */
-const notice = (page) => alerts(page).first().textContent().catch(() => null)
+/** The notice's own text, or null while there is none. Counting first keeps a poll from sitting on
+ *  Playwright's own 30s auto-wait, which would outlast the deadline the caller set. */
+const notice = async (page) => {
+  const alert = alerts(page).first()
+  return (await alert.count()) ? alert.textContent() : null
+}
 /** How long a notice that is going, or a drawer that is coming, takes to settle: Playwright counts
  *  a drawer visible from its first frame, which a screenshot would catch half off the screen. */
 const settled = (page) => page.waitForTimeout(600)
@@ -21,17 +25,20 @@ const settled = (page) => page.waitForTimeout(600)
 await flow("usage-limit", async ({ page, profileId, seed, until, shot }) => {
   const id = `usage-limit-${Math.random().toString(36).slice(2, 8)}`
   await seed([{ id, title: "Usage" }])
+  // A run that fails midway leaves the mock holding the figure it died on, and this one drives the
+  // figure to 100% before it is done, so it starts from the mock's own default.
+  await accountAt("")
   // A plain chat hides the Context ring behind the Simplified chats switch; the sheet is what this
   // flow reads, so it comes off.
   await page.evaluate(async () => {
     const { db } = await import("/src/lib/db.ts")
     await db.settings.update("settings", { simplifiedChats: false })
   })
-  // The dev server re-bundles its dependencies now and then and answers a reload with a blank page;
-  // a flow's assertions can't tell that from the app being broken, so it loads again.
-  const reload = async () => {
+  // The dev server re-bundles its dependencies now and then and answers a load with a blank page; a
+  // flow's assertions can't tell that from the app being broken, so it loads again.
+  const loads = async (load) => {
     for (let attempt = 1; attempt <= 3; attempt++) {
-      await page.reload({ waitUntil: "domcontentloaded" })
+      await load()
       try {
         await page.getByRole("button", { name: "Chat options" }).waitFor({ timeout: 15_000 })
         return
@@ -40,6 +47,8 @@ await flow("usage-limit", async ({ page, profileId, seed, until, shot }) => {
       }
     }
   }
+  const open = (url) => loads(() => page.goto(url, { waitUntil: "domcontentloaded" }))
+  const reload = () => loads(() => page.reload({ waitUntil: "domcontentloaded" }))
   /** Waits for the app to hold the account the mock is serving: a read still in flight would
    *  otherwise leave the notice showing the figure before it, which is what these assertions are
    *  about. */
@@ -63,9 +72,10 @@ await flow("usage-limit", async ({ page, profileId, seed, until, shot }) => {
 
   // Approaching, on a bot whose provider reports periods only: the tightest window warns and names
   // itself, and its reset line is a countdown.
-  await accountAt("94")
-  await page.goto(`${app}/c/${id}`)
-  await read("openrouter", 94)
+  // A figure of the flow's own, so this step tells the override apart from the mock's default (94).
+  await accountAt("95")
+  await open(`${app}/c/${id}`)
+  await read("openrouter", 95)
   const approaching = await until(
     async () => {
       const text = await notice(page)
@@ -92,13 +102,17 @@ await flow("usage-limit", async ({ page, profileId, seed, until, shot }) => {
   )
   assert.ok(
     sheetText.indexOf("openrouter/") < sheetText.indexOf("Context window"),
-    "the box sits above the meter it belongs to",
+    "the row sits above the meter it belongs to",
   )
   const tokens = (await sheet.locator("text=/ of .* tokens$/").first().textContent()) ?? ""
   assert.doesNotMatch(tokens, /openrouter/, "the meter's own line carries the count alone")
   assert.doesNotMatch(sheetText, /Not used yet/, "the meter states its percentage and nothing else")
+  // The route's windows at the figures the mock serves, so the sheet is checked against the account
+  // the banner named rather than for the words alone: Session is the tightest at 95, Weekly 80% of it.
+  assert.match(sheetText, /Session\s*95% used/, "the sheet states the window the banner named")
+  assert.match(sheetText, /Weekly\s*76% used/, "and the window beside it, at its own figure")
   assert.ok(
-    sheetText.indexOf("Session") < sheetText.indexOf("Weekly"),
+    sheetText.includes("Session") && sheetText.indexOf("Session") < sheetText.indexOf("Weekly"),
     "the sheet keeps the route's order",
   )
   await shot("sheet")
@@ -155,19 +169,19 @@ await flow("usage-limit", async ({ page, profileId, seed, until, shot }) => {
     limits.indexOf("Credits") > limits.indexOf("Monthly"),
     "the route's order is the sheet's: the monthly allowance, then bought credits",
   )
-  assert.ok(limits.includes("ollama-cloud/gpt-oss:120b"), "the box names the model the chat runs")
+  assert.ok(limits.includes("ollama-cloud/gpt-oss:120b"), "the row names the model the chat runs")
   await shot("credits")
   await page.keyboard.press("Escape")
   await credits.waitFor({ state: "hidden", timeout: 5_000 })
 
   // A phone, in the dark: the notice drops the window's name, and the sheet is a bottom sheet with
-  // the box on top of it.
+  // the row on top of it.
   await page.setViewportSize({ width: 390, height: 844 })
   await page.emulateMedia({ colorScheme: "dark" })
   await pick("claude-sonnet-4-5")
-  await accountAt("94")
+  await accountAt("95")
   await reload()
-  await read("anthropic", 94)
+  await read("anthropic", 95)
   const narrow = await until(
     async () => {
       const text = await notice(page)
@@ -176,17 +190,17 @@ await flow("usage-limit", async ({ page, profileId, seed, until, shot }) => {
     10_000,
     "the composer's limit notice on a phone",
   )
-  assert.match(narrow, /^Approaching Limit/, "a phone's banner leaves the window's name out")
-  assert.match(narrow, /Resets in \d/)
+  assert.doesNotMatch(narrow, /Session|Weekly/, "a phone's banner leaves the window's name out")
+  assert.match(narrow, /^Approaching Limit/, "and states the warning alone")
+  assert.match(narrow, /Resets in \d/, "with the countdown the wide one carries")
   await shot("phone")
   await page.getByRole("button", { name: "View usage" }).click()
   const phone = page.getByRole("dialog")
   await phone.waitFor({ timeout: 5_000 })
   await settled(page)
-  assert.ok(
-    ((await phone.textContent()) ?? "").includes("claude-sonnet-4-5"),
-    "the phone's sheet carries the box too",
-  )
+  const phoneText = (await phone.textContent()) ?? ""
+  assert.ok(phoneText.includes("claude-sonnet-4-5"), "the phone's sheet carries the row too")
+  assert.match(phoneText, /Session\s*95% used/, "at the same figures, in the same order")
   await shot("phone-sheet")
 
   // Its light side, and a tablet: the banner names the window again from 768px up, while the sheet is

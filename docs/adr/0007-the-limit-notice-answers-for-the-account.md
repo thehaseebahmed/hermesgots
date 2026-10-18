@@ -55,3 +55,18 @@ reading of core's own words but is not yet proven against a live model-scoped ac
 alarm is reported, the fix is `serialize` keeping `scope` on the wire — an added field an older app ignores
 — and the notice passing over a window core marks `model` when it decides the account is out, with the
 sheet still stating that window like any other. The app has to treat the field as optional either way.
+
+Two edges of this rule are recorded here rather than fixed, both narrow:
+
+- A **spent** balance beside an open gate. Only a balance with something left counts as capacity, so a
+  balance at zero falls through to the tightest window and the notice reads as the account being out: a
+  period window holding 60% of its allowance beside an empty credit balance says the credits are reached
+  while calls still run on the allowance. The plugin's own credits window never reports zero
+  (`usage_ollama._credits_window` answers None), so it takes a fetcher that reports a reset-less balance
+  spent. Settling it is a decision about what a spent pool means beside a gate that is still open — the
+  account is not out, so the honest notice is the pool's own or none — and it belongs with the provider
+  that reports one.
+- A window with **no** `resets_at` key at all counts as a balance (`windowViews` copies it only when it is
+  set), so a period window from a plugin that left the key out would read as capacity and stay quiet. The
+  route has always carried it — an ISO time, or a null for a balance — so this takes a shape mismatch
+  rather than an older plugin, and the app errs quiet, which is the safe direction for a warning.
