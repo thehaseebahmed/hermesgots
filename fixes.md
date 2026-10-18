@@ -1128,13 +1128,13 @@ out.
 
 # Deferred fixes from the simplify pass on the composer's `/` menu
 
-A cleanup review of `feat(chat): a slash anywhere opens the skill menu, skills cached on device` and
-`feat(chat): size the slash menu to the room the screen gives it` (four parallel reviewers: reuse,
-quality, efficiency, altitude). Everything else the review found is applied on the branch — the
-route-missing cooldown, the row dropped with its bot, the caret following the field, the commands
-matching the whole message, the height never exceeding the room it measured, the bounded `lacksRoute`
-probe and the noted failures. Four findings are recorded instead, because each is wider than a cleanup
-pass.
+A cleanup review of the branch's two feature commits — `feat(chat): open the slash menu from any token
+and cache the skills` and `feat(chat): size the slash menu to the room the screen gives it` — by four
+parallel reviewers (reuse, quality, efficiency, altitude). Everything else the review found is applied
+on the branch — the route-missing cooldown, the row dropped with its bot, the caret following the field,
+the commands matching the whole message, the height never exceeding the room it measured, the bounded
+`lacksRoute` probe and the noted failures. Four findings are recorded instead, because each is wider
+than a cleanup pass.
 
 ## Risky
 

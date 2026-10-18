@@ -23,14 +23,17 @@ commands are the ones the composer's own actions own; everything else a slash ca
 
 The list is filtered by name, category and description, ranked in tiers: an exact name first, then a
 name the query starts, then a name that contains it, then a fuzzy (subsequence) name match, then a
-category match, then a description match. Ties keep the plugin's own order. Escape closes the menu for
-that token until its text changes, or until there is no token left for it to belong to; when nothing
-matches, the menu is not shown.
+category match, then a description match. Ties keep the plugin's own order. Escape closes the menu until
+the text changes; when nothing matches, the menu is not shown.
 
 The bot's skills are cached on the device, one last-known list per bot, so the menu opens with the
-skills already in it and refetches in the background; a failed read leaves the cached list in place. A
+skills already in it and refetches in the background; the list a read brings replaces the one held, and
+a read that brings nothing — a failed host, a plugin with no route — leaves the held list in place, or
+shows the commands alone when there is none, rather than a menu waiting on a read that already ended. A
 plugin that has no skills route is left alone for `MISSING_ROUTE_MS` like every other route-missing read
-in the app, rather than re-asked at each open. The goal wizard's review picker reads the same cached list.
+in the app, rather than re-asked at each open. What the menu shows from all that is one pure rule
+(`skills-cache.ts`), so the cases that depend on which answer arrived first are pinned by a test. The
+goal wizard's review picker reads the same cached list.
 
 The list is as tall as the room above the composer and never more than 45% of what's on screen, up to
 the 288px it has always been. On a phone with the keyboard up that is about four rows, which scroll;

@@ -6,9 +6,9 @@ import { db } from "@/lib/db"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import { listSkills, type HermesConfig, type Skill } from "@/lib/hermes"
 import { noteFailure } from "@/lib/report"
+import { skillsState, type SkillsState } from "@/lib/skills-cache"
 
-export type SkillsState =
-  { status: "loading" } | { status: "ok"; skills: Skill[] } | { status: "error" }
+export type { SkillsState } from "@/lib/skills-cache"
 
 // This page's answer, so a second open in the same page needs no read; the device keeps the row.
 const memory = new Map<string, Skill[]>()
@@ -21,13 +21,6 @@ const unsupported = cooldown()
 async function readStored(key: string) {
   return (await db.skills.get(key))?.skills
 }
-
-/** An answer already held for a key wins over one being written under it. */
-const keep = (
-  current: { key: string; state: SkillsState } | null,
-  key: string,
-  state: SkillsState,
-) => (current?.key === key ? current : { key, state })
 
 /** Reads the profile's skills for this server and keeps them, unless the bot can't list them. */
 function readSkills(config: HermesConfig, key: string): Promise<Skill[]> {
@@ -45,8 +38,8 @@ function readSkills(config: HermesConfig, key: string): Promise<Skill[]> {
         unsupported.start(key)
         return []
       }
-      // A host that is away, busy or slow is not that answer: the cached list stands, and the
-      // failure is noted like every other read the app carries on from.
+      // A host that is away, busy or slow is not that answer: the held list stands, and the failure
+      // is noted like every other read the app carries on from.
       noteFailure("Reading the bot's skills", error)
       throw error
     }
@@ -69,51 +62,53 @@ function readSkills(config: HermesConfig, key: string): Promise<Skill[]> {
 }
 
 /**
- * The bot's skills as the device last knew them, read again in the background while `open`. What is
- * cached answers at once and stands if a read fails, so the menu never opens empty on a bot whose
- * host is away; a bot whose plugin has no skills route has none to show.
+ * The bot's skills as this page last knew them, read again in the background while `open`: what the
+ * page holds answers at once and a read that lands replaces it, so a skill installed a moment ago
+ * shows without a reload, and a read that fails leaves it standing, so the menu never opens empty on
+ * a bot whose host is away. A bot whose plugin has no skills route has none to show.
  */
 export function useSkills(config: HermesConfig | null, open: boolean): SkillsState {
   // A bot the app reads plugin routes for at all: with no key, no route is read, as everywhere else.
   const key = config?.baseUrl.trim() && config.apiKey ? connectionKey(config) : ""
-  const [result, setResult] = useState<{ key: string; state: SkillsState } | null>(null)
-  const known = key ? memory.get(key) : undefined
-  const state: SkillsState =
-    result?.key === key
-      ? result.state
-      : known
-        ? { status: "ok", skills: known }
-        : key
-          ? { status: "loading" }
-          : { status: "ok", skills: [] }
+  // The read that has finished for this bot, as a fresh object each time: a read that lands must
+  // render even when one has landed for this bot before, and the list itself lives in `memory`.
+  const [settled, setSettled] = useState<{ key: string } | null>(null)
+  const state = skillsState({
+    key,
+    known: key ? memory.get(key) : undefined,
+    settled: settled?.key ?? null,
+  })
 
   const baseUrl = config?.baseUrl
   const apiKey = config?.apiKey
-  // A page that has never read this bot's skills starts from the device's copy of them, and only
-  // while nothing else has answered for it yet.
+  // A page that has never read this bot's skills starts from the device's copy of them. An answer
+  // the page already holds is the fresher one, so the row only fills that gap, and a row that can't
+  // be read is no worse than no row at all.
   useEffect(() => {
     if (!key || memory.has(key)) return
     let cancelled = false
-    void readStored(key).then((skills) => {
-      // The host may have answered while this row was being read: keep the fresher list.
-      if (!skills || cancelled || memory.has(key)) return
-      memory.set(key, skills)
-      setResult((current) => keep(current, key, { status: "ok", skills }))
-    })
+    void readStored(key)
+      .then((skills) => {
+        if (cancelled || !skills || memory.has(key)) return
+        memory.set(key, skills)
+        setSettled({ key })
+      })
+      .catch((error: unknown) => noteFailure("Reading the bot's saved skills", error))
     return () => {
       cancelled = true
     }
   }, [key])
 
+  // The read behind each open replaces what the page holds (and the device's row with it); a read
+  // that fails leaves it standing, and all this records is that the read is over, so the menu stops
+  // waiting on it and shows the commands alone.
   useEffect(() => {
     if (!open || !baseUrl || !apiKey) return
     let cancelled = false
-    readSkills({ baseUrl, apiKey }, key).then(
-      (skills) =>
-        !cancelled && setResult((current) => keep(current, key, { status: "ok", skills })),
-      // A failed read leaves the cached list standing: nothing to report, nothing to lose.
-      () => !cancelled && setResult((current) => keep(current, key, { status: "error" })),
-    )
+    const done = () => {
+      if (!cancelled) setSettled({ key })
+    }
+    readSkills({ baseUrl, apiKey }, key).then(done, done)
     return () => {
       cancelled = true
     }

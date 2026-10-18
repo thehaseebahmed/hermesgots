@@ -157,8 +157,8 @@ export function Composer({
     saveDraft(draftKey, value)
   }, [value, draftKey, loaded])
   useEffect(() => onDraft?.(value), [value, onDraft])
-  // The token whose menu the user closed with Escape: it stays shut until that token changes.
-  const [dismissed, setDismissed] = useState<string | null>(null)
+  // The token whose menu the user closed with Escape: it stays shut until the text changes.
+  const [dismissed, setDismissed] = useState(false)
   const [active, setActive] = useState(0)
   // Where the caret is, so the `/` menu follows it rather than the whole field.
   const [caret, setCaret] = useState(0)
@@ -196,13 +196,9 @@ export function Composer({
   const items = token
     ? rankSlashItems([...LOCAL_COMMANDS, ...(busy ? SEND_COMMANDS : []), ...skillItems], token)
     : []
-  // Escape closes the menu for the token it was pressed on; typing in that token opens it again.
-  const tokenText = token ? value.slice(token.start, token.end) : null
+  // Escape closes the menu until the text changes: any edit opens it again, and so does a new `/`.
   const menuOpen =
-    token !== null &&
-    tokenText !== dismissed &&
-    !disabled &&
-    (items.length > 0 || skills.status !== "ok")
+    token !== null && !dismissed && !disabled && (items.length > 0 || skills.status !== "ok")
   const activeIndex = Math.min(active, Math.max(items.length - 1, 0))
   // The caret follows the field. A pick places it (`caretWanted`); anything else that writes the
   // value — a restored draft, dictation, a message handed back after a failed send — leaves it
@@ -234,7 +230,7 @@ export function Composer({
     if (!token) return
     const next = hoistSkill(value, token, item.name)
     caretWanted.current = next.caret
-    setDismissed(null)
+    setDismissed(false)
     setValue(next.text)
   }
 
@@ -411,7 +407,7 @@ export function Composer({
     }
     if (menuOpen && event.key === "Escape") {
       event.preventDefault()
-      setDismissed(tokenText)
+      setDismissed(true)
       return
     }
     if (event.key === "Enter" && !event.shiftKey) {
@@ -511,9 +507,9 @@ export function Composer({
             const at = event.target.selectionStart ?? event.target.value.length
             setCaret(at)
             setActive(0)
-            // An Escape belongs to the token it was pressed on: once there is no token left, the
-            // next one is a fresh start (a cleared and retyped `/gr` opens the menu again).
-            if (!slashToken(event.target.value, at)) setDismissed(null)
+            // An Escape belongs to the text it was pressed on: editing is the user asking for the
+            // menu back, whether they typed in the token, cleared it or replaced the whole message.
+            setDismissed(false)
           }}
           // A caret moved without a keystroke — a click, an arrow key — moves the menu with it.
           onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}

@@ -5,7 +5,7 @@ import { assert, flow, pass } from "./lib.mjs"
 
 const FIXTURE = ["github-pr-workflow", "log-triage", "plan"]
 
-await flow("slash-skills", async ({ page, shot }) => {
+await flow("slash-skills", async ({ page, until, shot }) => {
   const plugin = []
   const hermes = []
   page.on("request", (request) => {
@@ -66,15 +66,75 @@ await flow("slash-skills", async ({ page, shot }) => {
   await page.waitForTimeout(500)
   assert.equal(await menu.isVisible(), false, "a slash inside a word leaves the menu closed")
 
-  // The list is on the device: with the plugin unreachable, a reload still has the skills.
+  // Escape closes the menu until the text changes — and replacing the whole message is a change, so
+  // the same text typed again is a new token that opens it.
+  await composer.fill("/plan")
+  await until(
+    async () => (await menu.getByRole("option", { name: /\/plan\b/ }).count()) > 0,
+    10_000,
+    "the skills to arrive behind the first open",
+  )
+  await composer.press("Escape")
+  await page.waitForTimeout(200)
+  assert.equal(await menu.isVisible(), false, "Escape closes the menu")
+  await composer.press("Control+a")
+  await composer.type("/plan")
+  await until(
+    async () => (await menu.getByRole("option", { name: /\/plan\b/ }).count()) > 0,
+    10_000,
+    "the menu to come back once the text changed",
+  )
+
+  // The list is on the device, and a read that fails doesn't take the list the page already has.
   await composer.fill("/")
   await menu.waitFor({ timeout: 10_000 })
+  const asked = plugin.length
   await page.route("**/api/plugins/memento/**", (route) => route.abort())
+  await composer.fill("")
+  await composer.fill("/")
+  await until(() => plugin.length > asked, 10_000, "a read behind the second open")
+  await page.waitForTimeout(500)
+  assert.ok(
+    await menu.getByRole("option", { name: /\/plan\b/ }).isVisible(),
+    "a read that fails leaves the held list standing",
+  )
+
+  // With the plugin unreachable, a reload still has the skills, from the device's row.
   await page.reload()
   await composer.fill("still /pl")
   await menu.getByRole("option", { name: /\/plan\b/ }).waitFor({ timeout: 10_000 })
   await shot("cached")
   await page.unroute("**/api/plugins/memento/**")
+
+  // A read runs behind every open and its answer replaces what the page held: a skill installed a
+  // moment ago appears without a reload.
+  let listed = [...FIXTURE]
+  await page.route("**/api/plugins/memento/skills*", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        object: "list",
+        data: listed.map((name) => ({ name, description: `${name} in one line.`, category: null })),
+      }),
+    }),
+  )
+  await composer.fill("")
+  await composer.fill("/")
+  await until(
+    async () => (await menu.getByRole("option").allInnerTexts()).length >= FIXTURE.length,
+    10_000,
+    "the first list from the overridden route",
+  )
+  listed = [...listed, "installed-a-moment-ago"]
+  await composer.fill("")
+  await composer.fill("/")
+  await until(
+    () => menu.getByRole("option", { name: /\/installed-a-moment-ago\b/ }).isVisible(),
+    10_000,
+    "a skill installed a moment ago to appear without a reload",
+  )
+  await shot("refetched")
 
   // The list is only as tall as the room above the composer and a share of what's on screen: a small
   // display — a phone with the keyboard up — gets a shorter one that scrolls, never one that runs
