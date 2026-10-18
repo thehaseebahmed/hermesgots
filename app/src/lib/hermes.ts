@@ -396,6 +396,12 @@ export function parseMcpServers(value: unknown): McpServer[] {
   return servers
 }
 
+/** Reads the plugin's `mcp` write answer (`{"object": {"server": {...}}}`) into the one server. */
+export function parseMcpServer(value: unknown): McpServer | undefined {
+  const server = (value as { object?: { server?: unknown } } | null)?.object?.server
+  return parseMcpServers({ object: { servers: server === undefined ? [] : [server] } })[0]
+}
+
 /** The MCP servers the bot's Hermes profile has, read from the Gots plugin. */
 export async function listMcpServers(
   config: HermesConfig,
@@ -406,6 +412,32 @@ export async function listMcpServers(
     signal,
   })
   return parseMcpServers(await response.json())
+}
+
+/**
+ * Switches one of the bot's MCP servers on or off on its Host (the Gots plugin's
+ * `POST /mcp/<name>/enabled`), answering the row as the change lands. The Host writes the flag on
+ * the bot's profile and makes it live for the bot's next turn; a server a Hermes plugin provides is
+ * refused there.
+ */
+export async function setMcpServerEnabled(
+  config: HermesConfig,
+  name: string,
+  enabled: boolean,
+  signal?: AbortSignal,
+): Promise<McpServer> {
+  const response = await request(
+    `${pluginRoot(config.baseUrl)}/mcp/${encodeURIComponent(name)}/enabled`,
+    {
+      method: "POST",
+      headers: headers(config),
+      body: JSON.stringify({ enabled }),
+      signal,
+    },
+  )
+  const server = parseMcpServer(await response.json())
+  if (!server) throw new HermesError("The host answered without the server.")
+  return server
 }
 
 /** A provider the host has credentials for, and the models Hermes offers on it. */

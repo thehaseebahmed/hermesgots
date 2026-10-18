@@ -22,7 +22,16 @@ from unittest import mock
 from plugin import mcp
 
 
-def hermes(servers=None, runtime=None, errors=None, plugin_servers=None, owners=None, tokens=None):
+def hermes(
+    servers=None,
+    runtime=None,
+    errors=None,
+    plugin_servers=None,
+    owners=None,
+    tokens=None,
+    reconcile=None,
+    saved=None,
+):
     """Hermes's MCP built-ins for one test, faked the way the module imports them.
 
     ``servers`` is the profile's ``mcp_servers`` block as ``_get_mcp_servers`` answers it.
@@ -32,25 +41,51 @@ def hermes(servers=None, runtime=None, errors=None, plugin_servers=None, owners=
     the Host's own text for a failed one. ``plugin_servers``/``owners`` are what a Hermes plugin
     provides through its own ``mcp.json``; ``tokens`` names the servers with stored Server access.
 
-    The scopes the read enters land on ``hermes_cli.web_server_profiles``'s ``scopes``, so a test
-    can assert which profile's the read ran in. ``discover_mcp_tools`` and
-    ``reconcile_mcp_servers_with_config`` are present and refuse: a read that reached for one to
-    start or stop a server fails the test instead of quietly connecting something.
+    ``reconcile`` is a list the write's reconcile appends the profile it ran inside to; when it is
+    None, reconcile refuses — so a read that reached for it fails the test instead of quietly
+    reconciling. ``saved`` is a list the config write appends ``(profile, config)`` to, so a test can
+    assert both the saved flag and the scope the write ran in. The config load and save round-trip
+    through one ``store``, as Hermes's own do: a write lands in the store, so a read after it sees
+    the change.
+
+    The scopes the read and the write enter land on ``hermes_cli.web_server_profiles``'s ``scopes``,
+    so a test can assert which profile's they ran in. ``discover_mcp_tools`` refuses: a read or a
+    write that reached for one to start or stop a server fails the test instead of connecting
+    something.
     """
 
     scopes = []
+    saved = saved if saved is not None else []
 
     @contextlib.contextmanager
     def _config_profile_scope(profile):
         scopes.append(profile)
         yield
 
+    # Hermes's own config read and write: the block round-trips through one store, so the flag a
+    # write sets is what the next read reports.
+    store = {name: dict(cfg) for name, cfg in (servers or {}).items()}
     runtime = dict(runtime or {})
     errors = dict(errors or {})
     access = set(tokens or ())
 
     def _get_mcp_servers():
-        return {name: dict(cfg) for name, cfg in (servers or {}).items()}
+        return {name: dict(cfg) for name, cfg in store.items()}
+
+    def load_config():
+        return {"mcp_servers": {name: dict(cfg) for name, cfg in store.items()}}
+
+    def save_config(config):
+        saved.append((scopes[-1] if scopes else None, config))
+        block = config.get("mcp_servers", {})
+        store.clear()
+        store.update({name: dict(cfg) for name, cfg in block.items()})
+
+    def reconcile_mcp_servers_with_config():
+        if reconcile is None:
+            raise AssertionError("the read must not reconcile servers")
+        reconcile.append(scopes[-1] if scopes else None)
+        return {"registered": [], "unregistered": []}
 
     def server_configs_with_sources(config_servers):
         """Hermes's split: the profile's own servers, plus the ones a plugin provides."""
@@ -100,6 +135,17 @@ def hermes(servers=None, runtime=None, errors=None, plugin_servers=None, owners=
     config._get_mcp_servers = _get_mcp_servers
     config._oauth_tokens_present = _oauth_tokens_present
 
+    # The write's own modules: Hermes's config read/write and the config write scope (the read scope
+    # under Hermes's config lock, recorded on the same ``scopes`` the read's is).
+    config_module = types.ModuleType("hermes_cli.config")
+    config_module.load_config = load_config
+    config_module.save_config = save_config
+
+    routers = types.ModuleType("hermes_cli.web_routers")
+    router_common = types.ModuleType("hermes_cli.web_routers._common")
+    router_common.config_write_scope = _config_profile_scope
+    routers._common = router_common
+
     profiles = types.ModuleType("hermes_cli.web_server_profiles")
     profiles._config_profile_scope = _config_profile_scope
     profiles.scopes = scopes
@@ -107,13 +153,16 @@ def hermes(servers=None, runtime=None, errors=None, plugin_servers=None, owners=
     discovery = types.ModuleType("tools.mcp_tool_discovery")
     discovery.get_mcp_status = get_mcp_status
     discovery.discover_mcp_tools = _refuse("connect a server")
-    discovery.reconcile_mcp_servers_with_config = _refuse("reconcile servers")
+    discovery.reconcile_mcp_servers_with_config = reconcile_mcp_servers_with_config
 
     helpers = types.ModuleType("tui_gateway.mcp_rpc_helpers")
     helpers.server_configs_with_sources = server_configs_with_sources
 
     return {
+        "hermes_cli.config": config_module,
         "hermes_cli.mcp_config": config,
+        "hermes_cli.web_routers": routers,
+        "hermes_cli.web_routers._common": router_common,
         "hermes_cli.web_server_profiles": profiles,
         "tools.mcp_tool_discovery": discovery,
         "tui_gateway.mcp_rpc_helpers": helpers,
@@ -331,6 +380,119 @@ class McpReadTests(unittest.TestCase):
         ):
             found = mcp.read("bot-a")
         self.assertEqual([("srv", "on")], rows(found))
+
+
+class McpToggleTests(unittest.TestCase):
+    """Switching one of a bot's MCP servers on or off (``mcp.set_enabled``)."""
+
+    def test_switching_a_server_off_writes_the_flag_and_reads_as_off(self):
+        reconcile, saved = [], []
+        stubs = hermes(
+            servers={"github": {"command": "npx", "args": ["-y", "srv"]}},
+            reconcile=reconcile,
+            saved=saved,
+        )
+        with mock.patch.dict(sys.modules, stubs):
+            answered = mcp.set_enabled("bot-a", "github", False)
+            after = mcp.read("bot-a")
+        self.assertEqual(
+            {"name": "github", "state": "off", "source": "config", "reason": None}, answered
+        )
+        self.assertEqual([("github", "off")], rows(after))
+        self.assertIs(False, saved[-1][1]["mcp_servers"]["github"]["enabled"])
+
+    def test_switching_a_server_back_on_writes_the_flag_and_reads_as_on(self):
+        saved = []
+        stubs = hermes(
+            servers={"github": {"command": "npx", "enabled": False}},
+            reconcile=[],
+            saved=saved,
+        )
+        with mock.patch.dict(sys.modules, stubs):
+            answered = mcp.set_enabled("bot-a", "github", True)
+        self.assertEqual("on", answered["state"])
+        self.assertIs(True, saved[-1][1]["mcp_servers"]["github"]["enabled"])
+
+    def test_the_write_and_the_reconcile_run_inside_the_given_profile_scope(self):
+        """The scope is what keeps one bot's toggle from touching another bot's servers."""
+        reconcile, saved = [], []
+        stubs = hermes(servers={"srv": {"command": "npx"}}, reconcile=reconcile, saved=saved)
+        with mock.patch.dict(sys.modules, stubs):
+            mcp.set_enabled("bot-a", "srv", False)
+            mcp.set_enabled("bot-b", "srv", False)
+        # Each write entered its own profile's scope, and the reconcile ran inside that scope, not
+        # after it — so neither bot's toggle could touch the other's servers.
+        self.assertEqual(["bot-a", "bot-b"], [scope for scope, _config in saved])
+        self.assertEqual(["bot-a", "bot-b"], reconcile)
+
+    def test_switching_off_and_back_on_leaves_the_servers_other_keys_alone(self):
+        saved = []
+        stubs = hermes(
+            servers={
+                "postgres": {
+                    "url": "https://db.example/mcp",
+                    "env": {"PGPASSWORD": "${PG_PASSWORD}"},
+                    "args": ["--ro"],
+                }
+            },
+            reconcile=[],
+            saved=saved,
+        )
+        with mock.patch.dict(sys.modules, stubs):
+            mcp.set_enabled("bot-a", "postgres", False)
+            mcp.set_enabled("bot-a", "postgres", True)
+        entry = saved[-1][1]["mcp_servers"]["postgres"]
+        self.assertEqual(
+            {
+                "url": "https://db.example/mcp",
+                "env": {"PGPASSWORD": "${PG_PASSWORD}"},
+                "args": ["--ro"],
+                "enabled": True,
+            },
+            entry,
+        )
+
+    def test_a_server_a_hermes_plugin_provides_is_refused(self):
+        """Hermes refuses to modify those, so the toggle must not try."""
+        saved, reconcile = [], []
+        stubs = hermes(
+            plugin_servers={"theirs": {"command": "plugin-srv"}},
+            owners={"theirs": "gots-extras"},
+            saved=saved,
+            reconcile=reconcile,
+        )
+        with mock.patch.dict(sys.modules, stubs):
+            with self.assertRaises(mcp.McpError) as caught:
+                mcp.set_enabled("bot-a", "theirs", False)
+        self.assertEqual(400, caught.exception.status)
+        self.assertEqual([], saved)
+        self.assertEqual([], reconcile)
+
+    def test_an_unknown_server_is_refused(self):
+        saved = []
+        stubs = hermes(servers={"github": {"command": "npx"}}, saved=saved, reconcile=[])
+        with mock.patch.dict(sys.modules, stubs):
+            with self.assertRaises(mcp.McpError) as caught:
+                mcp.set_enabled("bot-a", "nope", False)
+        self.assertEqual(400, caught.exception.status)
+        self.assertEqual([], saved)
+
+    def test_the_toggle_never_connects_a_server(self):
+        """``discover_mcp_tools`` refuses in the fakes; a toggle that reached for it would fail here."""
+        stubs = hermes(servers={"srv": {"command": "npx"}}, reconcile=[])
+        with mock.patch.dict(sys.modules, stubs):
+            answered = mcp.set_enabled("bot-a", "srv", False)
+        self.assertEqual("off", answered["state"])
+
+    def test_a_host_without_the_write_built_ins_refuses_with_501(self):
+        """A host that can list servers but has no writers still lists them, and refuses a toggle."""
+        stubs = hermes(servers={"srv": {"command": "npx"}}, reconcile=[])
+        stubs["hermes_cli.web_routers._common"] = None
+        with mock.patch.dict(sys.modules, stubs):
+            self.assertIsNone(mcp.available())
+            with self.assertRaises(mcp.McpError) as caught:
+                mcp.set_enabled("bot-a", "srv", False)
+        self.assertEqual(501, caught.exception.status)
 
 
 class McpFeatureGateTests(unittest.TestCase):

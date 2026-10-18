@@ -1472,6 +1472,25 @@ http
     if (PLUGIN && MCPS && !profile && url.pathname === "/api/plugins/memento/mcp") {
       return json(res, 200, { object: { servers: MCP_SERVERS } })
     }
+    // Flipping one of those servers on or off. The write lands on the row the app renders back, and
+    // the mock's own list follows it so a later read agrees. A server a Hermes plugin provides can't
+    // be changed and answers the plugin's own refusal; the state a toggle lands in is the flag.
+    const mcpEnabled = url.pathname.match(/^\/api\/plugins\/memento\/mcp\/([^/]+)\/enabled$/)
+    if (PLUGIN && MCPS && !profile && mcpEnabled && req.method === "POST") {
+      const name = decodeURIComponent(mcpEnabled[1])
+      const { enabled } = await readBody(req)
+      const server = MCP_SERVERS.find((row) => row.name === name)
+      if (typeof enabled !== "boolean")
+        return json(res, 400, { error: { message: 'Body must be {"enabled": true} or {"enabled": false}' } })
+      if (!server) return json(res, 400, { error: { message: `No MCP server named '${name}' on this bot.` } })
+      if (server.source === "plugin")
+        return json(res, 400, {
+          error: { message: `${name} is provided by a Hermes plugin, so it can't be changed.` },
+        })
+      server.state = enabled ? "on" : "off"
+      server.reason = null
+      return json(res, 200, { object: { server } })
+    }
     // Web Push: the mock keeps subscriptions but sends nothing.
     if (PLUGIN && !profile && req.method === "POST" && url.pathname === "/api/plugins/memento/push") {
       const { subscription, device, vapid_key, subject, categories } = await readBody(req)

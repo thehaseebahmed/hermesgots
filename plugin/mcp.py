@@ -27,15 +27,23 @@ why it is not working yet and offers the way to grant it. Any other server carri
 reason: Hermes's own ``error`` text rides along whatever the state word, so a server a Hermes plugin
 provides keeps the word ``plugin`` and still says why it failed.
 
-This module owns every verb of the ``/mcp`` routes (#249). Only the read is written: ``catalogue``,
-``install``, ``set_enabled``, ``remove`` and ``start_access`` belong here too — the Catalogue with
+This module owns every verb of the ``/mcp`` routes (#249): the read and the toggle are written, and
+``catalogue``, ``install``, ``remove`` and ``start_access`` belong here too — the Catalogue with
 installed/enabled per entry, adding one from it through Hermes's connection-card path (never
 ``install_entry``, which can prompt on stdin and open a curses checklist in the host process),
-writing the ``enabled`` flag and reconciling, removing one the way ``hermes mcp remove`` does, and
-starting the Server access flow. The writes go through Hermes's config write scope, which also
-serialises against its own config lock; this read takes the profile's home-and-secrets scope
-(``hermes_cli.web_server_profiles._config_profile_scope``) — deliberately not ``_profile_scope``,
-which swaps the skills module's globals under a process-global lock for the whole body.
+removing one the way ``hermes mcp remove`` does, and starting the Server access flow. The read takes
+the profile's home-and-secrets scope (``hermes_cli.web_server_profiles._config_profile_scope``) —
+deliberately not ``_profile_scope``, which swaps the skills module's globals under a process-global
+lock for the whole body. A write takes that scope too, under Hermes's config write scope
+(``hermes_cli.web_routers._common.config_write_scope``), which also serialises the change against
+Hermes's own config lock.
+
+``set_enabled`` writes only the server's ``enabled`` flag through Hermes's own config read and write,
+then runs Hermes's own reconcile so the change is live for the bot's next turn. It never invokes the
+consent-gated reload (``/reload-mcp``), which tears every server down and invalidates the prompt
+cache, and it refuses a server a Hermes plugin provides, because Hermes will not modify one. Nothing
+else of a server's configuration — its transport, command, URL, environment, auth — is touched, so
+switching a server off and back on leaves it exactly as it was.
 
 Every Hermes symbol is imported late, inside the call that needs it, because a plugin loads before
 the CLI package exists. A host that moved one raises ImportError, which becomes an ``McpError`` the
@@ -80,6 +88,34 @@ def _hermes() -> Dict[str, Any]:
     }
 
 
+def _hermes_write() -> Dict[str, Any]:
+    """Hermes's own MCP writers beside the readers, imported at call time.
+
+    Only ``set_enabled`` needs these: the config read and write, the config write scope (the read
+    scope plus Hermes's config-mutation lock) and the reconcile that makes a change live. They are
+    imported separately from ``_hermes``'s readers, so a host that can list servers but lacks the
+    writers still lists them; a host missing any of these raises ``McpError`` with a 501.
+    """
+    try:
+        from hermes_cli.config import load_config, save_config
+        from hermes_cli.mcp_config import _get_mcp_servers, _oauth_tokens_present
+        from hermes_cli.web_routers._common import config_write_scope
+        from tools.mcp_tool_discovery import get_mcp_status, reconcile_mcp_servers_with_config
+        from tui_gateway.mcp_rpc_helpers import server_configs_with_sources
+    except ImportError as error:
+        raise McpError(UNAVAILABLE, 501) from error
+    return {
+        "scope": config_write_scope,
+        "servers": _get_mcp_servers,
+        "sources": server_configs_with_sources,
+        "status": get_mcp_status,
+        "tokens_present": _oauth_tokens_present,
+        "load": load_config,
+        "save": save_config,
+        "reconcile": reconcile_mcp_servers_with_config,
+    }
+
+
 def available() -> Optional[str]:
     """Why this host's MCP servers can't be read from here, or None when they can."""
     try:
@@ -100,16 +136,64 @@ def read(profile: Optional[str]) -> List[Dict[str, Any]]:
     hermes = _hermes()
     with hermes["scope"](profile):
         servers, owners = hermes["sources"](hermes["servers"]())
-        reported = {
-            row.get("name"): row
-            for row in hermes["status"](servers)
-            if isinstance(row, dict) and row.get("name")
-        }
-        found = [
-            _server(name, cfg, owners.get(name), reported.get(name), hermes["tokens_present"])
-            for name, cfg in servers.items()
-        ]
+        found = _rows(hermes, servers, owners)
     return sorted(found, key=lambda server: server["name"])
+
+
+def set_enabled(profile: Optional[str], name: str, enabled: bool) -> Dict[str, Any]:
+    """Switch one of ``profile``'s MCP servers on or off, and answer its row once it has landed.
+
+    Writes only the server's ``enabled`` flag, through Hermes's own config read and write inside the
+    profile's config write scope, so nothing else of the server's configuration is touched. Hermes's
+    own reconcile then runs for that profile, so the change is live for the bot's next turn, and a
+    chat that is already built keeps the servers it had; the consent-gated reload is never invoked.
+    A server the profile doesn't have, or one a Hermes plugin provides (which Hermes will not
+    modify), is refused.
+
+    ``profile`` is a profile name, or None for the process's own. Blocking — config I/O and a
+    reconcile, which takes a per-home lock and can back off for minutes — so call it from a worker
+    thread, never the event loop. Answers the server's row as ``read`` shapes it, so the caller sees
+    the state the change lands in.
+    """
+    hermes = _hermes_write()
+    with hermes["scope"](profile):
+        servers, owners = hermes["sources"](hermes["servers"]())
+        if name not in servers:
+            raise McpError(f"No MCP server named {name!r} on this bot.", 400)
+        if owners.get(name):
+            raise McpError(f"{name} is provided by a Hermes plugin, so it can't be changed.", 400)
+        _write_flag(hermes, name, enabled)
+        hermes["reconcile"]()
+        servers, owners = hermes["sources"](hermes["servers"]())
+        return _rows(hermes, servers, owners, only=name)[0]
+
+
+def _write_flag(hermes: Dict[str, Any], name: str, enabled: bool) -> None:
+    """Set one server's ``enabled`` flag in the profile's config, leaving every other key alone."""
+    config = hermes["load"]()
+    block = config.setdefault("mcp_servers", {})
+    entry = block.get(name)
+    if not isinstance(entry, dict):
+        entry = {}
+        block[name] = entry
+    entry["enabled"] = bool(enabled)
+    hermes["save"](config)
+
+
+def _rows(
+    hermes: Dict[str, Any], servers: Dict[str, Any], owners: Dict[str, Any], only: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """The app's row for each server, from Hermes's own status read (which never connects)."""
+    reported = {
+        row.get("name"): row
+        for row in hermes["status"](servers)
+        if isinstance(row, dict) and row.get("name")
+    }
+    return [
+        _server(name, cfg, owners.get(name), reported.get(name), hermes["tokens_present"])
+        for name, cfg in servers.items()
+        if only is None or name == only
+    ]
 
 
 def _server(name: str, cfg: Any, owner: Optional[str], status: Any, tokens_present: Any) -> Dict[str, Any]:

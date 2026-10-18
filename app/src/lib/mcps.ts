@@ -1,13 +1,14 @@
 /**
  * A bot's MCP servers, read from its Host's Gots plugin (`GET <plugin>/mcp`), with nothing kept on
  * the device. The screen reads once on open and again only while a server is in a state that moves
- * on its own — connecting, or waiting on Server access — since nothing here changes one. The row and
- * the screen exist only where the plugin advertises the feature, so a Bot whose Hermes is behind has
- * neither and is sent back to its editor, while a Bot whose Host hasn't answered yet is left to
- * answer rather than flashing its screen away. A plugin without the route is left alone like every
- * other optional one.
+ * on its own — connecting, or waiting on Server access — and `setEnabled` switches one on or off
+ * through the plugin, replacing that row with the state the change landed in. The row and the screen
+ * exist only where the plugin advertises the feature, so a Bot whose Hermes is behind has neither
+ * and is sent back to its editor, while a Bot whose Host hasn't answered yet is left to answer
+ * rather than flashing its screen away. A plugin without the route is left alone like every other
+ * optional one.
  */
-import { useState, useSyncExternalStore } from "react"
+import { useCallback, useState, useSyncExternalStore } from "react"
 
 import { connectionKey } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
@@ -15,6 +16,7 @@ import { MCP_WORK_MS } from "@/lib/freshness"
 import {
   getPluginFeatureList,
   listMcpServers,
+  setMcpServerEnabled,
   type HermesConfig,
   type McpServer,
   type McpState,
@@ -95,7 +97,9 @@ const unsupported = cooldown()
 /**
  * The Bot's MCP servers, read once when the screen opens and again only while one is connecting or
  * waiting on Server access. Undefined until a read lands; a read that fails leaves what the screen
- * has, since an unreachable Host must not take the screen down with it.
+ * has, since an unreachable Host must not take the screen down with it. `setEnabled` switches one
+ * server on or off on the Host and replaces its row with the state the change landed in; a write
+ * that fails is thrown for the screen to report, leaving the row as it was.
  */
 export function useMcpServers(server: McpServerConfig, active: boolean) {
   const [servers, setServers] = useState<McpServer[] | undefined>(undefined)
@@ -125,5 +129,12 @@ export function useMcpServers(server: McpServerConfig, active: boolean) {
     [key],
     { active: active && Boolean(key) },
   )
-  return servers
+  const setEnabled = useCallback(
+    async (name: string, enabled: boolean) => {
+      const row = await setMcpServerEnabled({ baseUrl, apiKey }, name, enabled)
+      setServers((current) => current?.map((server) => (server.name === row.name ? row : server)))
+    },
+    [baseUrl, apiKey],
+  )
+  return { servers, setEnabled }
 }

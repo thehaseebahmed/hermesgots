@@ -1,11 +1,13 @@
-import { useCallback, useEffect } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { ArrowLeftIcon, ServerIcon } from "lucide-react"
 import { Navigate, useParams } from "react-router"
+import { toast } from "sonner"
 
 import { Group, rowClass, Screen } from "@/components/settings-chrome"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Switch } from "@/components/ui/switch"
 import { listProfiles } from "@/lib/db"
 import { MCP_STATE_WORDS, useMcpFeatureAnswer, useMcpServers } from "@/lib/mcps"
 import type { McpServer, McpState } from "@/lib/hermes"
@@ -23,12 +25,12 @@ const STATE_TONES: Record<McpState, "secondary" | "outline" | "destructive"> = {
 }
 
 /**
- * A Bot's MCP servers: every one the Bot's Hermes profile has, each with the state it is in. It is
- * read-only — nothing here switches, adds or removes one — so there is no control on any row, and a
- * server a Hermes plugin provides reads as what it is. Reached from the Bot's own row in Settings and
- * by URL; back returns to the Bot. A Bot whose Hermes can't list them has no screen at all, so its
- * URL sends the user back to the Bot, while one whose Host hasn't answered yet draws nothing rather
- * than flashing its screen away.
+ * A Bot's MCP servers: every one the Bot's Hermes profile has, each with the state it is in, and a
+ * switch that turns one on or off for that Bot. A server a Hermes plugin provides is read as what it
+ * is and carries no switch, because Hermes refuses to modify one. Reached from the Bot's own row in
+ * Settings and by URL; back returns to the Bot. A Bot whose Hermes can't list them has no screen at
+ * all, so its URL sends the user back to the Bot, while one whose Host hasn't answered yet draws
+ * nothing rather than flashing its screen away.
  */
 export function McpsPage() {
   const { botId } = useParams()
@@ -36,7 +38,7 @@ export function McpsPage() {
   const profiles = useLiveQuery(listProfiles, [])
   const profile = profiles?.find((p) => p.id === botId)
   const answer = useMcpFeatureAnswer(profile)
-  const servers = useMcpServers(profile, answer === "yes")
+  const { servers, setEnabled } = useMcpServers(profile, answer === "yes")
   const profileId = profile?.id
   // Android's back does what the header's button does: it returns to the Bot.
   const back = useCallback(
@@ -73,7 +75,7 @@ export function McpsPage() {
       ) : (
         <Group>
           {servers.map((server) => (
-            <ServerRow key={server.name} server={server} />
+            <ServerRow key={server.name} server={server} onToggle={setEnabled} />
           ))}
         </Group>
       )}
@@ -81,8 +83,15 @@ export function McpsPage() {
   )
 }
 
-/** One server: its name, the Host's own reason when it failed, and Gots' word for its state. */
-function ServerRow({ server }: { server: McpServer }) {
+/** One server: its name, the Host's own reason when it failed, Gots' word for its state, and its switch. */
+function ServerRow({
+  server,
+  onToggle,
+}: {
+  server: McpServer
+  onToggle: (name: string, enabled: boolean) => Promise<void>
+}) {
+  const [saving, setSaving] = useState(false)
   return (
     <div className={rowClass} data-mcp={server.name}>
       <ServerIcon className="size-5 shrink-0 text-muted-foreground" />
@@ -91,6 +100,24 @@ function ServerRow({ server }: { server: McpServer }) {
         {server.reason && <span className="text-sm text-destructive">{server.reason}</span>}
       </span>
       <Badge variant={STATE_TONES[server.state]}>{MCP_STATE_WORDS[server.state]}</Badge>
+      {/* A server a Hermes plugin provides has no switch: Hermes refuses to modify one. */}
+      {server.source === "config" && (
+        <Switch
+          aria-label={`${server.name} on`}
+          checked={server.state !== "off"}
+          disabled={saving}
+          onCheckedChange={async (checked) => {
+            setSaving(true)
+            try {
+              await onToggle(server.name, checked)
+            } catch (error) {
+              toast.error(error instanceof Error ? error.message : "Couldn't save that.")
+            } finally {
+              setSaving(false)
+            }
+          }}
+        />
+      )}
     </div>
   )
 }

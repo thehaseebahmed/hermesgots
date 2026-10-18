@@ -132,7 +132,7 @@ const FLOWS = {
   mcps: {
     script: "e2e/mcps.mjs",
     about:
-      "A bot's MCP servers list from its editor row, read-only, with every state word, at phone and tablet widths",
+      "A bot's MCP servers list from its editor row, with a switch on each of its own servers and none on a plugin's, at phone and tablet widths",
   },
   "mcps-gate": {
     script: "e2e/mcps-gate.mjs",
