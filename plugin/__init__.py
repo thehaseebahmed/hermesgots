@@ -232,8 +232,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if denied is not None:
             return denied
         # The MCP screen is advertised only where Hermes's own MCP built-ins import, so a bot whose
-        # Hermes is too old gets no row rather than an error. Off the loop: the check imports them.
+        # Hermes is too old gets no row rather than an error; the switch is advertised apart from it,
+        # because the write's built-ins are a different set from the read's — a host that can list
+        # servers may still not be able to switch one, and must not offer a switch that can't work.
+        # Off the loop: the checks import them.
         serves_mcps = await asyncio.to_thread(mcp.available) is None
+        writes_mcps = serves_mcps and await asyncio.to_thread(mcp.writable) is None
         return web.json_response(
             {
                 "name": "memento",
@@ -280,6 +284,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "community",
                     # Hermes's own MCP built-ins, and the MCP screen with them; see mcp.py.
                     *(["mcps"] if serves_mcps else []),
+                    *(["mcps_write"] if writes_mcps else []),
                 ],
                 "clarify": asks,
                 "todo_tool": todo_tool,
@@ -400,6 +405,26 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except ImportError:
             return _error(web, mcp.UNAVAILABLE, 501)
         return web.json_response({"object": {"servers": servers}})
+
+    async def set_mcp_server_enabled(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None or not isinstance(body.get("enabled"), bool):
+            return _error(web, 'Body must be {"enabled": true} or {"enabled": false}', 400)
+        # The write runs Hermes's own config read and write and its reconcile inside this bot's
+        # profile scope, so it lands on the right bot and is live for its next turn; a host without
+        # those built-ins is a 501, never a 500. See mcp.py.
+        profile = request_profile()
+        name = request.match_info["name"]
+        try:
+            server = await asyncio.to_thread(mcp.set_enabled, profile, name, body["enabled"])
+        except mcp.McpError as error:
+            return _error(web, str(error), error.status)
+        except ImportError:
+            return _error(web, mcp.UNAVAILABLE, 501)
+        return web.json_response({"object": {"server": server}})
 
     async def set_fallbacks(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1129,6 +1154,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/fallbacks", get_fallbacks)
     app.router.add_get(f"{PREFIX}/skills", list_skills)
     app.router.add_get(f"{PREFIX}/mcp", list_mcp_servers)
+    app.router.add_post(f"{PREFIX}/mcp/{{name}}/enabled", set_mcp_server_enabled)
     app.router.add_post(f"{PREFIX}/fallbacks", set_fallbacks)
     app.router.add_get(f"{PREFIX}/github", github_status)
     app.router.add_get(f"{PREFIX}/github/repos", github_repos)

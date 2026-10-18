@@ -340,17 +340,18 @@ const RESEARCH_WRITERS = process.env.MOCK_RESEARCH_WRITERS !== "off"
 // MOCK_MCP=off is a Hermes whose plugin can't offer them at all: no route and no `mcps` feature.
 const MCPS = process.env.MOCK_MCP !== "off"
 const MCP_SERVERS = [
-  { name: "github", state: "on", source: "config", reason: null },
-  { name: "postgres", state: "off", source: "config", reason: null },
-  { name: "linear", state: "connecting", source: "config", reason: null },
+  { name: "github", state: "on", enabled: true, source: "config", reason: null },
+  { name: "postgres", state: "off", enabled: false, source: "config", reason: null },
+  { name: "linear", state: "connecting", enabled: true, source: "config", reason: null },
   {
     name: "sentry",
     state: "failed",
+    enabled: true,
     source: "config",
     reason: "Connection refused: nothing is listening on localhost:3100.",
   },
-  { name: "notion", state: "needs_access", source: "config", reason: null },
-  { name: "filesystem", state: "plugin", source: "plugin", reason: null },
+  { name: "notion", state: "needs_access", enabled: true, source: "config", reason: null },
+  { name: "filesystem", state: "plugin", enabled: true, source: "plugin", reason: null },
 ]
 
 /** How long a pull request's checks run after a turn says "pending", before they pass. */
@@ -1442,7 +1443,7 @@ http
       return json(res, 200, {
         name: "memento",
         version: PLUGIN_VERSION,
-        features: ["cron_runs", "session_label", "chats", "draft_text", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "goal", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "skills", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : []), ...(MCPS ? ["mcps"] : [])],
+        features: ["cron_runs", "session_label", "chats", "draft_text", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "goal", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "skills", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : []), ...(MCPS ? ["mcps", "mcps_write"] : [])],
         clarify: true,
         hooks: true,
         goal:
@@ -1471,6 +1472,26 @@ http
     // the plugin's prefix carries the profile and is stripped just above.
     if (PLUGIN && MCPS && !profile && url.pathname === "/api/plugins/memento/mcp") {
       return json(res, 200, { object: { servers: MCP_SERVERS } })
+    }
+    // Flipping one of those servers on or off. The write lands on the row the app renders back, and
+    // the mock's own list follows it so a later read agrees. A server a Hermes plugin provides can't
+    // be changed and answers the plugin's own refusal; the state a toggle lands in is the flag.
+    const mcpEnabled = url.pathname.match(/^\/api\/plugins\/memento\/mcp\/([^/]+)\/enabled$/)
+    if (PLUGIN && MCPS && !profile && mcpEnabled && req.method === "POST") {
+      const name = decodeURIComponent(mcpEnabled[1])
+      const { enabled } = await readBody(req)
+      const server = MCP_SERVERS.find((row) => row.name === name)
+      if (typeof enabled !== "boolean")
+        return json(res, 400, { error: { message: 'Body must be {"enabled": true} or {"enabled": false}' } })
+      if (!server) return json(res, 400, { error: { message: `No MCP server named '${name}' on this bot.` } })
+      if (server.source === "plugin")
+        return json(res, 400, {
+          error: { message: `${name} is provided by a Hermes plugin, so it can't be changed.` },
+        })
+      server.state = enabled ? "on" : "off"
+      server.enabled = enabled
+      server.reason = null
+      return json(res, 200, { object: { server } })
     }
     // Web Push: the mock keeps subscriptions but sends nothing.
     if (PLUGIN && !profile && req.method === "POST" && url.pathname === "/api/plugins/memento/push") {
