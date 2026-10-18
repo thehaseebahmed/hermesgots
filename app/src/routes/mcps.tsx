@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { listProfiles } from "@/lib/db"
@@ -358,16 +358,24 @@ function CatalogueRow({ entry, onOpen }: { entry: McpCatalogueEntry; onOpen: () 
 }
 
 /**
+ * What a field for a value the Bot already holds says: the Host reports that it has one and never its
+ * content, so the field stands empty with this as its placeholder and typing over it replaces the
+ * value.
+ */
+const SET_PLACEHOLDER = "Set — type to replace"
+
+/**
  * One Catalogue entry's form: a field per value the entry declares, and the Add that writes them.
  *
  * What is typed in lives in this component's own state and nowhere else — it is never written to the
  * device and never read back from the Host, which reports only whether it already holds a value for
- * a declared one. Such a value has no field at all: its row says it is set and offers nothing to
- * type into, because its content is the Host's and asking for it again would mean showing it. A
- * secret's field is masked, and a required one is marked; a required field left empty (or a space or
- * two, which is nothing typed in) refuses the add and marks that field. Adding closes the form and
- * the Catalogue behind it, and what the screen's list becomes is the Host's own answer; a Host that
- * refuses the add answers with its own reason, which the form reports.
+ * a declared one. A field is titled with the prompt the entry writes for people and subtitled with
+ * the name the value lands under on the Host, a secret's is masked, and a required one is starred;
+ * a required field left empty (or a space or two, which is nothing typed in) refuses the add and
+ * marks that field. A value the Bot already holds has a field of its own, standing empty and saying
+ * so: typing into it replaces what the Host holds, and leaving it alone sends nothing at all. Adding
+ * closes the form and the Catalogue behind it, and what the screen's list becomes is the Host's own
+ * answer; a Host that refuses the add answers with its own reason, which the form reports.
  */
 function McpEntryForm({
   server,
@@ -429,36 +437,42 @@ function McpEntryForm({
         <FieldGroup>
           {entry?.values.map((value) => (
             <Field key={value.name} data-value={value.name} data-required={value.required}>
-              <FieldLabel htmlFor={value.set ? undefined : `mcp-value-${value.name}`}>
-                {value.name}
-                {value.required && !value.set && <Badge variant="outline">Required</Badge>}
-                {/* The Host answers only whether it holds a value for a declared one, never the value
-                    itself, so a value it already has is a word beside the name rather than a control
-                    stretched across the field. */}
-                {value.set && <Badge variant="secondary">Set</Badge>}
+              {/* Hermes names a value twice: the prompt its manifest writes for people, and the name
+                  the value lands under on the Host. The prompt is the title and the name is the
+                  subtext, so a field reads as the thing being asked for, not as an env var. */}
+              <FieldLabel
+                htmlFor={`mcp-value-${value.name}`}
+                className="flex-col items-start gap-0.5"
+              >
+                <span>
+                  {value.prompt || value.name}
+                  {value.required && <span aria-hidden="true">{" *"}</span>}
+                </span>
+                {value.prompt && (
+                  <span className="text-xs font-normal text-muted-foreground">{value.name}</span>
+                )}
               </FieldLabel>
-              {!value.set && (
-                <Input
-                  id={`mcp-value-${value.name}`}
-                  className="h-11"
-                  // A credential is masked as it is typed; a plain value is not.
-                  type={value.secret ? "password" : "text"}
-                  autoComplete="off"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  value={fieldValue(value, entered)}
-                  aria-invalid={missing.includes(value.name)}
-                  onChange={(e) => {
-                    const given = e.target.value
-                    setEntered((current) => ({ ...current, [value.name]: given }))
-                    // Filling a field in takes the mark off it: the refusal was about the field as it
-                    // was, and the next Add is what judges it again.
-                    setMissing((current) => current.filter((name) => name !== value.name))
-                  }}
-                />
-              )}
-              {value.prompt && <FieldDescription>{value.prompt}</FieldDescription>}
+              <Input
+                id={`mcp-value-${value.name}`}
+                className="h-11"
+                // A credential is masked as it is typed; a plain value is not.
+                type={value.secret ? "password" : "text"}
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder={value.set ? SET_PLACEHOLDER : undefined}
+                value={fieldValue(value, entered)}
+                aria-required={value.required || undefined}
+                aria-invalid={missing.includes(value.name)}
+                onChange={(e) => {
+                  const given = e.target.value
+                  setEntered((current) => ({ ...current, [value.name]: given }))
+                  // Filling a field in takes the mark off it: the refusal was about the field as it
+                  // was, and the next Add is what judges it again.
+                  setMissing((current) => current.filter((name) => name !== value.name))
+                }}
+              />
             </Field>
           ))}
         </FieldGroup>

@@ -1,11 +1,12 @@
 // Picking an entry from the Catalogue adds that server to the Bot, at
 // /settings/bots/<botId>/mcps. The form an entry opens asks for the values its manifest declares:
-// a required one is marked, a default the manifest pins is filled in, a secret is masked and one the
-// Bot already holds is reported as set with nothing to type into. A required value left empty
-// refuses the add and marks that field; a value typed in is never shown back on the screen
-// afterwards, only that it is set; and a configuration Hermes's own validator refuses surfaces its
-// reason and leaves nothing half-added. An entry that declares no values is added in one tap. Phone
-// and tablet, light and dark.
+// titled with the prompt the manifest writes for people and subtitled with the name the value lands
+// under, a required one starred, a secret masked, a default the manifest pins filled in and a value
+// the Bot already holds standing empty with Set as its placeholder — typing over that field is what
+// replaces what the Bot holds. A required value left empty refuses the add and marks that field; a
+// value typed in is never shown back on the screen afterwards, only that it is set; and a
+// configuration Hermes's own validator refuses surfaces its reason and leaves nothing half-added. An
+// entry that declares no values is added in one tap. Phone and tablet, light and dark.
 import { app, assert, flow, mock, pass } from "./lib.mjs"
 
 // A value the form is filled with, and one the Bot's environment already holds — what the screen may
@@ -41,7 +42,10 @@ const run = async ({ page, profileId, shot, until }) => {
     // Picking an entry opens its form: one field per value the manifest declares.
     const open = async (name) => {
       await page.getByRole("button", { name: "Add a server" }).click()
-      await page.getByRole("dialog").getByRole("heading", { name: "Catalogue" }).waitFor({ timeout: 15_000 })
+      await page
+        .getByRole("dialog")
+        .getByRole("heading", { name: "Catalogue" })
+        .waitFor({ timeout: 15_000 })
       await page.locator(`[data-catalogue="${name}"]`).click()
       await page.getByRole("dialog").getByRole("heading", { name }).waitFor({ timeout: 15_000 })
     }
@@ -86,16 +90,15 @@ const run = async ({ page, profileId, shot, until }) => {
       "a default the manifest pins is filled in",
     )
 
-    // A value the Bot already holds is reported as set, and offers nothing to type into.
-    assert.equal(
-      await page.locator('[data-value="SLACK_SIGNING_SECRET"] input').count(),
-      0,
-      "a value the Bot holds has no field",
-    )
-    assert.equal(
-      await page.locator('[data-value="SLACK_SIGNING_SECRET"]').getByText("Set", { exact: true }).count(),
-      1,
-      "a value the Bot holds reads as set",
+    // A value the Bot already holds is reported as set and nothing of it is shown: its field stands
+    // empty with the state as its placeholder, and typing into that field is what replaces it.
+    const held = page.locator('[data-value="SLACK_SIGNING_SECRET"] input')
+    assert.equal(await held.count(), 1, "a value the Bot holds still has a field")
+    assert.equal(await held.inputValue(), "", "and the field is empty, never the value")
+    assert.match(
+      (await held.getAttribute("placeholder")) ?? "",
+      /^Set/,
+      "and reads as set, so a press into it is understood to replace the value",
     )
     await shot("form")
 
@@ -124,7 +127,7 @@ const run = async ({ page, profileId, shot, until }) => {
     await page.getByRole("button", { name: "Add", exact: true }).click()
     await page.locator('[data-mcp="slack"]').waitFor({ timeout: 15_000 })
     assert.equal(
-      await page.locator('[data-mcp]').count(),
+      await page.locator("[data-mcp]").count(),
       servers + 1,
       "the added server joins the Bot's list",
     )
@@ -154,15 +157,16 @@ const run = async ({ page, profileId, shot, until }) => {
     // The screen reports only whether a declared value is set, never its content: the form of the
     // entry that was just added reads a value that is set, and what was typed is nowhere on it.
     await open("slack")
+    const written = page.locator('[data-value="SLACK_BOT_TOKEN"] input')
     assert.equal(
-      await page.locator('[data-value="SLACK_BOT_TOKEN"]').getByText("Set", { exact: true }).count(),
-      1,
-      "a value the add wrote reads as set",
+      await written.inputValue(),
+      "",
+      "a value the Bot holds is not shown back, even right after an add",
     )
-    assert.equal(
-      await page.locator('[data-value="SLACK_BOT_TOKEN"] input').count(),
-      0,
-      "a value the Bot holds has no field, even right after an add",
+    assert.match(
+      (await written.getAttribute("placeholder")) ?? "",
+      /^Set/,
+      "and its field reads as set, so typing over it replaces the value",
     )
     // Every sheet on screen at once: nothing of what was typed, or of what the Bot held, is on any
     // of them — in the text they render or in any field still standing.
@@ -197,7 +201,7 @@ const run = async ({ page, profileId, shot, until }) => {
     await page.getByRole("button", { name: "Add", exact: true }).click()
     await page.locator('[data-mcp="stripe"]').waitFor({ timeout: 15_000 })
     assert.equal(
-      await page.locator('[data-mcp]').count(),
+      await page.locator("[data-mcp]").count(),
       servers + 2,
       "the entry that declares no values joins the list",
     )
@@ -235,5 +239,5 @@ for (const width of [390, 1024]) {
   }
 }
 pass(
-  "picking an entry opens its form with a field per declared value, required ones marked, defaults filled in and secrets masked, a required value left empty refuses the add and marks the field, an add writes the server with the default left standing and shows it with its state, the screen reports a declared value as set and never shows its content, an entry with no values is added in one tap, and a refused write surfaces its reason and adds nothing, at 390 and 1024px, light and dark",
+  "picking an entry opens its form with a field per declared value, required ones starred and titled with the manifest's own prompt, defaults filled in and secrets masked, a value the Bot holds standing empty and reading as set, a required value left empty refuses the add and marks the field, an add writes the server with the default left standing and shows it with its state, the screen reports a declared value as set and never shows its content, an entry with no values is added in one tap, and a refused write surfaces its reason and adds nothing, at 390 and 1024px, light and dark",
 )

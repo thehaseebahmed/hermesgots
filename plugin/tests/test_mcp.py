@@ -1586,6 +1586,30 @@ class McpAddTests(unittest.TestCase):
         self.assertEqual([], env_writes)
         self.assertEqual("already-found-once", stubs["hermes_cli.config"].get_env_value("PG_PASSWORD"))
 
+    def test_a_value_given_for_one_the_host_already_holds_replaces_it(self):
+        """Typing over a value the bot holds is how the screen replaces it: the new one is written."""
+        env_writes, saved = [], []
+        stubs = hermes(
+            catalogue=[POSTGRES],
+            env={"PG_PASSWORD": "already-found-once"},
+            env_writes=env_writes,
+            saved=saved,
+            reconcile=[],
+        )
+        with mock.patch.dict(sys.modules, stubs):
+            servers = mcp.install(
+                "bot-a", "postgres", {"PG_DATABASE": "gots", "PG_PASSWORD": "typed-over"}
+            )
+        self.assertEqual([("postgres", "on")], rows(servers))
+        self.assertEqual([("bot-a", "PG_PASSWORD")], env_writes)
+        self.assertEqual("typed-over", stubs["hermes_cli.config"].get_env_value("PG_PASSWORD"))
+        # The block still carries the manifest's own ref rather than the value typed over it: what
+        # the user typed reaches the profile's environment, never the configuration.
+        self.assertEqual(
+            {"DATABASE_URL": "postgres://user:${PG_PASSWORD}@db.example/gots"},
+            saved[-1][1]["mcp_servers"]["postgres"]["env"],
+        )
+
     def test_an_entry_the_catalogue_does_not_have_is_refused_and_nothing_is_written(self):
         cards, saved = [], []
         stubs = hermes(catalogue=[POSTGRES], cards=cards, saved=saved, reconcile=[])

@@ -16,12 +16,16 @@ export function searchCatalogue(entries: McpCatalogueEntry[], query: string): Mc
 }
 
 /**
- * What a field holds: what was typed into it, or — when nothing was — the default it is showing. A
- * field the user emptied is empty rather than its default again, so clearing one is a choice that
- * sticks.
+ * What a field holds: what was typed into it, else — for a value this Bot doesn't already hold — the
+ * default the manifest pins, so a form submitted untouched still carries it and the manifest's own
+ * `${NAME}` reference is not left unresolved. A field the user emptied stays empty rather than its
+ * default again, and a value the Bot already holds starts empty whatever the manifest pins: what
+ * stands is the Host's value, and the field is where typing over it replaces it.
  */
 export function fieldValue(value: McpCatalogueValue, entered: Record<string, string>): string {
-  return (entered[value.name] ?? value.default) || ""
+  const typed = entered[value.name]
+  if (typed !== undefined) return typed
+  return value.set ? "" : value.default || ""
 }
 
 /**
@@ -43,10 +47,10 @@ export function missingValues(
 
 /**
  * The values an add sends, by the name each declares: every field's own content, and nothing for a
- * value this Bot already holds — the Host reports only that it has one, and re-sending what it never
- * gave the app is impossible. A field left untouched sends the default it was showing, so a default a
- * manifest pins lands in the configuration rather than being left as the manifest's own `${NAME}`
- * reference; an empty field sends nothing at all, which is how the Host reads "nothing given".
+ * field left empty — which is how the Host reads "nothing given", so a value the Bot already holds
+ * stands as it is and one typed over it replaces it. A field left untouched sends the default it was
+ * showing, so a default a manifest pins lands in the configuration rather than being left as the
+ * manifest's own `${NAME}` reference.
  */
 export function collectedValues(
   values: McpCatalogueValue[],
@@ -54,7 +58,6 @@ export function collectedValues(
 ): Record<string, string> {
   const sent: Record<string, string> = {}
   for (const value of values) {
-    if (value.set) continue
     const given = fieldValue(value, entered)
     if (given) sent[value.name] = given
   }

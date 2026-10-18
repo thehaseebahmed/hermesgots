@@ -7,7 +7,12 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { collectedValues, fieldValue, missingValues, searchCatalogue } from "../src/lib/mcp-catalogue.ts"
+import {
+  collectedValues,
+  fieldValue,
+  missingValues,
+  searchCatalogue,
+} from "../src/lib/mcp-catalogue.ts"
 
 const bare = { name: "bare", description: "", installed: false }
 const github = {
@@ -51,8 +56,8 @@ test("a search against an empty catalogue keeps nothing", () => {
 })
 
 // The values an entry declares that an add can't go without. What is typed in stays on this device
-// until the add sends it, and a value the Host already holds is never a field at all: the screen is
-// told that it is set and no more.
+// until the add sends it, and a required value the Host already holds is never missing: the screen is
+// told that it is set and no more, and its field stands empty so typing can replace it.
 const required = (name, extra = {}) => ({
   name,
   prompt: `${name} prompt`,
@@ -89,16 +94,17 @@ test("an entry that declares nothing is missing nothing", () => {
 })
 
 test("every required value that is empty is named", () => {
-  assert.deepEqual(
-    missingValues([required("A"), optional("B"), required("C")], { B: "b" }),
-    ["A", "C"],
-  )
+  assert.deepEqual(missingValues([required("A"), optional("B"), required("C")], { B: "b" }), [
+    "A",
+    "C",
+  ])
 })
 
 // What a field shows and what an add sends. A default a manifest pins is what its field is filled
 // in with, so a form that is submitted untouched still carries it — a manifest's own `${NAME}`
 // reference must not be left unresolved in the configuration — while a field the user emptied stays
-// empty, and a value the Host already holds is never sent because the screen never had it.
+// empty. A value the Host already holds is its own case: its field starts empty whatever the manifest
+// pins (the value that stands is the Host's, and the app never had it), and typing over it replaces.
 const pinned = (name, value, extra = {}) => ({
   ...required(name, extra),
   secret: false,
@@ -126,18 +132,31 @@ test("an add sends what was typed into each field", () => {
 })
 
 test("an add sends the default a field was left showing", () => {
-  assert.deepEqual(collectedValues([pinned("REGION", "eu-west-1"), required("TOKEN")], { TOKEN: "t" }), {
-    REGION: "eu-west-1",
-    TOKEN: "t",
-  })
+  assert.deepEqual(
+    collectedValues([pinned("REGION", "eu-west-1"), required("TOKEN")], { TOKEN: "t" }),
+    {
+      REGION: "eu-west-1",
+      TOKEN: "t",
+    },
+  )
 })
 
 test("an add sends nothing for a field the user emptied", () => {
   assert.deepEqual(collectedValues([pinned("REGION", "eu-west-1")], { REGION: "" }), {})
 })
 
-test("an add sends nothing for a value the Host already holds", () => {
+test("a field for a value the Host already holds starts empty, whatever the manifest pins", () => {
+  assert.equal(fieldValue(pinned("REGION", "eu-west-1", { set: true }), {}), "")
+})
+
+test("an add sends nothing for a value the Host holds that was left alone", () => {
   assert.deepEqual(collectedValues([required("TOKEN", { set: true })], {}), {})
+})
+
+test("an add sends what was typed over a value the Host already holds", () => {
+  assert.deepEqual(collectedValues([required("TOKEN", { set: true })], { TOKEN: "newer" }), {
+    TOKEN: "newer",
+  })
 })
 
 test("an add sends nothing an entry doesn't declare", () => {
@@ -154,4 +173,3 @@ test("a value typed into another field doesn't cover a required one", () => {
 test("a required value a manifest pins a default for is not missing", () => {
   assert.deepEqual(missingValues([pinned("REGION", "eu-west-1")], {}), [])
 })
-
