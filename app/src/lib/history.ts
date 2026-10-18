@@ -707,6 +707,9 @@ async function reconcile(conversationId: string) {
       rows.map((row) => [row.id, row.timestamp ? Math.round(row.timestamp * 1000) : undefined]),
     )
     let next = 0
+    // The local turns this pass has already paired with a row: a compaction's copy of a turn must not
+    // pair with a local message that an earlier row of the same page already took.
+    const adopted = new Set<string>()
     // Inserted turns sort after what precedes them on Hermes, whatever this device's clock says.
     let floor = 0
     const turnEnd = (user: Message) => {
@@ -738,6 +741,7 @@ async function reconcile(conversationId: string) {
       const match = unmatched.findIndex((m, i) => i >= next && m.content === user.content)
       if (match >= 0) {
         next = match + 1
+        adopted.add(unmatched[match].id)
         writes.push({
           ...unmatched[match],
           hermesRowId: user.hermesRowId,
@@ -773,6 +777,7 @@ async function reconcile(conversationId: string) {
           ? undefined
           : current.find(
               (m) =>
+                !adopted.has(m.id) &&
                 m.role === "user" &&
                 m.status === "done" &&
                 m.content === user.content &&
@@ -781,6 +786,7 @@ async function reconcile(conversationId: string) {
                   : Math.abs(m.createdAt - at) <= CLOCK_SLACK_MS),
             )
       if (twin) {
+        adopted.add(twin.id)
         writes.push({ ...twin, hermesRowId: user.hermesRowId, hermesAt: at })
         floor = turnEnd(twin)
         const local = current[current.indexOf(twin) + 1]
