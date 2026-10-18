@@ -34,6 +34,11 @@ const FLOWS = {
     script: "e2e/model-switch.mjs",
     about: "Changing the model mid-chat shows where it changed in the thread, on a reload too",
   },
+  "usage-limit": {
+    script: "e2e/usage-limit.mjs",
+    about:
+      "The limit notice follows the account (quiet with credits, out without), and the usage sheet names the model in a box above its meter",
+  },
   approval: {
     script: "e2e/approval.mjs",
     about:

@@ -1045,7 +1045,7 @@ deliberately not entries, because neither has a fix the tree can hold today:
 
 # Deferred: the app-level calculations still to move to the plugin
 
-`docs/adr/0005-calculations-belong-on-the-plugin.md` decides that a fact a bot's host could work out is
+`docs/adr/0006-calculations-belong-on-the-plugin.md` decides that a fact a bot's host could work out is
 worked out on the host, and names the clusters to move. One of them landed with that decision: the todo
 list's own progress and each item's depth, which the plugin states with the list
 (`plugin/todos.py::progress_of` / `depth_of`, `GET sessions/{id}/todos`) and the app no longer works out
@@ -1074,7 +1074,7 @@ call, the catalogue's, disagreeing with a second device that has a different cat
   `syncContextWindow`'s lookup, keeping only what the route sent.
 - Why it is risky: the plugin gains an outbound models.dev dependency and an ETag cache it has never had,
   with its own way of being unreachable. The app keeps its catalogue for the model picker's cost tiers and
-  modalities, so this leaves two fetchers of the same public payload by design (ADR 0005) — and the
+  modalities, so this leaves two fetchers of the same public payload by design (ADR 0006) — and the
   catalogue is what a brand-new chat shows the window from today, so removing the app's branch changes
   what that chat shows.
 
@@ -1117,7 +1117,7 @@ every device works out its own verdicts from whatever text it happens to hold.
 ---
 
 Deferred by the same decision, each for the reason given: the app's model picker still derives its cost
-tiers and modalities from its own models.dev cache (ADR 0005, considered options), `sessionState`
+tiers and modalities from its own models.dev cache (ADR 0006, considered options), `sessionState`
 (`src/lib/workspace.ts:307`) stays a composition of the host's run status with this device's own marks
 rather than a calculation, and the plugin's version and the app's `MIN_PLUGIN_VERSION` are not bumped yet:
 the decision is one bump once the clusters that matter have landed, and the todo cluster degrades on its

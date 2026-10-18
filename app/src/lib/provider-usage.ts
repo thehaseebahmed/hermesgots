@@ -42,21 +42,43 @@ export function windowViews(usage: ProviderUsageData | undefined): UsageWindowVi
   }))
 }
 
-export function tightestWindow(usage: ProviderUsageData | undefined) {
-  return windowViews(usage).reduce<UsageWindowView | undefined>(
+/**
+ * A window with no reset time is a balance, not a period: bought credits, which a spent allowance
+ * draws on. Nothing about it runs out with the clock, so it is what keeps an account working after
+ * the period above it is spent. The route carries the key either way — an ISO time, or a null for a
+ * balance — so a window without one is a balance rather than a period the app couldn't date.
+ */
+function isBalance(window: UsageWindowView) {
+  return window.resetsAt === undefined
+}
+
+function tightestOf(windows: UsageWindowView[]) {
+  return windows.reduce<UsageWindowView | undefined>(
     (tightest, window) => (!tightest || window.remaining < tightest.remaining ? window : tightest),
     undefined,
   )
 }
 
+/**
+ * The notice for the composer, or nothing while the account can still run.
+ *
+ * A balance with room left is capacity, so a spent allowance beside it isn't the end of the road
+ * and nothing is shown; a balance that is itself running out is what warns, and names itself. With
+ * no balance in hand the tightest window decides, as it always has: a spent one reads as the
+ * account being out, a nearly spent one as a warning.
+ */
 export function limitNotice(usage: ProviderUsageData | undefined) {
-  const w = tightestWindow(usage)
-  if (!w || w.remaining > NOTICE_REMAINING_PERCENT) return undefined
-  return w
+  const windows = windowViews(usage)
+  const balance = tightestOf(windows.filter((w) => isBalance(w) && w.remaining > 0))
+  if (balance && balance.remaining > NOTICE_REMAINING_PERCENT) return undefined
+  const notice = balance ?? tightestOf(windows)
+  return notice && notice.remaining <= NOTICE_REMAINING_PERCENT ? notice : undefined
 }
 
+/** A dismissal lasts that window's state: one dismissed while approaching still reports being out. */
 export function limitNoticeKey(provider: string, window: UsageWindowView) {
-  return `${provider}:${window.label}:${window.resetsAt ?? 0}`
+  const state = window.remaining > 0 ? "approaching" : "out"
+  return `${provider}:${window.label}:${window.resetsAt ?? 0}:${state}`
 }
 
 /** Two answers are the same when their windows match by value, not by reference. */
@@ -67,10 +89,11 @@ function sameWindows(a: ProviderUsageData | undefined, b: ProviderUsageData) {
   return a.windows.every((w, i) => shape(w) === shape(b.windows[i]))
 }
 
-export function resetsInText(ms: number) {
-  const seconds = Math.max(0, Math.round((ms - Date.now()) / 1000))
-  if (seconds < 60) return `${seconds}s`
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
+export function resetsInText(ms: number, now = Date.now()) {
+  const seconds = Math.max(0, Math.round((ms - now) / 1000))
+  // The last minute reads "1m" rather than a second count the 60-second tick can't keep up with;
+  // the other forms are coarse enough to be honest between ticks.
+  if (seconds < 3600) return `${Math.max(1, Math.floor(seconds / 60))}m`
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
   if (seconds < 86400) return m ? `${h}h ${m}m` : `${h}h`
