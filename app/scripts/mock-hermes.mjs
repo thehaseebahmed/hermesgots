@@ -364,8 +364,7 @@ const MCP_SERVERS = [
 const mcpRemoved = new Set()
 const mcpRows = () => MCP_SERVERS.filter((server) => !mcpRemoved.has(server.name))
 // Hermes's Catalogue, as the plugin's own read reports it: every entry Hermes offers, each marked
-// with whether this bot's config already has it — the same servers the screen lists — and whether
-// that server's own configuration leaves it on. An entry the bot doesn't have is neither.
+// with whether this bot's config already has it — the same servers the screen lists.
 const MCP_CATALOGUE = [
   { name: "github", description: "Open, review and land pull requests." },
   { name: "google-drive", description: "Search and read files in Drive." },
@@ -377,10 +376,10 @@ const MCP_CATALOGUE = [
   { name: "stripe", description: "Inspect payments, invoices and subscriptions." },
 ]
 const mcpCatalogue = () =>
-  MCP_CATALOGUE.map((entry) => {
-    const server = mcpRows().find((row) => row.name === entry.name)
-    return { ...entry, installed: Boolean(server), enabled: Boolean(server?.enabled) }
-  })
+  MCP_CATALOGUE.map((entry) => ({
+    ...entry,
+    installed: mcpRows().some((row) => row.name === entry.name),
+  }))
 // The server a write is for, or null once the refusal has been answered: a name the bot's config
 // doesn't have, or one a Hermes plugin provides, which Hermes refuses to modify. Both writes — the
 // toggle and the removal — answer the plugin's own refusal the same way, so both ask this.

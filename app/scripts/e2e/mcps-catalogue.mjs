@@ -56,7 +56,7 @@ const run = async ({ page, profileId, shot, until }) => {
   await shot("catalogue")
 
   // Searching narrows the list to what it matches, in the entry's own name…
-  const search = page.getByRole("textbox", { name: "Search the catalogue" })
+  const search = page.getByRole("searchbox", { name: "Search the catalogue" })
   await search.fill("slack")
   await until(
     () => page.locator("[data-catalogue]").count().then((count) => count === 1),

@@ -473,8 +473,6 @@ export interface McpCatalogueEntry {
   description: string
   /** Whether this bot already has it — the Host's own read of the bot's configuration. */
   installed: boolean
-  /** Whether its configuration leaves it on; false for one the bot doesn't have at all. */
-  enabled: boolean
 }
 
 /** One catalogue entry as the plugin reports it, or nothing for one Gots has no name for. */
@@ -485,7 +483,6 @@ function parseMcpCatalogueEntry(raw: unknown): McpCatalogueEntry | undefined {
     name: entry.name,
     description: typeof entry.description === "string" ? entry.description : "",
     installed: entry.installed === true,
-    enabled: entry.enabled === true,
   }
 }
 

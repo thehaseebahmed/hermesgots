@@ -14,7 +14,7 @@
  */
 import { useCallback, useState, useSyncExternalStore } from "react"
 
-import { connectionKey } from "@/lib/connection"
+import { connectionKey, serverConfig } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { MCP_WORK_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import {
@@ -142,9 +142,8 @@ const unsupported = cooldown()
  */
 export function useMcpServers(server: McpServerConfig, active: boolean) {
   const [servers, setServers] = useState<McpServer[] | undefined>(undefined)
-  const baseUrl = server?.baseUrl ?? ""
-  const apiKey = server?.apiKey ?? ""
-  const config = { baseUrl, apiKey }
+  const config = serverConfig(server)
+  const { baseUrl, apiKey } = config
   const key = baseUrl && apiKey ? connectionKey(config) : ""
   usePoll(
     (signal) => {
@@ -206,10 +205,8 @@ export function useMcpServers(server: McpServerConfig, active: boolean) {
  */
 export function useMcpCatalogue(server: McpServerConfig, active: boolean) {
   const [entries, setEntries] = useState<McpCatalogueEntry[] | undefined>(undefined)
-  const baseUrl = server?.baseUrl ?? ""
-  const apiKey = server?.apiKey ?? ""
-  const config = { baseUrl, apiKey }
-  const key = baseUrl && apiKey ? connectionKey(config) : ""
+  const config = serverConfig(server)
+  const key = config.baseUrl && config.apiKey ? connectionKey(config) : ""
   usePoll(
     (signal) => {
       listMcpCatalogue(config, signal)
@@ -224,7 +221,8 @@ export function useMcpCatalogue(server: McpServerConfig, active: boolean) {
     },
     false,
     [key],
-    { active: active && Boolean(key) },
+    // Opening it is the whole trigger: the once-a-read is not repeated for the page coming back.
+    { active: active && Boolean(key), onShow: false },
   )
   return entries
 }

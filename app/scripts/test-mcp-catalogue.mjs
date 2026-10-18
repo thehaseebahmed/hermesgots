@@ -7,18 +7,16 @@ import test from "node:test"
 
 import { searchCatalogue } from "../src/lib/mcp-catalogue.ts"
 
-const bare = { name: "bare", description: "", installed: false, enabled: false }
+const bare = { name: "bare", description: "", installed: false }
 const github = {
   name: "github",
   description: "Open, review and land pull requests.",
   installed: true,
-  enabled: true,
 }
 const slack = {
   name: "slack",
   description: "Read and post in Slack channels.",
   installed: false,
-  enabled: false,
 }
 const catalogue = [bare, github, slack]
 

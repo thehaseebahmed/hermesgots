@@ -67,8 +67,8 @@ def hermes(
     the values, so a removal that wrote one shows up in the assertions rather than passing quietly.
 
     ``catalogue`` is what Hermes's own ``list_catalog`` offers — ``{name, description}`` dicts, shaped
-    into the entry objects its own ``CatalogEntry`` dataclass is — and ``is_installed``/``is_enabled``
-    read the same ``store`` the profile's config does, as Hermes's own do.
+    into the entry objects its own ``CatalogEntry`` dataclass is — and ``is_installed`` reads the same
+    ``store`` the profile's config does, as Hermes's own does.
 
     The scopes the read enters land on ``hermes_cli.web_server_profiles``'s ``scopes``, and the
     scopes the write enters on ``hermes_cli.web_routers._common``'s ``write_scopes`` — Hermes's own
@@ -230,20 +230,14 @@ def hermes(
 
     def list_catalog():
         """Hermes's own Catalogue: its entry objects, which carry a name and a description."""
-        return [types.SimpleNamespace(**entry) for entry in (catalogue or [])]
+        return [types.SimpleNamespace(**{"description": "", **entry}) for entry in (catalogue or [])]
 
     def is_installed(name):
         """Hermes's own read of the profile's config: a server it has an entry for is installed."""
         return name in store
 
-    def is_enabled(name):
-        """Hermes's own: installed and not switched off (an entry of nothing reads as not enabled)."""
-        cfg = store.get(name)
-        return bool(cfg) and (cfg if isinstance(cfg, dict) else {}).get("enabled", True) is not False
-
     catalog.list_catalog = list_catalog
     catalog.is_installed = is_installed
-    catalog.is_enabled = is_enabled
 
     oauth = types.ModuleType("tools.mcp_oauth_manager")
     oauth.get_manager = get_manager
@@ -799,7 +793,7 @@ class McpCatalogueTests(unittest.TestCase):
     """Browsing Hermes's Catalogue for a bot (``mcp.catalogue``): a read, and nothing else."""
 
     def test_every_entry_is_listed_sorted_with_whether_the_bot_has_it(self):
-        """An entry the bot's config has reads as installed, one it has switched off as not enabled."""
+        """An entry the bot's config has reads as installed, one it doesn't as not installed."""
         stubs = hermes(
             servers={"github": {"command": "npx"}, "postgres": {"url": "https://db.example/mcp", "enabled": False}},
             catalogue=[
@@ -816,32 +810,27 @@ class McpCatalogueTests(unittest.TestCase):
                     "name": "github",
                     "description": "Open, review and land pull requests.",
                     "installed": True,
-                    "enabled": True,
                 },
                 {
                     "name": "postgres",
                     "description": "Query a Postgres database.",
                     "installed": True,
-                    "enabled": False,
                 },
                 {
                     "name": "slack",
                     "description": "Read and post in Slack channels.",
                     "installed": False,
-                    "enabled": False,
                 },
             ],
             found,
         )
 
     def test_an_entry_with_no_description_reads_as_an_empty_one(self):
-        """Hermes carries no description for some entries; the app shows the name on its own."""
+        """An entry Hermes says nothing about carries an empty description; the app shows its name."""
         stubs = hermes(catalogue=[{"name": "bare"}])
         with mock.patch.dict(sys.modules, stubs):
             found = mcp.catalogue("bot-a")
-        self.assertEqual(
-            [{"name": "bare", "description": "", "installed": False, "enabled": False}], found
-        )
+        self.assertEqual([{"name": "bare", "description": "", "installed": False}], found)
 
     def test_an_empty_catalogue_answers_an_empty_list(self):
         with mock.patch.dict(sys.modules, hermes()):

@@ -1,16 +1,10 @@
 import { useCallback, useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import {
-  ArrowLeftIcon,
-  ChevronRightIcon,
-  PlusIcon,
-  SearchIcon,
-  ServerIcon,
-  Trash2Icon,
-} from "lucide-react"
+import { ArrowLeftIcon, ChevronRightIcon, PlusIcon, ServerIcon, Trash2Icon } from "lucide-react"
 import { Navigate, useParams } from "react-router"
 import { toast } from "sonner"
 
+import { ItemSearch } from "@/components/item-list"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Group, linkRowClass, rowClass, RowText, Screen } from "@/components/settings-chrome"
 import {
@@ -25,7 +19,6 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Switch } from "@/components/ui/switch"
 import { listProfiles } from "@/lib/db"
 import { searchCatalogue } from "@/lib/mcp-catalogue"
@@ -279,17 +272,7 @@ function McpCatalogueSheet({
           <PopupTitle>Catalogue</PopupTitle>
         </PopupHeader>
         <div className="flex flex-col gap-4 px-6 pt-2 pb-4">
-          <InputGroup className="h-11">
-            <InputGroupAddon>
-              <SearchIcon />
-            </InputGroupAddon>
-            <InputGroupInput
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search the catalogue"
-              aria-label="Search the catalogue"
-            />
-          </InputGroup>
+          <ItemSearch value={query} onChange={setQuery} label="Search the catalogue" />
           {shown === undefined ? null : shown.length === 0 ? (
             <p className="px-1 text-sm text-muted-foreground">
               {query.trim() ? `Nothing matches “${query.trim()}”.` : "No entries."}

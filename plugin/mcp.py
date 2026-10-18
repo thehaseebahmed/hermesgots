@@ -158,13 +158,13 @@ def _hermes_remove() -> Dict[str, Any]:
 def _hermes_catalogue() -> Dict[str, Any]:
     """Hermes's own Catalogue, imported at call time: a plugin loads before the CLI does.
 
-    The entries Hermes offers (``list_catalog``) and, per entry, whether this profile already has it
-    (``is_installed``/``is_enabled``), which are config reads and so want the profile's read scope.
-    Nothing here writes, installs or probes anything, so a missing one is a 501 rather than a
-    failure: the app then offers no Add action on that Host.
+    The entries Hermes offers (``list_catalog``) and, per entry, whether this profile already has one
+    (``is_installed``), which is a config read and so wants the profile's read scope. Nothing here
+    writes, installs or probes anything, so a missing one is a 501 rather than a failure: the app
+    then offers no Add action on that Host.
     """
     try:
-        from hermes_cli.mcp_catalog import is_enabled, is_installed, list_catalog
+        from hermes_cli.mcp_catalog import is_installed, list_catalog
         from hermes_cli.web_server_profiles import _config_profile_scope
     except ImportError as error:
         raise McpError(UNAVAILABLE, 501) from error
@@ -172,7 +172,6 @@ def _hermes_catalogue() -> Dict[str, Any]:
         "scope": _config_profile_scope,
         "list": list_catalog,
         "installed": is_installed,
-        "enabled": is_enabled,
     }
 
 
@@ -297,10 +296,10 @@ def catalogue(profile: Optional[str]) -> List[Dict[str, Any]]:
     """Every Catalogue entry ``profile`` is offered, A to Z, each marked with whether it has one.
 
     Hermes's own ``list_catalog`` is the entries — a manifest dir its own CI and approval process
-    curate — and ``is_installed``/``is_enabled`` are its own reads of the profile's config, so the
-    marks say what Hermes itself would. An entry is reported by name and description, with
-    ``installed`` (this bot has it) and ``enabled`` (its configuration leaves it on); an entry whose
-    description is missing reads as an empty one rather than being dropped.
+    curate — and ``is_installed`` is its own read of the profile's config, so the mark says what
+    Hermes itself would. An entry is reported by name and what Hermes says it is; one whose
+    description is missing or empty reads as an empty one rather than being dropped, and the app
+    shows its name alone.
 
     ``profile`` is a profile name, or None for the process's own. Blocking — the catalogue reads a
     directory of manifests and the profile's config, and the scope may hydrate an external secret
@@ -311,21 +310,18 @@ def catalogue(profile: Optional[str]) -> List[Dict[str, Any]]:
     hermes = _hermes_catalogue()
     with hermes["scope"](profile):
         entries = [
-            _catalogue_entry(entry, hermes["installed"], hermes["enabled"])
-            for entry in hermes["list"]()
+            _catalogue_entry(entry, hermes["installed"]) for entry in hermes["list"]()
         ]
     return sorted(entries, key=lambda entry: entry["name"])
 
 
-def _catalogue_entry(entry: Any, installed: Any, enabled: Any) -> Dict[str, Any]:
+def _catalogue_entry(entry: Any, installed: Any) -> Dict[str, Any]:
     """One of Hermes's ``CatalogEntry`` objects in the app's own shape. Call it inside the scope."""
     name = getattr(entry, "name", "")
-    description = getattr(entry, "description", "")
     return {
         "name": name,
-        "description": description if isinstance(description, str) else "",
+        "description": getattr(entry, "description", "") or "",
         "installed": bool(installed(name)),
-        "enabled": bool(enabled(name)),
     }
 
 
