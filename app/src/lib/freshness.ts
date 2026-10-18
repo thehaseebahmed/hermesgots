@@ -52,6 +52,10 @@ export const LIBRARY_MS = 60_000
  * on its own is watched; one the screen can't change is read once on open and left. */
 export const MCP_WORK_MS = 3_000
 
+/** Adding a server from the Catalogue, which the host may answer by cloning and installing the
+ * entry's own repository: longer than a switch's write, so a slow one isn't given up on early. */
+export const MCP_INSTALL_MS = 2 * 60_000
+
 /** The Code and Routines lists. */
 export const LIST_MS = 60_000
 /** Whether the host can hold a goal (Hermes's `/goal`, through the plugin). */

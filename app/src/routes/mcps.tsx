@@ -19,11 +19,14 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { listProfiles } from "@/lib/db"
-import { searchCatalogue } from "@/lib/mcp-catalogue"
+import { collectedValues, fieldValue, missingValues, searchCatalogue } from "@/lib/mcp-catalogue"
 import {
   useMcpCatalogue,
+  useMcpCatalogueEntry,
   useMcpFeatureAnswers,
   useMcpServers,
   MCP_STATE_WORDS,
@@ -32,6 +35,12 @@ import {
 import type { McpCatalogueEntry, McpServer, McpState } from "@/lib/hermes"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
+
+/**
+ * How tall the sheet holding the Catalogue is, so it holds between its two views — the entries, then
+ * one entry's form — the way the model picker's does.
+ */
+const CATALOGUE_HEIGHT = "h-[min(32rem,85dvh)]"
 
 /** How loud each state reads: a failed server is the only one that is a problem. */
 const STATE_TONES: Record<McpState, "secondary" | "outline" | "destructive"> = {
@@ -50,19 +59,20 @@ const STATE_TONES: Record<McpState, "secondary" | "outline" | "destructive"> = {
  * no control, because Hermes refuses to modify one; a Host that can list servers without being able
  * to change them has no switch, and one that can switch but predates the removal has no removal, so
  * no control is ever offered whose every tap could only fail. An Add action opens Hermes's Catalogue
- * as a searchable list, marking the entries this Bot already has and adding nothing, wherever the
- * Host advertises that it can read one. Reached from the Bot's own row in Settings and by URL; back
- * returns to the Bot. A Bot whose Hermes can't list them has no screen at all, so its URL sends the
- * user back to the Bot, while one whose Host hasn't answered yet draws nothing rather than flashing
- * its screen away.
+ * as a searchable list, marking the entries this Bot already has and adding the one that is picked —
+ * its form asking for the values that entry declares — wherever the Host advertises both that it can
+ * read a Catalogue and that it can add from one, since the action's whole work is the adding.
+ * Reached from the Bot's own row in Settings and by URL; back returns to the Bot. A Bot whose Hermes
+ * can't list them has no screen at all, so its URL sends the user back to the Bot, while one whose
+ * Host hasn't answered yet draws nothing rather than flashing its screen away.
  */
 export function McpsPage() {
   const { botId } = useParams()
   const { up } = useNav()
   const profiles = useLiveQuery(listProfiles, [])
   const profile = profiles?.find((p) => p.id === botId)
-  const { list, write, removable, catalogue } = useMcpFeatureAnswers(profile)
-  const { servers, setEnabled, remove } = useMcpServers(profile, list === "yes")
+  const { list, write, removable, catalogue, add } = useMcpFeatureAnswers(profile)
+  const { servers, setEnabled, remove, install } = useMcpServers(profile, list === "yes")
   // The name of the server a removal is being confirmed for, and whether that removal is on its way.
   const [removing, setRemoving] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -129,8 +139,10 @@ export function McpsPage() {
         </Group>
       )}
 
-      {/* Adding one starts in the Catalogue, so the action exists only where the Host has one. */}
-      {catalogue === "yes" && (
+      {/* Adding one is the Catalogue plus the write that lands it, so the action exists only where
+          the Host advertises both: a Host that can read a Catalogue but not add from one has no
+          action whose whole work it couldn't do. */}
+      {catalogue === "yes" && add === "yes" && (
         <Group>
           <button
             type="button"
@@ -145,7 +157,12 @@ export function McpsPage() {
         </Group>
       )}
 
-      <McpCatalogueSheet open={browsing} onOpenChange={setBrowsing} server={profile} />
+      <McpCatalogueSheet
+        open={browsing}
+        onOpenChange={setBrowsing}
+        server={profile}
+        install={install}
+      />
 
       <AlertDialog
         open={removing !== null}
@@ -241,33 +258,43 @@ function ServerRow({
 
 /**
  * Hermes's Catalogue as the Bot's Host offers it: every entry Hermes has, each marked with whether
- * this Bot already has it, and a search over both the names and what Hermes says each entry is. Read
+ * this Bot already has it and a search over both the names and what Hermes says each entry is. Read
  * from the Host each time it is opened and nothing more — nothing is polled, since nothing in a
- * catalogue moves on its own, and nothing is added: adding one is its own step. A search that was
- * typed and matched nothing says so rather than reading as a Host with no catalogue at all.
+ * catalogue moves on its own. A search that was typed and matched nothing says so rather than
+ * reading as a Host with no catalogue at all. Picking an entry opens its form as a sheet of its own,
+ * stacked on this one, so the list is one back away and the form never sits over the entry it is
+ * about; adding writes the Bot and closes both, and the servers the Host answers with take the
+ * screen's list.
  */
 function McpCatalogueSheet({
   open,
   onOpenChange,
   server,
+  install,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   server: McpServerConfig
+  install: (name: string, values: Record<string, string>) => Promise<void>
 }) {
   const entries = useMcpCatalogue(server, open)
   const [query, setQuery] = useState("")
+  // The entry whose form is open, by name: one at a time, above the list it was picked from.
+  const [picking, setPicking] = useState<string | undefined>(undefined)
   const shown = entries === undefined ? undefined : searchCatalogue(entries, query)
   return (
     <Popup
       open={open}
       onOpenChange={(next) => {
-        // What was searched for is a fresh start the next time it is opened.
-        if (!next) setQuery("")
+        // What was searched for, and the form if one was open, are a fresh start next time.
+        if (!next) {
+          setQuery("")
+          setPicking(undefined)
+        }
         onOpenChange(next)
       }}
     >
-      <PopupContent initialFocus={false}>
+      <PopupContent initialFocus={false} fixedHeight={CATALOGUE_HEIGHT}>
         <PopupHeader>
           <PopupTitle>Catalogue</PopupTitle>
         </PopupHeader>
@@ -280,23 +307,184 @@ function McpCatalogueSheet({
           ) : (
             <Group>
               {shown.map((entry) => (
-                <CatalogueRow key={entry.name} entry={entry} />
+                <CatalogueRow
+                  key={entry.name}
+                  entry={entry}
+                  onOpen={() => setPicking(entry.name)}
+                />
               ))}
             </Group>
           )}
         </div>
+        {/* One entry's form: a sheet stacked on this one, dismissed back to the Catalogue. It renders
+            inside this sheet's tree so Base UI registers the nesting. */}
+        {picking && (
+          <Popup open onOpenChange={(next) => !next && setPicking(undefined)}>
+            <PopupContent initialFocus={false} fixedHeight={CATALOGUE_HEIGHT}>
+              <McpEntryForm
+                server={server}
+                name={picking}
+                install={install}
+                onBack={() => setPicking(undefined)}
+                onAdded={() => {
+                  setPicking(undefined)
+                  onOpenChange(false)
+                }}
+              />
+            </PopupContent>
+          </Popup>
+        )}
       </PopupContent>
     </Popup>
   )
 }
 
 /** One Catalogue entry: what Hermes calls it, what it is, and whether this Bot already has it. */
-function CatalogueRow({ entry }: { entry: McpCatalogueEntry }) {
+function CatalogueRow({ entry, onOpen }: { entry: McpCatalogueEntry; onOpen: () => void }) {
   return (
-    <div className={rowClass} data-catalogue={entry.name}>
+    <button
+      type="button"
+      className={linkRowClass}
+      data-catalogue={entry.name}
+      aria-haspopup="dialog"
+      onClick={onOpen}
+    >
       <ServerIcon className="size-5 shrink-0 text-muted-foreground" />
       <RowText title={entry.name} subtitle={entry.description || undefined} />
       {entry.installed && <Badge variant="secondary">Added</Badge>}
-    </div>
+      <ChevronRightIcon className="size-5 shrink-0 text-muted-foreground" />
+    </button>
+  )
+}
+
+/**
+ * What a field for a value the Bot already holds says: the Host reports that it has one and never its
+ * content, so the field stands empty with this as its placeholder and typing over it replaces the
+ * value.
+ */
+const SET_PLACEHOLDER = "Set — type to replace"
+
+/**
+ * One Catalogue entry's form: a field per value the entry declares, and the Add that writes them.
+ *
+ * What is typed in lives in this component's own state and nowhere else — it is never written to the
+ * device and never read back from the Host, which reports only whether it already holds a value for
+ * a declared one. A field is titled with the prompt the entry writes for people and subtitled with
+ * the name the value lands under on the Host, a secret's is masked, and a required one is starred;
+ * a required field left empty (or a space or two, which is nothing typed in) refuses the add and
+ * marks that field. A value the Bot already holds has a field of its own, standing empty and saying
+ * so: typing into it replaces what the Host holds, and leaving it alone sends nothing at all. Adding
+ * closes the form and the Catalogue behind it, and what the screen's list becomes is the Host's own
+ * answer; a Host that refuses the add answers with its own reason, which the form reports.
+ */
+function McpEntryForm({
+  server,
+  name,
+  install,
+  onBack,
+  onAdded,
+}: {
+  server: McpServerConfig
+  name: string
+  install: (name: string, values: Record<string, string>) => Promise<void>
+  onBack: () => void
+  onAdded: () => void
+}) {
+  const { entry, failed } = useMcpCatalogueEntry(server, name, true)
+  const [entered, setEntered] = useState<Record<string, string>>({})
+  const [missing, setMissing] = useState<string[]>([])
+  const [adding, setAdding] = useState(false)
+
+  async function add() {
+    if (!entry) return
+    const gaps = missingValues(entry.values, entered)
+    setMissing(gaps)
+    if (gaps.length) return
+    setAdding(true)
+    try {
+      await install(entry.name, collectedValues(entry.values, entered))
+      onAdded()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't add that.")
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  return (
+    <>
+      {/* The back control and the title share one row so the two line up: an absolutely placed control
+          beside a centred title leaves the title off the sheet's middle and the control sitting low. */}
+      <PopupHeader className="flex-row items-center gap-2 pl-2 text-left">
+        <Button
+          variant="ghost"
+          size="icon-lg"
+          className="size-11 shrink-0"
+          aria-label="Catalogue"
+          onClick={onBack}
+        >
+          <ArrowLeftIcon />
+        </Button>
+        <div className="min-w-0 flex-1">
+          <PopupTitle className="justify-start text-left">{name}</PopupTitle>
+        </div>
+      </PopupHeader>
+      <div className="flex flex-col gap-4 px-6 pt-2 pb-4">
+        {/* A read that came back an error: said, rather than left as a form with nothing in it. */}
+        {failed && entry === undefined && (
+          <p className="px-1 text-sm text-muted-foreground">Couldn't load this entry's values.</p>
+        )}
+        <FieldGroup>
+          {entry?.values.map((value) => (
+            <Field key={value.name} data-value={value.name} data-required={value.required}>
+              {/* Hermes names a value twice: the prompt its manifest writes for people, and the name
+                  the value lands under on the Host. The prompt is the title and the name is the
+                  subtext, so a field reads as the thing being asked for, not as an env var. */}
+              <FieldLabel
+                htmlFor={`mcp-value-${value.name}`}
+                className="flex-col items-start gap-0.5"
+              >
+                <span>
+                  {value.prompt || value.name}
+                  {value.required && <span aria-hidden="true">{" *"}</span>}
+                </span>
+                {value.prompt && (
+                  <span className="text-xs font-normal text-muted-foreground">{value.name}</span>
+                )}
+              </FieldLabel>
+              <Input
+                id={`mcp-value-${value.name}`}
+                className="h-11"
+                // A credential is masked as it is typed; a plain value is not.
+                type={value.secret ? "password" : "text"}
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder={value.set ? SET_PLACEHOLDER : undefined}
+                value={fieldValue(value, entered)}
+                aria-required={value.required || undefined}
+                aria-invalid={missing.includes(value.name)}
+                onChange={(e) => {
+                  const given = e.target.value
+                  setEntered((current) => ({ ...current, [value.name]: given }))
+                  // Filling a field in takes the mark off it: the refusal was about the field as it
+                  // was, and the next Add is what judges it again.
+                  setMissing((current) => current.filter((name) => name !== value.name))
+                }}
+              />
+            </Field>
+          ))}
+        </FieldGroup>
+        <Button
+          size="lg"
+          className="h-11 rounded-full"
+          disabled={adding || !entry}
+          onClick={() => void add()}
+        >
+          Add
+        </Button>
+      </div>
+    </>
   )
 }

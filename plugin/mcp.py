@@ -30,11 +30,9 @@ why it is not working yet and offers the way to grant it. Any other server carri
 reason: Hermes's own ``error`` text rides along whatever the state word, so a server a Hermes plugin
 provides keeps the word ``plugin`` and still says why it failed.
 
-This module owns every verb of the ``/mcp`` routes (#249): the read, the toggle, the removal and the
-Catalogue are written, and ``install`` and ``start_access`` belong here too — adding a server from
-the Catalogue through Hermes's connection-card path (never
-``install_entry``, which can prompt on stdin and open a curses checklist in the host process), and
-starting the Server access flow. The read takes
+This module owns every verb of the ``/mcp`` routes (#249): the read, the toggle, the removal, the
+Catalogue and adding from it are written, and ``start_access`` — starting the Server access flow for
+a server that is waiting on it — belongs here too. The read takes
 the profile's home-and-secrets scope (``hermes_cli.web_server_profiles._config_profile_scope``) —
 deliberately not ``_profile_scope``, which swaps the skills module's globals under a process-global
 lock for the whole body. A write takes that scope too, under Hermes's config write scope
@@ -65,9 +63,29 @@ entry declares, so opening it cannot change the bot. A host whose Hermes has no 
 raises ``McpError`` with a 501, and ``browsable()`` is that same check for the ``info`` payload's
 gate, so an older Host is a Bot with no Add action rather than an error.
 
+Adding one is ``entry`` (what an entry declares) and ``install`` (write it). ``entry`` answers one
+Catalogue entry with the values it declares — each with whether it is required, whether it is secret,
+the default its manifest pins and whether this bot already has a value for it — and never a value the
+bot holds: a stored secret is reported as **set** and nothing else, which is the whole of what the
+screen may know about it. ``install`` takes the values the user typed and writes the server the way
+Hermes's own connection card does, minus everything a terminal owns: Hermes's own
+``card_install_config`` builds the ``mcp_servers.<name>`` block in memory (never ``install_entry``,
+which can prompt on stdin and open a curses checklist in the host process), a value the manifest
+declares non-secret is inlined into that block through Hermes's own ``_inline_non_secret_value`` so
+the file holds the value the server needs, a secret stays a ``${NAME}`` reference and goes to the
+profile's ``.env`` through Hermes's own ``save_env_value`` (behind its own name guard, so configuring
+one server is not a general environment-writing primitive), and Hermes's own ``_save_mcp_server``
+writes it — refusing, with its validator's own sentence, a configuration it considers suspicious.
+Nothing is written before every value checks out, so a refused add leaves the bot exactly as it was;
+the reconcile follows, so the server is live for the bot's next turn. Granting Server access is its
+own step (``start_access``): an entry whose auth is OAuth is added with its marker and reads
+``needs_access`` until the row's flow lands.
+
 Every Hermes symbol is imported late, inside the call that needs it, because a plugin loads before
 the CLI package exists. A host that moved one raises ImportError, which becomes an ``McpError`` the
-route answers as a 501; ``available()`` is that same check, for the ``info`` payload's feature gate.
+route answers as a 501; ``available()`` is that same check, for the ``info`` payload's feature gate,
+and so are ``writable``, ``removable``, ``browsable`` and ``addable`` — each control's own built-ins,
+so no control is offered whose every tap could only fail.
 """
 
 from __future__ import annotations
@@ -172,6 +190,67 @@ def _hermes_catalogue() -> Dict[str, Any]:
         "scope": _config_profile_scope,
         "list": list_catalog,
         "installed": installed_servers,
+    }
+
+
+def _hermes_install() -> Dict[str, Any]:
+    """Everything adding a Catalogue entry needs, imported at call time.
+
+    The write's own set (``_hermes_write``: the config read and write, Hermes's config write scope
+    and the reconcile) plus the adding half of the Catalogue: its entry read (``get_entry``), the
+    block Hermes builds for one from its manifest (``card_install_config``, never ``install_entry``,
+    which owns a terminal's prompts, probe and curses checklist), the inlining that turns a
+    non-secret value the user gave into the value the manifest's ``${NAME}`` refs stand for
+    (``_inline_non_secret_value``), the write that refuses a suspicious configuration
+    (``_save_mcp_server``) and the validator behind that refusal
+    (``hermes_cli.mcp_security.validate_mcp_server_entry``, the one whose own sentence the app
+    shows), the profile's environment read and write for the values an entry declares secret
+    (``get_env_value``/``save_env_value``) and Hermes's own guard on what may be persisted through
+    that writer (``validate_env_var_name_for_write``).
+
+    Missing any of them is a 501, and ``addable`` is that same check for the ``info`` payload's gate
+    — its own set, because a host can list a bot's servers, switch one and browse the Catalogue
+    without being able to add one from it. The two scopes are named apart: an entry read and the
+    mark of whether the bot has it run inside the profile's own read scope, and the add itself,
+    everything it writes and its reconcile inside Hermes's config write scope.
+    """
+    hermes = _hermes_write()
+    catalogue = _hermes_catalogue()
+    try:
+        from hermes_cli.config import (
+            get_env_value,
+            save_env_value,
+            validate_env_var_name_for_write,
+        )
+        from hermes_cli.mcp_catalog import (
+            CatalogError,
+            _inline_non_secret_value,
+            card_install_config,
+            get_entry,
+        )
+        from hermes_cli.mcp_config import _save_mcp_server
+        from hermes_cli.mcp_security import validate_mcp_server_entry
+    except ImportError as error:
+        raise McpError(UNAVAILABLE, 501) from error
+    return {
+        # The read-side helpers the answer after an add is shaped with (see ``_all_rows``).
+        "servers": hermes["servers"],
+        "sources": hermes["sources"],
+        "status": hermes["status"],
+        "tokens_present": hermes["tokens_present"],
+        "reconcile": hermes["reconcile"],
+        "read_scope": catalogue["scope"],
+        "write_scope": hermes["scope"],
+        "installed": catalogue["installed"],
+        "entry": get_entry,
+        "card": card_install_config,
+        "catalog_error": CatalogError,
+        "inline": _inline_non_secret_value,
+        "save_server": _save_mcp_server,
+        "validate": validate_mcp_server_entry,
+        "get_env": get_env_value,
+        "save_env": save_env_value,
+        "check_name": validate_env_var_name_for_write,
     }
 
 
@@ -292,6 +371,22 @@ def browsable() -> Optional[str]:
     return None
 
 
+def addable() -> Optional[str]:
+    """Why this host can't add a Catalogue entry to a bot from here, or None when it can.
+
+    Adding one needs Hermes's catalogue (its entry read and the block it builds) and the writes that
+    land it — the config write, the validator behind it, the environment writer and its name guard,
+    and the reconcile. That is its own set again: a host can list a bot's servers, switch one and
+    browse the Catalogue with the catalogue's own built-ins alone. ``info`` advertises this as its
+    own feature, so that host's Bot gets no Add action rather than one whose every tap is a 501.
+    """
+    try:
+        _hermes_install()
+    except McpError as error:
+        return str(error)
+    return None
+
+
 # Every feature this module answers for, with the check that says why a host can't offer it: one row
 # per control, because each needs its own built-ins (see each check above). ``info`` advertises
 # exactly the features whose check passes, so a feature is declared here once rather than named by
@@ -301,6 +396,7 @@ FEATURES: Tuple[Tuple[str, Callable[[], Optional[str]]], ...] = (
     ("mcps_write", writable),
     ("mcps_remove", removable),
     ("mcps_catalogue", browsable),
+    ("mcps_add", addable),
 )
 
 
@@ -340,6 +436,182 @@ def _catalogue_entry(entry: Any, servers: Dict[str, Any]) -> Dict[str, Any]:
         "description": getattr(entry, "description", "") or "",
         "installed": name in servers,
     }
+
+
+def entry(profile: Optional[str], name: str) -> Dict[str, Any]:
+    """One Catalogue entry as ``profile`` is offered it, with the values it declares.
+
+    The form that adds an entry is built from this: one field per value the entry's manifest declares
+    (``auth.env``), each with whether it is required, whether it is secret and the default the
+    manifest pins — and whether this bot already holds a value for it, which is the **only** thing
+    the app is ever told about a value the bot has. A stored secret is never answered back, and an
+    entry's own description is Hermes's. ``installed`` says whether the bot already has the server,
+    as the Catalogue's own read does, so the app can mark it.
+
+    ``profile`` is a profile name, or None for the process's own. Blocking — the profile's config and
+    its ``.env`` are read, and the scope may hydrate an external secret source — so call it from a
+    worker thread, never the event loop. This writes nothing: the block the entry would be added as
+    is built only by ``install``, so reading an entry cannot change the bot. An entry the Catalogue
+    doesn't have, or a host without the adding built-ins, raises ``McpError`` (400, or 501).
+    """
+    hermes = _hermes_install()
+    with hermes["read_scope"](profile):
+        found = _entry(hermes, name)
+        return _entry_detail(found, name in hermes["installed"](), hermes["get_env"])
+
+
+def install(profile: Optional[str], name: str, values: Dict[str, str]) -> List[Dict[str, Any]]:
+    """Add one of the Catalogue's entries to ``profile``, and answer the servers it has afterwards.
+
+    ``values`` is what the form collected, by the name each value declares. A key the entry does not
+    declare, or a name Hermes's own environment writer refuses, is a 400 for the whole add rather
+    than a partial write; a value the entry declares required that is neither given nor already held
+    by the bot is the same 400. Hermes's own ``card_install_config`` then builds the
+    ``mcp_servers.<name>`` block from the manifest — the same block its connection card installs,
+    minus the prompts, the probe and the tool checklist a terminal owns — each collected value the
+    manifest declares non-secret is inlined into it, and Hermes's own ``_save_mcp_server`` writes it.
+    A configuration that write refuses is a 400 carrying Hermes's own sentence, and since the secrets
+    are written only after the block lands, a refusal leaves nothing half-added; an entry whose own
+    repository Hermes clones while building the block is the same 400 — with Hermes's own sentence —
+    when that clone or its bootstrap fails. Hermes's own reconcile follows, so the server is live for
+    the bot's next turn, and the answer is the profile's
+    servers as ``read`` shapes them, so the app's list is the Host's own answer rather than the entry
+    it guessed was added.
+
+    A value already held by the bot is reused rather than asked for again: the manifest's ``${NAME}``
+    reference stays in the block and the profile's ``.env`` keeps the value (which is why a removal
+    leaves those values alone). An entry whose auth is OAuth is added with its marker and reads
+    ``needs_access`` until the row's own flow grants the access; nothing here starts one.
+
+    ``profile`` is a profile name, or None for the process's own. Blocking — the manifest's own
+    bootstrap may clone a repository, the config is read and written, the environment is written and
+    the reconcile takes a per-home lock — so call it from a worker thread, never the event loop.
+    """
+    hermes = _hermes_install()
+    with hermes["write_scope"](profile):
+        found = _entry(hermes, name)
+        declared = _declared(found)
+        collected = _collected(name, declared, values, hermes)
+        try:
+            block = hermes["card"](found)
+        except hermes["catalog_error"] as error:
+            # Building the block is where the entry's own repository is cloned and its bootstrap run
+            # (`card_install_config` → `_do_git_install`), and Hermes answers a clone that fails with
+            # its own sentence rather than a config it refuses: neither is a 500, and neither has
+            # written anything yet.
+            raise McpError(str(error), 400) from error
+        secrets = {value["name"] for value in declared if value["secret"]}
+        # Split first, then write in the order the half-added guarantee needs: the block carries the
+        # plain values before it is saved, and the secrets reach the profile's environment only once
+        # that save has landed.
+        plain = {key: value for key, value in collected.items() if key not in secrets}
+        secret = {key: value for key, value in collected.items() if key in secrets}
+        for key, value in plain.items():
+            block = hermes["inline"](block, key, value)
+        if not hermes["save_server"](name, block):
+            raise McpError(_refusal(hermes, name, block))
+        for key, value in secret.items():
+            hermes["save_env"](key, value)
+        hermes["reconcile"]()
+        return _all_rows(hermes)
+
+
+def _entry(hermes: Dict[str, Any], name: str) -> Any:
+    """One of Hermes's own Catalogue entries by name, or a 400 for one it doesn't have."""
+    found = hermes["entry"](name)
+    if found is None:
+        raise McpError(f"Hermes's Catalogue has no entry named {name!r}.", 400)
+    return found
+
+
+def _entry_detail(found: Any, installed: bool, get_env: Callable[[str], Any]) -> Dict[str, Any]:
+    """One entry in the app's own shape, with the values it declares and whether each is set."""
+    return {
+        "name": getattr(found, "name", ""),
+        "description": getattr(found, "description", "") or "",
+        "installed": installed,
+        "values": [_declared_value(spec, get_env) for spec in _env_specs(found)],
+    }
+
+
+def _value_shape(spec: Any) -> Dict[str, Any]:
+    """What both the form and an add's own checks read of one declared value: the Hermes defaults."""
+    return {
+        "name": getattr(spec, "name", ""),
+        "required": getattr(spec, "required", True) is not False,
+        "secret": getattr(spec, "secret", True) is not False,
+    }
+
+
+def _declared_value(spec: Any, get_env: Callable[[str], Any]) -> Dict[str, Any]:
+    """One value an entry declares, as the form is built from it.
+
+    ``set`` is whether this bot already holds a value for it, read through Hermes's own environment
+    read — and it is all the app is told: the value itself never leaves the Host. A secret's default
+    is never answered (Hermes's own form leaves one out, and the field is masked, so a default in it
+    would be a credential on screen); a plain value's default is what makes the common case one tap.
+    """
+    secret = getattr(spec, "secret", True) is not False
+    return {
+        **_value_shape(spec),
+        "prompt": getattr(spec, "prompt", "") or "",
+        "default": "" if secret else (getattr(spec, "default", "") or ""),
+        "set": bool(get_env(getattr(spec, "name", ""))),
+    }
+
+
+def _declared(found: Any) -> List[Dict[str, Any]]:
+    """What one entry declares, in the app's own shape: what an add checks its values against."""
+    return [_value_shape(spec) for spec in _env_specs(found)]
+
+
+def _env_specs(found: Any) -> List[Any]:
+    """The values one of Hermes's ``CatalogEntry`` objects declares (``auth.env``), if any."""
+    auth = getattr(found, "auth", None)
+    declared = getattr(auth, "env", None) or []
+    return list(declared)
+
+
+def _collected(
+    name: str, declared: List[Dict[str, Any]], values: Dict[str, str], hermes: Dict[str, Any]
+) -> Dict[str, str]:
+    """The values an add will write, or the 400 that refuses it before anything is built.
+
+    Configuring one MCP is not a general environment-writing primitive, so a key the entry doesn't
+    declare is refused like a name Hermes's own writer would refuse one — before the block is built,
+    before the profile's environment is touched and before anything is cloned or written. A value the
+    entry declares required that is neither given nor already held by the bot is the same refusal,
+    which is the Host's own backstop for the form's own check — a value of nothing but spaces is
+    nothing given, as the form's own rule has it, and a value that is given is written as it was
+    given. "Already held" is asked of Hermes's environment read for every declared value, secrets and
+    plain ones alike: a plain value lives inlined in the configuration rather than in `.env`, so it is
+    only ever found there when the name also stands for something ambient in the profile, and then
+    leaving the manifest's ``${NAME}`` reference standing is exactly what Hermes's own load-time
+    resolution wants.
+    """
+    names = {value["name"] for value in declared}
+    for key in values:
+        if key not in names:
+            raise McpError(f"{name} does not declare the value {key}.", 400)
+    for key in values:
+        try:
+            hermes["check_name"](key)
+        except ValueError as error:
+            raise McpError(str(error), 400) from error
+    collected: Dict[str, str] = {}
+    for value in declared:
+        given = values.get(value["name"])
+        if isinstance(given, str) and given.strip():
+            collected[value["name"]] = given
+        elif value["required"] and not hermes["get_env"](value["name"]):
+            raise McpError(f"{value['name']} is required but no value was provided.", 400)
+    return collected
+
+
+def _refusal(hermes: Dict[str, Any], name: str, block: Dict[str, Any]) -> str:
+    """Why Hermes's own validator refused a block, in its own words where it has any."""
+    issues = [issue for issue in hermes["validate"](name, block) if isinstance(issue, str)]
+    return " ".join(issues) if issues else f"Hermes refused {name}'s configuration."
 
 
 def _writable_server(hermes: Dict[str, Any], name: str) -> None:
