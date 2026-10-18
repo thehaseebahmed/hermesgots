@@ -18,9 +18,11 @@ prompt cache.
 
 ## Consequences
 
-- Server access cannot be granted in Gots. Hermes's in-process start binds a 127.0.0.1 receiver on
-  the host, so the row asks the host for the URL and the user finishes it in a browser on the host;
-  Gots shows the state and waits.
+- Server access is started in Gots, never granted there. Hermes's in-process start binds a 127.0.0.1
+  receiver on the host, so the row asks the host for the URL and the user finishes it in a browser:
+  on the host, or on their own phone, pasting the address the browser ends on back into the sheet
+  ([ADR 0011](./0011-a-server-access-callback-is-pasted-back-from-the-phone.md)). Gots shows the
+  state and waits; the row clears once the flow lands.
 - Remove matches `hermes mcp remove`: the config entry, the cloned install directory and the stored
   access token go, while the API key stays in the profile's `.env`, where Hermes reuses it on a
   reinstall.

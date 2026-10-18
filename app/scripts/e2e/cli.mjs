@@ -159,6 +159,11 @@ const FLOWS = {
     about:
       "Picking a Catalogue entry opens a form of the values it declares, an add writes the server and shows it, and the screen reports a value as set without ever showing its content",
   },
+  "mcps-access": {
+    script: "e2e/mcps-access.mjs",
+    about:
+      "Grant access on a waiting server starts the Host's flow, shows its URL, takes the pasted callback, and clears the row by itself, at phone and tablet widths",
+  },
   "fallbacks-silent-host": {
     script: "e2e/fallbacks-silent-host.mjs",
     about: "A host that never answers a fallback write gives the field back instead of wedging it",

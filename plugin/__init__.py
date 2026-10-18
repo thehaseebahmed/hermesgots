@@ -505,6 +505,42 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, mcp.UNAVAILABLE, 501)
         return web.json_response({"object": {"servers": servers}})
 
+    async def start_mcp_access(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        # Hermes's own non-blocking start runs inside this bot's profile scope, binding its callback
+        # receiver on this host; the flow is held so a second tap answers the same URL. A host
+        # without that built-in is a 501, never a 500. See mcp.py.
+        profile = request_profile()
+        name = request.match_info["name"]
+        try:
+            flow = await asyncio.to_thread(mcp.start_access, profile, name)
+        except mcp.McpError as error:
+            return _error(web, str(error), error.status)
+        except ImportError:
+            return _error(web, mcp.UNAVAILABLE_ACCESS, 501)
+        return web.json_response({"object": {"access": flow}})
+
+    async def deliver_mcp_access(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None or not isinstance(body.get("url"), str) or not body["url"]:
+            return _error(web, 'Body must be {"url": "<the address the browser ended on>"}', 400)
+        # The pasted redirect is checked against the running flow's own and handed to it, which
+        # enforces state and single use; the code is exchanged on this host. See mcp.py.
+        profile = request_profile()
+        name = request.match_info["name"]
+        try:
+            delivered = await asyncio.to_thread(mcp.deliver_access, profile, name, body["url"])
+        except mcp.McpError as error:
+            return _error(web, str(error), error.status)
+        except ImportError:
+            return _error(web, mcp.UNAVAILABLE_ACCESS, 501)
+        return web.json_response({"object": {"access": delivered}})
+
     async def set_fallbacks(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -1237,6 +1273,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/mcp/catalogue/{{name}}", get_mcp_catalogue_entry)
     app.router.add_post(f"{PREFIX}/mcp/install", install_mcp_server)
     app.router.add_post(f"{PREFIX}/mcp/{{name}}/enabled", set_mcp_server_enabled)
+    app.router.add_post(f"{PREFIX}/mcp/{{name}}/access", start_mcp_access)
+    app.router.add_post(f"{PREFIX}/mcp/{{name}}/access/callback", deliver_mcp_access)
     app.router.add_delete(f"{PREFIX}/mcp/{{name}}", remove_mcp_server)
     app.router.add_post(f"{PREFIX}/fallbacks", set_fallbacks)
     app.router.add_get(f"{PREFIX}/github", github_status)

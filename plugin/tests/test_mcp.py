@@ -54,6 +54,9 @@ def hermes(
     checks=None,
     validates=None,
     discovers=None,
+    start_errors=None,
+    starts=None,
+    started=None,
 ):
     """Hermes's MCP built-ins for one test, faked the way the module imports them.
 
@@ -419,6 +422,55 @@ def hermes(
     helpers = types.ModuleType("tui_gateway.mcp_rpc_helpers")
     helpers.server_configs_with_sources = server_configs_with_sources
 
+    # Hermes's own non-blocking Server access start: it binds a loopback receiver on this host and
+    # answers an attempt whose flow the plugin holds. The flows it minted land on ``started`` so a
+    # test can inspect the redirect and what was delivered; each start is recorded with the profile
+    # scope it ran in.
+    flows_started = started if started is not None else {}
+    start_calls = starts if starts is not None else []
+
+    class _Flow:
+        def __init__(self, name):
+            self.server_name = name
+            self.redirect_uri = "http://127.0.0.1:54321/callback"
+            self.delivered = []
+            self.status = "pending"
+
+        def deliver_callback(self, *, code, state, error, iss=None):
+            if self.status != "pending":
+                raise ValueError("OAuth callback already received")
+            if error:
+                self.status = "error"
+                self.delivered.append({"error": error, "state": state, "iss": iss})
+                return
+            self.delivered.append({"code": code, "state": state, "iss": iss})
+            self.status = "approved"
+
+        @property
+        def worker_done(self):
+            return self.status != "pending"
+
+    class _Attempt:
+        def __init__(self, name):
+            self.auth_url = f"https://{name}.example/authorize?state=st-{name}"
+            self.flow = _Flow(name)
+
+        def poll(self):
+            return {"status": self.flow.status}
+
+    def start(name):
+        if start_errors and name in start_errors:
+            raise RuntimeError(start_errors[name])
+        start_calls.append((scopes[-1] if scopes else None, name))
+        attempt = _Attempt(name)
+        flows_started[name] = attempt.flow
+        return attempt
+
+    connectors = types.ModuleType("tools.connectors")
+    connectors_oauth = types.ModuleType("tools.connectors.mcp_oauth")
+    connectors_oauth.start = start
+    connectors.mcp_oauth = connectors_oauth
+
     return {
         "hermes_cli.config": config_module,
         "hermes_cli.mcp_catalog": catalog,
@@ -429,6 +481,8 @@ def hermes(
         "hermes_cli.web_server_profiles": profiles,
         "tools.mcp_oauth_manager": oauth,
         "tools.mcp_tool_discovery": discovery,
+        "tools.connectors": connectors,
+        "tools.connectors.mcp_oauth": connectors_oauth,
         "tui_gateway.mcp_rpc_helpers": helpers,
     }
 
@@ -504,9 +558,9 @@ class McpReadTests(unittest.TestCase):
             found = mcp.read("bot-a")
         self.assertEqual(
             [
-                {"name": "alpha", "state": "on", "enabled": True, "source": "config", "reason": None},
-                {"name": "mid", "state": "off", "enabled": False, "source": "config", "reason": None},
-                {"name": "zeta", "state": "on", "enabled": True, "source": "config", "reason": None},
+                {"name": "alpha", "state": "on", "enabled": True, "source": "config", "reason": None, "access": False},
+                {"name": "mid", "state": "off", "enabled": False, "source": "config", "reason": None, "access": False},
+                {"name": "zeta", "state": "on", "enabled": True, "source": "config", "reason": None, "access": False},
             ],
             found,
         )
@@ -579,7 +633,7 @@ class McpReadTests(unittest.TestCase):
         ):
             found = mcp.read("bot-a")
         self.assertEqual(
-            [{"name": "drive", "state": "needs_access", "enabled": True, "source": "config", "reason": None}],
+            [{"name": "drive", "state": "needs_access", "enabled": True, "source": "config", "reason": None, "access": True}],
             found,
         )
 
@@ -606,7 +660,7 @@ class McpReadTests(unittest.TestCase):
         ):
             found = mcp.read("bot-a")
         self.assertEqual(
-            [{"name": "drive", "state": "on", "enabled": True, "source": "config", "reason": None}], found
+            [{"name": "drive", "state": "on", "enabled": True, "source": "config", "reason": None, "access": False}], found
         )
 
     def test_a_connected_oauth_server_reads_as_on_from_the_status_word_alone(self):
@@ -653,7 +707,7 @@ class McpReadTests(unittest.TestCase):
         ):
             found = mcp.read("bot-a")
         self.assertEqual(
-            {"name": "theirs", "state": "plugin", "enabled": True, "source": "plugin", "reason": None},
+            {"name": "theirs", "state": "plugin", "enabled": True, "source": "plugin", "reason": None, "access": False},
             {server["name"]: server for server in found}["theirs"],
         )
 
@@ -677,6 +731,7 @@ class McpReadTests(unittest.TestCase):
                 "enabled": True,
                 "source": "plugin",
                 "reason": "spawn failed",
+                "access": False,
             },
             found[0],
         )
@@ -692,7 +747,7 @@ class McpReadTests(unittest.TestCase):
         ):
             found = mcp.read("bot-a")
         self.assertEqual(
-            {"name": "theirs", "state": "plugin", "enabled": True, "source": "plugin", "reason": None},
+            {"name": "theirs", "state": "plugin", "enabled": True, "source": "plugin", "reason": None, "access": False},
             found[0],
         )
 
@@ -730,7 +785,7 @@ class McpToggleTests(unittest.TestCase):
             answered = mcp.set_enabled("bot-a", "github", False)
             after = mcp.read("bot-a")
         self.assertEqual(
-            {"name": "github", "state": "off", "enabled": False, "source": "config", "reason": None},
+            {"name": "github", "state": "off", "enabled": False, "source": "config", "reason": None, "access": False},
             answered,
         )
         self.assertEqual([("github", "off")], rows(after))
@@ -1166,6 +1221,7 @@ class McpFeatureGateTests(unittest.TestCase):
                 ("mcps_remove", mcp.removable),
                 ("mcps_catalogue", mcp.browsable),
                 ("mcps_add", mcp.addable),
+                ("mcps_access", mcp.accessible),
             ],
             list(mcp.FEATURES),
         )
@@ -1721,7 +1777,7 @@ class McpAddTests(unittest.TestCase):
         with mock.patch.dict(sys.modules, stubs):
             servers = mcp.install("bot-a", "postgres", {"PG_DATABASE": "gots", "PG_PASSWORD": "p"})
         self.assertEqual(
-            [{"name": "postgres", "state": "failed", "enabled": True, "source": "config", "reason": "Connection refused"}],
+            [{"name": "postgres", "state": "failed", "enabled": True, "source": "config", "reason": "Connection refused", "access": False}],
             servers,
         )
 
@@ -1743,6 +1799,195 @@ class McpAddTests(unittest.TestCase):
                     with self.assertRaises(mcp.McpError) as caught:
                         mcp.install("bot-a", "postgres", {"PG_DATABASE": "gots", "PG_PASSWORD": "p"})
                 self.assertEqual(501, caught.exception.status)
+
+
+class McpAccessTests(unittest.TestCase):
+    """Starting Server access from a row, and handing a browser's redirect back to the flow.
+
+    The Host's flow is faked (see ``hermes``): it mints an attempt with a loopback redirect and
+    records what the plugin delivers into it, so these tests assert the plugin's own rules — the row
+    that offers the action, the profile scope the start runs in, one URL per row, and the checks a
+    pasted address goes through before the flow sees it.
+    """
+
+    def setUp(self):
+        mcp._flows.clear()
+
+    def tearDown(self):
+        mcp._flows.clear()
+
+    def _oauth(self, **cfg):
+        return {"url": "https://drive.example/mcp", "auth": "oauth", **cfg}
+
+    def test_a_finished_flow_does_not_sit_in_the_cache(self):
+        """The cache holds only flows still waiting for a callback.
+
+        A flow the browser finished on the host, or one nobody came back to, must not keep its
+        attempt — and the loopback receiver bound with it — for the process's life, and the sweep is
+        not limited to the server being asked about: any later lookup drops the finished ones.
+        """
+        started = {}
+        servers = {"drive": self._oauth(), "gitlab": self._oauth()}
+        with mock.patch.dict(sys.modules, hermes(servers=servers, started=started)):
+            mcp.start_access("bot-a", "drive")
+            self.assertEqual({("bot-a", "drive")}, set(mcp._flows))
+            started["drive"].status = "approved"
+            mcp.start_access("bot-a", "gitlab")
+        self.assertEqual({("bot-a", "gitlab")}, set(mcp._flows))
+
+    def test_an_attempt_that_cannot_be_polled_is_dropped_rather_than_kept(self):
+        """A flow the plugin can no longer ask about is treated as gone, not held forever."""
+
+        class _Unpollable:
+            auth_url = "https://drive.example/authorize"
+
+            def poll(self):
+                raise RuntimeError("the host went away")
+
+        with mock.patch.dict(sys.modules, hermes(servers={"drive": self._oauth()})):
+            with mcp._flows_lock:
+                mcp._flows[("bot-a", "drive")] = _Unpollable()
+            with self.assertRaises(mcp.McpError):
+                mcp.deliver_access("bot-a", "drive", "http://127.0.0.1:54321/callback?code=a")
+        self.assertEqual(set(), set(mcp._flows))
+
+    def test_a_waiting_oauth_server_offers_access(self):
+        with mock.patch.dict(sys.modules, hermes(servers={"drive": self._oauth()})):
+            found = mcp.read("bot-a")
+        self.assertTrue(found[0]["access"])
+
+    def test_an_auth_failure_on_an_oauth_server_still_offers_access(self):
+        """A revoked or expired grant reads ``failed``; a fresh flow is the only way back."""
+        with mock.patch.dict(
+            sys.modules,
+            hermes(
+                servers={"drive": self._oauth()},
+                runtime={"drive": "failed"},
+                errors={"drive": "401 Unauthorized"},
+                tokens=["drive"],
+            ),
+        ):
+            found = mcp.read("bot-a")
+        self.assertEqual("failed", found[0]["state"])
+        self.assertTrue(found[0]["access"])
+
+    def test_a_plain_switched_off_or_plugin_server_never_offers_access(self):
+        with mock.patch.dict(
+            sys.modules,
+            hermes(
+                servers={
+                    "plain": {"url": "https://plain.example/mcp"},
+                    "drive": self._oauth(enabled=False),
+                },
+                plugin_servers={"theirs": self._oauth()},
+                owners={"theirs": "gots-extras"},
+                runtime={"theirs": "failed"},
+                tokens=["theirs"],
+            ),
+        ):
+            found = {server["name"]: server for server in mcp.read("bot-a")}
+        self.assertFalse(found["plain"]["access"])
+        self.assertFalse(found["drive"]["access"])
+        self.assertFalse(found["theirs"]["access"])
+
+    def test_starting_access_runs_in_the_bots_profile_and_answers_the_url(self):
+        starts = []
+        with mock.patch.dict(sys.modules, hermes(servers={"drive": self._oauth()}, starts=starts)):
+            flow = mcp.start_access("bot-a", "drive")
+        self.assertEqual([("bot-a", "drive")], starts)
+        self.assertEqual("https://drive.example/authorize?state=st-drive", flow["url"])
+        self.assertEqual(300, flow["expires"])
+
+    def test_an_oauth_servers_own_timeout_is_what_the_sheet_waits(self):
+        with mock.patch.dict(
+            sys.modules,
+            hermes(servers={"drive": self._oauth(oauth={"timeout": 120})}),
+        ):
+            flow = mcp.start_access("bot-a", "drive")
+        self.assertEqual(120, flow["expires"])
+
+    def test_a_second_start_answers_the_running_flows_url(self):
+        starts = []
+        with mock.patch.dict(sys.modules, hermes(servers={"drive": self._oauth()}, starts=starts)):
+            first = mcp.start_access("bot-a", "drive")
+            second = mcp.start_access("bot-a", "drive")
+        self.assertEqual(first["url"], second["url"])
+        self.assertEqual(1, len(starts), "a second tap must not mint a new flow")
+
+    def test_a_pasted_redirect_is_handed_to_the_running_flow(self):
+        started = {}
+        with mock.patch.dict(
+            sys.modules, hermes(servers={"drive": self._oauth()}, started=started)
+        ):
+            mcp.start_access("bot-a", "drive")
+            pasted = "http://127.0.0.1:54321/callback?code=abc&state=st-drive&iss=https%3A%2F%2Fauth.example"
+            answer = mcp.deliver_access("bot-a", "drive", pasted)
+        self.assertTrue(answer["delivered"])
+        self.assertEqual(
+            [{"code": "abc", "state": "st-drive", "iss": "https://auth.example"}],
+            started["drive"].delivered,
+        )
+
+    def test_a_pasted_address_that_is_not_the_flows_redirect_is_refused(self):
+        with mock.patch.dict(sys.modules, hermes(servers={"drive": self._oauth()})):
+            mcp.start_access("bot-a", "drive")
+            for pasted in (
+                "http://127.0.0.1:9/callback?code=abc&state=st-drive",
+                "http://elsewhere.example:54321/callback?code=abc&state=st-drive",
+                "https://127.0.0.1:54321/callback?code=abc&state=st-drive",
+                "http://127.0.0.1:54321/other?code=abc&state=st-drive",
+                "not a url",
+            ):
+                with self.subTest(pasted=pasted):
+                    with self.assertRaises(mcp.McpError) as caught:
+                        mcp.deliver_access("bot-a", "drive", pasted)
+                    self.assertEqual(400, caught.exception.status)
+
+    def test_a_paste_with_no_running_flow_is_refused(self):
+        with mock.patch.dict(sys.modules, hermes(servers={"drive": self._oauth()})):
+            with self.assertRaises(mcp.McpError) as caught:
+                mcp.deliver_access("bot-a", "drive", "http://127.0.0.1:54321/callback?code=a")
+        self.assertEqual(400, caught.exception.status)
+        self.assertIn("No Server access is running", str(caught.exception))
+
+    def test_a_flow_takes_one_answer_only(self):
+        with mock.patch.dict(sys.modules, hermes(servers={"drive": self._oauth()})):
+            mcp.start_access("bot-a", "drive")
+            pasted = "http://127.0.0.1:54321/callback?code=abc&state=st-drive"
+            mcp.deliver_access("bot-a", "drive", pasted)
+            # The flow has landed, so it is no longer the row's running sign-in.
+            with self.assertRaises(mcp.McpError):
+                mcp.deliver_access("bot-a", "drive", pasted)
+
+    def test_a_server_that_does_not_use_access_is_refused(self):
+        with mock.patch.dict(
+            sys.modules, hermes(servers={"plain": {"url": "https://plain.example/mcp"}})
+        ):
+            with self.assertRaises(mcp.McpError):
+                mcp.start_access("bot-a", "plain")
+
+    def test_a_start_hermes_refuses_answers_its_own_sentence(self):
+        with mock.patch.dict(
+            sys.modules,
+            hermes(
+                servers={"drive": self._oauth()},
+                start_errors={"drive": "This provider needs a client registered by hand."},
+            ),
+        ):
+            with self.assertRaises(mcp.McpError) as caught:
+                mcp.start_access("bot-a", "drive")
+        self.assertEqual(400, caught.exception.status)
+        self.assertEqual("This provider needs a client registered by hand.", str(caught.exception))
+
+    def test_a_host_without_the_start_advertises_no_access(self):
+        stubs = hermes(servers={"drive": self._oauth()})
+        stubs["tools.connectors"] = None
+        stubs["tools.connectors.mcp_oauth"] = None
+        with mock.patch.dict(sys.modules, stubs):
+            self.assertIsInstance(mcp.accessible(), str)
+            with self.assertRaises(mcp.McpError) as caught:
+                mcp.start_access("bot-a", "drive")
+        self.assertEqual(501, caught.exception.status)
 
 
 if __name__ == "__main__":

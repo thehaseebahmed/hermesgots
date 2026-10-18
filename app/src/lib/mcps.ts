@@ -19,8 +19,15 @@ import { useCallback, useState, useSyncExternalStore } from "react"
 
 import { connectionKey, serverConfig } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
-import { MCP_INSTALL_MS, MCP_WORK_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import {
+  MCP_ACCESS_MS,
+  MCP_INSTALL_MS,
+  MCP_WORK_MS,
+  READ_TIMEOUT_MS,
+  WRITE_TIMEOUT_MS,
+} from "@/lib/freshness"
+import {
+  deliverMcpAccess,
   getMcpCatalogueEntry,
   getPluginFeatureList,
   installMcpServer,
@@ -28,7 +35,9 @@ import {
   listMcpServers,
   removeMcpServer,
   setMcpServerEnabled,
+  startMcpAccess,
   type HermesConfig,
+  type McpAccess,
   type McpCatalogueEntry,
   type McpCatalogueEntryDetail,
   type McpServer,
@@ -50,6 +59,7 @@ export const MCP_FEATURES = {
   removable: "mcps_remove",
   catalogue: "mcps_catalogue",
   add: "mcps_add",
+  access: "mcps_access",
 } as const
 
 /** What each of those features this Bot's Host answered (see `McpFeatureAnswer`). */
@@ -138,11 +148,12 @@ export function useMcpFeatureAnswers(server: McpServerConfig): McpFeatureAnswers
   const removable = useSyncExternalStore(subscribe, () => read(MCP_FEATURES.removable))
   const catalogue = useSyncExternalStore(subscribe, () => read(MCP_FEATURES.catalogue))
   const add = useSyncExternalStore(subscribe, () => read(MCP_FEATURES.add))
+  const access = useSyncExternalStore(subscribe, () => read(MCP_FEATURES.access))
   usePoll(() => void readFeature({ baseUrl, apiKey }), false, [baseUrl, apiKey], {
     active: Boolean(key),
     onShow: false,
   })
-  return { list, write, removable, catalogue, add }
+  return { list, write, removable, catalogue, add, access }
 }
 
 /** What this Bot's plugin answered about its MCP servers (see `McpFeatureAnswer`). */
@@ -238,7 +249,32 @@ export function useMcpServers(server: McpServerConfig, active: boolean) {
     },
     [baseUrl, apiKey],
   )
-  return { servers, setEnabled, remove, install }
+  const reload = useCallback(async () => {
+    // The screen's own poll follows a connecting or waiting server, and a *failed* row that a flow
+    // is running for is neither — so the sheet that waits on one asks for the list itself, rather
+    // than leaving the row's read to whatever the screen does next.
+    try {
+      const next = await listMcpServers({ baseUrl, apiKey }, AbortSignal.timeout(READ_TIMEOUT_MS))
+      unsupported.clear(key)
+      setServers(next)
+    } catch (error) {
+      noteFailure("Reading the bot's MCP servers", error)
+    }
+  }, [baseUrl, apiKey, key])
+  const grant = useCallback(
+    async (name: string): Promise<McpAccess> =>
+      // The Host discovers the provider and waits for its authorization URL before answering, which
+      // is longer than a write: a start that never produces one is given up on rather than hanging.
+      startMcpAccess({ baseUrl, apiKey }, name, AbortSignal.timeout(MCP_ACCESS_MS)),
+    [baseUrl, apiKey],
+  )
+  const deliver = useCallback(
+    async (name: string, url: string) => {
+      await deliverMcpAccess({ baseUrl, apiKey }, name, url, AbortSignal.timeout(WRITE_TIMEOUT_MS))
+    },
+    [baseUrl, apiKey],
+  )
+  return { servers, setEnabled, remove, install, grant, deliver, reload }
 }
 
 /**
