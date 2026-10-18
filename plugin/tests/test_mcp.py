@@ -1500,6 +1500,34 @@ class McpAddTests(unittest.TestCase):
         self.assertEqual(400, caught.exception.status)
         self.assertIn("PG_PASSWORD", str(caught.exception))
 
+    def test_a_value_of_nothing_but_spaces_is_a_value_left_empty(self):
+        """The form's own rule, so the two refuse the same add: a space or two is nothing typed in."""
+        cards, saved, env_writes = [], [], []
+        stubs = hermes(
+            catalogue=[POSTGRES],
+            cards=cards,
+            saved=saved,
+            env_writes=env_writes,
+            reconcile=[],
+        )
+        with mock.patch.dict(sys.modules, stubs):
+            with self.assertRaises(mcp.McpError) as caught:
+                mcp.install("bot-a", "postgres", {"PG_DATABASE": "gots", "PG_PASSWORD": "  "})
+        self.assertEqual(400, caught.exception.status)
+        self.assertIn("PG_PASSWORD", str(caught.exception))
+        # Nothing was built, written or reconciled: the bot is exactly what it was.
+        self.assertEqual([], cards)
+        self.assertEqual([], saved)
+        self.assertEqual([], env_writes)
+
+    def test_a_given_value_is_written_as_it_was_given(self):
+        """Only the emptiness test looks past spaces: a value lands as the form sent it."""
+        saved = []
+        stubs = hermes(catalogue=[POSTGRES], saved=saved, reconcile=[])
+        with mock.patch.dict(sys.modules, stubs):
+            mcp.install("bot-a", "postgres", {"PG_DATABASE": " gots ", "PG_PASSWORD": "typed"})
+        self.assertEqual(["--db", " gots "], saved[-1][1]["mcp_servers"]["postgres"]["args"])
+
     def test_a_value_the_entry_does_not_declare_is_refused_and_nothing_is_written(self):
         """Configuring one MCP is not a general environment-writing primitive."""
         cards, saved, env_writes, checks = [], [], [], []

@@ -580,12 +580,14 @@ def _collected(
     Configuring one MCP is not a general environment-writing primitive, so a key the entry doesn't
     declare is refused like a name Hermes's own writer would refuse one — before the block is built,
     before the profile's environment is touched and before anything is cloned or written. A value the
-    entry declares required that is neither given nor already held by the bot is
-    the same refusal, which is the Host's own backstop for the form's own check. "Already held" is
-    asked of Hermes's environment read for every declared value, secrets and plain ones alike: a plain
-    value lives inlined in the configuration rather than in `.env`, so it is only ever found there when
-    the name also stands for something ambient in the profile, and then leaving the manifest's
-    ``${NAME}`` reference standing is exactly what Hermes's own load-time resolution wants.
+    entry declares required that is neither given nor already held by the bot is the same refusal,
+    which is the Host's own backstop for the form's own check — a value of nothing but spaces is
+    nothing given, as the form's own rule has it, and a value that is given is written as it was
+    given. "Already held" is asked of Hermes's environment read for every declared value, secrets and
+    plain ones alike: a plain value lives inlined in the configuration rather than in `.env`, so it is
+    only ever found there when the name also stands for something ambient in the profile, and then
+    leaving the manifest's ``${NAME}`` reference standing is exactly what Hermes's own load-time
+    resolution wants.
     """
     names = {value["name"] for value in declared}
     for key in values:
@@ -599,7 +601,7 @@ def _collected(
     collected: Dict[str, str] = {}
     for value in declared:
         given = values.get(value["name"])
-        if isinstance(given, str) and given:
+        if isinstance(given, str) and given.strip():
             collected[value["name"]] = given
         elif value["required"] and not hermes["get_env"](value["name"]):
             raise McpError(f"{value['name']} is required but no value was provided.", 400)
