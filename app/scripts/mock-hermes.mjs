@@ -721,7 +721,8 @@ const mcpBlockOf = (body) => {
 // server it can't find, so the sentence isn't written twice.
 const mcpServerRow = (res, name, status = 404) => {
   const server = mcpRows().find((row) => row.name === name)
-  if (!server) json(res, status, { error: { message: `No MCP server named '${name}' on this bot.` } })
+  if (!server)
+    json(res, status, { error: { message: `No MCP server named '${name}' on this bot.` } })
   return server
 }
 
@@ -743,10 +744,16 @@ const PENDING_CHECK_S = 12
 /** Project sessions as the plugin's memento.db holds them, by Hermes session id. */
 const projectSessions = new Map()
 // The plugin's pull request instruction (prompt_builder._PR_INSTRUCTIONS), word for word.
+// test_library.py matches this line word for word, so it stays one line.
+// prettier-ignore
 const PR_INSTRUCTIONS = "When the work is done and you've checked it, ship it yourself with the pull_request tool and action 'ship': it commits what's left, pushes this branch and opens a draft pull request, or pushes to the one open. Don't ask first, and don't use git push or gh for it. Write the description from the repo's pull request template when it has one (named below), else with Summary, Changes and How to test sections. The pull request stays a draft. Pass force: true only after a rebase or amend. action 'update' changes the open pull request's title or body, and 'status' reports without writing. Merging and closing are the user's decision: the tool refuses them, so ask the user with clarify instead."
 // The plugin's done-work emphasis (prompt_builder._DONE_INSTRUCTIONS), word for word.
+// test_library.py matches this line word for word, so it stays one line.
+// prettier-ignore
 const DONE_INSTRUCTIONS = "Two things the run's prompt emphasises once the work is done: don't share the pull request url or the commit message in your reply — the pull_request result and the session's pull request list already surface them where the user sees them. And before you finish, update your todo list to its final state: every item completed, or cancelled where it was dropped."
 // The plugin's working-rhythm guidance (prompt_builder._PROGRESS_UPDATES_INSTRUCTIONS), word for word.
+// test_library.py matches this line word for word, so it stays one line.
+// prettier-ignore
 const PROGRESS_UPDATES_INSTRUCTIONS = "Keep the user in the loop as you work, at a working rhythm rather than a running commentary. Post a short update between checkpoints — what landed, what you're doing next — so a long stretch of tool calls never reads as a hang. Keep the todo list current as you go: mark items done as they land and add what you discover. When something keeps failing, say what you tried and what you now think is wrong before the next attempt. Thinking out loud while you plan is welcome. Don't narrate each edit, read or command — the tool calls already show those; keep what you do say technical enough to follow the work without spelling out every implementation detail."
 // A chat's goal rides in Auto: Hermes's goal keeps the session working between runs.
 const MODES = ["accept_edits", "auto", "plan"]
@@ -985,7 +992,8 @@ function afkReason(project) {
   // An archived project is put away, so it isn't asked about anything (plugin's `afk.reason`).
   if (project.archived) return "This project is archived."
   // A checkout that isn't a git repo with a GitHub origin is no repository, as `tasks.repos_of` reads it.
-  if (!project.folders.some((folder) => folder.git && folder.repo)) return "This project has no repository."
+  if (!project.folders.some((folder) => folder.git && folder.repo))
+    return "This project has no repository."
   return GITHUB ? null : "No GitHub account on the server."
 }
 
@@ -2222,7 +2230,17 @@ function startRun(req, body) {
   // A client-addressed id from before a compression rotation adopts the live tip (Hermes's
   // _resolve_live_session_id): the run and its rows are keyed on the child, never the old id.
   const sessionId = resolveSession(body.session_id)
-  const run = { id, key, sessionId, status: "running", createdAt: Date.now() / 1000, events: [], seq: 0, listeners: new Set(), stopped: false }
+  const run = {
+    id,
+    key,
+    sessionId,
+    status: "running",
+    createdAt: Date.now() / 1000,
+    events: [],
+    seq: 0,
+    listeners: new Set(),
+    stopped: false,
+  }
   runs.set(id, run)
   noteEvent("runs", run.sessionId)
   const push = (name, fields = {}) => {
@@ -2490,7 +2508,53 @@ http
       return json(res, 200, {
         name: "memento",
         version: PLUGIN_VERSION,
-        features: ["cron_runs", "session_label", "chats", "draft_text", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "goal", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "skills", "queue", "dictation", "afk", "afk_switch", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : []), ...(MCPS ? ["mcps", "mcps_write", "mcps_remove", "mcps_catalogue", "mcps_add", "mcps_access", "mcps_config", "mcps_tools"] : [])],
+        features: [
+          "cron_runs",
+          "session_label",
+          "chats",
+          "draft_text",
+          "context",
+          "todos",
+          "projects",
+          "projects_async",
+          "project_repos",
+          "project_usage",
+          "github",
+          "sessions",
+          "runs",
+          "prs",
+          "plans",
+          "clarify",
+          "attachments",
+          "media",
+          "profile_routes",
+          "pr_tool",
+          "close",
+          "merge_resolve",
+          "goal",
+          ...(EVENTS ? ["events"] : []),
+          "push",
+          "host_model",
+          "fallbacks",
+          "skills",
+          "queue",
+          "dictation",
+          "afk",
+          "afk_switch",
+          ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : []),
+          ...(MCPS
+            ? [
+                "mcps",
+                "mcps_write",
+                "mcps_remove",
+                "mcps_catalogue",
+                "mcps_add",
+                "mcps_access",
+                "mcps_config",
+                "mcps_tools",
+              ]
+            : []),
+        ],
         clarify: true,
         hooks: true,
         goal:
@@ -2782,7 +2846,7 @@ http
       if (!mcpServerRow(res, name)) return
       return json(res, 200, {
         object: {
-          tools: { name, cached: req.method === "GET", tools: mcpToolList(name) },
+          tools: { cached: req.method === "GET", items: mcpToolList(name) },
         },
       })
     }
@@ -2997,7 +3061,10 @@ http
       cloneProject(project, root)
       return json(res, 202, { object: "memento.project", ...project })
     }
-    const projectRoute = /^\/api\/plugins\/memento\/projects\/([^/]+)(\/remove|\/retry|\/repos|\/repos\/remove|\/usage|\/library|\/tasks|\/afk)?$/.exec(url.pathname)
+    const projectRoute =
+      /^\/api\/plugins\/memento\/projects\/([^/]+)(\/remove|\/retry|\/repos|\/repos\/remove|\/usage|\/library|\/tasks|\/afk)?$/.exec(
+        url.pathname,
+      )
     if (PLUGIN && !profile && projectRoute?.[2] === "/library") {
       // The project's filed files, every session's merged by folder; a missing project 404s.
       const found = mockProjects().find((p) => p.id === decodeURIComponent(projectRoute[1]))
@@ -3035,11 +3102,13 @@ http
       if (found.status === "cloning")
         return json(res, 409, { error: { message: "The project is still being created." } })
       // A project whose clone failed has nothing checked out, as the library and usage routes say too.
-      if (found.status === "failed") return json(res, 404, { error: { message: "No such project." } })
+      if (found.status === "failed")
+        return json(res, 404, { error: { message: "No such project." } })
       const reason = afkReason(found)
       if (req.method === "POST") {
         const { on } = await readBody(req)
-        if (typeof on !== "boolean") return json(res, 400, { error: { message: "on must be true or false." } })
+        if (typeof on !== "boolean")
+          return json(res, 400, { error: { message: "on must be true or false." } })
         if (on && reason) return json(res, 409, { error: { message: reason } })
         if (on) afkProjects.add(found.id)
         else afkProjects.delete(found.id)
@@ -3167,7 +3236,8 @@ http
         })
       }
       if (projectRoute[2] === "/retry") {
-        if (found.status !== "failed") return json(res, 404, { error: { message: "No failed project to retry." } })
+        if (found.status !== "failed")
+          return json(res, 404, { error: { message: "No failed project to retry." } })
         // The retry makes the project again under a new id, so the old one's switch is forgotten.
         afkProjects.delete(found.id)
         for (const folder of found.folders) folder.status = "queued"
@@ -3196,7 +3266,8 @@ http
         // A project put away doesn't keep working: the plugin turns its switch off with it.
         if (found.archived) afkProjects.delete(found.id)
       }
-      if (pinned !== undefined) found.pinned_at = pinned ? (found.pinned_at ?? Math.floor(Date.now() / 1000)) : null
+      if (pinned !== undefined)
+        found.pinned_at = pinned ? (found.pinned_at ?? Math.floor(Date.now() / 1000)) : null
       return json(res, 200, { object: "memento.project", id: found.id })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/projects") {
@@ -3513,8 +3584,13 @@ http
       for (const run of runs.values()) {
         if (!run.sessionId || run.status !== "waiting_for_approval") continue
         const sessionId = ROOT_RUN_IDS ? chatSessionOf(run.sessionId) : run.sessionId
-        if (run.clarify) waiting[sessionId] = { kind: "question", count: run.clarify.questions?.length || 1 }
-        else waiting[sessionId] ??= { kind: "approval", ...(run.approval?.command ? { command: run.approval.command } : {}) }
+        if (run.clarify)
+          waiting[sessionId] = { kind: "question", count: run.clarify.questions?.length || 1 }
+        else
+          waiting[sessionId] ??= {
+            kind: "approval",
+            ...(run.approval?.command ? { command: run.approval.command } : {}),
+          }
       }
       for (const record of projectSessions.values())
         if (record.plan_pending) waiting[record.session_id] ??= { kind: "plan" }
@@ -3612,7 +3688,10 @@ http
       chatTitles.set(child, chatTitles.get(session) ?? "Compressed")
       return json(res, 200, { ok: true, session, child })
     }
-    const sessionRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/(workspace|workspace\/remove|mode|prs|library|close|goal|goal\/control)$/.exec(url.pathname)
+    const sessionRoute =
+      /^\/api\/plugins\/memento\/sessions\/([^/]+)\/(workspace|workspace\/remove|mode|prs|library|close|goal|goal\/control)$/.exec(
+        url.pathname,
+      )
     if (PLUGIN && !profile && sessionRoute) {
       const id = decodeURIComponent(sessionRoute[1])
       const route = sessionRoute[2]

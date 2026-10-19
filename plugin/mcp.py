@@ -450,7 +450,7 @@ def detail(profile: Optional[str], name: str) -> Dict[str, Any]:
         return _detail(name, cfg, bool(owners.get(name)), hermes)
 
 
-def edit(profile: Optional[str], name: str, body: Dict[str, Any]) -> List[Dict[str, Any]]:
+def edit(profile: Optional[str], name: str, body: Dict[str, Any]) -> Dict[str, Any]:
     """Save the Config screen's edit of one of ``profile``'s servers, and answer the servers left.
 
     The body carries the transport the form ended on and its fields: ``url`` or ``command``/``args``
@@ -475,22 +475,23 @@ def edit(profile: Optional[str], name: str, body: Dict[str, Any]) -> List[Dict[s
     hermes = _hermes_configure()
     with hermes["write_scope"](profile):
         servers, _ = _writable_server(hermes, name)
-        block = _edited(hermes, name, _server_block(servers, name), body)
-        return _write_block(hermes, name, block, body.get("values"))
+        typed = _typed(hermes, body.get("values"))
+        block = _edited(hermes, name, _server_block(servers, name), body, typed)
+        return _write_block(hermes, name, block, typed)
 
 
 def _write_block(
-    hermes: Dict[str, Any], name: str, block: Dict[str, Any], typed: Any
+    hermes: Dict[str, Any], name: str, block: Dict[str, Any], values: Dict[str, str]
 ) -> Dict[str, Any]:
     """Write one server's block and the values typed into it, then answer what the write left.
 
-    Call it inside the profile's write scope, after the name is known to be one this bot may change.
-    Hermes's validator has the last word on the block; the values a form typed are the only ones
-    written, and each lands in the profile's ``.env`` while the block keeps its ``${NAME}``
-    reference, so no credential is ever part of a configuration. Shared by the Config save and a
-    custom add, because both land a block the same way (ADR 0014).
+    Call it inside the profile's write scope, after the name is known to be one this bot may change
+    and after ``_typed`` has checked the values it is given. Hermes's validator has the last word on
+    the block; the values a form typed are the only ones written, and each lands in the profile's
+    ``.env`` while the block keeps its ``${NAME}`` reference, so no credential is ever part of a
+    configuration. Shared by the Config save and a custom add, because both land a block the same way
+    (ADR 0014).
     """
-    values = _typed(hermes, typed)
     return _land(hermes, name, block, values)
 
 
@@ -515,7 +516,7 @@ def _land(
     return {"servers": _all_rows(hermes), "server": _detail(name, block, False, hermes)}
 
 
-def custom(profile: Optional[str], body: Dict[str, Any]) -> List[Dict[str, Any]]:
+def custom(profile: Optional[str], body: Dict[str, Any]) -> Dict[str, Any]:
     """Add a server the Catalogue doesn't offer, from what the form collected, and answer the list.
 
     ``body`` is a name and exactly one transport — ``url``, or ``command`` with ``args`` — plus an
@@ -533,13 +534,14 @@ def custom(profile: Optional[str], body: Dict[str, Any]) -> List[Dict[str, Any]]
     ``profile`` is a profile name, or None for the process's own. Blocking — config I/O, the
     environment write and a reconcile — so call it from a worker thread, never the event loop.
     """
-    hermes = _hermes_configure()
+    hermes = _hermes_install()
     with hermes["write_scope"](profile):
         name = _new_name(hermes, body.get("name"))
         if body.get("url") and body.get("command"):
             raise McpError("A server has either an address or a command, never both.", 400)
-        block = _edited(hermes, name, {}, body)
-        return _write_block(hermes, name, block, body.get("values"))
+        typed = _typed(hermes, body.get("values"))
+        block = _edited(hermes, name, {}, body, typed)
+        return _write_block(hermes, name, block, typed)
 
 
 def tools(profile: Optional[str], name: str) -> Dict[str, Any]:
@@ -564,8 +566,8 @@ def tools(profile: Optional[str], name: str) -> Dict[str, Any]:
         cfg = _server_block(servers, name)
         entry = hermes["cached"](name, hermes["fingerprint"](cfg))
         if not entry:
-            return {"name": name, "cached": False, "tools": []}
-        return {"name": name, "cached": True, "tools": _tool_rows(hermes["from_cache"](entry))}
+            return {"cached": False, "items": []}
+        return {"cached": True, "items": _tool_rows(hermes["from_cache"](entry))}
 
 
 def probe_tools(profile: Optional[str], name: str) -> Dict[str, Any]:
@@ -588,7 +590,7 @@ def probe_tools(profile: Optional[str], name: str) -> Dict[str, Any]:
             found = hermes["probe"](name, cfg)
         except Exception as error:  # noqa: BLE001 - Hermes raises whatever its transport did
             raise McpError(_probe_reason(hermes, name, error), 400) from error
-        return {"name": name, "cached": False, "tools": _tool_rows(found)}
+        return {"cached": False, "items": _tool_rows(found)}
 
 
 def _hermes_configure() -> Dict[str, Any]:
@@ -677,13 +679,19 @@ def _holds(block: Dict[str, Any], key: str, hermes: Dict[str, Any]) -> bool:
 
 
 def _edited(
-    hermes: Dict[str, Any], name: str, cfg: Dict[str, Any], body: Dict[str, Any]
+    hermes: Dict[str, Any],
+    name: str,
+    cfg: Dict[str, Any],
+    body: Dict[str, Any],
+    values: Dict[str, str],
 ) -> Dict[str, Any]:
     """The block the Config screen's body describes, built on the one the profile has.
 
     Every key the screen doesn't manage is carried over as it was, so a server's ``enabled`` flag, its
     OAuth client block and any tuning the Host holds survive an edit. Only the keys that belong to the
-    transport being left are dropped, since a URL and a command are never both.
+    transport being left are dropped, since a URL and a command are never both. ``values`` is what
+    ``_typed`` made of the body's typed values: a name typed over becomes the ``${NAME}`` reference
+    Hermes resolves at load, and the value itself lands in the profile's ``.env`` after the block has.
     """
     transport = str(
         body.get("transport") or ("http" if (body.get("url") or cfg.get("url")) else "stdio")
@@ -707,7 +715,7 @@ def _edited(
         if auth == "header":
             token = str(body.get("token") or "").strip()
             if token:
-                edited["headers"] = hermes["bearer"](name, token)
+                edited["headers"] = _bearer(hermes)(name, token)
             elif not edited.get("headers"):
                 raise McpError("A header needs a token.", 400)
         else:
@@ -727,13 +735,23 @@ def _edited(
         env = dict(edited["env"]) if isinstance(edited.get("env"), dict) else {}
         # A value typed over becomes the reference Hermes resolves at load; the value itself goes to
         # the profile's .env after the block has landed, so a refused block writes nothing.
-        for key, value in _typed(hermes, body.get("values")).items():
+        for key in values:
             env[key] = "${%s}" % key
         if env:
             edited["env"] = env
         else:
             edited.pop("env", None)
     return edited
+
+
+def _bearer(hermes: Dict[str, Any]) -> Any:
+    """Hermes's header-token writer, which a custom add's own set doesn't carry (see ``_INSTALL``).
+
+    Only a token typed into an HTTP server's header field needs it, so it is loaded at that point
+    rather than up front: a Host without it keeps the whole custom form — a stdio add and an address
+    with no header both work — and answers its own 501 for the one field it can't honour.
+    """
+    return hermes.get("bearer") or _load({"bearer": _CONFIGURE["bearer"]})["bearer"]
 
 
 def _typed(hermes: Dict[str, Any], values: Any) -> Dict[str, str]:

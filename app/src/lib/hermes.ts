@@ -770,7 +770,7 @@ export function parseMcpTools(value: unknown): McpTools {
   const raw = wrapped(value, "tools") as Record<string, unknown> | undefined
   return {
     cached: raw?.cached === true,
-    tools: namedRows(raw?.tools, (tool) => {
+    tools: namedRows(raw?.items, (tool) => {
       const row = tool as Record<string, unknown> | null
       if (typeof row?.name !== "string" || !row.name) return undefined
       return {

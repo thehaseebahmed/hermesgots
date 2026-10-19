@@ -72,6 +72,9 @@ A server a Hermes plugin provides has a Config that is read and not written: no 
 - The three tabs (General, Models, MCP) each have their own URL, the MCP tab exists only where the
   plugin advertises `mcps`, and a bot that can't list its servers lands on General instead.
 - Two more features gate the sheet: `mcps_config` and `mcps_tools`, so a Host that can't describe a
-  block or list tools offers no tab for it rather than an empty one.
+  block or list tools offers no tab for it rather than an empty one. A removal is advertised on its
+  own (`mcps_remove`), and it is offered in the Config tab where there is one — but a Host can
+  remove a server it can't describe, so the sheet carries the same control itself when it has no
+  Config tab to put it in.
 - Custom add is offered where `mcps_add` is, independently of `mcps_catalogue`: a Host that can write
   a server but not browse Hermes's Catalogue still lets the user type one in.

@@ -96,7 +96,7 @@ An MCP server added by typing its address or its command, rather than picked fro
 _Avoid_: manual server, raw server, own MCP
 
 **Health**:
-How an MCP server is doing, as its row says it in a line: healthy with a tool count where the host knows one, or why it isn't working. Not whether it is switched on. Where the host can start Server access for what it says, the line is the tap that starts it.
+How an MCP server is doing, as its row says it in a line: healthy with a tool count where the host knows one, or why it isn't working. A server that is switched off says `Off` there, because that is how it is doing; the switch itself is the separate control beside it. Where the host can start Server access for what it says, the line is the tap that starts it.
 _Avoid_: status, state, badge, indicator
 
 **Server sheet**:

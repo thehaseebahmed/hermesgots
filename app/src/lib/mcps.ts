@@ -140,6 +140,8 @@ export function useMcpServers(server: McpServerConfig, active: boolean, watching
   const [servers, setServers] = useState<McpServer[] | undefined>(undefined)
   // The interval changes with what the screen is doing, and `usePoll` reads at once when its
   // interval changes — so a sheet opening or closing would re-read a list that is a second old.
+  // Half the poll is the threshold, since a read that landed within one interval is still the answer
+  // a sheet opened a moment ago is looking at.
   const readAt = useRef(0)
   const config = serverConfig(server)
   const { baseUrl, apiKey } = config
@@ -298,13 +300,6 @@ export function useMcpCatalogue(server: McpServerConfig, active: boolean) {
   return entries
 }
 
-/**
- * One server's own block, read when its sheet opens and again each time it is opened: what its
- * Config tab is built from. `detail` is undefined until a read lands, and `failedFor` says the read
- * that was meant to answer it came back an error, so the tab can say so rather than standing there
- * as an empty stub. An answer for a different server is never handed back, and nothing is written by
- * reading this.
- */
 /**
  * One named thing read while its sheet is open — the shape both a server's block and a catalogue
  * entry's values take: opening the sheet is the whole trigger, the read is bounded by

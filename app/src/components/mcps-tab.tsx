@@ -88,9 +88,10 @@ const SET_PLACEHOLDER = "Set — type to replace"
  * the waiting row and the way out of it are one line. Tapping the name opens the server's own sheet:
  * Config, where its block is shown and saved, and Tools, where what it offers is listed (ADR 0014).
  *
- * A heading with nothing under it is left out, so a bot with no servers shows the Add row alone. The
- * Add action's two ways in — the Catalogue and the custom form — need the same write a Config save
- * does, so neither is offered where the Host can't write.
+ * A heading with nothing under it is left out, so a bot with no servers shows the Add row alone. Each
+ * way in is offered under its own feature: the Catalogue where the Host can browse it, the custom
+ * form where it can land a block at all — a Host may have one and not the other, and a Host with
+ * neither gets no Add row.
  */
 export function McpsTab({ profile }: { profile: Profile }) {
   const answers = useMcpFeatureAnswers(profile)
@@ -180,7 +181,7 @@ export function McpsTab({ profile }: { profile: Profile }) {
       <McpCatalogueSheet
         open={sheet?.kind === "catalogue"}
         onOpenChange={(next) => setSheet(next ? { kind: "catalogue" } : null)}
-        server={profile}
+        profile={profile}
         install={install}
       />
 
@@ -446,6 +447,14 @@ function ServerSheet({
             </TabsContent>
           )}
         </Tabs>
+        {/* Removal is advertised on its own gate, so a Host that can remove a server without being
+            able to describe one still gets the way to do it — the Config tab is where it sits when
+            there is one, since that is the tab a removal belongs to. */}
+        {!config && removable && server.source !== "plugin" && (
+          <div className="px-4 pb-4">
+            <RemoveServer onRemove={onRemove} />
+          </div>
+        )}
       </PopupContent>
     </Popup>
   )
@@ -607,7 +616,7 @@ function ValueSection({
                 <Input
                   id={`${id}-value-name-${index}`}
                   aria-label="Name"
-                  className="h-11 font-mono text-sm"
+                  className="h-11 text-sm"
                   autoComplete="off"
                   autoCapitalize="off"
                   spellCheck={false}
@@ -802,18 +811,23 @@ function ConfigFields({
         </div>
       )}
 
-      {editable && removable && (
-        <Button
-          type="button"
-          variant="ghost"
-          className="h-11 rounded-full text-destructive"
-          onClick={onRemove}
-        >
-          <Trash2Icon data-icon="inline-start" />
-          Remove server
-        </Button>
-      )}
+      {editable && removable && <RemoveServer onRemove={onRemove} />}
     </div>
+  )
+}
+
+/** Taking a server away: the Config tab's last button, and the sheet's own when there is no tab. */
+function RemoveServer({ onRemove }: { onRemove: () => void }) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      className="h-11 rounded-full text-destructive"
+      onClick={onRemove}
+    >
+      <Trash2Icon data-icon="inline-start" />
+      Remove server
+    </Button>
   )
 }
 
@@ -922,15 +936,15 @@ function AddServerSheet({
 function McpCatalogueSheet({
   open,
   onOpenChange,
-  server,
+  profile,
   install,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  server: McpServerConfig
+  profile: McpServerConfig
   install: (name: string, values: Record<string, string>) => Promise<void>
 }) {
-  const entries = useMcpCatalogue(server, open)
+  const entries = useMcpCatalogue(profile, open)
   // What this screen added: the list a read landed is kept across opens, so without this the entry
   // just added is still in it, still reading as not installed, until the next read lands.
   const [added, setAdded] = useState<string[]>([])
@@ -1005,7 +1019,7 @@ function McpCatalogueSheet({
           <Popup open onOpenChange={(next) => !next && setPicking(undefined)}>
             <PopupContent initialFocus={false} fixedHeight={CATALOGUE_HEIGHT}>
               <McpEntryForm
-                server={server}
+                profile={profile}
                 name={picking}
                 install={install}
                 onBack={() => setPicking(undefined)}
@@ -1065,19 +1079,19 @@ function CatalogueRow({
  * screen's list becomes is the Host's own answer.
  */
 function McpEntryForm({
-  server,
+  profile,
   name,
   install,
   onBack,
   onAdded,
 }: {
-  server: McpServerConfig
+  profile: McpServerConfig
   name: string
   install: (name: string, values: Record<string, string>) => Promise<void>
   onBack: () => void
   onAdded: () => void
 }) {
-  const { entry, failed } = useMcpCatalogueEntry(server, name, true)
+  const { entry, failed } = useMcpCatalogueEntry(profile, name, true)
   const [entered, setEntered] = useState<Record<string, string>>({})
   const [missing, setMissing] = useState<string[]>([])
   const [adding, setAdding] = useState(false)
@@ -1131,7 +1145,7 @@ function McpEntryForm({
                 htmlFor={`mcp-value-${value.name}`}
                 className="flex-col items-start gap-0.5"
               >
-                <span className="font-mono text-sm">
+                <span className="text-sm">
                   {value.name}
                   {value.required && <span aria-hidden="true">{" *"}</span>}
                 </span>

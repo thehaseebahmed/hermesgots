@@ -8,7 +8,8 @@
 // Catalogue, since reading one is the whole of that choice; one that reads a Catalogue but predates
 // `mcps_add` offers no Add action at all, as the action's whole work is the adding. One without
 // `mcps_remove` keeps every row and its Config tab with no Remove server on it, and one without
-// `mcps_config` opens a sheet with only the Tools tab it can fill. The `info` answer is the only
+// `mcps_config` opens a sheet with only the Tools tab it can fill — with the removal under it, since
+// removing a server is its own feature and doesn't need the block. The `info` answer is the only
 // thing that changes; nothing logs an error.
 import { app, assert, flow, pass } from "./lib.mjs"
 
@@ -132,6 +133,12 @@ const run = async ({ page, profileId, shot }) => {
   await page.getByRole("tab", { name: "Tools" }).waitFor({ timeout: 15_000 })
   assert.equal(await page.getByRole("tab", { name: "Config" }).count(), 0, "no Config tab")
   assert.equal(await page.getByRole("tab", { name: "Tools" }).count(), 1, "the Tools tab alone")
+  // Removal is advertised on its own, so the sheet carries it where it has no Config tab to put it in.
+  assert.equal(
+    await page.getByRole("button", { name: "Remove server" }).count(),
+    1,
+    "a Host that can remove a server without describing one still offers the removal",
+  )
   await shot("tools-only")
 
   assert.deepEqual(errors, [], `no error in the console (${errors.join("; ")})`)
@@ -139,5 +146,5 @@ const run = async ({ page, profileId, shot }) => {
 
 await flow("mcps-gate", run)
 pass(
-  "a Bot whose plugin answers without `mcps` has no MCP tab and its tab URL returns to General, one that lists servers without `mcps_write` lists them with no switch, one without `mcps_remove` keeps its rows and offers no removal in Config, one with no Catalogue offers only a custom server to add, one that has a Catalogue but can't add from one offers no Add action, one without `mcps_config` opens Tools alone, and no error is logged",
+  "a Bot whose plugin answers without `mcps` has no MCP tab and its tab URL returns to General, one that lists servers without `mcps_write` lists them with no switch, one without `mcps_remove` keeps its rows and offers no removal in Config, one with no Catalogue offers only a custom server to add, one that has a Catalogue but can't add from one offers no Add action, one without `mcps_config` opens Tools alone with the removal still under it, and no error is logged",
 )

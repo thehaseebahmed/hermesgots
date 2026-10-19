@@ -2390,6 +2390,23 @@ class McpCustomTests(unittest.TestCase):
                 mcp.custom("bot-a", {"name": "theirs", "url": "https://theirs.example/mcp"})
         self.assertEqual(400, caught.exception.status)
 
+    def test_a_custom_add_needs_no_header_token_writer_but_its_header_field_does(self):
+        """The gate ``info`` advertises a custom add under is the add's, not the save's (see
+        ``addable`` and ``_CONFIGURE``): a Host without Hermes's bearer writer still adds a stdio
+        server, and answers its own 501 only for the one field that writer is for.
+        """
+        stubs = hermes(reconcile=[])
+        del stubs["hermes_cli.mcp_config"]._save_bearer_auth_token
+        with mock.patch.dict(sys.modules, stubs):
+            mcp.custom("bot-a", {"name": "github", "command": "npx"})
+            with self.assertRaises(mcp.McpError) as caught:
+                mcp.custom(
+                    "bot-a",
+                    {"name": "ink", "url": "https://ink.example/mcp", "auth": "header", "token": "t"},
+                )
+        self.assertEqual(501, caught.exception.status)
+        self.assertEqual({"command": "npx"}, stubs["hermes_cli.mcp_config"]._get_mcp_servers()["github"])
+
     def test_a_name_and_one_transport_are_required(self):
         with mock.patch.dict(sys.modules, hermes(reconcile=[])):
             for body in ({"url": "https://x.example/mcp"}, {"name": "ink"}, {"name": "ink", "url": "https://x.example/mcp", "command": "npx"}):
@@ -2419,9 +2436,8 @@ class McpToolsTests(unittest.TestCase):
             found = mcp.tools("bot-a", "pg")
         self.assertEqual(
             {
-                "name": "pg",
                 "cached": True,
-                "tools": [
+                "items": [
                     {"name": "query", "description": "Run a query."},
                     {"name": "schema", "description": ""},
                 ],
@@ -2432,14 +2448,14 @@ class McpToolsTests(unittest.TestCase):
     def test_a_server_with_no_cache_entry_answers_nothing(self):
         with mock.patch.dict(sys.modules, hermes(servers={"pg": {"command": "srv"}})):
             found = mcp.tools("bot-a", "pg")
-        self.assertEqual({"name": "pg", "cached": False, "tools": []}, found)
+        self.assertEqual({"cached": False, "items": []}, found)
 
     def test_a_stale_cache_entry_is_a_miss(self):
         stubs = hermes(servers={"pg": {"command": "srv"}}, cached={"pg": {"fingerprint": "url", "tools": [{"name": "q"}]}})
         with mock.patch.dict(sys.modules, stubs):
             found = mcp.tools("bot-a", "pg")
         self.assertIs(False, found["cached"])
-        self.assertEqual([], found["tools"])
+        self.assertEqual([], found["items"])
 
     def test_a_plugin_provided_servers_tools_are_read_too(self):
         stubs = hermes(
@@ -2449,7 +2465,7 @@ class McpToolsTests(unittest.TestCase):
         )
         with mock.patch.dict(sys.modules, stubs):
             found = mcp.tools("bot-a", "theirs")
-        self.assertEqual("their_tool", found["tools"][0]["name"])
+        self.assertEqual("their_tool", found["items"][0]["name"])
 
     def test_the_probe_answers_what_the_server_offers(self):
         stubs = hermes(
@@ -2461,9 +2477,11 @@ class McpToolsTests(unittest.TestCase):
             found = mcp.probe_tools("bot-a", "pg")
         self.assertEqual(
             {
-                "name": "pg",
                 "cached": False,
-                "tools": [{"name": "query", "description": "Run a query."}, {"name": "schema", "description": ""}],
+                "items": [
+                    {"name": "query", "description": "Run a query."},
+                    {"name": "schema", "description": ""},
+                ],
             },
             found,
         )

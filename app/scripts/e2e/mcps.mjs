@@ -1,8 +1,8 @@
 // A Bot's MCP servers, as a tab of its own settings at /settings/bots/<botId>/mcps: Add a server on
 // top, then the servers the bot's own config holds under "Your servers", then the ones a Hermes
 // plugin provides under "From plugins". Every row is its name over its health — a tool count where
-// Hermes reports one, Off, Connecting…, the Host's own sentence on a failure, and Needs
-// Authentication on a server waiting for Server access — and carries no state badge. Flipping a
+// Hermes reports one, Off, Connecting…, the Host's own sentence on a failure, and Click here to
+// authenticate on a server waiting for Server access — and carries no state badge. Flipping a
 // switch writes it and the row's health follows. The tab is a history entry of its own, so back
 // returns to General. A Bot with no servers shows the Add row and no heading at all. Phone and
 // tablet, light and dark.
