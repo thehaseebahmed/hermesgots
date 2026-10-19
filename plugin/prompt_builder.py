@@ -49,8 +49,6 @@ _PR_INSTRUCTIONS = (
     "and 'status' reports without writing. Merging and closing are the user's decision: the tool "
     "refuses them, "
 )
-# What settles that decision, by kind of run: a session with the user there says to ask, since the
-# tool won't merge for them; an AFK run has nobody to ask, so the pull request says it is ready.
 _MERGE_ASK = "so ask the user with clarify instead."
 _MERGE_READY = (
     "and nobody is here to be asked, so say in the pull request that it is ready to merge and "
@@ -102,7 +100,6 @@ The rules:
 
 
 def _pr_instructions(unattended: bool) -> str:
-    """The shipping rules, with the merge question settled the way this run can settle it."""
     return _PR_INSTRUCTIONS + (_MERGE_READY if unattended else _MERGE_ASK)
 
 
@@ -110,9 +107,6 @@ def session_prompt(record: Dict[str, Any], unattended: bool = False) -> str:
     """What the run's system prompt tells the agent: its worktrees (fixed per session), where its
     generated files go, how to keep the user in the loop as it works, how to open its pull request
     and the repos' templates and, in plan mode, the shape of the plan.
-
-    ``unattended`` is an AFK run's: the one instruction that would have the agent ask the user about
-    merging instead tells it to say the pull request is ready, since there is nobody to answer.
     """
     worktrees = _worktree_line(record)
     lines = [
@@ -139,8 +133,13 @@ def afk_prompt(record: Dict[str, Any], task: Dict[str, Any]) -> str:
     return "\n\n".join(line for line in lines if line)
 
 
+def afk_input(task: Dict[str, Any]) -> str:
+    """The run's input: one line naming the issue and where it is, never its text (ADR 0011)."""
+    url = tasks.issue_url(task)
+    return f"Implement Issue #{task.get('number')}" + (f" ({url})" if url else "")
+
+
 def _afk_task_line(task: Dict[str, Any]) -> str:
-    """The one line that is the task's: what to implement, and where its own text is."""
     repo, number = task.get("repo"), task.get("number")
     url = tasks.issue_url(task)
     where = f" ({url})" if url else ""

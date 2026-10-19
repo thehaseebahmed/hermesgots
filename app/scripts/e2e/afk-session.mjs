@@ -18,7 +18,6 @@ const run = async ({ page, profileId, shot, until }) => {
   const screen = `${app}/projects/${profileId}/${await makeProject(until, "AFK session")}`
   const control = () => page.getByRole("switch", { name: "Work on its own" })
 
-  // Turning it on has the host claim the oldest task and start the session that works it.
   await openAfk(page, screen)
   await control().waitFor({ timeout: 15_000 })
   await control().click()
@@ -28,8 +27,6 @@ const run = async ({ page, profileId, shot, until }) => {
     "the switch to read on",
   )
 
-  // The session appears where sessions are listed, titled after the task and marked as AFK's. Code
-  // lists newest first, so the first row titled after the task is the one this pass just published.
   await page.goto(`${app}/code`)
   const row = page.locator("a", { hasText: TITLE }).first()
   await row.waitFor({ timeout: 15_000 })
@@ -40,8 +37,6 @@ const run = async ({ page, profileId, shot, until }) => {
   )
   await shot("code")
 
-  // It opens, and the thread begins with the issue and its url — its text is the run's
-  // instructions, so it isn't a message.
   await row.click()
   await page.waitForURL("**/c/**")
   const messages = page.locator('[aria-label="Messages"]')
@@ -55,8 +50,6 @@ const run = async ({ page, profileId, shot, until }) => {
   await page.waitForTimeout(450)
   await shot("session")
 
-  // The record carries the session's mode, which the app pushes back to the host's workspace — the
-  // one the plugin made for the task — so nothing here is refused or ignored.
   assert.deepEqual(errors, [], `no console error (${errors.join("; ")})`)
 }
 

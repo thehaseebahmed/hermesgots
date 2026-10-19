@@ -54,11 +54,6 @@ SHOWN = ("repo", "number", "title", "url", "created_at", "assignees", "blockers"
 
 
 def issue_url(task: Dict[str, Any]) -> str:
-    """Where the task's issue is: the url the read filled in, else GitHub's own address for it.
-
-    A row read from the tracker carries the issue's url; one held from an older sweep may not, and a
-    repository's issue address is the same page.
-    """
     url = task.get("url")
     if url:
         return str(url)

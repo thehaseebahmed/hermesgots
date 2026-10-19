@@ -971,7 +971,6 @@ const mockTask = (repo, number, title, extra = {}) => ({
   blockers: [],
   ...extra,
 })
-/** A session's workspace record: a worktree and branch per repository, its mode and files folder. */
 const workspaceRecord = (project, { sessionId, slug, mode }) => {
   const repos = project.folders
     .filter((folder) => folder.git)
@@ -1040,17 +1039,10 @@ function afkTask(project) {
   }
 }
 
-/**
- * The session the sweep starts for the task it claimed, as the plugin publishes it: its workspace
- * (its own worktree and branch, mode auto), its own chat record (`afk`, auto, its title, newer
- * updated than created — the Code list hides the rest) and the transcript's first row, which names
- * the issue and where it is rather than quoting it.
- */
 function afkSession(project) {
   const held = afkTask(project)
   const session = `memento-afk-${project.id}`
   const title = `#${held.number} ${held.title}`
-  // The run's input, as the plugin sends it: the issue and its url, never its text.
   const input = `Implement Issue #${held.number} (${held.url})`
   const now = Date.now()
   if (project.folders.some((f) => f.git))
@@ -1077,7 +1069,6 @@ function afkSession(project) {
   noteEvent("chats")
 }
 
-/** The sweep, once per project: the task claimed and the session that will work it. */
 function afkSweep(project) {
   if (afkSwept.has(project.id)) return
   afkSwept.add(project.id)
@@ -3229,8 +3220,6 @@ http
         }
         return json(res, 200, afkAnswer(found, reason))
       }
-      // The sweep the switch woke has run by the next read, so this one holds the task it claimed —
-      // and has published the session that works it, as the plugin does.
       if (afkProjects.has(found.id)) afkSweep(found)
       return json(res, 200, afkAnswer(found, reason))
     }

@@ -1,9 +1,3 @@
-"""What an AFK session's run is told: how to work a planned issue with nobody to ask (ADR 0011).
-
-The prompt is `prompt_builder`'s, because one module owns every word the agent is told — the issue's
-own text is the one thing deliberately absent, since the agent fetches it from GitHub itself.
-"""
-
 import unittest
 from typing import Any, Dict
 
@@ -89,7 +83,6 @@ class AfkPromptTests(unittest.TestCase):
         self.assertIn("/checkout/files/afk-265", text, "and where its generated files go")
 
     def test_a_run_with_nobody_to_ask_says_the_pull_request_is_ready(self) -> None:
-        """The shipping paragraph's merge sentence, settled for a run with nobody in it."""
         text = self.text()
         self.assertIn("it is ready to merge", text)
         self.assertNotIn("ask the user with clarify", text)

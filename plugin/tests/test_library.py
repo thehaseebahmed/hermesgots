@@ -369,8 +369,7 @@ class InstructionsTest(unittest.TestCase):
         app = Path(__file__).resolve().parents[2] / "app"
         mock_js = (app / "scripts" / "mock-hermes.mjs").read_text()
         for name, block in (
-            # The attended text, which is the one a mock session with a user gets.
-            ("PR_INSTRUCTIONS", prompt_builder._pr_instructions(False)),
+            ("PR_INSTRUCTIONS", prompt_builder._pr_instructions(unattended=False)),
             ("DONE_INSTRUCTIONS", prompt_builder._DONE_INSTRUCTIONS),
             ("PROGRESS_UPDATES_INSTRUCTIONS", prompt_builder._PROGRESS_UPDATES_INSTRUCTIONS),
         ):

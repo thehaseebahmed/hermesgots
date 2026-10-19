@@ -51,7 +51,6 @@ ARCHIVED = "This project is archived."
 # How often a project left on is swept for work. A GitHub refusal ends that sweep and the next one
 # waits for its turn rather than asking again at once.
 SWEEP_SECONDS = 180
-# What a held task keeps: enough to show it, and to name the session that works it.
 HELD = ("repo", "number", "title", "url", "created_at")
 
 _loop: Optional[asyncio.AbstractEventLoop] = None
@@ -192,19 +191,11 @@ def sweep(
 
 
 def new_session_id() -> str:
-    """A session id Gots's own hooks label and the app opens: its minted chats' prefix, AFK's own."""
     return f"{sessions.MEMENTO_ID_PREFIX}afk-{uuid.uuid4().hex[:12]}"
 
 
 def title(task: Dict[str, Any]) -> str:
-    """The session's title, so the Code list says which task it is working."""
     return f"#{task.get('number')} {task.get('title') or ''}".strip()
-
-
-def first_line(task: Dict[str, Any]) -> str:
-    """The run's input: one line naming the issue and where it is, never its text (ADR 0011)."""
-    url = tasks.issue_url(task)
-    return f"Implement Issue #{task.get('number')}" + (f" ({url})" if url else "")
 
 
 def run_body(record: Dict[str, Any], task: Dict[str, Any]) -> Dict[str, Any]:
@@ -216,7 +207,7 @@ def run_body(record: Dict[str, Any], task: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "session_id": record["session_id"],
         "instructions": prompt_builder.afk_prompt(record, task),
-        "input": [{"role": "user", "content": first_line(task)}],
+        "input": [{"role": "user", "content": prompt_builder.afk_input(task)}],
     }
 
 

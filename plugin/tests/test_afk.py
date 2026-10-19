@@ -502,14 +502,6 @@ class ClaimTests(unittest.TestCase):
 
 
 class SessionTests(unittest.TestCase):
-    """A claimed task worked in a session of its own: the record it publishes and the run it starts.
-
-    Session creation is Hermes's (``sessions.ensure``) and the run is Hermes's (``outbox.post``), so
-    both are patched; what's asserted is what the plugin publishes — the chat record every device
-    reads the session from, and the run's request — because that record is what makes the session
-    visible and openable at all (ADR 0013).
-    """
-
     def setUp(self) -> None:
         self.tmp = TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -635,7 +627,6 @@ class SessionTests(unittest.TestCase):
         self.assertNotIn("model", posted["body"], "no model picked: the host's own runs")
 
     def test_a_key_in_the_homes_own_env_is_the_one_the_run_is_posted_with(self) -> None:
-        """Not the process's key: the sweep runs for every home the gateway serves."""
         self.home.joinpath(".env").write_text("API_SERVER_KEY=home-key\n")
         self.start()
         self.assertEqual(self.posted[0]["authorization"], "Bearer home-key")
@@ -662,7 +653,6 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(self.chats(), {}, "and nothing is published to be opened")
 
     def test_the_sweep_answers_the_task_it_just_claimed(self) -> None:
-        """The loop starts the session from what the sweep returns, not from a second read."""
         with TemporaryDirectory() as tmp:
             home = Path(tmp)
             checkout = home / "checkout"
@@ -736,7 +726,6 @@ class SweepAllTests(unittest.TestCase):
 
 
 class LoopTests(unittest.TestCase):
-    """What the background loop does with what it swept: a session per claimed task."""
 
     def setUp(self) -> None:
         self.tmp = TemporaryDirectory()
