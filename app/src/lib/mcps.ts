@@ -15,11 +15,15 @@
  * hasn't answered yet is left to answer rather than flashing its screen away. A plugin without the
  * route is left alone like every other optional one.
  */
-import { useCallback, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 
 import { connectionKey, serverConfig } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
-import { usePluginFeatureAnswers, type PluginFeatureAnswer } from "@/lib/features"
+import {
+  usePluginFeatureAnswers,
+  type PluginFeatureAnswer,
+  type PluginServer,
+} from "@/lib/features"
 import {
   MCP_ACCESS_MS,
   MCP_INSTALL_MS,
@@ -43,13 +47,10 @@ import {
   saveMcpServer,
   setMcpServerEnabled,
   startMcpAccess,
-  type HermesConfig,
   type McpAccess,
   type McpCatalogueEntry,
-  type McpCatalogueEntryDetail,
   type McpCustomServer,
   type McpServer,
-  type McpServerDetail,
   type McpServerEdit,
   type McpTools,
 } from "@/lib/hermes"
@@ -76,8 +77,8 @@ export const MCP_FEATURES = {
 /** What each of those features this Bot's Host answered (see `McpFeatureAnswer`). */
 export type McpFeatureAnswers = Record<keyof typeof MCP_FEATURES, McpFeatureAnswer>
 
-/** A bot's server as the client takes it: one of a profile or of a Hermes plugin beside it. */
-export type McpServerConfig = Pick<HermesConfig, "baseUrl" | "apiKey"> | null | undefined
+/** A bot's server as the client takes it: the shape every feature hook already names. */
+export type McpServerConfig = PluginServer
 
 /**
  * Whether the screen must keep reading: a server the Host is still starting gets there on its own.
@@ -123,13 +124,12 @@ export function useMcpFeatureAnswers(server: McpServerConfig): McpFeatureAnswers
   return usePluginFeatureAnswers(server, MCP_FEATURES)
 }
 
-/** What this Bot's plugin answered about its MCP servers (see `McpFeatureAnswer`). */
 /** Bots whose plugin has no `mcp` route (an older plugin), each left alone for a while. */
 const unsupported = cooldown()
 
 /**
- * The Bot's MCP servers, read once when the screen opens and again only while one is connecting or
- * waiting on Server access. Undefined until a read lands; a read that fails leaves what the screen
+ * The Bot's MCP servers, read once when the screen opens and again only while one is connecting, or
+ * while `watching` says the Server access sheet the screen opened is still waiting on one. Undefined until a read lands; a read that fails leaves what the screen
  * has, since an unreachable Host must not take the screen down with it. `setEnabled` switches one
  * server on or off on the Host and replaces its row with the state the change landed in, while
  * `remove` takes one away and `install` adds one from the Catalogue, each replacing the list with the
@@ -138,17 +138,22 @@ const unsupported = cooldown()
  */
 export function useMcpServers(server: McpServerConfig, active: boolean, watching = false) {
   const [servers, setServers] = useState<McpServer[] | undefined>(undefined)
+  // The interval changes with what the screen is doing, and `usePoll` reads at once when its
+  // interval changes — so a sheet opening or closing would re-read a list that is a second old.
+  const readAt = useRef(0)
   const config = serverConfig(server)
   const { baseUrl, apiKey } = config
   const key = baseUrl && apiKey ? connectionKey(config) : ""
   usePoll(
     (signal) => {
       if (unsupported.cooling(key)) return
+      if (Date.now() - readAt.current < MCP_WORK_MS / 2) return
       landRead(
         () => listMcpServers(config, signal),
         signal,
         (next) => {
           unsupported.clear(key)
+          readAt.current = Date.now()
           setServers(next)
         },
         (error) => {
@@ -220,13 +225,14 @@ export function useMcpServers(server: McpServerConfig, active: boolean, watching
     async (name: string, edit: McpServerEdit) => {
       // A block save is a config write and the Host's reconcile, which can back off, so it is given
       // what an add is rather than a switch's write; the Host's own answer is what the list becomes.
-      const left = await saveMcpServer(
+      const { servers: left, detail } = await saveMcpServer(
         { baseUrl, apiKey },
         name,
         edit,
         AbortSignal.timeout(MCP_SAVE_MS),
       )
       setServers(left)
+      return detail
     },
     [baseUrl, apiKey],
   )
@@ -242,10 +248,17 @@ export function useMcpServers(server: McpServerConfig, active: boolean, watching
     [baseUrl, apiKey],
   )
   const grant = useCallback(
-    async (name: string): Promise<McpAccess> =>
+    async (name: string, abandoned?: AbortSignal): Promise<McpAccess> =>
       // The Host discovers the provider and waits for its authorization URL before answering, which
-      // is longer than a write: a start that never produces one is given up on rather than hanging.
-      startMcpAccess({ baseUrl, apiKey }, name, AbortSignal.timeout(MCP_ACCESS_MS)),
+      // is longer than a write: a start that never produces one is given up on rather than hanging —
+      // as is one whose sheet was dismissed while it was starting.
+      startMcpAccess(
+        { baseUrl, apiKey },
+        name,
+        abandoned
+          ? AbortSignal.any([abandoned, AbortSignal.timeout(MCP_ACCESS_MS)])
+          : AbortSignal.timeout(MCP_ACCESS_MS),
+      ),
     [baseUrl, apiKey],
   )
   const deliver = useCallback(
@@ -292,41 +305,92 @@ export function useMcpCatalogue(server: McpServerConfig, active: boolean) {
  * as an empty stub. An answer for a different server is never handed back, and nothing is written by
  * reading this.
  */
-export function useMcpServerDetail(
+/**
+ * One named thing read while its sheet is open — the shape both a server's block and a catalogue
+ * entry's values take: opening the sheet is the whole trigger, the read is bounded by
+ * `READ_TIMEOUT_MS` (a Host that accepted the connection and went quiet can't hold the sheet), an
+ * answer for a different name is never handed back, and `reload` asks again after a flow wrote it.
+ */
+function useReadOnOpen<T extends { name: string }>(
   server: McpServerConfig,
   name: string | undefined,
   active: boolean,
-): { detail?: McpServerDetail; failed: boolean; reload: () => void } {
-  const [detail, setDetail] = useState<McpServerDetail | undefined>(undefined)
+  read: (
+    config: { baseUrl: string; apiKey: string },
+    name: string,
+    signal: AbortSignal,
+  ) => Promise<T | undefined>,
+  noting: string,
+) {
+  const [value, setValue] = useState<T | undefined>(undefined)
   const [failedFor, setFailedFor] = useState<string | undefined>(undefined)
   const [attempt, setAttempt] = useState(0)
   const config = serverConfig(server)
   const key = config.baseUrl && config.apiKey ? connectionKey(config) : ""
   usePoll(
     (signal) => {
+      const bounded = AbortSignal.any([signal, AbortSignal.timeout(READ_TIMEOUT_MS)])
       landRead(
-        () => getMcpServer(config, name ?? "", signal),
-        signal,
+        () => read({ baseUrl: config.baseUrl, apiKey: config.apiKey }, name ?? "", bounded),
+        bounded,
         (found) => {
-          setDetail(found)
+          setValue(found)
           setFailedFor(undefined)
         },
         (error) => {
           setFailedFor(name)
-          noteFailure("Reading a server's configuration", error)
+          noteFailure(noting, error)
         },
       )
     },
     false,
     [key, name, attempt],
-    // Opening the sheet is the whole trigger, as it is for a catalogue entry.
     { active: active && Boolean(key) && Boolean(name), onShow: false },
   )
   return {
-    detail: name !== undefined && detail?.name === name ? detail : undefined,
+    value: name !== undefined && value?.name === name ? value : undefined,
     failed: name !== undefined && failedFor === name,
     reload: () => setAttempt((count) => count + 1),
   }
+}
+
+/**
+ * One server's block: what the Config tab is built from, read when its sheet opens. Undefined until
+ * a read lands; `failed` says the read came back an error, so the tab can say so rather than
+ * standing there as an empty stub. Nothing is written by reading this.
+ */
+export function useMcpServerDetail(
+  server: McpServerConfig,
+  name: string | undefined,
+  active: boolean,
+) {
+  const { value, failed, reload } = useReadOnOpen(
+    server,
+    name,
+    active,
+    getMcpServer,
+    "Reading a server's configuration",
+  )
+  return { detail: value, failed, reload }
+}
+
+/**
+ * One catalogue entry with the values it declares: what the entry's form is built from, read when
+ * the form opens. Nothing is added by reading this.
+ */
+export function useMcpCatalogueEntry(
+  server: McpServerConfig,
+  name: string | undefined,
+  active: boolean,
+) {
+  const { value, failed } = useReadOnOpen(
+    server,
+    name,
+    active,
+    getMcpCatalogueEntry,
+    "Reading a catalogue entry",
+  )
+  return { entry: value, failed }
 }
 
 /**
@@ -341,6 +405,7 @@ export function useMcpServerTools(
   active: boolean,
 ) {
   const [found, setFound] = useState<McpTools | undefined>(undefined)
+  const [unread, setUnread] = useState(false)
   const [probing, setProbing] = useState(false)
   // The Host's own sentence for a probe it refused: the one tap that reaches the server says why,
   // rather than leaving a button that looks like nothing happened.
@@ -349,11 +414,18 @@ export function useMcpServerTools(
   const key = config.baseUrl && config.apiKey ? connectionKey(config) : ""
   usePoll(
     (signal) => {
+      const bounded = AbortSignal.any([signal, AbortSignal.timeout(READ_TIMEOUT_MS)])
       landRead(
-        () => listMcpServerTools(config, name ?? "", signal),
-        signal,
-        setFound,
-        (error) => noteFailure("Reading a server's tools", error),
+        () => listMcpServerTools(config, name ?? "", bounded),
+        bounded,
+        (tools) => {
+          setFound(tools)
+          setUnread(false)
+        },
+        (error) => {
+          setUnread(true)
+          noteFailure("Reading a server's tools", error)
+        },
       )
     },
     false,
@@ -365,6 +437,7 @@ export function useMcpServerTools(
     setProbing(true)
     setFailed(undefined)
     try {
+      setUnread(false)
       setFound(
         await probeMcpServerTools(
           { baseUrl: config.baseUrl, apiKey: config.apiKey },
@@ -378,48 +451,12 @@ export function useMcpServerTools(
       setProbing(false)
     }
   }, [config.baseUrl, config.apiKey, name])
-  return { tools: found, probing, failed, probe }
-}
-
-/**
- * One of those entries with the values it declares, read when its form is opened and again each time
- * it is opened: what the form is built from. `entry` is undefined until a read lands, and `failed`
- * says the read that was meant to answer it came back an error — so the form can say so rather than
- * standing there as an empty stub. An answer for a different entry is not handed back: a form opened
- * on one entry must never draw the values of the entry before it, and nothing is added by reading
- * this.
- */
-export function useMcpCatalogueEntry(
-  server: McpServerConfig,
-  name: string | undefined,
-  active: boolean,
-): { entry?: McpCatalogueEntryDetail; failed: boolean } {
-  const [entry, setEntry] = useState<McpCatalogueEntryDetail | undefined>(undefined)
-  const [failedFor, setFailedFor] = useState<string | undefined>(undefined)
-  const config = serverConfig(server)
-  const key = config.baseUrl && config.apiKey ? connectionKey(config) : ""
-  usePoll(
-    (signal) => {
-      landRead(
-        () => getMcpCatalogueEntry(config, name ?? "", signal),
-        signal,
-        (found) => {
-          setEntry(found)
-          setFailedFor(undefined)
-        },
-        (error) => {
-          setFailedFor(name)
-          noteFailure("Reading a catalogue entry", error)
-        },
-      )
-    },
-    false,
-    [key, name],
-    // Opening a form is the whole trigger, as it is for the Catalogue itself.
-    { active: active && Boolean(key) && Boolean(name), onShow: false },
-  )
   return {
-    entry: name !== undefined && entry?.name === name ? entry : undefined,
-    failed: name !== undefined && failedFor === name,
+    tools: found,
+    probing,
+    // The read that answers the tab before anything is tapped, and the probe's own sentence: both
+    // said, so an empty tab never reads as one still loading.
+    failed: failed ?? (unread ? "Couldn't read this server's tools." : undefined),
+    probe,
   }
 }

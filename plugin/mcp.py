@@ -119,27 +119,54 @@ class McpError(Exception):
         self.status = status
 
 
-# Where Hermes's own MCP built-ins live, by the name this module asks for them. One row per flow's
-# set: the sets nest, because a flow that writes answers with what it reads, and a host can have the
-# readers without the writers — which is why they are apart rather than one list. A key that names a
-# scope says which scope that flow's work runs inside: the read scope for a read, the config write
-# scope for anything that lands in the profile's config.
-_READ: Dict[str, Tuple[str, str]] = {
-    "scope": ("hermes_cli.web_server_profiles", "_config_profile_scope"),
+# Where Hermes's own MCP built-ins live, by the name this module asks for them. Each group is declared
+# once and each flow states the groups it actually touches: a flow that writes needs the writers, and
+# a host can have the readers without them — which is why the gates are apart rather than one list. A
+# missing built-in answers 501 for that flow alone, so a gate must never name something its own work
+# never calls: a host that moved an unused symbol would lose a feature that would have worked.
+_PROFILE_SCOPE: Dict[str, Tuple[str, str]] = {
+    "read_scope": ("hermes_cli.web_server_profiles", "_config_profile_scope"),
+}
+_CONFIG_SCOPE: Dict[str, Tuple[str, str]] = {
+    "write_scope": ("hermes_cli.web_routers._common", "config_write_scope"),
+}
+_SERVERS: Dict[str, Tuple[str, str]] = {
     "servers": ("hermes_cli.mcp_config", "_get_mcp_servers"),
     "sources": ("tui_gateway.mcp_rpc_helpers", "server_configs_with_sources"),
+}
+# What a row's own state costs: the status word, and whether an OAuth access is stored.
+_STATUS: Dict[str, Tuple[str, str]] = {
     "status": ("tools.mcp_tool_discovery", "get_mcp_status"),
     "tokens_present": ("hermes_cli.mcp_config", "_oauth_tokens_present"),
 }
+# Landing one server's block: Hermes's writer and validator, and the environment write with its name
+# guard, so a configuration never holds a credential of its own.
+_BLOCK: Dict[str, Tuple[str, str]] = {
+    "save_server": ("hermes_cli.mcp_config", "_save_mcp_server"),
+    "validate": ("hermes_cli.mcp_security", "validate_mcp_server_entry"),
+    "get_env": ("hermes_cli.config", "get_env_value"),
+    "save_env": ("hermes_cli.config", "save_env_value"),
+    "check_name": ("hermes_cli.config", "validate_env_var_name_for_write"),
+}
+_RECONCILE: Dict[str, Tuple[str, str]] = {
+    "reconcile": ("tools.mcp_tool_discovery", "reconcile_mcp_servers_with_config"),
+}
 
-# The switch's set: the read scope becomes the config write scope, and the reconcile makes a change
-# live for the bot's next turn.
+# The tab's own read: the rows, and the state each one is drawn from.
+_READ: Dict[str, Tuple[str, str]] = {
+    **_PROFILE_SCOPE,
+    **_SERVERS,
+    **_STATUS,
+}
+
+# The switch's set: the config write scope, the config read and write that sets one flag, and the
+# reconcile that makes the change live for the bot's next turn.
 _WRITE: Dict[str, Tuple[str, str]] = {
     **_READ,
-    "scope": ("hermes_cli.web_routers._common", "config_write_scope"),
+    **_CONFIG_SCOPE,
+    **_RECONCILE,
     "load": ("hermes_cli.config", "load_config"),
     "save": ("hermes_cli.config", "save_config"),
-    "reconcile": ("tools.mcp_tool_discovery", "reconcile_mcp_servers_with_config"),
 }
 
 # A removal is the way ``hermes mcp remove`` takes one away: the writers, the catalogue's uninstall
@@ -151,7 +178,7 @@ _REMOVE: Dict[str, Tuple[str, str]] = {
 }
 
 _CATALOGUE: Dict[str, Tuple[str, str]] = {
-    "scope": ("hermes_cli.web_server_profiles", "_config_profile_scope"),
+    **_PROFILE_SCOPE,
     "list": ("hermes_cli.mcp_catalog", "list_catalog"),
     "installed": ("hermes_cli.mcp_catalog", "installed_servers"),
 }
@@ -159,42 +186,39 @@ _CATALOGUE: Dict[str, Tuple[str, str]] = {
 # Adding an entry: the writes that land it, the adding half of the catalogue — its entry read, the
 # block Hermes builds from a manifest (never ``install_entry``, which owns a terminal's prompts,
 # probe and curses checklist), the inlining that turns a non-secret value into the value the
-# manifest's ``${NAME}`` refs stand for — the validator whose own sentence the app shows, and the
-# profile's environment read and write with Hermes's guard on the names it persists.
+# manifest's ``${NAME}`` refs stand for — and the profile's environment write, so a secret only lands
+# once the block has.
 _INSTALL: Dict[str, Tuple[str, str]] = {
-    **_WRITE,
-    "read_scope": ("hermes_cli.web_server_profiles", "_config_profile_scope"),
-    "write_scope": ("hermes_cli.web_routers._common", "config_write_scope"),
+    **_PROFILE_SCOPE,
+    **_CONFIG_SCOPE,
+    **_SERVERS,
+    **_STATUS,
+    **_BLOCK,
+    **_RECONCILE,
     "installed": ("hermes_cli.mcp_catalog", "installed_servers"),
     "entry": ("hermes_cli.mcp_catalog", "get_entry"),
     "card": ("hermes_cli.mcp_catalog", "card_install_config"),
     "catalog_error": ("hermes_cli.mcp_catalog", "CatalogError"),
     "inline": ("hermes_cli.mcp_catalog", "_inline_non_secret_value"),
-    "save_server": ("hermes_cli.mcp_config", "_save_mcp_server"),
-    "validate": ("hermes_cli.mcp_security", "validate_mcp_server_entry"),
-    "get_env": ("hermes_cli.config", "get_env_value"),
-    "save_env": ("hermes_cli.config", "save_env_value"),
-    "check_name": ("hermes_cli.config", "validate_env_var_name_for_write"),
 }
 
-# One server's block: the writers, the validator, the environment writer and its name guard — and
-# the catalogue is deliberately not among them, since a server typed in by hand has no entry.
+# One server's block, as its sheet reads it and writes it: the catalogue is deliberately not among
+# them, since a server typed in by hand has no entry.
 _CONFIGURE: Dict[str, Tuple[str, str]] = {
-    **_WRITE,
-    "read_scope": ("hermes_cli.web_server_profiles", "_config_profile_scope"),
-    "write_scope": ("hermes_cli.web_routers._common", "config_write_scope"),
-    "save_server": ("hermes_cli.mcp_config", "_save_mcp_server"),
-    "validate": ("hermes_cli.mcp_security", "validate_mcp_server_entry"),
-    "get_env": ("hermes_cli.config", "get_env_value"),
-    "save_env": ("hermes_cli.config", "save_env_value"),
-    "check_name": ("hermes_cli.config", "validate_env_var_name_for_write"),
+    **_PROFILE_SCOPE,
+    **_CONFIG_SCOPE,
+    **_SERVERS,
+    **_STATUS,
+    **_BLOCK,
+    **_RECONCILE,
     "bearer": ("hermes_cli.mcp_config", "_save_bearer_auth_token"),
 }
 
-# The Tools tab: Hermes's schema cache, which connects nothing, and the probe a tap asks for.
+# The Tools tab: Hermes's schema cache, which connects nothing, and the probe a tap asks for. No
+# status and no stored access: reading a tool list never needs either.
 _TOOLS: Dict[str, Tuple[str, str]] = {
-    **_READ,
-    "read_scope": ("hermes_cli.web_server_profiles", "_config_profile_scope"),
+    **_PROFILE_SCOPE,
+    **_SERVERS,
     "fingerprint": ("tools.mcp_schema_cache", "config_fingerprint"),
     "cached": ("tools.mcp_schema_cache", "get_cached_entry"),
     "from_cache": ("tools.mcp_schema_cache", "tools_from_cache_entry"),
@@ -204,9 +228,8 @@ _TOOLS: Dict[str, Tuple[str, str]] = {
 
 # Server access: Hermes's non-blocking card start, which is newer than the read and the writers.
 _ACCESS: Dict[str, Tuple[str, str]] = {
-    "scope": ("hermes_cli.web_server_profiles", "_config_profile_scope"),
-    "servers": ("hermes_cli.mcp_config", "_get_mcp_servers"),
-    "sources": ("tui_gateway.mcp_rpc_helpers", "server_configs_with_sources"),
+    **_PROFILE_SCOPE,
+    **_SERVERS,
     "start": ("tools.connectors.mcp_oauth", "start"),
 }
 
@@ -297,7 +320,7 @@ def read(profile: Optional[str]) -> List[Dict[str, Any]]:
     a host without the built-ins raises ``McpError`` with a 501.
     """
     hermes = _hermes()
-    with hermes["scope"](profile):
+    with hermes["read_scope"](profile):
         return _all_rows(hermes)
 
 
@@ -317,11 +340,11 @@ def set_enabled(profile: Optional[str], name: str, enabled: bool) -> Dict[str, A
     the state the change lands in.
     """
     hermes = _hermes_write()
-    with hermes["scope"](profile):
+    with hermes["write_scope"](profile):
         _writable_server(hermes, name)
         _write_flag(hermes, name, enabled)
         hermes["reconcile"]()
-        servers, owners = hermes["sources"](hermes["servers"]())
+        servers, owners = _blocks(hermes)
         return _rows(hermes, servers, owners, only=name)[0]
 
 
@@ -342,7 +365,7 @@ def remove(profile: Optional[str], name: str) -> List[Dict[str, Any]]:
     shapes them, so the app's list is the Host's own answer rather than the row it dropped.
     """
     hermes = _hermes_remove()
-    with hermes["scope"](profile):
+    with hermes["write_scope"](profile):
         _writable_server(hermes, name)
         hermes["uninstall"](name, purge_install_dir=True)
         hermes["oauth"]().remove(name)
@@ -422,7 +445,7 @@ def detail(profile: Optional[str], name: str) -> Dict[str, Any]:
     """
     hermes = _hermes_configure()
     with hermes["read_scope"](profile):
-        servers, owners = hermes["sources"](hermes["servers"]())
+        servers, owners = _blocks(hermes)
         cfg = _server_block(servers, name)
         return _detail(name, cfg, bool(owners.get(name)), hermes)
 
@@ -444,21 +467,22 @@ def edit(profile: Optional[str], name: str, body: Dict[str, Any]) -> List[Dict[s
     and a server a Hermes plugin provides, or one the profile doesn't have, is refused the same way.
     Hermes's own reconcile follows, so the change is live for the bot's next turn.
 
-    ``profile`` is a profile name, or None for the process's own. Blocking — config I/O, the
-    environment write and a reconcile — so call it from a worker thread, never the event loop.
+    Answers the servers left and this one's block as it landed, so the screen that saved needs no
+    second read. ``profile`` is a profile name, or None for the process's own. Blocking — config
+    I/O, the environment write and a reconcile — so call it from a worker thread, never the event
+    loop.
     """
     hermes = _hermes_configure()
     with hermes["write_scope"](profile):
-        _writable_server(hermes, name)
-        servers, _ = hermes["sources"](hermes["servers"]())
+        servers, _ = _writable_server(hermes, name)
         block = _edited(hermes, name, _server_block(servers, name), body)
         return _write_block(hermes, name, block, body.get("values"))
 
 
 def _write_block(
     hermes: Dict[str, Any], name: str, block: Dict[str, Any], typed: Any
-) -> List[Dict[str, Any]]:
-    """Write one server's block and the values typed into it, then answer the servers left.
+) -> Dict[str, Any]:
+    """Write one server's block and the values typed into it, then answer what the write left.
 
     Call it inside the profile's write scope, after the name is known to be one this bot may change.
     Hermes's validator has the last word on the block; the values a form typed are the only ones
@@ -467,12 +491,28 @@ def _write_block(
     custom add, because both land a block the same way (ADR 0014).
     """
     values = _typed(hermes, typed)
+    return _land(hermes, name, block, values)
+
+
+def _land(
+    hermes: Dict[str, Any], name: str, block: Dict[str, Any], values: Dict[str, str]
+) -> Dict[str, Any]:
+    """Write one validated block and its checked values, reconcile, and answer what the write left.
+
+    Call it inside the profile's write scope, after the block is built and the values are checked.
+    Hermes's validator has the last word on the block; the values land in the profile's ``.env`` while
+    the block keeps its ``${NAME}`` reference, so no credential is ever part of a configuration. Both
+    the Config save and a Catalogue add land a block this way, so the order — the block first, and no
+    value written under a block Hermes refused — is stated once.
+    """
     if not hermes["save_server"](name, block):
         raise McpError(_refusal(hermes, name, block))
     for key, value in values.items():
         hermes["save_env"](key, value)
     hermes["reconcile"]()
-    return _all_rows(hermes)
+    # The servers left, and the block as the write landed it: the sheet that saved is looking at
+    # this server, and reading it again would be a second round trip for a fact this call holds.
+    return {"servers": _all_rows(hermes), "server": _detail(name, block, False, hermes)}
 
 
 def custom(profile: Optional[str], body: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -520,7 +560,8 @@ def tools(profile: Optional[str], name: str) -> Dict[str, Any]:
     """
     hermes = _hermes_tools()
     with hermes["read_scope"](profile):
-        cfg = _server_block(hermes["sources"](hermes["servers"]())[0], name)
+        servers, _ = _blocks(hermes)
+        cfg = _server_block(servers, name)
         entry = hermes["cached"](name, hermes["fingerprint"](cfg))
         if not entry:
             return {"name": name, "cached": False, "tools": []}
@@ -541,16 +582,13 @@ def probe_tools(profile: Optional[str], name: str) -> Dict[str, Any]:
     """
     hermes = _hermes_tools()
     with hermes["read_scope"](profile):
-        cfg = _server_block(hermes["sources"](hermes["servers"]())[0], name)
+        servers, _ = _blocks(hermes)
+        cfg = _server_block(servers, name)
         try:
             found = hermes["probe"](name, cfg)
         except Exception as error:  # noqa: BLE001 - Hermes raises whatever its transport did
             raise McpError(_probe_reason(hermes, name, error), 400) from error
-        return {
-            "name": name,
-            "cached": False,
-            "tools": [{"name": str(tool), "description": str(text or "")} for tool, text in found],
-        }
+        return {"name": name, "cached": False, "tools": _tool_rows(found)}
 
 
 def _hermes_configure() -> Dict[str, Any]:
@@ -565,6 +603,17 @@ def _hermes_tools() -> Dict[str, Any]:
 
 # A value's content, when the block holds a reference rather than the value itself.
 _REFERENCE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
+
+
+def _blocks(hermes: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """The profile's servers and who provides each one: two calls, read as one.
+
+    Hermes's ``servers()`` answers the merged configuration and ``sources()`` says which of them a
+    plugin provides; nothing here wants one without the other, and reading them apart cost a second
+    config load and a second plugin discovery on every request.
+    """
+    servers, owners = hermes["sources"](hermes["servers"]())
+    return servers, owners
 
 
 def _server_block(servers: Dict[str, Any], name: str) -> Dict[str, Any]:
@@ -711,12 +760,20 @@ def _typed(hermes: Dict[str, Any], values: Any) -> Dict[str, str]:
     return typed
 
 
+# The path segments the MCP routes answer before they reach one server's own name. A server named
+# one of these would be shadowed by that route — `GET mcp/catalogue` is the Catalogue, not a server —
+# so a custom add may not take one.
+_RESERVED = ("catalogue", "custom", "install")
+
+
 def _new_name(hermes: Dict[str, Any], raw: Any) -> str:
     """The name a custom add will use, or the 400 that refuses it before anything is built."""
     name = raw.strip() if isinstance(raw, str) else ""
     if not name:
         raise McpError("A server needs a name.", 400)
-    servers, owners = hermes["sources"](hermes["servers"]())
+    if name in _RESERVED:
+        raise McpError(f"{name!r} is a word this plugin's own routes answer, so it can't name a server.", 400)
+    servers, owners = _blocks(hermes)
     if owners.get(name):
         raise McpError(f"{name} is provided by a Hermes plugin, so it can't be added.", 400)
     if name in servers:
@@ -724,16 +781,23 @@ def _new_name(hermes: Dict[str, Any], raw: Any) -> str:
     return name
 
 
-def _tool_rows(found: List[Any]) -> List[Dict[str, Any]]:
-    """Hermes's cached tool dicts as the list is drawn from them: a name and what it does."""
+def _tool_rows(found: Any) -> List[Dict[str, Any]]:
+    """A tool list as the app draws it — a name and what it does — from either answer Hermes gives.
+
+    The schema cache hands back dicts and the probe hands back ``(name, description)`` pairs, so the
+    one rule about a tool with no name (it is dropped) and the one row shape live here rather than in
+    each reader.
+    """
     rows = []
-    for tool in found:
-        if not isinstance(tool, dict):
+    for tool in found or []:
+        if isinstance(tool, dict):
+            name, description = tool.get("name"), tool.get("description")
+        elif isinstance(tool, (list, tuple)) and tool:
+            name, description = tool[0], tool[1] if len(tool) > 1 else ""
+        else:
             continue
-        name = tool.get("name")
         if not isinstance(name, str) or not name:
             continue
-        description = tool.get("description")
         rows.append({"name": name, "description": description if isinstance(description, str) else ""})
     return rows
 
@@ -767,8 +831,8 @@ def start_access(profile: Optional[str], name: str) -> Dict[str, Any]:
     action only where ``_grantable`` says so, which is the same rule the row carries.
     """
     hermes = _hermes_access()
-    with hermes["scope"](profile):
-        servers, owners = hermes["sources"](hermes["servers"]())
+    with hermes["read_scope"](profile):
+        servers, owners = _blocks(hermes)
         cfg = servers.get(name)
         if not isinstance(cfg, dict):
             raise McpError(f"No MCP server named {name!r} on this bot.", 400)
@@ -900,7 +964,7 @@ def catalogue(profile: Optional[str]) -> List[Dict[str, Any]]:
     browsing half of adding a server, and opening it cannot change the bot.
     """
     hermes = _hermes_catalogue()
-    with hermes["scope"](profile):
+    with hermes["read_scope"](profile):
         servers = hermes["installed"]()
         entries = [_catalogue_entry(entry, servers) for entry in hermes["list"]()]
     return sorted(entries, key=lambda entry: entry["name"])
@@ -1003,12 +1067,7 @@ def install(profile: Optional[str], name: str, values: Dict[str, str]) -> List[D
         secret = {key: value for key, value in collected.items() if key in secrets}
         for key, value in plain.items():
             block = hermes["inline"](block, key, value)
-        if not hermes["save_server"](name, block):
-            raise McpError(_refusal(hermes, name, block))
-        for key, value in secret.items():
-            hermes["save_env"](key, value)
-        hermes["reconcile"]()
-        return _all_rows(hermes)
+        return _land(hermes, name, block, secret)["servers"]
 
 
 def _entry(hermes: Dict[str, Any], name: str) -> Any:
@@ -1088,17 +1147,12 @@ def _collected(
     for key in values:
         if key not in names:
             raise McpError(f"{name} does not declare the value {key}.", 400)
-    for key in values:
-        try:
-            hermes["check_name"](key)
-        except ValueError as error:
-            raise McpError(str(error), 400) from error
-    collected: Dict[str, str] = {}
+    # The save's own check — a value of spaces is nothing given, a name Hermes's writer refuses is a
+    # 400 — so an add and a save can't disagree about what counts as a value.
+    typed = _typed(hermes, values)
+    collected: Dict[str, str] = dict(typed)
     for value in declared:
-        given = values.get(value["name"])
-        if isinstance(given, str) and given.strip():
-            collected[value["name"]] = given
-        elif value["required"] and not hermes["get_env"](value["name"]):
+        if value["name"] not in typed and value["required"] and not hermes["get_env"](value["name"]):
             raise McpError(f"{value['name']} is required but no value was provided.", 400)
     return collected
 
@@ -1109,17 +1163,20 @@ def _refusal(hermes: Dict[str, Any], name: str, block: Dict[str, Any]) -> str:
     return " ".join(issues) if issues else f"Hermes refused {name}'s configuration."
 
 
-def _writable_server(hermes: Dict[str, Any], name: str) -> None:
+def _writable_server(
+    hermes: Dict[str, Any], name: str
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Refuse a server the profile doesn't have, or one a Hermes plugin provides.
 
     Hermes will not modify a server a plugin provides, so neither a switch nor a removal can land on
     one; both writes ask this the same way, and answer the same 400 for each.
     """
-    servers, owners = hermes["sources"](hermes["servers"]())
-    if name not in servers:
-        raise McpError(f"No MCP server named {name!r} on this bot.", 400)
+    servers, owners = _blocks(hermes)
+    _server_block(servers, name)
     if owners.get(name):
         raise McpError(f"{name} is provided by a Hermes plugin, so it can't be changed.", 400)
+    # What it read is what a write then works from: the same two calls, not two more.
+    return servers, owners
 
 
 def _write_flag(hermes: Dict[str, Any], name: str, enabled: bool) -> None:
@@ -1152,7 +1209,7 @@ def _all_rows(hermes: Dict[str, Any]) -> List[Dict[str, Any]]:
     Both the read and a removal answer this shape, so the order the app's list is in lives here
     rather than in each of them. Call it inside the profile's scope.
     """
-    servers, owners = hermes["sources"](hermes["servers"]())
+    servers, owners = _blocks(hermes)
     return sorted(_rows(hermes, servers, owners), key=lambda server: server["name"])
 
 

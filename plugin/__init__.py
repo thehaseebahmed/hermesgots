@@ -407,7 +407,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
     def mcp_route(
         call: Any,
-        key: str,
+        key: Optional[str],
         *,
         named: bool = True,
         unavailable: str = mcp.UNAVAILABLE,
@@ -417,8 +417,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
         Every MCP route has this shape — the signed-in check, the profile that makes the call land
         on this bot and no other, the 400 a body reader raises, the 501 for a host whose Hermes has
-        moved the built-in the call needs, and the answer wrapped under one key — so each declares
-        only its call, its key and what it needs from the request. The call runs on the loop
+        moved the built-in the call needs, and the answer wrapped under one key (or spread, for a
+        write that answers more than one thing) — so each declares only its call, its key and what
+        it needs from the request. The call runs on the loop
         thread inside ``profile``'s scope, where the worker re-enters it; see mcp.py.
         """
 
@@ -440,7 +441,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 return _error(web, str(error), error.status)
             except ImportError:
                 return _error(web, unavailable, 501)
-            return web.json_response({"object": {key: answer}})
+            return web.json_response({"object": answer if key is None else {key: answer}})
 
         return handler
 
@@ -502,13 +503,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     # the values the entry declares secret — then its reconcile, so the server is live for this
     # bot's next turn and no other bot's config is touched.
     install_mcp_server = mcp_route(mcp.install, "servers", named=False, body=install_body)
-    add_custom_mcp_server = mcp_route(mcp.custom, "servers", named=False, body=custom_body)
+    add_custom_mcp_server = mcp_route(mcp.custom, None, named=False, body=custom_body)
 
     # A toggle, a removal, a save and the Server access flow all write this bot's own config through
     # Hermes's writer and reconcile; a server a Hermes plugin provides is refused there.
     set_mcp_server_enabled = mcp_route(mcp.set_enabled, "server", body=enabled_body)
     remove_mcp_server = mcp_route(mcp.remove, "servers")
-    save_mcp_server = mcp_route(mcp.edit, "servers", body=server_body)
+    save_mcp_server = mcp_route(mcp.edit, None, body=server_body)
     start_mcp_access = mcp_route(mcp.start_access, "access", unavailable=mcp.UNAVAILABLE_ACCESS)
     deliver_mcp_access = mcp_route(
         mcp.deliver_access,

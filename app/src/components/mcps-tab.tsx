@@ -13,6 +13,7 @@ import { toast } from "sonner"
 import { ItemSearch } from "@/components/item-list"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Group, linkRowClass, rowClass, RowText } from "@/components/settings-chrome"
+import { useCopied } from "@/lib/copied"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -41,6 +42,7 @@ import {
   transportReady,
   customServer,
   healthLine,
+  BLANK_DRAFT,
   type ConfigDraft,
   type ValueDraft,
 } from "@/lib/mcp-server"
@@ -92,34 +94,31 @@ const SET_PLACEHOLDER = "Set — type to replace"
  */
 export function McpsTab({ profile }: { profile: Profile }) {
   const answers = useMcpFeatureAnswers(profile)
-  // The server whose Server access sheet is open, by name: while it is, the screen keeps reading, so
-  // the wait sees the access land on a row whose own state would never move it.
-  const [granting, setGranting] = useState<string | null>(null)
+  // Which sheet is open. They exclude each other — the Catalogue replaces the Add choice, a server's
+  // sheet replaces the list, its removal replaces the sheet — so one state says what the screen is
+  // showing rather than six booleans that have to be kept in agreement.
+  const [sheet, setSheet] = useState<Sheet | null>(null)
+  const granting = sheet?.kind === "access" ? sheet.name : null
+  // While the access sheet waits, the screen keeps reading, so the wait sees the access land on a
+  // row whose own state would never move it.
   const { servers, setEnabled, remove, saveConfig, addCustom, install, grant, deliver, reload } =
     useMcpServers(profile, answers.list === "yes", granting !== null)
-  const [adding, setAdding] = useState(false)
-  const [browsing, setBrowsing] = useState(false)
-  const [customising, setCustomising] = useState(false)
-  // The server whose sheet is open, by name.
-  const [opened, setOpened] = useState<string | null>(null)
-  // The server a removal is being confirmed for, and whether that removal is on its way.
-  const [removing, setRemoving] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const openedServer = servers?.find((server) => server.name === opened)
-  const grantingServer = servers?.find((server) => server.name === granting)
+  const openedServer =
+    sheet?.kind === "server" ? servers?.find((server) => server.name === sheet.name) : undefined
+  const grantingServer =
+    sheet?.kind === "access" ? servers?.find((server) => server.name === sheet.name) : undefined
   const mine = servers?.filter((server) => server.source === "config") ?? []
   const theirs = servers?.filter((server) => server.source === "plugin") ?? []
   // A sheet only exists where the Host advertises a tab for it, so a row whose name could open
   // nothing keeps its name plain.
   const sheetOpenable = answers.config === "yes" || answers.tools === "yes"
 
-  async function confirmRemove() {
-    if (removing === null) return
+  async function confirmRemove(name: string) {
     setBusy(true)
     try {
-      await remove(removing)
-      setRemoving(null)
-      setOpened(null)
+      await remove(name)
+      setSheet(null)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't remove that.")
     } finally {
@@ -140,7 +139,7 @@ export function McpsTab({ profile }: { profile: Profile }) {
             className={linkRowClass}
             aria-haspopup="dialog"
             data-mcp-add
-            onClick={() => setAdding(true)}
+            onClick={() => setSheet({ kind: "add" })}
           >
             <PlusIcon className="size-5 shrink-0 text-muted-foreground" />
             <RowText title="Add a server" />
@@ -153,57 +152,55 @@ export function McpsTab({ profile }: { profile: Profile }) {
         title="Your servers"
         section="config"
         servers={mine}
-        openable={sheetOpenable}
-        writable={answers.write === "yes"}
-        canAuthenticate={(server) => offersAccess(answers.access === "yes", server.access)}
-        onToggle={setEnabled}
-        onOpen={setOpened}
-        onGrant={setGranting}
+        onOpen={sheetOpenable ? (name) => setSheet({ kind: "server", name }) : undefined}
+        controls={{
+          writable: answers.write === "yes",
+          access: answers.access === "yes",
+          onToggle: setEnabled,
+          onGrant: (name) => setSheet({ kind: "access", name }),
+        }}
       />
 
       <ServerSection
         title="From plugins"
         section="plugin"
         servers={theirs}
-        openable={sheetOpenable}
-        onOpen={setOpened}
+        onOpen={sheetOpenable ? (name) => setSheet({ kind: "server", name }) : undefined}
       />
 
       <AddServerSheet
-        open={adding}
-        onOpenChange={setAdding}
-        onCatalogue={() => {
-          setAdding(false)
-          setBrowsing(true)
-        }}
-        onCustom={() => {
-          setAdding(false)
-          setCustomising(true)
-        }}
+        open={sheet?.kind === "add"}
+        onOpenChange={(next) => setSheet(next ? { kind: "add" } : null)}
+        onCatalogue={() => setSheet({ kind: "catalogue" })}
+        onCustom={() => setSheet({ kind: "custom" })}
         catalogue={answers.catalogue === "yes"}
         custom={answers.add === "yes"}
       />
 
       <McpCatalogueSheet
-        open={browsing}
-        onOpenChange={setBrowsing}
+        open={sheet?.kind === "catalogue"}
+        onOpenChange={(next) => setSheet(next ? { kind: "catalogue" } : null)}
         server={profile}
         install={install}
       />
 
-      <CustomServerSheet open={customising} onOpenChange={setCustomising} add={addCustom} />
+      <CustomServerSheet
+        open={sheet?.kind === "custom"}
+        onOpenChange={(next) => setSheet(next ? { kind: "custom" } : null)}
+        add={addCustom}
+      />
 
-      {openedServer && (answers.config === "yes" || answers.tools === "yes") && (
+      {openedServer && (
         <ServerSheet
           profile={profile}
           server={openedServer}
           open
-          onOpenChange={(next) => !next && setOpened(null)}
+          onOpenChange={(next) => !next && setSheet(null)}
           config={answers.config === "yes"}
           tools={answers.tools === "yes"}
           removable={answers.removable === "yes"}
           saveConfig={saveConfig}
-          onRemove={() => setRemoving(openedServer.name)}
+          onRemove={() => setSheet({ kind: "remove", name: openedServer.name })}
         />
       )}
 
@@ -213,7 +210,7 @@ export function McpsTab({ profile }: { profile: Profile }) {
         <ServerAccessSheet
           server={grantingServer}
           open
-          onOpenChange={(next) => !next && setGranting(null)}
+          onOpenChange={(next) => !next && setSheet(null)}
           grant={grant}
           deliver={deliver}
           reload={reload}
@@ -221,12 +218,18 @@ export function McpsTab({ profile }: { profile: Profile }) {
       )}
 
       <AlertDialog
-        open={removing !== null}
-        onOpenChange={(open) => !open && !busy && setRemoving(null)}
+        open={sheet?.kind === "remove"}
+        onOpenChange={(open) => {
+          if (open || busy) return
+          // Cancelling goes back to the server's own sheet, the one the removal was offered from.
+          setSheet(sheet?.kind === "remove" ? { kind: "server", name: sheet.name } : null)
+        }}
       >
         <AlertDialogContent size="sm">
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove {removing}?</AlertDialogTitle>
+            <AlertDialogTitle>
+              Remove {sheet?.kind === "remove" ? sheet.name : ""}?
+            </AlertDialogTitle>
             <AlertDialogDescription>
               The bot stops having it, and its stored access goes with it. The values you gave it
               stay on the host, so adding it again doesn't mean finding them twice.
@@ -237,7 +240,7 @@ export function McpsTab({ profile }: { profile: Profile }) {
             <AlertDialogAction
               variant="destructive"
               disabled={busy}
-              onClick={() => void confirmRemove()}
+              onClick={() => sheet?.kind === "remove" && void confirmRemove(sheet.name)}
             >
               Remove
             </AlertDialogAction>
@@ -248,33 +251,45 @@ export function McpsTab({ profile }: { profile: Profile }) {
   )
 }
 
+/** Which sheet the screen is showing: exactly one, or none. */
+type Sheet =
+  | { kind: "add" }
+  | { kind: "catalogue" }
+  | { kind: "custom" }
+  | { kind: "server"; name: string }
+  | { kind: "access"; name: string }
+  | { kind: "remove"; name: string }
+
+/**
+ * What a row of *Your servers* can do: the switch, the sheet and the access flow. A plugin's rows get
+ * none of it, because Hermes refuses to modify what a plugin provides (ADR 0014).
+ */
+type RowControls = {
+  /** Whether the Host can write this bot's config, so a row may offer its switch. */
+  writable: boolean
+  /** Whether the Host can start Server access, so a health line may be the tap. */
+  access: boolean
+  onToggle: (name: string, enabled: boolean) => Promise<void>
+  onGrant: (name: string) => void
+}
+
 /**
  * One of the screen's two lists: a heading and the rows under it, with nothing at all when the list
  * is empty — a heading over no rows says there are none, and the screen drops it instead.
- *
- * A user managed server gets the switch, the sheet and the access flow; a plugin's gets only the sheet,
- * because Hermes refuses to modify what a plugin provides (ADR 0014).
  */
 function ServerSection({
   title,
   section,
   servers,
-  openable,
-  writable = false,
-  canAuthenticate,
-  onToggle,
   onOpen,
-  onGrant,
+  controls,
 }: {
   title: string
   section: string
   servers: McpServer[]
-  openable: boolean
-  writable?: boolean
-  canAuthenticate?: (server: McpServer) => boolean
-  onToggle?: (name: string, enabled: boolean) => Promise<void>
-  onOpen: (name: string) => void
-  onGrant?: (name: string) => void
+  /** Opening a server's sheet, where the Host can show one: every row of both lists has this. */
+  onOpen?: (name: string) => void
+  controls?: RowControls
 }) {
   if (servers.length === 0) return null
   return (
@@ -282,16 +297,7 @@ function ServerSection({
       <h2 className="px-2 text-sm font-medium text-muted-foreground">{title}</h2>
       <Group>
         {servers.map((server) => (
-          <ServerRow
-            key={server.name}
-            server={server}
-            writable={writable}
-            canAuthenticate={canAuthenticate?.(server) ?? false}
-            openable={openable}
-            onToggle={onToggle}
-            onOpen={() => onOpen(server.name)}
-            onGrant={onGrant ? () => onGrant(server.name) : undefined}
-          />
+          <ServerRow key={server.name} server={server} onOpen={onOpen} controls={controls} />
         ))}
       </Group>
     </section>
@@ -309,83 +315,69 @@ function ServerSection({
  */
 function ServerRow({
   server,
-  writable = false,
-  canAuthenticate = false,
-  openable,
-  onToggle,
   onOpen,
-  onGrant,
+  controls,
 }: {
   server: McpServer
-  /** Whether this Host can write this bot's config, so the row may offer its switch. */
-  writable?: boolean
-  /** Whether the Host can start Server access, so the health line may be the tap. */
-  canAuthenticate?: boolean
-  openable: boolean
-  onToggle?: (name: string, enabled: boolean) => Promise<void>
-  onOpen: () => void
-  onGrant?: () => void
+  onOpen?: (name: string) => void
+  controls?: RowControls
 }) {
   const [saving, setSaving] = useState(false)
-  const line = healthLine(server, { canAuthenticate })
+  // A row offers the flow where the Host can start one and this server is one it can start it for.
+  const line = healthLine(server, {
+    canAuthenticate: offersAccess(controls?.access === true, server.access),
+  })
   // A server a Hermes plugin provides is read-only, and so is every row of a Host that can't write,
   // so no switch is offered where one could only come back refused.
-  const editable = server.source === "config" && writable && onToggle !== undefined
+  const editable = server.source === "config" && controls?.writable === true
   return (
     <div className={rowClass} data-mcp={server.name}>
       <ServerIcon className="size-5 shrink-0 text-muted-foreground" />
-      <span className="flex min-w-0 flex-1 flex-col">
-        {openable ? (
-          <button
-            type="button"
-            className="min-w-0 truncate rounded-lg text-left text-base outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-            aria-haspopup="dialog"
-            onClick={onOpen}
-          >
-            {server.name}
-          </button>
-        ) : (
-          // A Host that can't show a server's sheet leaves its name plain, rather than a button
-          // that would open nothing.
-          <span className="truncate text-base">{server.name}</span>
-        )}
-        {line.authenticate ? (
-          // A failure the Host says access can fix stays a failure to read, so its colour comes from
-          // that rather than from the line being tappable.
-          <button
-            type="button"
-            className={cn(
-              // The line reads exactly where a plain subtitle would — the target grows below the
-              // text rather than around it, so the row is its own height and nothing overlaps the
-              // row beneath, whose switch is a tap of its own.
-              "-mx-1 flex min-h-11 items-start px-1 pt-0 pb-3 text-left text-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring",
-              line.failed ? "text-destructive" : "text-warning",
-            )}
-            onClick={onGrant}
-          >
-            {line.text}
-          </button>
-        ) : (
-          <span
-            className={cn(
-              "line-clamp-2 text-sm",
-              line.failed ? "text-destructive" : "text-muted-foreground",
-            )}
-          >
-            {line.text}
-          </span>
-        )}
-      </span>
-      {editable && (
+      <RowText
+        title={
+          onOpen ? (
+            <button
+              type="button"
+              className="max-w-full truncate rounded-lg text-left outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+              aria-haspopup="dialog"
+              onClick={() => onOpen(server.name)}
+            >
+              {server.name}
+            </button>
+          ) : (
+            server.name
+          )
+        }
+        subtitle={
+          line.authenticate && controls ? (
+            // A failure the Host says access can fix stays a failure to read, so its colour comes
+            // from that rather than from the line being tappable. The line reads exactly where a
+            // plain subtitle would — the target grows below the text rather than around it, so
+            // nothing overlaps the row beneath, whose switch is a tap of its own.
+            <button
+              type="button"
+              className={cn(
+                "-mx-1 flex min-h-11 items-start px-1 pt-0 pb-3 text-left outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring",
+                line.failed ? "text-destructive" : "text-warning",
+              )}
+              onClick={() => controls.onGrant(server.name)}
+            >
+              {line.text}
+            </button>
+          ) : (
+            <span className={line.failed ? "text-destructive" : undefined}>{line.text}</span>
+          )
+        }
+      />
+      {editable && controls && (
         <Switch
           aria-label={`${server.name} on`}
           checked={server.enabled}
           disabled={saving}
           onCheckedChange={async (checked) => {
             setSaving(true)
-            if (!onToggle) return
             try {
-              await onToggle(server.name, checked)
+              await controls.onToggle(server.name, checked)
             } catch (error) {
               toast.error(error instanceof Error ? error.message : "Couldn't save that.")
             } finally {
@@ -395,61 +387,6 @@ function ServerRow({
         />
       )}
     </div>
-  )
-}
-
-/** The Add row's two ways in: Hermes's Catalogue, or a server typed in by hand. */
-function AddServerSheet({
-  open,
-  onOpenChange,
-  onCatalogue,
-  onCustom,
-  catalogue,
-  custom,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  onCatalogue: () => void
-  onCustom: () => void
-  catalogue: boolean
-  custom: boolean
-}) {
-  return (
-    <Popup open={open} onOpenChange={onOpenChange}>
-      <PopupContent initialFocus={false}>
-        <PopupHeader>
-          <PopupTitle>Add a server</PopupTitle>
-        </PopupHeader>
-        <div className="px-4 pb-6">
-          <Group>
-            {catalogue && (
-              <button
-                type="button"
-                className={linkRowClass}
-                data-mcp-source="catalogue"
-                onClick={onCatalogue}
-              >
-                <ServerIcon className="size-5 shrink-0 text-muted-foreground" />
-                <RowText title="Catalogue" />
-                <ChevronRightIcon className="size-5 shrink-0 text-muted-foreground" />
-              </button>
-            )}
-            {custom && (
-              <button
-                type="button"
-                className={linkRowClass}
-                data-mcp-source="custom"
-                onClick={onCustom}
-              >
-                <PlusIcon className="size-5 shrink-0 text-muted-foreground" />
-                <RowText title="Custom server" />
-                <ChevronRightIcon className="size-5 shrink-0 text-muted-foreground" />
-              </button>
-            )}
-          </Group>
-        </div>
-      </PopupContent>
-    </Popup>
   )
 }
 
@@ -476,7 +413,7 @@ function ServerSheet({
   config: boolean
   tools: boolean
   removable: boolean
-  saveConfig: (name: string, edit: McpServerEdit) => Promise<void>
+  saveConfig: (name: string, edit: McpServerEdit) => Promise<McpServerDetail | undefined>
   onRemove: () => void
 }) {
   return (
@@ -491,7 +428,9 @@ function ServerSheet({
             {tools && <TabsTrigger value="tools">Tools</TabsTrigger>}
           </TabsList>
           {config && (
-            <TabsContent value="config" className="flex-1 overflow-y-auto">
+            // Both panels stay mounted: a switch between them must not throw away a half-typed value
+            // or read the Host again for a block it already has.
+            <TabsContent value="config" keepMounted className="flex-1 overflow-y-auto">
               <ConfigTab
                 profile={profile}
                 server={server}
@@ -502,7 +441,7 @@ function ServerSheet({
             </TabsContent>
           )}
           {tools && (
-            <TabsContent value="tools" className="flex-1 overflow-y-auto">
+            <TabsContent value="tools" keepMounted className="flex-1 overflow-y-auto">
               <ToolsTab profile={profile} server={server} />
             </TabsContent>
           )}
@@ -663,7 +602,7 @@ function ValueSection({
       {rows.length > 0 && (
         <FieldGroup>
           {rows.map((row, index) => (
-            <Field key={`${row.name}-${index}`} data-value={row.name}>
+            <Field key={index} data-value={row.name}>
               {row.named ? (
                 <Input
                   id={`${id}-value-name-${index}`}
@@ -731,30 +670,26 @@ function ValueSection({
 function ConfigTab({
   profile,
   server,
-  saveConfig,
   removable,
   onRemove,
+  saveConfig,
 }: {
   profile: McpServerConfig
   server: McpServer
-  saveConfig: (name: string, edit: McpServerEdit) => Promise<void>
   removable: boolean
   onRemove: () => void
+  saveConfig: (name: string, edit: McpServerEdit) => Promise<McpServerDetail | undefined>
 }) {
   const { detail, failed, reload } = useMcpServerDetail(profile, server.name, true)
-  const [draft, setDraft] = useState<ConfigDraft | undefined>(undefined)
-  const [rows, setRows] = useState<ValueDraft[]>([])
-  const [saving, setSaving] = useState(false)
-  // The answer this component's fields were built from: a read, or a save's re-read, that is newer
-  // than it is the one the fields take — during render, so no frame shows the old block's fields.
-  const [seeded, setSeeded] = useState<McpServerDetail | undefined>(undefined)
-  if (detail && detail !== seeded) {
-    setSeeded(detail)
-    setDraft(configDraft(detail))
-    setRows(detail.values.map((value) => ({ name: value.name, value: "" })))
-  }
+  // What a save answered: the block as the Host landed it, which is newer than the read the sheet
+  // opened with and costs no second request.
+  const [written, setWritten] = useState<McpServerDetail | undefined>(undefined)
+  // A save's answer can describe the same block as the read, so the form is reseeded by hand:
+  // Save clears what was typed, exactly as a fresh read would.
+  const [version, setVersion] = useState(0)
+  const block = written ?? detail
 
-  if (failed && !detail) {
+  if (failed && !block) {
     return (
       <div className="flex flex-col gap-4 px-4 py-4">
         <p className="text-sm text-muted-foreground">Couldn't load this server's configuration.</p>
@@ -764,23 +699,67 @@ function ConfigTab({
       </div>
     )
   }
-  if (!detail || !draft) return null
+  if (!block) return null
 
-  // Narrowed once, so the callbacks below read the block the screen is showing rather than a value
-  // that could have arrived again since.
-  const block: McpServerDetail = detail
+  return (
+    <ConfigFields
+      key={`${version}:${configKey(block)}`}
+      block={block}
+      removable={removable}
+      onRemove={onRemove}
+      saveConfig={saveConfig}
+      onSaved={(saved) => {
+        setWritten(saved)
+        setVersion((count) => count + 1)
+      }}
+    />
+  )
+}
+
+/**
+ * The block's own identity, as the form is keyed on it: a read that lands a different block
+ * reseeds every field from it, so nothing here has to watch for one arriving mid-edit.
+ */
+function configKey(detail: McpServerDetail): string {
+  const values = detail.values.map((value) => `${value.name}:${value.set ? 1 : 0}`).join(",")
+  return [
+    detail.transport,
+    detail.url,
+    detail.command,
+    detail.args.join(" "),
+    detail.auth,
+    values,
+  ].join("|")
+}
+
+/** One server's block as its fields: the transport and its own fields, its values, and one Save. */
+function ConfigFields({
+  block,
+  removable,
+  onRemove,
+  onSaved,
+  saveConfig,
+}: {
+  block: McpServerDetail
+  removable: boolean
+  onRemove: () => void
+  onSaved: (saved: McpServerDetail) => void
+  saveConfig: (name: string, edit: McpServerEdit) => Promise<McpServerDetail | undefined>
+}) {
+  const [draft, setDraft] = useState(() => configDraft(block))
+  const [rows, setRows] = useState<ValueDraft[]>(() =>
+    block.values.map((value) => ({ name: value.name, value: "" })),
+  )
+  const [saving, setSaving] = useState(false)
   const editable = block.editable
   const canSave = editable && configChanged(block, draft, rows) && transportReady(draft)
 
   async function save() {
-    if (!draft) return
     setSaving(true)
     try {
-      await saveConfig(block.name, configEdit(draft, rows))
-      // What was typed leaves the fields with the write: the re-read is what says the bot now holds
-      // it, and Save has nothing left to send until something changes again.
-      setRows((current) => current.map((row) => ({ ...row, value: "" })))
-      reload()
+      const saved = await saveConfig(block.name, configEdit(draft, rows))
+      if (saved) onSaved(saved)
+      else setRows((current) => current.map((row) => ({ ...row, value: "" })))
       toast.success("Saved.")
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't save that.")
@@ -796,14 +775,14 @@ function ConfigTab({
         draft={draft}
         onChange={setDraft}
         editable={editable}
-        tokenSet={detail.auth === "header"}
+        tokenSet={block.auth === "header"}
       />
 
       {(rows.length > 0 || editable) && (
         <ValueSection
           id="mcp-config"
           rows={rows}
-          known={detail.values}
+          known={block.values}
           editable={editable}
           onChange={setRows}
         />
@@ -879,6 +858,61 @@ function ToolsTab({ profile, server }: { profile: McpServerConfig; server: McpSe
   )
 }
 
+/** The Add row's two ways in: Hermes's Catalogue, or a server typed in by hand. */
+function AddServerSheet({
+  open,
+  onOpenChange,
+  onCatalogue,
+  onCustom,
+  catalogue,
+  custom,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onCatalogue: () => void
+  onCustom: () => void
+  catalogue: boolean
+  custom: boolean
+}) {
+  return (
+    <Popup open={open} onOpenChange={onOpenChange}>
+      <PopupContent initialFocus={false}>
+        <PopupHeader>
+          <PopupTitle>Add a server</PopupTitle>
+        </PopupHeader>
+        <div className="px-4 pb-6">
+          <Group>
+            {catalogue && (
+              <button
+                type="button"
+                className={linkRowClass}
+                data-mcp-source="catalogue"
+                onClick={onCatalogue}
+              >
+                <ServerIcon className="size-5 shrink-0 text-muted-foreground" />
+                <RowText title="Catalogue" />
+                <ChevronRightIcon className="size-5 shrink-0 text-muted-foreground" />
+              </button>
+            )}
+            {custom && (
+              <button
+                type="button"
+                className={linkRowClass}
+                data-mcp-source="custom"
+                onClick={onCustom}
+              >
+                <PlusIcon className="size-5 shrink-0 text-muted-foreground" />
+                <RowText title="Custom server" />
+                <ChevronRightIcon className="size-5 shrink-0 text-muted-foreground" />
+              </button>
+            )}
+          </Group>
+        </div>
+      </PopupContent>
+    </Popup>
+  )
+}
+
 /**
  * Hermes's Catalogue as the Bot's Host offers it: the entries this Bot doesn't have, searched over
  * both their names and what Hermes says each one is. A tap adds it — at once where the entry declares
@@ -897,6 +931,9 @@ function McpCatalogueSheet({
   install: (name: string, values: Record<string, string>) => Promise<void>
 }) {
   const entries = useMcpCatalogue(server, open)
+  // What this screen added: the list a read landed is kept across opens, so without this the entry
+  // just added is still in it, still reading as not installed, until the next read lands.
+  const [added, setAdded] = useState<string[]>([])
   const [query, setQuery] = useState("")
   // The entry whose form is open, by name: one at a time, stacked above the list it was picked from.
   const [picking, setPicking] = useState<string | undefined>(undefined)
@@ -905,7 +942,7 @@ function McpCatalogueSheet({
     entries === undefined
       ? undefined
       : searchCatalogue(
-          entries.filter((entry) => !entry.installed),
+          entries.filter((entry) => !entry.installed && !added.includes(entry.name)),
           query,
         )
 
@@ -917,6 +954,7 @@ function McpCatalogueSheet({
     setInstalling(entry.name)
     try {
       await install(entry.name, {})
+      setAdded((current) => [...current, entry.name])
       onOpenChange(false)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't add that.")
@@ -972,6 +1010,7 @@ function McpCatalogueSheet({
                 install={install}
                 onBack={() => setPicking(undefined)}
                 onAdded={() => {
+                  setAdded((current) => [...current, picking])
                   setPicking(undefined)
                   onOpenChange(false)
                 }}
@@ -1153,23 +1192,15 @@ function CustomServerSheet({
   onOpenChange: (open: boolean) => void
   add: (server: McpCustomServer) => Promise<void>
 }) {
-  const blank: ConfigDraft = {
-    transport: "http",
-    url: "",
-    command: "",
-    args: "",
-    auth: "none",
-    token: "",
-  }
   const [name, setName] = useState("")
-  const [draft, setDraft] = useState<ConfigDraft>(blank)
+  const [draft, setDraft] = useState<ConfigDraft>(BLANK_DRAFT)
   const [rows, setRows] = useState<ValueDraft[]>([])
   const [adding, setAdding] = useState(false)
 
   // The form is blank the next time it opens, whether it was closed or the add closed it.
   function reset() {
     setName("")
-    setDraft(blank)
+    setDraft(BLANK_DRAFT)
     setRows([])
   }
 
@@ -1259,7 +1290,7 @@ function ServerAccessSheet({
   server: McpServer
   open: boolean
   onOpenChange: (open: boolean) => void
-  grant: (name: string) => Promise<McpAccess>
+  grant: (name: string, abandoned?: AbortSignal) => Promise<McpAccess>
   deliver: (name: string, url: string) => Promise<void>
   reload: () => Promise<void>
 }) {
@@ -1269,13 +1300,16 @@ function ServerAccessSheet({
   const [expired, setExpired] = useState(false)
   const [pasted, setPasted] = useState("")
   const [sending, setSending] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const { copied, noteCopied } = useCopied()
   // Bumped by Try again: each start (and each retry) is one attempt at the flow.
   const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     if (!open) return
     let cancelled = false
+    // Dismissing the sheet abandons the flow: the request goes with it rather than holding a Host
+    // flow open for the rest of its timeout.
+    const stopped = new AbortController()
     setFlow(undefined)
     setFailed(undefined)
     setExpired(false)
@@ -1283,7 +1317,7 @@ function ServerAccessSheet({
     setStarting(true)
     void (async () => {
       try {
-        const answer = await grant(server.name)
+        const answer = await grant(server.name, stopped.signal)
         if (cancelled) return
         // The stored access still works: nothing to open. The row is read once more before the sheet
         // closes, since a failed row's own read is not the one the screen's poll is following.
@@ -1302,6 +1336,7 @@ function ServerAccessSheet({
     })()
     return () => {
       cancelled = true
+      stopped.abort()
     }
     // `onOpenChange` is the parent's close, stable for the life of one open sheet.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1326,8 +1361,7 @@ function ServerAccessSheet({
     if (!flow?.url) return
     try {
       await navigator.clipboard.writeText(flow.url)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
+      noteCopied()
     } catch {
       toast.error("Couldn't copy that.")
     }

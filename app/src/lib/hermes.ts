@@ -806,14 +806,16 @@ export async function saveMcpServer(
   name: string,
   edit: McpServerEdit,
   signal?: AbortSignal,
-): Promise<McpServer[]> {
+): Promise<{ servers: McpServer[]; detail?: McpServerDetail }> {
   const response = await request(mcpPath(config, name, "config"), {
     method: "POST",
     headers: headers(config),
     body: JSON.stringify(edit),
     signal,
   })
-  return parseMcpServers(await response.json())
+  const body: unknown = await response.json()
+  // One round trip answers both: the servers left, and this one's block as the write landed it.
+  return { servers: parseMcpServers(body), detail: parseMcpServerDetail(body) }
 }
 
 /**

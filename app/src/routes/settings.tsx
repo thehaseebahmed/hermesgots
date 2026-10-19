@@ -43,7 +43,7 @@ import { toast } from "sonner"
 import { AccountSettings } from "@/components/account-settings"
 import { CommunitySettings } from "@/components/community-settings"
 import { BotEditor } from "@/components/bot-settings"
-import { BOT_TABS, type BotTab } from "@/lib/bot-tabs"
+import { botTabOf, type BotTab } from "@/lib/bot-tabs"
 import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { OnlineDot } from "@/components/bot-card"
@@ -150,18 +150,20 @@ export function SettingsPage() {
     return <Navigate to="/settings" replace />
   // The bot tabs: a hand-typed address naming one this screen doesn't have lands on the bot itself,
   // and one asked for on anything but a bot lands on the section without it.
-  if (tab && !BOT_TABS.includes(tab as BotTab))
+  // One reading of the URL's third segment, so nothing downstream narrows it again with a cast.
+  const botTab = botTabOf(tab)
+  if (tab && !botTab)
     return <Navigate to={botId ? `/settings/bots/${botId}` : "/settings"} replace />
   if (tab && (section !== "bots" || !botId)) return <Navigate to="/settings" replace />
   // General's address is the bot's own: one URL per tab, and none of them an alias of another.
-  if (tab === "general") return <Navigate to={`/settings/bots/${botId}`} replace />
+  if (botTab === "general") return <Navigate to={`/settings/bots/${botId}`} replace />
   if (!large)
     return screen ? (
       <SectionScreen
         section={screen}
         botId={botId}
         botName={botName}
-        tab={tab as BotTab | undefined}
+        tab={botTab}
         profiles={profiles}
       />
     ) : (
@@ -185,7 +187,7 @@ export function SettingsPage() {
           <BotSection
             profiles={profiles}
             botId={botId}
-            tab={tab as BotTab | undefined}
+            tab={botTab}
             onDeleted={() => root("/settings")}
           />
         ) : (

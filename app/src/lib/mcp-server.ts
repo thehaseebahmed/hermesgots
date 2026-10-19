@@ -69,6 +69,16 @@ export interface ValueDraft {
   named?: boolean
 }
 
+/** A draft with nothing in it: the custom form's own starting point, and what Reset goes back to. */
+export const BLANK_DRAFT: ConfigDraft = {
+  transport: "http",
+  url: "",
+  command: "",
+  args: "",
+  auth: "none",
+  token: "",
+}
+
 /** The draft a server's Config tab opens with. */
 export function configDraft(detail: McpServerDetail): ConfigDraft {
   return {

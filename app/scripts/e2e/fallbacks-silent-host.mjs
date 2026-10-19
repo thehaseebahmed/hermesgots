@@ -19,7 +19,7 @@ await flow("fallbacks-silent-host", async ({ page, profileId, until, shot }) => 
   })
   assert.deepEqual(await hosted(), [])
 
-  await page.goto(`${app}/settings/bots/${profileId}`)
+  await page.goto(`${app}/settings/bots/${profileId}/models`)
   await add.waitFor({ timeout: 15_000 })
 
   // Reads are answered as usual; the write is left hanging, as a host that took it and stalled.

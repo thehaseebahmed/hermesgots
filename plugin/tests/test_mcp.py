@@ -2104,8 +2104,6 @@ class McpAccessTests(unittest.TestCase):
         self.assertEqual(501, caught.exception.status)
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class McpDetailTests(unittest.TestCase):
@@ -2223,7 +2221,14 @@ class McpEditTests(unittest.TestCase):
         self.assertEqual("hunter2", stubs["hermes_cli.config"].get_env_value("PG_PASSWORD"))
         self.assertEqual([("bot-a", "PG_PASSWORD")], stubs["hermes_cli.config"].env_writes)
         self.assertEqual(["bot-a"], stubs["hermes_cli.web_routers._common"].write_scopes)
-        self.assertEqual([("pg", "on")], rows(found))
+        self.assertEqual([("pg", "on")], rows(found["servers"]))
+        # The block as it landed, so the sheet that saved needn't read it again.
+        self.assertEqual("pg", found["server"]["name"])
+        self.assertEqual("stdio", found["server"]["transport"])
+        self.assertEqual(
+            [{"name": "PG_PASSWORD", "set": True}, {"name": "PG_URL", "set": True}],
+            found["server"]["values"],
+        )
 
     def test_an_empty_value_leaves_what_the_bot_holds_alone(self):
         stubs = hermes(
@@ -2336,7 +2341,7 @@ class McpCustomTests(unittest.TestCase):
         with mock.patch.dict(sys.modules, stubs):
             found = mcp.custom("bot-a", {"name": "ink", "url": "https://mcp.ml.ink/mcp"})
         self.assertEqual({"url": "https://mcp.ml.ink/mcp"}, stubs["hermes_cli.mcp_config"]._get_mcp_servers()["ink"])
-        self.assertEqual([("ink", "on")], rows(found))
+        self.assertEqual([("ink", "on")], rows(found["servers"]))
         self.assertEqual(["bot-a"], stubs["hermes_cli.web_routers._common"].write_scopes)
 
     def test_a_stdio_server_is_added_with_its_values_in_the_environment(self):
@@ -2364,7 +2369,13 @@ class McpCustomTests(unittest.TestCase):
         with mock.patch.dict(sys.modules, stubs):
             found = mcp.custom("bot-a", {"name": "drive", "url": "https://drive.example/mcp", "auth": "oauth"})
         self.assertEqual("oauth", stubs["hermes_cli.mcp_config"]._get_mcp_servers()["drive"]["auth"])
-        self.assertEqual("needs_access", found[0]["state"])
+        self.assertEqual("needs_access", found["servers"][0]["state"])
+
+    def test_a_word_one_of_the_plugin_routes_answers_is_refused(self):
+        with mock.patch.dict(sys.modules, hermes(reconcile=[])):
+            with self.assertRaises(mcp.McpError) as raised:
+                mcp.custom("bot-a", {"name": "catalogue", "url": "https://x.example/mcp"})
+        self.assertEqual(400, raised.exception.status)
 
     def test_a_name_the_bot_already_has_is_refused(self):
         with mock.patch.dict(sys.modules, hermes(servers={"ink": {"url": "https://ink.example/mcp"}}, reconcile=[])):
@@ -2480,3 +2491,7 @@ class McpToolsTests(unittest.TestCase):
         with mock.patch.dict(sys.modules, stubs):
             mcp.tools("bot-a", "pg")
         self.assertEqual(["bot-a"], stubs["hermes_cli.web_server_profiles"].scopes)
+
+
+if __name__ == "__main__":
+    unittest.main()

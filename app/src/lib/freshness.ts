@@ -54,8 +54,8 @@ export const SESSION_REREAD_MS = 60_000
 /** How long a known library count is trusted before it's read again. */
 export const LIBRARY_MS = 60_000
 
-/** A bot's MCP servers, while a server is connecting or waiting on Server access: a state that moves
- * on its own is watched; one the screen can't change is read once on open and left. */
+/** A bot's MCP servers, while a server is connecting or the Server access sheet is open: a state that
+ * moves on its own is watched; one the screen can't change is read once on open and left. */
 export const MCP_WORK_MS = 3_000
 
 /** Adding a server from the Catalogue, which the host may answer by cloning and installing the

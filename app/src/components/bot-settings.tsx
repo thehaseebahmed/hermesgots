@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { EyeIcon, EyeOffIcon, PlugZapIcon, Trash2Icon } from "lucide-react"
 import { useNavigate } from "react-router"
@@ -47,8 +47,9 @@ import {
   updateProfile,
   type Profile,
 } from "@/lib/db"
+import { connectionKey } from "@/lib/connection"
 import { formatRelative } from "@/lib/format"
-import { type BotTab } from "@/lib/bot-tabs"
+import { botTabOf, botTabPath, type BotTab } from "@/lib/bot-tabs"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import { checkHealth, getPluginVersion, listModels } from "@/lib/hermes"
 import { useMcpFeatureAnswers } from "@/lib/mcps"
@@ -214,10 +215,7 @@ export function BotEditor({
 
   const save = (patch: Partial<Omit<Profile, "id">>) => void updateProfile(profile.id, patch)
 
-  const open = (next: BotTab) =>
-    navigate(
-      next === "general" ? `/settings/bots/${profile.id}` : `/settings/bots/${profile.id}/${next}`,
-    )
+  const open = (next: BotTab) => navigate(botTabPath(profile.id, next))
 
   // A URL into a tab this bot doesn't have: General takes its place, in the history entry it was
   // asked for, rather than the address reading MCP over a screen that isn't. Only an answer of "no"
@@ -227,37 +225,46 @@ export function BotEditor({
       void navigate(`/settings/bots/${profile.id}`, { replace: true })
   }, [tab, answers.list, navigate, profile.id])
 
+  // One read of the host's model list, for both the tab's own open and General's Test connection.
+  const readModels = useCallback(
+    (config: Pick<Profile, "baseUrl" | "apiKey">) =>
+      listModels(config, AbortSignal.timeout(READ_TIMEOUT_MS)),
+    [],
+  )
+
   // The Models tab reads the list itself when it opens: the choice is what the tab is for, and the
-  // General tab's Test connection is the health check rather than the way to fill it.
+  // General tab's Test connection is the health check rather than the way to fill it. The
+  // connection's own key is the dependency, so an edited address or key asks the new host rather
+  // than showing the last one's models.
+  const hostBaseUrl = linked ? profile.baseUrl : baseUrl
+  const hostApiKey = linked ? profile.apiKey : apiKey
+  const modelsKey = connectionKey({ baseUrl: hostBaseUrl, apiKey: hostApiKey })
   useEffect(() => {
-    if (shown !== "models" || models.length) return
+    if (shown !== "models") return
     let cancelled = false
-    void (async () => {
-      try {
-        const ids = await listModels(
-          linked ? profile : { baseUrl, apiKey },
-          AbortSignal.timeout(READ_TIMEOUT_MS),
-        )
-        if (!cancelled) setModels(ids)
-      } catch {
+    void readModels({ baseUrl: hostBaseUrl, apiKey: hostApiKey })
+      .then((ids) => {
+        if (cancelled) return
+        setModels(ids)
+        setModelsFailed(false)
+      })
+      .catch(() => {
         // The tab says it couldn't read them; Test connection in General says why in the Host's words.
         if (!cancelled) setModelsFailed(true)
-      }
-    })()
+      })
     return () => {
       cancelled = true
     }
-    // The connection the read uses is the one the tab opened on.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown, models.length, linked])
+  }, [shown, modelsKey, hostBaseUrl, hostApiKey, readModels])
 
   const test = async () => {
     setConnection({ state: "testing" })
     const config = linked ? profile : { baseUrl, apiKey }
     try {
       await checkHealth(config)
-      const ids = await listModels(config)
+      const ids = await readModels(config)
       setModels(ids)
+      setModelsFailed(false)
       if (ids.length && !ids.includes(profile.model)) save({ model: ids[0] })
       // A named profile advertises its name as the model id.
       const advertised = ids.find((id) => id !== UNNAMED_MODEL)
@@ -281,7 +288,10 @@ export function BotEditor({
   return (
     <Tabs
       value={shown}
-      onValueChange={(next) => open(next as BotTab)}
+      onValueChange={(next) => {
+        const tab = botTabOf(next)
+        if (tab) open(tab)
+      }}
       className="gap-4"
       data-bot-tabs
     >

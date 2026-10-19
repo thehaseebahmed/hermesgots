@@ -529,6 +529,24 @@ const mcpBlocks = new Map([
 const mcpBlocksSeed = [...mcpBlocks.entries()]
 // What a server's tools are, by name: Hermes's schema cache answers these for a server it has
 // registered (the rows above carry the count), and a probe answers the same list as fresh.
+// One server's block as its Config tab reads it: the transport, its fields and the environment names
+// it declares — never a value, only whether the bot holds one. A read and a write answer the same
+// shape, so the screen that saved needs no second request.
+const mcpDetailOf = (name, server) => {
+  const block = mcpBlocks.get(name) ?? { transport: "http", args: [], auth: "none", values: [] }
+  return {
+    name,
+    source: server.source,
+    transport: block.transport,
+    url: block.url ?? "",
+    command: block.command ?? "",
+    args: block.args ?? [],
+    auth: block.auth ?? "none",
+    editable: server.source === "config",
+    values: block.values.map((value) => ({ name: value.name, set: mcpEnv.has(value.name) })),
+  }
+}
+
 const mcpToolList = (name) => {
   const count = MCP_SERVERS.find((server) => server.name === name)?.tools ?? 0
   return Array.from({ length: count }, (_, index) => ({
@@ -578,6 +596,11 @@ const MCP_CATALOGUE = [
 // Whether this bot already has one of the Catalogue's entries: the one place that question is
 // answered, so the list, an entry read and an install can never disagree about it.
 const mcpInstalled = (name) => mcpRows().some((row) => row.name === name)
+// Whether an entry declares something to fill in: the one rule the app reads as `needsConfig`, and
+// the plugin as `_needs_config`. Said once here, so the Catalogue's list and one entry's read can't
+// disagree about whether a tap opens a form.
+const needsConfig = (entry) => (entry.values ?? []).length > 0
+
 const mcpCatalogue = () =>
   MCP_CATALOGUE.map((entry) => ({
     name: entry.name,
@@ -585,7 +608,7 @@ const mcpCatalogue = () =>
     installed: mcpInstalled(entry.name),
     // Whether adding it leaves anything to fill in: an entry that declares values does, so it opens
     // its form; one that declares none is added by the tap that picks it (ADR 0014).
-    needs_config: (entry.values ?? []).length > 0,
+    needs_config: needsConfig(entry),
   }))
 // One entry of that Catalogue, as the plugin's own entry read answers it: the values its manifest
 // declares, each reported as required or not, secret or not, with the default it pins (never one for
@@ -598,7 +621,7 @@ const mcpCatalogueEntry = (name) => {
     name: entry.name,
     description: entry.description,
     installed: mcpInstalled(entry.name),
-    needs_config: (entry.values ?? []).length > 0,
+    needs_config: needsConfig(entry),
     values: (entry.values ?? []).map((value) => ({
       name: value.name,
       prompt: value.prompt,
@@ -694,12 +717,17 @@ const mcpBlockOf = (body) => {
 // The server a write is for, or null once the refusal has been answered: a name the bot's config
 // doesn't have, or one a Hermes plugin provides, which Hermes refuses to modify. Both writes — the
 // toggle and the removal — answer the plugin's own refusal the same way, so both ask this.
-const mcpWritableServer = (res, name) => {
+// The row of one of the bot's servers, or the plugin's own refusal — the one place a read names a
+// server it can't find, so the sentence isn't written twice.
+const mcpServerRow = (res, name, status = 404) => {
   const server = mcpRows().find((row) => row.name === name)
-  if (!server) {
-    json(res, 400, { error: { message: `No MCP server named '${name}' on this bot.` } })
-    return null
-  }
+  if (!server) json(res, status, { error: { message: `No MCP server named '${name}' on this bot.` } })
+  return server
+}
+
+const mcpWritableServer = (res, name) => {
+  const server = mcpServerRow(res, name, 400)
+  if (!server) return null
   if (server.source === "plugin") {
     json(res, 400, {
       error: { message: `${name} is provided by a Hermes plugin, so it can't be changed.` },
@@ -2667,29 +2695,9 @@ http
     const mcpDetail = url.pathname.match(/^\/api\/plugins\/memento\/mcp\/([^/]+)$/)
     if (PLUGIN && MCPS && !profile && mcpDetail && req.method === "GET") {
       const name = decodeURIComponent(mcpDetail[1])
-      const server = mcpRows().find((row) => row.name === name)
-      if (!server) {
-        return json(res, 404, { error: { message: `No MCP server named '${name}' on this bot.` } })
-      }
-      const block = mcpBlocks.get(name) ?? { transport: "http", args: [], auth: "none", values: [] }
-      return json(res, 200, {
-        object: {
-          server: {
-            name,
-            source: server.source,
-            transport: block.transport,
-            url: block.url ?? "",
-            command: block.command ?? "",
-            args: block.args ?? [],
-            auth: block.auth ?? "none",
-            editable: server.source === "config",
-            values: block.values.map((value) => ({
-              name: value.name,
-              set: mcpEnv.has(value.name),
-            })),
-          },
-        },
-      })
+      const server = mcpServerRow(res, name)
+      if (!server) return
+      return json(res, 200, { object: { server: mcpDetailOf(name, server) } })
     }
     // Saving that block, the way the plugin's own save does: one write of the whole block, its
     // values into the bot's environment, and the answer is what the bot has now. A server a Hermes
@@ -2717,7 +2725,7 @@ http
             .map((key) => ({ name: key })),
         ],
       })
-      return json(res, 200, { object: { servers: mcpRows() } })
+      return json(res, 200, { object: { servers: mcpRows(), server: mcpDetailOf(name, server) } })
     }
     // A server the Catalogue doesn't offer, written the way an add from the Catalogue is: Hermes's
     // own create contract, with its own refusals for a name it won't take, one the bot already has
@@ -2762,16 +2770,16 @@ http
         ...mcpBlockOf(body),
         values: Object.keys(values).map((key) => ({ name: key })),
       })
-      return json(res, 200, { object: { servers: mcpRows() } })
+      return json(res, 200, {
+        object: { servers: mcpRows(), server: mcpDetailOf(name, mcpAdded.get(name)) },
+      })
     }
     // One server's tools: Hermes's schema cache on a GET (a read that connects nothing), and the
     // probe on a POST — a connect, a list and a disconnect, which is why only a tap asks for it.
     const mcpTools = url.pathname.match(/^\/api\/plugins\/memento\/mcp\/([^/]+)\/tools$/)
     if (PLUGIN && MCPS && !profile && mcpTools && (req.method === "GET" || req.method === "POST")) {
       const name = decodeURIComponent(mcpTools[1])
-      if (!mcpRows().some((row) => row.name === name)) {
-        return json(res, 404, { error: { message: `No MCP server named '${name}' on this bot.` } })
-      }
+      if (!mcpServerRow(res, name)) return
       return json(res, 200, {
         object: {
           tools: { name, cached: req.method === "GET", tools: mcpToolList(name) },
