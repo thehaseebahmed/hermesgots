@@ -2511,12 +2511,15 @@ export interface ProjectAfk {
   critiqueSkills: string[]
 }
 
+/** A skill's name as the pickers write it, or null: a blank name is no choice at all. */
+function skillName(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null
+}
+
 /** The skill names in a list the host sent, each once, in its order. */
 function skillNames(value: unknown): string[] {
-  const names = Array.isArray(value)
-    ? value.filter((name): name is string => typeof name === "string")
-    : []
-  return [...new Set(names.map((name) => name.trim()).filter(Boolean))]
+  const names = Array.isArray(value) ? value.map(skillName) : []
+  return [...new Set(names.filter((name): name is string => name !== null))]
 }
 
 function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
@@ -2532,7 +2535,7 @@ function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
     reason: str(body.reason) || null,
     task: parseIssue(body.task),
     refusal: str(body.refusal) || null,
-    buildSkill: str(body.build_skill) || null,
+    buildSkill: skillName(body.build_skill),
     critiqueSkills: skillNames(body.critique_skills),
   }
 }
@@ -2554,19 +2557,28 @@ export async function getProjectAfk(
   return parseAfk((await response.json()) as Record<string, unknown> | null)
 }
 
-/** Turns a project's AFK on or off on its host, answering the setting it now holds. */
-export async function setProjectAfk(
+/** Writes one of the project's AFK settings, answering the setting the host now holds. */
+async function writeAfk(
   config: HermesConfig,
   projectId: string,
-  on: boolean,
+  body: Record<string, unknown>,
 ): Promise<ProjectAfk> {
   const response = await request(projectPath(config, projectId, "afk"), {
     method: "POST",
     headers: headers(config),
-    body: JSON.stringify({ on }),
+    body: JSON.stringify(body),
     signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
   })
   return parseAfk((await response.json()) as Record<string, unknown> | null)
+}
+
+/** Turns a project's AFK on or off on its host, answering the setting it now holds. */
+export function setProjectAfk(
+  config: HermesConfig,
+  projectId: string,
+  on: boolean,
+): Promise<ProjectAfk> {
+  return writeAfk(config, projectId, { on })
 }
 
 /**
@@ -2574,19 +2586,16 @@ export async function setProjectAfk(
  * host, answering the setting it now holds. The two are written together: a write naming one would
  * leave the other's meaning to a guess.
  */
-export async function setProjectAfkSkills(
+export function setProjectAfkSkills(
   config: HermesConfig,
   projectId: string,
   buildSkill: string | null,
   critiqueSkills: string[],
 ): Promise<ProjectAfk> {
-  const response = await request(projectPath(config, projectId, "afk"), {
-    method: "POST",
-    headers: headers(config),
-    body: JSON.stringify({ build_skill: buildSkill, critique_skills: critiqueSkills }),
-    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  return writeAfk(config, projectId, {
+    build_skill: buildSkill,
+    critique_skills: critiqueSkills,
   })
-  return parseAfk((await response.json()) as Record<string, unknown> | null)
 }
 
 export type LiveRunStatus = "running" | "waiting_for_approval"

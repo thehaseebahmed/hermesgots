@@ -102,6 +102,21 @@ const choosing = async ({ page, profileId, shot, until }) => {
   assert.equal(neighbour.build_skill, null, "another project builds by nothing")
   assert.deepEqual(neighbour.critique_skills, [], "and critiques by nothing")
 
+  // The shape the route keeps, which the pickers write: one write names either the switch or the
+  // skills, and the skills are written together. Posted straight at the host, since the app never
+  // builds such a body.
+  for (const [body, why] of [
+    [{ critique_skills: [] }, "a body naming one of the two"],
+    [{ on: true, build_skill: null, critique_skills: [] }, "a body naming both"],
+  ]) {
+    const refused = await fetch(`${mock}/api/plugins/memento/projects/${project}/afk`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+    assert.equal(refused.status, 400, `${why} is refused`)
+  }
+
   // The choice is the project's, kept on the host: a reload reads it back, and asks the host for it —
   // then either clears back to nothing, the build's None and the critique's Clear.
   const asked = afkReads.length

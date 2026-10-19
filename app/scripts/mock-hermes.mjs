@@ -157,7 +157,13 @@ const afkSwept = new Set()
 const afkStalled = new Map()
 // The skills each project's AFK work follows — one to build by, the ones to critique — as the plugin
 // keeps them on the project's row: the names from the profile's live list, not the skills.
+// The skills each project's work follows, as the plugin's row keeps them: `build_skill` and
+// `critique_skills`, written together (afk.skills_from).
 const afkSkills = new Map()
+/** A skill's name as the plugin writes it (`afk._name`), or null: a blank name is no choice. */
+const skillName = (value) => (typeof value === "string" && value.trim() ? value.trim() : null)
+/** The names a choice holds, trimmed, without blanks and each once, in order (`afk._names`). */
+const skillNames = (values) => [...new Set(values.map(skillName).filter(Boolean))]
 // What the media route serves for chart.png: navy sky, teal ground, a sun.
 const MOCK_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAHgAAABLCAIAAAA06NSGAAAAuklEQVR42u3aQQmAABBE0anhxQYW8mIDz0Y0jhFsIII4iDz4Cd5xZzNMiwoFAWjQAg0aNAXQoAX6dsc+Xwf6deI3uEO5Yx3KHetQ7liHcsc6lDvWoEF/T/mJNWjQoEGDBg0aNGjQoEGDBu3W4dYB2j0atIXFZmgFt4L76/CpBNrvHWiBBi3QoEEL9H+gx21VIdCgQQs0aNAIQIMWaNCgKYAGLdCgQVMADVqgQYMWaNACDRq0QIMW6E92AjwFRtd/9tVBAAAAAElFTkSuQmCC",
@@ -3191,29 +3197,42 @@ http
       const reason = afkReason(found)
       if (req.method === "POST") {
         const body = await readBody(req)
-        const { on } = body
-        const skills = "build_skill" in body || "critique_skills" in body
-        if (typeof on !== "boolean" && !skills)
+        const switching = "on" in body
+        const choosing = "build_skill" in body || "critique_skills" in body
+        // The route's own rules, as the plugin keeps them: one write, one shape, and the two pickers
+        // written together.
+        if (!switching && !choosing)
           return json(res, 400, {
             error: { message: "on, build_skill or critique_skills is needed." },
           })
-        // The two pickers are written together and both name what the project's work follows, as
-        // the plugin's own row holds them: the names, not the skills themselves.
-        if (skills) {
-          if ("build_skill" in body && body.build_skill !== null && typeof body.build_skill !== "string")
+        if (switching && choosing)
+          return json(res, 400, {
+            error: { message: "A write names either on or the skills, not both." },
+          })
+        if (switching && typeof body.on !== "boolean")
+          return json(res, 400, { error: { message: "on must be true or false." } })
+        if (choosing) {
+          if (!("build_skill" in body) || !("critique_skills" in body))
+            return json(res, 400, {
+              error: { message: "A skills write names build_skill and critique_skills." },
+            })
+          if (body.build_skill !== null && typeof body.build_skill !== "string")
             return json(res, 400, { error: { message: "build_skill must be a skill's name or null." } })
-          if (!Array.isArray(body.critique_skills) || !body.critique_skills.every((n) => typeof n === "string"))
+          if (
+            !Array.isArray(body.critique_skills) ||
+            !body.critique_skills.every((name) => typeof name === "string")
+          )
             return json(res, 400, {
               error: { message: "critique_skills must be a list of skill names." },
             })
           afkSkills.set(found.id, {
-            build_skill: body.build_skill ?? null,
-            critique_skills: body.critique_skills,
+            build_skill: skillName(body.build_skill),
+            critique_skills: skillNames(body.critique_skills),
           })
         }
-        if (typeof on === "boolean") {
-          if (on && reason) return json(res, 409, { error: { message: reason } })
-          if (on) afkProjects.add(found.id)
+        if (switching) {
+          if (body.on && reason) return json(res, 409, { error: { message: reason } })
+          if (body.on) afkProjects.add(found.id)
           else {
             afkProjects.delete(found.id)
             afkSwept.delete(found.id)
