@@ -17,6 +17,7 @@ import { prLabel, prLook } from "@/components/chat/pr-look"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { ItemGroup, ItemRow, ItemSearch } from "@/components/item-list"
 import { NewSessionPopup, type SessionTarget } from "@/components/new-session"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { projectKey, startBlocked, useProjectSessions, useSessionFollowUps } from "@/lib/code"
@@ -444,6 +445,13 @@ function SessionItem({
       waiting={state === "waiting" && !prTick}
       botId={botId}
       title={session.title}
+      badge={
+        session.afk ? (
+          <Badge data-afk className="bg-primary/10 text-primary">
+            AFK
+          </Badge>
+        ) : undefined
+      }
       when={formatWhen(session.updatedAt, now)}
       line={line && <span className="truncate">{line}</span>}
       selected={session.id === pane?.selected}

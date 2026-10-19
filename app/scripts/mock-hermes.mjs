@@ -747,7 +747,8 @@ const PENDING_CHECK_S = 12
 
 /** Project sessions as the plugin's memento.db holds them, by Hermes session id. */
 const projectSessions = new Map()
-// The plugin's pull request instruction (prompt_builder._PR_INSTRUCTIONS), word for word.
+// The plugin's pull request instruction (prompt_builder._pr_instructions(unattended=False)), word
+// for word.
 // test_library.py matches this line word for word, so it stays one line.
 // prettier-ignore
 const PR_INSTRUCTIONS = "When the work is done and you've checked it, ship it yourself with the pull_request tool and action 'ship': it commits what's left, pushes this branch and opens a draft pull request, or pushes to the one open. Don't ask first, and don't use git push or gh for it. Write the description from the repo's pull request template when it has one (named below), else with Summary, Changes and How to test sections. The pull request stays a draft. Pass force: true only after a rebase or amend. action 'update' changes the open pull request's title or body, and 'status' reports without writing. Merging and closing are the user's decision: the tool refuses them, so ask the user with clarify instead."
@@ -971,6 +972,29 @@ const mockTask = (repo, number, title, extra = {}) => ({
   blockers: [],
   ...extra,
 })
+const workspaceRecord = (project, { sessionId, slug, mode }) => {
+  const repos = project.folders
+    .filter((folder) => folder.git)
+    .map((folder) => ({
+      name: folder.repo,
+      repo_root: folder.path,
+      path: `${folder.path}/.worktrees/${slug}`,
+      branch: `hermes/${slug}`,
+    }))
+  return {
+    session_id: sessionId,
+    project_id: project.id,
+    repo_root: repos[0].repo_root,
+    path: repos[0].path,
+    branch: repos[0].branch,
+    mode,
+    plan_pending: 0,
+    created_at: Date.now(),
+    repos,
+    files_dir: `${repos[0].repo_root}/files/${slug}`,
+    plan_file: null,
+  }
+}
 const projectTasks = (project) => {
   const repo = repoOf(project)
   const task = (number, title, extra = {}) => mockTask(repo, number, title, extra)
@@ -1014,6 +1038,42 @@ function afkTask(project) {
     url: task.url,
     created_at: task.created_at,
   }
+}
+
+function afkSession(project) {
+  const held = afkTask(project)
+  const session = `memento-afk-${project.id}`
+  const title = `#${held.number} ${held.title}`
+  const input = `Implement Issue #${held.number} (${held.url})`
+  const now = Date.now()
+  if (project.folders.some((f) => f.git))
+    projectSessions.set(
+      session,
+      workspaceRecord(project, { sessionId: session, slug: `afk-${held.number}`, mode: "auto" }),
+    )
+  chatTitles.set(session, title)
+  transcripts.set(session, [
+    { id: ++lastRowId, session_id: session, timestamp: now / 1000, role: "user", content: input },
+  ])
+  pluginChats.set(session, {
+    at: now + 1,
+    value: {
+      title,
+      hermesSessionId: session,
+      createdAt: now,
+      updatedAt: now + 1,
+      projectId: project.id,
+      mode: "auto",
+      afk: true,
+    },
+  })
+  noteEvent("chats")
+}
+
+function afkSweep(project) {
+  if (afkSwept.has(project.id)) return
+  afkSwept.add(project.id)
+  afkSession(project)
 }
 
 /** AFK's answer for a project: its switch, the task it holds, and its last refusal (none mocked). */
@@ -3161,8 +3221,7 @@ http
         }
         return json(res, 200, afkAnswer(found, reason))
       }
-      // The sweep the switch woke has run by the next read, so this one holds the task it claimed.
-      if (afkProjects.has(found.id)) afkSwept.add(found.id)
+      if (afkProjects.has(found.id)) afkSweep(found)
       return json(res, 200, afkAnswer(found, reason))
     }
     if (PLUGIN && !profile && projectRoute?.[2] === "/usage") {
@@ -3794,25 +3853,11 @@ http
           await sleep(800 * gitFolders.length)
           const pick = (words) => words[Math.floor(Math.random() * words.length)]
           const slug = `${pick(["jazzy", "cosmic", "fuzzy", "zesty", "nimble"])}-${pick(["hopper", "otter", "comet", "waffle", "quokka"])}-${randomUUID().slice(0, 4)}`
-          const repos = gitFolders.map((f) => ({
-            name: f.repo,
-            repo_root: f.path,
-            path: `${f.path}/.worktrees/${slug}`,
-            branch: `hermes/${slug}`,
-          }))
-          record = {
-            session_id: id,
-            project_id: project.id,
-            repo_root: repos[0].repo_root,
-            path: repos[0].path,
-            branch: repos[0].branch,
+          record = workspaceRecord(project, {
+            sessionId: id,
+            slug,
             mode: mode ?? "accept_edits",
-            plan_pending: 0,
-            created_at: Date.now(),
-            repos,
-            files_dir: `${repos[0].repo_root}/files/${slug}`,
-            plan_file: null,
-          }
+          })
           projectSessions.set(id, record)
         } else if (mode && mode !== record.mode) {
           record.mode = mode

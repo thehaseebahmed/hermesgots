@@ -170,6 +170,11 @@ const FLOWS = {
     about:
       "AFK claims the oldest ready task when a project is turned on — the pop-up naming what it holds — and a GitHub refusal leaves the switch on with its reason shown",
   },
+  "afk-session": {
+    script: "e2e/afk-session.mjs",
+    about:
+      "AFK works its claimed task in a session of its own: in Code marked AFK, opening with one line naming the task rather than the brief",
+  },
   "mcps-gate": {
     script: "e2e/mcps-gate.mjs",
     about:

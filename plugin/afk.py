@@ -11,6 +11,16 @@ used (ADR 0012). One task per project at a time — while one is held the sweep 
 and a GitHub refusal stops it, leaves the switch on and records the reason the app's sheet shows,
 rather than asking again in a loop.
 
+The task it takes is worked in a session of its own, made the way the app's workspace route makes
+one (`sessions.ensure`: its own worktree, branch and row, in Auto), and the chat record that makes
+that session appear and open in the app is written here (ADR 0013) — the Code list hides a session
+nothing was sent in, and the app has no conversation for one it didn't make. The run then starts
+from this plugin: `prompt_builder.afk_prompt` is its instructions — how to work an issue that was
+planned before the user left, with nobody to ask — and its input is one line naming the issue and
+where it is. Its own text is deliberately not copied into either: the agent fetches the issue, so
+the brief can't go stale and the prompt is the same tokens every turn. It carries no model, so the
+host's own runs.
+
 A project that can't be left to work says why instead of offering a switch: it has no GitHub
 repository to read tasks from, the host has no GitHub account to read or claim one with, or the
 project has been put away. The reason is the host's own answer rather than the app's guess, because
@@ -24,10 +34,11 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from . import github, tasks
+from . import chats, github, prompt_builder, sessions, tasks
 from .store import connect, db_path
 
 logger = logging.getLogger(__name__)
@@ -40,7 +51,6 @@ ARCHIVED = "This project is archived."
 # How often a project left on is swept for work. A GitHub refusal ends that sweep and the next one
 # waits for its turn rather than asking again at once.
 SWEEP_SECONDS = 180
-# What a held task keeps: enough to show it, and to name the session that will work it (#268).
 HELD = ("repo", "number", "title", "url", "created_at")
 
 _loop: Optional[asyncio.AbstractEventLoop] = None
@@ -133,38 +143,40 @@ def read(
 
 def sweep(
     hermes_home: Path, project_id: str, folders: Iterable[Any], archived: bool = False
-) -> None:
+) -> Optional[Dict[str, Any]]:
     """Claims the oldest ready task for a project left to work, if it isn't holding one.
 
-    One task per project at a time: while a task is held this does nothing, and the session that
-    works it is what lets the next one be taken. A GitHub refusal — no permission to write issues, a
-    rate limit, no connection — records its reason and stops this sweep with the switch left on, so
-    the sheet says why; the next sweep is the next attempt, not an immediate one.
+    Answers the task it just claimed, so the caller starts the session that works it without a
+    second read, and None when it claimed nothing. One task per project at a time: while a task is
+    held this does nothing, and the session that works it is what lets the next one be taken. A
+    GitHub refusal — no permission to write issues, a rate limit, no connection — records its reason
+    and stops this sweep with the switch left on, so the sheet says why; the next sweep is the next
+    attempt, not an immediate one.
     """
     found = _row(hermes_home, project_id)
     if found is None or not found["on"]:
-        return
+        return None
     if found["task"] is not None:
         # Already holding the task it took: the session that works it is what frees the next one.
-        return
+        return None
     why = reason(hermes_home, folders, archived)
     if why is not None:
         # Put away, with no repository to read, or no account to read it with: the sheet's own
         # reason already says so, and it isn't GitHub refusing anything — so a refusal it recorded
         # before would sit beside that reason saying something GitHub no longer says.
         _forget_refusal(hermes_home, project_id, found)
-        return
+        return None
     auth, _ = github.token(hermes_home)
     try:
         answers = tasks.read(hermes_home, folders)
     except github.GitHubError as error:
         _refuse(hermes_home, project_id, str(error))
-        return
+        return None
     ready = answers.get("ready") or []
     if not ready:
         # GitHub answered and has nothing to give: whatever it refused before is stale.
         _forget_refusal(hermes_home, project_id, found)
-        return
+        return None
     task = ready[0]
     try:
         github.claim_issue(
@@ -172,9 +184,127 @@ def sweep(
         )
     except github.GitHubError as error:
         _refuse(hermes_home, project_id, str(error))
-        return
+        return None
     # The hold clears the last refusal in the same write: this sweep just got an answer.
     _hold(hermes_home, project_id, task)
+    return task
+
+
+def new_session_id() -> str:
+    return f"{sessions.MEMENTO_ID_PREFIX}afk-{uuid.uuid4().hex[:12]}"
+
+
+def session_title(task: Dict[str, Any]) -> str:
+    return f"#{task.get('number')} {task.get('title') or ''}".strip()
+
+
+def run_body(record: Dict[str, Any], task: Dict[str, Any]) -> Dict[str, Any]:
+    """The ``POST /v1/runs`` request: how to work a planned issue, and the issue's name as the input.
+
+    The prompt is all `prompt_builder`'s — one module holds every word the agent is told — and the
+    issue's own text is left out of both: the agent reads it from GitHub.
+    """
+    return {
+        "session_id": record["session_id"],
+        "instructions": prompt_builder.afk_prompt(record, task),
+        "input": [{"role": "user", "content": prompt_builder.afk_input(task)}],
+    }
+
+
+def publish(
+    hermes_home: Path, session_id: str, project_id: str, task: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Writes the chat record that makes the session appear and open in the app (ADR 0013).
+
+    Its ``updatedAt`` is newer than its ``createdAt``, because the Code list hides a session nothing
+    was sent in by exactly that rule; the record is keyed by the session id, so a device has one id
+    for it. It is written once, here: the chat list is last-write-wins, so a title the user edits, a
+    mode they change or a resolve they make afterwards has to win.
+    """
+    now = int(time.time() * 1000)
+    value = {
+        "title": session_title(task),
+        "hermesSessionId": session_id,
+        "createdAt": now,
+        "updatedAt": now + 1,
+        "projectId": project_id,
+        "mode": "auto",
+        "afk": True,
+    }
+    chats.merge(db_path(hermes_home), {session_id: {"at": now + 1, "value": value}})
+    return value
+
+
+async def start(
+    adapter: Any, hermes_home: Path, project_id: str, task: Dict[str, Any]
+) -> None:
+    """Works a claimed task in a session of its own: its worktree, its run, its chat record.
+
+    The task is already claimed by the sweep, and it's named to the run rather than read: the agent
+    fetches the issue itself, so the claim stays the fast path and the brief is never a stale copy of
+    what the tracker says. The record is written only once the run is under way: a session the app
+    shows with no run behind it is worse than one it never hears about. A start that fails leaves
+    the claim held, and its own ticket (#270) is what gives it back, so the same task is never
+    worked twice.
+    """
+    from . import link, outbox
+
+    profile = link.profile_name(hermes_home)
+    session_id = new_session_id()
+    issue = f"{task.get('repo')}#{task.get('number')}"
+    try:
+        record = await asyncio.to_thread(
+            sessions.ensure,
+            db_path(hermes_home),
+            hermes_home,
+            session_id,
+            project_id,
+            task.get("title") or "",
+            "auto",
+        )
+    except Exception:
+        logger.warning("memento: AFK couldn't make a session for %s", issue, exc_info=True)
+        return
+    sessions.apply_cwd(session_id, record["path"])
+    try:
+        started = await outbox.post(
+            adapter,
+            profile,
+            "/v1/runs",
+            run_body(record, task),
+            authorization=_authorization(hermes_home),
+        )
+    except outbox.StartError as error:
+        logger.warning("memento: AFK couldn't start the session for %s: %s", issue, error)
+        return
+    try:
+        await asyncio.to_thread(publish, hermes_home, session_id, project_id, task)
+    except Exception:
+        # The run is going and nothing else can show it: name the session, which is all a reader of
+        # the log has to find it with.
+        logger.error(
+            "memento: AFK started %s in %s but couldn't publish it to the app",
+            issue,
+            session_id,
+            exc_info=True,
+        )
+    logger.info(
+        "memento: AFK is working %s in %s (run %s)", issue, session_id, started.get("run_id")
+    )
+
+
+def _authorization(hermes_home: Path) -> Optional[str]:
+    """The key this home's runs are posted with, or None to let ``outbox`` resolve its own.
+
+    Read from the home's own ``.env``, the same read ``link.record`` publishes a bot's key from,
+    rather than through Hermes's credential helper: AFK runs from the gateway's loop, where no
+    request's profile scope is set, so the helper would answer the launch profile's key for every
+    home a multiplexed process serves.
+    """
+    from . import link
+
+    key = link.env_value(hermes_home, "API_SERVER_KEY")
+    return f"Bearer {key}" if key else None
 
 
 def enabled_projects(hermes_home: Path) -> List[str]:
@@ -189,13 +319,16 @@ def enabled_projects(hermes_home: Path) -> List[str]:
     return [str(row[0]) for row in rows]
 
 
-def sweep_all(hermes_home: Path) -> None:
-    """Sweeps every project left on; one project's trouble never stops another's."""
-    from . import sessions
+def sweep_all(hermes_home: Path) -> List[Tuple[str, Dict[str, Any]]]:
+    """Sweeps every project left on; one project's trouble never stops another's.
 
+    Answers what each project just claimed, so the caller can start those sessions; a project that
+    claimed nothing isn't in the list.
+    """
+    claimed: List[Tuple[str, Dict[str, Any]]] = []
     left_on = enabled_projects(hermes_home)
     if not left_on:
-        return
+        return claimed
     # One read of the project list, not one per project: a sweep only needs their folders.
     projects = sessions.projects(hermes_home / "projects.db")
     for project_id in left_on:
@@ -204,7 +337,7 @@ def sweep_all(hermes_home: Path) -> None:
             # A row whose project is gone.
             continue
         try:
-            sweep(
+            task = sweep(
                 hermes_home,
                 project_id,
                 project.folders,
@@ -212,28 +345,43 @@ def sweep_all(hermes_home: Path) -> None:
             )
         except Exception:
             logger.warning("memento: couldn't sweep AFK's project %s", project_id, exc_info=True)
+            continue
+        if task is not None:
+            claimed.append((project_id, task))
+    return claimed
+
+
+async def sweep_homes(adapter: Any) -> None:
+    """Sweeps every home this process serves, and starts the session for what each just claimed.
+
+    Not just its own home: a /p/<profile> bot keeps its own store. One home's trouble is that
+    home's, so a store it can't read must not stop the rest. A session is started here, on the loop,
+    because starting a run is the API server's own call and this is the thread it's reached from.
+    """
+    from . import link
+
+    for one in link.served_homes(adapter):
+        try:
+            claimed = await asyncio.to_thread(sweep_all, one)
+        except Exception:
+            logger.warning("memento: AFK couldn't sweep the home at %s", one, exc_info=True)
+            continue
+        for project_id, task in claimed:
+            try:
+                await start(adapter, one, project_id, task)
+            except Exception:
+                logger.warning("memento: AFK couldn't start %s's task", project_id, exc_info=True)
 
 
 async def run(adapter: Any) -> None:
     """Sweeps the projects left on every ``SWEEP_SECONDS``, and at once when woken, while Hermes runs."""
-    from . import link
-
     global _loop, _event
     _loop = asyncio.get_running_loop()
     _event = asyncio.Event()
 
-    async def sweep_homes() -> None:
-        # Every home this process serves, not just its own: a /p/<profile> bot keeps its own store.
-        # One home's trouble is that home's: a store it can't read must not stop the rest.
-        for one in link.served_homes(adapter):
-            try:
-                await asyncio.to_thread(sweep_all, one)
-            except Exception:
-                logger.warning("memento: AFK couldn't sweep the home at %s", one, exc_info=True)
-
     while True:
         try:
-            await sweep_homes()
+            await sweep_homes(adapter)
         except Exception:
             logger.warning("memento: AFK's sweep failed", exc_info=True)
         try:
@@ -261,8 +409,6 @@ def after_run(session_id: Any = None, **_kwargs: Any) -> None:
     sweep for every chat would read GitHub for nothing.
     """
     try:
-        from . import sessions
-
         path, home = sessions._paths()
         if sessions.record_for(path, home, str(session_id or "")):
             wake()

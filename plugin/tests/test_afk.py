@@ -9,15 +9,16 @@ Run: python3 -m unittest plugin.tests.test_afk -v
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import ModuleType, SimpleNamespace
-from typing import Any, List
+from typing import Any, Dict, List
 from unittest.mock import patch
 
-from plugin import afk, github, projects
+from plugin import afk, chats, github, outbox, projects, prompt_builder, sessions
 from plugin.afk import (
     ARCHIVED,
     NO_GITHUB,
@@ -28,6 +29,7 @@ from plugin.afk import (
     sweep,
     sweep_all,
 )
+from plugin.store import db_path
 from plugin.tasks import CLAIM_LABEL, READY_LABEL
 from plugin.tests._helpers import issue_row, stub_projects_db
 
@@ -499,6 +501,179 @@ class ClaimTests(unittest.TestCase):
         self.assertEqual(wake.call_count, 1, "turning it off has nothing to wake for")
 
 
+class SessionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = Path(self.tmp.name)
+        self.home.joinpath("projects.db").write_text("")
+        self.task = {
+            "repo": "mock-user/memento",
+            "number": 265,
+            "title": "The frontier is read from GitHub and listed",
+            "url": "https://github.com/mock-user/memento/issues/265",
+            "created_at": "2026-10-01T00:00:00Z",
+        }
+        self.ensured: List[tuple] = []
+        self.posted: List[dict] = []
+        self.record = {
+            "session_id": "",
+            "project_id": "p1",
+            "mode": "auto",
+            "path": "/trees/quiet-marmot",
+            "branch": "hermes/quiet-marmot",
+            "repo_root": "/checkout",
+            "files_dir": "/checkout/files/quiet-marmot",
+            "plan_pending": False,
+            "repos": [
+                {
+                    "name": "mock-user/memento",
+                    "repo_root": "/checkout",
+                    "path": "/trees/quiet-marmot",
+                    "branch": "hermes/quiet-marmot",
+                }
+            ],
+        }
+        for one in (
+            patch.object(github, "token", return_value=("token", "env")),
+            patch.object(github, "origin_repo", return_value="mock-user/memento"),
+            patch("plugin.sessions.ensure", side_effect=self.ensure),
+            patch("plugin.sessions.apply_cwd"),
+            patch("plugin.outbox.post", side_effect=self.post),
+        ):
+            one.start()
+            self.addCleanup(one.stop)
+
+    def ensure(self, path: Any, home: Any, session_id: str, project_id: Any, task: Any, mode: Any) -> dict:
+        self.ensured.append((session_id, project_id, task, mode))
+        return {**self.record, "session_id": session_id, "project_id": project_id, "mode": mode}
+
+    async def post(self, adapter: Any, profile: Any, path: str, body: dict, **kwargs: Any) -> dict:
+        self.posted.append({"profile": profile, "path": path, "body": body, **kwargs})
+        return {"run_id": "run-1"}
+
+    def adapter(self) -> SimpleNamespace:
+        return SimpleNamespace(_host="127.0.0.1", _port=8642, _api_key="host-key")
+
+    def start(self) -> None:
+        asyncio.run(afk.start(self.adapter(), self.home, "p1", self.task))
+
+    def chats(self) -> Dict[str, Any]:
+        return chats.read(db_path(self.home))
+
+    def test_the_session_is_made_with_a_worktree_of_its_own_in_auto(self) -> None:
+        self.start()
+        self.assertEqual(len(self.ensured), 1)
+        session_id, project_id, task, mode = self.ensured[0]
+        self.assertEqual(project_id, "p1")
+        self.assertEqual(task, self.task["title"], "the worktree is named after the task")
+        self.assertEqual(mode, "auto", "an AFK session runs in Auto")
+        self.assertTrue(session_id.startswith("memento-"), "a session id Gots's own hooks label")
+
+    def test_the_chat_record_it_publishes_is_what_makes_the_session_appear(self) -> None:
+        self.start()
+        records = self.chats()
+        self.assertEqual(len(records), 1)
+        entry = next(iter(records.values()))
+        value = entry["value"]
+        self.assertEqual(value["title"], "#265 The frontier is read from GitHub and listed")
+        self.assertEqual(value["hermesSessionId"], self.ensured[0][0])
+        self.assertEqual(value["projectId"], "p1")
+        self.assertEqual(value["mode"], "auto")
+        self.assertIs(value["afk"], True, "the list marks it as AFK's")
+        self.assertGreater(
+            value["updatedAt"],
+            value["createdAt"],
+            "a record whose updated time isn't newer is hidden by the Code list",
+        )
+        self.assertGreaterEqual(entry["at"], value["updatedAt"], "the change clock is the record's")
+
+    def test_the_run_starts_with_one_line_naming_the_issue_and_where_it_is(self) -> None:
+        self.start()
+        self.assertEqual(len(self.posted), 1)
+        body = self.posted[0]["body"]
+        message = body["input"][0]
+        self.assertEqual(message["role"], "user")
+        self.assertEqual(
+            message["content"],
+            "Implement Issue #265 (https://github.com/mock-user/memento/issues/265)",
+            "the input is the issue and its url, not its text",
+        )
+
+    def test_the_instructions_are_the_afk_prompt_and_carry_no_task_text(self) -> None:
+        self.start()
+        instructions = self.posted[0]["body"]["instructions"]
+        record = {**self.record, "session_id": self.ensured[0][0], "project_id": "p1", "mode": "auto"}
+        self.assertEqual(
+            instructions,
+            prompt_builder.afk_prompt(record, self.task),
+            "one module owns every word the agent is told",
+        )
+        self.assertIn("Never ask the user anything", instructions)
+        self.assertIn("delegate_task", instructions)
+        self.assertIn("gh issue view", instructions, "it fetches the issue itself")
+        self.assertIn(
+            "You are working in a git worktree of mock-user/memento",
+            instructions,
+            "the session's own prompt is kept, so its worktree and pull request lines still hold",
+        )
+        self.assertNotIn("Read the frontier first.", instructions, "the issue's text isn't copied in")
+
+    def test_the_run_is_the_sessions_own_and_starts_on_the_hosts_answer(self) -> None:
+        self.start()
+        posted = self.posted[0]
+        self.assertEqual(posted["path"], "/v1/runs")
+        self.assertEqual(posted["body"]["session_id"], self.ensured[0][0])
+        self.assertNotIn("model", posted["body"], "no model picked: the host's own runs")
+
+    def test_a_key_in_the_homes_own_env_is_the_one_the_run_is_posted_with(self) -> None:
+        self.home.joinpath(".env").write_text("API_SERVER_KEY=home-key\n")
+        self.start()
+        self.assertEqual(self.posted[0]["authorization"], "Bearer home-key")
+
+    def test_a_home_with_no_key_leaves_its_resolution_to_outbox(self) -> None:
+        self.start()
+        self.assertIsNone(
+            self.posted[0]["authorization"],
+            "outbox knows the profile's key: a home's own .env is all this adds",
+        )
+
+    def test_a_run_that_cannot_start_publishes_nothing(self) -> None:
+        outbox.post.side_effect = outbox.StartError("No API key for this bot.", True)
+        self.start()
+        self.assertEqual(len(self.ensured), 1, "the session was made")
+        self.assertEqual(
+            self.chats(), {}, "a record the app would open with no run behind it is worse than none"
+        )
+
+    def test_a_session_that_cannot_be_made_starts_no_run(self) -> None:
+        with patch("plugin.sessions.ensure", side_effect=sessions.WorkspaceError("No such project.")):
+            self.start()
+        self.assertEqual(self.posted, [], "nothing is started for a session that doesn't exist")
+        self.assertEqual(self.chats(), {}, "and nothing is published to be opened")
+
+    def test_the_sweep_answers_the_task_it_just_claimed(self) -> None:
+        with TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            checkout = home / "checkout"
+            (checkout / ".git").mkdir(parents=True)
+            home.joinpath("projects.db").write_text("")
+            rows = [issue_row(265)]
+            with (
+                patch.object(github, "token", return_value=("token", "env")),
+                patch.object(github, "origin_repo", return_value="mock-user/memento"),
+                patch.object(github, "_get", lambda path, auth: {"login": "mock-user"}),
+                patch.object(github, "_page", lambda path, auth: (rows, "")),
+                patch.object(github, "_request", lambda *args, **kwargs: {}),
+            ):
+                set_on(home, "p1", [folder(str(checkout))], True)
+                self.assertEqual(sweep(home, "p1", [folder(str(checkout))])["number"], 265)
+                self.assertIsNone(
+                    sweep(home, "p1", [folder(str(checkout))]),
+                    "a project holding one is asked for nothing further",
+                )
+
+
 class SweepAllTests(unittest.TestCase):
     """Which projects the background sweep looks at."""
 
@@ -540,6 +715,55 @@ class SweepAllTests(unittest.TestCase):
             with patch.object(afk, "sweep", side_effect=[RuntimeError("database is locked"), None]) as call:
                 sweep_all(self.home)
         self.assertEqual([one.args[1] for one in call.call_args_list], ["p1", "p2"])
+
+    def test_a_sweep_answers_the_tasks_it_just_claimed(self) -> None:
+        set_on(self.home, "p1", [folder(str(self.checkout))], True)
+        task = {"repo": "mock-user/memento", "number": 265, "title": "Task 265"}
+        with stub_projects_db(projects=[self.project("p1"), self.project("p2")]):
+            with patch.object(afk, "sweep", side_effect=[task, None]):
+                claimed = sweep_all(self.home)
+        self.assertEqual(claimed, [("p1", task)], "only what was claimed is answered")
+
+
+class LoopTests(unittest.TestCase):
+
+    def setUp(self) -> None:
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = Path(self.tmp.name)
+        self.task = {"repo": "mock-user/memento", "number": 265, "title": "Task 265"}
+        self.starts: List[tuple] = []
+        self.patch = patch("plugin.link.served_homes", return_value=[self.home])
+        self.patch.start()
+        self.addCleanup(self.patch.stop)
+
+    async def start(self, adapter: Any, home: Path, project_id: str, task: dict, **kwargs: Any) -> None:
+        self.starts.append((home, project_id, task, adapter))
+
+    def test_the_task_a_sweep_claimed_is_worked_in_a_session(self) -> None:
+        adapter = SimpleNamespace()
+        with (
+            patch.object(afk, "sweep_all", return_value=[("p1", self.task)]),
+            patch.object(afk, "start", side_effect=self.start),
+        ):
+            asyncio.run(afk.sweep_homes(adapter))
+        self.assertEqual(self.starts, [(self.home, "p1", self.task, adapter)])
+
+    def test_a_sweep_that_claimed_nothing_starts_nothing(self) -> None:
+        with (
+            patch.object(afk, "sweep_all", return_value=[]),
+            patch.object(afk, "start", side_effect=self.start),
+        ):
+            asyncio.run(afk.sweep_homes(SimpleNamespace()))
+        self.assertEqual(self.starts, [])
+
+    def test_one_projects_failure_to_start_does_not_stop_anothers(self) -> None:
+        second = {"repo": "mock-user/memento", "number": 266, "title": "Task 266"}
+        with (
+            patch.object(afk, "sweep_all", return_value=[("p1", self.task), ("p2", second)]),
+            patch.object(afk, "start", side_effect=[RuntimeError("no worktree"), None]),
+        ):
+            asyncio.run(afk.sweep_homes(SimpleNamespace()))
 
 
 class WakeTests(unittest.TestCase):

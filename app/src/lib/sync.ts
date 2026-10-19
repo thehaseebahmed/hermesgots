@@ -79,6 +79,7 @@ const CHAT_FIELDS = [
   "createdAt",
   "updatedAt",
   "projectId",
+  "afk",
   "resolvedAt",
   "discardedAt",
   "draftAt",
