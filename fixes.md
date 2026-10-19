@@ -1,3 +1,55 @@
+# Deferred fixes from the reviews on AFK's switch
+
+Two reviews of `feat(projects): switch a project to work its own tasks, kept on its host` — `/code-review`'s
+two independent passes (the repo's documented standards, and the ticket with its parent spec) — turned up
+one change too wide for the branch's own review pass. It is recorded here instead of applied: it rewrites
+a handler this branch never touched.
+
+Everything else both reviews found is applied on this branch rather than filed. From the standards pass:
+`AGENTS.md`'s route enumeration names `projects/{id}/afk` (`:216`), and the sheet no longer prints a line
+explaining that a plugin can't switch AFK on — a plugin without `afk_switch` leaves the row out, which is
+what `skills` ("no error line") and `mcps` ("no row and no screen rather than an error") already do, with
+the flow asserting the row's absence instead of the copy. The duplicated `makeProject`/`openAfk` the two
+flows carried are one pair in `lib.mjs`, beside `setUpBot`; `readAfk`/`read` stay two bodies because they
+differ in five things (route, setter, failure wording, `noteFailure` label, feature) and one reader taking
+all five is longer and less clear than the two; `quiet` is `duplicate`, and `why`/`offers` are the
+`reason`/`canSwitch` the plugin's own words already use; `projects`, `afk` and the neighbours build their
+paths through one `projectPath`, so `getProjectTasks` stopped being the odd one out.
+
+From the spec pass, and the real defect: `afk.state` used to answer off for an archived project by masking
+the stored row, so a project archived from Hermes's own dashboard or CLI kept its `enabled = 1` and came
+back on when restored. It now writes the switch off the first time an archived project's state is read —
+which also collapsed the duplicated `why != ARCHIVED` in `state`/`set_on` — and the test asserts both the
+row and the restore. A refusal is now `afk.Refused` rather than a bare `ValueError`, so the route answers
+409 with the project's reason and only that; a fault in the store can no longer read as one. The ticket's
+"working a task" state is not one this branch can prove — nothing consumes the switch until the sweep
+lands (#263's own ticket) — so the flows cover idle, can't-be-on, on-with-a-reason and too-old, and the
+frontier's rows under them.
+
+## Risky
+
+### 1. Three routes carry the same project preamble
+
+`plugin/__init__.py`'s `project_tasks`, `project_afk` and `post_project_afk` each spell out the same
+opening — `unauthorized`, `request.match_info["project_id"]`, `clones.is_pending_id`, `resolve_project` —
+and this branch added the second and third copies of it.
+
+- Cost: a change to how a project route authenticates, resolves a pending clone or answers an unknown id
+  lands in three places, and the next project route copies whichever it lands beside.
+- Suggested fix: one helper answering the project, with the pending-clone answer passed in as the
+  caller's own — `tasks.empty()` for the frontier, a 409 for the switch.
+- Why it is risky: the pending-clone answer deliberately differs per route today (a project still cloning
+  has tasks that are empty, but no switch to offer), so the shared shape needs a parameter for it, and
+  `project_tasks` predates this branch. Editing it here would put an untouched handler inside a switch
+  feature's review, for a saving of three lines per route.
+
+---
+
+Found by the `/code-review` pass on this branch. Both axes' findings are fixed above except this entry,
+and the pull request does not wait on it.
+
+---
+
 # Deferred fixes from the simplify pass on AFK's frontier
 
 A cleanup review of `feat(projects): list a project's ready tasks in AFK's pop-up` (four parallel

@@ -27,6 +27,14 @@ NO_GITHUB = "No GitHub account on the server."
 ARCHIVED = "This project is archived."
 
 
+class Refused(Exception):
+    """Turning a project on where it can't be left to work. Its reason is the message.
+
+    Its own type, so the route refuses with the reason it was given and nothing else: an error from
+    the store is a fault, not the project's answer, and must not reach the app as one.
+    """
+
+
 def reason(
     hermes_home: Path, folders: Iterable[Any], archived: bool = False
 ) -> Optional[str]:
@@ -49,12 +57,17 @@ def state(
 ) -> Dict[str, Any]:
     """The project's switch as the app reads it: whether it's on, and why it can't be.
 
-    An archived project reads off whatever the row says: it was put away, so its switch isn't a
-    setting anything would act on — a project archived where this plugin didn't do it (Hermes's own
-    dashboard or CLI) still has its old row.
+    An archived project is turned off here if anything had left it on, and reads off whatever
+    happens: it was put away, so its switch isn't a setting anything acts on. Writing it off rather
+    than only masking it is what keeps a restore from resuming work no one asked for — a project
+    archived where this plugin didn't do it (Hermes's own dashboard or CLI) still has its old row.
     """
     why = reason(hermes_home, folders, archived)
-    return {"on": is_on(hermes_home, project_id) and why != ARCHIVED, "reason": why}
+    on = is_on(hermes_home, project_id)
+    if on and why == ARCHIVED:
+        turn_off(hermes_home, project_id)
+        on = False
+    return {"on": on, "reason": why}
 
 
 def set_on(
@@ -73,9 +86,9 @@ def set_on(
     """
     why = reason(hermes_home, folders, archived)
     if on and why is not None:
-        raise ValueError(why)
+        raise Refused(why)
     _write(hermes_home, project_id, on)
-    return {"on": on and why != ARCHIVED, "reason": why}
+    return {"on": on, "reason": why}
 
 
 def turn_off(hermes_home: Path, project_id: str) -> None:

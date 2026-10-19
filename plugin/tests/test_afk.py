@@ -18,7 +18,7 @@ from typing import Any, List
 from unittest.mock import patch
 
 from plugin import github, projects
-from plugin.afk import ARCHIVED, NO_GITHUB, NO_REPOSITORY, is_on, set_on, state
+from plugin.afk import ARCHIVED, NO_GITHUB, NO_REPOSITORY, Refused, is_on, set_on, state
 
 
 def folder(path: str) -> SimpleNamespace:
@@ -127,7 +127,7 @@ class SwitchTests(unittest.TestCase):
     def test_a_project_with_no_repository_cannot_be_turned_on(self) -> None:
         plain = self.home / "plain"
         plain.mkdir()
-        with self.assertRaises(ValueError) as raised:
+        with self.assertRaises(Refused) as raised:
             set_on(self.home, "p1", self.folders(str(plain)), True)
         self.assertEqual(str(raised.exception), NO_REPOSITORY)
         self.assertFalse(is_on(self.home, "p1"))
@@ -137,7 +137,7 @@ class SwitchTests(unittest.TestCase):
             self.assertEqual(
                 state(self.home, "p1", self.folders()), {"on": False, "reason": NO_GITHUB}
             )
-            with self.assertRaises(ValueError) as raised:
+            with self.assertRaises(Refused) as raised:
                 set_on(self.home, "p1", self.folders(), True)
         self.assertEqual(str(raised.exception), NO_GITHUB)
         self.assertFalse(is_on(self.home, "p1"))
@@ -154,18 +154,25 @@ class SwitchTests(unittest.TestCase):
         # The account it was left to work with is gone, so turning it back on would be refused — but
         # putting the project back to work is the user's to do, and always allowed.
         with patch.object(github, "token", return_value=(None, None)):
-            with self.assertRaises(ValueError):
+            with self.assertRaises(Refused):
                 set_on(self.home, "p1", self.folders(), True)
             self.assertEqual(set_on(self.home, "p1", self.folders(), False)["on"], False)
         self.assertFalse(is_on(self.home, "p1"))
 
     def test_an_archived_project_reads_off_whatever_its_row_says(self) -> None:
         # Archived somewhere this plugin didn't do it — Hermes's own dashboard or CLI — so the row is
-        # still there; the sheet must not show a switch that would never be acted on.
+        # still there; the sheet must not show a switch that would never be acted on, and reading it
+        # off is what keeps a restore from resuming work nobody asked for.
         set_on(self.home, "p1", self.folders(), True)
         self.assertEqual(
             state(self.home, "p1", self.folders(), archived=True),
             {"on": False, "reason": ARCHIVED},
+        )
+        self.assertFalse(is_on(self.home, "p1"), "the row is written off, not only masked")
+        self.assertEqual(
+            state(self.home, "p1", self.folders()),
+            {"on": False, "reason": None},
+            "restoring it starts off",
         )
 
     def test_a_project_left_on_keeps_its_switch_when_its_reason_comes_back(self) -> None:
@@ -201,7 +208,7 @@ class SwitchTests(unittest.TestCase):
         token.assert_not_called()
 
     def test_an_archived_project_cannot_be_turned_on(self) -> None:
-        with self.assertRaises(ValueError) as raised:
+        with self.assertRaises(Refused) as raised:
             set_on(self.home, "p1", self.folders(), True, archived=True)
         self.assertEqual(str(raised.exception), ARCHIVED)
         self.assertFalse(is_on(self.home, "p1"))

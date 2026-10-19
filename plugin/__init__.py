@@ -1000,7 +1000,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 on,
                 bool(getattr(project, "archived", False)),
             )
-        except ValueError as why:
+        except afk.Refused as why:
             # The project can't be left to work: its reason is the answer, and nothing is written.
             return _error(web, str(why), 409)
         return web.json_response({"object": "memento.afk", "project_id": project_id, **found})

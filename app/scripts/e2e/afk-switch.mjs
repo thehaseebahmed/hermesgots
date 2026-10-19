@@ -1,27 +1,7 @@
 // AFK's switch: a project opened to its options menu offers it in the AFK pop-up, turning it on is
 // the host's answer, and a reload reads that same answer back — the setting is the project's, not
 // the device's. Phone and tablet, light and dark, with no console error.
-import { app, assert, flow, mock, pass, runId } from "./lib.mjs"
-
-/** A project the mock has finished cloning, so its screen offers the options menu; answers its id. */
-async function makeProject(until) {
-  const created = await fetch(`${mock}/api/plugins/memento/projects`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: `AFK switch ${runId()}`, repos: ["mock-user/memento"] }),
-  })
-  const pending = await created.json()
-  const ready = await until(
-    async () => {
-      const listed = await (await fetch(`${mock}/api/plugins/memento/projects`)).json()
-      const found = listed.projects.find((project) => project.slug === pending.slug)
-      return found?.status === "ready" ? found : null
-    },
-    20_000,
-    "the mock to finish cloning the project",
-  )
-  return ready.id
-}
+import { app, assert, flow, makeProject, openAfk, pass } from "./lib.mjs"
 
 const run = async ({ page, profileId, shot, until }) => {
   const errors = []
@@ -29,15 +9,9 @@ const run = async ({ page, profileId, shot, until }) => {
   page.on("console", (message) => {
     if (message.type() === "error") errors.push(message.text())
   })
-  const screen = `${app}/projects/${profileId}/${await makeProject(until)}`
-  const openAfk = async () => {
-    await page.goto(screen)
-    const options = page.getByRole("button", { name: "Project options" })
-    await options.waitFor({ timeout: 15_000 })
-    await options.click()
-    await page.getByRole("menuitem", { name: "AFK" }).click()
-  }
+  const screen = `${app}/projects/${profileId}/${await makeProject(until, "AFK switch")}`
   const control = () => page.getByRole("switch", { name: "Work on its own" })
+
   // The switch shows the host's answer, so it flips when the write lands — never before.
   const reads = (state) =>
     until(
@@ -58,7 +32,7 @@ const run = async ({ page, profileId, shot, until }) => {
   }
 
   // The switch starts off, and turning it on is the host's answer rather than the device's.
-  await openAfk()
+  await openAfk(page, screen)
   await control().waitFor({ timeout: 15_000 })
   assert.equal(await control().getAttribute("aria-checked"), "false", "AFK starts off")
   await snap("off")
@@ -68,7 +42,7 @@ const run = async ({ page, profileId, shot, until }) => {
   const askedFirst = afkReads.length
 
   // The setting is the project's, kept on the host: a reload reads it back, and off is its write.
-  await openAfk()
+  await openAfk(page, screen)
   await control().waitFor({ timeout: 15_000 })
   assert.equal(
     await control().getAttribute("aria-checked"),

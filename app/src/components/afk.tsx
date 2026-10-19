@@ -35,9 +35,6 @@ export const AFK_FEATURE = "afk"
 /** And the one it advertises when it can turn the switch on and off. */
 export const AFK_SWITCH_FEATURE = "afk_switch"
 
-/** A plugin that lists a project's tasks without the switch is too old to be asked for one. */
-const NO_SWITCH = "This plugin can't switch AFK on."
-
 /** A Bot whose plugin answers without the route is left alone for a while, like every other read. */
 const unsupported = cooldown()
 
@@ -163,7 +160,7 @@ export function AfkPopup({
             error={error}
             // Said twice only when it is the same thing said: the switch's reason can differ from why
             // the frontier failed, and then it is two different facts, not one repeated.
-            quiet={Boolean(afk?.reason) && afk?.reason === error}
+            duplicate={Boolean(afk?.reason) && afk?.reason === error}
             manyRepos={manyRepos}
           />
         </div>
@@ -191,19 +188,20 @@ function AfkSwitch({
   saving: boolean
   onToggle: (on: boolean) => void
 }) {
-  if (answer === "no") return <p className="px-1 text-sm text-muted-foreground">{NO_SWITCH}</p>
+  // A plugin that can't switch AFK on offers no row at all, rather than a line explaining itself.
+  if (answer === "no") return null
   if (answer === "unknown") return null
   if (error) return <p className="px-1 text-sm text-destructive">{error}</p>
-  const why = afk?.reason ?? undefined
+  const reason = afk?.reason ?? undefined
   // A project that can't be worked has nothing to switch on; one already on can still be switched off.
-  const offers = afk && (afk.on || !why)
+  const canSwitch = afk && (afk.on || !reason)
   return (
     <div className="flex flex-col gap-1">
       <div className="flex min-h-11 items-center justify-between gap-3 px-1">
         <span className="text-base">Work on its own</span>
         {!afk ? (
           <Spinner className="size-4" />
-        ) : offers ? (
+        ) : canSwitch ? (
           <Switch
             aria-label="Work on its own"
             checked={afk.on}
@@ -212,9 +210,9 @@ function AfkSwitch({
           />
         ) : null}
       </div>
-      {why && (
+      {reason && (
         <p className="px-1 text-sm text-muted-foreground" role="status">
-          {why}
+          {reason}
         </p>
       )}
     </div>
@@ -225,17 +223,17 @@ function AfkSwitch({
 function Tasks({
   tasks,
   error,
-  quiet,
+  duplicate,
   manyRepos,
 }: {
   tasks: ProjectTasks | undefined
   error: string | undefined
-  quiet: boolean
+  duplicate: boolean
   manyRepos: boolean
 }) {
   // A frontier failure the switch's own reason already says isn't an error the user needs twice — and
   // nothing is coming, so the row is left out rather than spinning over a read that failed.
-  if (error) return quiet ? null : <p className="px-1 text-sm text-destructive">{error}</p>
+  if (error) return duplicate ? null : <p className="px-1 text-sm text-destructive">{error}</p>
   if (!tasks) {
     return (
       <p className="flex items-center gap-2 px-1 text-sm text-muted-foreground">

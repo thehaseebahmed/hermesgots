@@ -2371,10 +2371,10 @@ export async function getProjectTasks(
   projectId: string,
   signal?: AbortSignal,
 ): Promise<ProjectTasks> {
-  const response = await request(
-    `${pluginRoot(config.baseUrl)}/projects/${encodeURIComponent(projectId)}/tasks`,
-    { headers: headers(config), signal },
-  )
+  const response = await request(projectPath(config, projectId, "tasks"), {
+    headers: headers(config),
+    signal,
+  })
   const body = (await response.json()) as Record<string, unknown> | null
   // A 200 that carries no list isn't an empty frontier: saying nothing is ready would be a lie
   // about a read that never happened.
@@ -2412,8 +2412,8 @@ function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
   return { on: body.on, reason: str(body.reason) || null }
 }
 
-function afkPath(config: HermesConfig, projectId: string) {
-  return `${pluginRoot(config.baseUrl)}/projects/${encodeURIComponent(projectId)}/afk`
+function projectPath(config: HermesConfig, projectId: string, route: "tasks" | "afk") {
+  return `${pluginRoot(config.baseUrl)}/projects/${encodeURIComponent(projectId)}/${route}`
 }
 
 /** A project's AFK switch, read from its host. */
@@ -2422,7 +2422,10 @@ export async function getProjectAfk(
   projectId: string,
   signal?: AbortSignal,
 ): Promise<ProjectAfk> {
-  const response = await request(afkPath(config, projectId), { headers: headers(config), signal })
+  const response = await request(projectPath(config, projectId, "afk"), {
+    headers: headers(config),
+    signal,
+  })
   return parseAfk((await response.json()) as Record<string, unknown> | null)
 }
 
@@ -2432,7 +2435,7 @@ export async function setProjectAfk(
   projectId: string,
   on: boolean,
 ): Promise<ProjectAfk> {
-  const response = await request(afkPath(config, projectId), {
+  const response = await request(projectPath(config, projectId, "afk"), {
     method: "POST",
     headers: headers(config),
     body: JSON.stringify({ on }),
