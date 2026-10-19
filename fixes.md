@@ -1627,3 +1627,26 @@ access sheet rather than raising a toast, so the same expression has two destina
   change if a site's own wording is mistaken for the helper's default.
 
 ---
+
+# Deferred from the review of the run poll's lineage walk
+
+`sessions.chat_session` reads a chat's compression lineage out of Hermes's `state.db` so `runs/live`
+can key a run on the session the chat started as. That made it the third walk up
+`parent_session_id` in the plugin, and the three don't agree: `chat_session` follows only a
+compression continuation and goes 1000 deep (Hermes's own cap), while `push._lineage`
+(`plugin/push.py`) and `record_for` (`plugin/sessions.py`) follow any parent and stop at
+`MAX_PARENT_HOPS` — six. A chat compressed more than five times therefore resolves to a mid-chain
+session for push's title and mute while `runs/live` resolves it to the root. Separately, five
+modules open `state.db` with their own copy of the read-only URI, timeout and error policy
+(`delegation`, `push`, `projects`, `cleanup`, `research`); this branch gave `sessions.py` one
+(`_open_state`) and left the rest.
+
+- What the fix is: one `host_store`-style reader (a read-only connection, one error policy) and one
+  `lineage(home, session_id, stop=...)` over it, with the stop condition as its argument, called by
+  all three walks.
+- Why it is not in this branch: it rewrites `push.py` and `record_for`, neither of which this diff
+  touches — `record_for` answers the nearest *record*, not the root, and folding it in changes what
+  the hooks answer for a delegated turn.
+- Why it is risky: those callers feed worktree resolution (`record_for_call`) and push routing, so a
+  wrong id writes a session's plan or a notification under another chat; and the five readers are
+  on paths from a background clone to the dashboard, each with an error policy somebody chose.

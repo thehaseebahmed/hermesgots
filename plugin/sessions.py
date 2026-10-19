@@ -25,9 +25,10 @@ import secrets
 import sqlite3
 import subprocess
 import time
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Set, Tuple
 
 from . import approvals, events, push
 from .store import connect
@@ -52,9 +53,16 @@ FIELDS = (
 )
 REPO_FIELDS = ("name", "repo_root", "path", "branch")
 MAX_PARENT_HOPS = 5
-# How far a chat's session id may have been moved on by compression. A chain this long is already
-# pathological; the bound only keeps a corrupt store from walking forever.
-COMPRESSION_DEPTH = 32
+# How far a chat's session id may have been moved on by compression. Hermes walks a thousand and
+# has met real lineages of 180 (#125041): a shorter bound silently keys the run on a mid-chain id,
+# which is the wedge the walk exists to avoid. The loop also stops on a repeat, so a corrupt store
+# can't walk forever.
+COMPRESSION_DEPTH = 1000
+# Hermes marks children that fork off their parent instead of continuing it: a branch, a delegation,
+# a reset, or a session a tool made. Those share ``parent_session_id`` but are another conversation.
+_FORK_MARKERS = ("_branched_from", "_delegate_from", "_reset_from")
+# The profiles whose store the lineage walk couldn't read and has already said so about.
+_walk_warned: Set[Path] = set()
 ADJECTIVES = (
     "breezy", "cosmic", "dapper", "fuzzy", "gleaming", "jazzy", "lucky", "mellow", "nimble",
     "peppy", "quirky", "snazzy", "spry", "sunny", "swift", "wobbly", "zesty", "plucky",
@@ -157,13 +165,30 @@ def read(path: Path, session_id: str) -> Optional[Dict[str, Any]]:
     return _record(row) if row else None
 
 
-def _parent_of(hermes_home: Path, session_id: str) -> Optional[str]:
-    state = hermes_home / "state.db"
+def _open_state(home: Path) -> Optional[sqlite3.Connection]:
+    """A read-only look at the profile's ``state.db``, or None when it has none.
+
+    Read-only, so a reader can never lock the gateway out of its own store. Closed by the caller
+    (or ``closing``): a poll opens one of these per request.
+    """
+    state = home / "state.db"
     if not state.exists():
         return None
     try:
-        # Read-only, so a lookup can never lock the gateway out of its own store.
-        with sqlite3.connect(f"{state.as_uri()}?mode=ro", uri=True, timeout=2) as conn:
+        conn = sqlite3.connect(f"{state.as_uri()}?mode=ro", uri=True, timeout=2)
+    except sqlite3.Error:
+        logger.debug("memento: couldn't open %s", state, exc_info=True)
+        return None
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _parent_of(hermes_home: Path, session_id: str) -> Optional[str]:
+    conn = _open_state(hermes_home)
+    if conn is None:
+        return None
+    try:
+        with closing(conn):
             row = conn.execute(
                 "SELECT parent_session_id FROM sessions WHERE id = ?", (session_id,)
             ).fetchone()
@@ -702,27 +727,84 @@ def is_code_session(session_id: str) -> bool:
     return bool(path.exists() and read(path, session_id))
 
 
-def chat_session(db: Any, session_id: str) -> str:
+def chat_session(
+    home: Path, session_id: str, roots: Optional[Dict[str, str]] = None
+) -> str:
     """The session a chat started as. Compression moves a chat on to a child session, and Gots
-    only knows the first. Only a parent whose own turn ended in compression is followed, so a
-    delegation or a branch — which shares the ``parent_session_id`` column but is not a compaction
-    boundary — never hijacks the chat's run."""
-    get = getattr(db, "get_session", None)
-    if not callable(get):
-        return session_id
+    only knows the first, so a run Hermes keyed on the child has to be found from the root.
+
+    A hop is taken only where the parent ended in compression and the child continues it rather
+    than forking off it, which is Hermes's own step (``_CHAIN_STEP_SQL``): a child carrying any
+    ``_branched_from``, ``_delegate_from`` or ``_reset_from``, or made by a tool, is another
+    conversation, so its run is never reported as the chat's. Stopping early is the safe way to be
+    wrong — the id stays the child's, where Hermes itself puts the run.
+
+    Reads ``state.db`` itself, read-only, rather than ``SessionDB.get_session``: the app polls
+    ``runs/live`` every 10 s and the change stream walks this per session event, and ``get_session``
+    drains the live turn's queued token writes, so every poll would stall behind the turn it is
+    asked about (and the reads sharing the API server's executor with it). ``roots`` memoises the
+    walk for one request — every id it passed, since a chain answers one root.
+    """
+    if roots is not None and session_id in roots:
+        return roots[session_id]
     current = session_id
-    for _ in range(COMPRESSION_DEPTH):
-        row = get(current) or {}
-        parent_id = row.get("parent_session_id")
-        parent = parent_id and get(parent_id)
-        if not parent or parent.get("end_reason") != "compression":
-            break
-        current = parent_id
+    walked = [session_id]
+    conn = _open_state(home)
+    if conn is not None:
+        try:
+            with closing(conn):
+                for _ in range(COMPRESSION_DEPTH):
+                    row = conn.execute(
+                        """SELECT child.parent_session_id AS parent_id,
+                                  parent.end_reason AS parent_end,
+                                  child.model_config AS model_config,
+                                  child.source AS source
+                           FROM sessions child LEFT JOIN sessions parent
+                             ON parent.id = child.parent_session_id
+                           WHERE child.id = ?""",
+                        (current,),
+                    ).fetchone()
+                    parent_id = row["parent_id"] if row else None
+                    if (
+                        not parent_id
+                        or row["parent_end"] != "compression"
+                        or parent_id in walked
+                        or _forks(row)
+                    ):
+                        break
+                    current = parent_id
+                    walked.append(current)
+        except sqlite3.Error:
+            # A store this can't read would key every run on its tip — the wedge this exists to
+            # avoid — so say it once per profile, and never cache the failure.
+            if home not in _walk_warned:
+                _walk_warned.add(home)
+                logger.warning("memento: couldn't walk a chat's compression lineage", exc_info=True)
+            return session_id
+    if roots is not None:
+        for session in walked:
+            roots[session] = current
     return current
 
 
+def _forks(row: Any) -> bool:
+    """Whether this child forks off its parent instead of continuing it: a session a tool made, or
+    one carrying a branch, delegation or reset marker at all — Hermes's ``_CHAIN_STEP_SQL`` refuses
+    every one of them, and a marker inherited verbatim from a continuation counts."""
+    if (row["source"] or "") == "tool":
+        return True
+    try:
+        config = json.loads(row["model_config"] or "{}")
+    except ValueError:
+        return False
+    return isinstance(config, dict) and any(config.get(marker) for marker in _FORK_MARKERS)
+
+
 def live_runs(
-    adapter: Any, owned: Optional[Callable[[str], bool]] = None, db: Any = None
+    adapter: Any,
+    owned: Optional[Callable[[str], bool]],
+    home: Path,
+    roots: Optional[Dict[str, str]] = None,
 ) -> Tuple[Dict[str, str], Dict[str, str]]:
     """Each session with a run in flight: ``running`` or ``waiting_for_approval``, and its run id.
 
@@ -730,23 +812,25 @@ def live_runs(
     the run again. Keyed by the session the chat started as (``chat_session``), not the run's own:
     compression moves a chat on to a child session mid-flight, and a device that only knows the id
     the chat began with must still find its run. ``owned`` keeps only the runs the caller's profile
-    started.
+    started; ``home`` is that profile's, for the lineage walk, which ``roots`` shares with
+    ``waiting`` so one poll walks a chat once.
     """
     statuses = getattr(adapter, "_run_statuses", None)
     if not isinstance(statuses, dict):
         return {}, {}
     live: Dict[str, str] = {}
     run_ids: Dict[str, str] = {}
+    roots = {} if roots is None else roots
     for run_id, status in list(statuses.items()):
         if not isinstance(status, dict) or (owned and not owned(run_id)):
             continue
-        state = LIVE_STATUSES.get(status.get("status"))
+        state_name = LIVE_STATUSES.get(status.get("status"))
         session_id = status.get("session_id")
-        if not state or not isinstance(session_id, str) or not session_id:
+        if not state_name or not isinstance(session_id, str) or not session_id:
             continue
-        session_id = chat_session(db, session_id)
+        session_id = chat_session(home, session_id, roots)
         if live.get(session_id) != "waiting_for_approval":
-            live[session_id] = state
+            live[session_id] = state_name
             if isinstance(run_id, str):
                 run_ids[session_id] = run_id
     return live, run_ids
@@ -757,13 +841,15 @@ def waiting(
     path: Path,
     hermes_home: Path,
     owned: Optional[Callable[[str], bool]] = None,
-    db: Any = None,
+    roots: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Why each session waits on the user: its run's questions or approval, or a plan to review.
     A project session also names its project. Keyed by the session the chat started as, like
-    ``live_runs``, so a wait on a compressed chat's child session is reported for the chat."""
+    ``live_runs``, so a wait on a compressed chat's child session is reported for the chat; its
+    ``roots`` cache is the one that call filled, so a poll walks each chat once."""
     found: Dict[str, Dict[str, Any]] = {}
     statuses = getattr(adapter, "_run_statuses", None)
+    roots = {} if roots is None else roots
     for run_id, status in list(statuses.items()) if isinstance(statuses, dict) else []:
         if not isinstance(status, dict) or status.get("status") != "waiting_for_approval":
             continue
@@ -772,7 +858,7 @@ def waiting(
         session_id = status.get("session_id")
         if not isinstance(session_id, str) or not session_id:
             continue
-        session_id = chat_session(db, session_id)
+        session_id = chat_session(hermes_home, session_id, roots)
         clarify = status.get("clarify")
         if isinstance(clarify, dict):
             questions = clarify.get("questions")

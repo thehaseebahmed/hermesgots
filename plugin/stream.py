@@ -88,6 +88,7 @@ async def serve(
     path: Path,
     profile: str,
     db: Any,
+    home: Path,
     cursor: Optional[int],
     version: str,
     device: Optional[str] = None,
@@ -107,7 +108,9 @@ async def serve(
     async def root_session(session_id: str) -> str:
         if session_id not in chat_sessions:
             try:
-                chat_sessions[session_id] = await asyncio.to_thread(chat_session, db, session_id)
+                chat_sessions[session_id] = await asyncio.to_thread(
+                    chat_session, home, session_id
+                )
             except Exception:
                 logger.debug("memento: couldn't follow session %s", session_id, exc_info=True)
                 return session_id

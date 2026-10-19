@@ -5,9 +5,9 @@
 // both shapes a load can meet: the rotation before the live run starts (the run is keyed on the
 // child) and mid-run (it keeps the id it began with). The claim: loading the chat wedges it, and
 // only Stop brings the turn down; what must happen instead is written below as the assertions.
-import { app, assert, flow, mock, pass, runId } from "./lib.mjs"
+import { app, assert, compress, flow, mock, mockAuth, pass, runId } from "./lib.mjs"
 
-const auth = { "Content-Type": "application/json", Authorization: "Bearer mock-key" }
+const auth = mockAuth
 
 async function hostRun(sessionId, input) {
   const started = await fetch(`${mock}/v1/runs`, {
@@ -27,13 +27,6 @@ async function endOf(runId, ms = 90_000) {
   }
   throw new Error(`the host's run ${runId} never ended`)
 }
-
-const compress = (session, child) =>
-  fetch(`${mock}/__mock/compress`, {
-    method: "POST",
-    headers: auth,
-    body: JSON.stringify({ session, child }),
-  })
 
 async function compressed(name, { beforeRun }) {
   await flow(name, async ({ page, seed, lastReply, until, shot }) => {
