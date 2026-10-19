@@ -29,7 +29,7 @@
 - [ ] `pnpm lint`, `pnpm typecheck` and `pnpm build` pass
 - [ ] Checked on a phone-sized and a tablet-sized viewport, in light and dark mode
 - [ ] If the IndexedDB schema changed: bumped the Dexie version in `src/lib/db.ts` and checked that existing data still loads
-- [ ] If the Hermes API usage changed: checked against the Hermes source or docs, and updated `scripts/mock-hermes.mjs` to match
+- [ ] Which tier does this change's test belong to — unit, component or end-to-end? The cheapest that would fail for the reason the change can fail
 - [ ] New images, icons, characters and fonts are original or properly licensed (no third-party characters or brand assets)
 - [ ] No secrets, API keys or personal data in code, screenshots or fixtures
 - [ ] README updated if setup, configuration or behaviour changed

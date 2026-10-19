@@ -37,6 +37,11 @@ For formatting:
 pnpm format      # Format code with Prettier and Tailwind CSS class sorter
 ```
 
+Tests sit in three tiers — unit, component and end-to-end — and a test belongs to the cheapest tier
+that would fail for the reason the change can fail. A new end-to-end flow is an argument that the
+lower tiers cannot reach the behaviour
+(`docs/adr/0019-a-test-belongs-to-the-cheapest-tier-that-would-fail-for-its-reason.md`).
+
 ### Browser E2E Flows
 
 To test chat, sessions, approvals, and sync flows against the mock API server:

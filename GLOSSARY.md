@@ -212,3 +212,21 @@ _Avoid_: dictionary, custom words, hint, keyterms
 **Host speech model**:
 The model on a bot's host that hears its dictation. Its size is the trade between waiting and being right.
 _Avoid_: whisper model, STT model, engine, ASR
+
+## Testing
+
+**Tier**:
+One of the three places a test can sit — unit, component or end-to-end — each named for the class of failure it owns.
+_Avoid_: level, layer, test type, pyramid
+
+**Flow**:
+One path a user takes through the app in a real browser, against a test host.
+_Avoid_: test, case, scenario, spec
+
+**Sweep**:
+The end-to-end flows run together as one pass. Not AFK's sweep, which passes over a project's tasks.
+_Avoid_: suite, run, regression set, full test
+
+**Test host**:
+The stand-in for a bot's Hermes that a test talks to, answering in the shapes the real one answers. It is not a Host: what it says is no evidence about the machine a bot's Hermes runs on.
+_Avoid_: fake, stub, fixture
