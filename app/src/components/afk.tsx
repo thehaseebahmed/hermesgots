@@ -4,10 +4,12 @@
  * when the pop-up opens, with nothing kept on the device. The pop-up and the row that opens it exist
  * only where the plugin advertises `afk`, so a Bot on an older plugin offers neither.
  */
-import { useEffect, useState, type ReactNode } from "react"
+import { useCallback, useState, type ReactNode } from "react"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Spinner } from "@/components/ui/spinner"
+import { connectionKey } from "@/lib/connection"
+import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import {
   getProjectTasks,
@@ -16,16 +18,20 @@ import {
   type ProjectFrontier,
   type ProjectTask,
 } from "@/lib/hermes"
+import { usePoll } from "@/lib/poll"
 import { noteFailure } from "@/lib/report"
 
 /** The feature the plugin advertises when it can read a project's tasks. */
 export const AFK_FEATURE = "afk"
 
-const GROUPS: { key: "ready" | "claimed" | "blocked"; label: string }[] = [
+/** A Bot whose plugin answers without the route is left alone for a while, like every other read. */
+const unsupported = cooldown()
+
+const GROUPS = [
   { key: "ready", label: "Ready" },
   { key: "claimed", label: "Claimed" },
   { key: "blocked", label: "Blocked" },
-]
+] as const
 
 export function AfkPopup({
   open,
@@ -40,29 +46,41 @@ export function AfkPopup({
 }) {
   const [frontier, setFrontier] = useState<ProjectFrontier>()
   const [error, setError] = useState<string>()
+  const key = connectionKey(config)
 
-  useEffect(() => {
-    if (!open) return
-    let live = true
-    getProjectTasks(config, projectId, AbortSignal.timeout(READ_TIMEOUT_MS))
-      .then((next) => {
-        if (!live) return
-        setFrontier(next)
-        setError(undefined)
-      })
-      .catch((failure: unknown) => {
-        if (!live) return
-        setError(failure instanceof Error ? failure.message : "Couldn't read the project's tasks.")
-        noteFailure("Reading the project's tasks", failure)
-      })
-    return () => {
-      live = false
-    }
-    // The read is the same one whatever the project's fields are: its id and its Bot are what it needs.
-  }, [open, config, projectId])
+  const read = useCallback(
+    (signal: AbortSignal) => {
+      if (unsupported.cooling(key)) return
+      // A fresh read drops the last failure at once; the list it replaces stays until the answer
+      // lands, so a sheet opened again doesn't flash a spinner over tasks already in hand.
+      setError(undefined)
+      // A read that never answers is treated as lost rather than left hanging on the host.
+      void getProjectTasks(
+        config,
+        projectId,
+        AbortSignal.any([signal, AbortSignal.timeout(READ_TIMEOUT_MS)]),
+      )
+        .then((next) => {
+          unsupported.clear(key)
+          if (signal.aborted) return
+          setFrontier(next)
+        })
+        .catch((failure: unknown) => {
+          if (signal.aborted) return
+          setError(
+            failure instanceof Error ? failure.message : "Couldn't read the project's tasks.",
+          )
+          noteFailure("Reading the project's tasks", failure)
+          void lacksRoute(config, failure, AFK_FEATURE).then((missing) => {
+            if (missing) unsupported.start(key)
+          })
+        })
+    },
+    [config, key, projectId],
+  )
+  // Read once each time the sheet opens — and again for another project — never on a timer.
+  usePoll(read, false, [projectId], { active: open, onShow: false })
 
-  const nothing =
-    frontier !== undefined && GROUPS.every((group) => frontier[group.key].length === 0)
   const manyRepos = (frontier?.repos.length ?? 0) > 1
 
   return (
@@ -72,40 +90,53 @@ export function AfkPopup({
           <PopupTitle>AFK</PopupTitle>
         </PopupHeader>
         <div className="flex flex-col gap-6 px-4 pb-4 sm:px-6">
-          {error ? (
-            <p className="px-1 text-sm text-destructive">{error}</p>
-          ) : frontier === undefined ? (
-            <p className="flex items-center gap-2 px-1 text-sm text-muted-foreground">
-              <Spinner className="size-4" /> Reading tasks…
-            </p>
-          ) : nothing ? (
-            <p className="px-1 text-sm text-muted-foreground">No ready tasks.</p>
-          ) : (
-            GROUPS.map((group) => {
-              const tasks = frontier[group.key]
-              if (!tasks.length) return null
-              return (
-                <section key={group.key} aria-label={group.label} data-group={group.key}>
-                  <h3 className="px-1 pb-1 text-sm text-muted-foreground">
-                    {group.label} ({tasks.length})
-                  </h3>
-                  <ul>
-                    {tasks.map((task) => (
-                      <TaskRow
-                        key={`${task.repo}#${task.number}`}
-                        task={task}
-                        claimed={group.key === "claimed"}
-                        manyRepos={manyRepos}
-                      />
-                    ))}
-                  </ul>
-                </section>
-              )
-            })
-          )}
+          <Tasks frontier={frontier} error={error} manyRepos={manyRepos} />
         </div>
       </PopupContent>
     </Popup>
+  )
+}
+
+/** The groups that hold something, or the one line that says why none does. */
+function Tasks({
+  frontier,
+  error,
+  manyRepos,
+}: {
+  frontier: ProjectFrontier | undefined
+  error: string | undefined
+  manyRepos: boolean
+}) {
+  if (error) return <p className="px-1 text-sm text-destructive">{error}</p>
+  if (!frontier) {
+    return (
+      <p className="flex items-center gap-2 px-1 text-sm text-muted-foreground">
+        <Spinner className="size-4" /> Reading tasks…
+      </p>
+    )
+  }
+  const groups = GROUPS.filter((group) => frontier[group.key].length > 0)
+  if (!groups.length) return <p className="px-1 text-sm text-muted-foreground">No ready tasks.</p>
+  return (
+    <>
+      {groups.map((group) => (
+        <section key={group.key} aria-label={group.label} data-group={group.key}>
+          <h3 className="px-1 pb-1 text-sm text-muted-foreground">
+            {group.label} ({frontier[group.key].length})
+          </h3>
+          <ul>
+            {frontier[group.key].map((task) => (
+              <TaskRow
+                key={`${task.repo}#${task.number}`}
+                task={task}
+                claimed={group.key === "claimed"}
+                manyRepos={manyRepos}
+              />
+            ))}
+          </ul>
+        </section>
+      ))}
+    </>
   )
 }
 

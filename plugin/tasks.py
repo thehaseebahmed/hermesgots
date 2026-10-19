@@ -9,12 +9,12 @@ blockers of the ones that have any — and nothing in it decides what the fronti
 
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from . import github
+from .repos import _repo_of
 
 READY_LABEL = "ready-for-agent"
 CLAIM_LABEL = "gots-got-it"
@@ -66,19 +66,22 @@ def frontier(tasks: Iterable[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]
             "url": task.get("url"),
             "created_at": task.get("created_at"),
             "assignees": list(task.get("assignees") or []),
+            # Every row carries its blockers, empty for the ones that have none: one shape leaves.
+            "blockers": [],
         }
-        if CLAIM_LABEL in labels or row["assignees"]:
+        if _claimed(labels, row["assignees"]):
             claimed.append(row)
             continue
-        open_blockers = [
+        row["blockers"] = [
             blocker for blocker in task.get("blockers") or [] if blocker.get("state") != "closed"
         ]
-        if open_blockers:
-            row["blockers"] = open_blockers
-            blocked.append(row)
-        else:
-            ready.append(row)
+        (blocked if row["blockers"] else ready).append(row)
     return {"ready": ready, "claimed": claimed, "blocked": blocked}
+
+
+def _claimed(labels: Iterable[Any], assignees: Iterable[Any]) -> bool:
+    """Whether someone has the task: Gots's own mark, or an assignee who took it."""
+    return CLAIM_LABEL in labels or bool(list(assignees))
 
 
 def _order(task: Dict[str, Any]) -> Tuple[str, int]:
@@ -88,17 +91,23 @@ def _order(task: Dict[str, Any]) -> Tuple[str, int]:
     return (created if isinstance(created, str) else "", number if isinstance(number, int) else 0)
 
 
+def empty() -> Dict[str, Any]:
+    """A project with no repository to read: the route's answer while it clones, and the read's."""
+    return {"repos": [], "ready": [], "claimed": [], "blocked": []}
+
+
 def read(hermes_home: Path, folders: Iterable[Any]) -> Dict[str, Any]:
     """The project's tasks as GitHub holds them, split by `frontier`.
 
     Each repository the project's checkouts point at is asked once for its open ready tasks — one
-    request per repository, since only those can be in the frontier — and the blockers of each are
-    read after that, so a task with none costs nothing. A project with no GitHub repository has no
-    tasks to read, and no request goes out.
+    request per repository, since only those can be in the frontier — and each candidate's blockers
+    after that: only the ones GitHub says are open, and never a claimed task's, so a task with none
+    costs nothing. A project with no GitHub repository has no tasks to read, and no request goes
+    out.
     """
     repos = _repos(folders)
     if not repos:
-        return {"repos": [], "ready": [], "claimed": [], "blocked": []}
+        return empty()
     auth, _ = github.token(hermes_home)
     if not auth:
         raise github.GitHubError("No GitHub account on the server.", 409)
@@ -117,9 +126,7 @@ def _repos(folders: Iterable[Any]) -> List[str]:
     repos: List[str] = []
     for folder in folders:
         path = getattr(folder, "path", None)
-        if not isinstance(path, str) or not os.path.exists(os.path.join(path, ".git")):
-            continue
-        repo = github.origin_repo(path)
+        repo = _repo_of(path) if isinstance(path, str) else None
         if repo and repo not in repos:
             repos.append(repo)
     return repos
@@ -147,6 +154,18 @@ def _task(
     looked_up: Dict[Tuple[str, int], Optional[Dict[str, Any]]],
 ) -> Dict[str, Any]:
     """One issue as a task row: what the frontier rule reads, and nothing else."""
+    labels = [
+        label.get("name")
+        for label in row.get("labels") or []
+        if isinstance(label, dict) and isinstance(label.get("name"), str)
+    ]
+    assignees = [
+        assignee.get("login")
+        for assignee in row.get("assignees") or []
+        if isinstance(assignee, dict) and isinstance(assignee.get("login"), str)
+    ]
+    # A claimed task is out of the frontier whatever it blocks, so its blockers aren't read.
+    blockers = [] if _claimed(labels, assignees) else _blockers(repo, row, auth, edges, looked_up)
     return {
         "repo": repo,
         "number": row.get("number"),
@@ -154,17 +173,9 @@ def _task(
         "url": row.get("html_url"),
         "state": row.get("state") or "open",
         "created_at": row.get("created_at"),
-        "labels": [
-            label.get("name")
-            for label in row.get("labels") or []
-            if isinstance(label, dict) and isinstance(label.get("name"), str)
-        ],
-        "assignees": [
-            assignee.get("login")
-            for assignee in row.get("assignees") or []
-            if isinstance(assignee, dict) and isinstance(assignee.get("login"), str)
-        ],
-        "blockers": _blockers(repo, row, auth, edges, looked_up),
+        "labels": labels,
+        "assignees": assignees,
+        "blockers": blockers,
     }
 
 
@@ -177,18 +188,24 @@ def _blockers(
 ) -> List[Dict[str, Any]]:
     """The task's blockers: GitHub's native edges, else its body's `Blocked by:` line.
 
-    The summary says whether the issue has native edges at all — `total_blocked_by` counts them
-    closed ones included — so a task without any reads its body instead. A task *with* edges never
-    falls back to the line, since the line is the older habit the edges replace.
+    The summary counts the issue's edges — `blocked_by` the ones still open, `total_blocked_by`
+    every one it ever had — so a task with no open edge is asked nothing further, and only a task
+    with no edges at all reads its body instead. A task *with* edges never falls back to the line,
+    since the line is the older habit the edges replace.
     """
     summary = row.get("issue_dependencies_summary")
-    total = summary.get("total_blocked_by") if isinstance(summary, dict) else None
-    if total is None or total:
-        native = _edges(repo, row.get("number"), auth, edges)
-        # No count to go by, and no edge to be found: this issue's blockers are its body's line.
-        if native or total:
-            return native
-    return _from_body(repo, row, auth, looked_up)
+    if isinstance(summary, dict):
+        # No edge at all: the body's line is what this issue was written with.
+        if summary.get("total_blocked_by") == 0:
+            return _from_body(repo, row, auth, looked_up)
+        # Edges, but not one still open: every blocker it had is closed, so a request would only
+        # confirm it.
+        if summary.get("blocked_by") == 0:
+            return []
+        return _edges(repo, row.get("number"), auth, edges)
+    # A payload without the summary says nothing about its edges, so they're read and the body's
+    # line is the fallback when there are none.
+    return _edges(repo, row.get("number"), auth, edges) or _from_body(repo, row, auth, looked_up)
 
 
 def _edges(
@@ -198,7 +215,11 @@ def _edges(
     key = (repo, number)
     if key not in cache:
         rows = github._get(f"/repos/{repo}/issues/{number}/dependencies/blocked_by", auth)
-        cache[key] = [_issue(row, repo) for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+        cache[key] = (
+            [_issue(row, repo) for row in rows if isinstance(row, dict)]
+            if isinstance(rows, list)
+            else []
+        )
     return cache[key]
 
 
@@ -232,8 +253,9 @@ def _issue_at(
         try:
             cache[key] = github._get(f"/repos/{repo}/issues/{number}", auth)
         except github.GitHubError as error:
-            not_found = error.status == 404 or str(error).startswith("Not Found")
-            cache[key] = None if not_found else {"number": number, "state": "open"}
+            # A blocker nobody could read counts as open (see below); one GitHub says isn't there
+            # doesn't block anything.
+            cache[key] = None if github.is_missing(error) else {"number": number, "state": "open"}
     row = cache[key]
     return _issue(row, repo) if isinstance(row, dict) else None
 

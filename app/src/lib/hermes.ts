@@ -2304,8 +2304,6 @@ export interface ProjectTask {
   number: number
   title: string
   url: string | null
-  /** When it was opened, which is the order the frontier comes in. */
-  createdAt: string | null
   /** Who has it, when a person took it. */
   assignees: string[]
   /** What's still open ahead of it, when it can't be started yet. */
@@ -2333,27 +2331,25 @@ export interface ProjectFrontier {
 
 function parseBlocker(value: unknown): ProjectBlocker | null {
   const found = (value ?? {}) as Record<string, unknown>
-  return typeof found.number === "number"
-    ? {
-        repo: typeof found.repo === "string" ? found.repo : "",
-        number: found.number,
-        title: typeof found.title === "string" ? found.title : "",
-        url: typeof found.url === "string" ? found.url : null,
-      }
-    : null
+  if (typeof found.number !== "number") return null
+  return {
+    repo: str(found.repo),
+    number: found.number,
+    title: str(found.title),
+    url: str(found.url) || null,
+  }
 }
 
 function parseTask(value: unknown): ProjectTask | null {
   const found = (value ?? {}) as Record<string, unknown>
   if (typeof found.number !== "number") return null
-  const blockers = found.blockers
   const assignees = found.assignees
+  const blockers = found.blockers
   return {
-    repo: typeof found.repo === "string" ? found.repo : "",
+    repo: str(found.repo),
     number: found.number,
-    title: typeof found.title === "string" ? found.title : "",
-    url: typeof found.url === "string" ? found.url : null,
-    createdAt: typeof found.created_at === "string" ? found.created_at : null,
+    title: str(found.title),
+    url: str(found.url) || null,
     assignees: Array.isArray(assignees)
       ? assignees.filter((login): login is string => typeof login === "string")
       : [],
@@ -2380,14 +2376,19 @@ export async function getProjectTasks(
     { headers: headers(config), signal },
   )
   const body = (await response.json()) as Record<string, unknown> | null
-  const repos = body?.repos
+  // A 200 that carries no list isn't an empty frontier: saying nothing is ready would be a lie
+  // about a read that never happened.
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new HermesError("Hermes answered without a task list.")
+  }
+  const repos = body.repos
   return {
     repos: Array.isArray(repos)
       ? repos.filter((repo): repo is string => typeof repo === "string")
       : [],
-    ready: parseTasks(body?.ready),
-    claimed: parseTasks(body?.claimed),
-    blocked: parseTasks(body?.blocked),
+    ready: parseTasks(body.ready),
+    claimed: parseTasks(body.claimed),
+    blocked: parseTasks(body.blocked),
   }
 }
 

@@ -147,6 +147,15 @@ def _get(path: str, auth: Optional[str]) -> Any:
     return _request(path, auth)
 
 
+def is_missing(error: "GitHubError") -> bool:
+    """Whether GitHub said the thing isn't there.
+
+    Every HTTP failure but a 401 arrives as GitHub's own wording rather than its status, so this is
+    the one place that reads a 404 out of it.
+    """
+    return "Not Found" in str(error)
+
+
 def status(hermes_home: Path) -> Dict[str, Any]:
     auth, source = token(hermes_home)
     if not auth:
@@ -473,7 +482,7 @@ def delete_branch(repo: str, branch: str, auth: str) -> None:
     try:
         _request(f"/repos/{repo}/git/refs/{_ref(branch)}", auth, "DELETE")
     except GitHubError as error:
-        if "Reference does not exist" not in str(error) and "Not Found" not in str(error):
+        if "Reference does not exist" not in str(error) and not is_missing(error):
             raise
 
 

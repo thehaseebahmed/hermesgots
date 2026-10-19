@@ -897,6 +897,20 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "No such project.", 404)
         return web.json_response({"object": "memento.project.usage", **found})
 
+    async def project_row(project_id: str):
+        """A project, or the response that says why it can't be read — its two routes' own answer."""
+        try:
+            return (
+                await asyncio.to_thread(
+                    sessions._project, hermes_home() / "projects.db", project_id
+                ),
+                None,
+            )
+        except ValueError:
+            return None, _error(web, "No such project.", 404)
+        except ImportError:
+            return None, _error(web, "This Hermes version has no Projects.", 501)
+
     async def project_library(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -907,14 +921,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return web.json_response(
                 {"object": "memento.library", "project_id": project_id, "folders": []}
             )
-        try:
-            project = await asyncio.to_thread(
-                sessions._project, hermes_home() / "projects.db", project_id
-            )
-        except ValueError:
-            return _error(web, "No such project.", 404)
-        except ImportError:
-            return _error(web, "This Hermes version has no Projects.", 501)
+        project, refused = await project_row(project_id)
+        if refused is not None:
+            return refused
         root = library.library_root(project)
         folders = await asyncio.to_thread(library.tree, root)
         return web.json_response(
@@ -929,27 +938,16 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # A project still being cloned has no checkout to read a task from yet.
         if clones.is_pending_id(project_id):
             return web.json_response(
-                {
-                    "object": "memento.tasks",
-                    "project_id": project_id,
-                    "repos": [],
-                    "ready": [],
-                    "claimed": [],
-                    "blocked": [],
-                }
+                {"object": "memento.tasks", "project_id": project_id, **tasks.empty()}
             )
-        try:
-            project = await asyncio.to_thread(
-                sessions._project, hermes_home() / "projects.db", project_id
-            )
-        except ValueError:
-            return _error(web, "No such project.", 404)
-        except ImportError:
-            return _error(web, "This Hermes version has no Projects.", 501)
+        project, refused = await project_row(project_id)
+        if refused is not None:
+            return refused
         try:
             found = await asyncio.to_thread(tasks.read, hermes_home(), project.folders)
         except github.GitHubError as error:
-            # The switch's own answer: GitHub refusing is why AFK can't go on, so it's reported.
+            # GitHub's own reason is the answer: there's no account on this server, or its token
+            # was refused, and the sheet says so instead of showing an empty frontier.
             return _error(web, str(error), error.status)
         return web.json_response({"object": "memento.tasks", "project_id": project_id, **found})
 

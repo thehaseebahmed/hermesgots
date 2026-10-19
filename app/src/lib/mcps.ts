@@ -106,8 +106,6 @@ function landRead<T>(
 }
 
 /** The features the screen asks about, in the one list a read of its Bot's features answers. */
-const MCP_FEATURE_LIST = Object.values(MCP_FEATURES)
-
 /** What a Bot's plugin answered about one of those (see `PluginFeatureAnswer`). */
 export type McpFeatureAnswer = PluginFeatureAnswer
 
@@ -119,15 +117,7 @@ export type McpFeatureAnswer = PluginFeatureAnswer
  * all.
  */
 export function useMcpFeatureAnswers(server: McpServerConfig): McpFeatureAnswers {
-  const answers = usePluginFeatureAnswers(server, MCP_FEATURE_LIST)
-  return {
-    list: answers[MCP_FEATURES.list],
-    write: answers[MCP_FEATURES.write],
-    removable: answers[MCP_FEATURES.removable],
-    catalogue: answers[MCP_FEATURES.catalogue],
-    add: answers[MCP_FEATURES.add],
-    access: answers[MCP_FEATURES.access],
-  }
+  return usePluginFeatureAnswers(server, MCP_FEATURES)
 }
 
 /** What this Bot's plugin answered about its MCP servers (see `McpFeatureAnswer`). */

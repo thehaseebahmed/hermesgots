@@ -175,6 +175,7 @@ class ReadTests(unittest.TestCase):
         labels=(READY_LABEL,),
         assignees=(),
         summary: Optional[int] = 0,
+        open_edges: Optional[int] = None,
         pull_request: bool = False,
     ) -> Dict[str, Any]:
         row = {
@@ -188,7 +189,12 @@ class ReadTests(unittest.TestCase):
             "assignees": [{"login": login} for login in assignees],
         }
         if summary is not None:
-            row["issue_dependencies_summary"] = {"total_blocked_by": summary}
+            # GitHub counts the open edges apart from every edge the issue ever had; all of them
+            # open unless the test says otherwise.
+            row["issue_dependencies_summary"] = {
+                "total_blocked_by": summary,
+                "blocked_by": summary if open_edges is None else open_edges,
+            }
         if pull_request:
             row["pull_request"] = {"url": "https://api.github.com/repos/mock-user/memento/pulls/1"}
         return row
@@ -307,18 +313,34 @@ class ReadTests(unittest.TestCase):
         self.assertEqual(raised.exception.status, 409)
         self.assertEqual(self.paths, [])
 
-    def test_a_claimed_task_names_no_blockers(self) -> None:
-        """It's out of the frontier, so what blocks it is not what the app is told."""
+    def test_a_claimed_task_names_no_blockers_and_is_asked_none(self) -> None:
+        """It's out of the frontier, so what blocks it is neither read nor told to the app."""
         self.serve(
             {
                 "/repos/mock-user/memento/issues?": [
-                    self.issue(265, labels=(READY_LABEL, CLAIM_LABEL), summary=0)
-                ]
+                    self.issue(265, labels=(READY_LABEL, CLAIM_LABEL), summary=2)
+                ],
+                "/repos/mock-user/memento/issues/265/dependencies/blocked_by": [],
             }
         )
         found = read(Path(self.home.name), self.folders)
         self.assertEqual([row["number"] for row in found["claimed"]], [265])
-        self.assertNotIn("blockers", found["claimed"][0])
+        self.assertEqual(found["claimed"][0]["blockers"], [])
+        # The summary says it has edges; a claim means they're never worth a request.
+        self.assertEqual(len(self.paths), 1, self.paths)
+
+    def test_a_task_whose_blockers_are_all_closed_asks_no_edges(self) -> None:
+        """``blocked_by`` counts the open ones, so a zero settles it without a second request."""
+        self.serve(
+            {
+                "/repos/mock-user/memento/issues?": [
+                    self.issue(266, summary=3, open_edges=0)
+                ],
+            }
+        )
+        found = read(Path(self.home.name), self.folders)
+        self.assertEqual([row["number"] for row in found["ready"]], [266])
+        self.assertEqual(len(self.paths), 1, self.paths)
 
 
 class Folder:
