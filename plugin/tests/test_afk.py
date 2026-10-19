@@ -23,10 +23,8 @@ from plugin.afk import (
     NO_GITHUB,
     NO_REPOSITORY,
     Refused,
-    is_on,
     read,
     set_on,
-    state,
     sweep,
     sweep_all,
 )
@@ -108,33 +106,33 @@ class SwitchTests(unittest.TestCase):
         return stub
 
     def test_a_project_that_can_be_left_to_work_starts_off(self) -> None:
-        self.assertEqual(state(self.home, "p1", self.folders()), {"on": False, "reason": None})
-        self.assertFalse(is_on(self.home, "p1"))
+        self.assertEqual(read(self.home, "p1", self.folders()), {"on": False, "reason": None, "task": None, "refusal": None})
+        self.assertFalse(read(self.home, "p1", self.folders())["on"])
 
     def test_turning_it_on_is_read_back_from_the_host(self) -> None:
         self.assertEqual(set_on(self.home, "p1", self.folders(), True)["on"], True)
-        self.assertTrue(is_on(self.home, "p1"))
+        self.assertTrue(read(self.home, "p1", self.folders())["on"])
         # A fresh read — the app's own, from another device — is the host's answer, not the device's.
-        self.assertEqual(state(self.home, "p1", self.folders()), {"on": True, "reason": None})
+        self.assertEqual(read(self.home, "p1", self.folders()), {"on": True, "reason": None, "task": None, "refusal": None})
 
     def test_turning_it_off_again(self) -> None:
         set_on(self.home, "p1", self.folders(), True)
         self.assertEqual(set_on(self.home, "p1", self.folders(), False)["on"], False)
-        self.assertFalse(is_on(self.home, "p1"))
+        self.assertFalse(read(self.home, "p1", self.folders())["on"])
 
     def test_one_projects_switch_does_not_touch_anothers(self) -> None:
         set_on(self.home, "p1", self.folders(), True)
-        self.assertFalse(is_on(self.home, "p2"))
+        self.assertFalse(read(self.home, "p2", self.folders())["on"])
         set_on(self.home, "p2", self.folders(), True)
         set_on(self.home, "p2", self.folders(), False)
-        self.assertTrue(is_on(self.home, "p1"))
+        self.assertTrue(read(self.home, "p1", self.folders())["on"])
 
     def test_a_project_with_no_repository_says_why(self) -> None:
         plain = self.home / "plain"
         plain.mkdir()
         self.assertEqual(
-            state(self.home, "p1", self.folders(str(plain))),
-            {"on": False, "reason": NO_REPOSITORY},
+            read(self.home, "p1", self.folders(str(plain))),
+            {"on": False, "reason": NO_REPOSITORY, "task": None, "refusal": None},
         )
 
     def test_a_project_with_no_repository_cannot_be_turned_on(self) -> None:
@@ -143,23 +141,23 @@ class SwitchTests(unittest.TestCase):
         with self.assertRaises(Refused) as raised:
             set_on(self.home, "p1", self.folders(str(plain)), True)
         self.assertEqual(str(raised.exception), NO_REPOSITORY)
-        self.assertFalse(is_on(self.home, "p1"))
+        self.assertFalse(read(self.home, "p1", self.folders())["on"])
 
     def test_a_host_without_github_says_why(self) -> None:
         with patch.object(github, "token", return_value=(None, None)):
             self.assertEqual(
-                state(self.home, "p1", self.folders()), {"on": False, "reason": NO_GITHUB}
+                read(self.home, "p1", self.folders()), {"on": False, "reason": NO_GITHUB, "task": None, "refusal": None}
             )
             with self.assertRaises(Refused) as raised:
                 set_on(self.home, "p1", self.folders(), True)
         self.assertEqual(str(raised.exception), NO_GITHUB)
-        self.assertFalse(is_on(self.home, "p1"))
+        self.assertFalse(read(self.home, "p1", self.folders())["on"])
 
     def test_a_project_with_no_repository_is_not_asked_github_about(self) -> None:
         plain = self.home / "plain"
         plain.mkdir()
         with patch.object(github, "token") as token:
-            state(self.home, "p1", self.folders(str(plain)))
+            read(self.home, "p1", self.folders(str(plain)))
         token.assert_not_called()
 
     def test_turning_it_off_is_allowed_even_where_it_cannot_be_on(self) -> None:
@@ -170,7 +168,7 @@ class SwitchTests(unittest.TestCase):
             with self.assertRaises(Refused):
                 set_on(self.home, "p1", self.folders(), True)
             self.assertEqual(set_on(self.home, "p1", self.folders(), False)["on"], False)
-        self.assertFalse(is_on(self.home, "p1"))
+        self.assertFalse(read(self.home, "p1", self.folders())["on"])
 
     def test_an_archived_project_reads_off_whatever_its_row_says(self) -> None:
         # Archived somewhere this plugin didn't do it — Hermes's own dashboard or CLI — so the row is
@@ -178,13 +176,13 @@ class SwitchTests(unittest.TestCase):
         # off is what keeps a restore from resuming work nobody asked for.
         set_on(self.home, "p1", self.folders(), True)
         self.assertEqual(
-            state(self.home, "p1", self.folders(), archived=True),
-            {"on": False, "reason": ARCHIVED},
+            read(self.home, "p1", self.folders(), archived=True),
+            {"on": False, "reason": ARCHIVED, "task": None, "refusal": None},
         )
-        self.assertFalse(is_on(self.home, "p1"), "the row is written off, not only masked")
+        self.assertFalse(read(self.home, "p1", self.folders())["on"], "the row is written off, not only masked")
         self.assertEqual(
-            state(self.home, "p1", self.folders()),
-            {"on": False, "reason": None},
+            read(self.home, "p1", self.folders()),
+            {"on": False, "reason": None, "task": None, "refusal": None},
             "restoring it starts off",
         )
 
@@ -193,7 +191,7 @@ class SwitchTests(unittest.TestCase):
         with patch.object(github, "token", return_value=(None, None)):
             # Still on — the switch is the user's to turn off — but the host now says why it can't work.
             self.assertEqual(
-                state(self.home, "p1", self.folders()), {"on": True, "reason": NO_GITHUB}
+                read(self.home, "p1", self.folders()), {"on": True, "reason": NO_GITHUB, "task": None, "refusal": None}
             )
 
     def test_archiving_a_project_turns_its_switch_off(self) -> None:
@@ -201,21 +199,21 @@ class SwitchTests(unittest.TestCase):
         set_on(self.home, "p1", self.folders(), True)
         projects.update(self.home, "p1", None, None, archived=True)
         self.assertEqual(stub.archived, ["p1"])
-        self.assertFalse(is_on(self.home, "p1"))
+        self.assertFalse(read(self.home, "p1", self.folders())["on"])
 
     def test_editing_a_project_leaves_its_switch_alone(self) -> None:
         self.stub_projects()
         set_on(self.home, "p1", self.folders(), True)
         projects.update(self.home, "p1", "A new name", "And a description")
-        self.assertTrue(is_on(self.home, "p1"), "renaming a project doesn't put it away")
+        self.assertTrue(read(self.home, "p1", self.folders())["on"], "renaming a project doesn't put it away")
         projects.update(self.home, "p1", None, None, archived=False)
-        self.assertTrue(is_on(self.home, "p1"), "restoring one that wasn't archived leaves it be")
+        self.assertTrue(read(self.home, "p1", self.folders())["on"], "restoring one that wasn't archived leaves it be")
 
     def test_an_archived_project_says_why(self) -> None:
         with patch.object(github, "token") as token:
             self.assertEqual(
-                state(self.home, "p1", self.folders(), archived=True),
-                {"on": False, "reason": ARCHIVED},
+                read(self.home, "p1", self.folders(), archived=True),
+                {"on": False, "reason": ARCHIVED, "task": None, "refusal": None},
             )
         # Put away before its repositories or the account are looked at: neither can matter.
         token.assert_not_called()
@@ -224,7 +222,7 @@ class SwitchTests(unittest.TestCase):
         with self.assertRaises(Refused) as raised:
             set_on(self.home, "p1", self.folders(), True, archived=True)
         self.assertEqual(str(raised.exception), ARCHIVED)
-        self.assertFalse(is_on(self.home, "p1"))
+        self.assertFalse(read(self.home, "p1", self.folders())["on"])
         # Turning it off is always the user's to do, and this is the state it should be in anyway.
         self.assertEqual(set_on(self.home, "p1", self.folders(), False, archived=True)["on"], False)
 
@@ -233,14 +231,14 @@ class SwitchTests(unittest.TestCase):
         (self.home / "projects.db").write_text("")
         set_on(self.home, "p1", self.folders(), True)
         projects.remove(self.home, "p1")
-        self.assertFalse(is_on(self.home, "p1"))
+        self.assertFalse(read(self.home, "p1", self.folders())["on"])
 
     def test_a_project_that_was_not_deleted_keeps_its_switch(self) -> None:
         self.stub_projects(deleted=False)
         (self.home / "projects.db").write_text("")
         set_on(self.home, "p1", self.folders(), True)
         projects.remove(self.home, "p1")
-        self.assertTrue(is_on(self.home, "p1"))
+        self.assertTrue(read(self.home, "p1", self.folders())["on"])
 
     def test_a_failed_forget_does_not_fail_the_delete(self) -> None:
         self.stub_projects()
@@ -269,6 +267,7 @@ class ClaimTests(unittest.TestCase):
         self.issues: List[dict] = []
         self.label_exists = True
         self.write_error: Exception | None = None
+        self.write_error_on: str | None = None
         self.read_error: Exception | None = None
         self.writes: List[tuple] = []
         self._patches = [
@@ -314,7 +313,10 @@ class ClaimTests(unittest.TestCase):
 
     def answer_request(self, path: str, auth: Any, method: str = "GET", data: Any = None) -> Any:
         self.writes.append((method, path, data))
-        if self.write_error is not None:
+        refused = self.write_error is not None and (
+            self.write_error_on is None or self.write_error_on in path
+        )
+        if refused:
             raise self.write_error
         return {}
 
@@ -389,7 +391,7 @@ class ClaimTests(unittest.TestCase):
         self.assertIsNone(self.shown()["task"], "a task GitHub refused is not held")
         self.assertEqual(shown["refusal"], "Resource not accessible by personal access token")
         self.assertTrue(shown["on"], "a GitHub refusal doesn't turn the project off")
-        self.assertTrue(is_on(self.home, "p1"), "the switch stays on")
+        self.assertTrue(read(self.home, "p1", self.folders())["on"], "the switch stays on")
         self.assertEqual(len(self.writes), 1, "and the sweep stops rather than working the rest")
 
     def test_a_read_github_refuses_is_recorded_too(self) -> None:
@@ -397,7 +399,7 @@ class ClaimTests(unittest.TestCase):
         self.read_error = github.GitHubError("API rate limit exceeded for 1.2.3.4.", 403)
         self.sweep()
         self.assertEqual(self.shown()["refusal"], "API rate limit exceeded for 1.2.3.4.")
-        self.assertTrue(is_on(self.home, "p1"))
+        self.assertTrue(read(self.home, "p1", self.folders())["on"])
         self.assertEqual(self.writes, [])
 
     def test_a_missing_account_is_the_switchs_reason_and_not_a_refusal(self) -> None:
@@ -409,6 +411,43 @@ class ClaimTests(unittest.TestCase):
         self.assertEqual(shown["reason"], NO_GITHUB)
         self.assertIsNone(shown["refusal"], "a fact the switch already says isn't a refusal as well")
         self.assertEqual(self.writes, [])
+
+    def test_a_refused_assignment_takes_the_mark_back_off(self) -> None:
+        # The label is on, the assignment is refused: leaving the mark would keep the task out of
+        # every frontier while no sweep holds it, which is a task nothing ever works.
+        self.on()
+        self.issues = [issue_row(265), issue_row(266, created="2026-10-02T00:00:00Z")]
+        self.write_error = github.GitHubError("Resource not accessible by personal access token", 403)
+        self.write_error_on = "/assignees"
+        self.sweep()
+        shown = self.shown()
+        self.assertIsNone(shown["task"], "a claim it couldn't finish isn't held")
+        self.assertEqual(
+            self.writes,
+            [
+                ("POST", "/repos/mock-user/memento/issues/265/labels", {"labels": [CLAIM_LABEL]}),
+                (
+                    "POST",
+                    "/repos/mock-user/memento/issues/265/assignees",
+                    {"assignees": ["mock-user"]},
+                ),
+                ("DELETE", "/repos/mock-user/memento/issues/265/labels/gots-got-it", None),
+            ],
+            "the mark is taken back off, so the task is in the frontier again",
+        )
+        self.assertEqual(shown["refusal"], "Resource not accessible by personal access token")
+
+    def test_once_the_task_it_holds_is_released_the_next_sweep_takes_the_one_behind_it(self) -> None:
+        """Releasing a claim is #270's; the sweep's half is that a freed project takes the next one."""
+        self.on()
+        self.issues = [issue_row(265), issue_row(266, created="2026-10-02T00:00:00Z")]
+        self.sweep()
+        self.assertEqual(self.shown()["task"]["number"], 265)
+        # The claim released (its own ticket): the row stops holding anything, as #270 will write it.
+        afk._update(self.home, "p1", task=None, claimed_at=None)
+        self.issues = [issue_row(266, created="2026-10-02T00:00:00Z")]
+        self.sweep()
+        self.assertEqual(self.shown()["task"]["number"], 266, "the one behind it is taken next")
 
     def test_a_successful_sweep_clears_the_last_refusal(self) -> None:
         self.on()
@@ -501,25 +540,6 @@ class SweepAllTests(unittest.TestCase):
             with patch.object(afk, "sweep", side_effect=[RuntimeError("database is locked"), None]) as call:
                 sweep_all(self.home)
         self.assertEqual([one.args[1] for one in call.call_args_list], ["p1", "p2"])
-
-    def test_a_project_holding_a_task_is_not_looked_up_at_all(self) -> None:
-        """The row says it already holds one, so the sweep skips it before reading its folders."""
-        set_on(self.home, "p1", [folder(str(self.checkout))], True)
-        afk._hold(
-            self.home,
-            "p1",
-            {
-                "repo": "mock-user/memento",
-                "number": 265,
-                "title": "Task 265",
-                "url": "https://github.com/mock-user/memento/issues/265",
-                "created_at": "2026-10-01T00:00:00Z",
-            },
-        )
-        with stub_projects_db(projects=[]):
-            with patch.object(afk, "sweep") as sweep:
-                sweep_all(self.home)
-        sweep.assert_not_called()
 
 
 class WakeTests(unittest.TestCase):

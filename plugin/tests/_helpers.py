@@ -88,6 +88,7 @@ def temp_hermes_home(case: unittest.TestCase) -> Path:
     case.addCleanup(patcher.stop)
     return home
 
+
 def issue_row(
     number: int,
     *,

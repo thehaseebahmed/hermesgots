@@ -98,7 +98,6 @@ export function AfkPopup({
   const readAfk = useCallback(
     (signal: AbortSignal) => {
       if (unsupported.cooling(key)) return
-      setAfkError(undefined)
       void getProjectAfk(
         config,
         projectId,
@@ -107,6 +106,8 @@ export function AfkPopup({
         .then((next) => {
           unsupported.clear(key)
           if (signal.aborted) return
+          // The answer clears the last failure: what the sheet shows is what the host just said.
+          setAfkError(undefined)
           setAfk(next)
         })
         .catch((failure: unknown) => {

@@ -232,8 +232,8 @@ def projects(projects_db: Path) -> Dict[str, Any]:
     if not projects_db.exists():
         return {}
     with pdb.connect_closing(db_path=projects_db) as conn:
-        projects = pdb.list_projects(conn, include_archived=True)
-    return {str(project.id): project for project in projects}
+        found = pdb.list_projects(conn, include_archived=True)
+    return {str(project.id): project for project in found}
 
 
 def _project_folders(project: Any) -> list[str]:

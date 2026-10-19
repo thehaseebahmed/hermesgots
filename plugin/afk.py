@@ -72,15 +72,6 @@ def reason(
     return None if auth else NO_GITHUB
 
 
-def state(
-    hermes_home: Path, project_id: str, folders: Iterable[Any], archived: bool = False
-) -> Dict[str, Any]:
-    """The project's switch on its own: whether it's on, and why it can't be. `read` is the sheet's
-    whole answer, which carries the task held and the last refusal beside these two."""
-    found = read(hermes_home, project_id, folders, archived)
-    return {"on": found["on"], "reason": found["reason"]}
-
-
 def set_on(
     hermes_home: Path,
     project_id: str,
@@ -121,12 +112,6 @@ def forget(hermes_home: Path, project_id: str) -> None:
         conn.close()
 
 
-def is_on(hermes_home: Path, project_id: str) -> bool:
-    """Whether the project is left to work its own tasks — the host's answer, not a device's."""
-    found = _row(hermes_home, project_id)
-    return bool(found and found["on"])
-
-
 def read(
     hermes_home: Path, project_id: str, folders: Iterable[Any], archived: bool = False
 ) -> Dict[str, Any]:
@@ -165,7 +150,9 @@ def sweep(
     why = reason(hermes_home, folders, archived)
     if why is not None:
         # Put away, with no repository to read, or no account to read it with: the sheet's own
-        # reason already says so, and it isn't GitHub refusing anything.
+        # reason already says so, and it isn't GitHub refusing anything — so a refusal it recorded
+        # before would sit beside that reason saying something GitHub no longer says.
+        _forget_refusal(hermes_home, project_id, found)
         return
     auth, _ = github.token(hermes_home)
     try:
@@ -173,11 +160,10 @@ def sweep(
     except github.GitHubError as error:
         _refuse(hermes_home, project_id, str(error))
         return
-    if found["refusal"] is not None:
-        # GitHub answered, so whatever it refused before is stale.
-        _clear_refusal(hermes_home, project_id)
     ready = answers.get("ready") or []
     if not ready:
+        # GitHub answered and has nothing to give: whatever it refused before is stale.
+        _forget_refusal(hermes_home, project_id, found)
         return
     task = ready[0]
     try:
@@ -187,6 +173,7 @@ def sweep(
     except github.GitHubError as error:
         _refuse(hermes_home, project_id, str(error))
         return
+    # The hold clears the last refusal in the same write: this sweep just got an answer.
     _hold(hermes_home, project_id, task)
 
 
@@ -303,6 +290,12 @@ def _refuse(hermes_home: Path, project_id: str, why: str) -> None:
 
 def _clear_refusal(hermes_home: Path, project_id: str) -> None:
     _update(hermes_home, project_id, refusal=None, refused_at=None)
+
+
+def _forget_refusal(hermes_home: Path, project_id: str, found: Dict[str, Any]) -> None:
+    """Clears a refusal the row holds, when the sweep has something else to say instead."""
+    if found["refusal"] is not None:
+        _clear_refusal(hermes_home, project_id)
 
 
 def _row(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:

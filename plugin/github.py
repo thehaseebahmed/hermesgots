@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import re
 import shutil
@@ -21,6 +22,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 API = "https://api.github.com"
 TOKEN_ENV_VARS = ("GITHUB_TOKEN", "GH_TOKEN")
@@ -222,13 +225,28 @@ def claim_issue(repo: str, number: int, account: str, label: str, auth: Optional
     """Claims one issue: marked with ``label`` and assigned to ``account``, in that order.
 
     The label is applied before the assignment, so a write that fails halfway leaves a task that
-    still reads as claimed (the mark is on it) rather than one assigned to the host's user with
-    nothing saying an agent has it. The label itself is created on the repository when it isn't
+    still reads as claimed while the assignment is being retried — and if the assignment is refused,
+    the label is taken back off, because a task marked as claimed that no sweep holds is one no
+    sweep will ever work (ADR 0012). The label itself is created on the repository when it isn't
     there yet, because a label that doesn't exist can't be applied.
     """
     _ensure_label(repo, label, auth)
     _request(f"/repos/{repo}/issues/{number}/labels", auth, "POST", {"labels": [label]})
-    _request(f"/repos/{repo}/issues/{number}/assignees", auth, "POST", {"assignees": [account]})
+    try:
+        _request(f"/repos/{repo}/issues/{number}/assignees", auth, "POST", {"assignees": [account]})
+    except GitHubError:
+        _unlabel(repo, number, label, auth)
+        raise
+
+
+def _unlabel(repo: str, number: int, label: str, auth: Optional[str]) -> None:
+    """Takes the claim mark back off a claim that couldn't be finished, best-effort: the refusal
+    that follows is what the sheet shows, and this only keeps the task in the frontier."""
+    path = f"/repos/{repo}/issues/{number}/labels/{urllib.parse.quote(label, safe='')}"
+    try:
+        _request(path, auth, "DELETE")
+    except GitHubError:
+        logger.warning("memento: couldn't take %s off %s#%s", label, repo, number, exc_info=True)
 
 
 def _ensure_label(repo: str, label: str, auth: Optional[str]) -> None:
