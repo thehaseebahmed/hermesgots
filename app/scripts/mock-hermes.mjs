@@ -1016,6 +1016,65 @@ function afkTask(project) {
   }
 }
 
+/**
+ * The session the sweep starts for the task it claimed, as the plugin publishes it: its workspace
+ * (its own worktree and branch, mode auto), its own chat record (`afk`, auto, its title, newer
+ * updated than created — the Code list hides the rest) and the transcript's first row, which is one
+ * short line naming the task rather than the brief.
+ */
+function afkSession(project) {
+  const held = afkTask(project)
+  const session = `memento-afk-${project.id}`
+  const line = `#${held.number} ${held.title}`
+  const now = Date.now()
+  const slug = `afk-${held.number}`
+  const gitFolders = project.folders.filter((f) => f.git)
+  const repos = gitFolders.map((f) => ({
+    name: f.repo,
+    repo_root: f.path,
+    path: `${f.path}/.worktrees/${slug}`,
+    branch: `hermes/${slug}`,
+  }))
+  if (repos.length)
+    projectSessions.set(session, {
+      session_id: session,
+      project_id: project.id,
+      repo_root: repos[0].repo_root,
+      path: repos[0].path,
+      branch: repos[0].branch,
+      mode: "auto",
+      plan_pending: 0,
+      created_at: now,
+      repos,
+      files_dir: `${repos[0].repo_root}/files/${slug}`,
+      plan_file: null,
+    })
+  chatTitles.set(session, line)
+  transcripts.set(session, [
+    { id: ++lastRowId, session_id: session, timestamp: now / 1000, role: "user", content: line },
+  ])
+  pluginChats.set(session, {
+    at: now + 1,
+    value: {
+      title: line,
+      hermesSessionId: session,
+      createdAt: now,
+      updatedAt: now + 1,
+      projectId: project.id,
+      mode: "auto",
+      afk: true,
+    },
+  })
+  noteEvent("chats")
+}
+
+/** The sweep, once per project: the task claimed and the session that will work it. */
+function afkSweep(project) {
+  if (afkSwept.has(project.id)) return
+  afkSwept.add(project.id)
+  afkSession(project)
+}
+
 /** AFK's answer for a project: its switch, the task it holds, and its last refusal (none mocked). */
 function afkAnswer(project, reason) {
   const on = afkProjects.has(project.id)
@@ -3161,8 +3220,9 @@ http
         }
         return json(res, 200, afkAnswer(found, reason))
       }
-      // The sweep the switch woke has run by the next read, so this one holds the task it claimed.
-      if (afkProjects.has(found.id)) afkSwept.add(found.id)
+      // The sweep the switch woke has run by the next read, so this one holds the task it claimed —
+      // and has published the session that works it, as the plugin does.
+      if (afkProjects.has(found.id)) afkSweep(found)
       return json(res, 200, afkAnswer(found, reason))
     }
     if (PLUGIN && !profile && projectRoute?.[2] === "/usage") {

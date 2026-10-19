@@ -444,6 +444,16 @@ function SessionItem({
       waiting={state === "waiting" && !prTick}
       botId={botId}
       title={session.title}
+      badge={
+        session.afk ? (
+          <span
+            data-afk
+            className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
+          >
+            AFK
+          </span>
+        ) : undefined
+      }
       when={formatWhen(session.updatedAt, now)}
       line={line && <span className="truncate">{line}</span>}
       selected={session.id === pane?.selected}

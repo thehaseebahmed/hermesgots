@@ -69,6 +69,7 @@ export function ItemRow({
   waiting,
   botId,
   title,
+  badge,
   when,
   line,
   warn,
@@ -82,6 +83,8 @@ export function ItemRow({
   waiting?: boolean
   botId?: string
   title: string
+  /** A mark beside the title, for what the row is rather than what it's doing. */
+  badge?: ReactNode
   when?: string
   line?: ReactNode
   /** The status line reads as a warning (a failed step). */
@@ -115,6 +118,7 @@ export function ItemRow({
       <span className="flex min-w-0 flex-1 flex-col gap-1">
         <span className="flex items-baseline gap-2">
           <span className="min-w-0 flex-1 truncate font-medium">{title}</span>
+          {badge}
           {when && <span className="shrink-0 text-xs text-muted-foreground">{when}</span>}
         </span>
         {line && (

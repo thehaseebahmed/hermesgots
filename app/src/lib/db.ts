@@ -145,6 +145,12 @@ export interface Conversation {
   modelChoice?: ModelChoice
   /** The Hermes Project this chat is a session of (works in its own worktree). */
   projectId?: string
+  /**
+   * Started by AFK to work one of its project's tasks, on the host. Synced through the chat record
+   * the plugin publishes, so every device marks the session the same; the user's own sessions never
+   * carry it.
+   */
+  afk?: boolean
   /** When the user saved the session as a draft. Synced, so the plugin's cleanup spares it. */
   draftAt?: number
   /** The unsent text in this chat's composer. Synced through the chat record, so another device and a reinstall see it. */

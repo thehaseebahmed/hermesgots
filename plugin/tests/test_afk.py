@@ -9,15 +9,16 @@ Run: python3 -m unittest plugin.tests.test_afk -v
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import ModuleType, SimpleNamespace
-from typing import Any, List
+from typing import Any, Dict, List
 from unittest.mock import patch
 
-from plugin import afk, github, projects
+from plugin import afk, chats, github, projects, sessions
 from plugin.afk import (
     ARCHIVED,
     NO_GITHUB,
@@ -28,6 +29,7 @@ from plugin.afk import (
     sweep,
     sweep_all,
 )
+from plugin.store import db_path
 from plugin.tasks import CLAIM_LABEL, READY_LABEL
 from plugin.tests._helpers import issue_row, stub_projects_db
 
@@ -499,6 +501,277 @@ class ClaimTests(unittest.TestCase):
         self.assertEqual(wake.call_count, 1, "turning it off has nothing to wake for")
 
 
+class DetailTests(unittest.TestCase):
+    """The task's own text: its body and its comments, as the run's instructions carry them."""
+
+    def setUp(self) -> None:
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = Path(self.tmp.name)
+        self.pages: List[Any] = []
+        self.comments: List[Any] = []
+        self.links: List[str] = []
+        self._patches = [
+            patch.object(github, "token", return_value=("token", "env")),
+            patch.object(github, "_get", self.answer_get),
+            patch.object(github, "_page", self.answer_page),
+        ]
+        for one in self._patches:
+            one.start()
+            self.addCleanup(one.stop)
+
+    def answer_get(self, path: str, auth: Any) -> Any:
+        if path == "/repos/mock-user/memento/issues/265":
+            return {"number": 265, "title": "Task 265", "body": "Read the frontier first."}
+        raise AssertionError(f"unexpected read: {path}")
+
+    def answer_page(self, path: str, auth: Any) -> Any:
+        if not path.startswith("/repos/mock-user/memento/issues/265/comments"):
+            raise AssertionError(f"unexpected page: {path}")
+        return self.comments, self.links.pop(0) if self.links else ""
+
+    def test_the_body_and_every_comment_are_read(self) -> None:
+        self.comments = [
+            {"user": {"login": "mock-user"}, "body": "Start with the rule, not the read."},
+            {"user": {"login": "someone"}, "body": "Blocked by #264 until it lands."},
+        ]
+        found = afk.detail(self.home, "mock-user/memento", 265)
+        self.assertEqual(found["body"], "Read the frontier first.")
+        self.assertEqual(
+            found["comments"],
+            [
+                {"author": "mock-user", "body": "Start with the rule, not the read."},
+                {"author": "someone", "body": "Blocked by #264 until it lands."},
+            ],
+        )
+
+    def test_every_page_of_comments_is_read(self) -> None:
+        self.comments = [{"user": {"login": "mock-user"}, "body": "One."}]
+        self.links = [
+            f'<{github.API}/repos/mock-user/memento/issues/265/comments?page=2>; rel="next"'
+        ]
+        found = afk.detail(self.home, "mock-user/memento", 265)
+        self.assertEqual([row["body"] for row in found["comments"]], ["One.", "One."])
+
+    def test_a_host_without_an_account_says_why(self) -> None:
+        with patch.object(github, "token", return_value=(None, "none")):
+            with self.assertRaises(github.GitHubError) as raised:
+                afk.detail(self.home, "mock-user/memento", 265)
+        self.assertEqual(str(raised.exception), NO_GITHUB)
+
+
+class BriefTests(unittest.TestCase):
+    """What the run is told: the task as instructions, and no place to ask."""
+
+    task = {
+        "repo": "mock-user/memento",
+        "number": 265,
+        "title": "The frontier is read from GitHub and listed",
+        "url": "https://github.com/mock-user/memento/issues/265",
+        "created_at": "2026-10-01T00:00:00Z",
+    }
+
+    def test_the_brief_carries_the_task_and_its_comments(self) -> None:
+        text = afk.brief(
+            self.task,
+            {
+                "body": "Read the frontier first.",
+                "comments": [{"author": "someone", "body": "Blocked by #264 until it lands."}],
+            },
+        )
+        self.assertIn("mock-user/memento#265", text)
+        self.assertIn(self.task["title"], text)
+        self.assertIn("Read the frontier first.", text)
+        self.assertIn("Blocked by #264 until it lands.", text)
+        self.assertIn("someone", text)
+
+    def test_the_brief_tells_it_not_to_ask_and_to_get_a_second_opinion(self) -> None:
+        text = afk.brief(self.task, {"body": "", "comments": []})
+        self.assertIn("Do not ask", text)
+        self.assertIn("decide", text)
+        self.assertIn("delegate_task", text)
+        self.assertIn("draft pull request", text)
+
+    def test_a_task_with_no_body_or_comments_still_says_what_it_is(self) -> None:
+        text = afk.brief(self.task, {"body": "", "comments": []})
+        self.assertIn("mock-user/memento#265", text)
+        self.assertNotIn("Comments:", text)
+
+    def test_a_task_too_long_for_one_run_is_cut(self) -> None:
+        text = afk.brief(self.task, {"body": "x" * 200_000, "comments": []})
+        self.assertLessEqual(len(text), afk.MAX_BRIEF + 200)
+        self.assertIn("cut here", text)
+
+
+class SessionTests(unittest.TestCase):
+    """A claimed task worked in a session of its own: the record it publishes and the run it starts.
+
+    Session creation is Hermes's (``sessions.ensure``) and the run is Hermes's (``outbox.post``), so
+    both are patched; what's asserted is what the plugin publishes — the chat record every device
+    reads the session from, and the run's request — because that record is what makes the session
+    visible and openable at all (ADR 0013).
+    """
+
+    def setUp(self) -> None:
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = Path(self.tmp.name)
+        self.home.joinpath("projects.db").write_text("")
+        self.task = {
+            "repo": "mock-user/memento",
+            "number": 265,
+            "title": "The frontier is read from GitHub and listed",
+            "url": "https://github.com/mock-user/memento/issues/265",
+            "created_at": "2026-10-01T00:00:00Z",
+        }
+        self.ensured: List[tuple] = []
+        self.posted: List[dict] = []
+        self.record = {
+            "session_id": "",
+            "project_id": "p1",
+            "mode": "auto",
+            "path": "/trees/quiet-marmot",
+            "branch": "hermes/quiet-marmot",
+            "repo_root": "/checkout",
+            "files_dir": "/checkout/files/quiet-marmot",
+            "plan_pending": False,
+            "repos": [
+                {
+                    "name": "mock-user/memento",
+                    "repo_root": "/checkout",
+                    "path": "/trees/quiet-marmot",
+                    "branch": "hermes/quiet-marmot",
+                }
+            ],
+        }
+        for one in (
+            patch.object(github, "token", return_value=("token", "env")),
+            patch.object(github, "origin_repo", return_value="mock-user/memento"),
+            patch("plugin.sessions.ensure", side_effect=self.ensure),
+            patch("plugin.sessions.apply_cwd"),
+            patch("plugin.outbox.post", side_effect=self.post),
+        ):
+            one.start()
+            self.addCleanup(one.stop)
+
+    def ensure(self, path: Any, home: Any, session_id: str, project_id: Any, task: Any, mode: Any) -> dict:
+        self.ensured.append((session_id, project_id, task, mode))
+        return {**self.record, "session_id": session_id, "project_id": project_id, "mode": mode}
+
+    async def post(self, adapter: Any, profile: Any, path: str, body: dict, **kwargs: Any) -> dict:
+        self.posted.append({"profile": profile, "path": path, "body": body, **kwargs})
+        return {"run_id": "run-1"}
+
+    def adapter(self) -> SimpleNamespace:
+        return SimpleNamespace(_host="127.0.0.1", _port=8642, _api_key="host-key")
+
+    def start(self, detail: Any = None) -> None:
+        asyncio.run(
+            afk.start(
+                self.adapter(),
+                self.home,
+                "p1",
+                self.task,
+                detail if detail is not None else {"body": "Read the frontier first.", "comments": []},
+            )
+        )
+
+    def chats(self) -> Dict[str, Any]:
+        return chats.read(db_path(self.home))
+
+    def test_the_session_is_made_with_a_worktree_of_its_own_in_auto(self) -> None:
+        self.start()
+        self.assertEqual(len(self.ensured), 1)
+        session_id, project_id, task, mode = self.ensured[0]
+        self.assertEqual(project_id, "p1")
+        self.assertEqual(task, self.task["title"], "the worktree is named after the task")
+        self.assertEqual(mode, "auto", "an AFK session runs in Auto")
+        self.assertTrue(session_id.startswith("memento-"), "a session id Gots's own hooks label")
+
+    def test_the_chat_record_it_publishes_is_what_makes_the_session_appear(self) -> None:
+        self.start()
+        records = self.chats()
+        self.assertEqual(len(records), 1)
+        entry = next(iter(records.values()))
+        value = entry["value"]
+        self.assertEqual(value["title"], "#265 The frontier is read from GitHub and listed")
+        self.assertEqual(value["hermesSessionId"], self.ensured[0][0])
+        self.assertEqual(value["projectId"], "p1")
+        self.assertEqual(value["mode"], "auto")
+        self.assertIs(value["afk"], True, "the list marks it as AFK's")
+        self.assertGreater(
+            value["updatedAt"],
+            value["createdAt"],
+            "a record whose updated time isn't newer is hidden by the Code list",
+        )
+        self.assertGreaterEqual(entry["at"], value["updatedAt"], "the change clock is the record's")
+
+    def test_the_run_starts_with_one_short_line_naming_the_task(self) -> None:
+        self.start()
+        self.assertEqual(len(self.posted), 1)
+        body = self.posted[0]["body"]
+        message = body["input"][0]
+        self.assertEqual(message["role"], "user")
+        self.assertIn("#265", message["content"])
+        self.assertIn(self.task["title"], message["content"])
+        self.assertNotIn("\n", message["content"], "the transcript opens with a line, not a brief")
+        self.assertNotIn("Read the frontier first.", message["content"])
+
+    def test_the_task_arrives_as_instructions_beside_the_sessions_own_prompt(self) -> None:
+        self.start(
+            {
+                "body": "Read the frontier first.",
+                "comments": [{"author": "someone", "body": "Start with the rule."}],
+            }
+        )
+        instructions = self.posted[0]["body"]["instructions"]
+        self.assertIn("Read the frontier first.", instructions)
+        self.assertIn("Start with the rule.", instructions)
+        self.assertIn("Do not ask", instructions)
+        self.assertIn("delegate_task", instructions)
+        self.assertIn(
+            "You are working in a git worktree of mock-user/memento",
+            instructions,
+            "the session's own prompt is kept, so its worktree and pull request lines still hold",
+        )
+
+    def test_the_run_is_the_sessions_own_and_starts_on_the_hosts_answer(self) -> None:
+        self.start()
+        posted = self.posted[0]
+        self.assertEqual(posted["path"], "/v1/runs")
+        self.assertEqual(posted["body"]["session_id"], self.ensured[0][0])
+        self.assertNotIn("model", posted["body"], "no model picked: the host's own runs")
+        self.assertEqual(posted["authorization"], "Bearer host-key")
+
+    def test_a_session_that_cannot_be_made_starts_no_run(self) -> None:
+        with patch("plugin.sessions.ensure", side_effect=sessions.WorkspaceError("No such project.")):
+            self.start()
+        self.assertEqual(self.posted, [], "nothing is started for a session that doesn't exist")
+        self.assertEqual(self.chats(), {}, "and nothing is published to be opened")
+
+    def test_the_sweep_answers_the_task_it_just_claimed(self) -> None:
+        """The loop starts the session from what the sweep returns, not from a second read."""
+        with TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            checkout = home / "checkout"
+            (checkout / ".git").mkdir(parents=True)
+            home.joinpath("projects.db").write_text("")
+            rows = [issue_row(265)]
+            with (
+                patch.object(github, "token", return_value=("token", "env")),
+                patch.object(github, "origin_repo", return_value="mock-user/memento"),
+                patch.object(github, "_get", lambda path, auth: {"login": "mock-user"}),
+                patch.object(github, "_page", lambda path, auth: (rows, "")),
+                patch.object(github, "_request", lambda *args, **kwargs: {}),
+            ):
+                set_on(home, "p1", [folder(str(checkout))], True)
+                self.assertEqual(sweep(home, "p1", [folder(str(checkout))])["number"], 265)
+                self.assertIsNone(
+                    sweep(home, "p1", [folder(str(checkout))]),
+                    "a project holding one is asked for nothing further",
+                )
+
+
 class SweepAllTests(unittest.TestCase):
     """Which projects the background sweep looks at."""
 
@@ -540,6 +813,56 @@ class SweepAllTests(unittest.TestCase):
             with patch.object(afk, "sweep", side_effect=[RuntimeError("database is locked"), None]) as call:
                 sweep_all(self.home)
         self.assertEqual([one.args[1] for one in call.call_args_list], ["p1", "p2"])
+
+    def test_a_sweep_answers_the_tasks_it_just_claimed(self) -> None:
+        set_on(self.home, "p1", [folder(str(self.checkout))], True)
+        task = {"repo": "mock-user/memento", "number": 265, "title": "Task 265"}
+        with stub_projects_db(projects=[self.project("p1"), self.project("p2")]):
+            with patch.object(afk, "sweep", side_effect=[task, None]):
+                claimed = sweep_all(self.home)
+        self.assertEqual(claimed, [("p1", task)], "only what was claimed is answered")
+
+
+class LoopTests(unittest.TestCase):
+    """What the background loop does with what it swept: a session per claimed task."""
+
+    def setUp(self) -> None:
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = Path(self.tmp.name)
+        self.task = {"repo": "mock-user/memento", "number": 265, "title": "Task 265"}
+        self.starts: List[tuple] = []
+        self.patch = patch("plugin.link.served_homes", return_value=[self.home])
+        self.patch.start()
+        self.addCleanup(self.patch.stop)
+
+    async def start(self, adapter: Any, home: Path, project_id: str, task: dict, **kwargs: Any) -> None:
+        self.starts.append((home, project_id, task, adapter))
+
+    def test_the_task_a_sweep_claimed_is_worked_in_a_session(self) -> None:
+        adapter = SimpleNamespace()
+        with (
+            patch.object(afk, "sweep_all", return_value=[("p1", self.task)]),
+            patch.object(afk, "start", side_effect=self.start),
+        ):
+            asyncio.run(afk.sweep_homes(adapter))
+        self.assertEqual(self.starts, [(self.home, "p1", self.task, adapter)])
+
+    def test_a_sweep_that_claimed_nothing_starts_nothing(self) -> None:
+        with (
+            patch.object(afk, "sweep_all", return_value=[]),
+            patch.object(afk, "start", side_effect=self.start),
+        ):
+            asyncio.run(afk.sweep_homes(SimpleNamespace()))
+        self.assertEqual(self.starts, [])
+
+    def test_one_projects_failure_to_start_does_not_stop_anothers(self) -> None:
+        second = {"repo": "mock-user/memento", "number": 266, "title": "Task 266"}
+        with (
+            patch.object(afk, "sweep_all", return_value=[("p1", self.task), ("p2", second)]),
+            patch.object(afk, "start", side_effect=[RuntimeError("no worktree"), None]),
+        ):
+            asyncio.run(afk.sweep_homes(SimpleNamespace()))
 
 
 class WakeTests(unittest.TestCase):
