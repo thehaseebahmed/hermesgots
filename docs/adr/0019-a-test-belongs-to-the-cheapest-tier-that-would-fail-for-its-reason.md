@@ -49,8 +49,8 @@ or an element's height would pass whatever the CSS says.
   question.
 - **The component tier is the price of the boundary.** It is machinery the repository did not have:
   a runner, a seeded database, a faked HTTP boundary and tests written against the app's own client
-  types. It is also the tier most work lands in, so it has to stay inside the two-minute budget
-  (ADR 0002) — a gate people run at the end of the day is a gate they run after the work is done.
+  types. It is also the tier most work lands in, so it has to stay cheap enough to run before every
+  commit — a gate people run at the end of the day is a gate they run after the work is done.
 - **Geometry escalates to the sweep.** Layout that a DOM cannot measure — a rail's row heights, pane
   adjacency at a tablet width, a menu's height cap, a full-viewport cover — is asserted by a real
   browser or it is asserted by nothing. A component test that appears to check it would pass
