@@ -51,6 +51,7 @@ FIELDS = (
     "plan_file",
     "files_dir",
     "task",
+    "pipeline",
 )
 REPO_FIELDS = ("name", "repo_root", "path", "branch")
 MAX_PARENT_HOPS = 5
@@ -138,6 +139,7 @@ def _record(row: Any) -> Dict[str, Any]:
         {field: repo.get(field) for field in REPO_FIELDS} for repo in repos if isinstance(repo, dict)
     ]
     record["task"] = _json(record["task"], None)
+    record["pipeline"] = _json(record["pipeline"], None)
     # A row from before repos were kept: the one tree it has.
     if not record["repos"] and record["path"]:
         record["repos"] = [
@@ -181,6 +183,21 @@ def set_task(path: Path, session_id: str, task: Dict[str, Any]) -> None:
         )
         if cursor.rowcount == 0:
             logger.warning("memento: no session row for %s to name task #%s on", session_id, task.get("number"))
+    finally:
+        conn.close()
+
+
+def set_pipeline(path: Path, session_id: str, pipeline: Optional[Dict[str, Any]]) -> None:
+    """Records the stage a staged task is in, so the pop-up can name it and a finished task can
+    still say how it got there (``pipeline.py``). ``None`` clears it."""
+    conn = connect(path)
+    try:
+        cursor = conn.execute(
+            "UPDATE project_sessions SET pipeline = ? WHERE session_id = ?",
+            (json.dumps(pipeline, separators=(",", ":")) if pipeline else None, session_id),
+        )
+        if cursor.rowcount == 0:
+            logger.warning("memento: no session row for %s to record a stage on", session_id)
     finally:
         conn.close()
 
