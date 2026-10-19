@@ -971,6 +971,30 @@ const mockTask = (repo, number, title, extra = {}) => ({
   blockers: [],
   ...extra,
 })
+/** A session's workspace record: a worktree and branch per repository, its mode and files folder. */
+const workspaceRecord = (project, { sessionId, slug, mode }) => {
+  const repos = project.folders
+    .filter((folder) => folder.git)
+    .map((folder) => ({
+      name: folder.repo,
+      repo_root: folder.path,
+      path: `${folder.path}/.worktrees/${slug}`,
+      branch: `hermes/${slug}`,
+    }))
+  return {
+    session_id: sessionId,
+    project_id: project.id,
+    repo_root: repos[0].repo_root,
+    path: repos[0].path,
+    branch: repos[0].branch,
+    mode,
+    plan_pending: 0,
+    created_at: Date.now(),
+    repos,
+    files_dir: `${repos[0].repo_root}/files/${slug}`,
+    plan_file: null,
+  }
+}
 const projectTasks = (project) => {
   const repo = repoOf(project)
   const task = (number, title, extra = {}) => mockTask(repo, number, title, extra)
@@ -1029,28 +1053,11 @@ function afkSession(project) {
   // The run's input, as the plugin sends it: the issue and its url, never its text.
   const input = `Implement Issue #${held.number} (${held.url})`
   const now = Date.now()
-  const slug = `afk-${held.number}`
-  const gitFolders = project.folders.filter((f) => f.git)
-  const repos = gitFolders.map((f) => ({
-    name: f.repo,
-    repo_root: f.path,
-    path: `${f.path}/.worktrees/${slug}`,
-    branch: `hermes/${slug}`,
-  }))
-  if (repos.length)
-    projectSessions.set(session, {
-      session_id: session,
-      project_id: project.id,
-      repo_root: repos[0].repo_root,
-      path: repos[0].path,
-      branch: repos[0].branch,
-      mode: "auto",
-      plan_pending: 0,
-      created_at: now,
-      repos,
-      files_dir: `${repos[0].repo_root}/files/${slug}`,
-      plan_file: null,
-    })
+  if (project.folders.some((f) => f.git))
+    projectSessions.set(
+      session,
+      workspaceRecord(project, { sessionId: session, slug: `afk-${held.number}`, mode: "auto" }),
+    )
   chatTitles.set(session, title)
   transcripts.set(session, [
     { id: ++lastRowId, session_id: session, timestamp: now / 1000, role: "user", content: input },
@@ -3856,25 +3863,11 @@ http
           await sleep(800 * gitFolders.length)
           const pick = (words) => words[Math.floor(Math.random() * words.length)]
           const slug = `${pick(["jazzy", "cosmic", "fuzzy", "zesty", "nimble"])}-${pick(["hopper", "otter", "comet", "waffle", "quokka"])}-${randomUUID().slice(0, 4)}`
-          const repos = gitFolders.map((f) => ({
-            name: f.repo,
-            repo_root: f.path,
-            path: `${f.path}/.worktrees/${slug}`,
-            branch: `hermes/${slug}`,
-          }))
-          record = {
-            session_id: id,
-            project_id: project.id,
-            repo_root: repos[0].repo_root,
-            path: repos[0].path,
-            branch: repos[0].branch,
+          record = workspaceRecord(project, {
+            sessionId: id,
+            slug,
             mode: mode ?? "accept_edits",
-            plan_pending: 0,
-            created_at: Date.now(),
-            repos,
-            files_dir: `${repos[0].repo_root}/files/${slug}`,
-            plan_file: null,
-          }
+          })
           projectSessions.set(id, record)
         } else if (mode && mode !== record.mode) {
           record.mode = mode

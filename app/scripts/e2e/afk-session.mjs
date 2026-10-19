@@ -28,12 +28,11 @@ const run = async ({ page, profileId, shot, until }) => {
     "the switch to read on",
   )
 
-  // The session appears where sessions are listed, titled after the task and marked as AFK's. The
-  // mock keeps its chat list between flows, so an earlier pass of this flow's own session is there
-  // too; the newest is this run's, and Code lists newest first.
+  // The session appears where sessions are listed, titled after the task and marked as AFK's. Code
+  // lists newest first, so the first row titled after the task is the one this pass just published.
   await page.goto(`${app}/code`)
   const row = page.locator("a", { hasText: TITLE }).first()
-  await until(async () => (await row.count()) === 1, 15_000, "the AFK session to appear in Code")
+  await row.waitFor({ timeout: 15_000 })
   assert.equal(
     await row.locator("[data-afk]").textContent(),
     "AFK",

@@ -17,6 +17,7 @@ import { prLabel, prLook } from "@/components/chat/pr-look"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { ItemGroup, ItemRow, ItemSearch } from "@/components/item-list"
 import { NewSessionPopup, type SessionTarget } from "@/components/new-session"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { projectKey, startBlocked, useProjectSessions, useSessionFollowUps } from "@/lib/code"
@@ -446,12 +447,9 @@ function SessionItem({
       title={session.title}
       badge={
         session.afk ? (
-          <span
-            data-afk
-            className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
-          >
+          <Badge data-afk className="bg-primary/10 text-primary">
             AFK
-          </span>
+          </Badge>
         ) : undefined
       }
       when={formatWhen(session.updatedAt, now)}
