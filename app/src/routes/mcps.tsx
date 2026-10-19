@@ -279,7 +279,7 @@ function Segmented<T extends string>({
         <Button
           key={option.value}
           type="button"
-          variant={value === option.value ? "secondary" : "outline"}
+          variant={value === option.value ? "default" : "outline"}
           className="h-11 flex-1 rounded-full"
           aria-pressed={value === option.value}
           disabled={disabled}
@@ -334,9 +334,14 @@ function ServerRow({
           {server.name}
         </button>
         {line.authenticate ? (
+          // A failure the Host says access can fix stays a failure to read, so its colour comes from
+          // that rather than from the line being tappable.
           <button
             type="button"
-            className="-mx-1 min-h-11 px-1 text-left text-sm text-primary outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+            className={cn(
+              "-mx-1 min-h-11 px-1 text-left text-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring",
+              line.failed ? "text-destructive" : "text-primary",
+            )}
             onClick={onGrant}
           >
             {line.text}
