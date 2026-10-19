@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -25,6 +26,7 @@ from plugin.afk import (
     NO_REPOSITORY,
     Refused,
     read,
+    release,
     set_on,
     sweep,
     sweep_all,
@@ -252,12 +254,11 @@ class SwitchTests(unittest.TestCase):
             self.assertTrue(projects.remove(self.home, "p1"))
 
 
-class ClaimTests(unittest.TestCase):
-    """The sweep: the oldest ready task assigned and marked on GitHub, one at a time.
+class ClaimStubTests(unittest.TestCase):
+    """A Hermes home with one checkout, and GitHub as the plugin's own HTTP stub.
 
-    GitHub is the plugin's HTTP stub, as the frontier's read is tested: ``_get``/``_page`` answer the
-    reads and ``_request`` records the writes, so what's asserted is what AFK would leave on the
-    tracker rather than how the module is arranged.
+    ``_get``/``_page`` answer the reads and ``_request`` records the writes, so what's asserted is
+    what AFK would leave on the tracker rather than how the module is arranged.
     """
 
     def setUp(self) -> None:
@@ -321,6 +322,10 @@ class ClaimTests(unittest.TestCase):
         if refused:
             raise self.write_error
         return {}
+
+
+class ClaimTests(ClaimStubTests):
+    """The sweep: the oldest ready task assigned and marked on GitHub, one at a time."""
 
     def test_the_oldest_ready_task_is_assigned_and_marked(self) -> None:
         self.on()
@@ -440,13 +445,12 @@ class ClaimTests(unittest.TestCase):
         self.assertEqual(shown["refusal"], "Resource not accessible by personal access token")
 
     def test_once_the_task_it_holds_is_released_the_next_sweep_takes_the_one_behind_it(self) -> None:
-        """Releasing a claim is #270's; the sweep's half is that a freed project takes the next one."""
+        """A freed project's next sweep takes what is behind the task it gave back."""
         self.on()
         self.issues = [issue_row(265), issue_row(266, created="2026-10-02T00:00:00Z")]
         self.sweep()
         self.assertEqual(self.shown()["task"]["number"], 265)
-        # The claim released (its own ticket): the row stops holding anything, as #270 will write it.
-        afk._update(self.home, "p1", task=None, claimed_at=None)
+        release(self.home, "p1")
         self.issues = [issue_row(266, created="2026-10-02T00:00:00Z")]
         self.sweep()
         self.assertEqual(self.shown()["task"]["number"], 266, "the one behind it is taken next")
@@ -501,6 +505,208 @@ class ClaimTests(unittest.TestCase):
         self.assertEqual(wake.call_count, 1, "turning it off has nothing to wake for")
 
 
+class AfkSessionTests(ClaimStubTests):
+    """AFK holding a claimed task in a published session, and giving that claim back.
+
+    The session is made and published the way ``afk.start`` leaves it — the worktree's row, the hold
+    naming the session, and the chat record that makes it appear — and then the user's own mark
+    arrives through the chat list, which is the one channel a device's discard, resolve or delete
+    travels on.
+    """
+
+    SESSION = "memento-afk-s1"
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.on()
+        self.issues = [issue_row(265), issue_row(266, created="2026-10-02T00:00:00Z")]
+        self.sweep()
+        self.task = self.shown()["task"]
+        repos = [
+            {
+                "name": "mock-user/memento",
+                "repo_root": str(self.checkout),
+                "path": "/trees/afk-265",
+                "branch": "hermes/afk-265",
+            }
+        ]
+        sessions._upsert(db_path(self.home), self.SESSION, "p1", repos, "auto", "/files/afk-265")
+        afk._adopt(self.home, "p1", self.SESSION)
+        afk.publish(self.home, self.SESSION, "p1", self.task)
+        self.writes.clear()
+
+    def merged(self, **marks: Any) -> None:
+        """The app's own write to the chat list: the session it marks, at a newer change clock."""
+        record = chats.read(db_path(self.home))[self.SESSION]
+        value = {**record["value"], **marks}
+        at = int(time.time() * 1000) + 60_000
+        chats.merge(db_path(self.home), {self.SESSION: {"at": at, "value": value}})
+
+    def deleted(self) -> None:
+        at = int(time.time() * 1000) + 60_000
+        chats.merge(db_path(self.home), {self.SESSION: {"at": at, "deleted": True}})
+
+    def aged(self, seconds: int) -> None:
+        """The hold as a restart finds it: taken a while ago, with nothing running it since."""
+        afk._update(self.home, "p1", claimed_at=int(time.time()) - seconds)
+
+    def released(self) -> List[tuple]:
+        return [write for write in self.writes if write[0] == "DELETE"]
+
+
+class ReleaseTests(AfkSessionTests):
+    """Giving a claim back: the session the user closed, and the task returning to the frontier."""
+
+    def test_discarding_the_session_takes_the_mark_off(self) -> None:
+        self.merged(discardedAt=int(time.time() * 1000))
+        self.sweep()
+        self.assertEqual(
+            self.released(),
+            [("DELETE", "/repos/mock-user/memento/issues/265/labels/gots-got-it", None)],
+            "the claim is the mark, and taking it off is what puts the task back in the frontier",
+        )
+
+    def test_the_released_task_is_one_the_sweep_can_take_again(self) -> None:
+        self.merged(discardedAt=int(time.time() * 1000))
+        self.sweep()
+        self.assertEqual(
+            self.shown()["task"]["number"],
+            265,
+            "the task is back in the frontier, so the oldest one ready is taken again",
+        )
+
+    def test_a_resolved_session_gives_its_task_back_too(self) -> None:
+        self.merged(resolvedAt=int(time.time() * 1000))
+        self.sweep()
+        self.assertEqual(len(self.released()), 1, "the user is done with the session's work")
+
+    def test_a_deleted_session_gives_its_task_back_too(self) -> None:
+        self.deleted()
+        self.sweep()
+        self.assertEqual(len(self.released()), 1)
+
+    def test_a_session_nobody_closed_keeps_its_claim(self) -> None:
+        self.sweep()
+        self.assertEqual(self.writes, [], "nothing is written while its session still holds the task")
+        self.assertEqual(self.shown()["task"]["number"], 265)
+
+    def test_closing_the_session_on_its_own_gives_the_task_back(self) -> None:
+        """The route the app's Discard calls: the task comes off the session's own record."""
+        record = sessions.read(db_path(self.home), self.SESSION)
+        self.assertTrue(afk.release_session(self.home, record))
+        self.assertEqual(len(self.released()), 1)
+        self.assertIsNone(self.shown()["task"], "the project is free for the next task")
+        self.assertIsNone(afk._row(self.home, "p1")["session_id"])
+
+    def test_a_session_started_by_hand_releases_nothing(self) -> None:
+        self.assertFalse(
+            afk.release_session(self.home, {"session_id": "memento-abc", "project_id": "p1"}),
+            "a session with no task behind it has no claim to give back",
+        )
+        self.assertEqual(self.writes, [])
+
+    def test_a_refused_release_is_what_the_sheet_says(self) -> None:
+        self.merged(discardedAt=int(time.time() * 1000))
+        self.issues = []
+        self.write_error = github.GitHubError("Resource not accessible by personal access token", 403)
+        self.write_error_on = "/labels/"
+        self.sweep()
+        shown = self.shown()
+        self.assertIsNone(shown["task"], "nothing on the host works the task either way")
+        self.assertEqual(shown["refusal"], "Resource not accessible by personal access token")
+
+
+class RunEndTests(AfkSessionTests):
+    """What a run's end does to the task: a finished one lets go, a failed one is left alone."""
+
+    def ended(self, **kwargs: Any) -> None:
+        with patch("plugin.sessions._paths", return_value=(db_path(self.home), self.home)):
+            afk.after_run(session_id=self.SESSION, **kwargs)
+
+    def test_a_finished_run_hands_the_project_the_next_task(self) -> None:
+        with patch.object(afk, "wake") as wake:
+            self.ended(completed=True)
+        self.assertIsNone(self.shown()["task"], "the hold is what one task at a time is, so it goes")
+        self.assertEqual(self.writes, [], "its claim stays: the task is in review on GitHub")
+        wake.assert_called_once()
+
+    def test_a_failed_run_keeps_the_claim_and_the_session(self) -> None:
+        self.ended(completed=False, failed=True)
+        self.assertEqual(self.shown()["task"], self.task, "the claim is held for the user to look at")
+        self.assertEqual(self.writes, [], "and nothing is written to GitHub")
+        self.assertEqual(
+            sessions.read(db_path(self.home), self.SESSION)["task"],
+            self.task,
+            "the session and its record are left alone",
+        )
+        self.assertIn(self.SESSION, chats.read(db_path(self.home)))
+
+    def test_a_failed_run_says_why_nothing_is_working_it(self) -> None:
+        self.ended(completed=False, failed=True)
+        shown = afk.stalled(self.home)
+        self.assertEqual(shown[self.SESSION]["kind"], "stalled")
+        self.assertEqual(shown[self.SESSION]["reason"], afk.FAILED_RUN)
+
+    def test_an_interrupted_run_says_so(self) -> None:
+        self.ended(completed=False, interrupted=True)
+        self.assertEqual(afk.stalled(self.home)[self.SESSION]["reason"], afk.INTERRUPTED_RUN)
+
+    def test_a_run_of_a_session_afk_does_not_hold_leaves_the_hold_alone(self) -> None:
+        repos = [
+            {
+                "name": "mock-user/memento",
+                "repo_root": str(self.checkout),
+                "path": "/trees/hand-made",
+                "branch": "hermes/hand-made",
+            }
+        ]
+        sessions._upsert(db_path(self.home), "memento-hand-made", "p1", repos, "auto", None)
+        with patch("plugin.sessions._paths", return_value=(db_path(self.home), self.home)):
+            with patch.object(afk, "wake") as wake:
+                afk.after_run(session_id="memento-hand-made", completed=True)
+        self.assertEqual(self.shown()["task"], self.task)
+        wake.assert_called_once()
+
+
+class StallTests(AfkSessionTests):
+    """A claim nothing is working, where waiting sessions appear."""
+
+    def test_a_session_adopted_after_a_restart_is_reported_with_its_reason(self) -> None:
+        self.aged(afk.STALL_SECONDS + 1)
+        shown = afk.stalled(self.home)
+        self.assertEqual(shown[self.SESSION]["kind"], "stalled")
+        self.assertEqual(shown[self.SESSION]["reason"], afk.DEFAULT_STALL)
+
+    def test_a_restart_takes_no_second_session_and_no_second_claim(self) -> None:
+        self.aged(afk.STALL_SECONDS + 1)
+        self.sweep()
+        self.assertEqual(self.writes, [], "the claim stands: nothing is claimed twice")
+        self.assertEqual(self.shown()["task"]["number"], 265, "and the task stays AFK's")
+        self.assertEqual(afk._row(self.home, "p1")["session_id"], self.SESSION, "the same session")
+
+    def test_a_run_in_flight_is_what_working_it_looks_like(self) -> None:
+        self.aged(afk.STALL_SECONDS + 1)
+        self.assertEqual(afk.stalled(self.home, {self.SESSION: "running"}), {})
+
+    def test_a_claim_just_taken_is_given_its_start(self) -> None:
+        self.aged(1)
+        self.assertEqual(
+            afk.stalled(self.home),
+            {},
+            "a session's worktrees come first, so a fresh claim hasn't stalled",
+        )
+
+    def test_a_run_that_ended_is_reported_at_once(self) -> None:
+        self.aged(1)
+        with patch("plugin.sessions._paths", return_value=(db_path(self.home), self.home)):
+            afk.after_run(session_id=self.SESSION, completed=False, failed=True)
+        self.assertIn(self.SESSION, afk.stalled(self.home), "its own reason stands in for the wait")
+
+    def test_a_project_holding_nothing_stalls_nothing(self) -> None:
+        afk._free(self.home, "p1")
+        self.assertEqual(afk.stalled(self.home), {})
+
+
 class SessionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = TemporaryDirectory()
@@ -517,6 +723,7 @@ class SessionTests(unittest.TestCase):
         }
         self.ensured: List[tuple] = []
         self.posted: List[dict] = []
+        self.writes: List[tuple] = []
         self.record = {
             "session_id": "",
             "project_id": "p1",
@@ -538,6 +745,7 @@ class SessionTests(unittest.TestCase):
         for one in (
             patch.object(github, "token", return_value=("token", "env")),
             patch.object(github, "origin_repo", return_value="mock-user/memento"),
+            patch.object(github, "_request", self.request),
             patch("plugin.sessions.ensure", side_effect=self.ensure),
             patch("plugin.sessions.apply_cwd"),
             patch("plugin.outbox.post", side_effect=self.post),
@@ -546,6 +754,10 @@ class SessionTests(unittest.TestCase):
             self.addCleanup(one.stop)
         set_on(self.home, "p1", [folder(str(self.home / "checkout"))], True)
         afk._hold(self.home, "p1", self.task)
+
+    def request(self, path: str, auth: Any, method: str = "GET", data: Any = None) -> Any:
+        self.writes.append((method, path, data))
+        return {}
 
     def ensure(self, path: Any, home: Any, session_id: str, project_id: Any, task: Any, mode: Any) -> dict:
         self.ensured.append((session_id, project_id, task, mode))
@@ -671,11 +883,30 @@ class SessionTests(unittest.TestCase):
             self.chats(), {}, "a record the app would open with no run behind it is worse than none"
         )
 
+    def test_a_run_that_cannot_start_gives_the_claim_back(self) -> None:
+        outbox.post.side_effect = outbox.StartError("No API key for this bot.", True)
+        self.start()
+        self.assertEqual(
+            self.writes,
+            [("DELETE", "/repos/mock-user/memento/issues/265/labels/gots-got-it", None)],
+            "nothing began the work, so the task returns to the frontier rather than sitting claimed",
+        )
+        self.assertIsNone(read(self.home, "p1", [folder(str(self.home / "checkout"))])["task"])
+
     def test_a_session_that_cannot_be_made_starts_no_run(self) -> None:
         with patch("plugin.sessions.ensure", side_effect=sessions.WorkspaceError("No such project.")):
             self.start()
         self.assertEqual(self.posted, [], "nothing is started for a session that doesn't exist")
         self.assertEqual(self.chats(), {}, "and nothing is published to be opened")
+        self.assertEqual(len(self.writes), 1, "and the claim goes back, with no session to show it")
+
+    def test_the_session_working_the_task_is_named_on_the_projects_row(self) -> None:
+        self.start()
+        self.assertEqual(
+            afk._row(self.home, "p1")["session_id"],
+            self.ensured[0][0],
+            "a restart adopts this session, and the app is told what it is",
+        )
 
     def test_the_sweep_answers_the_task_it_just_claimed(self) -> None:
         with TemporaryDirectory() as tmp:

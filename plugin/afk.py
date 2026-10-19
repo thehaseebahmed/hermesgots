@@ -26,6 +26,14 @@ repository to read tasks from, the host has no GitHub account to read or claim o
 project has been put away. The reason is the host's own answer rather than the app's guess, because
 the host is what would do the work — and turning a project on is refused with that reason, so nothing
 is ever left half on.
+
+A claim is given back rather than kept forever (ADR 0015). The hold lasts as long as the run that
+works the task: a run that finishes hands the project its next task and leaves the claim on GitHub,
+since the task is in review; a run that fails, or that a restart cut off, keeps both the claim and
+the session, and the project records why nothing is working it, so the session appears where waiting
+sessions appear. Closing the session — discarded, resolved, deleted — releases the claim, which is
+what puts the task back in the frontier, and a start that never got its run away releases it too: a
+task nothing ever began is handed out again rather than lost.
 """
 
 from __future__ import annotations
@@ -33,6 +41,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sqlite3
 import time
 import uuid
 from pathlib import Path
@@ -52,6 +61,13 @@ ARCHIVED = "This project is archived."
 # waits for its turn rather than asking again at once.
 SWEEP_SECONDS = 180
 HELD = ("repo", "number", "title", "url", "created_at")
+# How long a claim may sit with nothing running it before the app is told it stalled. A start makes
+# the session's worktrees first, which can take a while on a big repository, so a claim just taken is
+# given that much room; a run that ends says why at once.
+STALL_SECONDS = 300
+DEFAULT_STALL = "AFK stopped before the task was finished."
+FAILED_RUN = "The run failed."
+INTERRUPTED_RUN = "The run was interrupted."
 
 _loop: Optional[asyncio.AbstractEventLoop] = None
 _event: Optional["asyncio.Event"] = None
@@ -141,6 +157,108 @@ def read(
     return {"on": on, "reason": why, "task": found["task"], "refusal": found["refusal"]}
 
 
+def release(
+    hermes_home: Path, project_id: str, task: Optional[Dict[str, Any]] = None
+) -> None:
+    """Gives a claimed task back: the mark comes off GitHub and the project stops holding it.
+
+    ``task`` is the row's own unless the caller names one: a session the user closed names the task
+    its own record carries, which the row has already let go of once its run finished. A GitHub
+    refusal is recorded for the sheet, and the hold goes anyway — nothing on the host is working the
+    task either way, and the next sweep's read is what says whether it is back in the frontier.
+    """
+    found = _row(hermes_home, project_id)
+    held = task if task is not None else (found["task"] if found else None)
+    auth, _ = github.token(hermes_home)
+    if held is not None and auth:
+        try:
+            github.release_claim(str(held["repo"]), int(held["number"]), tasks.CLAIM_LABEL, auth)
+        except (github.GitHubError, KeyError, TypeError, ValueError) as error:
+            logger.warning("memento: couldn't release %s on GitHub", held, exc_info=True)
+            _refuse(hermes_home, project_id, str(error))
+    if found is not None:
+        _update(
+            hermes_home,
+            project_id,
+            task=None,
+            session_id=None,
+            claimed_at=None,
+            stalled=None,
+            stalled_at=None,
+        )
+
+
+def release_session(hermes_home: Path, record: Optional[Dict[str, Any]]) -> bool:
+    """Gives back the task a closed session worked, answering whether it had one.
+
+    The task comes off the session's own record, written as its run was published, because the
+    project's row lets go of it as soon as that run finishes — which is before the user decides to
+    discard or resolve the session. A session the user started by hand names no task and releases
+    nothing.
+    """
+    task = (record or {}).get("task")
+    project_id = (record or {}).get("project_id")
+    if not isinstance(task, dict) or not project_id:
+        return False
+    release(hermes_home, str(project_id), task)
+    wake()
+    return True
+
+
+def holding_project(hermes_home: Path, session_id: str) -> Optional[str]:
+    """The project whose task this session is working, or None when AFK isn't holding it."""
+    if not session_id:
+        return None
+    try:
+        conn = connect(db_path(hermes_home))
+        try:
+            row = conn.execute(
+                """SELECT project_id FROM project_afk
+                   WHERE session_id = ? AND task IS NOT NULL AND enabled = 1""",
+                (session_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        logger.debug("memento: couldn't look up AFK's hold for %s", session_id, exc_info=True)
+        return None
+    except OSError:
+        # A home this can't be read on is a fact about the test or a missing store, never a fault
+        # that should stop a finished run from waking the sweep.
+        return None
+    return str(row[0]) if row else None
+
+
+def stalled(
+    hermes_home: Path, live: Optional[Dict[str, str]] = None
+) -> Dict[str, Dict[str, Any]]:
+    """AFK sessions nothing is working, by Hermes session id, with the reason they wait on the user.
+
+    A project still holding a task whose session has no run in flight is one the user has to look
+    at: its run failed, or the host restarted while it worked and the session was adopted rather than
+    restarted or doubled. Either way it is where waiting sessions appear, naming the project like the
+    rest, and never beside a live run — a run in flight is what working it looks like.
+    """
+    found: Dict[str, Dict[str, Any]] = {}
+    rows = _holding_rows(hermes_home)
+    if not rows:
+        return found
+    names = sessions._project_names(hermes_home)
+    now = time.time()
+    for project_id, session_id, why, claimed_at in rows:
+        if not session_id or (live and session_id in live):
+            continue
+        # A claim just taken is a start still making its worktrees: nothing has had its chance yet.
+        # A run that ended recorded why, so that one is reported at once.
+        if not why and claimed_at and now - claimed_at < STALL_SECONDS:
+            continue
+        reason: Dict[str, Any] = {"kind": "stalled", "reason": why or DEFAULT_STALL}
+        if names.get(project_id):
+            reason["project"] = names[project_id]
+        found[session_id] = reason
+    return found
+
+
 def sweep(
     hermes_home: Path, project_id: str, folders: Iterable[Any], archived: bool = False
 ) -> Optional[Dict[str, Any]]:
@@ -148,7 +266,8 @@ def sweep(
 
     Answers the task it just claimed, so the caller starts the session that works it without a
     second read, and None when it claimed nothing. One task per project at a time: while a task is
-    held this does nothing, and the session that works it is what lets the next one be taken. A
+    held this does nothing, and the session that works it is what lets the next one be taken — or
+    the user closing that session, which gives its task back and lets this sweep take another. A
     GitHub refusal — no permission to write issues, a rate limit, no connection — records its reason
     and stops this sweep with the switch left on, so the sheet says why; the next sweep is the next
     attempt, not an immediate one.
@@ -158,7 +277,10 @@ def sweep(
         return None
     if found["task"] is not None:
         # Already holding the task it took: the session that works it is what frees the next one.
-        return None
+        # Unless the user has closed that session — then its task is back in the frontier and this
+        # sweep may take the one behind it.
+        if not _settle(hermes_home, project_id, found):
+            return None
     why = reason(hermes_home, folders, archived)
     if why is not None:
         # Put away, with no repository to read, or no account to read it with: the sheet's own
@@ -244,9 +366,9 @@ async def start(
     The task is already claimed by the sweep, and it's named to the run rather than read: the agent
     fetches the issue itself, so the claim stays the fast path and the brief is never a stale copy of
     what the tracker says. The record is written only once the run is under way: a session the app
-    shows with no run behind it is worse than one it never hears about. A start that fails leaves
-    the claim held, and its own ticket (#270) is what gives it back, so the same task is never
-    worked twice.
+    shows with no run behind it is worse than one it never hears about. A start that never gets its
+    run away gives the claim back (ADR 0015): nothing began the work, so the task returns to the
+    frontier instead of sitting claimed with no session to show for it.
     """
     from . import link, outbox
 
@@ -265,7 +387,10 @@ async def start(
         )
     except Exception:
         logger.warning("memento: AFK couldn't make a session for %s", issue, exc_info=True)
+        await asyncio.to_thread(release, hermes_home, project_id)
         return
+    # Named before the run is posted, so a run that ends at once still finds its project holding it.
+    await asyncio.to_thread(_adopt, hermes_home, project_id, session_id)
     sessions.apply_cwd(session_id, record["path"])
     try:
         started = await outbox.post(
@@ -277,6 +402,7 @@ async def start(
         )
     except outbox.StartError as error:
         logger.warning("memento: AFK couldn't start the session for %s: %s", issue, error)
+        await asyncio.to_thread(release, hermes_home, project_id)
         return
     try:
         await asyncio.to_thread(publish, hermes_home, session_id, project_id, task)
@@ -403,16 +529,34 @@ def wake() -> None:
         pass
 
 
-def after_run(session_id: Any = None, **_kwargs: Any) -> None:
-    """The ``on_session_end`` hook: a project session finished, so AFK looks for the next task now.
+def after_run(
+    session_id: Any = None,
+    completed: bool = False,
+    failed: bool = False,
+    interrupted: bool = False,
+    **_kwargs: Any,
+) -> None:
+    """The ``on_session_end`` hook: AFK's own task finished, or nothing is working it any more.
 
-    Only a project session is AFK's cue — a chat's turn says nothing about its work, and waking a
-    sweep for every chat would read GitHub for nothing.
+    A run that finished hands the project its next task: its claim stays on GitHub, because the task
+    is in review, but the hold is what one task at a time is, so it goes and the sweep is asked to
+    look now. A run that failed or was interrupted is left exactly as it is — the session, its
+    transcript and its claim — and records why nothing is working the task, so the app shows the
+    session where it shows a wait (ADR 0015). Only a session AFK is holding is its own: every other
+    project session just wakes the sweep, and a chat's turn says nothing about any work.
     """
     try:
         path, home = sessions._paths()
-        if sessions.record_for(path, home, str(session_id or "")):
-            wake()
+        record = sessions.record_for(path, home, str(session_id or ""))
+        if not record:
+            return
+        project_id = holding_project(home, str(record.get("session_id") or ""))
+        if project_id is not None:
+            if failed or interrupted or not completed:
+                _stall(home, project_id, INTERRUPTED_RUN if interrupted else FAILED_RUN)
+                return
+            _free(home, project_id)
+        wake()
     except Exception:
         logger.debug("memento: couldn't wake AFK's sweep", exc_info=True)
 
@@ -427,7 +571,63 @@ def _hold(hermes_home: Path, project_id: str, task: Dict[str, Any]) -> None:
         claimed_at=int(time.time()),
         refusal=None,
         refused_at=None,
+        session_id=None,
+        stalled=None,
+        stalled_at=None,
     )
+
+
+def _adopt(hermes_home: Path, project_id: str, session_id: str) -> None:
+    """Names the session working the held task, so a restart adopts that one and nothing else.
+
+    Written before the run is posted, so a run that ends at once still finds the project holding its
+    session, and cleared only when the task is finished or given back.
+    """
+    _update(hermes_home, project_id, session_id=session_id, stalled=None, stalled_at=None)
+
+
+def _free(hermes_home: Path, project_id: str) -> None:
+    """Lets go of the held task without giving the claim back: its work is in review on GitHub."""
+    _update(
+        hermes_home,
+        project_id,
+        task=None,
+        session_id=None,
+        claimed_at=None,
+        stalled=None,
+        stalled_at=None,
+    )
+
+
+def _stall(hermes_home: Path, project_id: str, why: str) -> None:
+    """Records why nothing is working the held task, which the app shows where a wait is shown."""
+    _update(hermes_home, project_id, stalled=why, stalled_at=int(time.time()))
+
+
+def _settle(hermes_home: Path, project_id: str, found: Dict[str, Any]) -> bool:
+    """Lets go of a held task whose session the user closed, answering whether it did.
+
+    The user's own marks are what says a session's work is over: discarded, resolved, or deleted
+    outright. Read from the chat list rather than a route, so a session closed on any device — or
+    while the host was away — still gives its task back. A session with no record yet is one the
+    start hasn't published: nothing has closed it, so the hold stands.
+    """
+    session_id = found.get("session_id")
+    task = found.get("task")
+    if not session_id or not isinstance(task, dict):
+        return False
+    record = chats.read(db_path(hermes_home)).get(session_id)
+    if not record:
+        return False
+    value = record.get("value")
+    closed = bool(record.get("deleted")) or (
+        isinstance(value, dict) and bool(value.get("discardedAt") or value.get("resolvedAt"))
+    )
+    if not closed:
+        return False
+    release(hermes_home, project_id, task)
+    wake()
+    return True
 
 
 def _refuse(hermes_home: Path, project_id: str, why: str) -> None:
@@ -450,7 +650,9 @@ def _row(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
     conn = connect(db_path(hermes_home))
     try:
         row = conn.execute(
-            "SELECT enabled, task, refusal FROM project_afk WHERE project_id = ?", (project_id,)
+            """SELECT enabled, task, refusal, session_id, stalled FROM project_afk
+               WHERE project_id = ?""",
+            (project_id,),
         ).fetchone()
     finally:
         conn.close()
@@ -460,7 +662,30 @@ def _row(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
         "on": bool(row[0]),
         "task": _task(row[1]),
         "refusal": row[2] if isinstance(row[2], str) and row[2] else None,
+        "session_id": row[3] if isinstance(row[3], str) and row[3] else None,
+        "stalled": row[4] if isinstance(row[4], str) and row[4] else None,
     }
+
+
+def _holding_rows(hermes_home: Path) -> List[Tuple[str, str, Optional[str], Optional[int]]]:
+    """Every project holding a task: its id, the session working it, why it stalled, since when."""
+    conn = connect(db_path(hermes_home))
+    try:
+        rows = conn.execute(
+            """SELECT project_id, session_id, stalled, claimed_at FROM project_afk
+               WHERE enabled = 1 AND task IS NOT NULL ORDER BY project_id"""
+        ).fetchall()
+    finally:
+        conn.close()
+    return [
+        (
+            str(row[0]),
+            str(row[1]) if isinstance(row[1], str) and row[1] else "",
+            row[2] if isinstance(row[2], str) and row[2] else None,
+            int(row[3]) if isinstance(row[3], (int, float)) else None,
+        )
+        for row in rows
+    ]
 
 
 def _task(value: Any) -> Optional[Dict[str, Any]]:

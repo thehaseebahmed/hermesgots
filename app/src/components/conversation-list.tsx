@@ -17,6 +17,7 @@ import {
   TargetIcon,
   TelescopeIcon,
   TimerIcon,
+  TriangleAlertIcon,
   UserIcon,
 } from "lucide-react"
 
@@ -87,6 +88,7 @@ const REASON_ICONS: Record<WaitingReason["kind"], typeof ListChecksIcon> = {
   approval: ShieldAlertIcon,
   plan: ListChecksIcon,
   goal: TargetIcon,
+  stalled: TriangleAlertIcon,
 }
 
 /**

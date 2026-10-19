@@ -175,6 +175,11 @@ const FLOWS = {
     about:
       "AFK works its claimed task in a session of its own: in Code marked AFK, opening with one line naming the task rather than the brief",
   },
+  "afk-stalled": {
+    script: "e2e/afk-stalled.mjs",
+    about:
+      "A stalled AFK session waits where the user finds it: the sidebar's Waiting for input and Code's Waiting on you, with the host's reason under it",
+  },
   "mcps-gate": {
     script: "e2e/mcps-gate.mjs",
     about:

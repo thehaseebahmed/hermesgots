@@ -149,6 +149,9 @@ const afkProjects = new Set()
 // loop, so the claim lands after the switch's own answer and shows on the next read — which is what
 // the sheet's poll is there for, and why the mock sweeps on a read rather than on the POST.
 const afkSwept = new Set()
+// The projects whose claimed task nothing is working any more: its run failed, or the host restarted
+// mid-run and adopted the session. A flow sets this to drive a stalled AFK session without a run.
+const afkStalled = new Map()
 // What the media route serves for chart.png: navy sky, teal ground, a sun.
 const MOCK_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAHgAAABLCAIAAAA06NSGAAAAuklEQVR42u3aQQmAABBE0anhxQYW8mIDz0Y0jhFsIII4iDz4Cd5xZzNMiwoFAWjQAg0aNAXQoAX6dsc+Xwf6deI3uEO5Yx3KHetQ7liHcsc6lDvWoEF/T/mJNWjQoEGDBg0aNGjQoEGDBu3W4dYB2j0atIXFZmgFt4L76/CpBNrvHWiBBi3QoEEL9H+gx21VIdCgQQs0aNAIQIMWaNCgKYAGLdCgQVMADVqgQYMWaNACDRq0QIMW6E92AjwFRtd/9tVBAAAAAElFTkSuQmCC",
@@ -3704,12 +3707,36 @@ http
         if (goal && (goal.status === "paused" || goal.verdict === "blocked"))
           waiting[id] ??= { kind: "goal", reason: goal.paused_reason ?? goal.reason ?? "blocked" }
       }
+      // AFK's own wait: a session whose run ended without finishing, or one a restart adopted, so
+      // nothing is working the task it still holds.
+      for (const [projectId, why] of afkStalled) {
+        const session = `memento-afk-${projectId}`
+        if (!projectSessions.has(session) || sessions[session]) continue
+        const name = mockProjects().find((p) => p.id === projectId)?.name
+        waiting[session] = {
+          kind: "stalled",
+          reason: why,
+          ...(name ? { project: name } : {}),
+        }
+      }
       for (const [id, reason] of Object.entries(waiting)) {
         const record = projectSessions.get(id)
         const name = record && mockProjects().find((p) => p.id === record.project_id)?.name
         if (name) reason.project = name
       }
       return json(res, 200, { object: "memento.runs", sessions, run_ids, waiting })
+    }
+    // Dev only: POST { project_id, reason } makes the project's claimed task stalled — its session
+    // waiting with that reason, the way a failed run or a restart leaves it. POST { project_id, off:
+    // true } puts it back to working, and { reset: true } clears every project's, which a flow that
+    // repeats needs since the mock keeps its state between passes.
+    if (url.pathname === "/__mock/afk" && req.method === "POST") {
+      const { project_id: projectId, reason = "The run failed.", off = false, reset = false } =
+        await readBody(req)
+      if (reset) afkStalled.clear()
+      else if (off) afkStalled.delete(projectId)
+      else afkStalled.set(projectId, reason)
+      return json(res, 200, { ok: true })
     }
     if (url.pathname === "/__mock/mcp" && req.method === "POST") {
       // Dev only: puts back every MCP server a flow has removed and takes away every one a flow has

@@ -2671,6 +2671,9 @@ export type WaitingReason =
   | { kind: "plan" }
   /** A goal only the user can move: paused (budget spent, a gate out of retries) or judged blocked. */
   | { kind: "goal"; reason: string }
+  /** An AFK session nothing is working: its run failed, or a restart adopted it. Its reason is the
+   * host's own words. */
+  | { kind: "stalled"; reason: string }
 
 /** What a server's plugin reports of its runs, by Hermes session id. */
 export interface LiveRuns {
@@ -2723,6 +2726,12 @@ export async function getLiveRuns(config: HermesConfig, signal?: AbortSignal): P
       waiting[id] = {
         kind: "goal",
         reason: typeof raw.reason === "string" ? raw.reason : "paused",
+        project,
+      }
+    else if (raw.kind === "stalled")
+      waiting[id] = {
+        kind: "stalled",
+        reason: typeof raw.reason === "string" ? raw.reason : "AFK stopped.",
         project,
       }
   }

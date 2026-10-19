@@ -242,11 +242,20 @@ def claim_issue(repo: str, number: int, account: str, label: str, auth: Optional
 def _unlabel(repo: str, number: int, label: str, auth: Optional[str]) -> None:
     """Takes the claim mark back off a claim that couldn't be finished, best-effort: the refusal
     that follows is what the sheet shows, and this only keeps the task in the frontier."""
-    path = f"/repos/{repo}/issues/{number}/labels/{urllib.parse.quote(label, safe='')}"
     try:
-        _request(path, auth, "DELETE")
+        release_claim(repo, number, label, auth)
     except GitHubError:
         logger.warning("memento: couldn't take %s off %s#%s", label, repo, number, exc_info=True)
+
+
+def release_claim(repo: str, number: int, label: str, auth: Optional[str]) -> None:
+    """Gives a claimed task back to the frontier by taking the mark off, the claim's own undo.
+
+    Only the mark: the assignment is the account's record of what it picked up, and a task put back
+    is still whoever's to work. Raises GitHub's refusal, which the caller records for the sheet.
+    """
+    path = f"/repos/{repo}/issues/{number}/labels/{urllib.parse.quote(label, safe='')}"
+    _request(path, auth, "DELETE")
 
 
 def _ensure_label(repo: str, label: str, auth: Optional[str]) -> None:
