@@ -295,7 +295,6 @@ def connect(path: Path) -> sqlite3.Connection:
         )
         # v24: the task AFK holds for that project, and the last refusal it met on GitHub, which the
         # app's sheet shows (afk.py). A task is one JSON row: repo, number, title, url, created_at.
-        # v25: the session working that task, so its pull request can close the task it was given.
         afk_columns = {row[1] for row in conn.execute("PRAGMA table_info(project_afk)")}
         for column, kind in (
             ("task", "TEXT"),

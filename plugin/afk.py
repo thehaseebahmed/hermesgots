@@ -33,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sqlite3
 import time
 import uuid
 from pathlib import Path
@@ -199,21 +200,19 @@ def session_title(task: Dict[str, Any]) -> str:
 
 
 def task_for_session(hermes_home: Path, session_id: str) -> Optional[Dict[str, Any]]:
-    """The task a session of AFK's was started for, or None when the session isn't working one.
-
-    The row names both, so a session's pull request can close the task it was given (ADR 0012)
-    without the app having to tell the host anything: the session is the plugin's own, and the task
-    it works is what the plugin claimed.
-    """
+    """The task a session of AFK's was started for, or None when the session isn't working one."""
     if not session_id:
         return None
-    conn = connect(db_path(hermes_home))
     try:
-        row = conn.execute(
-            "SELECT task FROM project_afk WHERE session_id = ?", (session_id,)
-        ).fetchone()
-    finally:
-        conn.close()
+        conn = connect(db_path(hermes_home))
+        try:
+            row = conn.execute(
+                "SELECT task FROM project_afk WHERE session_id = ?", (session_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
     return _task(row[0]) if row else None
 
 
@@ -240,6 +239,7 @@ def publish(
     for it. It is written once, here: the chat list is last-write-wins, so a title the user edits, a
     mode they change or a resolve they make afterwards has to win.
     """
+    _update(hermes_home, project_id, session_id=session_id)
     now = int(time.time() * 1000)
     value = {
         "title": session_title(task),
@@ -296,13 +296,6 @@ async def start(
     except outbox.StartError as error:
         logger.warning("memento: AFK couldn't start the session for %s: %s", issue, error)
         return
-    try:
-        # Which session works which task, so its pull request can close the task (#269). Written
-        # before the record is published: a run under way must name its task even if publishing
-        # fails and the session is only found through the log.
-        await asyncio.to_thread(_update, hermes_home, project_id, session_id=session_id)
-    except Exception:
-        logger.warning("memento: AFK couldn't name %s's session", issue, exc_info=True)
     try:
         await asyncio.to_thread(publish, hermes_home, session_id, project_id, task)
     except Exception:
@@ -443,11 +436,7 @@ def after_run(session_id: Any = None, **_kwargs: Any) -> None:
 
 
 def _hold(hermes_home: Path, project_id: str, task: Dict[str, Any]) -> None:
-    """Records the task AFK holds, and clears any refusal: the sweep just succeeded.
-
-    The session working it is cleared too: it belongs to the hold before this one, and its pull
-    request must never close the task now claimed.
-    """
+    """Records the task AFK holds, and clears any refusal: the sweep just succeeded."""
     row = {key: task.get(key) for key in HELD}
     _update(
         hermes_home,

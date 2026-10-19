@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import subprocess
 import threading
 from pathlib import Path
@@ -204,13 +203,13 @@ def _body(
     tree: str,
     base: Optional[str],
     body: Optional[str],
-    task: Optional[Dict[str, Any]] = None,
-    repo_name: Optional[str] = None,
+    reference: Optional[str] = None,
 ) -> str:
     if not body:
         log = _git(tree, "log", "--reverse", "--format=- %s", f"origin/{base}..HEAD") if base else None
         body = log.stdout.strip() if log is not None and log.returncode == 0 else ""
-    body = _closing(body or "", _closes(task, repo_name))
+    if reference:
+        body = f"{body}\n\n{reference}" if body.strip() else reference
     if PR_FOOTER in body:
         return body
     return f"{body}\n\n{PR_FOOTER}" if body else PR_FOOTER
@@ -229,31 +228,6 @@ def _closes(task: Optional[Dict[str, Any]], repo_name: Optional[str]) -> Optiona
     if not isinstance(repo, str) or repo.lower() != repo_name.lower():
         return None
     return f"Closes #{number}" if isinstance(number, int) else None
-
-
-def _closing(body: str, reference: Optional[str]) -> str:
-    """``body`` with the task's closing line, unless it already says it.
-
-    The AFK brief asks for the line too, and an agent that wrote it keeps its own wording: this
-    only makes sure the reference is there, once.
-    """
-    if not reference:
-        return body
-    number = reference.rsplit("#", 1)[-1]
-    if re.search(rf"(?i)\b(?:clos\w*|fix\w*|resolv\w*)\s+#{re.escape(number)}\b", body):
-        return body
-    if PR_FOOTER in body:
-        return body.replace(PR_FOOTER, f"{reference}\n\n{PR_FOOTER}", 1)
-    return f"{body}\n\n{reference}" if body.strip() else reference
-
-
-def _afk_task(hermes_home: Path, session_id: str) -> Optional[Dict[str, Any]]:
-    """The task an AFK session was started for; a read that fails mustn't cost the ship."""
-    try:
-        return afk.task_for_session(hermes_home, session_id)
-    except Exception:
-        logger.debug("memento: couldn't read AFK's task for %s", session_id, exc_info=True)
-        return None
 
 
 def _open_pr(
@@ -277,22 +251,21 @@ def _open_pr(
     if not title:
         subjects = _git(tree, "log", "--format=%s", f"origin/{state['base']}..HEAD").stdout.splitlines()
         title = subjects[0] if len(subjects) == 1 else repo["branch"]
+    reference = _closes(task, name)
     try:
         created = github.create_pull_request(
             name,
             repo["branch"],
             state["base"],
             title[:MAX_TITLE],
-            _body(tree, state["base"], body, task, name),
+            _body(tree, state["base"], body, reference),
             True,
             auth,
         )
     except github.GitHubError as error:
         raise ShipError(str(error), error.status) from None
     github.forget_pull_request(repo["repo_root"], repo["branch"])
-    if session_id and _closes(task, name):
-        # The task's pull request is open and waiting on the user: AFK's own news, so a tap lands on
-        # the session whose pill leads to it (ADR 0012).
+    if session_id and reference:
         push.notify("afk_pr", session_id, db_path(hermes_home))
     return created
 
@@ -326,7 +299,7 @@ def ship(
         states = {state["name"]: state for state in status(record)}
         if not message and any(state["changed"] for state in states.values()):
             raise ValueError("A commit message is required.")
-        task = _afk_task(hermes_home, session_id)
+        task = afk.task_for_session(hermes_home, session_id)
         results = []
         for repo in record["repos"]:
             state = states.get(repo["name"])
@@ -371,7 +344,7 @@ def update(
     auth, _ = github.token(hermes_home)
     if not auth:
         raise ShipError("No GitHub account on the server.", 409)
-    task = _afk_task(hermes_home, str(record.get("session_id") or ""))
+    task = afk.task_for_session(hermes_home, str(record.get("session_id") or ""))
     results = []
     for repo in record["repos"]:
         name = github.origin_repo(repo["repo_root"])
@@ -382,9 +355,13 @@ def update(
             continue
         result: Dict[str, Any] = {"name": repo["name"], "pr": pr}
         try:
-            # A new body must not drop the line that closes the task this session works.
+            reference = _closes(task, name)
             result["pr"] = github.update_pull_request(
-                name, pr["number"], title, _closing(body, _closes(task, name)) if body else body, auth
+                name,
+                pr["number"],
+                title,
+                f"{body}\n\n{reference}" if body and reference else body,
+                auth,
             )
             github.forget_pull_request(repo["repo_root"], repo["branch"])
         except github.GitHubError as error:

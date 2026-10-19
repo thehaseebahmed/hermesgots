@@ -74,7 +74,6 @@ KINDS = (
     "research_scope",
     "research_done",
     "research_failed",
-    # An AFK session's pull request is open: a task the user can review (#269).
     "afk_pr",
 )
 # What a device switches: a kind within a feature (chats, code, routines, research). A session's
@@ -93,7 +92,6 @@ CATEGORIES = (
     "research_input",
     "research_done",
     "research_failed",
-    # AFK's own: a task's pull request is ready to review, apart from a session's other news.
     "code_afk_pr",
 )
 # What a device that never said which it wants gets: what pushed before there were more.
@@ -115,7 +113,6 @@ def category_of(kind: str, project: bool = False) -> str:
     if kind in ("pr_checks", "pr_merged"):
         return f"code_{kind}"
     if kind == "afk_pr":
-        # AFK's own, whether or not the session is a project one: it always is.
         return "code_afk_pr"
     feature = "code" if project or kind == "plan" else "chat"
     return f"{feature}_{'input' if kind in INPUT_KINDS else kind}"

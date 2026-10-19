@@ -507,7 +507,6 @@ class SessionTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.home = Path(self.tmp.name)
         self.home.joinpath("projects.db").write_text("")
-        # The project's AFK row exists by the time a task is worked: the sweep that claimed it wrote it.
         (self.home / "checkout" / ".git").mkdir(parents=True)
         self.task = {
             "repo": "mock-user/memento",
@@ -545,7 +544,6 @@ class SessionTests(unittest.TestCase):
         ):
             one.start()
             self.addCleanup(one.stop)
-        # What the sweep leaves behind before it starts the session: the switch on, the task held.
         set_on(self.home, "p1", [folder(str(self.home / "checkout"))], True)
         afk._hold(self.home, "p1", self.task)
 

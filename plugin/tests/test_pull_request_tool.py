@@ -186,8 +186,6 @@ TASK = {
 
 
 class AfkTaskTests(_Base):
-    """An AFK session's pull request names the task it works, through the plugin's HTTP stub."""
-
     def _ship(self, task=None, body=None, repo_root=None):
         sent = []
 
@@ -220,10 +218,6 @@ class AfkTaskTests(_Base):
         data, _ = self._ship(task=TASK)
         self.assertIs(data["draft"], True, "the pull request stays a draft")
         self.assertIn("Closes #265", data["body"])
-
-    def test_a_body_that_already_closes_the_task_is_not_told_twice(self):
-        data, _ = self._ship(task=TASK, body="What changed.\n\nCloses #265")
-        self.assertEqual(data["body"].count("Closes #265"), 1)
 
     def test_another_repository_does_not_close_the_task(self):
         data, _ = self._ship(task=TASK, repo_root="o/other")
