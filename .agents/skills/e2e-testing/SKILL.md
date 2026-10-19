@@ -71,6 +71,7 @@ elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` l
 | `image-skeleton` | A reply's images hold their cell while the plugin serves them (the route is held), then land at that size: one image and a gallery alike, phone and tablet, light and dark |
 | `image-viewer` | A photo opened from a message holds its own box while it decodes |
 | `fallback-models` | A bot's fallback models are recorded on its host from its settings: two picks in order, one removed, and no third offered |
+| `delegation-model` | A bot's subagent model is recorded as its host's delegation model and read back, cleared to the bot's own with Default model, and a plugin that never advertised `delegation_model` shows no field at all |
 | `mcps` | The bot's MCP tab is opened from its editor: Add a server on top, the bot's servers under *Your servers* and a plugin's under *From plugins*, each row its name over its health and no badge, a switch flipped off and back on, and an empty state, at phone and tablet widths |
 | `mcps-gate` | A bot whose plugin answers without `mcps` has no MCP tab (its URL lands back on General), and one that lists servers without `mcps_write` lists them with no switch: no console error either way |
 | `mcps-remove` | Remove server is offered in the Config tab of a server the bot's own config holds and on none a Hermes plugin provides, a cancel sends nothing, and a confirmed one takes the server away with the list showing what is left, at phone and tablet widths, light and dark |
