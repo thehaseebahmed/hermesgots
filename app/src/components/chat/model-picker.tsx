@@ -644,9 +644,9 @@ export function DefaultModelSetting({
 }
 
 /**
- * A bot's second-opinion model, in its settings: the model every task it delegates runs on, which
- * is its host's own delegation model. A host whose plugin can't record one shows no field at all,
- * and a write on its way greys the field out until the host's answer lands.
+ * A bot's subagent model, in its settings: the model every task it delegates runs on, which is its
+ * host's own delegation model. A host whose plugin can't record one shows no field at all, and a
+ * write on its way greys the field out until the host's answer lands.
  */
 export function DelegationModelSetting({ profile }: { profile: Profile }) {
   const [open, setOpen] = useState(false)
@@ -667,7 +667,7 @@ export function DelegationModelSetting({ profile }: { profile: Profile }) {
   return (
     <Field aria-labelledby="delegation-model-label" aria-busy={saving || undefined}>
       <div className="flex items-center gap-2">
-        <FieldLabel id="delegation-model-label">Second opinion</FieldLabel>
+        <FieldLabel id="delegation-model-label">Subagent model</FieldLabel>
         {saving && <Spinner className="size-3.5" />}
       </div>
       <Button
@@ -675,7 +675,7 @@ export function DelegationModelSetting({ profile }: { profile: Profile }) {
         id="delegation-model"
         type="button"
         variant="outline"
-        aria-label={`Second opinion: ${pick ? fullModel(pick) : "Same as the bot"}`}
+        aria-label={`Subagent model: ${pick ? fullModel(pick) : "Same as the bot"}`}
         className="h-11 w-full justify-between gap-2 font-normal"
         disabled={!providers.length || saving}
         onClick={() => setOpen(true)}

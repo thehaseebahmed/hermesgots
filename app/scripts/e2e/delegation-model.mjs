@@ -1,5 +1,5 @@
-// A bot's second-opinion model: its settings screen records it as the host's delegation model,
-// greys the field out while the write is on its way, and clears it back to the bot's own model.
+// A bot's subagent model: its settings screen records it as the host's delegation model, greys the
+// field out while the write is on its way, and clears it back to the bot's own model.
 import { app, assert, flow, mock, pass } from "./lib.mjs"
 
 await flow("delegation-model", async ({ page, profileId, until, shot, held }) => {
@@ -16,7 +16,7 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
     await picker.getByRole("button", { name: label }).first().click()
   }
   // The whole field, so the heading's saving icon and the field are read where they render.
-  const field = page.getByRole("group", { name: "Second opinion" })
+  const field = page.getByRole("group", { name: "Subagent model" })
   const opener = page.locator("#delegation-model")
   // Every delegation write the page sends, so the greying out is checked against what goes to the
   // host and not only against how the field looks.
@@ -54,7 +54,7 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
   await until(
     async () => (await hosted())?.model === "openai/gpt-5-mini",
     10_000,
-    "the host to record the second-opinion model",
+    "the host to record the subagent model",
   )
   assert.deepEqual(await hosted(), { provider: "openrouter", model: "openai/gpt-5-mini" })
   await opener.getByText("openrouter/openai/gpt-5-mini").waitFor()
@@ -86,5 +86,5 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
   assert.equal(await field.count(), 0, "and no field around it")
   await shot("no-picker")
 
-  pass("the host recorded the second-opinion model, cleared it, and offered no field without it")
+  pass("the host recorded the subagent model, cleared it, and offered no field without it")
 })

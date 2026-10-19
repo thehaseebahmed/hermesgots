@@ -139,7 +139,7 @@ const FLOWS = {
   "delegation-model": {
     script: "e2e/delegation-model.mjs",
     about:
-      "A bot's second-opinion model is recorded as its host's delegation model, cleared back to the bot's own",
+      "A bot's subagent model is recorded as its host's delegation model, cleared back to the bot's own",
   },
   mcps: {
     script: "e2e/mcps.mjs",
