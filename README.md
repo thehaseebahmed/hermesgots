@@ -1,4 +1,6 @@
-# Gots 🤖
+<p align="center">
+  <img src="assets/hero.png" alt="Gots — Hermes Bots that got your back!" width="100%">
+</p>
 
 <p align="center">
   <a href="https://hermesgots.dev">Website</a> | <a href="https://app.hermesgots.dev">App</a> | <a href="plugin/README.md">Plugin</a>
@@ -63,8 +65,6 @@ Follow the first-run setup wizard, enter your Host API URL (e.g. `http://localho
 ---
 
 ## How it fits together
-
-![Gots deployment diagram: a device node (your phone or tablet) running the Gots app, a node (your computer or server) running Hermes Agent and the Gots plugin, and an optional node (Gots' sync server) offering sign-in and an encrypted store. The app chats with and controls the Host, and signs in and syncs through the sync server, which only ever holds encrypted data.](docs/deployment.svg)
 
 There are three pieces, and only the first two really matter day to day.
 
