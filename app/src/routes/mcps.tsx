@@ -669,7 +669,7 @@ function ConfigTab({
 
       {(rows.length > 0 || editable) && (
         <section className="flex flex-col gap-2" data-mcp-section="values">
-          <h2 className="px-1 text-sm font-medium text-muted-foreground">Environment variables</h2>
+          <h2 className="text-sm leading-snug font-medium">Environment variables</h2>
           {rows.length > 0 && (
             <FieldGroup>
               {rows.map((row, index) => {
@@ -678,7 +678,10 @@ function ConfigTab({
                   <Field key={`${row.name}-${index}`} data-value={row.name}>
                     {/* The environment name is the whole of the row: nothing describes a value this
                     server's block holds, so there is no second line to write. */}
-                    <FieldLabel htmlFor={`mcp-config-value-${index}`} className="font-mono text-sm">
+                    <FieldLabel
+                      htmlFor={`mcp-config-value-${index}`}
+                      className="text-sm font-medium text-muted-foreground"
+                    >
                       {row.name || known?.name}
                     </FieldLabel>
                     <Input
@@ -1213,9 +1216,7 @@ function CustomServerSheet({
 
           {draft.transport === "stdio" && (
             <section className="flex flex-col gap-2" data-mcp-section="values">
-              <h2 className="px-1 text-sm font-medium text-muted-foreground">
-                Environment variables
-              </h2>
+              <h2 className="text-sm leading-snug font-medium">Environment variables</h2>
               {rows.length > 0 && (
                 <FieldGroup>
                   {rows.map((row, index) => (
