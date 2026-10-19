@@ -1,5 +1,10 @@
 # The slash menu opens on any token, and hoists a picked skill to the message's front
 
+*Superseded in part by [ADR 0015](./0015-goal-mode-is-removed-and-nothing-replaces-it.md): `goal` is
+no longer one of the commands this record describes — it has left the menu, the composer's command
+list and the wizard whose review picker read the skill list. Everything here about commands and
+skills stands.*
+
 The composer's slash menu used to need the slash at the very start of the composer with nothing after
 it but a single word — `/gri` opened it, `/grill the tests` and `fix /grill` did not. Discovery was
 therefore limited to the one position where a skill is also _invocable_, and a skill whose name the
