@@ -145,6 +145,8 @@ interface Segment {
   /** Too short to send: the last moment before Stop, after a cut. */
   skip?: boolean
   stopped: Promise<void>
+  /** Turns what the recorder flushed into a piece, once, however the segment ends. */
+  close: () => void
 }
 
 interface Recording {
@@ -170,7 +172,7 @@ interface Session {
   draining: Promise<boolean> | null
   error: unknown
   /** Why the take itself died (the recorder errored, the track ended): Retry still sends its pieces. */
-  failure: string | null
+  failure: Error | null
   /** Cancelled or done: nothing more is kept. */
   closed: boolean
   saving: Promise<unknown>
@@ -229,7 +231,7 @@ function forget(session: Session) {
 
 function release(recording: Recording) {
   window.clearInterval(recording.timer)
-  window.clearInterval(recording.watch)
+  window.clearTimeout(recording.watch)
   window.clearTimeout(recording.cap)
   recording.stream.getTracks().forEach((track) => track.stop())
   void recording.audio?.close().catch(() => {})
@@ -238,17 +240,27 @@ function release(recording: Recording) {
   recording.audio = undefined
 }
 
+/** Stops the recorders and lets the mic go; resolves once the last piece is in. */
+function end(recording: Recording) {
+  const stopping = stopSegments(recording)
+  release(recording)
+  return stopping
+}
+
 function stopSegments(recording: Recording) {
   const open = [...recording.segments]
   for (const segment of open) if (segment.recorder.state !== "inactive") segment.recorder.stop()
   recording.stoppedAt ??= Date.now()
   // A recorder that errored fires no stop of its own, and one the browser dropped may fire none
-  // either: the take is let go with the audio it flushed rather than waiting on a stop that can't come.
+  // either: the take is closed with the audio it flushed rather than waiting on a stop that can't come.
   return Promise.all(
     open.map(
       (segment) =>
         new Promise<void>((done) => {
-          const timer = window.setTimeout(done, STOP_MS)
+          const timer = window.setTimeout(() => {
+            segment.close()
+            done()
+          }, STOP_MS)
           void segment.stopped.then(() => {
             window.clearTimeout(timer)
             done()
@@ -315,12 +327,11 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
   /** Ends a take whose recorder died, keeping the pieces already cut so Retry can send them. */
   const fail = useCallback((current: Session, recording: Recording, message: string) => {
     if (session.current !== current || current.recording !== recording) return
-    current.failure = message
+    current.failure = new Error(message)
     current.recording = null
     current.upload?.abort()
     current.upload = null
-    const stopping = stopSegments(recording)
-    release(recording)
+    const stopping = end(recording)
     setLevels(null)
     void stopping.then(() => {
       if (session.current !== current) return
@@ -336,15 +347,8 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
         audioBitsPerSecond: 24_000,
       })
       let stopped!: () => void
-      // A stop and an error can both land, and only one of them may turn the segment into a piece.
+      // A stop, an error and the stop timeout can all land, and only one may make the segment a piece.
       let closed = false
-      const segment: Segment = {
-        recorder,
-        chunks: [],
-        startedAt: Date.now(),
-        heard: !recording.measured,
-        stopped: new Promise((resolve) => (stopped = resolve)),
-      }
       const close = () => {
         if (closed) return
         closed = true
@@ -358,6 +362,14 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
         // take that died waits for Retry instead, so its failure stays the bar's one message.
         if (session.current === current && !current.failure) void drain(current)
         stopped()
+      }
+      const segment: Segment = {
+        recorder,
+        chunks: [],
+        startedAt: Date.now(),
+        heard: !recording.measured,
+        stopped: new Promise((resolve) => (stopped = resolve)),
+        close,
       }
       recorder.ondataavailable = (event) => {
         if (!event.data.size) return
@@ -473,18 +485,15 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
     stream
       .getAudioTracks()
       .forEach((track) => track.addEventListener("ended", () => fail(current, recording, TAKEN)))
-    // A recorder still "recording" that has sent no audio at all isn't a quiet room: it's dead, and
+    // A recorder still "recording" that has sent no audio by now isn't a quiet room: it's dead, and
     // nothing else tells the app so.
-    recording.watch = window.setInterval(() => {
-      if (session.current !== current || recording.sent) return
-      if (Date.now() - recording.startedAt < SILENT_MS) return
-      fail(current, recording, SILENT)
-    }, SILENT_MS / 5)
+    recording.watch = window.setTimeout(() => {
+      if (session.current === current && !recording.sent) fail(current, recording, SILENT)
+    }, SILENT_MS)
     setStartedAt(recording.startedAt)
     // Past the cap the recording stops growing; Stop or Send still turns it into text.
     recording.cap = window.setTimeout(() => {
-      void stopSegments(recording)
-      release(recording)
+      void end(recording)
       if (session.current === current) setLevels(null)
     }, MAX_MS)
     return true
@@ -505,15 +514,12 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
         return joinText(...current.pieces.map((piece) => piece.text ?? ""))
       }
       const failure = current.error ?? current.failure
-      const timedOut = failure instanceof DOMException && failure.name === "AbortError"
       setError(
-        timedOut
+        failure instanceof DOMException && failure.name === "AbortError"
           ? "The bot took too long to transcribe."
-          : typeof failure === "string"
-            ? failure
-            : failure instanceof Error
-              ? failure.message
-              : "Couldn't transcribe the recording.",
+          : failure instanceof Error
+            ? failure.message
+            : "Couldn't transcribe the recording.",
       )
       setStatus("failed")
       // The host may have lost faster-whisper since; ask again so the mic hides if so.
@@ -530,10 +536,7 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
       forget(current)
       current.upload?.abort()
       current.upload = null
-      if (current.recording) {
-        void stopSegments(current.recording)
-        release(current.recording)
-      }
+      if (current.recording) void end(current.recording)
     }
     showIdle()
   }, [showIdle])
@@ -544,21 +547,17 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
    */
   const finish = useCallback(async () => {
     const current = session.current
-    if (!current) {
+    // Nothing to end: no take, or one that died before Stop with nothing left to send.
+    if (!current || (!current.recording && !current.failure)) {
       cancel()
       return ""
     }
+    // A take that died before Stop (the recorder errored, the track ended) still sends what it recorded.
+    if (!current.recording) return settle(current)
     const recording = current.recording
-    // The take died before Stop (the recorder errored, the track ended): what it recorded still goes.
-    if (!recording) {
-      if (current.failure) return settle(current)
-      cancel()
-      return ""
-    }
     const last = recording.segments.at(-1)
     if (last && current.pieces.length && Date.now() - last.startedAt < MIN_MS) last.skip = true
-    const stopping = stopSegments(recording)
-    release(recording)
+    const stopping = end(recording)
     await stopping
     if (session.current !== current) return null
     current.recording = null
@@ -603,8 +602,7 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
       current.upload = null
       const recording = current.recording
       if (recording) {
-        release(recording)
-        void stopSegments(recording).then(() => {
+        void end(recording).then(() => {
           current.recording = null
           save(current, true)
         })
