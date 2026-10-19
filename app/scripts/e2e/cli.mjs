@@ -80,6 +80,11 @@ const FLOWS = {
     about: "A compressed chat another device started loads its transcript and follows its run on a device that never saw it",
     alsoPolling: true,
   },
+  "compressed-live": {
+    script: "e2e/compressed-live.mjs",
+    about:
+      "A chat compressed mid-run on the device that sent the turn keeps streaming to its end, and finishes after a reload too",
+  },
   "plan-mode": {
     script: "e2e/plan-mode.mjs",
     about:

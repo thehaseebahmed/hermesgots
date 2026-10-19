@@ -25,6 +25,7 @@ import secrets
 import sqlite3
 import subprocess
 import time
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -702,27 +703,50 @@ def is_code_session(session_id: str) -> bool:
     return bool(path.exists() and read(path, session_id))
 
 
-def chat_session(db: Any, session_id: str) -> str:
+def chat_session(
+    state: Path, session_id: str, known: Optional[Dict[str, str]] = None
+) -> str:
     """The session a chat started as. Compression moves a chat on to a child session, and Gots
     only knows the first. Only a parent whose own turn ended in compression is followed, so a
     delegation or a branch — which shares the ``parent_session_id`` column but is not a compaction
-    boundary — never hijacks the chat's run."""
-    get = getattr(db, "get_session", None)
-    if not callable(get):
-        return session_id
+    boundary — never hijacks the chat's run.
+
+    Reads ``state.db`` itself, read-only, rather than ``SessionDB.get_session``: the app polls
+    ``runs/live`` every 10 s and the change stream walks this per session event, and ``get_session``
+    drains the live turn's queued token writes, so every poll would stall behind the turn it is
+    asked about (and the reads sharing the API server's executor with it). ``known`` memoises the
+    walk for one request, since a queue puts several runs on one lineage.
+    """
+    if known is not None and session_id in known:
+        return known[session_id]
     current = session_id
-    for _ in range(COMPRESSION_DEPTH):
-        row = get(current) or {}
-        parent_id = row.get("parent_session_id")
-        parent = parent_id and get(parent_id)
-        if not parent or parent.get("end_reason") != "compression":
-            break
-        current = parent_id
+    try:
+        if state.exists():
+            # Read-only, so a poll can never lock the gateway out of its own store, and closed
+            # before returning: this runs on every poll.
+            with closing(sqlite3.connect(f"{state.as_uri()}?mode=ro", uri=True, timeout=2)) as conn:
+                conn.row_factory = sqlite3.Row
+                for _ in range(COMPRESSION_DEPTH):
+                    row = conn.execute(
+                        """SELECT child.parent_session_id AS parent_id, parent.end_reason AS parent_end
+                           FROM sessions child LEFT JOIN sessions parent
+                             ON parent.id = child.parent_session_id
+                           WHERE child.id = ?""",
+                        (current,),
+                    ).fetchone()
+                    if not row or not row["parent_id"] or row["parent_end"] != "compression":
+                        break
+                    current = row["parent_id"]
+    except sqlite3.Error:
+        logger.debug("memento: couldn't walk %s's compression parents", session_id, exc_info=True)
+        current = session_id
+    if known is not None:
+        known[session_id] = current
     return current
 
 
 def live_runs(
-    adapter: Any, owned: Optional[Callable[[str], bool]] = None, db: Any = None
+    adapter: Any, owned: Optional[Callable[[str], bool]] = None, home: Optional[Path] = None
 ) -> Tuple[Dict[str, str], Dict[str, str]]:
     """Each session with a run in flight: ``running`` or ``waiting_for_approval``, and its run id.
 
@@ -730,23 +754,26 @@ def live_runs(
     the run again. Keyed by the session the chat started as (``chat_session``), not the run's own:
     compression moves a chat on to a child session mid-flight, and a device that only knows the id
     the chat began with must still find its run. ``owned`` keeps only the runs the caller's profile
-    started.
+    started; ``home`` is that profile's, for the lineage walk.
     """
     statuses = getattr(adapter, "_run_statuses", None)
     if not isinstance(statuses, dict):
         return {}, {}
     live: Dict[str, str] = {}
     run_ids: Dict[str, str] = {}
+    state = (home / "state.db") if home else None
+    known: Dict[str, str] = {}
     for run_id, status in list(statuses.items()):
         if not isinstance(status, dict) or (owned and not owned(run_id)):
             continue
-        state = LIVE_STATUSES.get(status.get("status"))
+        state_name = LIVE_STATUSES.get(status.get("status"))
         session_id = status.get("session_id")
-        if not state or not isinstance(session_id, str) or not session_id:
+        if not state_name or not isinstance(session_id, str) or not session_id:
             continue
-        session_id = chat_session(db, session_id)
+        if state is not None:
+            session_id = chat_session(state, session_id, known)
         if live.get(session_id) != "waiting_for_approval":
-            live[session_id] = state
+            live[session_id] = state_name
             if isinstance(run_id, str):
                 run_ids[session_id] = run_id
     return live, run_ids
@@ -757,13 +784,15 @@ def waiting(
     path: Path,
     hermes_home: Path,
     owned: Optional[Callable[[str], bool]] = None,
-    db: Any = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Why each session waits on the user: its run's questions or approval, or a plan to review.
     A project session also names its project. Keyed by the session the chat started as, like
-    ``live_runs``, so a wait on a compressed chat's child session is reported for the chat."""
+    ``live_runs``, so a wait on a compressed chat's child session is reported for the chat, and
+    walked from ``hermes_home``'s store for the same reason it is there."""
     found: Dict[str, Dict[str, Any]] = {}
     statuses = getattr(adapter, "_run_statuses", None)
+    state = hermes_home / "state.db"
+    known: Dict[str, str] = {}
     for run_id, status in list(statuses.items()) if isinstance(statuses, dict) else []:
         if not isinstance(status, dict) or status.get("status") != "waiting_for_approval":
             continue
@@ -772,7 +801,7 @@ def waiting(
         session_id = status.get("session_id")
         if not isinstance(session_id, str) or not session_id:
             continue
-        session_id = chat_session(db, session_id)
+        session_id = chat_session(state, session_id, known)
         clarify = status.get("clarify")
         if isinstance(clarify, dict):
             questions = clarify.get("questions")
