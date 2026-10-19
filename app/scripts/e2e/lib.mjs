@@ -282,6 +282,39 @@ function helpers(page) {
 export const pass = (text) => console.log(`PASS: ${text}`)
 
 /**
+ * Creates a project on the mock and waits for the clone to land, so its screen offers the options
+ * menu; answers its id. `until` is `helpers(page)`'s poll, and the name is the flow's own so a run's
+ * projects are told apart in the mock's list.
+ */
+export async function makeProject(until, name) {
+  const created = await fetch(`${mock}/api/plugins/memento/projects`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: `${name} ${runId()}`, repos: ["mock-user/memento"] }),
+  })
+  const pending = await created.json()
+  const ready = await until(
+    async () => {
+      const listed = await (await fetch(`${mock}/api/plugins/memento/projects`)).json()
+      const found = listed.projects.find((project) => project.slug === pending.slug)
+      return found?.status === "ready" ? found : null
+    },
+    20_000,
+    "the mock to finish cloning the project",
+  )
+  return ready.id
+}
+
+/** A project screen with its options menu's AFK pop-up open. */
+export async function openAfk(page, screen) {
+  await page.goto(screen)
+  const options = page.getByRole("button", { name: "Project options" })
+  await options.waitFor({ timeout: 15_000 })
+  await options.click()
+  await page.getByRole("menuitem", { name: "AFK" }).click()
+}
+
+/**
  * Fails unless the element's text fits on one line. Its height is compared with a line, since a block
  * reports a single client rect whether it wraps or not.
  */

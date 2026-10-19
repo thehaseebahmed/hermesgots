@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from . import (
+    afk,
     alerts,
     approvals,
     attachments,
@@ -270,6 +271,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "library",
                     # A project's ready tasks, read from its repositories' GitHub issues; see tasks.py.
                     "afk",
+                    # Whether that project is left to work them: AFK's switch, the project's own
+                    # setting on the host (afk.py). Advertised apart from the read, so a plugin that
+                    # can list a project's tasks but never switch AFK on offers no switch at all.
+                    "afk_switch",
                     "clarify",
                     "todo_tool",
                     "agents",
@@ -951,6 +956,55 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), error.status)
         return web.json_response({"object": "memento.tasks", "project_id": project_id, **found})
 
+    async def project_afk(request: "web.Request") -> "web.Response":
+        """Whether the project is left to work its own tasks, and why it can't be."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        project_id = request.match_info["project_id"]
+        # A project still being cloned has no checkout to leave to work, and never offers the switch.
+        if clones.is_pending_id(project_id):
+            return _error(web, "The project is still being created.", 409)
+        project, refused = await resolve_project(project_id)
+        if refused is not None:
+            return refused
+        found = await asyncio.to_thread(
+            afk.state,
+            hermes_home(),
+            project_id,
+            project.folders,
+            bool(getattr(project, "archived", False)),
+        )
+        return web.json_response({"object": "memento.afk", "project_id": project_id, **found})
+
+    async def post_project_afk(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        project_id = request.match_info["project_id"]
+        if clones.is_pending_id(project_id):
+            return _error(web, "The project is still being created.", 409)
+        body = await json_body(request)
+        on = body.get("on") if body else None
+        if not isinstance(on, bool):
+            return _error(web, "on must be true or false.", 400)
+        project, refused = await resolve_project(project_id)
+        if refused is not None:
+            return refused
+        try:
+            found = await asyncio.to_thread(
+                afk.set_on,
+                hermes_home(),
+                project_id,
+                project.folders,
+                on,
+                bool(getattr(project, "archived", False)),
+            )
+        except afk.Refused as why:
+            # The project can't be left to work: its reason is the answer, and nothing is written.
+            return _error(web, str(why), 409)
+        return web.json_response({"object": "memento.afk", "project_id": project_id, **found})
+
     async def session_db():
         open_db = getattr(adapter, "_ensure_session_db_async", None)
         return await open_db() if callable(open_db) else None
@@ -1303,6 +1357,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/projects/{{project_id}}/usage", project_usage)
     app.router.add_get(f"{PREFIX}/projects/{{project_id}}/library", project_library)
     app.router.add_get(f"{PREFIX}/projects/{{project_id}}/tasks", project_tasks)
+    app.router.add_get(f"{PREFIX}/projects/{{project_id}}/afk", project_afk)
+    app.router.add_post(f"{PREFIX}/projects/{{project_id}}/afk", post_project_afk)
     app.router.add_post(f"{PREFIX}/model", set_host_model)
     app.router.add_get(f"{PREFIX}/fallbacks", get_fallbacks)
     app.router.add_get(f"{PREFIX}/skills", list_skills)

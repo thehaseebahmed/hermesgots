@@ -133,6 +133,9 @@ const cors = {
 }
 
 const GITHUB = !process.env.MOCK_NO_GITHUB
+// Projects left to work their own tasks: AFK's switch, which the mock keeps per project the way the
+// plugin keeps it in its store, so a page reload reads the same answer back.
+const afkProjects = new Set()
 // What the media route serves for chart.png: navy sky, teal ground, a sun.
 const MOCK_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAHgAAABLCAIAAAA06NSGAAAAuklEQVR42u3aQQmAABBE0anhxQYW8mIDz0Y0jhFsIII4iDz4Cd5xZzNMiwoFAWjQAg0aNAXQoAX6dsc+Xwf6deI3uEO5Yx3KHetQ7liHcsc6lDvWoEF/T/mJNWjQoEGDBg0aNGjQoEGDBu3W4dYB2j0atIXFZmgFt4L76/CpBNrvHWiBBi3QoEEL9H+gx21VIdCgQQs0aNAIQIMWaNCgKYAGLdCgQVMADVqgQYMWaNACDRq0QIMW6E92AjwFRtd/9tVBAAAAAElFTkSuQmCC",
@@ -717,6 +720,15 @@ const projectTasks = (project) => {
       }),
     ],
   }
+}
+
+/** Why a project can't be left to work, as the plugin's `afk.reason` answers it, or null. */
+function afkReason(project) {
+  // An archived project is put away, so it isn't asked about anything (plugin's `afk.reason`).
+  if (project.archived) return "This project is archived."
+  // A checkout that isn't a git repo with a GitHub origin is no repository, as `tasks.repos_of` reads it.
+  if (!project.folders.some((folder) => folder.git && folder.repo)) return "This project has no repository."
+  return GITHUB ? null : "No GitHub account on the server."
 }
 
 const RUN_ERROR = "Timed out waiting for https://status.example.com"
@@ -1661,7 +1673,7 @@ http
       return json(res, 200, {
         name: "memento",
         version: PLUGIN_VERSION,
-        features: ["cron_runs", "session_label", "chats", "draft_text", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "goal", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "skills", "queue", "dictation", "afk", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : []), ...(MCPS ? ["mcps", "mcps_write", "mcps_remove", "mcps_catalogue", "mcps_add", "mcps_access"] : [])],
+        features: ["cron_runs", "session_label", "chats", "draft_text", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "goal", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "skills", "queue", "dictation", "afk", "afk_switch", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : []), ...(MCPS ? ["mcps", "mcps_write", "mcps_remove", "mcps_catalogue", "mcps_add", "mcps_access"] : [])],
         clarify: true,
         hooks: true,
         goal:
@@ -1963,7 +1975,7 @@ http
       cloneProject(project, root)
       return json(res, 202, { object: "memento.project", ...project })
     }
-    const projectRoute = /^\/api\/plugins\/memento\/projects\/([^/]+)(\/remove|\/retry|\/repos|\/repos\/remove|\/usage|\/library|\/tasks)?$/.exec(url.pathname)
+    const projectRoute = /^\/api\/plugins\/memento\/projects\/([^/]+)(\/remove|\/retry|\/repos|\/repos\/remove|\/usage|\/library|\/tasks|\/afk)?$/.exec(url.pathname)
     if (PLUGIN && !profile && projectRoute?.[2] === "/library") {
       // The project's filed files, every session's merged by folder; a missing project 404s.
       const found = mockProjects().find((p) => p.id === decodeURIComponent(projectRoute[1]))
@@ -1992,6 +2004,31 @@ http
         })
       if (!GITHUB) return json(res, 409, { error: { message: "No GitHub account on the server." } })
       return json(res, 200, projectTasks(found))
+    }
+    if (PLUGIN && !profile && projectRoute?.[2] === "/afk") {
+      // AFK's switch, as the plugin's own route answers it: the project's setting, kept on the host
+      // (here, in this process, so a reload reads the same answer back), and why it can't be on.
+      const found = mockProjects().find((p) => p.id === decodeURIComponent(projectRoute[1]))
+      if (!found) return json(res, 404, { error: { message: "No such project." } })
+      if (found.status === "cloning")
+        return json(res, 409, { error: { message: "The project is still being created." } })
+      // A project whose clone failed has nothing checked out, as the library and usage routes say too.
+      if (found.status === "failed") return json(res, 404, { error: { message: "No such project." } })
+      const reason = afkReason(found)
+      if (req.method === "POST") {
+        const { on } = await readBody(req)
+        if (typeof on !== "boolean") return json(res, 400, { error: { message: "on must be true or false." } })
+        if (on && reason) return json(res, 409, { error: { message: reason } })
+        if (on) afkProjects.add(found.id)
+        else afkProjects.delete(found.id)
+        return json(res, 200, { object: "memento.afk", project_id: found.id, on, reason })
+      }
+      return json(res, 200, {
+        object: "memento.afk",
+        project_id: found.id,
+        on: afkProjects.has(found.id),
+        reason,
+      })
     }
     if (PLUGIN && !profile && projectRoute?.[2] === "/usage") {
       const found = mockProjects().find((p) => p.id === decodeURIComponent(projectRoute[1]))
@@ -2077,6 +2114,8 @@ http
       }
       if (projectRoute[2] === "/retry") {
         if (found.status !== "failed") return json(res, 404, { error: { message: "No failed project to retry." } })
+        // The retry makes the project again under a new id, so the old one's switch is forgotten.
+        afkProjects.delete(found.id)
         for (const folder of found.folders) folder.status = "queued"
         found.status = "cloning"
         found.error = null
@@ -2086,6 +2125,8 @@ http
       if (projectRoute[2]) {
         clearTimeout(cloning.get(found.id))
         cloning.delete(found.id)
+        // Deleting a project forgets its switch, as the plugin's `projects.remove` does.
+        afkProjects.delete(found.id)
         all.splice(all.indexOf(found), 1)
         return json(res, 200, { object: "memento.project", removed: true })
       }
@@ -2094,7 +2135,11 @@ http
       if (name !== undefined && !String(name).trim()) return json(res, 400, { error: { message: "Name the project." } })
       if (name !== undefined) found.name = String(name).trim()
       if (description !== undefined) found.description = String(description).trim() || null
-      if (archived !== undefined) found.archived = Boolean(archived)
+      if (archived !== undefined) {
+        found.archived = Boolean(archived)
+        // A project put away doesn't keep working: the plugin turns its switch off with it.
+        if (found.archived) afkProjects.delete(found.id)
+      }
       if (pinned !== undefined) found.pinned_at = pinned ? (found.pinned_at ?? Math.floor(Date.now() / 1000)) : null
       return json(res, 200, { object: "memento.project", id: found.id })
     }

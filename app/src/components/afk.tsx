@@ -1,19 +1,27 @@
 /**
- * AFK: a project's tasks as GitHub holds them — what's ready to be worked, oldest first, what
- * somebody has already claimed, and what an open task still blocks — read through the Gots plugin
- * when the pop-up opens, with nothing kept on the device. The pop-up and the row that opens it exist
- * only where the plugin advertises `afk`, so a Bot on an older plugin offers neither.
+ * AFK: a project's switch for working its own tasks, and the tasks it would work — the frontier,
+ * what's ready oldest first, what somebody has already claimed, and what an open task still blocks.
+ * The switch is the host's setting for the project, so it reads back the same on every device. It is
+ * always shown: a project that can't be left to work (or a Bot on a plugin too old to switch one) has
+ * it off and disabled, with the reason underneath. The frontier is there where the plugin advertises
+ * `afk`, the switch where it advertises `afk_switch`.
  */
 import { useCallback, useState, type ReactNode } from "react"
+import { toast } from "sonner"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Spinner } from "@/components/ui/spinner"
+import { Switch } from "@/components/ui/switch"
 import { connectionKey } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
+import { usePluginFeature, type PluginFeatureAnswer } from "@/lib/features"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import {
+  getProjectAfk,
   getProjectTasks,
+  setProjectAfk,
   type HermesConfig,
+  type ProjectAfk,
   type ProjectBlocker,
   type ProjectTasks,
   type ProjectTask,
@@ -23,6 +31,9 @@ import { noteFailure } from "@/lib/report"
 
 /** The feature the plugin advertises when it can read a project's tasks. */
 export const AFK_FEATURE = "afk"
+
+/** And the one it advertises when it can turn the switch on and off. */
+export const AFK_SWITCH_FEATURE = "afk_switch"
 
 /** A Bot whose plugin answers without the route is left alone for a while, like every other read. */
 const unsupported = cooldown()
@@ -46,7 +57,11 @@ export function AfkPopup({
 }) {
   const [tasks, setTasks] = useState<ProjectTasks>()
   const [error, setError] = useState<string>()
+  const [afk, setAfk] = useState<ProjectAfk>()
+  const [afkError, setAfkError] = useState<string>()
+  const [saving, setSaving] = useState(false)
   const key = connectionKey(config)
+  const switchable = usePluginFeature(config, AFK_SWITCH_FEATURE)
 
   const read = useCallback(
     (signal: AbortSignal) => {
@@ -81,19 +96,132 @@ export function AfkPopup({
   // Read once each time the sheet opens — and again for another project — never on a timer.
   usePoll(read, false, [projectId], { active: open, onShow: false })
 
+  const readAfk = useCallback(
+    (signal: AbortSignal) => {
+      if (unsupported.cooling(key)) return
+      setAfkError(undefined)
+      void getProjectAfk(
+        config,
+        projectId,
+        AbortSignal.any([signal, AbortSignal.timeout(READ_TIMEOUT_MS)]),
+      )
+        .then((next) => {
+          unsupported.clear(key)
+          if (signal.aborted) return
+          setAfk(next)
+        })
+        .catch((failure: unknown) => {
+          if (signal.aborted) return
+          setAfkError(failure instanceof Error ? failure.message : "Couldn't read AFK's setting.")
+          noteFailure("Reading AFK's setting", failure)
+          void lacksRoute(config, failure, AFK_SWITCH_FEATURE).then((missing) => {
+            if (missing) unsupported.start(key)
+          })
+        })
+    },
+    [config, key, projectId],
+  )
+  // The switch's own read, only where the plugin has it: a Host that can't answer is never asked.
+  usePoll(readAfk, false, [key, projectId], {
+    active: open && switchable === "yes",
+    onShow: false,
+  })
+
+  const turn = async (on: boolean) => {
+    setSaving(true)
+    try {
+      // The host's answer is what the switch shows: a write it refused never reads back as done.
+      setAfk(await setProjectAfk(config, projectId, on))
+    } catch (failure) {
+      toast.error(failure instanceof Error ? failure.message : "Couldn't save that.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const manyRepos = (tasks?.repos.length ?? 0) > 1
 
   return (
     <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent>
         <PopupHeader className="pb-2">
-          <PopupTitle>AFK</PopupTitle>
+          <PopupTitle>Away From Keyboard</PopupTitle>
         </PopupHeader>
         <div className="flex flex-col gap-6 px-4 pb-4 sm:px-6">
-          <Tasks tasks={tasks} error={error} manyRepos={manyRepos} />
+          <AfkSwitch
+            answer={switchable}
+            afk={afk}
+            error={afkError}
+            saving={saving}
+            onToggle={(on) => void turn(on)}
+          />
+          <Tasks
+            tasks={tasks}
+            error={error}
+            // Said twice only when it is the same thing said: the switch's reason can differ from why
+            // the frontier failed, and then it is two different facts, not one repeated.
+            duplicate={Boolean(afk?.reason) && afk?.reason === error}
+            manyRepos={manyRepos}
+          />
         </div>
       </PopupContent>
     </Popup>
+  )
+}
+
+/**
+ * The switch, and what stopped it where something did. It is always in place — a project that can't be
+ * left to work, a plugin that can't switch it and a read that failed all show it off and out of reach,
+ * with the reason under it — so the row doesn't appear and disappear between projects. A project
+ * already left to work keeps its switch live even once its reason is back (the account it read tasks
+ * with is gone, say): turning it off is still the user's to do.
+ *
+ * The label reads the switch's state ("Turned off", "Turned on"); the control's own name stays what it
+ * does, so assistive tech hears the name and its checked state rather than a name that changes.
+ */
+function AfkSwitch({
+  answer,
+  afk,
+  error,
+  saving,
+  onToggle,
+}: {
+  answer: PluginFeatureAnswer
+  afk: ProjectAfk | undefined
+  error: string | undefined
+  saving: boolean
+  onToggle: (on: boolean) => void
+}) {
+  const reason = afk?.reason ?? undefined
+  const on = afk?.on ?? false
+  // The host has to say the project can be worked, and the switch has to have been read back.
+  const canSwitch = answer === "yes" && Boolean(afk) && !saving && !error && (on || !reason)
+  const reading = answer === "yes" && !afk && !error
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex min-h-11 items-center justify-between gap-3 px-1">
+        <span className="text-base">{on ? "Turned on" : "Turned off"}</span>
+        {reading ? (
+          <Spinner className="size-4" />
+        ) : (
+          <Switch
+            aria-label="Work on its own"
+            checked={on}
+            disabled={!canSwitch}
+            onCheckedChange={onToggle}
+          />
+        )}
+      </div>
+      {error ? (
+        <p className="px-1 text-sm text-destructive">{error}</p>
+      ) : (
+        reason && (
+          <p className="px-1 text-sm text-muted-foreground" role="status">
+            {reason}
+          </p>
+        )
+      )}
+    </div>
   )
 }
 
@@ -101,13 +229,17 @@ export function AfkPopup({
 function Tasks({
   tasks,
   error,
+  duplicate,
   manyRepos,
 }: {
   tasks: ProjectTasks | undefined
   error: string | undefined
+  duplicate: boolean
   manyRepos: boolean
 }) {
-  if (error) return <p className="px-1 text-sm text-destructive">{error}</p>
+  // A frontier failure the switch's own reason already says isn't an error the user needs twice — and
+  // nothing is coming, so the row is left out rather than spinning over a read that failed.
+  if (error) return duplicate ? null : <p className="px-1 text-sm text-destructive">{error}</p>
   if (!tasks) {
     return (
       <p className="flex items-center gap-2 px-1 text-sm text-muted-foreground">

@@ -187,6 +187,12 @@ def update(
             change = getattr(pdb, "archive_project" if archived else "restore_project", None)
             if change is None:
                 raise ImportError("This Hermes version can't archive projects.")
+            # A project put away doesn't keep working: its switch goes off first, so a failure here
+            # leaves a project that isn't archived but isn't working either, never the other way.
+            if archived:
+                from .afk import turn_off
+
+                turn_off(hermes_home, project_id)
             change(conn, project_id)
     if pinned is not None:
         _pin(hermes_home, project_id, pinned)
@@ -416,4 +422,14 @@ def remove(hermes_home: Path, project_id: str) -> bool:
     if not projects_db.exists():
         return False
     with pdb.connect_closing(db_path=projects_db) as conn:
-        return bool(pdb.delete_project(conn, project_id))
+        removed = bool(pdb.delete_project(conn, project_id))
+    if removed:
+        from .afk import forget
+
+        try:
+            forget(hermes_home, project_id)
+        except Exception:
+            # The project's record is gone either way: a switch left behind is a row nothing reads,
+            # and failing the request here would report a delete that did happen as a failure.
+            logger.warning("memento: couldn't forget %s's AFK switch", project_id, exc_info=True)
+    return removed

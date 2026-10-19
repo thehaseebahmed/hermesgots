@@ -165,7 +165,7 @@ class ReadTests(unittest.TestCase):
         self.home = TemporaryDirectory()
         self.addCleanup(self.home.cleanup)
         self.paths: List[str] = []
-        # A checkout, as `_repos` sees one.
+        # A checkout, as `repos_of` sees one.
         Path(self.home.name, ".git").mkdir()
         self.folders: List[Any] = [Folder(self.home.name)]
         self._patches = [

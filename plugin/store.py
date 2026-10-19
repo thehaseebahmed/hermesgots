@@ -1,17 +1,17 @@
 """``$HERMES_HOME/memento/memento.db``: the chat list (``chats.py``), context use (``context.py``) and
 the models each chat's calls ran on (``model_changes.py``), project sessions (``sessions.py``),
 projects still cloning (``clones.py``), repos being added to or removed from a project (``repos.py``),
-pinned projects (``projects.py``), merged pull requests (``merges.py``) and recent changes for the
-app's live stream (``events.py``), devices' push subscriptions (``push.py``) and messages waiting
-for a session's run (``outbox.py``) and research missions with their evidence ledgers
-(``research.py``)."""
+pinned projects (``projects.py``), merged pull requests (``merges.py``), a project's AFK switch
+(``afk.py``) and recent changes for the app's live stream (``events.py``), devices' push
+subscriptions (``push.py``) and messages waiting for a session's run (``outbox.py``) and research
+missions with their evidence ledgers (``research.py``)."""
 
 from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 23
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -282,6 +282,15 @@ def connect(path: Path) -> sqlite3.Connection:
                    model TEXT NOT NULL,
                    provider TEXT,
                    PRIMARY KEY (session_id, at)
+               )"""
+        )
+        # v23: a project left to work its own tasks — AFK's switch, which is the project's own
+        # setting rather than the device's (afk.py).
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS project_afk (
+                   project_id TEXT PRIMARY KEY,
+                   enabled INTEGER NOT NULL,
+                   at INTEGER NOT NULL
                )"""
         )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
