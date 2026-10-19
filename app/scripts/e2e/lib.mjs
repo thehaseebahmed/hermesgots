@@ -331,6 +331,20 @@ export async function openAfk(page, screen) {
   await page.getByRole("menuitem", { name: "AFK" }).click()
 }
 
+/** Leaves a project to work on its own: the AFK pop-up opened, the switch turned on and read back. */
+export async function afkOn(page, screen, until) {
+  await openAfk(page, screen)
+  const control = page.getByRole("switch", { name: "Work on its own" })
+  await control.waitFor({ timeout: 15_000 })
+  await control.click()
+  await until(
+    async () => (await control.getAttribute("aria-checked")) === "true",
+    15_000,
+    "the switch to read on",
+  )
+  return control
+}
+
 /**
  * Fails unless the element's text fits on one line. Its height is compared with a line, since a block
  * reports a single client rect whether it wraps or not.

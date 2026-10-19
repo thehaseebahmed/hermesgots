@@ -1156,6 +1156,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         record = await asyncio.to_thread(sessions.record_for, path, home, session_id)
         if not record:
             return web.json_response({"object": "memento.closed", "removed": True, "kept": [], "results": []})
+        try:
+            if await asyncio.to_thread(afk.release_session, home, record):
+                afk.wake()
+        except Exception:
+            logger.warning("memento: couldn't release a closed session's task", exc_info=True)
         # Before the branches go: a tree whose commits are only on its remote branch can still go.
         try:
             removed = await asyncio.to_thread(sessions.remove, path, record["session_id"])
@@ -1184,12 +1189,17 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except Exception:
             logger.debug("memento: reading waiting sessions failed", exc_info=True)
             waiting = {}
-        try:
-            # A goal paused or blocked by the judge waits on the user too, and outranks its own note:
-            # a question the run asked is what the turn is doing right now.
-            waiting = {**await asyncio.to_thread(goal.waiting, home), **waiting}
-        except Exception:
-            logger.debug("memento: reading waiting goals failed", exc_info=True)
+        for name, read, args in (
+            ("waiting goals", goal.waiting, (home,)),
+            ("stalled AFK sessions", afk.stalled, (home, live)),
+        ):
+            try:
+                host_side = await asyncio.to_thread(read, *args)
+            except Exception:
+                logger.debug("memento: reading %s failed", name, exc_info=True)
+                continue
+            for session_id, reason in host_side.items():
+                waiting.setdefault(session_id, reason)
         return web.json_response(
             {"object": "memento.runs", "sessions": live, "run_ids": run_ids, "waiting": waiting}
         )

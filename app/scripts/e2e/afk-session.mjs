@@ -3,7 +3,7 @@
 // run's first message — the issue and where it is, not the issue's text. The mock's sweep publishes
 // the session the way the plugin does, so the whole thing is covered without GitHub. Phone and
 // tablet, light and dark, with no console error.
-import { app, assert, flow, makeProject, openAfk, pass } from "./lib.mjs"
+import { afkOn, app, assert, flow, makeProject, pass } from "./lib.mjs"
 
 const HELD = 265
 const TITLE = "#265 The frontier is read from GitHub and listed"
@@ -16,16 +16,8 @@ const run = async ({ page, profileId, shot, until }) => {
     if (message.type() === "error") errors.push(message.text())
   })
   const screen = `${app}/projects/${profileId}/${await makeProject(until, "AFK session")}`
-  const control = () => page.getByRole("switch", { name: "Work on its own" })
 
-  await openAfk(page, screen)
-  await control().waitFor({ timeout: 15_000 })
-  await control().click()
-  await until(
-    async () => (await control().getAttribute("aria-checked")) === "true",
-    15_000,
-    "the switch to read on",
-  )
+  await afkOn(page, screen, until)
 
   await page.goto(`${app}/code`)
   // Code lists newest first, so the first row titled after the task is this pass's session.

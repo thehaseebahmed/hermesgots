@@ -58,20 +58,17 @@ def turn_finished(**kwargs: Any) -> None:
             return
         with _lock:
             started = _started.pop(session_id, None)
-        interrupted = bool(kwargs.get("interrupted"))
-        failed = bool(kwargs.get("failed")) and not interrupted
-        done = bool(kwargs.get("completed")) and not failed and not interrupted
-        if not (failed or done):
-            return
+        stopped = sessions.outcome(**kwargs)
         path, home = sessions._paths()
         record = sessions.record_for(path, home, session_id) if path.exists() else None
         # Delegated children and other surfaces' sessions end turns too.
         if not record and not session_id.startswith("memento-"):
             return
-        if failed:
+        if stopped.failed:
             push.notify("run_failed", session_id, path)
         elif (
-            started is not None
+            stopped.finished
+            and started is not None
             and time.monotonic() - started >= RUN_DONE_MIN_S
             # A plan waiting for review is told as such.
             and not (record and record["mode"] == "plan")

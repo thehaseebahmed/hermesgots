@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from . import events
 from .store import connect
@@ -65,6 +65,38 @@ def read(path: Path) -> Dict[str, Dict[str, Any]]:
         return _records(conn)
     finally:
         conn.close()
+
+
+def one(path: Path, chat_id: str) -> Optional[Dict[str, Any]]:
+    """One chat's record, read by its id: asking about a single session doesn't cost the whole list."""
+    if not chat_id or not path.exists():
+        return None
+    conn = connect(path)
+    try:
+        row = conn.execute(
+            "SELECT at, deleted, value FROM chats WHERE id = ?", (chat_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    at, deleted, value = row
+    return {"at": at, "deleted": True} if deleted else {"at": at, "value": json.loads(value)}
+
+
+def closed(entry: Optional[Dict[str, Any]]) -> bool:
+    """Whether the user is done with a chat: discarded, resolved, or deleted outright.
+
+    The app writes those marks and the chat list carries them to every device, which is why they are
+    the answer to "is this session over" for anything running on the host: a merge resolves a session
+    by the same reading, and AFK gives a closed session's task back by it.
+    """
+    if not isinstance(entry, dict):
+        return False
+    value = entry.get("value")
+    return bool(entry.get("deleted")) or (
+        isinstance(value, dict) and bool(value.get("discardedAt") or value.get("resolvedAt"))
+    )
 
 
 def merge(path: Path, chats: Any) -> Dict[str, Dict[str, Any]]:

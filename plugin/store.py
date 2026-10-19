@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 25
+SCHEMA_VERSION = 26
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -296,12 +296,17 @@ def connect(path: Path) -> sqlite3.Connection:
         )
         # v24: the task AFK holds for that project, and the last refusal it met on GitHub, which the
         # app's sheet shows (afk.py). A task is one JSON row: repo, number, title, url, created_at.
+        # v26: the session working that task — the one a restart adopts and the app is told about
+        # when nothing is running it — and why nothing is (afk.py).
         afk_columns = {row[1] for row in conn.execute("PRAGMA table_info(project_afk)")}
         for column, kind in (
             ("task", "TEXT"),
             ("claimed_at", "INTEGER"),
             ("refusal", "TEXT"),
             ("refused_at", "INTEGER"),
+            ("session_id", "TEXT"),
+            ("stalled", "TEXT"),
+            ("stalled_at", "INTEGER"),
         ):
             if column not in afk_columns:
                 conn.execute(f"ALTER TABLE project_afk ADD COLUMN {column} {kind}")

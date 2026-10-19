@@ -26,6 +26,7 @@ export function reasonText(reason: WaitingReason) {
   }
   if (reason.kind === "goal")
     return reason.reason === "blocked" ? "Goal blocked: needs you" : "Goal paused"
+  if (reason.kind === "stalled") return reason.reason
   return "Plan ready for review"
 }
 

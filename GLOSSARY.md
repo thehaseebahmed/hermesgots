@@ -135,6 +135,10 @@ _Avoid_: ticket, work item, card, job
 A task that has to be closed before another one can start.
 _Avoid_: dependency, prerequisite, upstream
 
+**Stalled**:
+An AFK session nothing is working any more: its run failed, was interrupted, or stopped without finishing, or the host restarted while it worked and adopted it rather than starting it again. It keeps its task, its claim and its transcript, and waits for the user beside the questions and approvals waiting sessions are shown with.
+_Avoid_: stuck, broken, paused, aborted
+
 **Frontier**:
 The ready tasks that can be started now: their blockers are all closed, and nobody has claimed them.
 _Avoid_: backlog, queue, ready list, board
@@ -142,6 +146,10 @@ _Avoid_: backlog, queue, ready list, board
 **Claim**:
 Taking a task so nothing else picks it up. A claimed task is out of the frontier.
 _Avoid_: assign, lock, pickup
+
+**Hold**:
+The task a project's AFK switch claimed and the session working it: the host's own record, one per project, which is why a project takes no second task while one is held. It lasts as long as the run; a finished run lets go of the hold and leaves the claim, and a session the user closes gives both back.
+_Avoid_: lock, lease, slot
 
 **In review**:
 A task whose pull request is open and waiting on the user.

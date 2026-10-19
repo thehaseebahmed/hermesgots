@@ -242,11 +242,28 @@ def claim_issue(repo: str, number: int, account: str, label: str, auth: Optional
 def _unlabel(repo: str, number: int, label: str, auth: Optional[str]) -> None:
     """Takes the claim mark back off a claim that couldn't be finished, best-effort: the refusal
     that follows is what the sheet shows, and this only keeps the task in the frontier."""
-    path = f"/repos/{repo}/issues/{number}/labels/{urllib.parse.quote(label, safe='')}"
     try:
-        _request(path, auth, "DELETE")
+        _take_label(repo, number, label, auth)
     except GitHubError:
         logger.warning("memento: couldn't take %s off %s#%s", label, repo, number, exc_info=True)
+
+
+def _take_label(repo: str, number: int, label: str, auth: Optional[str]) -> None:
+    """Takes the claim label off an issue; the refusal is the caller's to record."""
+    path = f"/repos/{repo}/issues/{number}/labels/{urllib.parse.quote(label, safe='')}"
+    _request(path, auth, "DELETE")
+
+
+def release_claim(repo: str, number: int, label: str, auth: Optional[str]) -> None:
+    """Gives a claimed task back to the frontier: the mark off, and the host's assignment with it.
+
+    Both halves matter, because a task is out of the frontier while it carries *either* — the rule
+    is `tasks._claimed` — so taking only the label off would leave a task no sweep can take again,
+    which is the opposite of giving it back. Only the host's own assignment goes: an issue a person
+    also holds stays theirs. Raises GitHub's refusal, which the caller records for the sheet.
+    """
+    _take_label(repo, number, label, auth)
+    _request(f"/repos/{repo}/issues/{number}/assignees", auth, "DELETE", {"assignees": [login(auth)]})
 
 
 def _ensure_label(repo: str, label: str, auth: Optional[str]) -> None:

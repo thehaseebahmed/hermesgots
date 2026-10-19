@@ -3,7 +3,7 @@
 // A GitHub refusal leaves the switch on and shows its reason in the same pop-up. The read is the
 // plugin's own route, so the whole thing is covered against the mock. Phone and tablet, light and
 // dark, with no console error.
-import { app, assert, flow, makeProject, openAfk, pass } from "./lib.mjs"
+import { afkOn, app, assert, flow, makeProject, openAfk, pass } from "./lib.mjs"
 
 const HELD = 265
 const HELD_TITLE = "The frontier is read from GitHub and listed"
@@ -16,7 +16,6 @@ const run = async ({ page, profileId, shot, until }) => {
     if (message.type() === "error") errors.push(message.text())
   })
   const screen = `${app}/projects/${profileId}/${await makeProject(until, "AFK claim")}`
-  const control = () => page.getByRole("switch", { name: "Work on its own" })
   // The sheet slides in on a phone and a drawer on a tablet: let it settle before a shot.
   const snap = async (name) => {
     await page.waitForTimeout(450)
@@ -24,14 +23,7 @@ const run = async ({ page, profileId, shot, until }) => {
   }
 
   // Turning it on is the host's; the task its sweep claims lands on the next read of the sheet.
-  await openAfk(page, screen)
-  await control().waitFor({ timeout: 15_000 })
-  await control().click()
-  await until(
-    async () => (await control().getAttribute("aria-checked")) === "true",
-    15_000,
-    "the switch to read on",
-  )
+  const control = await afkOn(page, screen, until)
   const working = page.locator("[data-working]")
   await working.waitFor({ timeout: 15_000 })
   assert.ok(
@@ -55,8 +47,8 @@ const run = async ({ page, profileId, shot, until }) => {
 
   // The claim is the host's, so a reload reads the same task back rather than an empty sheet.
   await openAfk(page, screen)
-  await control().waitFor({ timeout: 15_000 })
-  assert.equal(await control().getAttribute("aria-checked"), "true", "a reload reads the switch on")
+  await control.waitFor({ timeout: 15_000 })
+  assert.equal(await control.getAttribute("aria-checked"), "true", "a reload reads the switch on")
   await working.locator(`[data-task="${HELD}"]`).waitFor({ timeout: 15_000 })
   await snap("reloaded")
 
@@ -80,7 +72,7 @@ const run = async ({ page, profileId, shot, until }) => {
   await refused.waitFor({ timeout: 15_000 })
   assert.equal(await refused.textContent(), REFUSAL, "the refusal is its own line under the switch")
   assert.equal(
-    await control().getAttribute("aria-checked"),
+    await control.getAttribute("aria-checked"),
     "true",
     "a refusal leaves the project left to work",
   )
