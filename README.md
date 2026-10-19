@@ -100,7 +100,7 @@ You can deploy your own instance of Gots with zero-knowledge sync using Netlify:
 
 ## Development & Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for full development environment setup, Docker dev containers, browser E2E test flows, Android build configurations, and release workflows.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full development environment setup, Docker dev containers, browser E2E test flows, and local Android builds.
 
 Quick local development:
 

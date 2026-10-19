@@ -1,6 +1,6 @@
 # Contributing to Gots
 
-Thank you for contributing to Gots! This guide covers development setup, testing, container workflows, Android builds, and release processes.
+Thank you for contributing to Gots! This guide covers development setup, testing, container workflows, and local Android builds.
 
 ## Development Setup
 
@@ -117,36 +117,6 @@ pnpm exec cap open android   # Opens in Android Studio
 cd android && ./gradlew assembleDebug
 ```
 
-### Signing & Keystore Configuration
-
-To create a signing key:
-
-```bash
-keytool -genkeypair -v -keystore memento.keystore -alias memento -keyalg RSA -keysize 4096 -validity 10000
-base64 -w0 memento.keystore   # macOS: base64 -i memento.keystore
-```
-
-Add the following to GitHub repository **Settings → Secrets and variables → Actions**:
-
-- **Secrets**:
-  - `ANDROID_KEYSTORE_BASE64`: Base64 encoded keystore file.
-  - `ANDROID_KEYSTORE_PASSWORD`: Password for keystore.
-  - `ANDROID_KEY_ALIAS`: Alias name.
-  - `ANDROID_KEY_PASSWORD`: Password for key alias.
-- **Variables**:
-  - `MEMENTO_SITE_URL`: Netlify production site URL (`https://<your-site>.netlify.app`).
-  - `MEMENTO_CANDIDATE_URL`: (Optional) Netlify candidate branch deploy URL (`https://candidate--<your-site>.netlify.app`).
-
-### Firebase App Distribution for Testers
-
-Pushes to `main` automatically publish debug APKs to Firebase App Distribution when configured:
-
-1. Create a service account in Google Cloud IAM with **Firebase App Distribution Admin** (`roles/firebaseappdistro.admin`) and download its JSON key.
-2. In GitHub repository Actions secrets/variables:
-   - Secret: `FIREBASE_SERVICE_ACCOUNT` (the JSON key text or base64).
-   - Variable: `FIREBASE_TESTER_GROUPS` (e.g., `testers`).
-   - Variable: `FIREBASE_APP_ID` (e.g., `1:...:android:...`).
-
 ---
 
 ## Git & Pull Request Guidelines
@@ -169,14 +139,3 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 ### PR Process
 
 Fill in `.github/pull_request_template.md` for all pull requests. Ensure all automated CI checks pass.
-
----
-
-## Release Process
-
-Releases are created as annotated dated tags on `main` (e.g., `v2026.10.19`) triggered via GitHub Actions:
-
-1. Navigate to **Actions → Release → Run workflow**.
-2. Leave the date blank for today's date, or specify a date.
-3. The release workflow validates that version bumps exist for modified packages (`app/package.json` and plugin versioning) via `.github/scripts/release.mjs`.
-4. If valid, the tag is pushed, triggering automated production deployment and signed Android release APK builds.
