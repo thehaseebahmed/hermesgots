@@ -150,3 +150,33 @@ _Avoid_: pending, awaiting merge, PR open
 **gots-got-it**:
 The mark Gots leaves on a task it has claimed.
 _Avoid_: claimed, in-progress, assigned, taken
+
+## Dictation
+
+**Dictation**:
+Speaking a message into Gots instead of typing it. Its voice bar holds the composer's place while it runs, and its words land in the composer when it ends.
+_Avoid_: voice input, speech-to-text, transcription, STT, voice typing
+
+**Voice bar**:
+The strip that holds the composer's place during a dictation: the words heard so far, how loud the room is, and Stop, Send and Cancel.
+_Avoid_: recorder, overlay, dictation sheet, mic sheet
+
+**Phrase**:
+One stretch of a dictation between two pauses: the unit that finishes, is cleaned up, and stops changing.
+_Avoid_: chunk, piece, segment, utterance
+
+**Committed text**:
+The words of a dictation the host has settled on. Gots never changes them again; a phrase still being heard is not committed yet.
+_Avoid_: partial, interim, stable prefix, live text
+
+**Cleanup**:
+The pass that tidies a finished phrase — fillers, punctuation, casing, numbers, a spoken list as a list — without rewording it.
+_Avoid_: polish, post-processing, formatting, correction
+
+**Vocabulary**:
+The words a bot's dictation leans towards: names, product words, jargon. It biases what the host hears and how a phrase is cleaned up.
+_Avoid_: dictionary, custom words, hint, keyterms
+
+**Host speech model**:
+The model on a bot's host that hears its dictation. Its size is the trade between waiting and being right.
+_Avoid_: whisper model, STT model, engine, ASR
