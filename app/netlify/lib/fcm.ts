@@ -25,6 +25,7 @@ export const PUSH_KINDS = [
   "research_scope",
   "research_done",
   "research_failed",
+  "afk_pr",
 ] as const
 export type PushKind = (typeof PUSH_KINDS)[number] | "test"
 export type SendResult = "ok" | "gone" | "error"
@@ -38,6 +39,7 @@ export const PUSH_CATEGORIES = [
   "code_run_done",
   "code_pr_checks",
   "code_pr_merged",
+  "code_afk_pr",
   "code_setup_failed",
   "routine_failed",
   "research_input",
@@ -98,6 +100,7 @@ const WORDS: Record<PushKind, string> = {
   research_scope: "The scope is ready for your approval",
   research_done: "Your research is ready",
   research_failed: "The mission stopped with an error",
+  afk_pr: "A task's pull request is ready to review",
   test: "This is a test notification",
 }
 

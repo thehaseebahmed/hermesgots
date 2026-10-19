@@ -41,6 +41,12 @@ class Categories(unittest.TestCase):
         self.assertIsNone(push.clean_categories(None))
         self.assertEqual(push.clean_categories([]), [])
 
+    def test_an_afk_task_pull_request_has_a_category_of_its_own(self):
+        self.assertEqual(push.category_of("afk_pr"), "code_afk_pr")
+        self.assertEqual(push.category_of("afk_pr", project=True), "code_afk_pr")
+        self.assertIn("code_afk_pr", push.CATEGORIES)
+        self.assertIn("afk_pr", push.SESSION_KINDS, "it names the session it is about")
+
     def test_a_kind_belongs_to_the_feature_of_its_session(self):
         self.assertEqual(push.category_of("question"), "chat_input")
         self.assertEqual(push.category_of("question", project=True), "code_input")

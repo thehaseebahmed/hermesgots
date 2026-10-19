@@ -17,6 +17,7 @@ export type PushCategory =
   | "code_run_done"
   | "code_pr_checks"
   | "code_pr_merged"
+  | "code_afk_pr"
   | "code_setup_failed"
   | "routine_failed"
   | "research_input"
@@ -72,6 +73,13 @@ export const PUSH_CATEGORIES: PushCategoryInfo[] = [
     title: "Pull request merged",
     on: false,
     importance: 2,
+  },
+  {
+    id: "code_afk_pr",
+    feature: "code",
+    title: "A task's pull request is ready to review",
+    on: true,
+    importance: 3,
   },
   {
     id: "code_setup_failed",

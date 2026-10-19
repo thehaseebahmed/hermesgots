@@ -57,11 +57,12 @@ class AfkPromptTests(unittest.TestCase):
         self.assertIn("Conventional Commits", text)
         self.assertIn("A suite you didn't run isn't passing", text)
 
-    def test_it_ships_a_draft_pull_request_that_closes_the_issue(self) -> None:
+    def test_it_ships_a_draft_pull_request_and_leaves_the_closing_line_to_the_tool(self) -> None:
         text = self.text()
         self.assertIn("action 'ship'", text)
         self.assertIn("draft pull request", text)
-        self.assertIn("Closes #265", text, "the brief names the issue it closes")
+        self.assertIn("#265", text, "the brief names the issue it implements")
+        self.assertIn("Don't write the `Closes` line yourself", text)
         self.assertIn("Don't close the issue or merge anything yourself", text)
 
     def test_it_has_nobody_to_ask_and_a_second_opinion_to_take(self) -> None:

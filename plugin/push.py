@@ -74,6 +74,7 @@ KINDS = (
     "research_scope",
     "research_done",
     "research_failed",
+    "afk_pr",
 )
 # What a device switches: a kind within a feature (chats, code, routines, research). A session's
 # kinds belong to Code when it is a project session, else to Chats.
@@ -86,6 +87,7 @@ CATEGORIES = (
     "code_run_done",
     "code_pr_checks",
     "code_pr_merged",
+    "code_afk_pr",
     "code_setup_failed",
     "routine_failed",
     "research_input",
@@ -95,7 +97,9 @@ CATEGORIES = (
 # What a device that never said which it wants gets: what pushed before there were more.
 LEGACY_CATEGORIES = ("chat_input", "code_input")
 # Kinds that are about a chat's session, so that chat can be muted.
-SESSION_KINDS = ("approval", "question", "plan", "run_done", "run_failed", "pr_checks", "pr_merged")
+SESSION_KINDS = (
+    "approval", "question", "plan", "run_done", "run_failed", "pr_checks", "pr_merged", "afk_pr"
+)
 INPUT_KINDS = ("approval", "question", "plan")
 
 
@@ -108,7 +112,7 @@ def category_of(kind: str, project: bool = False) -> str:
         return "research_input"
     if kind.startswith("research_"):
         return kind
-    if kind in ("pr_checks", "pr_merged"):
+    if kind in ("pr_checks", "pr_merged", "afk_pr"):
         return f"code_{kind}"
     feature = "code" if project or kind == "plan" else "chat"
     return f"{feature}_{'input' if kind in INPUT_KINDS else kind}"

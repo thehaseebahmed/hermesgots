@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 24
+SCHEMA_VERSION = 25
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -245,9 +245,10 @@ def connect(path: Path) -> sqlite3.Connection:
         )
         # v4: a session has a worktree in every repo of its project. v5: its newest plan file. v10: a
         # session's Theseus settings, kept so old rows and this schema agree (nothing reads it since
-        # Theseus became a goal). v15: the folder its generated files go to.
+        # Theseus became a goal). v15: the folder its generated files go to. v25: the task AFK
+        # started it for, kept with the session so its pull request still names it after the claim.
         columns = {row[1] for row in conn.execute("PRAGMA table_info(project_sessions)")}
-        for column in ("repos", "plan_file", "theseus", "files_dir"):
+        for column in ("repos", "plan_file", "theseus", "files_dir", "task"):
             if column not in columns:
                 conn.execute(f"ALTER TABLE project_sessions ADD COLUMN {column} TEXT")
         # v20: token counts per UTC day, model and mode, for the community leaderboard.

@@ -17,6 +17,7 @@ const WORDS = {
   research_scope: "The scope is ready for your approval",
   research_done: "Your research is ready",
   research_failed: "The mission stopped with an error",
+  afk_pr: "A task's pull request is ready to review",
 }
 
 // When the plugin is older or couldn't find a name.

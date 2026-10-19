@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from plugin import ship
+from plugin.store import db_path
 
 
 def _record(tmp):
@@ -174,6 +175,123 @@ class ForceTests(_Base):
                 ship._push(Path(self.tmp), self.tmp, "hermes/s1", force=True)
         self.assertEqual(ctx.exception.status, 409)
         self.assertIn("moved", str(ctx.exception))
+
+
+TASK = {
+    "repo": "o/r",
+    "number": 265,
+    "title": "The work comes back as a draft pull request",
+    "url": "https://github.com/o/r/issues/265",
+    "created_at": "2026-10-01T00:00:00Z",
+}
+
+
+class AfkTaskTests(_Base):
+    def _ship(self, task=None, repo_root=None, body=None):
+        sent = []
+
+        def request(path, auth, method="GET", data=None):
+            sent.append((path, method, data))
+            return {"number": 7, "html_url": "https://github.com/o/r/pull/7", "state": "open", "draft": True}
+
+        record = _record(self.tmp)
+        record["task"] = task
+        if repo_root:
+            record["repos"][0] = {**record["repos"][0], "repo_root": repo_root}
+        with (
+            patch("plugin.ship.status", return_value=[_state(changed=True)]),
+            patch("plugin.ship._commit", return_value="abc1234"),
+            patch("plugin.ship._repo_status", return_value=_state(changed=True)),
+            patch("plugin.ship._push"),
+            patch("plugin.ship._lock") as lock,
+            patch("plugin.github.pull_request", return_value=None),
+            patch("plugin.github.token", return_value=("tok", "u")),
+            patch("plugin.github.origin_repo", return_value=repo_root or "o/r"),
+            patch("plugin.github._request", side_effect=request),
+            patch("plugin.push.notify") as notify,
+        ):
+            lock.return_value.acquire.return_value = True
+            ship.ship(Path(self.tmp), "s1", record, "msg", "T", body, True, False)
+        created = [call for call in sent if call[0].endswith("/pulls") and call[1] == "POST"]
+        return (created[0][2] if created else None), notify
+
+    def test_the_task_its_repository_works_is_closed_by_the_merge(self):
+        data, _ = self._ship(task=TASK)
+        self.assertIs(data["draft"], True, "the pull request stays a draft")
+        self.assertIn("Closes #265", data["body"])
+
+    def test_the_body_the_run_wrote_carries_the_closing_line(self):
+        data, _ = self._ship(task=TASK, body="## Summary\n\nWork.\n\n## How to test\n\nRun it.")
+        self.assertIn("Work.", data["body"])
+        self.assertIn("Closes #265", data["body"].splitlines())
+
+    def test_another_repository_does_not_close_the_task(self):
+        data, _ = self._ship(task=TASK, repo_root="o/other")
+        self.assertNotIn("Closes #265", data["body"])
+
+    def test_a_session_the_afk_row_does_not_hold_gets_no_reference(self):
+        data, _ = self._ship(task=None)
+        self.assertNotIn("Closes #", data["body"])
+
+    def test_opening_the_tasks_pull_request_says_it_is_ready_to_review(self):
+        _, notify = self._ship(task=TASK)
+        notify.assert_called_once()
+        args, _ = notify.call_args
+        self.assertEqual(args[:2], ("afk_pr", "s1"))
+        self.assertEqual(args[2], db_path(Path(self.tmp)))
+
+    def test_another_repositorys_pull_request_is_not_the_tasks_news(self):
+        _, notify = self._ship(task=TASK, repo_root="o/other")
+        notify.assert_not_called()
+
+    def test_a_session_that_is_not_afks_says_nothing(self):
+        _, notify = self._ship(task=None)
+        notify.assert_not_called()
+
+
+class AfkUpdateTests(_Base):
+    def test_updating_the_body_keeps_the_task_reference(self):
+        pr = {"number": 7, "state": "open", "title": "old", "url": "u"}
+        record = _record(self.tmp)
+        record["task"] = TASK
+        with (
+            patch("plugin.github.token", return_value=("tok", "u")),
+            patch("plugin.github.origin_repo", return_value="o/r"),
+            patch("plugin.github.pull_request", return_value=pr),
+            patch("plugin.github.update_pull_request", return_value=pr) as upd,
+            patch("plugin.github.forget_pull_request"),
+        ):
+            ship.update(Path(self.tmp), record, "new", "Body.")
+        self.assertIn("Closes #265", upd.call_args.args[3])
+
+    def test_updating_a_body_that_already_names_the_task_does_not_say_it_twice(self):
+        pr = {"number": 7, "state": "open", "title": "old", "url": "u"}
+        record = _record(self.tmp)
+        record["task"] = TASK
+        with (
+            patch("plugin.github.token", return_value=("tok", "u")),
+            patch("plugin.github.origin_repo", return_value="o/r"),
+            patch("plugin.github.pull_request", return_value=pr),
+            patch("plugin.github.update_pull_request", return_value=pr) as upd,
+            patch("plugin.github.forget_pull_request"),
+        ):
+            ship.update(Path(self.tmp), record, None, "Body.\n\nCloses #265")
+        self.assertEqual(upd.call_args.args[3].count("Closes #265"), 1)
+
+
+    def test_a_body_closing_a_longer_number_still_closes_this_task(self):
+        pr = {"number": 7, "state": "open", "title": "old", "url": "u"}
+        record = _record(self.tmp)
+        record["task"] = {**TASK, "number": 26}
+        with (
+            patch("plugin.github.token", return_value=("tok", "u")),
+            patch("plugin.github.origin_repo", return_value="o/r"),
+            patch("plugin.github.pull_request", return_value=pr),
+            patch("plugin.github.update_pull_request", return_value=pr) as upd,
+            patch("plugin.github.forget_pull_request"),
+        ):
+            ship.update(Path(self.tmp), record, None, "Body.\n\nCloses #265")
+        self.assertIn("Closes #26", upd.call_args.args[3].splitlines())
 
 
 class UpdateTests(_Base):

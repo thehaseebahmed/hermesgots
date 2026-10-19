@@ -14,8 +14,9 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import github, projects, tools_common
+from . import github, projects, push, tools_common
 from .sessions import PR_FOOTER, WorkspaceError, _git
+from .store import db_path
 
 logger = logging.getLogger(__name__)
 
@@ -198,17 +199,52 @@ def _push_error(stderr: str, fallback: str, auth: Optional[str]) -> ShipError:
     return ShipError(_last_line(stderr, fallback, auth))
 
 
-def _body(tree: str, base: Optional[str], body: Optional[str]) -> str:
+def _body(
+    tree: str,
+    base: Optional[str],
+    body: Optional[str],
+    reference: Optional[str] = None,
+) -> str:
     if not body:
         log = _git(tree, "log", "--reverse", "--format=- %s", f"origin/{base}..HEAD") if base else None
         body = log.stdout.strip() if log is not None and log.returncode == 0 else ""
+    body = _with_reference(body, reference)
     if PR_FOOTER in body:
         return body
     return f"{body}\n\n{PR_FOOTER}" if body else PR_FOOTER
 
 
+def _with_reference(body: str, reference: Optional[str]) -> str:
+    if not reference or any(line.strip() == reference for line in body.splitlines()):
+        return body
+    if PR_FOOTER in body:
+        return body.replace(PR_FOOTER, f"{reference}\n\n{PR_FOOTER}", 1)
+    return f"{body}\n\n{reference}" if body.strip() else reference
+
+
+def _closes(task: Optional[Dict[str, Any]], repo_name: Optional[str]) -> Optional[str]:
+    """The line that closes an AFK session's task, only in the repository the task lives in.
+
+    GitHub closes an issue through a pull request in the same repository, and a cross-repository
+    ``Closes owner/repo#n`` doesn't close anything — so a project that spans repositories gets the
+    reference once, on the pull request that can act on it (ADR 0012).
+    """
+    if not task or not repo_name:
+        return None
+    repo, number = task.get("repo"), task.get("number")
+    if not isinstance(repo, str) or repo.lower() != repo_name.lower():
+        return None
+    return f"Closes #{number}" if isinstance(number, int) else None
+
+
 def _open_pr(
-    hermes_home: Path, repo: Dict[str, Any], state: Dict[str, Any], title: Optional[str], body: Optional[str]
+    hermes_home: Path,
+    repo: Dict[str, Any],
+    state: Dict[str, Any],
+    title: Optional[str],
+    body: Optional[str],
+    session_id: Optional[str] = None,
+    task: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     name = github.origin_repo(repo["repo_root"])
     if not name:
@@ -222,13 +258,22 @@ def _open_pr(
     if not title:
         subjects = _git(tree, "log", "--format=%s", f"origin/{state['base']}..HEAD").stdout.splitlines()
         title = subjects[0] if len(subjects) == 1 else repo["branch"]
+    reference = _closes(task, name)
     try:
         created = github.create_pull_request(
-            name, repo["branch"], state["base"], title[:MAX_TITLE], _body(tree, state["base"], body), True, auth
+            name,
+            repo["branch"],
+            state["base"],
+            title[:MAX_TITLE],
+            _body(tree, state["base"], body, reference),
+            True,
+            auth,
         )
     except github.GitHubError as error:
         raise ShipError(str(error), error.status) from None
     github.forget_pull_request(repo["repo_root"], repo["branch"])
+    if session_id and reference:
+        push.notify("afk_pr", session_id, db_path(hermes_home))
     return created
 
 
@@ -261,6 +306,7 @@ def ship(
         states = {state["name"]: state for state in status(record)}
         if not message and any(state["changed"] for state in states.values()):
             raise ValueError("A commit message is required.")
+        task = record.get("task")
         results = []
         for repo in record["repos"]:
             state = states.get(repo["name"])
@@ -283,7 +329,9 @@ def ship(
                     _push(hermes_home, repo["path"], repo["branch"], force)
                     result["pushed"] = True
                 if wants_pr:
-                    result["pr"] = _open_pr(hermes_home, repo, state, title, body)
+                    result["pr"] = _open_pr(
+                        hermes_home, repo, state, title, body, session_id, task
+                    )
             except (ShipError, WorkspaceError) as error:
                 result["error"] = str(error)
             results.append(result)
@@ -303,6 +351,7 @@ def update(
     auth, _ = github.token(hermes_home)
     if not auth:
         raise ShipError("No GitHub account on the server.", 409)
+    task = record.get("task")
     results = []
     for repo in record["repos"]:
         name = github.origin_repo(repo["repo_root"])
@@ -313,7 +362,14 @@ def update(
             continue
         result: Dict[str, Any] = {"name": repo["name"], "pr": pr}
         try:
-            result["pr"] = github.update_pull_request(name, pr["number"], title, body, auth)
+            reference = _closes(task, name)
+            result["pr"] = github.update_pull_request(
+                name,
+                pr["number"],
+                title,
+                _with_reference(body, reference) if body else body,
+                auth,
+            )
             github.forget_pull_request(repo["repo_root"], repo["branch"])
         except github.GitHubError as error:
             result["error"] = str(error)

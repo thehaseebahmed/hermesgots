@@ -221,6 +221,7 @@ def publish(
     for it. It is written once, here: the chat list is last-write-wins, so a title the user edits, a
     mode they change or a resolve they make afterwards has to win.
     """
+    sessions.set_task(db_path(hermes_home), session_id, task)
     now = int(time.time() * 1000)
     value = {
         "title": session_title(task),
