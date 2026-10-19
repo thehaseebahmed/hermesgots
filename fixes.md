@@ -1,3 +1,71 @@
+# Deferred fixes from the simplify pass on AFK's frontier
+
+A cleanup review of `feat(projects): list a project's ready tasks in AFK's pop-up` (four parallel
+reviewers: reuse, quality, efficiency, altitude) turned up changes worth making that are either
+wider than this branch or a decision the read should not settle on its own. All but the two below
+are applied here; those two change what a read asks for rather than how it is written.
+
+Everything else the review found is applied on this branch: the read reuses `repos._repo_of` for a
+project's repositories instead of parsing a checkout path a second time; a claimed task's blockers
+are never fetched, since a claimed task is out of the frontier whatever it blocks; an issue whose
+edges GitHub's own summary counts as all closed costs no second request; one `_claimed` predicate
+answers "someone has this" for both the rule and the read; every row leaves `frontier` in one shape,
+with an empty `blockers` list rather than a key some rows have and others don't; "GitHub says there
+is no such issue" is `github.is_missing` rather than a second `"Not Found"` match; a blocker that
+could not be read still counts as open, and the tests pin that beside the missing one; the library
+and task routes resolve a project through one helper; and the app's per-connection feature answers
+live in one `createStore` whose hook takes a whole registry, so the MCP screen no longer restates
+six keys by hand and the AFK row reads the same store. The AFK sheet also reads through `usePoll`
+with an abort and the house `lacksRoute` cooldown instead of its own effect, and its four states are
+guard clauses rather than a ternary chain.
+
+## Careful
+
+### 1. The read stops at a repository's first page of ready tasks
+
+`plugin/tasks.py::_candidates` asks one question per repository — the open issues carrying
+`ready-for-agent`, oldest first, `per_page=100` — and does not follow GitHub's `Link: rel="next"`.
+The cap is deliberate (the comment says the oldest page is the one that matters, since that is the
+order AFK works in), but a repository holding more than a hundred open ready tasks answers the
+oldest hundred and nothing says the rest exist.
+
+- Cost: the newest tasks on a busy repository are invisible to AFK, in the screen whose whole job is
+  to say what can be worked next. Nothing else is wrong with the answer: a blocker pointing at a
+  task beyond the page is still read by number, so the frontier is correct about the tasks it lists.
+- Suggested fix: follow the `Link` header up to a small page cap of its own, or read the count first
+  and say when the list is a slice — the app has room for a line under the header.
+- Why it is not applied here: it changes the request shape (a loop with its own cap, a header parse
+  and a state to be honest about), and whether a project should stop at a hundred is a decision
+  about AFK's cost per open rather than a cleanup of this read. No repository in the tracker is
+  close to the cap today, so the fix wants that decision first and a flow that seeds more than a
+  page after it.
+
+### 2. A feature answer is kept for the whole session
+
+`app/src/lib/features.ts` remembers each connection's answer and `readFeatures` returns early once
+it has one, so a plugin upgraded while the app is open keeps its old feature list until the page is
+reloaded: the AFK row stays hidden (or stays visible) on the strength of the list `/info` gave the
+first screen that asked. `MIN_PLUGIN_VERSION` (`src/lib/version.ts`) raises an out-of-date warning
+but does not refresh an answer.
+
+- Cost: a Bot whose host was updated mid-session still reads as an older plugin, which for this
+  branch means a menu row that exists and is not offered — the same silence the MCP screen already
+  had, now that two screens share the store.
+- Suggested fix: key the remembered answer on the plugin's version from `/info` (which the app
+  already reads) and re-read when it moves, or clear the store when the version warning appears.
+- Why it is not applied here: it changes when every feature-gated control is asked about, for a
+  state only an in-place upgrade reaches, and the cache this branch moved out of `app/src/lib/mcps.ts`
+  held an answer for the session too — so this is the existing rule made shared, not one the change
+  introduced.
+
+---
+
+Found by the `/simplify-code` pass on this branch. It was a cleanup review, not a bug hunt —
+correctness was out of scope except where a changed read could be wrong, which the tests pin — and
+neither entry blocks the pull request.
+
+---
+
 # Deferred fixes from the simplify pass
 
 A cleanup review of `fix(usage): read an older Hermes core without read_only` (four parallel
