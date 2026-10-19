@@ -465,14 +465,7 @@ const mcpBlocks = new Map([
       command: "npx",
       args: ["-y", "@modelcontextprotocol/server-github"],
       auth: "none",
-      values: [
-        {
-          name: "GITHUB_TOKEN",
-          prompt: "GitHub personal access token",
-          required: true,
-          secret: true,
-        },
-      ],
+      values: [{ name: "GITHUB_TOKEN" }],
     },
   ],
   [
@@ -482,14 +475,7 @@ const mcpBlocks = new Map([
       command: "npx",
       args: ["-y", "@modelcontextprotocol/server-postgres", "postgres://localhost/app"],
       auth: "none",
-      values: [
-        {
-          name: "PG_PASSWORD",
-          prompt: "Password for that database",
-          required: false,
-          secret: true,
-        },
-      ],
+      values: [{ name: "PG_PASSWORD" }],
     },
   ],
   [
@@ -2691,7 +2677,7 @@ http
             args: block.args ?? [],
             auth: block.auth ?? "none",
             editable: server.source === "config",
-            values: block.values.map((value) => ({ ...value, set: mcpEnv.has(value.name) })),
+            values: block.values.map((value) => ({ name: value.name, set: mcpEnv.has(value.name) })),
           },
         },
       })
@@ -2719,7 +2705,7 @@ http
           ...(block.values ?? []),
           ...Object.keys(values)
             .filter((key) => !(block.values ?? []).some((value) => value.name === key))
-            .map((key) => ({ name: key, prompt: "", required: false, secret: true })),
+            .map((key) => ({ name: key })),
         ],
       })
       return json(res, 200, { object: { servers: mcpRows() } })
@@ -2765,12 +2751,7 @@ http
       })
       mcpBlocks.set(name, {
         ...mcpBlockOf(body),
-        values: Object.keys(values).map((key) => ({
-          name: key,
-          prompt: "",
-          required: false,
-          secret: true,
-        })),
+        values: Object.keys(values).map((key) => ({ name: key })),
       })
       return json(res, 200, { object: { servers: mcpRows() } })
     }

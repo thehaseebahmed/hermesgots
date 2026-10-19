@@ -444,18 +444,17 @@ def tool_readable() -> Optional[str]:
 def detail(profile: Optional[str], name: str) -> Dict[str, Any]:
     """One of ``profile``'s servers as the Config screen is built from it, never a value it holds.
 
-    The transport and what it runs — a URL, or a command and its arguments — plus one value row per
-    environment name, each with the prompt its Catalogue entry writes for it where the entry declares
-    one, whether it is required, whether its field is masked, and whether the bot already holds it.
-    The content of a value is never answered, whether it sits in the profile's ``.env`` behind a
-    ``${NAME}`` reference or inline in the block; ``set`` is the whole of what the screen may know.
+    The transport and what it runs — a URL, or a command and its arguments — plus one row per
+    environment name the block holds, masked, saying whether the bot already holds it. The content of
+    a value is never answered, whether it sits in the profile's ``.env`` behind a ``${NAME}``
+    reference or inline in the block; ``set`` is the whole of what the screen may know.
 
     A server a Hermes plugin provides is answered too, with ``editable`` false: Hermes refuses to
     modify those, and the screen shows what the plugin's own ``mcp.json`` runs without a Save.
 
-    ``profile`` is a profile name, or None for the process's own. Blocking — the profile's config and
-    ``.env`` are read, and the catalogue may be scanned for the entry a name matches — so call it
-    from a worker thread, never the event loop. Nothing is connected, started or written.
+    ``profile`` is a profile name, or None for the process's own. Blocking — the profile's config
+    and ``.env`` are read — so call it from a worker thread, never the event loop. Nothing is
+    connected, started or written.
     """
     hermes = _hermes_configure()
     with hermes["read_scope"](profile):
@@ -682,7 +681,7 @@ def _detail(
         "args": [str(argument) for argument in (cfg.get("args") or [])],
         "auth": _auth(cfg),
         "editable": not plugin,
-        "values": _value_rows(name, cfg, hermes),
+        "values": _value_rows(cfg, hermes),
     }
 
 
@@ -693,47 +692,19 @@ def _auth(cfg: Dict[str, Any]) -> str:
     return "header" if cfg.get("headers") else "none"
 
 
-def _value_rows(name: str, cfg: Dict[str, Any], hermes: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """One row per environment name: the block's own, then any its Catalogue entry declares.
+def _value_rows(cfg: Dict[str, Any], hermes: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """One row per environment name the block holds, A to Z, masked and marked set or not.
 
-    The block's names come first, A to Z, then a declared value the block has no line for — a
-    manifest can gain one after a server was added — each marked not set. A prompt is the entry's own
-    where it writes one, and empty otherwise; a value nothing declares is masked, since the screen
-    can't tell a credential from a setting and masking is the harmless side to guess wrong on.
+    Only the block's own names. A row says what this server's configuration has, never what a
+    catalogue entry that happens to share the server's name declares — a server the form added by
+    hand is described by nothing but itself. Every value is masked, since a block cannot tell a
+    credential from a setting and masking is the harmless side to guess wrong on.
     """
-    declared = _declared_for(hermes, name)
-    prompts = {
-        str(getattr(spec, "name", "")): getattr(spec, "prompt", "") or "" for spec in declared
-    }
-    secrets = {
-        str(getattr(spec, "name", "")): getattr(spec, "secret", True) is not False
-        for spec in declared
-    }
-    required = {
-        str(getattr(spec, "name", "")): getattr(spec, "required", True) is not False
-        for spec in declared
-    }
     block = cfg.get("env") if isinstance(cfg.get("env"), dict) else {}
-    names = sorted({str(key) for key in block} | set(prompts))
     return [
-        {
-            "name": key,
-            "prompt": prompts.get(key, ""),
-            "required": required.get(key, False),
-            "secret": secrets.get(key, True),
-            "set": _holds(block, key, hermes),
-        }
-        for key in names
+        {"name": key, "set": _holds(block, key, hermes)}
+        for key in sorted(str(key) for key in block)
     ]
-
-
-def _declared_for(hermes: Dict[str, Any], name: str) -> List[Any]:
-    """The values a Catalogue entry matching this server's name declares, if there is one."""
-    try:
-        found = hermes["entry"](name)
-    except Exception:  # noqa: BLE001 - a catalogue that can't be read is no prompts, not a failure
-        return []
-    return _env_specs(found) if found is not None else []
 
 
 def _holds(block: Dict[str, Any], key: str, hermes: Dict[str, Any]) -> bool:

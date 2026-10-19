@@ -67,16 +67,10 @@ const run = async ({ page, profileId, shot, until }) => {
       "the arguments are one line, as the block holds them",
     )
 
-    // Each environment value is one field, titled with the name it lands under and subtitled with
-    // what the manifest says for people.
-    const title = page.locator('[data-value="GITHUB_TOKEN"] label > span').first()
-    const subtitle = page.locator('[data-value="GITHUB_TOKEN"] label > span').nth(1)
-    assert.equal(await title.innerText(), "GITHUB_TOKEN *", "the value's name is its title")
-    assert.equal(
-      await subtitle.innerText(),
-      "GitHub personal access token",
-      "the manifest's own words are its subtitle",
-    )
+    // Each environment value is one field titled with the name it lands under, and nothing else:
+    // no catalogue entry describes a value this server's block holds.
+    const label = page.locator('[data-value="GITHUB_TOKEN"] label')
+    assert.equal(await label.innerText(), "GITHUB_TOKEN", "the value's name is the whole of the row")
     // It is masked, and what the bot holds is not on the screen: the field stands empty and says Set.
     const field = page.locator('[data-value="GITHUB_TOKEN"] input')
     assert.equal(await field.getAttribute("type"), "password", "the value's field is masked")

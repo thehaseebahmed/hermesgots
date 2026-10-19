@@ -2145,8 +2145,8 @@ class McpDetailTests(unittest.TestCase):
             found = mcp.detail("bot-a", "pg")
         self.assertEqual(
             [
-                {"name": "PG_TOKEN", "prompt": "", "required": False, "secret": True, "set": True},
-                {"name": "PG_URL", "prompt": "", "required": False, "secret": True, "set": True},
+                {"name": "PG_TOKEN", "set": True},
+                {"name": "PG_URL", "set": True},
             ],
             found["values"],
         )
@@ -2160,22 +2160,19 @@ class McpDetailTests(unittest.TestCase):
             found = mcp.detail("bot-a", "pg")
         self.assertIs(False, found["values"][0]["set"])
 
-    def test_a_catalogue_prompt_and_a_value_the_block_lacks_are_listed(self):
-        """The flipped field's descriptions come from the entry a server's name matches."""
+    def test_a_value_row_says_only_what_the_block_holds(self):
+        """A name the Catalogue offers is not this server's: nothing the entry declares is added.
+
+        A server the form added by hand can share a catalogue entry's name and mean something else
+        entirely, so the rows are the block's own names and nothing describes them.
+        """
         stubs = hermes(
             servers={"postgres": {"command": "srv", "env": {"DATABASE_URL": "postgres://x"}}},
             catalogue=[POSTGRES],
         )
         with mock.patch.dict(sys.modules, stubs):
             found = mcp.detail("bot-a", "postgres")
-        self.assertEqual(
-            [
-                {"name": "DATABASE_URL", "prompt": "", "required": False, "secret": True, "set": True},
-                {"name": "PG_DATABASE", "prompt": "Database", "required": True, "secret": False, "set": False},
-                {"name": "PG_PASSWORD", "prompt": "Password", "required": True, "secret": True, "set": False},
-            ],
-            found["values"],
-        )
+        self.assertEqual([{"name": "DATABASE_URL", "set": True}], found["values"])
 
     def test_a_plugin_provided_server_is_answered_and_is_not_editable(self):
         stubs = hermes(

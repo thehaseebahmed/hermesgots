@@ -339,7 +339,9 @@ function ServerRow({
           <button
             type="button"
             className={cn(
-              "-mx-1 min-h-11 px-1 text-left text-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring",
+              // The line reads exactly where a plain subtitle would: its 44px touch target grows
+              // below the text, and the negative margin keeps that height out of the row's layout.
+              "flex min-h-11 items-start -mx-1 -mb-6 px-1 text-left text-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring",
               line.failed ? "text-destructive" : "text-warning",
             )}
             onClick={onGrant}
@@ -669,25 +671,17 @@ function ConfigTab({
         <FieldGroup>
           {rows.map((row, index) => {
             const known = detail.values.find((value) => value.name === row.name)
-            const prompt = known?.prompt && known.prompt !== known.name ? known.prompt : ""
             return (
               <Field key={`${row.name}-${index}`} data-value={row.name}>
-                <FieldLabel
-                  htmlFor={`mcp-config-value-${index}`}
-                  className="flex-col items-start gap-0.5"
-                >
-                  <span className="font-mono text-sm">
-                    {row.name || known?.name}
-                    {known?.required && <span aria-hidden="true">{" *"}</span>}
-                  </span>
-                  {prompt && (
-                    <span className="text-xs font-normal text-muted-foreground">{prompt}</span>
-                  )}
+                {/* The environment name is the whole of the row: nothing describes a value this
+                    server's block holds, so there is no second line to write. */}
+                <FieldLabel htmlFor={`mcp-config-value-${index}`} className="font-mono text-sm">
+                  {row.name || known?.name}
                 </FieldLabel>
                 <Input
                   id={`mcp-config-value-${index}`}
                   className="h-11"
-                  type={known?.secret === false ? "text" : "password"}
+                  type="password"
                   autoComplete="off"
                   autoCapitalize="off"
                   autoCorrect="off"

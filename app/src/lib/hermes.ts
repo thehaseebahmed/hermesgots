@@ -681,11 +681,8 @@ export async function installMcpServer(
 
 /** One value a server's own configuration holds, as its Config tab is built from it. */
 export interface McpServerValue {
+  /** The environment name the block holds, which is the whole of the row's title. */
   name: string
-  /** What the Catalogue entry writes for people, where one matches the server's name. */
-  prompt: string
-  required: boolean
-  secret: boolean
   /** Whether the bot already holds it. Its content never reaches the screen. */
   set: boolean
 }
@@ -739,13 +736,7 @@ export interface McpTools {
 function parseMcpServerValue(raw: unknown): McpServerValue | undefined {
   const value = raw as Record<string, unknown> | null
   if (typeof value?.name !== "string" || !value.name) return undefined
-  return {
-    name: value.name,
-    prompt: typeof value.prompt === "string" ? value.prompt : "",
-    required: value.required === true,
-    secret: value.secret !== false,
-    set: value.set === true,
-  }
+  return { name: value.name, set: value.set === true }
 }
 
 /** One server's block as the plugin reports it, or nothing for a row Gots can't draw. */
