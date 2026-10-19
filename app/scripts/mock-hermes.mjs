@@ -2127,6 +2127,9 @@ const PROFILE_PATH = /(?:^|\/)p\/([^/]+)(?=\/)/
 const profileOf = (req) => PROFILE_PATH.exec(req.url ?? "")?.[1] ?? ""
 // The fallback models the plugin's `fallbacks` route recorded, per profile.
 const fallbacksOf = new Map()
+// The model the plugin's `delegation` route recorded: what the profile's delegated tasks run on,
+// or nothing when they inherit the bot's own model.
+const delegationsOf = new Map()
 // The provider figure every later usage read serves, set by `usage?percent=N` and cleared by
 // `percent=`: a dev-only override, so an e2e flow can move an account from approaching to out
 // without restarting the mock (which the env alone can't do mid-run).
@@ -2596,6 +2599,7 @@ http
           "push",
           "host_model",
           "fallbacks",
+          "delegation_model",
           "skills",
           "queue",
           "dictation",
@@ -3053,6 +3057,39 @@ http
         if (saved.length) fallbacksOf.set(key, saved)
         else fallbacksOf.delete(key)
         return json(res, 200, { object: "memento.fallbacks", fallbacks: saved })
+      }
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/delegation") {
+      const key = pluginProfile ?? ""
+      if (req.method === "GET") {
+        return json(res, 200, {
+          object: "memento.delegation",
+          delegation: delegationsOf.get(key) ?? null,
+        })
+      }
+      if (req.method === "POST") {
+        const { delegation } = await readBody(req)
+        if (delegation != null) {
+          const provider = delegation.provider?.trim?.() ?? ""
+          const model = delegation.model?.trim?.() ?? ""
+          if (!provider || !model) {
+            return json(res, 400, {
+              error: {
+                message: provider ? "Delegation needs a model" : "Delegation needs a provider",
+              },
+            })
+          }
+          // Checked the way the host's `model` route checks the main one.
+          if (!PICKER_PROVIDERS.includes(provider)) {
+            return json(res, 400, { error: { message: `Unknown provider '${provider}'.` } })
+          }
+          const saved = { provider, model }
+          delegationsOf.set(key, saved)
+          return json(res, 200, { object: "memento.delegation", delegation: saved })
+        }
+        // Nothing set: a delegated task inherits the bot's own model.
+        delegationsOf.delete(key)
+        return json(res, 200, { object: "memento.delegation", delegation: null })
       }
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/github") {
