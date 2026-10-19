@@ -116,6 +116,12 @@ const lastCalls = new Map()
 const modelChanges = new Map()
 const transcripts = new Map()
 let lastRowId = 0
+// Context compression rotates a chat to a child session (Hermes's sessions.parent_session_id): a
+// turn addressed to the old id runs on the live tip and is keyed there in runs/live, while a
+// transcript read of the old id still returns the whole lineage (resolve_resume_session_id +
+// include_ancestors). POST /__mock/compress { session, child } performs the rotation.
+const compressed = new Map()
+const resolveSession = (id) => (id && compressed.get(id)) || id
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const cors = {
@@ -1242,6 +1248,11 @@ const RUN_BACKLOG = Number(process.env.MOCK_RUN_BACKLOG ?? 1000)
 const DROP_EVENTS_MS = Number(process.env.MOCK_DROP_EVENTS_MS ?? 0)
 const BLOCK_RUN_EVENTS = process.env.MOCK_BLOCK_RUN_EVENTS === "1"
 const STALL_EVENTS_MS = Number(process.env.MOCK_STALL_EVENTS_MS ?? 0)
+// On by default: runs/live answers under the session a chat started as, mirroring the plugin's
+// `chat_session` walk, so a compressed chat's run stays findable on a device that only knows the id
+// the chat began with. `MOCK_RUNS_LIVE_ROOT_IDS=0` restores the old keying — the run's own session id
+// (the compression tip after a rotation) — so the e2e can still prove the bug when the walk is absent.
+const ROOT_RUN_IDS = process.env.MOCK_RUNS_LIVE_ROOT_IDS !== "0"
 
 // The plugin's change stream: one log per profile (the "" key is the default one). Runs and sessions
 // belong to no profile here, so they go to every log.
@@ -1276,10 +1287,23 @@ function logOf(profile) {
   if (!eventLogs.has(profile)) eventLogs.set(profile, { rows: [], seq: 0 })
   return eventLogs.get(profile)
 }
+// The session a chat started as (the plugin's stream.py `chat_session`): session events carry it,
+// since Gots knows a chat by the id it began with however far compression has moved it on.
+function chatSessionOf(sessionId) {
+  let current = sessionId
+  for (let hop = 0; hop < 8; hop += 1) {
+    const parent = [...compressed.entries()].find(([, child]) => child === current)?.[0]
+    if (!parent) return current
+    current = parent
+  }
+  return current
+}
+
 function noteEvent(kind, sessionId, profile) {
+  const chatSession = kind === "session" ? chatSessionOf(sessionId) : sessionId
   for (const key of profile === undefined ? new Set([...eventLogs.keys(), ""]) : [profile]) {
     const log = logOf(key)
-    log.rows.push({ id: ++log.seq, kind, session_id: sessionId })
+    log.rows.push({ id: ++log.seq, kind, session_id: chatSession })
     if (log.rows.length > 2000) log.rows.shift()
   }
   for (const stream of eventStreams) stream()
@@ -1388,7 +1412,10 @@ function startRun(req, body) {
   const replay = key && [...runs.values()].find((run) => run.key === key)
   if (replay) return replay
   const id = `run_${randomUUID().replace(/-/g, "")}`
-  const run = { id, key, sessionId: body.session_id, status: "running", createdAt: Date.now() / 1000, events: [], seq: 0, listeners: new Set(), stopped: false }
+  // A client-addressed id from before a compression rotation adopts the live tip (Hermes's
+  // _resolve_live_session_id): the run and its rows are keyed on the child, never the old id.
+  const sessionId = resolveSession(body.session_id)
+  const run = { id, key, sessionId, status: "running", createdAt: Date.now() / 1000, events: [], seq: 0, listeners: new Set(), stopped: false }
   runs.set(id, run)
   noteEvent("runs", run.sessionId)
   const push = (name, fields = {}) => {
@@ -1403,7 +1430,7 @@ function startRun(req, body) {
   // The url rides along: the profile is read off it when the turn records the model it ran.
   const sessionReq = {
     url: req.url,
-    headers: { ...req.headers, "x-hermes-session-id": body.session_id },
+    headers: { ...req.headers, "x-hermes-session-id": sessionId },
   }
   // Steers the agent has read and not yet answered.
   let heard = []
@@ -2193,17 +2220,22 @@ http
       const run_ids = {}
       for (const [runId, run] of runs.entries()) {
         if (!run.sessionId || !["running", "waiting_for_approval"].includes(run.status)) continue
-        if (sessions[run.sessionId] !== "waiting_for_approval") {
-          sessions[run.sessionId] = run.status
-          run_ids[run.sessionId] = runId
+        // Keyed by the run's own session unless the fix is on: the chat's lookups go by the id it
+        // started with (stream.py `chat_session` walks compression for its session events), never
+        // the live tip's.
+        const sessionId = ROOT_RUN_IDS ? chatSessionOf(run.sessionId) : run.sessionId
+        if (sessions[sessionId] !== "waiting_for_approval") {
+          sessions[sessionId] = run.status
+          run_ids[sessionId] = runId
         }
       }
       // Why each session waits: its run's questions or approval, else a plan to review.
       const waiting = {}
       for (const run of runs.values()) {
         if (!run.sessionId || run.status !== "waiting_for_approval") continue
-        if (run.clarify) waiting[run.sessionId] = { kind: "question", count: run.clarify.questions?.length || 1 }
-        else waiting[run.sessionId] ??= { kind: "approval", ...(run.approval?.command ? { command: run.approval.command } : {}) }
+        const sessionId = ROOT_RUN_IDS ? chatSessionOf(run.sessionId) : run.sessionId
+        if (run.clarify) waiting[sessionId] = { kind: "question", count: run.clarify.questions?.length || 1 }
+        else waiting[sessionId] ??= { kind: "approval", ...(run.approval?.command ? { command: run.approval.command } : {}) }
       }
       for (const record of projectSessions.values()) if (record.plan_pending) waiting[record.session_id] ??= { kind: "plan" }
       // A goal the user has to unstick parks a session: paused (its budget spent, a gate out of
@@ -2282,6 +2314,20 @@ http
         ...carried,
       ])
       return json(res, 200, { ok: true, rows: carried.length })
+    }
+    // Dev only: POST { session, child } rotates a chat onto a child session the way Hermes's context
+    // compression does. The child shares the lineage's rows: a read of either id sees root→tip, and
+    // turns land in one transcript whichever id they were addressed with.
+    if (url.pathname === "/__mock/compress" && req.method === "POST") {
+      const { session, child } = await readBody(req)
+      if (!session || !child) return json(res, 400, { error: { message: "session and child" } })
+      compressed.set(session, child)
+      // The child shares the lineage's rows: a read of either id sees root→tip, and turns land in
+      // one transcript whichever id they were addressed with.
+      if (!transcripts.has(session)) transcripts.set(session, [])
+      transcripts.set(child, transcripts.get(session))
+      chatTitles.set(child, chatTitles.get(session) ?? "Compressed")
+      return json(res, 200, { ok: true, session, child })
     }
     const sessionRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/(workspace|workspace\/remove|mode|prs|library|close|goal|goal\/control)$/.exec(url.pathname)
     if (PLUGIN && !profile && sessionRoute) {

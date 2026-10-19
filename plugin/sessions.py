@@ -52,6 +52,9 @@ FIELDS = (
 )
 REPO_FIELDS = ("name", "repo_root", "path", "branch")
 MAX_PARENT_HOPS = 5
+# How far a chat's session id may have been moved on by compression. A chain this long is already
+# pathological; the bound only keeps a corrupt store from walking forever.
+COMPRESSION_DEPTH = 32
 ADJECTIVES = (
     "breezy", "cosmic", "dapper", "fuzzy", "gleaming", "jazzy", "lucky", "mellow", "nimble",
     "peppy", "quirky", "snazzy", "spry", "sunny", "swift", "wobbly", "zesty", "plucky",
@@ -694,13 +697,35 @@ def is_code_session(session_id: str) -> bool:
     return bool(path.exists() and read(path, session_id))
 
 
+def chat_session(db: Any, session_id: str) -> str:
+    """The session a chat started as. Compression moves a chat on to a child session, and Gots
+    only knows the first. Only a parent whose own turn ended in compression is followed, so a
+    delegation or a branch — which shares the ``parent_session_id`` column but is not a compaction
+    boundary — never hijacks the chat's run."""
+    get = getattr(db, "get_session", None)
+    if not callable(get):
+        return session_id
+    current = session_id
+    for _ in range(COMPRESSION_DEPTH):
+        row = get(current) or {}
+        parent_id = row.get("parent_session_id")
+        parent = parent_id and get(parent_id)
+        if not parent or parent.get("end_reason") != "compression":
+            break
+        current = parent_id
+    return current
+
+
 def live_runs(
-    adapter: Any, owned: Optional[Callable[[str], bool]] = None
+    adapter: Any, owned: Optional[Callable[[str], bool]] = None, db: Any = None
 ) -> Tuple[Dict[str, str], Dict[str, str]]:
     """Each session with a run in flight: ``running`` or ``waiting_for_approval``, and its run id.
 
     The run id is what lets a client that lost track of a reply (a reload, a dropped stream) follow
-    the run again. ``owned`` keeps only the runs the caller's profile started.
+    the run again. Keyed by the session the chat started as (``chat_session``), not the run's own:
+    compression moves a chat on to a child session mid-flight, and a device that only knows the id
+    the chat began with must still find its run. ``owned`` keeps only the runs the caller's profile
+    started.
     """
     statuses = getattr(adapter, "_run_statuses", None)
     if not isinstance(statuses, dict):
@@ -714,6 +739,7 @@ def live_runs(
         session_id = status.get("session_id")
         if not state or not isinstance(session_id, str) or not session_id:
             continue
+        session_id = chat_session(db, session_id)
         if live.get(session_id) != "waiting_for_approval":
             live[session_id] = state
             if isinstance(run_id, str):
@@ -722,10 +748,15 @@ def live_runs(
 
 
 def waiting(
-    adapter: Any, path: Path, hermes_home: Path, owned: Optional[Callable[[str], bool]] = None
+    adapter: Any,
+    path: Path,
+    hermes_home: Path,
+    owned: Optional[Callable[[str], bool]] = None,
+    db: Any = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Why each session waits on the user: its run's questions or approval, or a plan to review.
-    A project session also names its project."""
+    A project session also names its project. Keyed by the session the chat started as, like
+    ``live_runs``, so a wait on a compressed chat's child session is reported for the chat."""
     found: Dict[str, Dict[str, Any]] = {}
     statuses = getattr(adapter, "_run_statuses", None)
     for run_id, status in list(statuses.items()) if isinstance(statuses, dict) else []:
@@ -736,6 +767,7 @@ def waiting(
         session_id = status.get("session_id")
         if not isinstance(session_id, str) or not session_id:
             continue
+        session_id = chat_session(db, session_id)
         clarify = status.get("clarify")
         if isinstance(clarify, dict):
             questions = clarify.get("questions")

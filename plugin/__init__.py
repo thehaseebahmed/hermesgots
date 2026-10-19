@@ -666,7 +666,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if denied is not None:
             return denied
         session_id = request.match_info["session_id"]
-        live, _ = sessions.live_runs(adapter)
+        open_db = getattr(adapter, "_ensure_session_db_async", None)
+        db = await open_db() if callable(open_db) else None
+        live, _ = await asyncio.to_thread(sessions.live_runs, adapter, db=db)
         # On the loop thread, like store_path: the profile scope isn't visible inside to_thread.
         home = hermes_home()
         found = await asyncio.to_thread(delegation.children, home, session_id, set(live))
@@ -1105,10 +1107,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if denied is not None:
             return denied
         owned = owned_runs(request)
-        live, run_ids = sessions.live_runs(adapter, owned)
+        open_db = getattr(adapter, "_ensure_session_db_async", None)
+        db = await open_db() if callable(open_db) else None
+        live, run_ids = await asyncio.to_thread(sessions.live_runs, adapter, owned, db)
         try:
             waiting = await asyncio.to_thread(
-                sessions.waiting, adapter, store_path(), hermes_home(), owned
+                sessions.waiting, adapter, store_path(), hermes_home(), owned, db
             )
         except Exception:
             logger.debug("memento: reading waiting sessions failed", exc_info=True)
