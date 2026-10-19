@@ -122,21 +122,22 @@ class WorkspaceError(Exception):
         self.status = status
 
 
+def _json(value: Any, default: Any) -> Any:
+    try:
+        return json.loads(value) if value else default
+    except ValueError:
+        return default
+
+
 def _record(row: Any) -> Dict[str, Any]:
     record = dict(zip(FIELDS, row))
     record["plan_pending"] = bool(record["plan_pending"])
     record["mode"] = LEGACY_MODES.get(record["mode"], record["mode"])
-    try:
-        repos = json.loads(record["repos"]) if record["repos"] else []
-    except ValueError:
-        repos = []
+    repos = _json(record["repos"], [])
     record["repos"] = [
         {field: repo.get(field) for field in REPO_FIELDS} for repo in repos if isinstance(repo, dict)
     ]
-    try:
-        record["task"] = json.loads(record["task"]) if record["task"] else None
-    except ValueError:
-        record["task"] = None
+    record["task"] = _json(record["task"], None)
     # A row from before repos were kept: the one tree it has.
     if not record["repos"] and record["path"]:
         record["repos"] = [
@@ -174,10 +175,12 @@ def set_task(path: Path, session_id: str, task: Dict[str, Any]) -> None:
     """Records the issue AFK started this session for, so its pull request closes it."""
     conn = connect(path)
     try:
-        conn.execute(
+        cursor = conn.execute(
             "UPDATE project_sessions SET task = ? WHERE session_id = ?",
             (json.dumps(task, separators=(",", ":")), session_id),
         )
+        if cursor.rowcount == 0:
+            logger.warning("memento: no session row for %s to name task #%s on", session_id, task.get("number"))
     finally:
         conn.close()
 

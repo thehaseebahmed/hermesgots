@@ -112,10 +112,8 @@ def category_of(kind: str, project: bool = False) -> str:
         return "research_input"
     if kind.startswith("research_"):
         return kind
-    if kind in ("pr_checks", "pr_merged"):
+    if kind in ("pr_checks", "pr_merged", "afk_pr"):
         return f"code_{kind}"
-    if kind == "afk_pr":
-        return "code_afk_pr"
     feature = "code" if project or kind == "plan" else "chat"
     return f"{feature}_{'input' if kind in INPUT_KINDS else kind}"
 
