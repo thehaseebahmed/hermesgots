@@ -220,6 +220,12 @@ class ReadDelegationTest(unittest.TestCase):
                 host_model.read_delegation(self.path),
                 {"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"},
             )
+        # A file that names no main provider runs Hermes's own default.
+        patch, _, _ = hermes({"model": {"default": "old"}, "delegation": {"model": "a/b"}})
+        with patch:
+            self.assertEqual(
+                host_model.read_delegation(self.path), {"provider": "openrouter", "model": "a/b"}
+            )
 
     def test_an_auto_provider_is_the_bots_own(self) -> None:
         patch, _, _ = hermes(

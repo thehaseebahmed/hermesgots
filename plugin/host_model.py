@@ -227,7 +227,8 @@ def _delegation_of(cfg: Dict[str, Any]) -> Optional[Dict[str, str]]:
     main = cfg.get("model") if isinstance(cfg.get("model"), dict) else {}
     provider = str(section.get("provider") or "").strip()
     if not provider or provider == "auto":
-        provider = str(main.get("provider") or "").strip()
+        # Hermes's own default for the main model when the file names no provider.
+        provider = str(main.get("provider") or "openrouter").strip()
     return {"provider": provider, "model": model} if provider else None
 
 
