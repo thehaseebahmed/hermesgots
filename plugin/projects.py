@@ -190,6 +190,11 @@ def update(
             change(conn, project_id)
     if pinned is not None:
         _pin(hermes_home, project_id, pinned)
+    # A project put away doesn't keep working: its switch goes off with it.
+    if archived:
+        from .afk import turn_off
+
+        turn_off(hermes_home, project_id)
     return True
 
 
@@ -416,4 +421,9 @@ def remove(hermes_home: Path, project_id: str) -> bool:
     if not projects_db.exists():
         return False
     with pdb.connect_closing(db_path=projects_db) as conn:
-        return bool(pdb.delete_project(conn, project_id))
+        removed = bool(pdb.delete_project(conn, project_id))
+    if removed:
+        from .afk import forget
+
+        forget(hermes_home, project_id)
+    return removed

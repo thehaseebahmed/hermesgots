@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 23
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -282,6 +282,15 @@ def connect(path: Path) -> sqlite3.Connection:
                    model TEXT NOT NULL,
                    provider TEXT,
                    PRIMARY KEY (session_id, at)
+               )"""
+        )
+        # v23: a project left to work its own tasks — AFK's switch, which is the project's own
+        # setting rather than the device's (afk.py).
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS project_afk (
+                   project_id TEXT PRIMARY KEY,
+                   enabled INTEGER NOT NULL,
+                   at INTEGER NOT NULL
                )"""
         )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

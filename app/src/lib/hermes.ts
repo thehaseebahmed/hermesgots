@@ -1,5 +1,5 @@
 import { connectionKey } from "@/lib/connection"
-import { READ_TIMEOUT_MS } from "@/lib/freshness"
+import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import type {
   ApprovalChoice,
   ClarifyAnswers,
@@ -2390,6 +2390,55 @@ export async function getProjectTasks(
     claimed: parseTasks(body.claimed),
     blocked: parseTasks(body.blocked),
   }
+}
+
+/**
+ * A project's AFK switch: whether it is left to work its own tasks, and why it can't be. The
+ * setting is the host's, so it is the same on every device the project is opened from. Needs
+ * plugin 0.50.
+ */
+export interface ProjectAfk {
+  on: boolean
+  /** What stops the project being left to work, when something does; null when it can be. */
+  reason: string | null
+}
+
+function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
+  // A read that answers without the setting isn't off: showing a switch that says so would be a
+  // guess about a project nothing answered for.
+  if (!body || typeof body.on !== "boolean") {
+    throw new HermesError("Hermes answered without AFK's setting.")
+  }
+  return { on: body.on, reason: str(body.reason) || null }
+}
+
+function afkPath(config: HermesConfig, projectId: string) {
+  return `${pluginRoot(config.baseUrl)}/projects/${encodeURIComponent(projectId)}/afk`
+}
+
+/** A project's AFK switch, read from its host. */
+export async function getProjectAfk(
+  config: HermesConfig,
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<ProjectAfk> {
+  const response = await request(afkPath(config, projectId), { headers: headers(config), signal })
+  return parseAfk((await response.json()) as Record<string, unknown> | null)
+}
+
+/** Turns a project's AFK on or off on its host, answering the setting it now holds. */
+export async function setProjectAfk(
+  config: HermesConfig,
+  projectId: string,
+  on: boolean,
+): Promise<ProjectAfk> {
+  const response = await request(afkPath(config, projectId), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ on }),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  return parseAfk((await response.json()) as Record<string, unknown> | null)
 }
 
 export type LiveRunStatus = "running" | "waiting_for_approval"

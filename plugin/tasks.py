@@ -110,7 +110,7 @@ def read(hermes_home: Path, folders: Iterable[Any]) -> Dict[str, Any]:
     costs nothing. A project with no GitHub repository has no tasks to read, and no request goes
     out.
     """
-    repos = _repos(folders)
+    repos = repos_of(folders)
     if not repos:
         return empty()
     auth, _ = github.token(hermes_home)
@@ -126,7 +126,7 @@ def read(hermes_home: Path, folders: Iterable[Any]) -> Dict[str, Any]:
     return {"repos": repos, **groups(tasks)}
 
 
-def _repos(folders: Iterable[Any]) -> List[str]:
+def repos_of(folders: Iterable[Any]) -> List[str]:
     """Each GitHub repository a checkout of the project's points at, once, in the project's order."""
     repos: List[str] = []
     for folder in folders:

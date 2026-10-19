@@ -149,6 +149,16 @@ const FLOWS = {
     about:
       "A project's options menu opens AFK's frontier: ready oldest first, claimed marked, blocked naming its open blocker, with no row for a plugin that can't read it",
   },
+  "afk-switch": {
+    script: "e2e/afk-switch.mjs",
+    about:
+      "AFK's switch turns a project on and off on its host, and a reload reads that setting back — the project's, not the device's",
+  },
+  "afk-switch-reasons": {
+    script: "e2e/afk-switch-reasons.mjs",
+    about:
+      "AFK's pop-up says why it can't offer the switch: no GitHub account, said once, and a plugin too old to switch it",
+  },
   "mcps-gate": {
     script: "e2e/mcps-gate.mjs",
     about:
