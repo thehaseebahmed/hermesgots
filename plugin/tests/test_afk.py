@@ -33,7 +33,7 @@ from plugin.afk import (
     sweep_all,
 )
 from plugin.tasks import CLAIM_LABEL, READY_LABEL
-from plugin.tests._helpers import stub_projects_db
+from plugin.tests._helpers import issue_row, stub_projects_db
 
 
 def folder(path: str) -> SimpleNamespace:
@@ -291,29 +291,12 @@ class ClaimTests(unittest.TestCase):
     def on(self) -> None:
         set_on(self.home, "p1", self.folders(), True)
 
-    def sweep(self) -> dict:
-        return sweep(self.home, "p1", self.folders())
+    def sweep(self) -> None:
+        sweep(self.home, "p1", self.folders())
 
-    def issue(
-        self,
-        number: int,
-        *,
-        created: str = "2026-10-01T00:00:00Z",
-        labels: tuple = (READY_LABEL,),
-        assignees: tuple = (),
-    ) -> dict:
-        """An open issue as GitHub's list answers it."""
-        return {
-            "number": number,
-            "title": f"Task {number}",
-            "html_url": f"https://github.com/mock-user/memento/issues/{number}",
-            "state": "open",
-            "created_at": created,
-            "body": "",
-            "labels": [{"name": name} for name in labels],
-            "assignees": [{"login": login} for login in assignees],
-            "issue_dependencies_summary": {"total_blocked_by": 0, "blocked_by": 0},
-        }
+    def shown(self) -> dict:
+        """What the sheet reads after a sweep: the switch, the task held and the last refusal."""
+        return read(self.home, "p1", self.folders())
 
     def answer_get(self, path: str, auth: Any) -> Any:
         self.paths.append(path)
@@ -342,8 +325,8 @@ class ClaimTests(unittest.TestCase):
     def test_the_oldest_ready_task_is_assigned_and_marked(self) -> None:
         self.on()
         self.issues = [
-            self.issue(266, created="2026-10-02T00:00:00Z"),
-            self.issue(265, created="2026-10-01T00:00:00Z"),
+            issue_row(266, created="2026-10-02T00:00:00Z"),
+            issue_row(265, created="2026-10-01T00:00:00Z"),
         ]
         self.sweep()
         self.assertEqual(held(self.home, "p1")["number"], 265, "the oldest is the one AFK takes")
@@ -362,7 +345,7 @@ class ClaimTests(unittest.TestCase):
     def test_the_claim_mark_is_created_when_the_repository_has_none(self) -> None:
         self.on()
         self.label_exists = False
-        self.issues = [self.issue(265)]
+        self.issues = [issue_row(265)]
         self.sweep()
         method, path, data = self.writes[0]
         self.assertEqual((method, path), ("POST", "/repos/mock-user/memento/labels"))
@@ -376,8 +359,8 @@ class ClaimTests(unittest.TestCase):
     def test_an_older_task_somebody_already_claimed_is_passed_over(self) -> None:
         self.on()
         self.issues = [
-            self.issue(265, labels=(READY_LABEL, CLAIM_LABEL)),
-            self.issue(266, created="2026-10-02T00:00:00Z"),
+            issue_row(265, labels=(READY_LABEL, CLAIM_LABEL)),
+            issue_row(266, created="2026-10-02T00:00:00Z"),
         ]
         self.sweep()
         self.assertEqual(held(self.home, "p1")["number"], 266, "the next ready one is taken")
@@ -385,9 +368,9 @@ class ClaimTests(unittest.TestCase):
     def test_one_task_at_a_time_even_when_several_are_ready(self) -> None:
         self.on()
         self.issues = [
-            self.issue(265),
-            self.issue(266, created="2026-10-02T00:00:00Z"),
-            self.issue(267, created="2026-10-03T00:00:00Z"),
+            issue_row(265),
+            issue_row(266, created="2026-10-02T00:00:00Z"),
+            issue_row(267, created="2026-10-03T00:00:00Z"),
         ]
         self.sweep()
         asked = len(self.writes)
@@ -396,15 +379,17 @@ class ClaimTests(unittest.TestCase):
         self.assertEqual(len(self.writes), asked, "the second sweep claims nothing while one is held")
 
     def test_nothing_is_claimed_before_the_switch_is_on(self) -> None:
-        self.issues = [self.issue(265)]
-        self.assertIsNone(self.sweep())
-        self.assertEqual(self.writes, [], "a project that isn't left to work is never swept")
+        self.issues = [issue_row(265)]
+        self.sweep()
+        self.assertIsNone(held(self.home, "p1"), "a project that isn't left to work is never swept")
+        self.assertEqual(self.writes, [])
 
     def test_a_refusal_stops_the_sweep_with_the_switch_left_on_and_its_reason_kept(self) -> None:
         self.on()
-        self.issues = [self.issue(265), self.issue(266, created="2026-10-02T00:00:00Z")]
+        self.issues = [issue_row(265), issue_row(266, created="2026-10-02T00:00:00Z")]
         self.write_error = github.GitHubError("Resource not accessible by personal access token", 403)
-        shown = self.sweep()
+        self.sweep()
+        shown = self.shown()
         self.assertIsNone(held(self.home, "p1"), "a task GitHub refused is not held")
         self.assertEqual(shown["refusal"], "Resource not accessible by personal access token")
         self.assertTrue(shown["on"], "a GitHub refusal doesn't turn the project off")
@@ -414,34 +399,37 @@ class ClaimTests(unittest.TestCase):
     def test_a_read_github_refuses_is_recorded_too(self) -> None:
         self.on()
         self.read_error = github.GitHubError("API rate limit exceeded for 1.2.3.4.", 403)
-        shown = self.sweep()
-        self.assertEqual(shown["refusal"], "API rate limit exceeded for 1.2.3.4.")
+        self.sweep()
+        self.assertEqual(self.shown()["refusal"], "API rate limit exceeded for 1.2.3.4.")
         self.assertTrue(is_on(self.home, "p1"))
         self.assertEqual(self.writes, [])
 
     def test_a_successful_sweep_clears_the_last_refusal(self) -> None:
         self.on()
-        self.issues = [self.issue(265)]
+        self.issues = [issue_row(265)]
         self.write_error = github.GitHubError("GitHub answered 403.", 403)
-        self.assertEqual(self.sweep()["refusal"], "GitHub answered 403.")
+        self.sweep()
+        self.assertEqual(self.shown()["refusal"], "GitHub answered 403.")
         self.write_error = None
-        self.assertIsNone(self.sweep()["refusal"], "GitHub answered, so the reason is stale")
+        self.sweep()
+        self.assertIsNone(self.shown()["refusal"], "GitHub answered, so the reason is stale")
         self.assertEqual(held(self.home, "p1")["number"], 265)
 
     def test_an_empty_frontier_holds_nothing_and_clears_an_old_refusal(self) -> None:
         self.on()
         self.read_error = github.GitHubError("Couldn't reach GitHub from the server.")
-        self.assertEqual(self.sweep()["refusal"], "Couldn't reach GitHub from the server.")
+        self.sweep()
+        self.assertEqual(self.shown()["refusal"], "Couldn't reach GitHub from the server.")
         self.read_error = None
         self.issues = []
-        shown = self.sweep()
+        self.sweep()
         self.assertIsNone(held(self.home, "p1"))
-        self.assertIsNone(shown["refusal"])
+        self.assertIsNone(self.shown()["refusal"])
         self.assertEqual(self.writes, [])
 
     def test_the_app_reads_the_task_held_and_the_last_refusal(self) -> None:
         self.on()
-        self.issues = [self.issue(265)]
+        self.issues = [issue_row(265)]
         self.sweep()
         shown = read(self.home, "p1", self.folders())
         self.assertEqual(shown["on"], True)
@@ -508,15 +496,24 @@ class SweepAllTests(unittest.TestCase):
                 sweep_all(self.home)
         self.assertEqual([one.args[1] for one in call.call_args_list], ["p1", "p2"])
 
-    def test_a_profiles_home_is_watched_once_and_swept_beside_the_loops_own(self) -> None:
-        """A bot at /p/<profile> keeps its own store, added when its sheet is read or written."""
-        with patch.object(afk, "_watched", set()):
-            afk.watch(Path("/profiles/work"))
-            afk.watch(Path("/profiles/work"))
-            self.assertEqual(
-                afk.homes(Path("/default")),
-                [Path("/default"), Path("/profiles/work")],
-            )
+    def test_a_project_holding_a_task_is_not_looked_up_at_all(self) -> None:
+        """The row says it already holds one, so the sweep skips it before reading its folders."""
+        set_on(self.home, "p1", [folder(str(self.checkout))], True)
+        afk._hold(
+            self.home,
+            "p1",
+            {
+                "repo": "mock-user/memento",
+                "number": 265,
+                "title": "Task 265",
+                "url": "https://github.com/mock-user/memento/issues/265",
+                "created_at": "2026-10-01T00:00:00Z",
+            },
+        )
+        with stub_projects_db(projects=[]):
+            with patch.object(afk, "sweep") as sweep:
+                sweep_all(self.home)
+        sweep.assert_not_called()
 
 
 class WakeTests(unittest.TestCase):

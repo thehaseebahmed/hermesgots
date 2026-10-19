@@ -189,7 +189,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             asyncio.ensure_future(research.run(home)),
             # Projects left to work their own tasks are swept for work while the host runs; see
             # afk.py. A sweep is woken when one is turned on and when a session finishes.
-            asyncio.ensure_future(afk.run(home)),
+            asyncio.ensure_future(afk.run(adapter)),
         ]
         yield
         for task in tasks:
@@ -947,9 +947,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         project, refused = await resolve_project(project_id)
         if refused is not None:
             return refused
-        # A bot at /p/<profile> has its own store, which the sweep's loop can't see until it's asked
-        # to sweep this profile's home too; reading its sheet is what asks.
-        afk.watch(hermes_home())
         found = await asyncio.to_thread(
             afk.read,
             hermes_home(),
@@ -973,22 +970,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         project, refused = await resolve_project(project_id)
         if refused is not None:
             return refused
-        # Turning it on is the profile's, so its home is swept from now on (see the read above).
-        afk.watch(hermes_home())
         try:
-            await asyncio.to_thread(
+            found = await asyncio.to_thread(
                 afk.set_on,
                 hermes_home(),
                 project_id,
                 project.folders,
                 on,
-                bool(getattr(project, "archived", False)),
-            )
-            found = await asyncio.to_thread(
-                afk.read,
-                hermes_home(),
-                project_id,
-                project.folders,
                 bool(getattr(project, "archived", False)),
             )
         except afk.Refused as why:

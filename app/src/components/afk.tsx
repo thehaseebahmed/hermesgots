@@ -22,8 +22,7 @@ import {
   setProjectAfk,
   type HermesConfig,
   type ProjectAfk,
-  type ProjectAfkTask,
-  type ProjectBlocker,
+  type ProjectIssue,
   type ProjectTasks,
   type ProjectTask,
 } from "@/lib/hermes"
@@ -170,7 +169,12 @@ export function AfkPopup({
             saving={saving}
             onToggle={(on) => void turn(on)}
           />
-          <Working task={afk?.task} refusal={afk?.refusal} manyRepos={manyRepos} />
+          <Working
+            on={Boolean(afk?.on)}
+            task={afk?.task}
+            refusal={afk?.refusal}
+            manyRepos={manyRepos}
+          />
           <Tasks
             tasks={tasks}
             error={error}
@@ -244,18 +248,21 @@ function AfkSwitch({
 /**
  * What the sweep is doing: the task AFK holds, and why GitHub last refused it. Neither is the
  * switch's own reason — a refusal leaves the switch on — so they read as the sweep's answer rather
- * than as the project's, and both simply disappear when there is nothing to say.
+ * than as the project's, and both simply disappear when there is nothing to say. A project that
+ * isn't left to work says nothing: the task it holds is released with the claim (#270), not here.
  */
 function Working({
+  on,
   task,
   refusal,
   manyRepos,
 }: {
-  task: ProjectAfkTask | null | undefined
+  on: boolean
+  task: ProjectIssue | null | undefined
   refusal: string | null | undefined
   manyRepos: boolean
 }) {
-  if (!task && !refusal) return null
+  if (!on || (!task && !refusal)) return null
   return (
     <div className="flex flex-col gap-3">
       {refusal && (
@@ -266,23 +273,7 @@ function Working({
       {task && (
         <section aria-label="Working" data-working>
           <h3 className="px-1 pb-1 text-sm text-muted-foreground">Working</h3>
-          <a
-            href={task.url ?? undefined}
-            target="_blank"
-            rel="noreferrer"
-            data-task={task.number}
-            className="flex min-h-11 flex-col justify-center gap-0.5 rounded-2xl px-3 py-2 outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <span className="flex min-w-0 items-start gap-2">
-              <span className="shrink-0 pt-0.5 font-mono text-xs text-muted-foreground">
-                #{task.number}
-              </span>
-              <span className="min-w-0 flex-1 text-base leading-snug break-words">
-                {task.title}
-              </span>
-            </span>
-            {manyRepos && <span className="pl-8 text-sm text-muted-foreground">{task.repo}</span>}
-          </a>
+          <TaskLink task={task} note={manyRepos ? task.repo : undefined} />
         </section>
       )}
     </div>
@@ -336,6 +327,36 @@ function Tasks({
   )
 }
 
+/** One issue as the sheet shows it: its number and title, opening it on GitHub, a note under it. */
+function TaskLink({
+  task,
+  note,
+  badge,
+}: {
+  task: ProjectIssue
+  note?: ReactNode
+  badge?: ReactNode
+}) {
+  return (
+    <a
+      href={task.url ?? undefined}
+      target="_blank"
+      rel="noreferrer"
+      data-task={task.number}
+      className="flex min-h-11 flex-col justify-center gap-0.5 rounded-2xl px-3 py-2 outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <span className="flex min-w-0 items-start gap-2">
+        <span className="shrink-0 pt-0.5 font-mono text-xs text-muted-foreground">
+          #{task.number}
+        </span>
+        <span className="min-w-0 flex-1 text-base leading-snug break-words">{task.title}</span>
+        {badge}
+      </span>
+      {note && <span className="pl-8 text-sm text-muted-foreground">{note}</span>}
+    </a>
+  )
+}
+
 function TaskRow({
   task,
   claimed,
@@ -350,28 +371,17 @@ function TaskRow({
   if (task.blockers.length) note.push(`Blocked by ${blockerNames(task)}`)
   return (
     <li>
-      <a
-        href={task.url ?? undefined}
-        target="_blank"
-        rel="noreferrer"
-        data-task={task.number}
-        className="flex min-h-11 flex-col justify-center gap-0.5 rounded-2xl px-3 py-2 outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <span className="flex min-w-0 items-start gap-2">
-          <span className="shrink-0 pt-0.5 font-mono text-xs text-muted-foreground">
-            #{task.number}
-          </span>
-          <span className="min-w-0 flex-1 text-base leading-snug break-words">{task.title}</span>
-          {claimed && (
+      <TaskLink
+        task={task}
+        note={note.length > 0 ? note.join(" · ") : undefined}
+        badge={
+          claimed ? (
             <span className="shrink-0 rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">
               {task.assignees[0] ?? "Claimed"}
             </span>
-          )}
-        </span>
-        {note.length > 0 && (
-          <span className="pl-8 text-sm text-muted-foreground">{note.join(" · ")}</span>
-        )}
-      </a>
+          ) : undefined
+        }
+      />
     </li>
   )
 }
@@ -379,7 +389,7 @@ function TaskRow({
 /** The blockers still open, by number — `owner/repo#n` for one on another repository. */
 function blockerNames(task: ProjectTask) {
   return task.blockers
-    .map((blocker: ProjectBlocker) =>
+    .map((blocker: ProjectIssue) =>
       blocker.repo && blocker.repo !== task.repo
         ? `${blocker.repo}#${blocker.number}`
         : `#${blocker.number}`,

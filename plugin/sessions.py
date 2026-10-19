@@ -219,16 +219,21 @@ def slug(task: Any = None) -> str:
 
 
 def _project(projects_db: Path, project_id: str) -> Any:
-    from hermes_cli import projects_db as pdb
-
-    if not projects_db.exists():
-        raise ValueError("No such project.")
-    with pdb.connect_closing(db_path=projects_db) as conn:
-        projects = pdb.list_projects(conn, include_archived=True)
-    project = next((p for p in projects if str(p.id) == project_id), None)
+    project = _projects(projects_db).get(project_id)
     if project is None:
         raise ValueError("No such project.")
     return project
+
+
+def _projects(projects_db: Path) -> Dict[str, Any]:
+    """Every project by id, read once: a caller sweeping many projects needs one list, not one each."""
+    from hermes_cli import projects_db as pdb
+
+    if not projects_db.exists():
+        return {}
+    with pdb.connect_closing(db_path=projects_db) as conn:
+        projects = pdb.list_projects(conn, include_archived=True)
+    return {str(project.id): project for project in projects}
 
 
 def _project_folders(project: Any) -> list[str]:

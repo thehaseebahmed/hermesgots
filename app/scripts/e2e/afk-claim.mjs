@@ -23,7 +23,7 @@ const run = async ({ page, profileId, shot, until }) => {
     await shot(name)
   }
 
-  // Turning it on is the host's, and the task AFK claims comes back with that answer.
+  // Turning it on is the host's; the task its sweep claims lands on the next read of the sheet.
   await openAfk(page, screen)
   await control().waitFor({ timeout: 15_000 })
   await control().click()
@@ -76,7 +76,9 @@ const run = async ({ page, profileId, shot, until }) => {
     })
   })
   await openAfk(page, screen)
-  await page.getByText(REFUSAL, { exact: true }).waitFor({ timeout: 15_000 })
+  const refused = page.locator("[data-refusal]")
+  await refused.waitFor({ timeout: 15_000 })
+  assert.equal(await refused.textContent(), REFUSAL, "the refusal is its own line under the switch")
   assert.equal(
     await control().getAttribute("aria-checked"),
     "true",
