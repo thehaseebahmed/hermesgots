@@ -32,8 +32,7 @@ export function ModeOptions({
 }: Omit<ModeSettings, "onMode"> & { disabled?: boolean; onPick: (mode: SessionMode) => void }) {
   const note = (option: SessionMode) => {
     if (option === "auto" && !autoAvailable) return "Needs the plugin"
-    // Auto is what carries a goal on: the plugin keeps the run going between turns.
-    if (option === "auto") return "A goal, or edits left to it"
+    if (option === "auto") return "Edits left to it"
   }
   const off = (option: SessionMode) => Boolean(disabled) || (option === "auto" && !autoAvailable)
   return (

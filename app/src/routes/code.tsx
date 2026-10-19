@@ -101,8 +101,7 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   const { root } = useNav()
   const listed = useProjectSessions()
   const live = useAllLiveRuns()
-  // What the server says waits on the user: a goal paused or blocked, a question, an approval or a
-  // plan to read.
+  // What the server says waits on the user: a question, an approval or a plan to read.
   const waits = useWaiting()
   const lists = useAllProjects()
   const changes = useAnyChange("projects")
@@ -424,8 +423,8 @@ function SessionItem({
 }) {
   const removed = removedRepos(session, project)
   const draft = useDraft(session.id)
-  // A session the server says waits on the user says why: a goal paused or blocked, a question to
-  // answer, an approval to give, a plan to read.
+  // A session the server says waits on the user says why: a question to answer, an approval to
+  // give, a plan to read.
   const wait = waiting ? reasonText(waiting) : undefined
   const detail = removed.length
     ? `${names.format(removed)} removed`

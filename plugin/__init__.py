@@ -5,7 +5,7 @@ can read cron run history from Hermes's execution ledger instead of piecing it t
 device, keep its chat list on the server (``chats.py``), report each chat's context use
 (``context.py``) and the agent's todo list (``todos.py``), list and create Hermes Projects (``projects.py``) with GitHub repos cloned into
 them in the background (``clones.py``, ``github.py``), add and remove a project's repos (``repos.py``), run project sessions in their own worktrees with a permission mode and save their plans
-(``sessions.py``), let the agent push and open its pull requests, close them when a session is dropped (``ship.py``), file the files it generates in the project's library (``library.py``) and resolve a session once its pull request merges (``merges.py``), hold a chat's goal with Hermes's own ``/goal`` and keep it going between runs (``goal.py``), research a question into a cited guide, quiz or glossary (``research.py``), let the agent ask the user questions with Hermes's ``clarify`` tool (``clarify.py``), keep its delegations in the turn that made them (``delegation.py``) and
+(``sessions.py``), let the agent push and open its pull requests, close them when a session is dropped (``ship.py``), file the files it generates in the project's library (``library.py``) and resolve a session once its pull request merges (``merges.py``), research a question into a cited guide, quiz or glossary (``research.py``), let the agent ask the user questions with Hermes's ``clarify`` tool (``clarify.py``), keep its delegations in the turn that made them (``delegation.py``) and
 set the profile's main model from a bot's Default model (``host_model.py``), label its chats as Gots's, tell the app what changed as it happens (``events.py``, ``stream.py``), and links the profile to a Gots account (``link.py``). The dashboard half lives in ``dashboard/``.
 """
 
@@ -34,7 +34,6 @@ from . import (
     dictation,
     events,
     github,
-    goal,
     host_model,
     library,
     link,
@@ -288,7 +287,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "close",
                     "merge_resolve",
                     "events",
-                    "goal",
                     "push",
                     "sync_delegation",
                     "host_model",
@@ -306,12 +304,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 "clarify": asks,
                 "todo_tool": todo_tool,
                 "hooks": hooks_live(),
-                "goal": {
-                    "ready": goal.available() is None,
-                    "reason": goal.available(),
-                    "min_turns": goal.MIN_TURNS,
-                    "max_turns": goal.MAX_TURNS,
-                },
                 "dictation": await asyncio.to_thread(dictation.info),
                 "research": {
                     "ready": research.available() is None,
@@ -1189,17 +1181,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except Exception:
             logger.debug("memento: reading waiting sessions failed", exc_info=True)
             waiting = {}
-        for name, read, args in (
-            ("waiting goals", goal.waiting, (home,)),
-            ("stalled AFK sessions", afk.stalled, (home, live)),
-        ):
-            try:
-                host_side = await asyncio.to_thread(read, *args)
-            except Exception:
-                logger.debug("memento: reading %s failed", name, exc_info=True)
-                continue
-            for session_id, reason in host_side.items():
-                waiting.setdefault(session_id, reason)
+        try:
+            host_side = await asyncio.to_thread(afk.stalled, home, live)
+        except Exception:
+            logger.debug("memento: reading stalled AFK sessions failed", exc_info=True)
+            host_side = {}
+        for session_id, reason in host_side.items():
+            waiting.setdefault(session_id, reason)
         return web.json_response(
             {"object": "memento.runs", "sessions": live, "run_ids": run_ids, "waiting": waiting}
         )
@@ -1222,77 +1210,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             cursor, VERSION,
             request.query.get("device") or None,
         )
-
-    def goal_scope():
-        # Hermes keeps a goal in this profile's session database (``state_meta``), so every read and
-        # write re-enters the request's profile scope inside the worker thread.
-        return profile_scope()
-
-    async def goal_view(session_id: str, extra: Optional[Dict[str, Any]] = None) -> "web.Response":
-        scope = goal_scope()
-
-        def run():
-            with scope():
-                return goal.read(session_id)
-
-        found = await asyncio.to_thread(run)
-        return web.json_response(
-            {"object": "memento.goal", "session_id": session_id, **(extra or {}), **found}
-        )
-
-    async def get_goal(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        return await goal_view(request.match_info["session_id"])
-
-    async def post_goal(request: "web.Request") -> "web.Response":
-        """Sets the session's goal from the wizard's ``/goal`` text, and its quality gates."""
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        body = await json_body(request)
-        if body is None:
-            return _error(web, "Body must be a JSON object", 400)
-        session_id = request.match_info["session_id"]
-        scope = goal_scope()
-
-        def run():
-            with scope():
-                return goal.apply(
-                    session_id, body.get("command"), body.get("gates"), body.get("max_turns")
-                )
-
-        try:
-            applied = await asyncio.to_thread(run)
-        except goal.GoalError as error:
-            return _error(web, str(error), error.status)
-        except ValueError as error:
-            return _error(web, str(error), 400)
-        events.note("runs", session_id, store_path(), True)
-        return web.json_response({"object": "memento.goal", "session_id": session_id, **applied})
-
-    async def post_goal_control(request: "web.Request") -> "web.Response":
-        """The sheet's actions: pause, resume or clear the session's goal."""
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        body = await json_body(request)
-        if body is None:
-            return _error(web, "Body must be a JSON object", 400)
-        session_id = request.match_info["session_id"]
-        scope = goal_scope()
-
-        def run():
-            with scope():
-                return goal.control(session_id, body.get("action"))
-
-        try:
-            done = await asyncio.to_thread(run)
-        except goal.GoalError as error:
-            return _error(web, str(error), error.status)
-        events.note("runs", session_id, store_path(), True)
-        return web.json_response({"object": "memento.goal", "session_id": session_id, **done})
 
     async def push_subscribe(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1489,9 +1406,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/dictation", dictate)
     app.router.add_post(f"{PREFIX}/dictation/warm", warm_dictation)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/attachments", upload_attachment)
-    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/goal", get_goal)
-    app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/goal", post_goal)
-    app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/goal/control", post_goal_control)
     app.router.add_get(f"{PREFIX}/runs/live", live_runs)
     app.router.add_get(f"{PREFIX}/events", stream_events)
     app.router.add_post(f"{PREFIX}/push", push_subscribe)
@@ -1801,9 +1715,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/rewrite", research_rewrite)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/retry", research_retry)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/remove", remove_research)
-    # The goal loop judges finished turns and posts continuations through the server's own scope
-    # readers and adapter, which only exist here; see goal.py.
-    goal.wire(adapter, scope=profile_scope, profile=request_profile)
     mirror_for_profiles(app, web)
     logger.info("memento: serving %s on the API server", PREFIX)
 
@@ -1831,9 +1742,6 @@ def register(ctx) -> None:
         register_hook("post_approval_response", events.on_approval)
         register_hook("post_approval_response", approvals.settled)
         register_hook("on_session_end", events.on_turn_end)
-        # A session with a goal is judged when its turn ends, and continued from here; see goal.py.
-        register_hook("post_llm_call", goal.remember)
-        register_hook("on_session_end", goal.turn_finished)
         # The run is over, so a queued message can go now rather than at the next tick.
         register_hook("on_session_end", lambda **_kwargs: outbox.wake())
         # And AFK looks for the next task now when a project session ends; see afk.py.

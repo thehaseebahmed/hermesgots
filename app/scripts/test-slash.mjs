@@ -5,6 +5,7 @@ import {
   LOCAL_COMMANDS,
   SEND_COMMANDS,
   hoistItem,
+  localCommand,
   nameSpread,
   rankSlashItems,
   slashToken,
@@ -62,7 +63,7 @@ test("a new line starts a token just as a space does", () => {
 
 test("a token with text after it isn't the whole message", () => {
   assert.equal(slashToken("/new do the thing", 4)?.alone, false)
-  assert.equal(slashToken("/goal write the spec", 5)?.alone, false)
+  assert.equal(slashToken("/settings dark mode", 9)?.alone, false)
 })
 
 test("the whole token is replaced, but the query is only what is typed before the caret", () => {
@@ -167,9 +168,15 @@ test("a picked skill goes to the front of the message, the rest following it", (
 
 test("a picked skill at the front leaves the rest of the message where it was", () => {
   const text = "/gri the report"
-  assert.deepEqual(hoistItem(text, slashToken(text, 4), "goal"), {
-    text: "/goal the report",
-    caret: 16,
+  assert.deepEqual(hoistItem(text, slashToken(text, 4), "review"), {
+    text: "/review the report",
+    caret: 18,
   })
   assert.deepEqual(hoistItem("/gri", tokenAt("/gri"), "plan"), { text: "/plan ", caret: 6 })
+})
+
+test("the slash menu offers no goal command", () => {
+  assert.deepEqual(names(LOCAL_COMMANDS), ["new", "settings"])
+  // `/goal fix the tests` is a message like any other now, not a command Gots runs.
+  assert.equal(localCommand("/goal fix the tests"), null)
 })

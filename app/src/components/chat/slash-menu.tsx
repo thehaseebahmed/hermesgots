@@ -5,7 +5,6 @@ import {
   PlusIcon,
   SettingsIcon,
   SparklesIcon,
-  TargetIcon,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -16,7 +15,6 @@ import { cn } from "@/lib/utils"
 
 const COMMAND_ICONS = {
   new: PlusIcon,
-  goal: TargetIcon,
   settings: SettingsIcon,
   steer: CornerDownRightIcon,
   queue: ListPlusIcon,

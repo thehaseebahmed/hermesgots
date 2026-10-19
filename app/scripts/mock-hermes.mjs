@@ -763,53 +763,8 @@ const DONE_INSTRUCTIONS = "Two things the run's prompt emphasises once the work 
 // test_library.py matches this line word for word, so it stays one line.
 // prettier-ignore
 const PROGRESS_UPDATES_INSTRUCTIONS = "Keep the user in the loop as you work, at a working rhythm rather than a running commentary. Post a short update between checkpoints — what landed, what you're doing next — so a long stretch of tool calls never reads as a hang. Keep the todo list current as you go: mark items done as they land and add what you discover. When something keeps failing, say what you tried and what you now think is wrong before the next attempt. Thinking out loud while you plan is welcome. Don't narrate each edit, read or command — the tool calls already show those; keep what you do say technical enough to follow the work without spelling out every implementation detail."
-// A chat's goal rides in Auto: Hermes's goal keeps the session working between runs.
+// The session modes a project session can run in (the plugin's MODES).
 const MODES = ["accept_edits", "auto", "plan"]
-// A chat's goal, as the plugin's goal routes carry it: Hermes's own state, kept per session.
-// MOCK_GOAL=<status> starts every goal there: active, paused, done or cleared.
-const goals = new Map()
-const GOAL_STATUSES = ["active", "paused", "done", "cleared"]
-const GOAL_START = GOAL_STATUSES.includes(process.env.MOCK_GOAL) ? process.env.MOCK_GOAL : "active"
-// Hermes's contract labels (goals.parse_contract): the wizard writes these, the app reads them back.
-const CONTRACT_LABELS = {
-  outcome: "outcome",
-  verify: "verification",
-  verification: "verification",
-  constraints: "constraints",
-  boundaries: "boundaries",
-  "stop when": "stop_when",
-}
-const contractOf = (text) => {
-  const found = { outcome: "", verification: "", constraints: "", boundaries: "", stop_when: "" }
-  for (const line of String(text).split("\n")) {
-    const match = /^([a-z ]+):\s*(.+)$/i.exec(line.trim())
-    const field = match && CONTRACT_LABELS[match[1].toLowerCase().trim()]
-    if (field) found[field] += (found[field] ? " " : "") + match[2].trim()
-  }
-  return found
-}
-const goalRecord = (id) => {
-  let record = goals.get(id)
-  if (!record) {
-    record = {
-      goal: "",
-      status: GOAL_START,
-      turns_used: GOAL_START === "active" ? 2 : 0,
-      max_turns: 20,
-      subgoals: [],
-      contract: contractOf(""),
-      gates: [],
-      verdict: GOAL_START === "active" ? "continue" : null,
-      reason: GOAL_START === "paused" ? "The turn budget is spent." : null,
-      paused_reason: GOAL_START === "paused" ? "The turn budget is spent." : null,
-      waiting: null,
-    }
-    goals.set(id, record)
-  }
-  return record
-}
-const goalView = (record) =>
-  record && record.goal ? { ...record, gates: [...record.gates] } : null
 
 // The sessions each session delegated to with delegate_task (the plugin reads them from state.db),
 // each a transcript of its own at GET /api/sessions/{id}/messages.
@@ -2638,7 +2593,6 @@ http
           "pr_tool",
           "close",
           "merge_resolve",
-          "goal",
           ...(EVENTS ? ["events"] : []),
           "push",
           "host_model",
@@ -2664,15 +2618,6 @@ http
         ],
         clarify: true,
         hooks: true,
-        goal:
-          process.env.MOCK_GOAL === "unavailable"
-            ? {
-                ready: false,
-                reason: "This Hermes version has no /goal command to set one with.",
-                min_turns: 1,
-                max_turns: 500,
-              }
-            : { ready: true, reason: null, min_turns: 1, max_turns: 500 },
         research: {
           ready: true,
           reason: null,
@@ -3700,13 +3645,6 @@ http
       }
       for (const record of projectSessions.values())
         if (record.plan_pending) waiting[record.session_id] ??= { kind: "plan" }
-      // A goal the user has to unstick parks a session: paused (its budget spent, a gate out of
-      // retries) or judged blocked.
-      for (const [id, record] of goals) {
-        const goal = goalView(record)
-        if (goal && (goal.status === "paused" || goal.verdict === "blocked"))
-          waiting[id] ??= { kind: "goal", reason: goal.paused_reason ?? goal.reason ?? "blocked" }
-      }
       // AFK's own wait: a session whose run ended without finishing, or one a restart adopted.
       for (const [projectId, why] of afkStalled) {
         const session = `memento-afk-${projectId}`
@@ -3810,7 +3748,7 @@ http
       return json(res, 200, { ok: true, session, child })
     }
     const sessionRoute =
-      /^\/api\/plugins\/memento\/sessions\/([^/]+)\/(workspace|workspace\/remove|mode|prs|library|close|goal|goal\/control)$/.exec(
+      /^\/api\/plugins\/memento\/sessions\/([^/]+)\/(workspace|workspace\/remove|mode|prs|library|close)$/.exec(
         url.pathname,
       )
     if (PLUGIN && !profile && sessionRoute) {
@@ -3884,86 +3822,6 @@ http
         return answer(record)
       }
       if (route === "workspace") return answer(workspace ?? null)
-      if (route === "goal") {
-        // Hermes's own /goal, as the plugin's routes carry it: setting one answers with the kick text
-        // the app then sends, and everything after that is state.
-        const record = goalRecord(id)
-        if (req.method !== "POST") {
-          return json(res, 200, { object: "memento.goal", session_id: id, goal: goalView(record) })
-        }
-        const body = await readBody(req)
-        const text = String(body?.command ?? "").trim()
-        if (!text)
-          return json(res, 400, { error: { message: "A goal needs something to work towards." } })
-        const max = Number(body?.max_turns) || 20
-        if (max < 1 || max > 500)
-          return json(res, 400, { error: { message: "max_turns must be between 1 and 500." } })
-        const gates = (Array.isArray(body?.gates) ? body.gates : []).map(String).filter(Boolean)
-        Object.assign(record, {
-          goal: text,
-          status: "active",
-          turns_used: 0,
-          max_turns: max,
-          contract: contractOf(text),
-          subgoals: [],
-          verdict: null,
-          reason: null,
-          paused_reason: null,
-          waiting: null,
-          gates: gates.map((command) => ({
-            command,
-            passing: null,
-            exit_code: null,
-            attempts: 0,
-            max_retries: 2,
-            output: "",
-          })),
-        })
-        return json(res, 200, {
-          object: "memento.goal",
-          session_id: id,
-          goal: goalView(record),
-          kick: `Continue working towards this goal: ${text.split("\n")[0]}`,
-        })
-      }
-      if (route === "goal/control") {
-        const record = goalRecord(id)
-        const { action } = await readBody(req)
-        if (!["pause", "resume", "clear"].includes(action))
-          return json(res, 400, {
-            error: { message: `Unknown goal action ${JSON.stringify(action)}.` },
-          })
-        if (action === "clear") {
-          goals.delete(id)
-          return json(res, 200, {
-            object: "memento.goal",
-            session_id: id,
-            goal: null,
-            kick: null,
-            message: "Cleared the goal.",
-          })
-        }
-        if (action === "pause") {
-          record.status = "paused"
-          record.paused_reason = "Paused by the user."
-          return json(res, 200, {
-            object: "memento.goal",
-            session_id: id,
-            goal: goalView(record),
-            kick: null,
-            message: "Paused the goal.",
-          })
-        }
-        record.status = "active"
-        record.paused_reason = null
-        return json(res, 200, {
-          object: "memento.goal",
-          session_id: id,
-          goal: goalView(record),
-          kick: `Continue working towards this goal: ${record.goal.split("\n")[0]}`,
-          message: "Continuing the goal.",
-        })
-      }
       if (route === "mode" && req.method === "POST") {
         const { mode } = await readBody(req)
         if (!MODES.includes(mode))

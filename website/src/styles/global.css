@@ -258,10 +258,6 @@ h1 {
   background: var(--usage-input);
 }
 
-.mode-goal {
-  background: var(--usage-cache-write);
-}
-
 .mode-chat {
   background: var(--usage-cache-read);
 }
