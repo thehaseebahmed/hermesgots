@@ -24,7 +24,7 @@ export function healthLine(
   if (server.state === "needs_access") {
     return {
       text: canAuthenticate
-        ? "Needs Authentication: Click here to authenticate"
+        ? "Click here to authenticate"
         : "Needs Authentication",
       authenticate: canAuthenticate,
       failed: false,

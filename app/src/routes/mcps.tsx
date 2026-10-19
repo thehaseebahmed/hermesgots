@@ -79,7 +79,7 @@ const SET_PLACEHOLDER = "Set — type to replace"
  * configuration holds, then the ones a Hermes plugin provides.
  *
  * Every row is its name over its health — *Healthy: 78 tools* where Hermes reports a count, the
- * Host's own sentence where it failed, *Needs Authentication: Click here to authenticate* where
+ * Host's own sentence where it failed, *Click here to authenticate* where
  * Server access is what stands in the way — and that health line is the button starting the flow, so
  * the waiting row and the way out of it are one line. Tapping the name opens the server's own sheet:
  * Config, where its block is shown and saved, and Tools, where what it offers is listed (ADR 0014).
@@ -340,7 +340,7 @@ function ServerRow({
             type="button"
             className={cn(
               "-mx-1 min-h-11 px-1 text-left text-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring",
-              line.failed ? "text-destructive" : "text-primary",
+              line.failed ? "text-destructive" : "text-warning",
             )}
             onClick={onGrant}
           >

@@ -1,5 +1,5 @@
 // A server waiting on Server access says so on its row and offers the one thing that helps, on the
-// same line: Needs Authentication: Click here to authenticate — and so does a server whose grant
+// same line: Click here to authenticate — and so does a server whose grant
 // failed, whose reason is the line and whose access the Host can still start. The action asks the
 // Host to start the flow and shows the URL the provider handed back, with a way to copy it; the row
 // keeps saying it is waiting while that runs. The flow's callback binds the host's own loopback, so
@@ -28,7 +28,7 @@ const run = async ({ page, profileId, shot, until }) => {
     if (request.method() === "POST" && path.endsWith("/access")) starts.push(path)
     if (request.method() === "POST" && path.endsWith("/access/callback")) callbacks.push(path)
   })
-  const AUTHENTICATE = "Needs Authentication: Click here to authenticate"
+  const AUTHENTICATE = "Click here to authenticate"
   const health = (name, text) =>
     page.locator(`[data-mcp="${name}"]`).getByRole("button", { name: text, exact: true })
   const address = () => page.getByLabel("The address to open")

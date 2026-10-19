@@ -47,7 +47,7 @@ test("a waiting server invites the tap where the Host can start the flow", () =>
   assert.deepEqual(
     healthLine(server({ state: "needs_access", access: false }), { canAuthenticate: true }),
     {
-      text: "Needs Authentication: Click here to authenticate",
+      text: "Click here to authenticate",
       authenticate: true,
       failed: false,
     },
@@ -99,7 +99,7 @@ test("Server access outranks a failure the Host reports underneath it", () => {
   const line = healthLine(server({ state: "needs_access", reason: "auth error" }), {
     canAuthenticate: true,
   })
-  assert.equal(line.text, "Needs Authentication: Click here to authenticate")
+  assert.equal(line.text, "Click here to authenticate")
 })
 
 test("arguments survive a line with a path that has a space in it", () => {

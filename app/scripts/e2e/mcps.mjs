@@ -14,7 +14,7 @@ const SERVERS = [
   ["postgres", "Off"],
   ["linear", "Connecting…"],
   ["sentry", "Connection refused: nothing is listening on localhost:3100."],
-  ["notion", "Needs Authentication: Click here to authenticate"],
+  ["notion", "Click here to authenticate"],
   ["filesystem", "Healthy: 4 tools"],
 ]
 const REASON = "Connection refused: nothing is listening on localhost:3100."
@@ -82,7 +82,7 @@ const run = async ({ page, profileId, shot, until }) => {
   assert.equal(
     await page
       .locator('[data-mcp="notion"]')
-      .getByRole("button", { name: "Needs Authentication: Click here to authenticate" })
+      .getByRole("button", { name: "Click here to authenticate" })
       .count(),
     1,
     "the waiting row's health line is the button that starts Server access",
