@@ -1002,16 +1002,20 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if clones.is_pending_id(project_id):
             return _error(web, "The project is still being created.", 409)
         body = await json_body(request) or {}
-        named = {"on", "build_skill", "critique_skills"} & set(body)
-        if not named:
+        switch = "on" in body
+        choosing = any(field in body for field in afk.SKILL_FIELDS)
+        if not switch and not choosing:
             return _error(web, "on, build_skill or critique_skills is needed.", 400)
+        if switch and choosing:
+            # One write, one shape. The skills land before the switch wakes the sweep, so a body
+            # naming both could write the choice and then be refused — half of it written.
+            return _error(web, "A write names either on or the skills, not both.", 400)
         on = body.get("on")
-        if "on" in named and not isinstance(on, bool):
+        if switch and not isinstance(on, bool):
             return _error(web, "on must be true or false.", 400)
-        # One write names the switch or the skills; the skills' own body is checked before anything
-        # is read or written, so a refusal leaves the row as it was.
+        # Checked before anything is read or written, so a refusal leaves the row as it was.
         skills = None
-        if named - {"on"}:
+        if choosing:
             try:
                 skills = afk.skills_from(body)
             except ValueError as why:
@@ -1020,10 +1024,15 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if refused is not None:
             return refused
         if skills is not None:
-            # Before the switch's own write, which wakes the sweep: a task claimed on the way has to
-            # be worked by the skills the user just chose.
             await asyncio.to_thread(afk.set_skills, hermes_home(), project_id, *skills)
-        if "on" in named:
+            found = await asyncio.to_thread(
+                afk.read,
+                hermes_home(),
+                project_id,
+                project.folders,
+                bool(getattr(project, "archived", False)),
+            )
+        else:
             try:
                 found = await asyncio.to_thread(
                     afk.set_on,
@@ -1036,14 +1045,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             except afk.Refused as why:
                 # The project can't be left to work: its reason is the answer, and nothing is written.
                 return _error(web, str(why), 409)
-        else:
-            found = await asyncio.to_thread(
-                afk.read,
-                hermes_home(),
-                project_id,
-                project.folders,
-                bool(getattr(project, "archived", False)),
-            )
         return web.json_response({"object": "memento.afk", "project_id": project_id, **found})
 
     async def session_db():

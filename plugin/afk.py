@@ -168,6 +168,10 @@ def read(
     }
 
 
+# The two fields a skills write names, written together and read together.
+SKILL_FIELDS = ("build_skill", "critique_skills")
+
+
 def skills_from(body: Dict[str, Any]) -> Tuple[Optional[str], List[str]]:
     """The skills a write names, read from its body, or ``ValueError`` saying what's wrong.
 
@@ -176,7 +180,7 @@ def skills_from(body: Dict[str, Any]) -> Tuple[Optional[str], List[str]]:
     they are still skills is the sweep's question, not this write's, so a name the profile has since
     lost is kept as the project's choice and refused where a task would be claimed (#323).
     """
-    if "build_skill" not in body or "critique_skills" not in body:
+    if any(field not in body for field in SKILL_FIELDS):
         raise ValueError("A skills write names build_skill and critique_skills.")
     build_skill = body["build_skill"]
     if build_skill is not None and not isinstance(build_skill, str):
@@ -203,20 +207,13 @@ def set_skills(
     behind it, so choosing a skill is no reason to start working anything. Turning the switch on or
     off writes its own columns only, so a choice outlives both.
     """
-    names = _names(critique_skills)
-    conn = connect(db_path(hermes_home))
-    try:
-        conn.execute(
-            """INSERT INTO project_afk (project_id, enabled, at, build_skill, critique_skills)
-               VALUES (?, 0, ?, ?, ?)
-               ON CONFLICT(project_id) DO UPDATE SET
-                   build_skill = excluded.build_skill,
-                   critique_skills = excluded.critique_skills,
-                   at = excluded.at""",
-            (project_id, int(time.time()), _name(build_skill), json.dumps(names)),
-        )
-    finally:
-        conn.close()
+    _upsert(
+        hermes_home,
+        project_id,
+        build_skill=_name(build_skill),
+        critique_skills=json.dumps(_names(critique_skills)),
+        at=int(time.time()),
+    )
 
 
 def release(
@@ -792,16 +789,22 @@ def _names(values: Iterable[Any]) -> List[str]:
     return found
 
 
-def _list(value: Any) -> List[Any]:
-    """The JSON list a column holds, or none: a row written before the column, or by hand, reads as
-    no choice rather than failing the sheet."""
+def _column(value: Any, kind: type) -> Any:
+    """The JSON a column holds when it is a `kind`, else None: a row written before the column, or by
+    hand, reads as nothing rather than failing the sheet."""
     if not isinstance(value, str) or not value:
-        return []
+        return None
     try:
         found = json.loads(value)
     except ValueError:
-        return []
-    return found if isinstance(found, list) else []
+        return None
+    return found if isinstance(found, kind) else None
+
+
+def _list(value: Any) -> List[Any]:
+    """The JSON list a column holds, or none: a row written before the column, or by hand, reads as
+    no choice rather than failing the sheet."""
+    return _column(value, list) or []
 
 
 class Hold(NamedTuple):
@@ -838,13 +841,29 @@ def _holding_rows(hermes_home: Path) -> List[Hold]:
 
 def _task(value: Any) -> Optional[Dict[str, Any]]:
     """The task a row's JSON column holds, or None when it holds nothing a sheet can show."""
-    if not isinstance(value, str) or not value:
-        return None
+    return _column(value, dict)
+
+
+def _upsert(hermes_home: Path, project_id: str, **fields: Any) -> None:
+    """Writes the named columns of the project's AFK row, making the row where the project has none.
+
+    One statement for both writers, so a column is never added to the insert and forgotten in the
+    update: a fresh row starts with the switch off, since every writer that isn't the switch leaves
+    `enabled` and every other column to the row's own defaults, and only the named columns are set.
+    """
+    row = {"enabled": 0, **fields}
+    columns = ", ".join(row)
+    placeholders = ", ".join("?" for _ in row)
+    assignments = ", ".join(f"{name} = excluded.{name}" for name in fields)
+    conn = connect(db_path(hermes_home))
     try:
-        found = json.loads(value)
-    except ValueError:
-        return None
-    return found if isinstance(found, dict) else None
+        conn.execute(
+            f"""INSERT INTO project_afk (project_id, {columns}) VALUES (?, {placeholders})
+                ON CONFLICT(project_id) DO UPDATE SET {assignments}""",
+            (project_id, *row.values()),
+        )
+    finally:
+        conn.close()
 
 
 def _update(hermes_home: Path, project_id: str, **fields: Any) -> None:
@@ -864,15 +883,6 @@ def _update(hermes_home: Path, project_id: str, **fields: Any) -> None:
 
 
 def _write(hermes_home: Path, project_id: str, on: bool) -> None:
-    conn = connect(db_path(hermes_home))
-    try:
-        # The switch's own columns only: the task it holds and the last refusal are the sweep's, and
-        # the skills its work follows are the pickers' (`set_skills`) — turning it on or off leaves
-        # both alone.
-        conn.execute(
-            """INSERT INTO project_afk (project_id, enabled, at) VALUES (?, ?, ?)
-               ON CONFLICT(project_id) DO UPDATE SET enabled = excluded.enabled, at = excluded.at""",
-            (project_id, 1 if on else 0, int(time.time())),
-        )
-    finally:
-        conn.close()
+    # The switch's own columns only: the task it holds and the last refusal are the sweep's, and the
+    # skills its work follows are the pickers' (`set_skills`) — turning it on or off leaves both alone.
+    _upsert(hermes_home, project_id, enabled=1 if on else 0, at=int(time.time()))

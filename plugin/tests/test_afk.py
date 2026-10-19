@@ -327,6 +327,15 @@ class SkillChoiceTests(unittest.TestCase):
         self.assertEqual(found["build_skill"], "writing-for-agents")
         self.assertEqual(found["critique_skills"], ["code-review"])
 
+    def test_choosing_a_skill_leaves_a_project_already_working_on(self) -> None:
+        # The row's other columns are not this write's: a project already left to work stays on when
+        # its skills change, and the sweep's task and refusal are untouched.
+        set_on(self.home, "p1", self.folders(), True)
+        set_skills(self.home, "p1", "writing-for-agents", ["code-review"])
+        found = read(self.home, "p1", self.folders())
+        self.assertTrue(found["on"])
+        self.assertEqual(found["build_skill"], "writing-for-agents")
+
     def test_choosing_a_skill_on_a_project_never_turned_on_keeps_its_switch_off(self) -> None:
         # The pickers sit under the switch, which a project that was never left to work has no row
         # for yet: choosing one creates the row without turning anything on.
