@@ -1002,28 +1002,15 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if clones.is_pending_id(project_id):
             return _error(web, "The project is still being created.", 409)
         body = await json_body(request) or {}
-        switch = "on" in body
-        choosing = any(field in body for field in afk.SKILL_FIELDS)
-        if not switch and not choosing:
-            return _error(web, "on, build_skill or critique_skills is needed.", 400)
-        if switch and choosing:
-            # One write, one shape. The skills land before the switch wakes the sweep, so a body
-            # naming both could write the choice and then be refused — half of it written.
-            return _error(web, "A write names either on or the skills, not both.", 400)
-        on = body.get("on")
-        if switch and not isinstance(on, bool):
-            return _error(web, "on must be true or false.", 400)
-        skills = None
-        if choosing:
-            try:
-                skills = afk.skills_from(body)
-            except ValueError as why:
-                return _error(web, str(why), 400)
+        try:
+            named, value = afk.write_from(body)
+        except ValueError as why:
+            return _error(web, str(why), 400)
         project, refused = await resolve_project(project_id)
         if refused is not None:
             return refused
-        if skills is not None:
-            await asyncio.to_thread(afk.set_skills, hermes_home(), project_id, *skills)
+        if named == "skills":
+            await asyncio.to_thread(afk.set_skills, hermes_home(), project_id, *value)
             found = await asyncio.to_thread(
                 afk.read,
                 hermes_home(),
@@ -1038,7 +1025,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     hermes_home(),
                     project_id,
                     project.folders,
-                    on,
+                    value,
                     bool(getattr(project, "archived", False)),
                 )
             except afk.Refused as why:

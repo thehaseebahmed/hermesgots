@@ -2510,13 +2510,11 @@ export interface ProjectAfk {
   critiqueSkills: string[]
 }
 
-function skillName(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value.trim() : null
-}
-
 function skillNames(value: unknown): string[] {
-  const names = Array.isArray(value) ? value.map(skillName) : []
-  return [...new Set(names.filter((name): name is string => name !== null))]
+  // Typed, not re-derived: the host already writes these trimmed and each once.
+  return Array.isArray(value)
+    ? value.filter((name): name is string => typeof name === "string")
+    : []
 }
 
 function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
@@ -2532,7 +2530,7 @@ function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
     reason: str(body.reason) || null,
     task: parseIssue(body.task),
     refusal: str(body.refusal) || null,
-    buildSkill: skillName(body.build_skill),
+    buildSkill: str(body.build_skill) || null,
     critiqueSkills: skillNames(body.critique_skills),
   }
 }

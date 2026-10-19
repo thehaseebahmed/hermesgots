@@ -154,7 +154,9 @@ export function AfkPopup({
   // once it's on the sheet keeps reading at AFK_MS, because turning it on wakes a sweep on the host
   // and the task it claims, or why GitHub refused it, lands after the switch's own answer.
   usePoll(readAfk, afk?.on ? AFK_MS : false, [key, projectId], {
-    active: open && switchable === "yes",
+    // Read where either feature wants the row: a host that can hold a skill choice answers it here,
+    // whether or not it can also switch a project on.
+    active: open && (switchable === "yes" || withSkills === "yes"),
     onShow: false,
   })
 

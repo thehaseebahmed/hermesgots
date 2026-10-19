@@ -186,6 +186,26 @@ def skills_from(body: Dict[str, Any]) -> Tuple[Optional[str], List[str]]:
     return build_skill, critique_skills
 
 
+def write_from(body: Dict[str, Any]) -> Tuple[str, Any]:
+    """What a write names — ``"on"`` with its flag, or ``"skills"`` with the pair — or ValueError.
+
+    One write, one shape: the skills land before the switch wakes the sweep, so a body naming both
+    could write the choice and then be refused, leaving half of it written.
+    """
+    switch = "on" in body
+    choosing = any(field in body for field in SKILL_FIELDS)
+    if switch and choosing:
+        raise ValueError("A write names either on or the skills, not both.")
+    if switch:
+        on = body["on"]
+        if not isinstance(on, bool):
+            raise ValueError("on must be true or false.")
+        return "on", on
+    if choosing:
+        return "skills", skills_from(body)
+    raise ValueError("on, build_skill or critique_skills is needed.")
+
+
 def set_skills(
     hermes_home: Path,
     project_id: str,
