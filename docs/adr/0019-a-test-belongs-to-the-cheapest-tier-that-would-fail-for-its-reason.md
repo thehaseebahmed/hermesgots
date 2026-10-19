@@ -3,7 +3,7 @@
 Sixty browser flows is what "everything a unit test cannot do goes to end-to-end" produces. The unit
 tier is a pure rule: a module of TypeScript run by `node --test`, with no DOM, no database and no
 HTTP. So a change that renders a screen, opens a sheet or reads the device's database has exactly
-one home — a flow, with a dev server and up to four fake hosts behind it — and the set only grows.
+one home — a flow, with a dev server and up to four test hosts behind it — and the set only grows.
 Nothing asks a flow to justify itself, and a flow nobody runs never argues for its own deletion, so
 each one is a permanent cost paid for a single assertion.
 
@@ -44,8 +44,9 @@ or an element's height would pass whatever the CSS says.
 ## Consequences
 
 - **A new flow is an argument, not a default.** A pull request that adds one has to say why the
-  lower tiers cannot reach the behaviour, which the template asks for. That is the whole mechanism:
-  the rule's only enforcement is that a reviewer can point at it and ask the question.
+  lower tiers cannot reach the behaviour. The template's checklist asks for the tier, and that is
+  the whole mechanism: the rule's only enforcement is that a reviewer can point at it and ask the
+  question.
 - **The component tier is the price of the boundary.** It is machinery the repository did not have:
   a runner, a seeded database, a faked HTTP boundary and tests written against the app's own client
   types. It is also the tier most work lands in, so it has to stay inside the two-minute budget
@@ -57,7 +58,7 @@ or an element's height would pass whatever the CSS says.
 - **What a component test proves is a shape TypeScript already pins.** Its fake at the HTTP boundary
   answers what the app's own types say, not what the plugin really answers. The plugin's real
   answers are proven by its own suite, and at the seam by the sweep; a component test that grows
-  responses the plugin should produce would be a second, quieter fake.
+  responses the plugin should produce would be a second, quieter test host.
 - **The flows do not leave in one change.** Each demoted flow is deleted only once its replacement
   at the lower tier is green, and the replacement carries the old assertions rather than re-deriving
   them, so there is never a moment when a behaviour is protected by nothing. Until then the count
