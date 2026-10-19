@@ -977,7 +977,6 @@ def _before_tool(kwargs: Dict[str, Any]) -> Optional[Dict[str, str]]:
     if record["path"] and task_id and not _has_cwd(task_id):
         # The gateway restarted since the app last posted the workspace.
         apply_cwd(task_id, record["path"])
-    # Ahead of the plan early return, so every mode re-applies it, not only the blocked ones.
     follow_auto(record["mode"] == "auto")
     if record["mode"] != "plan":
         return None

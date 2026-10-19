@@ -177,6 +177,5 @@ test("a picked skill at the front leaves the rest of the message where it was", 
 
 test("the slash menu offers no goal command", () => {
   assert.deepEqual(names(LOCAL_COMMANDS), ["new", "settings"])
-  // `/goal fix the tests` is a message like any other now, not a command Gots runs.
   assert.equal(localCommand("/goal fix the tests"), null)
 })

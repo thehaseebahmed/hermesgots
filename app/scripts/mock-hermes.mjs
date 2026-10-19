@@ -763,7 +763,6 @@ const DONE_INSTRUCTIONS = "Two things the run's prompt emphasises once the work 
 // test_library.py matches this line word for word, so it stays one line.
 // prettier-ignore
 const PROGRESS_UPDATES_INSTRUCTIONS = "Keep the user in the loop as you work, at a working rhythm rather than a running commentary. Post a short update between checkpoints — what landed, what you're doing next — so a long stretch of tool calls never reads as a hang. Keep the todo list current as you go: mark items done as they land and add what you discover. When something keeps failing, say what you tried and what you now think is wrong before the next attempt. Thinking out loud while you plan is welcome. Don't narrate each edit, read or command — the tool calls already show those; keep what you do say technical enough to follow the work without spelling out every implementation detail."
-// The session modes a project session can run in (the plugin's MODES).
 const MODES = ["accept_edits", "auto", "plan"]
 
 // The sessions each session delegated to with delegate_task (the plugin reads them from state.db),
