@@ -17,7 +17,8 @@ import { createStore } from "@/lib/store"
 export type PluginFeatureAnswer = "unknown" | "yes" | "no"
 
 /** A bot's server as a read of its features takes it. */
-type Server = Pick<HermesConfig, "baseUrl" | "apiKey"> | null | undefined
+/** A bot's server as these hooks take it: a profile, or a plugin beside one, or nothing yet. */
+export type PluginServer = Pick<HermesConfig, "baseUrl" | "apiKey"> | null | undefined
 
 // The features each connection's plugin answered; only a real answer is remembered, and the map is
 // replaced rather than mutated so a subscriber is handed a new value.
@@ -43,7 +44,7 @@ function answer(known: readonly string[] | undefined, feature: string): PluginFe
  * with no answer yet is `unknown` for every feature rather than `no` for each.
  */
 export function usePluginFeatureAnswers<K extends string>(
-  server: Server,
+  server: PluginServer,
   features: Record<K, string>,
 ): Record<K, PluginFeatureAnswer> {
   const config = serverConfig(server)
@@ -60,11 +61,11 @@ export function usePluginFeatureAnswers<K extends string>(
 }
 
 /** One of those features, for a control that needs just the one. */
-export function usePluginFeature(server: Server, feature: string): PluginFeatureAnswer {
+export function usePluginFeature(server: PluginServer, feature: string): PluginFeatureAnswer {
   return usePluginFeatureAnswers(server, { [feature]: feature })[feature]
 }
 
 /** That feature as a switch: true only for an answer that carries it, false while it's unknown. */
-export function usePluginFeatureOn(server: Server, feature: string): boolean {
+export function usePluginFeatureOn(server: PluginServer, feature: string): boolean {
   return usePluginFeature(server, feature) === "yes"
 }

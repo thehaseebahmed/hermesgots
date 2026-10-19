@@ -83,6 +83,26 @@ _Avoid_: server, backend, machine
 A source of abilities a bot's host runs and the bot draws from, added and switched on one bot at a time.
 _Avoid_: connector, integration, plugin, tool
 
+**User managed server**:
+An MCP server the bot's own configuration holds, so Gots can switch it off or take it away.
+_Avoid_: own server, config server, local server, third-party server
+
+**Plugin managed server**:
+An MCP server a Hermes plugin on the host provides. Gots shows it and cannot change it.
+_Avoid_: plugin server, provided server, built-in server
+
+**Custom server**:
+An MCP server added by typing its address or its command, rather than picked from the Catalogue. User managed once it is added.
+_Avoid_: manual server, raw server, own MCP
+
+**Health**:
+How an MCP server is doing, as its row says it in a line: healthy with a tool count where the host knows one, or why it isn't working. A server that is switched off says `Off` there, because that is how it is doing; the switch itself is the separate control beside it. Where the host can start Server access for what it says, the line is the tap that starts it.
+_Avoid_: status, state, badge, indicator
+
+**Server sheet**:
+One MCP server's own panel, opened by its row: its Config, the block the host holds, and its Tools, what it offers. No URL of its own — it is about one server, not a place.
+_Avoid_: server page, server detail screen, editor
+
 **Catalogue**:
 The MCP servers Hermes offers to add, as the host knows them.
 _Avoid_: store, marketplace, directory, library

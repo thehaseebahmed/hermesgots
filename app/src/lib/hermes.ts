@@ -342,9 +342,10 @@ export async function respondToApproval(
   })
 }
 
-export async function listModels(config: HermesConfig): Promise<string[]> {
+export async function listModels(config: HermesConfig, signal?: AbortSignal): Promise<string[]> {
   const response = await request(endpoint(config.baseUrl, "/models"), {
     headers: headers(config),
+    signal,
   })
   const body = await response.json()
   return Array.isArray(body?.data) ? body.data.map((m: { id: string }) => m.id) : []
@@ -383,6 +384,34 @@ export interface McpServer {
   reason?: string
   /** Whether the Host can start Server access for this row, and so offers Grant access. */
   access: McpAccessOffer
+  /**
+   * How many tools it offers, where the Host knows: Hermes answers a count for a server it has
+   * connected or registered, and none for one it has no runtime state for (see `mcp-server.ts`).
+   */
+  tools?: number
+}
+
+/** The rows a plugin answer wraps (`{"object": {"servers": [...]}}`), or nothing it doesn't carry. */
+function wrapped(value: unknown, key: string): unknown {
+  return (value as Record<string, Record<string, unknown>> | null)?.object?.[key]
+}
+
+/** The rows of one answer or list, each read once, dropping any Gots has no name for. */
+function namedRows<T extends { name: string }>(
+  rows: unknown,
+  read: (raw: unknown) => T | undefined,
+): T[] {
+  if (!Array.isArray(rows)) return []
+  return rows.flatMap((row) => {
+    const found = read(row)
+    return found === undefined ? [] : [found]
+  })
+}
+
+/** One path on the bot's plugin under `/mcp`, every segment escaped (`/mcp/<name>/tools`). */
+function mcpPath(config: HermesConfig, ...segments: string[]): string {
+  const rest = segments.map((segment) => `/${encodeURIComponent(segment)}`).join("")
+  return `${pluginRoot(config.baseUrl)}/mcp${rest}`
 }
 
 const MCP_STATES = new Set<string>(["on", "off", "connecting", "failed", "needs_access", "plugin"])
@@ -401,6 +430,7 @@ function parseMcpServerRow(raw: unknown): McpServer | undefined {
     source: row.source === "plugin" ? "plugin" : "config",
     ...(typeof row.reason === "string" && row.reason ? { reason: row.reason } : {}),
     access: readMcpAccessOffer(row),
+    ...(typeof row.tools === "number" && Number.isFinite(row.tools) ? { tools: row.tools } : {}),
   }
 }
 
@@ -409,14 +439,12 @@ function parseMcpServerRow(raw: unknown): McpServer | undefined {
  * lists: a row with no name, or a state Gots has no word for, is dropped, and so is an empty reason.
  */
 export function parseMcpServers(value: unknown): McpServer[] {
-  const rows = (value as { object?: { servers?: unknown } } | null)?.object?.servers
-  if (!Array.isArray(rows)) return []
-  return rows.map(parseMcpServerRow).filter((server): server is McpServer => server !== undefined)
+  return namedRows(wrapped(value, "servers"), parseMcpServerRow)
 }
 
 /** Reads the plugin's `mcp` write answer (`{"object": {"server": {...}}}`) into the one server. */
 export function parseMcpServer(value: unknown): McpServer | undefined {
-  return parseMcpServerRow((value as { object?: { server?: unknown } } | null)?.object?.server)
+  return parseMcpServerRow(wrapped(value, "server"))
 }
 
 /** The MCP servers the bot's Hermes profile has, read from the Gots plugin. */
@@ -424,7 +452,7 @@ export async function listMcpServers(
   config: HermesConfig,
   signal?: AbortSignal,
 ): Promise<McpServer[]> {
-  const response = await request(`${pluginRoot(config.baseUrl)}/mcp`, {
+  const response = await request(mcpPath(config), {
     headers: headers(config),
     signal,
   })
@@ -443,15 +471,12 @@ export async function setMcpServerEnabled(
   enabled: boolean,
   signal?: AbortSignal,
 ): Promise<McpServer> {
-  const response = await request(
-    `${pluginRoot(config.baseUrl)}/mcp/${encodeURIComponent(name)}/enabled`,
-    {
-      method: "POST",
-      headers: headers(config),
-      body: JSON.stringify({ enabled }),
-      signal,
-    },
-  )
+  const response = await request(mcpPath(config, name, "enabled"), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ enabled }),
+    signal,
+  })
   const server = parseMcpServer(await response.json())
   if (!server) throw new HermesError("The host answered without the server.")
   return server
@@ -469,7 +494,7 @@ export async function removeMcpServer(
   name: string,
   signal?: AbortSignal,
 ): Promise<McpServer[]> {
-  const response = await request(`${pluginRoot(config.baseUrl)}/mcp/${encodeURIComponent(name)}`, {
+  const response = await request(mcpPath(config, name), {
     method: "DELETE",
     headers: headers(config),
     signal,
@@ -488,14 +513,11 @@ export async function startMcpAccess(
   name: string,
   signal?: AbortSignal,
 ): Promise<McpAccess> {
-  const response = await request(
-    `${pluginRoot(config.baseUrl)}/mcp/${encodeURIComponent(name)}/access`,
-    {
-      method: "POST",
-      headers: headers(config),
-      signal,
-    },
-  )
+  const response = await request(mcpPath(config, name, "access"), {
+    method: "POST",
+    headers: headers(config),
+    signal,
+  })
   return parseMcpAccess(await response.json())
 }
 
@@ -511,7 +533,7 @@ export async function deliverMcpAccess(
   url: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  await request(`${pluginRoot(config.baseUrl)}/mcp/${encodeURIComponent(name)}/access/callback`, {
+  await request(mcpPath(config, name, "access", "callback"), {
     method: "POST",
     headers: headers(config),
     body: JSON.stringify({ url }),
@@ -526,6 +548,11 @@ export interface McpCatalogueEntry {
   description: string
   /** Whether this bot already has it — the Host's own read of the bot's configuration. */
   installed: boolean
+  /**
+   * Whether adding it leaves anything to fill in — a value its manifest declares. An entry that
+   * needs none is added by the tap that picks it (ADR 0014).
+   */
+  needsConfig: boolean
 }
 
 /** One catalogue entry as the plugin reports it, or nothing for one Gots has no name for. */
@@ -536,6 +563,7 @@ function parseMcpCatalogueEntry(raw: unknown): McpCatalogueEntry | undefined {
     name: entry.name,
     description: typeof entry.description === "string" ? entry.description : "",
     installed: entry.installed === true,
+    needsConfig: entry.needs_config === true,
   }
 }
 
@@ -544,11 +572,7 @@ function parseMcpCatalogueEntry(raw: unknown): McpCatalogueEntry | undefined {
  * Catalogue lists: an entry with no name is dropped, and so is anything that isn't an entry at all.
  */
 export function parseMcpCatalogue(value: unknown): McpCatalogueEntry[] {
-  const rows = (value as { object?: { entries?: unknown } } | null)?.object?.entries
-  if (!Array.isArray(rows)) return []
-  return rows
-    .map(parseMcpCatalogueEntry)
-    .filter((entry): entry is McpCatalogueEntry => entry !== undefined)
+  return namedRows(wrapped(value, "entries"), parseMcpCatalogueEntry)
 }
 
 /**
@@ -560,7 +584,7 @@ export async function listMcpCatalogue(
   config: HermesConfig,
   signal?: AbortSignal,
 ): Promise<McpCatalogueEntry[]> {
-  const response = await request(`${pluginRoot(config.baseUrl)}/mcp/catalogue`, {
+  const response = await request(mcpPath(config, "catalogue"), {
     headers: headers(config),
     signal,
   })
@@ -615,15 +639,10 @@ function parseMcpCatalogueValue(raw: unknown): McpCatalogueValue | undefined {
  * field the user might skip.
  */
 export function parseMcpCatalogueEntryDetail(value: unknown): McpCatalogueEntryDetail | undefined {
-  const raw = (value as { object?: { entry?: Record<string, unknown> } } | null)?.object?.entry
+  const raw = wrapped(value, "entry") as Record<string, unknown> | undefined
   const entry = parseMcpCatalogueEntry(raw)
   if (!entry) return undefined
-  const values = Array.isArray(raw?.values)
-    ? raw.values
-        .map(parseMcpCatalogueValue)
-        .filter((row): row is McpCatalogueValue => row !== undefined)
-    : []
-  return { ...entry, values }
+  return { ...entry, values: namedRows(raw?.values, parseMcpCatalogueValue) }
 }
 
 /**
@@ -637,10 +656,10 @@ export async function getMcpCatalogueEntry(
   name: string,
   signal?: AbortSignal,
 ): Promise<McpCatalogueEntryDetail | undefined> {
-  const response = await request(
-    `${pluginRoot(config.baseUrl)}/mcp/catalogue/${encodeURIComponent(name)}`,
-    { headers: headers(config), signal },
-  )
+  const response = await request(mcpPath(config, "catalogue", name), {
+    headers: headers(config),
+    signal,
+  })
   return parseMcpCatalogueEntryDetail(await response.json())
 }
 
@@ -658,13 +677,206 @@ export async function installMcpServer(
   values: Record<string, string>,
   signal?: AbortSignal,
 ): Promise<McpServer[]> {
-  const response = await request(`${pluginRoot(config.baseUrl)}/mcp/install`, {
+  const response = await request(mcpPath(config, "install"), {
     method: "POST",
     headers: headers(config),
     body: JSON.stringify({ name, values }),
     signal,
   })
   return parseMcpServers(await response.json())
+}
+
+/** One value a server's own configuration holds, as its Config tab is built from it. */
+export interface McpServerValue {
+  /** The environment name the block holds, which is the whole of the row's title. */
+  name: string
+  /** Whether the bot already holds it. Its content never reaches the screen. */
+  set: boolean
+}
+
+/** One of a bot's servers with the block it runs (the Gots plugin's `GET /mcp/<name>`). */
+export interface McpServerDetail {
+  name: string
+  source: "config" | "plugin"
+  transport: "http" | "stdio"
+  url: string
+  command: string
+  args: string[]
+  auth: "none" | "header" | "oauth"
+  /** False for a server a Hermes plugin provides, which Hermes refuses to modify. */
+  editable: boolean
+  values: McpServerValue[]
+}
+
+/** What the Config tab saves: only the fields it manages, and the values typed over. */
+export interface McpServerEdit {
+  transport: "http" | "stdio"
+  url?: string
+  command?: string
+  args?: string[]
+  auth?: "none" | "header" | "oauth"
+  token?: string
+  values?: Record<string, string>
+}
+
+/** A server the Catalogue doesn't offer, as the custom form collects it. */
+export interface McpCustomServer extends McpServerEdit {
+  name: string
+}
+
+/** One tool a server offers, as the Host lists it: the name it is called by and what it does. */
+export interface McpTool {
+  name: string
+  description: string
+}
+
+/**
+ * What the Host answered about one server's tools, and where they came from: Hermes's schema cache
+ * (`cached`) or the one probe a tap asked for. A cache miss is an empty list, not an error.
+ */
+export interface McpTools {
+  cached: boolean
+  tools: McpTool[]
+}
+
+/** One value row as the plugin reports it, read the stricter way where it says less. */
+function parseMcpServerValue(raw: unknown): McpServerValue | undefined {
+  const value = raw as Record<string, unknown> | null
+  if (typeof value?.name !== "string" || !value.name) return undefined
+  return { name: value.name, set: value.set === true }
+}
+
+/** One server's block as the plugin reports it, or nothing for a row Gots can't draw. */
+export function parseMcpServerDetail(value: unknown): McpServerDetail | undefined {
+  const raw = wrapped(value, "server") as Record<string, unknown> | undefined
+  if (typeof raw?.name !== "string" || !raw.name) return undefined
+  const transport = raw.transport === "stdio" ? "stdio" : "http"
+  const auth = raw.auth === "header" || raw.auth === "oauth" ? raw.auth : "none"
+  return {
+    name: raw.name,
+    source: raw.source === "plugin" ? "plugin" : "config",
+    transport,
+    url: typeof raw.url === "string" ? raw.url : "",
+    command: typeof raw.command === "string" ? raw.command : "",
+    args: Array.isArray(raw.args) ? raw.args.filter((a): a is string => typeof a === "string") : [],
+    auth,
+    editable: raw.editable === true,
+    values: namedRows(raw.values, parseMcpServerValue),
+  }
+}
+
+/** One server's tools as the plugin reports them, dropping a tool Gots has no name for. */
+export function parseMcpTools(value: unknown): McpTools {
+  const raw = wrapped(value, "tools") as Record<string, unknown> | undefined
+  return {
+    cached: raw?.cached === true,
+    tools: namedRows(raw?.items, (tool) => {
+      const row = tool as Record<string, unknown> | null
+      if (typeof row?.name !== "string" || !row.name) return undefined
+      return {
+        name: row.name,
+        description: typeof row.description === "string" ? row.description : "",
+      }
+    }),
+  }
+}
+
+/**
+ * One of the bot's servers with the block it runs (the Gots plugin's `GET /mcp/<name>`): the
+ * transport and its fields, and one row per environment name the block holds. A read only, and the
+ * only thing it says about a value the bot holds is whether it has one.
+ */
+export async function getMcpServer(
+  config: HermesConfig,
+  name: string,
+  signal?: AbortSignal,
+): Promise<McpServerDetail | undefined> {
+  const response = await request(mcpPath(config, name), { headers: headers(config), signal })
+  return parseMcpServerDetail(await response.json())
+}
+
+/**
+ * Saves the Config tab's edit of one server on its Host (the Gots plugin's `POST /mcp/<name>/config`),
+ * answering every server the bot has afterwards. A typed value lands in the bot's profile
+ * environment and the block keeps Hermes's `${NAME}` reference; a block Hermes's own validator
+ * refuses is refused there, with its sentence.
+ */
+export async function saveMcpServer(
+  config: HermesConfig,
+  name: string,
+  edit: McpServerEdit,
+  signal?: AbortSignal,
+): Promise<{ servers: McpServer[]; detail?: McpServerDetail }> {
+  const response = await request(mcpPath(config, name, "config"), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify(edit),
+    signal,
+  })
+  const body: unknown = await response.json()
+  // One round trip answers both: the servers left, and this one's block as the write landed it.
+  return { servers: parseMcpServers(body), detail: parseMcpServerDetail(body) }
+}
+
+/**
+ * Adds a server the Catalogue doesn't offer (the Gots plugin's `POST /mcp/custom`), answering every
+ * server the bot has afterwards: a URL, or a command with its arguments and the environment values
+ * it needs. The Host refuses a name the bot already has, one a Hermes plugin provides, and a
+ * configuration its validator won't take.
+ */
+export async function addCustomMcpServer(
+  config: HermesConfig,
+  server: McpCustomServer,
+  signal?: AbortSignal,
+): Promise<McpServer[]> {
+  const response = await request(mcpPath(config, "custom"), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify(server),
+    signal,
+  })
+  return parseMcpServers(await response.json())
+}
+
+/**
+ * One server's tools from Hermes's own schema cache (the Gots plugin's `GET /mcp/<name>/tools`):
+ * what a registration wrote, so nothing is connected by asking. An empty answer with `cached` false
+ * is a server that has never connected, or one whose configuration has changed since.
+ */
+export async function listMcpServerTools(
+  config: HermesConfig,
+  name: string,
+  signal?: AbortSignal,
+): Promise<McpTools> {
+  return readMcpTools(config, name, "GET", signal)
+}
+
+/**
+ * One server's tools by having the Host probe it once (the Gots plugin's `POST /mcp/<name>/tools`):
+ * it connects, lists what the server offers, and disconnects. The only read here that reaches the
+ * server, so it is asked for by a tap and given `MCP_TOOLS_MS` rather than a read's timeout.
+ */
+export async function probeMcpServerTools(
+  config: HermesConfig,
+  name: string,
+  signal?: AbortSignal,
+): Promise<McpTools> {
+  return readMcpTools(config, name, "POST", signal)
+}
+
+/** One server's tools, read from Hermes's schema cache (GET) or by the probe (POST). */
+async function readMcpTools(
+  config: HermesConfig,
+  name: string,
+  method: "GET" | "POST",
+  signal?: AbortSignal,
+): Promise<McpTools> {
+  const response = await request(mcpPath(config, name, "tools"), {
+    method,
+    headers: headers(config),
+    signal,
+  })
+  return parseMcpTools(await response.json())
 }
 
 /** A provider the host has credentials for, and the models Hermes offers on it. */

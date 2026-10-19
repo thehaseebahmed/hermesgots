@@ -1587,3 +1587,43 @@ user's message — read in the tree and matched against the transcript and the r
 four chat flows (`chat-message`, `reattach`, `history-pages` and the branch's new `history-generations`)
 all pass, and none of them stops a reply and sends in the same breath, or asserts what a compaction's
 seam row looks like.
+
+# Deferred from the code review on the MCP tab
+
+## Careful
+
+### 1. The error-toast fallback is hand-written eight times, and the helper it wants is app-wide
+
+A write's failure is shown by hand at each of the tab's write paths:
+
+```ts
+toast.error(error instanceof Error ? error.message : "Couldn't add that.")
+```
+
+`app/src/components/mcps-tab.tsx` has eight of them — the removal (`:124`), a switch (`:383`), a
+Config save (`:774`), the Catalogue's add and its form's add (`:974`, `:1109`), the custom form's
+(`:1228`), Server access's start (`:1346`) and its callback's (`:1392`) — differing only in the
+sentence used when the throw isn't an `Error`, and one of the eight (`:1346`) sets a field of the
+access sheet rather than raising a toast, so the same expression has two destinations.
+
+- Cost: eight copies of one rule about how a Host's refusal is shown, where a change to the rule —
+  a reason the Host sent as text but not as an `Error`, say — is a change in eight places that a
+  reader has to find.
+- Suggested fix: one `messageOf(error, fallback)` in `app/src/lib/` (beside `report.ts`, which
+  already holds the app's other "what went wrong" helpers), returning the throw's own sentence or the
+  caller's, called at all eight sites and at the other sites that share the shape.
+- Why it was not fixed here: it isn't a local duplication, it is the repo's idiom. The same
+  expression stands 45 times across 24 files in `src/` — `src/routes/chat.tsx` (4),
+  `src/components/bot-settings.tsx` (4), `src/lib/sync.ts` (3), `src/routes/project.tsx` (2),
+  `src/lib/chat.ts` (2), `src/components/project-settings.tsx` (2), and one each in a dozen more.
+  Only thirteen of them are this branch's (the eight here, four in `bot-settings.tsx`, one in
+  `mcps.ts`); the rest predate it. Adding the helper inside one screen's diff would leave that
+  screen the only one calling it, which is a worse outcome than the duplication: the next reader
+  would have two idioms to learn and no way to tell which is current. The honest fix is one commit
+  over the whole app, with the helper named for what it answers and every site converted, so the
+  idiom has one home.
+- Why it is risky: mechanical, but wide — 45 call sites, on paths that show a user why a chat, a
+  sync or a write failed, and a fallback sentence is user-facing copy the conversion can silently
+  change if a site's own wording is mistaken for the helper's default.
+
+---

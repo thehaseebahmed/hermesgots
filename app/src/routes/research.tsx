@@ -70,6 +70,7 @@ import {
 } from "@/components/ui/input-group"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
+import { Segmented } from "@/components/segmented"
 import { db, getActiveProfile, rememberModel, type ModelChoice } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { getResearchWriters } from "@/lib/hermes"
@@ -756,43 +757,6 @@ function MissionHeader({
   )
 }
 
-/** A choice between a few options as one row of pills. */
-function Segmented<T extends string>({
-  options,
-  value,
-  onChange,
-  label,
-}: {
-  options: { id: T; name: string; icon?: typeof BookOpenTextIcon }[]
-  value: T
-  onChange: (value: T) => void
-  label: string
-}) {
-  return (
-    <div className="flex gap-1 rounded-full bg-muted p-1" role="radiogroup" aria-label={label}>
-      {options.map((option) => {
-        const Icon = option.icon
-        return (
-          <button
-            key={option.id}
-            type="button"
-            role="radio"
-            aria-checked={value === option.id}
-            onClick={() => onChange(option.id)}
-            className={cn(
-              "flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-full px-3 text-sm font-medium text-muted-foreground transition-colors",
-              value === option.id && "bg-background text-foreground shadow-sm",
-            )}
-          >
-            {Icon && <Icon className="size-4" />}
-            {option.name}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="flex flex-col gap-2">
@@ -867,7 +831,7 @@ function BriefForm({ mission }: { mission: Mission }) {
         <span className="text-sm font-medium">Format</span>
         <Segmented
           label="Format"
-          options={FORMATS.map((f) => ({ ...f, icon: FORMAT_ICONS[f.id] }))}
+          options={FORMATS.map((f) => ({ id: f.id, label: f.name, icon: FORMAT_ICONS[f.id] }))}
           value={format}
           onChange={setFormat}
         />
@@ -884,8 +848,8 @@ function BriefForm({ mission }: { mission: Mission }) {
         <Segmented
           label="Depth"
           options={[
-            { id: "overview", name: "Overview" },
-            { id: "deep", name: "In depth" },
+            { id: "overview", label: "Overview" },
+            { id: "deep", label: "In depth" },
           ]}
           value={depth}
           onChange={setDepth}

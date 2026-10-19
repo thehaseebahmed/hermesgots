@@ -33,7 +33,7 @@ await flow("fallback-models", async ({ page, profileId, until, shot, held }) => 
   })
   assert.deepEqual(await hosted(), [])
 
-  await page.goto(`${app}/settings/bots/${profileId}`)
+  await page.goto(`${app}/settings/bots/${profileId}/models`)
   const add = page.getByRole("button", { name: "Add fallback" })
   await add.waitFor({ timeout: 15_000 })
 
