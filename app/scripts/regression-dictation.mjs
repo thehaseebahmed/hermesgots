@@ -55,8 +55,9 @@ function speech() {
 
 const clips = async () => (await (await fetch(`${mock}/__mock/dictation`)).json()).clips
 
-async function open(server, viewport, colorScheme = "light", on = browser, touch = false) {
+async function open(server, viewport, colorScheme = "light", on = browser, touch = false, init) {
   const context = await on.newContext({ viewport, colorScheme, hasTouch: touch, isMobile: touch })
+  if (init) await context.addInitScript(init)
   await context.grantPermissions(["microphone"], { origin: app })
   const page = await context.newPage()
   await page.goto(app)
@@ -156,6 +157,75 @@ try {
     assert.equal(all.length, 3)
     assert.equal(await page.getByRole("textbox").last().inputValue(), Array(3).fill(SENTENCE).join(" "))
     await talker.close()
+  }
+
+  // A recorder that errors while live is a failure the user can retry, never a bar stuck transcribing.
+  {
+    const page = await open(mock, { width: 390, height: 844 }, "light", browser, false, () => {
+      const Recorder = window.MediaRecorder
+      window.MediaRecorder = class extends Recorder {
+        start(...args) {
+          super.start(...args)
+          window.setTimeout(() => this.dispatchEvent(new Event("error")), 1200)
+        }
+      }
+    })
+    const mic = page.getByRole("button", { name: "Voice", exact: true })
+    const before = (await clips()).length
+    await mic.click()
+    await page.getByRole("button", { name: "Stop" }).waitFor()
+    await page.getByRole("button", { name: "Retry" }).waitFor({ timeout: 2500 })
+    assert.equal(await page.getByText("Transcribing…").count(), 0, "no transcribing that never ends")
+    await page.getByText("The recording stopped.").waitFor()
+    await shot(page, "phone-light-9-recorder-failed")
+
+    // Retry sends the piece already recorded and lands its text.
+    await page.getByRole("button", { name: "Retry" }).click()
+    await page.waitForFunction(
+      () => [...document.querySelectorAll("textarea")].at(-1)?.value.includes("dictation"),
+      undefined,
+      { timeout: 5000 },
+    )
+    assert.equal(await page.getByRole("textbox").last().inputValue(), SENTENCE)
+    assert.equal((await clips()).length, before + 1, "one piece reached the host")
+
+    // Discard keeps nothing: no clip sent, and the kept recording is gone from the device.
+    await mic.click()
+    await page.getByRole("button", { name: "Retry" }).waitFor({ timeout: 2500 })
+    await page.getByRole("button", { name: "Discard" }).click()
+    await mic.waitFor()
+    assert.equal((await clips()).length, before + 1, "Discard sent nothing")
+    assert.equal(await page.getByRole("textbox").last().inputValue(), SENTENCE)
+    assert.equal(
+      await page.evaluate(async () => (await import("/src/lib/db.ts")).db.dictations.count()),
+      0,
+      "Discard kept nothing on the device",
+    )
+    await page.close()
+  }
+
+  // A track the device ends under the app — another app takes the microphone, permission is
+  // revoked — fails the same way, and Retry sends what was already recorded.
+  {
+    const page = await open(mock, { width: 390, height: 844 }, "light", browser, false, () => {
+      const getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices)
+      navigator.mediaDevices.getUserMedia = async (...args) => {
+        const stream = await getUserMedia(...args)
+        window.__mic = stream
+        return stream
+      }
+    })
+    await page.getByRole("button", { name: "Voice", exact: true }).click()
+    await page.getByRole("button", { name: "Stop" }).waitFor()
+    await page.waitForTimeout(1500)
+    await page.evaluate(() => window.__mic.getAudioTracks()[0].dispatchEvent(new Event("ended")))
+    await page.getByRole("button", { name: "Retry" }).waitFor({ timeout: 2500 })
+    await page.getByText("The microphone is in use by another app.").waitFor()
+    await shot(page, "phone-light-10-track-ended")
+    await page.getByRole("button", { name: "Retry" }).click()
+    await page.getByRole("button", { name: "Voice", exact: true }).waitFor()
+    assert.equal(await page.getByRole("textbox").last().inputValue(), SENTENCE)
+    await page.close()
   }
 
   // A tap on a phone keeps recording: its click must not land on the bar that took the mic's place.
