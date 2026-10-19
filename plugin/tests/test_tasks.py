@@ -19,7 +19,7 @@ from plugin import github, tasks
 from plugin.tasks import (
     CLAIM_LABEL,
     READY_LABEL,
-    frontier,
+    groups,
     next_page,
     parse_blocked_by,
     read,
@@ -64,48 +64,46 @@ class FrontierTests(unittest.TestCase):
     """What AFK offers, over rows and nothing else."""
 
     def test_an_open_ready_task_nobody_has_is_ready(self) -> None:
-        found = frontier([task(265)])
+        found = groups([task(265)])
         self.assertEqual([row["number"] for row in found["ready"]], [265])
         self.assertEqual(found["claimed"], [])
         self.assertEqual(found["blocked"], [])
 
     def test_a_closed_task_is_not_in_the_frontier(self) -> None:
-        found = frontier([task(265, state="closed")])
+        found = groups([task(265, state="closed")])
         self.assertEqual(found, {"ready": [], "claimed": [], "blocked": []})
 
     def test_a_task_without_the_ready_mark_is_not_in_the_frontier(self) -> None:
-        found = frontier([task(265, labels=())])
+        found = groups([task(265, labels=())])
         self.assertEqual(found, {"ready": [], "claimed": [], "blocked": []})
 
     def test_a_task_assigned_to_anyone_is_claimed(self) -> None:
-        found = frontier([task(265, assignees=["someone"])])
+        found = groups([task(265, assignees=["someone"])])
         self.assertEqual(found["ready"], [])
         self.assertEqual([row["number"] for row in found["claimed"]], [265])
 
     def test_a_task_with_the_claim_mark_is_claimed(self) -> None:
-        found = frontier([task(265, labels=(READY_LABEL, CLAIM_LABEL))])
+        found = groups([task(265, labels=(READY_LABEL, CLAIM_LABEL))])
         self.assertEqual(found["ready"], [])
         self.assertEqual([row["number"] for row in found["claimed"]], [265])
 
     def test_a_task_with_an_open_blocker_is_blocked_and_names_it(self) -> None:
-        found = frontier([task(266, blockers=[blocker(265)])])
+        found = groups([task(266, blockers=[blocker(265)])])
         self.assertEqual(found["ready"], [])
         self.assertEqual([row["number"] for row in found["blocked"]], [266])
         self.assertEqual([found["blocked"][0]["blockers"][0]["number"]], [265])
 
     def test_a_task_whose_blockers_are_all_closed_is_ready(self) -> None:
-        found = frontier([task(266, blockers=[blocker(265, state="closed")])])
+        found = groups([task(266, blockers=[blocker(265, state="closed")])])
         self.assertEqual([row["number"] for row in found["ready"]], [266])
         self.assertEqual(found["blocked"], [])
 
     def test_a_blocked_row_names_only_the_open_blockers(self) -> None:
-        found = frontier(
-            [task(268, blockers=[blocker(266, state="closed"), blocker(267)])]
-        )
+        found = groups([task(268, blockers=[blocker(266, state="closed"), blocker(267)])])
         self.assertEqual([row["number"] for row in found["blocked"][0]["blockers"]], [267])
 
     def test_ready_tasks_are_oldest_first(self) -> None:
-        found = frontier(
+        found = groups(
             [
                 task(3, created="2026-10-03T00:00:00Z"),
                 task(1, created="2026-10-01T00:00:00Z"),
@@ -116,7 +114,7 @@ class FrontierTests(unittest.TestCase):
 
     def test_a_task_a_person_took_is_claimed_not_ready(self) -> None:
         """An assignee means someone has it, whether or not it's the host's own account."""
-        found = frontier([task(265, assignees=["someone", "someone-else"])])
+        found = groups([task(265, assignees=["someone", "someone-else"])])
         self.assertEqual(found["ready"], [])
         self.assertEqual(found["claimed"][0]["assignees"], ["someone", "someone-else"])
 

@@ -15,7 +15,7 @@ import {
   getProjectTasks,
   type HermesConfig,
   type ProjectBlocker,
-  type ProjectFrontier,
+  type ProjectTasks,
   type ProjectTask,
 } from "@/lib/hermes"
 import { usePoll } from "@/lib/poll"
@@ -44,7 +44,7 @@ export function AfkPopup({
   config: HermesConfig
   projectId: string
 }) {
-  const [frontier, setFrontier] = useState<ProjectFrontier>()
+  const [tasks, setTasks] = useState<ProjectTasks>()
   const [error, setError] = useState<string>()
   const key = connectionKey(config)
 
@@ -63,7 +63,7 @@ export function AfkPopup({
         .then((next) => {
           unsupported.clear(key)
           if (signal.aborted) return
-          setFrontier(next)
+          setTasks(next)
         })
         .catch((failure: unknown) => {
           if (signal.aborted) return
@@ -81,7 +81,7 @@ export function AfkPopup({
   // Read once each time the sheet opens — and again for another project — never on a timer.
   usePoll(read, false, [projectId], { active: open, onShow: false })
 
-  const manyRepos = (frontier?.repos.length ?? 0) > 1
+  const manyRepos = (tasks?.repos.length ?? 0) > 1
 
   return (
     <Popup open={open} onOpenChange={onOpenChange}>
@@ -90,7 +90,7 @@ export function AfkPopup({
           <PopupTitle>AFK</PopupTitle>
         </PopupHeader>
         <div className="flex flex-col gap-6 px-4 pb-4 sm:px-6">
-          <Tasks frontier={frontier} error={error} manyRepos={manyRepos} />
+          <Tasks tasks={tasks} error={error} manyRepos={manyRepos} />
         </div>
       </PopupContent>
     </Popup>
@@ -99,33 +99,33 @@ export function AfkPopup({
 
 /** The groups that hold something, or the one line that says why none does. */
 function Tasks({
-  frontier,
+  tasks,
   error,
   manyRepos,
 }: {
-  frontier: ProjectFrontier | undefined
+  tasks: ProjectTasks | undefined
   error: string | undefined
   manyRepos: boolean
 }) {
   if (error) return <p className="px-1 text-sm text-destructive">{error}</p>
-  if (!frontier) {
+  if (!tasks) {
     return (
       <p className="flex items-center gap-2 px-1 text-sm text-muted-foreground">
         <Spinner className="size-4" /> Reading tasks…
       </p>
     )
   }
-  const groups = GROUPS.filter((group) => frontier[group.key].length > 0)
+  const groups = GROUPS.filter((group) => tasks[group.key].length > 0)
   if (!groups.length) return <p className="px-1 text-sm text-muted-foreground">No ready tasks.</p>
   return (
     <>
       {groups.map((group) => (
         <section key={group.key} aria-label={group.label} data-group={group.key}>
           <h3 className="px-1 pb-1 text-sm text-muted-foreground">
-            {group.label} ({frontier[group.key].length})
+            {group.label} ({tasks[group.key].length})
           </h3>
           <ul>
-            {frontier[group.key].map((task) => (
+            {tasks[group.key].map((task) => (
               <TaskRow
                 key={`${task.repo}#${task.number}`}
                 task={task}

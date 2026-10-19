@@ -10,7 +10,7 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 - **Make an issue a sub-issue of a parent**: `gh issue create --parent <parent> ...`, or `gh issue edit <parent> --add-sub-issue <child>` afterwards (`gh` 2.94+). Older `gh`: `gh api --method POST repos/<owner>/<repo>/issues/<parent>/sub_issues -F sub_issue_id=<child-db-id>` (database id, as in **Blocking** below). Without sub-issues, put `Part of #<parent>` at the top of the child body.
 - **Comment on an issue**: `gh issue comment <number> --body "..."`
 - **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
-- **Claim a task for AFK**: `gh issue edit <number> --add-label "gots-got-it" --add-assignee @me`. `gots-got-it` is Gots's own claim mark rather than a triage label: an AFK session applies it when it starts a task and takes it off when that session is discarded or fails, and a task carrying it or an assignee is out of the frontier (`docs/adr/0012-a-task-is-claimed-on-github-not-in-gots.md`).
+- **Claim a task for AFK**: `gh issue edit <number> --add-label "gots-got-it" --add-assignee @me`. `gots-got-it` is Gots's own claim mark rather than a triage label: the mark AFK puts on a task it has taken, and takes off again if that session is discarded or fails, so the same task is never worked twice, and a task carrying it or an assignee is out of the frontier (`docs/adr/0012-a-task-is-claimed-on-github-not-in-gots.md`).
 - **Close**: `gh issue close <number> --comment "..."`
 
 Infer the repo from `git remote -v`; `gh` does this automatically when run inside a clone.

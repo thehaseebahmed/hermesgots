@@ -156,7 +156,7 @@ def _error_message(error: urllib.error.HTTPError) -> Optional[str]:
 
 
 def _get(path: str, auth: Optional[str]) -> Any:
-    return _request(path, auth)
+    return _fetch(path, auth)[0]
 
 
 def is_missing(error: "GitHubError") -> bool:

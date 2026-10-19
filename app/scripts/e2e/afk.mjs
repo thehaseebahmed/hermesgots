@@ -4,34 +4,35 @@
 // own route, so the whole pop-up is covered against the mock. A plugin that doesn't advertise `afk`
 // offers no row, and a Host whose GitHub refuses shows its reason instead of a list. Phone and
 // tablet, light and dark, with no console error.
-import { app, assert, flow, mock, pass } from "./lib.mjs"
+import { app, assert, flow, mock, pass, runId } from "./lib.mjs"
 
 /** A project the mock has finished cloning, so its screen offers the options menu; answers its id. */
-async function makeProject() {
+async function makeProject(until) {
   const created = await fetch(`${mock}/api/plugins/memento/projects`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      name: `AFK ${Math.random().toString(36).slice(2, 7)}`,
-      repos: ["mock-user/memento"],
-    }),
+    body: JSON.stringify({ name: `AFK ${runId()}`, repos: ["mock-user/memento"] }),
   })
   const pending = await created.json()
-  for (const end = Date.now() + 20_000; Date.now() < end; await new Promise((done) => setTimeout(done, 200))) {
-    const listed = await (await fetch(`${mock}/api/plugins/memento/projects`)).json()
-    const found = listed.projects.find((project) => project.slug === pending.slug)
-    if (found?.status === "ready") return found.id
-  }
-  throw new Error("the mock never finished cloning the project")
+  const ready = await until(
+    async () => {
+      const listed = await (await fetch(`${mock}/api/plugins/memento/projects`)).json()
+      const found = listed.projects.find((project) => project.slug === pending.slug)
+      return found?.status === "ready" ? found : null
+    },
+    20_000,
+    "the mock to finish cloning the project",
+  )
+  return ready.id
 }
 
-const run = async ({ page, profileId, shot }) => {
+const run = async ({ page, profileId, shot, until }) => {
   const errors = []
   page.on("pageerror", (error) => errors.push(error.message))
   page.on("console", (message) => {
     if (message.type() === "error") errors.push(message.text())
   })
-  const screen = `${app}/projects/${profileId}/${await makeProject()}`
+  const screen = `${app}/projects/${profileId}/${await makeProject(until)}`
 
   // The options menu carries the row, and it opens the pop-up.
   await page.goto(screen)

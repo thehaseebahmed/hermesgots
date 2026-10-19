@@ -12,7 +12,7 @@ Everything else the review found is applied on this branch: the read reuses `rep
 project's repositories instead of parsing a checkout path a second time; a claimed task's blockers
 are never fetched, since a claimed task is out of the frontier whatever it blocks; an issue whose
 edges GitHub's own summary counts as all closed costs no second request; one `_claimed` predicate
-answers "someone has this" for both the rule and the read; every row leaves `frontier` in one shape,
+answers "someone has this" for both the rule and the read; every row leaves `groups()` in one shape,
 with an empty `blockers` list rather than a key some rows have and others don't; "GitHub says there
 is no such issue" is `github.is_missing` rather than a second `"Not Found"` match; a blocker that
 could not be read still counts as open, and the tests pin that beside the missing one; the library

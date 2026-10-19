@@ -1976,10 +1976,20 @@ http
       })
     }
     if (PLUGIN && !profile && req.method === "GET" && projectRoute?.[2] === "/tasks") {
-      // A project's ready tasks as the plugin's read reports them: the frontier AFK works.
+      // A project's tasks as the plugin's read reports them: the frontier AFK works, and what is
+      // out of it. A project still cloning has no folders to read yet, so it answers empty groups
+      // rather than a 404 — the plugin's own answer while it clones.
       const found = mockProjects().find((p) => p.id === decodeURIComponent(projectRoute[1]))
-      if (!found || found.status === "cloning" || found.status === "failed")
-        return json(res, 404, { error: { message: "No such project." } })
+      if (!found) return json(res, 404, { error: { message: "No such project." } })
+      if (found.status === "cloning")
+        return json(res, 200, {
+          object: "memento.tasks",
+          project_id: found.id,
+          repos: [],
+          ready: [],
+          claimed: [],
+          blocked: [],
+        })
       if (!GITHUB) return json(res, 409, { error: { message: "No GitHub account on the server." } })
       return json(res, 200, projectTasks(found))
     }

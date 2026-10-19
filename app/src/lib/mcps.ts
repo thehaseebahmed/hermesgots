@@ -105,7 +105,6 @@ function landRead<T>(
     })
 }
 
-/** The features the screen asks about, in the one list a read of its Bot's features answers. */
 /** What a Bot's plugin answered about one of those (see `PluginFeatureAnswer`). */
 export type McpFeatureAnswer = PluginFeatureAnswer
 

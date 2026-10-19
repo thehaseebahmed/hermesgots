@@ -2319,10 +2319,10 @@ export interface ProjectBlocker {
 }
 
 /**
- * A project's tasks as AFK reads them: what's ready, oldest first, what someone has already
- * claimed, and what an open task blocks. Needs plugin 0.49.
+ * A project's tasks as AFK reads them: the frontier — what's ready, oldest first — and what is out
+ * of it, claimed or blocked by an open task. Needs plugin 0.49.
  */
-export interface ProjectFrontier {
+export interface ProjectTasks {
   repos: string[]
   ready: ProjectTask[]
   claimed: ProjectTask[]
@@ -2370,7 +2370,7 @@ export async function getProjectTasks(
   config: HermesConfig,
   projectId: string,
   signal?: AbortSignal,
-): Promise<ProjectFrontier> {
+): Promise<ProjectTasks> {
   const response = await request(
     `${pluginRoot(config.baseUrl)}/projects/${encodeURIComponent(projectId)}/tasks`,
     { headers: headers(config), signal },

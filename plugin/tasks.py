@@ -48,12 +48,17 @@ def parse_blocked_by(body: Any) -> List[int]:
     return found
 
 
-def frontier(tasks: Iterable[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
-    """The project's tasks split the way AFK reads them: ready, claimed and blocked.
+# What a task row keeps once the rule has decided where it goes. The frontier is the ready group
+# (GLOSSARY.md); the other two are the tasks that are out of it, with why.
+SHOWN = ("repo", "number", "title", "url", "created_at", "assignees", "blockers")
+
+
+def groups(tasks: Iterable[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    """The project's tasks grouped the way AFK reads them: ready, claimed and blocked.
 
     Only an open task carrying the ready mark is one of AFK's at all; it's out of the frontier when
     it carries Gots's claim mark or an assignee — someone has it — and blocked while any of its
-    blockers is still open, those named on the row. What's left is ready, oldest first.
+    blockers is still open, those named on the row. What's left is the frontier, oldest first.
     """
     ready: List[Dict[str, Any]] = []
     claimed: List[Dict[str, Any]] = []
@@ -64,16 +69,11 @@ def frontier(tasks: Iterable[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]
         labels = task.get("labels") or []
         if READY_LABEL not in labels:
             continue
-        row = {
-            "repo": task.get("repo"),
-            "number": task.get("number"),
-            "title": task.get("title") or "",
-            "url": task.get("url"),
-            "created_at": task.get("created_at"),
-            "assignees": list(task.get("assignees") or []),
-            # Every row carries its blockers, empty for the ones that have none: one shape leaves.
-            "blockers": [],
-        }
+        row = {key: task.get(key) for key in SHOWN}
+        row["title"] = row["title"] or ""
+        row["assignees"] = list(row["assignees"] or [])
+        # Every row carries its blockers, empty for the ones that have none: one shape leaves.
+        row["blockers"] = []
         if _claimed(labels, row["assignees"]):
             claimed.append(row)
             continue
@@ -102,7 +102,7 @@ def empty() -> Dict[str, Any]:
 
 
 def read(hermes_home: Path, folders: Iterable[Any]) -> Dict[str, Any]:
-    """The project's tasks as GitHub holds them, split by `frontier`.
+    """The project's tasks as GitHub holds them, grouped by `groups`.
 
     Each repository the project's checkouts point at is asked for its open ready tasks — a request
     per page GitHub offers, since only those can be in the frontier — and each candidate's blockers
@@ -123,7 +123,7 @@ def read(hermes_home: Path, folders: Iterable[Any]) -> Dict[str, Any]:
         for row in _candidates(repo, auth):
             if isinstance(row, dict) and not row.get("pull_request"):
                 tasks.append(_task(repo, row, auth, edges, looked_up))
-    return {"repos": repos, **frontier(tasks)}
+    return {"repos": repos, **groups(tasks)}
 
 
 def _repos(folders: Iterable[Any]) -> List[str]:
@@ -180,7 +180,7 @@ def _task(
     edges: Dict[Tuple[str, int], List[Dict[str, Any]]],
     looked_up: Dict[Tuple[str, int], Optional[Dict[str, Any]]],
 ) -> Dict[str, Any]:
-    """One issue as a task row: what the frontier rule reads, and nothing else."""
+    """One issue as a task row: what the grouping rule reads, and nothing else."""
     labels = [
         label.get("name")
         for label in row.get("labels") or []

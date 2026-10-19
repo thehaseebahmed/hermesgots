@@ -897,7 +897,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "No such project.", 404)
         return web.json_response({"object": "memento.project.usage", **found})
 
-    async def project_row(project_id: str):
+    async def resolve_project(project_id: str):
         """A project, or the response that says why it can't be read — its two routes' own answer."""
         try:
             return (
@@ -921,7 +921,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return web.json_response(
                 {"object": "memento.library", "project_id": project_id, "folders": []}
             )
-        project, refused = await project_row(project_id)
+        project, refused = await resolve_project(project_id)
         if refused is not None:
             return refused
         root = library.library_root(project)
@@ -940,7 +940,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return web.json_response(
                 {"object": "memento.tasks", "project_id": project_id, **tasks.empty()}
             )
-        project, refused = await project_row(project_id)
+        project, refused = await resolve_project(project_id)
         if refused is not None:
             return refused
         try:
