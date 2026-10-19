@@ -194,8 +194,7 @@ export type SessionMode = "accept_edits" | "auto" | "plan"
 
 /**
  * A session's mode as the app works with it. An unset mode is Accept edits, Hermes's own behaviour;
- * sessions made before 0.42 stored Theseus as a mode of its own, and those read as Auto, which is
- * what carries a goal on.
+ * sessions made before 0.42 stored Theseus as a mode of its own, and those read as Auto.
  */
 export function sessionMode(mode: SessionMode | "theseus" | undefined): SessionMode {
   if (mode === "theseus") return "auto"

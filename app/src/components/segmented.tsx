@@ -5,10 +5,10 @@ import { cn } from "@/lib/utils"
 /**
  * A row of pills where one of a few values is active, each a radio of one group.
  *
- * One control for the app's short choices — the goal wizard's reviewers, a research format, a
- * server's transport — so a change to how it reads (its roles, its height, the shape of the raised
- * pill) is one edit rather than one per screen. The value is a radio rather than a pressed button:
- * the pills are alternatives, and only one is ever on.
+ * One control for the app's short choices — a research format, a server's transport — so a change
+ * to how it reads (its roles, its height, the shape of the raised pill) is one edit rather than one
+ * per screen. The value is a radio rather than a pressed button: the pills are alternatives, and
+ * only one is ever on.
  */
 export function Segmented<T extends string | number>({
   label,

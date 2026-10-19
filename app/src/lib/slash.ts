@@ -1,4 +1,4 @@
-export type LocalCommand = "new" | "settings" | "goal"
+export type LocalCommand = "new" | "settings"
 /** Commands that carry the message after them, while a reply runs. */
 export type SendMode = "steer" | "queue"
 
@@ -8,7 +8,6 @@ export type SlashItem =
 
 export const LOCAL_COMMANDS: SlashItem[] = [
   { kind: "command", name: "new", description: "Start a new chat" },
-  { kind: "command", name: "goal", description: "Work towards something until it's done" },
   { kind: "command", name: "settings", description: "Open settings" },
 ]
 
@@ -24,15 +23,6 @@ export const isSendMode = (name: string): name is SendMode => name === "steer" |
 export function sendMode(text: string): { mode: SendMode; text: string } | null {
   const match = /^\/(steer|queue)(?:\s+([\s\S]*))?$/.exec(text.trimStart())
   return match ? { mode: match[1] as SendMode, text: (match[2] ?? "").trim() } : null
-}
-
-/**
- * `/goal` or `/goal <what to work towards>`: opens the wizard, with the line after it as the task.
- * A goal is composed and set through the plugin, so it never goes to the agent as a message.
- */
-export function goalCommand(text: string): { task: string } | null {
-  const match = /^\/goal(?:\s+([\s\S]*))?$/.exec(text.trimStart())
-  return match ? { task: (match[1] ?? "").trim() } : null
 }
 
 export function localCommand(text: string): LocalCommand | null {
@@ -75,11 +65,11 @@ export function slashToken(text: string, caret: number): SlashToken | null {
 }
 
 /**
- * Commands by name prefix — and only when the token is the whole message, which is the shape the
- * composer's own actions take (`localCommand`, `goalCommand`), so the menu never offers one that
- * running would drop the rest of the message for — then the skills, in tiers: an exact name, a name
- * the query starts, a name that contains it, a fuzzy name, a category, a description. Ties keep
- * their order.
+ * Commands by name prefix — and only when the token is the whole message, the shape `localCommand`
+ * matches on, so the menu never offers one that running would drop the rest of the message for
+ * (`/steer` and `/queue` carry text instead and are hoisted with it, like a skill) — then the
+ * skills, in tiers: an exact name, a name the query starts, a name that contains it, a fuzzy name,
+ * a category, a description. Ties keep their order.
  */
 export function rankSlashItems(items: SlashItem[], token: SlashToken): SlashItem[] {
   const query = token.query.toLowerCase()

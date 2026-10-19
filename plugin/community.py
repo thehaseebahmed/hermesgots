@@ -1,8 +1,8 @@
 """The community leaderboard: this profile's token counts per day, model and mode.
 
 ``post_api_request`` sees every model call with its own usage, so the hook adds it to a counter
-for the call's UTC day, model and the mode of the session it belongs to (``goal`` while the session
-has an active goal, else a project session's Accept edits, Auto or Plan, else ``chat``), and its tokens to a counter for the day, provider and
+for the call's UTC day, model and the mode of the session it belongs to (a project session's Accept
+edits, Auto or Plan, else ``chat``), and its tokens to a counter for the day, provider and
 model. Only the numbers are kept: no prompt, text,
 session id or path. They stay on the host until the account joins the leaderboard in the app,
 which the registry answers on each check-in; then the last 35 days are sent to Gots, which adds
@@ -17,7 +17,7 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from .store import connect, db_path
 
@@ -27,11 +27,6 @@ KEEP_DAYS = 35
 KINDS = ("input", "output", "cache_write", "cache_read")
 # What the site names them: camel case, as its JSON does elsewhere.
 WIRE = {"input": "input", "output": "output", "cache_write": "cacheWrite", "cache_read": "cacheRead"}
-MODES = ("accept_edits", "auto", "plan")
-# How long a session's goal status is trusted: the hook runs on every model call, and a goal read is a
-# state database read.
-GOAL_TTL_S = 30.0
-_goal_seen: Dict[str, Tuple[float, bool]] = {}
 
 
 def _provider(value: Any) -> str:
@@ -87,10 +82,8 @@ def _record(kwargs: Dict[str, Any]) -> None:
     mode = "chat"
     if isinstance(session_id, str) and session_id:
         found = sessions.record_for(path, home, session_id)
-        if found and found.get("mode") in MODES:
+        if found and found.get("mode") in sessions.MODES:
             mode = found["mode"]
-        if _goal_active(session_id):
-            mode = "goal"
     conn = connect(path)
     try:
         conn.execute(
@@ -115,28 +108,6 @@ def _record(kwargs: Dict[str, Any]) -> None:
         conn.execute("DELETE FROM community_providers WHERE day < ?", (oldest,))
     finally:
         conn.close()
-
-
-def _goal_active(session_id: str) -> bool:
-    """Whether the session is working towards a goal right now (Hermes's ``/goal``, set from Gots).
-
-    Runs in the call's own profile, where the session's goal lives. A Hermes without ``/goal`` has
-    none."""
-    now = time.monotonic()
-    seen = _goal_seen.get(session_id)
-    if seen and now - seen[0] < GOAL_TTL_S:
-        return seen[1]
-    from . import goal
-
-    try:
-        state = goal.manager(session_id).state
-        active = state is not None and getattr(state, "status", None) == "active"
-    except Exception:
-        active = False
-    if len(_goal_seen) > 256:
-        _goal_seen.clear()
-    _goal_seen[session_id] = (now, active)
-    return active
 
 
 def payload(home: Path) -> Dict[str, Any]:

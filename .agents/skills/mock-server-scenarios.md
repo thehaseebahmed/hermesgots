@@ -172,9 +172,6 @@ pnpm mock
 | GET | `/api/plugins/memento/runs/live` | Sessions with active runs |
 | POST/GET | `/api/plugins/memento/sessions/{id}/workspace` | Create/read project workspace (worktrees) |
 | POST | `/api/plugins/memento/sessions/{id}/mode` | Change permission mode (accept_edits/auto/plan) |
-| GET | `/api/plugins/memento/sessions/{id}/goal` | The session's goal as Hermes holds it: `{ text, status, turns_used, max_turns, contract, gates, subgoals, verdict, reason, paused_reason, waiting }`, null when it has none |
-| POST | `/api/plugins/memento/sessions/{id}/goal` | Set one: `{ command, gates, max_turns }` (the `/goal` text the wizard composed); answers the goal and the `kick` to send |
-| POST | `/api/plugins/memento/sessions/{id}/goal/control` | `{ action: "pause" \| "resume" \| "clear" }`; resume answers the `kick` to send |
 | POST | `/api/plugins/memento/sessions/{id}/workspace/remove` | Remove worktrees (keeps if "commit" said) |
 | GET | `/api/plugins/memento/sessions/{id}/prs` | PRs per repo after 2 turns |
 

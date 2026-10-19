@@ -14,7 +14,6 @@ import {
   PlusIcon,
   SearchIcon,
   ShieldAlertIcon,
-  TargetIcon,
   TelescopeIcon,
   TimerIcon,
   TriangleAlertIcon,
@@ -87,7 +86,6 @@ const REASON_ICONS: Record<WaitingReason["kind"], typeof ListChecksIcon> = {
   question: MessageCircleQuestionMarkIcon,
   approval: ShieldAlertIcon,
   plan: ListChecksIcon,
-  goal: TargetIcon,
   stalled: TriangleAlertIcon,
 }
 

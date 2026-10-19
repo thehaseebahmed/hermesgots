@@ -14,7 +14,6 @@ export const MODES = [
   { key: "plan", label: "Plan" },
   { key: "auto", label: "Auto" },
   { key: "accept_edits", label: "Accept edits" },
-  { key: "goal", label: "Goal" },
   { key: "chat", label: "Chat" },
 ] as const
 export type Mode = (typeof MODES)[number]["key"]
@@ -140,14 +139,11 @@ export function sampleBoard(): Board {
       const total = spent.reduce((sum, person) => sum + person.byModel[index]!, 0)
       const plan = 0.08 + random() * 0.12
       const accept = 0.15 + random() * 0.2
-      const goal = random() * 0.1
       const chat = 0.1 + random() * 0.15
-      const auto = Math.max(0, 1 - plan - accept - goal - chat)
+      const auto = Math.max(0, 1 - plan - accept - chat)
+      const share: Record<Mode, number> = { plan, auto, accept_edits: accept, chat }
       const modes = Object.fromEntries(
-        Object.entries({ plan, auto, accept_edits: accept, goal, chat }).map(([k, v]) => [
-          k,
-          Math.round(total * v),
-        ]),
+        MODES.map(({ key }) => [key, Math.round(total * share[key])]),
       ) as Record<Mode, number>
       return {
         model: name,

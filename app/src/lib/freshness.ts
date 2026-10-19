@@ -37,12 +37,8 @@ export const SEND_CAUGHT_UP_MS = 5_000
 export const HOST_QUEUE_MS = 3_000
 /** While the host does slow work the screen waits on (cloning a repo, adding or removing one). */
 export const HOST_WORK_MS = 3_000
-/** An agent a chat delegated to, and a goal's continuation loop, while they work. */
+/** An agent a chat delegated to, while it works. */
 export const AGENT_WORK_MS = 4_000
-
-/** A chat's goal: its state, its gates and its turn budget. Every judgment and every continuation
- * notes a `runs` event, which is what normally re-reads it, so this is only the net under that. */
-export const GOAL_MS = SAFETY_MS
 
 /** How long a known pull request is trusted before it's read again. */
 export const PR_MS = 30_000
@@ -76,7 +72,5 @@ export const AFK_MS = 5_000
 
 /** The Code and Routines lists. */
 export const LIST_MS = 60_000
-/** Whether the host can hold a goal (Hermes's `/goal`, through the plugin). */
-export const GOAL_INFO_MS = 60_000
 /** Whether the host can dictate. */
 export const DICTATION_INFO_MS = 5 * 60_000

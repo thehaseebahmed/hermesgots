@@ -2122,23 +2122,6 @@ export async function setWorkspaceMode(
   return parseWorkspace(await response.json(), sessionId)
 }
 
-/** What the plugin says about goals on this bot's host (`info`'s `goal`). */
-export interface GoalInfo {
-  ready: boolean
-  /** Why it can't hold a goal here: a Hermes whose `/goal` the plugin can't reach. */
-  reason: string | null
-}
-
-export async function getGoalInfo(config: HermesConfig): Promise<GoalInfo | null> {
-  const response = await request(`${pluginRoot(config.baseUrl)}/info`, { headers: headers(config) })
-  const raw = (await response.json())?.goal
-  if (!raw || typeof raw !== "object") return null
-  return {
-    ready: Boolean(raw.ready),
-    reason: typeof raw.reason === "string" ? raw.reason : null,
-  }
-}
-
 /** A session the agent delegated to with `delegate_task`, from Hermes's store via the plugin. */
 export interface DelegatedAgent {
   id: string
@@ -2149,47 +2132,6 @@ export interface DelegatedAgent {
   endedAt: number | null
   toolCalls: number
   status: "running" | "done" | "stopped"
-}
-
-/** One of the goal's quality gates: a shell command that must pass before it can be done. */
-export interface GoalGate {
-  command: string
-  /** Whether it passed its last run; null before it has run. */
-  passing: boolean | null
-  exitCode: number | null
-  attempts: number
-  maxRetries: number
-  /** The tail of what it said, so a failing gate explains itself. */
-  output: string
-}
-
-/** The five fields of a goal's completion contract, as Hermes stores them. */
-export interface GoalContract {
-  outcome: string
-  verification: string
-  constraints: string
-  boundaries: string
-  stopWhen: string
-}
-
-/** A chat's goal: Hermes's own `/goal` state, as the plugin reports it. */
-export interface Goal {
-  /** The goal text, exactly as it was set (headline first, then the contract lines). */
-  text: string
-  status: "active" | "paused" | "done" | "cleared"
-  turnsUsed: number
-  maxTurns: number
-  contract: GoalContract
-  gates: GoalGate[]
-  subgoals: string[]
-  /** The judge's last word: `done`, `blocked`, `continue`, `wait` or `skipped`. */
-  verdict: string | null
-  /** Why the judge said it. */
-  reason: string | null
-  /** Why the goal paused itself, e.g. the turn budget spent. */
-  pausedReason: string | null
-  /** What it's parked on when it isn't the user (a process, a deadline). */
-  waiting: string | null
 }
 
 function parseAgents(raw: unknown): DelegatedAgent[] {
@@ -2209,46 +2151,6 @@ function parseAgents(raw: unknown): DelegatedAgent[] {
 
 const str = (value: unknown) => (typeof value === "string" ? value : "")
 
-function parseGate(raw: any): GoalGate {
-  return {
-    command: str(raw?.command),
-    passing: typeof raw?.passing === "boolean" ? raw.passing : null,
-    exitCode: typeof raw?.exit_code === "number" ? raw.exit_code : null,
-    attempts: typeof raw?.attempts === "number" ? raw.attempts : 0,
-    maxRetries: typeof raw?.max_retries === "number" ? raw.max_retries : 0,
-    output: str(raw?.output),
-  }
-}
-
-/** The plugin's payload as the app reads it; null when the session hasn't a goal. */
-export function parseGoal(raw: any): Goal | null {
-  const body = raw?.goal
-  if (!body || typeof body !== "object") return null
-  const status = str(body.status)
-  const contract = body.contract ?? {}
-  return {
-    text: str(body.goal),
-    status: status === "paused" || status === "done" || status === "cleared" ? status : "active",
-    turnsUsed: typeof body.turns_used === "number" ? body.turns_used : 0,
-    maxTurns: typeof body.max_turns === "number" ? body.max_turns : 0,
-    contract: {
-      outcome: str(contract.outcome),
-      verification: str(contract.verification),
-      constraints: str(contract.constraints),
-      boundaries: str(contract.boundaries),
-      stopWhen: str(contract.stop_when),
-    },
-    gates: (Array.isArray(body.gates) ? body.gates : []).map(parseGate),
-    subgoals: (Array.isArray(body.subgoals) ? body.subgoals : []).filter(
-      (s: unknown): s is string => typeof s === "string",
-    ),
-    verdict: typeof body.verdict === "string" ? body.verdict : null,
-    reason: typeof body.reason === "string" ? body.reason : null,
-    pausedReason: typeof body.paused_reason === "string" ? body.paused_reason : null,
-    waiting: typeof body.waiting === "string" ? body.waiting : null,
-  }
-}
-
 /** The sessions a session delegated to, oldest first. A 404 means the plugin is missing. */
 export async function getSessionAgents(
   config: HermesConfig,
@@ -2259,51 +2161,6 @@ export async function getSessionAgents(
     { headers: headers(config) },
   )
   return parseAgents((await response.json())?.agents)
-}
-
-/** The session's goal, or null when it hasn't one. */
-export async function getGoal(config: HermesConfig, sessionId: string): Promise<Goal | null> {
-  const response = await request(pluginSession(config, sessionId, "/goal"), {
-    headers: headers(config),
-  })
-  return parseGoal(await response.json())
-}
-
-/**
- * Sets the session's goal from the wizard's text, its gates and its turn budget. Answers with the
- * goal and the kick text — what the app sends as the first message, so the run starts at once.
- */
-export async function postGoal(
-  config: HermesConfig,
-  sessionId: string,
-  body: { command: string; gates: string[]; maxTurns?: number | null },
-): Promise<{ goal: Goal | null; kick: string | null }> {
-  const response = await request(pluginSession(config, sessionId, "/goal"), {
-    method: "POST",
-    headers: headers(config),
-    body: JSON.stringify({ command: body.command, gates: body.gates, max_turns: body.maxTurns }),
-  })
-  const parsed = await response.json()
-  return { goal: parseGoal(parsed), kick: typeof parsed?.kick === "string" ? parsed.kick : null }
-}
-
-/** Pause, resume or clear the session's goal. Resuming answers with the text that continues it. */
-export async function controlGoal(
-  config: HermesConfig,
-  sessionId: string,
-  action: "pause" | "resume" | "clear",
-): Promise<{ goal: Goal | null; kick: string | null; message: string }> {
-  const response = await request(pluginSession(config, sessionId, "/goal/control"), {
-    method: "POST",
-    headers: headers(config),
-    body: JSON.stringify({ action }),
-  })
-  const parsed = await response.json()
-  return {
-    goal: parseGoal(parsed),
-    kick: typeof parsed?.kick === "string" ? parsed.kick : null,
-    message: str(parsed?.message),
-  }
 }
 
 export interface KeptWorktree {
@@ -2669,8 +2526,6 @@ export type WaitingReason =
   | { kind: "question"; count: number }
   | { kind: "approval"; command?: string }
   | { kind: "plan" }
-  /** A goal only the user can move: paused (budget spent, a gate out of retries) or judged blocked. */
-  | { kind: "goal"; reason: string }
   /** An AFK session nothing is working: its run failed, or a restart adopted it. Its reason is the
    * host's own words. */
   | { kind: "stalled"; reason: string }
@@ -2722,12 +2577,6 @@ export async function getLiveRuns(config: HermesConfig, signal?: AbortSignal): P
         project,
       }
     else if (raw.kind === "plan") waiting[id] = { kind: "plan", project }
-    else if (raw.kind === "goal")
-      waiting[id] = {
-        kind: "goal",
-        reason: typeof raw.reason === "string" ? raw.reason : "paused",
-        project,
-      }
     else if (raw.kind === "stalled")
       waiting[id] = {
         kind: "stalled",

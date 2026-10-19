@@ -24,10 +24,10 @@ export function reasonText(reason: WaitingReason) {
     const command = reason.command?.split("\n")[0].trim()
     return command ? `Approve ${command}` : "Needs approval to run a command"
   }
-  if (reason.kind === "goal")
-    return reason.reason === "blocked" ? "Goal blocked: needs you" : "Goal paused"
   if (reason.kind === "stalled") return reason.reason
-  return "Plan ready for review"
+  if (reason.kind === "plan") return "Plan ready for review"
+  // A kind this build doesn't know yet still means the session wants the user, not a plan.
+  return "Needs you"
 }
 
 type Found = LiveRuns["waiting"]

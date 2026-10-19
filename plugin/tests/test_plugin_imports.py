@@ -14,7 +14,7 @@ import unittest
 class PluginImportTests(unittest.TestCase):
     MODULES = [
         "alerts", "attachments", "chats", "clarify", "cleanup",
-        "clones", "community", "context", "delegation", "events", "github", "goal",
+        "clones", "community", "context", "delegation", "events", "github",
         "host_model", "link", "mcp", "media", "merges", "outbox", "skill_catalog",
         "projects", "repos", "sessions", "push", "ship",
         "stream", "todos", "usage",

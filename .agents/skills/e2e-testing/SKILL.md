@@ -69,8 +69,6 @@ elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` l
 | `drafts` | Composer drafts are kept per chat and cleared on send |
 | `submission` | Concurrent sends start one run and get one reply |
 | `image-skeleton` | A reply's images hold their cell while the plugin serves them (the route is held), then land at that size: one image and a gallery alike, phone and tablet, light and dark |
-| `goal-wizard` | `/goal` opens the wizard, the preview follows the form, and Save sets the goal and sends its kick |
-| `goal-pill` | A set goal keeps its pill and sheet; pausing waits on the user with a card, and Resume sends the kick again |
 | `image-viewer` | A photo opened from a message holds its own box while it decodes |
 | `fallback-models` | A bot's fallback models are recorded on its host from its settings: two picks in order, one removed, and no third offered |
 | `mcps` | The bot's MCP tab is opened from its editor: Add a server on top, the bot's servers under *Your servers* and a plugin's under *From plugins*, each row its name over its health and no badge, a switch flipped off and back on, and an empty state, at phone and tablet widths |

@@ -123,15 +123,6 @@ const FLOWS = {
     about:
       "An agent's images hold their place with a skeleton while they load, in a chat and a project session",
   },
-  "goal-wizard": {
-    script: "e2e/goal-wizard.mjs",
-    about:
-      "/goal opens the wizard: the preview follows the form, and Save sets the goal and sends its kick",
-  },
-  "goal-pill": {
-    script: "e2e/goal-pill.mjs",
-    about: "An active goal shows its pill and sheet; a paused one waits on the user and resumes",
-  },
   "image-viewer": {
     script: "e2e/image-viewer.mjs",
     about: "A photo opened from a message holds its place while it decodes, then paints",

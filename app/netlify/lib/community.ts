@@ -15,10 +15,10 @@
 import type { RegistryStore } from "./registry.ts"
 import { sha256 } from "./registry.ts"
 
-export const MODES = ["plan", "auto", "accept_edits", "goal", "chat"] as const
+export const MODES = ["plan", "auto", "accept_edits", "chat"] as const
 export type Mode = (typeof MODES)[number]
-/** Modes the app no longer has, counted as the one that took their place. */
-const LEGACY_MODES: Record<string, Mode> = { theseus: "auto" }
+/** Modes the app no longer has, folded into `auto` so a historic row still adds up. */
+const LEGACY_MODES: Record<string, Mode> = { theseus: "auto", goal: "auto" }
 
 /** A reported mode as the board counts it, or null for one it doesn't know. */
 export function modeOf(raw: string): Mode | null {
@@ -99,7 +99,7 @@ export interface Board {
   >
 }
 
-export const BOARD_VERSION = 2
+export const BOARD_VERSION = 3
 
 /** Days kept per member, and the longest period the board shows. */
 export const KEEP_DAYS = 35

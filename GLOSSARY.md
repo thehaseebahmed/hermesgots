@@ -53,7 +53,7 @@ What a project session is doing — idle, working, waiting on the user, or close
 _Avoid_: status, state machine
 
 **Command**:
-Something Gots itself does from the composer: a new chat, the goal wizard, settings, or how a message sent mid-reply goes. A command never reaches the agent as a message.
+Something Gots itself does from the composer: a new chat, settings, or how a message sent mid-reply goes. A command never reaches the agent as a message.
 _Avoid_: slash command, action, app skill
 
 **Skill**:
