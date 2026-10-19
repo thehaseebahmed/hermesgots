@@ -3,12 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://hermesgots.dev">Website</a> | <a href="https://app.hermesgots.dev">App</a> | <a href="plugin/README.md">Plugin</a>
-</p>
-<p align="center">
   <a href="https://hermesgots.dev"><img src="https://img.shields.io/badge/Website-hermesgots.dev-10B981?style=for-the-badge" alt="Website"></a>
-  <a href="https://github.com/thehaseebahmed/memento/releases"><img src="https://img.shields.io/github/v/release/thehaseebahmed/memento?style=for-the-badge&color=blue" alt="Releases"></a>
-  <a href="https://app.netlify.com/projects/hermesgots/deploys"><img alt="Netlify Status" src="https://api.netlify.com/api/v1/badges/5e7733ce-e51d-4d60-adc3-c0e5b8fdb5e5/deploy-status"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
 </p>
 
