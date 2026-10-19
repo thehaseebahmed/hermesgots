@@ -47,11 +47,14 @@ def reason(
 def state(
     hermes_home: Path, project_id: str, folders: Iterable[Any], archived: bool = False
 ) -> Dict[str, Any]:
-    """The project's switch as the app reads it: whether it's on, and why it can't be."""
-    return {
-        "on": is_on(hermes_home, project_id),
-        "reason": reason(hermes_home, folders, archived),
-    }
+    """The project's switch as the app reads it: whether it's on, and why it can't be.
+
+    An archived project reads off whatever the row says: it was put away, so its switch isn't a
+    setting anything would act on — a project archived where this plugin didn't do it (Hermes's own
+    dashboard or CLI) still has its old row.
+    """
+    why = reason(hermes_home, folders, archived)
+    return {"on": is_on(hermes_home, project_id) and why != ARCHIVED, "reason": why}
 
 
 def set_on(
@@ -64,14 +67,15 @@ def set_on(
     """Turns the project's AFK on or off, answering its state after the write.
 
     Turning it on is refused for a project that can't be left to work, the reason being the error's
-    message: the app shows that where the switch would be, and nothing is written, so a switch shown
-    as on is always one the host can act on.
+    message: the app shows that where the switch would be, and nothing is written, so the host never
+    holds an on it refused. A project turned on earlier keeps its switch when its reason comes back —
+    turning it off is still the user's to do — so the on it answers is the row it holds.
     """
     why = reason(hermes_home, folders, archived)
     if on and why is not None:
         raise ValueError(why)
     _write(hermes_home, project_id, on)
-    return {"on": on, "reason": why}
+    return {"on": on and why != ARCHIVED, "reason": why}
 
 
 def turn_off(hermes_home: Path, project_id: str) -> None:

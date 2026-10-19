@@ -159,6 +159,15 @@ class SwitchTests(unittest.TestCase):
             self.assertEqual(set_on(self.home, "p1", self.folders(), False)["on"], False)
         self.assertFalse(is_on(self.home, "p1"))
 
+    def test_an_archived_project_reads_off_whatever_its_row_says(self) -> None:
+        # Archived somewhere this plugin didn't do it — Hermes's own dashboard or CLI — so the row is
+        # still there; the sheet must not show a switch that would never be acted on.
+        set_on(self.home, "p1", self.folders(), True)
+        self.assertEqual(
+            state(self.home, "p1", self.folders(), archived=True),
+            {"on": False, "reason": ARCHIVED},
+        )
+
     def test_a_project_left_on_keeps_its_switch_when_its_reason_comes_back(self) -> None:
         set_on(self.home, "p1", self.folders(), True)
         with patch.object(github, "token", return_value=(None, None)):
@@ -212,6 +221,15 @@ class SwitchTests(unittest.TestCase):
         set_on(self.home, "p1", self.folders(), True)
         projects.remove(self.home, "p1")
         self.assertTrue(is_on(self.home, "p1"))
+
+    def test_a_failed_forget_does_not_fail_the_delete(self) -> None:
+        self.stub_projects()
+        (self.home / "projects.db").write_text("")
+        set_on(self.home, "p1", self.folders(), True)
+        with patch("plugin.afk.forget", side_effect=RuntimeError("database is locked")):
+            # The record is gone either way: a switch left behind is a row nothing reads, and the
+            # caller must not be told a delete that happened was a failure.
+            self.assertTrue(projects.remove(self.home, "p1"))
 
 
 if __name__ == "__main__":

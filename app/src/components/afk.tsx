@@ -101,6 +101,7 @@ export function AfkPopup({
 
   const readAfk = useCallback(
     (signal: AbortSignal) => {
+      if (unsupported.cooling(key)) return
       setAfkError(undefined)
       void getProjectAfk(
         config,
@@ -108,6 +109,7 @@ export function AfkPopup({
         AbortSignal.any([signal, AbortSignal.timeout(READ_TIMEOUT_MS)]),
       )
         .then((next) => {
+          unsupported.clear(key)
           if (signal.aborted) return
           setAfk(next)
         })
@@ -115,12 +117,15 @@ export function AfkPopup({
           if (signal.aborted) return
           setAfkError(failure instanceof Error ? failure.message : "Couldn't read AFK's setting.")
           noteFailure("Reading AFK's setting", failure)
+          void lacksRoute(config, failure, AFK_SWITCH_FEATURE).then((missing) => {
+            if (missing) unsupported.start(key)
+          })
         })
     },
-    [config, projectId],
+    [config, key, projectId],
   )
   // The switch's own read, only where the plugin has it: a Host that can't answer is never asked.
-  usePoll(readAfk, false, [projectId], {
+  usePoll(readAfk, false, [key, projectId], {
     active: open && switchable === "yes",
     onShow: false,
   })
@@ -153,7 +158,14 @@ export function AfkPopup({
             saving={saving}
             onToggle={(on) => void turn(on)}
           />
-          <Tasks tasks={tasks} error={error} quiet={Boolean(afk?.reason)} manyRepos={manyRepos} />
+          <Tasks
+            tasks={tasks}
+            error={error}
+            // Said twice only when it is the same thing said: the switch's reason can differ from why
+            // the frontier failed, and then it is two different facts, not one repeated.
+            quiet={Boolean(afk?.reason) && afk?.reason === error}
+            manyRepos={manyRepos}
+          />
         </div>
       </PopupContent>
     </Popup>
@@ -221,7 +233,7 @@ function Tasks({
   quiet: boolean
   manyRepos: boolean
 }) {
-  // A frontier the switch's own reason already explains isn't an error the user needs twice — and
+  // A frontier failure the switch's own reason already says isn't an error the user needs twice — and
   // nothing is coming, so the row is left out rather than spinning over a read that failed.
   if (error) return quiet ? null : <p className="px-1 text-sm text-destructive">{error}</p>
   if (!tasks) {

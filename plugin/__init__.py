@@ -969,7 +969,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if refused is not None:
             return refused
         found = await asyncio.to_thread(
-            afk.state, hermes_home(), project_id, project.folders, bool(project.archived)
+            afk.state,
+            hermes_home(),
+            project_id,
+            project.folders,
+            bool(getattr(project, "archived", False)),
         )
         return web.json_response({"object": "memento.afk", "project_id": project_id, **found})
 
@@ -994,7 +998,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 project_id,
                 project.folders,
                 on,
-                bool(project.archived),
+                bool(getattr(project, "archived", False)),
             )
         except ValueError as why:
             # The project can't be left to work: its reason is the answer, and nothing is written.
