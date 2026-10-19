@@ -70,6 +70,10 @@ export const MCP_SAVE_MS = 2 * 60_000
  * to answer, since the probe waits on its own connect timeout rather than a read's. */
 export const MCP_TOOLS_MS = 90_000
 
+/** AFK's sheet while it's open: turning the project on wakes a sweep on the host, so the task it
+ * claims (or the reason GitHub refused it) lands after the switch's own answer. */
+export const AFK_MS = 5_000
+
 /** The Code and Routines lists. */
 export const LIST_MS = 60_000
 /** Whether the host can hold a goal (Hermes's `/goal`, through the plugin). */

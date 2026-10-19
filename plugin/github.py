@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import re
 import shutil
@@ -21,6 +22,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 API = "https://api.github.com"
 TOKEN_ENV_VARS = ("GITHUB_TOKEN", "GH_TOKEN")
@@ -168,12 +171,18 @@ def is_missing(error: "GitHubError") -> bool:
     return "Not Found" in str(error)
 
 
+def _user(auth: Optional[str]) -> Dict[str, Any]:
+    """The account a token belongs to, as GitHub answers for it."""
+    found = _get("/user", auth)
+    return found if isinstance(found, dict) else {}
+
+
 def status(hermes_home: Path) -> Dict[str, Any]:
     auth, source = token(hermes_home)
     if not auth:
         return {"connected": False, "source": source, "login": None}
     try:
-        user = _get("/user", auth)
+        user = _user(auth)
     except GitHubError as error:
         return {"connected": False, "source": source, "login": None, "error": str(error)}
     return {"connected": True, "source": source, "login": user.get("login")}
@@ -197,6 +206,64 @@ def repos(hermes_home: Path) -> List[Dict[str, Any]]:
         for repo in rows
         if isinstance(repo, dict) and isinstance(repo.get("full_name"), str)
     ]
+
+
+def login(auth: Optional[str]) -> str:
+    """The login of the account a token belongs to: who a claim is assigned to."""
+    found = _user(auth).get("login")
+    if not isinstance(found, str) or not found:
+        raise GitHubError("GitHub didn't say whose account the token is.")
+    return found
+
+
+# Gots's claim mark, created on the repository the first time AFK claims a task there (ADR 0012).
+CLAIM_COLOR = "0e8a16"
+CLAIM_DESCRIPTION = "Gots is working this task."
+
+
+def claim_issue(repo: str, number: int, account: str, label: str, auth: Optional[str]) -> None:
+    """Claims one issue: marked with ``label`` and assigned to ``account``, in that order.
+
+    The label is applied before the assignment, so a write that fails halfway leaves a task that
+    still reads as claimed while the assignment is being retried — and if the assignment is refused,
+    the label is taken back off, because a task marked as claimed that no sweep holds is one no
+    sweep will ever work (ADR 0012). The label itself is created on the repository when it isn't
+    there yet, because a label that doesn't exist can't be applied.
+    """
+    _ensure_label(repo, label, auth)
+    _request(f"/repos/{repo}/issues/{number}/labels", auth, "POST", {"labels": [label]})
+    try:
+        _request(f"/repos/{repo}/issues/{number}/assignees", auth, "POST", {"assignees": [account]})
+    except GitHubError:
+        _unlabel(repo, number, label, auth)
+        raise
+
+
+def _unlabel(repo: str, number: int, label: str, auth: Optional[str]) -> None:
+    """Takes the claim mark back off a claim that couldn't be finished, best-effort: the refusal
+    that follows is what the sheet shows, and this only keeps the task in the frontier."""
+    path = f"/repos/{repo}/issues/{number}/labels/{urllib.parse.quote(label, safe='')}"
+    try:
+        _request(path, auth, "DELETE")
+    except GitHubError:
+        logger.warning("memento: couldn't take %s off %s#%s", label, repo, number, exc_info=True)
+
+
+def _ensure_label(repo: str, label: str, auth: Optional[str]) -> None:
+    """Creates the label on the repository when it has none of that name; leaves one that's there."""
+    path = f"/repos/{repo}/labels/{urllib.parse.quote(label, safe='')}"
+    try:
+        _get(path, auth)
+        return
+    except GitHubError as error:
+        if not is_missing(error):
+            raise
+    _request(
+        f"/repos/{repo}/labels",
+        auth,
+        "POST",
+        {"name": label, "color": CLAIM_COLOR, "description": CLAIM_DESCRIPTION},
+    )
 
 
 def _destination(raw: Any) -> str:

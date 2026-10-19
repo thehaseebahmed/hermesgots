@@ -145,6 +145,10 @@ const GITHUB = !process.env.MOCK_NO_GITHUB
 // Projects left to work their own tasks: AFK's switch, which the mock keeps per project the way the
 // plugin keeps it in its store, so a page reload reads the same answer back.
 const afkProjects = new Set()
+// ...and the ones its sweep has since claimed a task for. Turning a project on wakes the plugin's
+// loop, so the claim lands after the switch's own answer and shows on the next read — which is what
+// the sheet's poll is there for, and why the mock sweeps on a read rather than on the POST.
+const afkSwept = new Set()
 // What the media route serves for chart.png: navy sky, teal ground, a sun.
 const MOCK_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAHgAAABLCAIAAAA06NSGAAAAuklEQVR42u3aQQmAABBE0anhxQYW8mIDz0Y0jhFsIII4iDz4Cd5xZzNMiwoFAWjQAg0aNAXQoAX6dsc+Xwf6deI3uEO5Yx3KHetQ7liHcsc6lDvWoEF/T/mJNWjQoEGDBg0aNGjQoEGDBu3W4dYB2j0atIXFZmgFt4L76/CpBNrvHWiBBi3QoEEL9H+gx21VIdCgQQs0aNAIQIMWaNCgKYAGLdCgQVMADVqgQYMWaNACDRq0QIMW6E92AjwFRtd/9tVBAAAAAElFTkSuQmCC",
@@ -949,28 +953,40 @@ const projectLibrary = (projectId) => {
 }
 // A project's ready tasks as the plugin's read reports them: two ready (oldest first), one claimed
 // by Gots' own mark, and one blocked by the task it waits on. The numbers and titles never change,
-// so a flow can assert them on whatever project it made.
+// so a flow can assert them on whatever project it made. A project left to work has had its oldest
+// ready task claimed by AFK — the mock's own sweep — so it is claimed here and gone from the ready
+// group, as the plugin's read would report it.
+const AFK_TASK = 265
+const AFK_TITLE = "The frontier is read from GitHub and listed"
+const repoOf = (project) =>
+  project.folders.find((folder) => folder.repo)?.repo ?? "mock-user/memento"
+/** A task row as the plugin's frontier read answers it. */
+const mockTask = (repo, number, title, extra = {}) => ({
+  repo,
+  number,
+  title,
+  url: `https://github.com/${repo}/issues/${number}`,
+  created_at: `2026-10-${String(number - 264).padStart(2, "0")}T09:00:00Z`,
+  assignees: [],
+  blockers: [],
+  ...extra,
+})
 const projectTasks = (project) => {
-  const repo = project.folders.find((folder) => folder.repo)?.repo ?? "mock-user/memento"
-  const task = (number, title, extra = {}) => ({
-    repo,
-    number,
-    title,
-    url: `https://github.com/${repo}/issues/${number}`,
-    created_at: `2026-10-${String(number - 264).padStart(2, "0")}T09:00:00Z`,
-    assignees: [],
-    blockers: [],
-    ...extra,
-  })
+  const repo = repoOf(project)
+  const task = (number, title, extra = {}) => mockTask(repo, number, title, extra)
+  const afk = afkSwept.has(project.id)
+  const oldest = task(AFK_TASK, AFK_TITLE)
   return {
     object: "memento.tasks",
     project_id: project.id,
     repos: [repo],
-    ready: [
-      task(265, "The frontier is read from GitHub and listed"),
-      task(266, "The switch: AFK is a project's own setting on the host"),
+    ready: afk
+      ? [task(266, "The switch: AFK is a project's own setting on the host")]
+      : [oldest, task(266, "The switch: AFK is a project's own setting on the host")],
+    claimed: [
+      ...(afk ? [{ ...oldest, assignees: ["mock-user"] }] : []),
+      task(267, "AFK claims the next ready task", { assignees: ["mock-user"] }),
     ],
-    claimed: [task(267, "AFK claims the next ready task", { assignees: ["mock-user"] })],
     blocked: [
       task(268, "The claimed task is worked in its own session", {
         blockers: [
@@ -984,6 +1000,34 @@ const projectTasks = (project) => {
         ],
       }),
     ],
+  }
+}
+
+/** The task the mock's AFK holds for a project left to work: its oldest ready one. */
+function afkTask(project) {
+  // The plugin keeps the sheet's fields, not the assignees and blockers the frontier read adds.
+  const task = mockTask(repoOf(project), AFK_TASK, AFK_TITLE)
+  return {
+    repo: task.repo,
+    number: task.number,
+    title: task.title,
+    url: task.url,
+    created_at: task.created_at,
+  }
+}
+
+/** AFK's answer for a project: its switch, the task it holds, and its last refusal (none mocked). */
+function afkAnswer(project, reason) {
+  const on = afkProjects.has(project.id)
+  return {
+    object: "memento.afk",
+    project_id: project.id,
+    on,
+    reason,
+    // The sweep that claims it runs after the switch's own answer, so the task lands on the next
+    // read rather than in the POST's answer.
+    task: afkSwept.has(project.id) ? afkTask(project) : null,
+    refusal: null,
   }
 }
 
@@ -3111,15 +3155,15 @@ http
           return json(res, 400, { error: { message: "on must be true or false." } })
         if (on && reason) return json(res, 409, { error: { message: reason } })
         if (on) afkProjects.add(found.id)
-        else afkProjects.delete(found.id)
-        return json(res, 200, { object: "memento.afk", project_id: found.id, on, reason })
+        else {
+          afkProjects.delete(found.id)
+          afkSwept.delete(found.id)
+        }
+        return json(res, 200, afkAnswer(found, reason))
       }
-      return json(res, 200, {
-        object: "memento.afk",
-        project_id: found.id,
-        on: afkProjects.has(found.id),
-        reason,
-      })
+      // The sweep the switch woke has run by the next read, so this one holds the task it claimed.
+      if (afkProjects.has(found.id)) afkSwept.add(found.id)
+      return json(res, 200, afkAnswer(found, reason))
     }
     if (PLUGIN && !profile && projectRoute?.[2] === "/usage") {
       const found = mockProjects().find((p) => p.id === decodeURIComponent(projectRoute[1]))

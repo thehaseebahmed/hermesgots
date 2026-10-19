@@ -5,7 +5,10 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import ModuleType
+from typing import Any, Dict, Iterable, Optional
 from unittest.mock import MagicMock, patch
+
+from plugin.tasks import READY_LABEL
 
 
 def make_fake_agent(lookup_fn, scope_already=None):
@@ -84,3 +87,42 @@ def temp_hermes_home(case: unittest.TestCase) -> Path:
     patcher.start()
     case.addCleanup(patcher.stop)
     return home
+
+
+def issue_row(
+    number: int,
+    *,
+    title: Optional[str] = None,
+    created: str = "2026-10-01T00:00:00Z",
+    state: str = "open",
+    body: str = "",
+    labels: Iterable[str] = (READY_LABEL,),
+    assignees: Iterable[str] = (),
+    summary: Optional[int] = 0,
+    open_edges: Optional[int] = None,
+    pull_request: bool = False,
+) -> Dict[str, Any]:
+    """An issue as GitHub's list answers it, ready-marked unless the test says otherwise.
+
+    ``summary`` is the count GitHub gives ``issue_dependencies_summary`` (``None``: no key at all,
+    the shape of an issue with no native dependency to report), and ``open_edges`` how many of them
+    are still open; all of them open unless the test says otherwise.
+    """
+    row: Dict[str, Any] = {
+        "number": number,
+        "title": title or f"Task {number}",
+        "html_url": f"https://github.com/mock-user/memento/issues/{number}",
+        "state": state,
+        "created_at": created,
+        "body": body,
+        "labels": [{"name": name} for name in labels],
+        "assignees": [{"login": login} for login in assignees],
+    }
+    if summary is not None:
+        row["issue_dependencies_summary"] = {
+            "total_blocked_by": summary,
+            "blocked_by": summary if open_edges is None else open_edges,
+        }
+    if pull_request:
+        row["pull_request"] = {"url": "https://api.github.com/repos/mock-user/memento/pulls/1"}
+    return row

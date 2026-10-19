@@ -6,7 +6,7 @@
  * it off and disabled, with the reason underneath. The frontier is there where the plugin advertises
  * `afk`, the switch where it advertises `afk_switch`.
  */
-import { useCallback, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { toast } from "sonner"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
@@ -15,14 +15,14 @@ import { Switch } from "@/components/ui/switch"
 import { connectionKey } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { usePluginFeature, type PluginFeatureAnswer } from "@/lib/features"
-import { READ_TIMEOUT_MS } from "@/lib/freshness"
+import { AFK_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import {
   getProjectAfk,
   getProjectTasks,
   setProjectAfk,
   type HermesConfig,
   type ProjectAfk,
-  type ProjectBlocker,
+  type ProjectIssue,
   type ProjectTasks,
   type ProjectTask,
 } from "@/lib/hermes"
@@ -66,9 +66,6 @@ export function AfkPopup({
   const read = useCallback(
     (signal: AbortSignal) => {
       if (unsupported.cooling(key)) return
-      // A fresh read drops the last failure at once; the list it replaces stays until the answer
-      // lands, so a sheet opened again doesn't flash a spinner over tasks already in hand.
-      setError(undefined)
       // A read that never answers is treated as lost rather than left hanging on the host.
       void getProjectTasks(
         config,
@@ -78,6 +75,8 @@ export function AfkPopup({
         .then((next) => {
           unsupported.clear(key)
           if (signal.aborted) return
+          // The answer replaces the last failure too: what's on screen is the list it brought.
+          setError(undefined)
           setTasks(next)
         })
         .catch((failure: unknown) => {
@@ -99,7 +98,6 @@ export function AfkPopup({
   const readAfk = useCallback(
     (signal: AbortSignal) => {
       if (unsupported.cooling(key)) return
-      setAfkError(undefined)
       void getProjectAfk(
         config,
         projectId,
@@ -108,6 +106,8 @@ export function AfkPopup({
         .then((next) => {
           unsupported.clear(key)
           if (signal.aborted) return
+          // The answer clears the last failure: what the sheet shows is what the host just said.
+          setAfkError(undefined)
           setAfk(next)
         })
         .catch((failure: unknown) => {
@@ -122,10 +122,29 @@ export function AfkPopup({
     [config, key, projectId],
   )
   // The switch's own read, only where the plugin has it: a Host that can't answer is never asked.
-  usePoll(readAfk, false, [key, projectId], {
+  // While the project is off nothing here can change but the user's own write, so there is no timer;
+  // once it's on the sheet keeps reading at AFK_MS, because turning it on wakes a sweep on the host
+  // and the task it claims, or why GitHub refused it, lands after the switch's own answer.
+  usePoll(readAfk, afk?.on ? AFK_MS : false, [key, projectId], {
     active: open && switchable === "yes",
     onShow: false,
   })
+
+  // Taking a task moves it out of the frontier, so the list is read again when AFK's answer names
+  // the one it holds — and when it lets one go, which puts it back. Not when the frontier already
+  // has it claimed: that read is the same list, only fresher.
+  const held = afk?.task ? `${afk.task.repo}#${afk.task.number}` : ""
+  const listed =
+    Boolean(held) && Boolean(tasks?.claimed.some((row) => `${row.repo}#${row.number}` === held))
+  const seen = useRef(held)
+  useEffect(() => {
+    if (seen.current === held) return
+    seen.current = held
+    if (listed) return
+    const controller = new AbortController()
+    read(controller.signal)
+    return () => controller.abort()
+  }, [held, listed, read])
 
   const turn = async (on: boolean) => {
     setSaving(true)
@@ -155,6 +174,9 @@ export function AfkPopup({
             saving={saving}
             onToggle={(on) => void turn(on)}
           />
+          {/* Only a project left to work has anything to say here: a task held under an off switch
+              reads as still working. */}
+          {afk?.on && <Working task={afk.task} refusal={afk.refusal} manyRepos={manyRepos} />}
           <Tasks
             tasks={tasks}
             error={error}
@@ -225,6 +247,39 @@ function AfkSwitch({
   )
 }
 
+/**
+ * What the sweep is doing: the task AFK holds, and why GitHub last refused it. Neither is the
+ * switch's own reason — a refusal leaves the switch on — so they read as the sweep's answer rather
+ * than as the project's, and both simply disappear when there is nothing to say. A project that
+ * isn't left to work says nothing: the task it holds is released with the claim (#270), not here.
+ */
+function Working({
+  task,
+  refusal,
+  manyRepos,
+}: {
+  task: ProjectIssue | null | undefined
+  refusal: string | null | undefined
+  manyRepos: boolean
+}) {
+  if (!task && !refusal) return null
+  return (
+    <div className="flex flex-col gap-3">
+      {refusal && (
+        <p data-refusal className="px-1 text-sm text-destructive" role="status">
+          {refusal}
+        </p>
+      )}
+      {task && (
+        <section aria-label="Working" data-working>
+          <h3 className="px-1 pb-1 text-sm text-muted-foreground">Working</h3>
+          <TaskLink task={task} note={manyRepos ? task.repo : undefined} />
+        </section>
+      )}
+    </div>
+  )
+}
+
 /** The groups that hold something, or the one line that says why none does. */
 function Tasks({
   tasks,
@@ -272,6 +327,36 @@ function Tasks({
   )
 }
 
+/** One issue as the sheet shows it: its number and title, opening it on GitHub, a note under it. */
+function TaskLink({
+  task,
+  note,
+  badge,
+}: {
+  task: ProjectIssue
+  note?: ReactNode
+  badge?: ReactNode
+}) {
+  return (
+    <a
+      href={task.url ?? undefined}
+      target="_blank"
+      rel="noreferrer"
+      data-task={task.number}
+      className="flex min-h-11 flex-col justify-center gap-0.5 rounded-2xl px-3 py-2 outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <span className="flex min-w-0 items-start gap-2">
+        <span className="shrink-0 pt-0.5 font-mono text-xs text-muted-foreground">
+          #{task.number}
+        </span>
+        <span className="min-w-0 flex-1 text-base leading-snug break-words">{task.title}</span>
+        {badge}
+      </span>
+      {note && <span className="pl-8 text-sm text-muted-foreground">{note}</span>}
+    </a>
+  )
+}
+
 function TaskRow({
   task,
   claimed,
@@ -286,28 +371,17 @@ function TaskRow({
   if (task.blockers.length) note.push(`Blocked by ${blockerNames(task)}`)
   return (
     <li>
-      <a
-        href={task.url ?? undefined}
-        target="_blank"
-        rel="noreferrer"
-        data-task={task.number}
-        className="flex min-h-11 flex-col justify-center gap-0.5 rounded-2xl px-3 py-2 outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <span className="flex min-w-0 items-start gap-2">
-          <span className="shrink-0 pt-0.5 font-mono text-xs text-muted-foreground">
-            #{task.number}
-          </span>
-          <span className="min-w-0 flex-1 text-base leading-snug break-words">{task.title}</span>
-          {claimed && (
+      <TaskLink
+        task={task}
+        note={note.length > 0 ? note.join(" · ") : undefined}
+        badge={
+          claimed ? (
             <span className="shrink-0 rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">
               {task.assignees[0] ?? "Claimed"}
             </span>
-          )}
-        </span>
-        {note.length > 0 && (
-          <span className="pl-8 text-sm text-muted-foreground">{note.join(" · ")}</span>
-        )}
-      </a>
+          ) : undefined
+        }
+      />
     </li>
   )
 }
@@ -315,7 +389,7 @@ function TaskRow({
 /** The blockers still open, by number — `owner/repo#n` for one on another repository. */
 function blockerNames(task: ProjectTask) {
   return task.blockers
-    .map((blocker: ProjectBlocker) =>
+    .map((blocker: ProjectIssue) =>
       blocker.repo && blocker.repo !== task.repo
         ? `${blocker.repo}#${blocker.number}`
         : `#${blocker.number}`,

@@ -2511,19 +2511,15 @@ export async function getLibraryFile(
 }
 
 /** One of a project's tasks: an issue the user has marked ready for an agent to work. */
-export interface ProjectTask {
-  repo: string
-  number: number
-  title: string
-  url: string | null
+export interface ProjectTask extends ProjectIssue {
   /** Who has it, when a person took it. */
   assignees: string[]
   /** What's still open ahead of it, when it can't be started yet. */
-  blockers: ProjectBlocker[]
+  blockers: ProjectIssue[]
 }
 
-/** A task another one waits on. */
-export interface ProjectBlocker {
+/** An issue a task points at: a blocker it waits on, or the task AFK holds. */
+export interface ProjectIssue {
   repo: string
   number: number
   title: string
@@ -2541,7 +2537,7 @@ export interface ProjectTasks {
   blocked: ProjectTask[]
 }
 
-function parseBlocker(value: unknown): ProjectBlocker | null {
+function parseIssue(value: unknown): ProjectIssue | null {
   const found = (value ?? {}) as Record<string, unknown>
   if (typeof found.number !== "number") return null
   return {
@@ -2553,20 +2549,19 @@ function parseBlocker(value: unknown): ProjectBlocker | null {
 }
 
 function parseTask(value: unknown): ProjectTask | null {
+  // The task's own fields are the issue's: a field added to one is read for both.
+  const issue = parseIssue(value)
+  if (!issue) return null
   const found = (value ?? {}) as Record<string, unknown>
-  if (typeof found.number !== "number") return null
   const assignees = found.assignees
   const blockers = found.blockers
   return {
-    repo: str(found.repo),
-    number: found.number,
-    title: str(found.title),
-    url: str(found.url) || null,
+    ...issue,
     assignees: Array.isArray(assignees)
       ? assignees.filter((login): login is string => typeof login === "string")
       : [],
     blockers: Array.isArray(blockers)
-      ? blockers.map(parseBlocker).filter((blocker): blocker is ProjectBlocker => blocker !== null)
+      ? blockers.map(parseIssue).filter((blocker): blocker is ProjectIssue => blocker !== null)
       : [],
   }
 }
@@ -2607,12 +2602,16 @@ export async function getProjectTasks(
 /**
  * A project's AFK switch: whether it is left to work its own tasks, and why it can't be. The
  * setting is the host's, so it is the same on every device the project is opened from. Needs
- * plugin 0.50.
+ * plugin 0.50, and 0.51 for the task it holds and the last refusal.
  */
 export interface ProjectAfk {
   on: boolean
   /** What stops the project being left to work, when something does; null when it can be. */
   reason: string | null
+  /** The task AFK has claimed and is working, while it holds one. */
+  task: ProjectIssue | null
+  /** Why GitHub last refused the sweep. The switch stays on, so this is not `reason`. */
+  refusal: string | null
 }
 
 function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
@@ -2621,7 +2620,14 @@ function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
   if (!body || typeof body.on !== "boolean") {
     throw new HermesError("Hermes answered without AFK's setting.")
   }
-  return { on: body.on, reason: str(body.reason) || null }
+  // A plugin from before the sweep answers neither field; that's no task and no refusal, not a
+  // failure to read the switch.
+  return {
+    on: body.on,
+    reason: str(body.reason) || null,
+    task: parseIssue(body.task),
+    refusal: str(body.refusal) || null,
+  }
 }
 
 function projectPath(config: HermesConfig, projectId: string, route: "tasks" | "afk") {

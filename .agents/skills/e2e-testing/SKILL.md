@@ -84,6 +84,7 @@ elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` l
 | `afk` | A project's options menu carries an AFK row where its Host advertises `afk`, and the pop-up lists the project's tasks as the frontier AFK reads: ready oldest first, claimed marked with who has them, blocked naming the open task they wait on — with no row where the feature is missing and the Host's own refusal shown in place of a list, at 390 and 1024px, light and dark |
 | `afk-switch` | The AFK pop-up's switch turns a project on and off, its row reading Turned off and Turned on, and a reload reads that setting back from the Host — the project's, not the device's — at 390 and 1024px, light and dark |
 | `afk-switch-reasons` | Where the switch can't be offered it is shown off and disabled rather than hidden: no GitHub account, the reason said once rather than again for the frontier, a project already on keeping a live switch with the reason under it, and a plugin that lists tasks but never advertised `afk_switch`, at 390 and 1024px, light and dark |
+| `afk-claim` | Turning a project on has its Host claim the oldest ready task: the pop-up names what AFK is holding, the frontier no longer offers it, a reload reads the same task back, and a GitHub refusal leaves the switch on with its reason shown in the pop-up, at 390 and 1024px, light and dark |
 
 The new flows live in `app/scripts/e2e/`. The older ones are `app/scripts/regression-*.mjs`, which
 the CLI runs by name.

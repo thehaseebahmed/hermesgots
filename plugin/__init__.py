@@ -187,6 +187,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             asyncio.ensure_future(alerts.run(home)),
             # Research missions write up once their researcher stops; see research.py.
             asyncio.ensure_future(research.run(home)),
+            # Projects left to work their own tasks are swept for work while the host runs; see
+            # afk.py. A sweep is woken when one is turned on and when a session finishes.
+            asyncio.ensure_future(afk.run(adapter)),
         ]
         yield
         for task in tasks:
@@ -945,7 +948,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if refused is not None:
             return refused
         found = await asyncio.to_thread(
-            afk.state,
+            afk.read,
             hermes_home(),
             project_id,
             project.folders,
@@ -1820,6 +1823,8 @@ def register(ctx) -> None:
         register_hook("on_session_end", goal.turn_finished)
         # The run is over, so a queued message can go now rather than at the next tick.
         register_hook("on_session_end", lambda **_kwargs: outbox.wake())
+        # And AFK looks for the next task now when a project session ends; see afk.py.
+        register_hook("on_session_end", afk.after_run)
     register_cli = getattr(ctx, "register_cli_command", None)
     if register_cli is not None:
         register_cli(

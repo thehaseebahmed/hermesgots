@@ -159,6 +159,11 @@ const FLOWS = {
     about:
       "AFK's pop-up says why it can't offer the switch: no GitHub account, said once, and a plugin too old to switch it",
   },
+  "afk-claim": {
+    script: "e2e/afk-claim.mjs",
+    about:
+      "AFK claims the oldest ready task when a project is turned on — the pop-up naming what it holds — and a GitHub refusal leaves the switch on with its reason shown",
+  },
   "mcps-gate": {
     script: "e2e/mcps-gate.mjs",
     about:
