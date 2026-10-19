@@ -1156,11 +1156,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         record = await asyncio.to_thread(sessions.record_for, path, home, session_id)
         if not record:
             return web.json_response({"object": "memento.closed", "removed": True, "kept": [], "results": []})
-        # An AFK session the user closes gives its task back: the claim comes off GitHub before the
-        # record naming the task is removed with the session, and before a failed close can lose it.
         try:
             if await asyncio.to_thread(afk.release_session, home, record):
-                # Nothing is left to work the task, so the sweep is asked to look for the next one.
                 afk.wake()
         except Exception:
             logger.warning("memento: couldn't release a closed session's task", exc_info=True)
@@ -1192,17 +1189,17 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except Exception:
             logger.debug("memento: reading waiting sessions failed", exc_info=True)
             waiting = {}
-        # Every host-side reason a session waits on the user, lowest precedence first: a live run's
-        # own wait (a question, an approval, a plan) is what the turn is doing right now, so it
-        # outranks the host's note that nothing is working a session any more.
         for name, read, args in (
-            ("stalled AFK sessions", afk.stalled, (home, live)),
             ("waiting goals", goal.waiting, (home,)),
+            ("stalled AFK sessions", afk.stalled, (home, live)),
         ):
             try:
-                waiting = {**await asyncio.to_thread(read, *args), **waiting}
+                host_side = await asyncio.to_thread(read, *args)
             except Exception:
                 logger.debug("memento: reading %s failed", name, exc_info=True)
+                continue
+            for session_id, reason in host_side.items():
+                waiting.setdefault(session_id, reason)
         return web.json_response(
             {"object": "memento.runs", "sessions": live, "run_ids": run_ids, "waiting": waiting}
         )

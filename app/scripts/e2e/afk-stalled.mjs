@@ -1,8 +1,7 @@
 // An AFK session nothing is working any more — its run failed, or a restart adopted it — waits where
 // the user will find it: Code's Waiting on you, and from 1280px the sidebar's Waiting for input, each
 // with the host's own reason under it, the way the plugin reports a stalled claim. The mock says a
-// project's claim stalled on request, so the whole thing is covered without GitHub. Phone and desktop,
-// light and dark, with no console error.
+// project's claim stalled on request, so the whole thing is covered without GitHub.
 import { afkOn, app, assert, flow, makeProject, mock, pass } from "./lib.mjs"
 
 const TITLE = "#265 The frontier is read from GitHub and listed"
@@ -25,7 +24,6 @@ const run = (wide) => async ({ page, profileId, shot, until }) => {
 
   await afkOn(page, screen, until)
 
-  // The sweep claimed the task and published its session; then its run ended without finishing.
   await until(
     async () => {
       const answer = await (await fetch(`${mock}/api/plugins/memento/projects/${projectId}/afk`)).json()

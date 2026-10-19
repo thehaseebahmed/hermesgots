@@ -68,11 +68,7 @@ def read(path: Path) -> Dict[str, Dict[str, Any]]:
 
 
 def one(path: Path, chat_id: str) -> Optional[Dict[str, Any]]:
-    """One chat's record, read by its id: asking about a single session doesn't cost the whole list.
-
-    The list is what a sync hands over whole; a sweep that asks whether one session is closed wants
-    the one row, since every value in the list is parsed on the way through `read`.
-    """
+    """One chat's record, read by its id: asking about a single session doesn't cost the whole list."""
     if not chat_id or not path.exists():
         return None
     conn = connect(path)

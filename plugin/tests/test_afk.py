@@ -257,8 +257,7 @@ class SwitchTests(unittest.TestCase):
 class ClaimStubTests(unittest.TestCase):
     """A Hermes home with one checkout, and GitHub as the plugin's own HTTP stub.
 
-    ``_get``/``_page`` answer the reads and ``_request`` records the writes, so what's asserted is
-    what AFK would leave on the tracker rather than how the module is arranged.
+    ``_get``/``_page`` answer the reads and ``_request`` records the writes.
     """
 
     def setUp(self) -> None:
@@ -445,7 +444,6 @@ class ClaimTests(ClaimStubTests):
         self.assertEqual(shown["refusal"], "Resource not accessible by personal access token")
 
     def test_once_the_task_it_holds_is_released_the_next_sweep_takes_the_one_behind_it(self) -> None:
-        """A freed project's next sweep takes what is behind the task it gave back."""
         self.on()
         self.issues = [issue_row(265), issue_row(266, created="2026-10-02T00:00:00Z")]
         self.sweep()
@@ -508,10 +506,8 @@ class ClaimTests(ClaimStubTests):
 class AfkSessionTests(ClaimStubTests):
     """AFK holding a claimed task in a published session, and giving that claim back.
 
-    The session is made and published the way ``afk.start`` leaves it — the worktree's row, the hold
-    naming the session, and the chat record that makes it appear — and then the user's own mark
-    arrives through the chat list, which is the one channel a device's discard, resolve or delete
-    travels on.
+    The session is made and published the way ``afk.start`` leaves it, and the user's own mark then
+    arrives through the chat list.
     """
 
     SESSION = "memento-afk-s1"

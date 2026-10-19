@@ -3707,8 +3707,7 @@ http
         if (goal && (goal.status === "paused" || goal.verdict === "blocked"))
           waiting[id] ??= { kind: "goal", reason: goal.paused_reason ?? goal.reason ?? "blocked" }
       }
-      // AFK's own wait: a session whose run ended without finishing, or one a restart adopted, so
-      // nothing is working the task it still holds.
+      // AFK's own wait: a session whose run ended without finishing, or one a restart adopted.
       for (const [projectId, why] of afkStalled) {
         const session = `memento-afk-${projectId}`
         if (!projectSessions.has(session) || sessions[session]) continue
