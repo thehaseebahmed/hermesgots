@@ -25,6 +25,7 @@ export const PUSH_KINDS = [
   "research_scope",
   "research_done",
   "research_failed",
+  "afk_pr",
 ] as const
 export type PushKind = (typeof PUSH_KINDS)[number] | "test"
 export type SendResult = "ok" | "gone" | "error"
@@ -43,6 +44,7 @@ export const PUSH_CATEGORIES = [
   "research_input",
   "research_done",
   "research_failed",
+  "code_afk_pr",
 ] as const
 export type PushCategory = (typeof PUSH_CATEGORIES)[number]
 /** What a device that never said which it wants gets: what pushed before there were more. */
@@ -57,6 +59,7 @@ export function categoryOf(kind: PushKind): PushCategory | "test" {
   if (kind === "routine_failed") return "routine_failed"
   if (kind === "research_brief" || kind === "research_scope") return "research_input"
   if (kind === "research_done" || kind === "research_failed") return kind
+  if (kind === "afk_pr") return "code_afk_pr"
   return `code_${kind}`
 }
 
@@ -98,6 +101,7 @@ const WORDS: Record<PushKind, string> = {
   research_scope: "The scope is ready for your approval",
   research_done: "Your research is ready",
   research_failed: "The mission stopped with an error",
+  afk_pr: "A task's pull request is ready to review",
   test: "This is a test notification",
 }
 

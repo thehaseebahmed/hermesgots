@@ -507,6 +507,8 @@ class SessionTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.home = Path(self.tmp.name)
         self.home.joinpath("projects.db").write_text("")
+        # The project's AFK row exists by the time a task is worked: the sweep that claimed it wrote it.
+        (self.home / "checkout" / ".git").mkdir(parents=True)
         self.task = {
             "repo": "mock-user/memento",
             "number": 265,
@@ -543,6 +545,9 @@ class SessionTests(unittest.TestCase):
         ):
             one.start()
             self.addCleanup(one.stop)
+        # What the sweep leaves behind before it starts the session: the switch on, the task held.
+        set_on(self.home, "p1", [folder(str(self.home / "checkout"))], True)
+        afk._hold(self.home, "p1", self.task)
 
     def ensure(self, path: Any, home: Any, session_id: str, project_id: Any, task: Any, mode: Any) -> dict:
         self.ensured.append((session_id, project_id, task, mode))
@@ -587,6 +592,24 @@ class SessionTests(unittest.TestCase):
             "a record whose updated time isn't newer is hidden by the Code list",
         )
         self.assertGreaterEqual(entry["at"], value["updatedAt"], "the change clock is the record's")
+
+    def test_the_project_row_names_the_session_working_its_task(self) -> None:
+        self.start()
+        session_id = self.ensured[0][0]
+        self.assertEqual(
+            afk.task_for_session(self.home, session_id),
+            self.task,
+            "the host keeps which session works which task, for the pull request that closes it",
+        )
+        self.assertIsNone(afk.task_for_session(self.home, "memento-afk-not-this-one"))
+
+    def test_a_run_that_never_started_names_no_session(self) -> None:
+        outbox.post.side_effect = outbox.StartError("No API key for this bot.", True)
+        self.start()
+        self.assertIsNone(
+            afk.task_for_session(self.home, self.ensured[0][0]),
+            "a session nothing was sent in is not the one working the task",
+        )
 
     def test_the_run_starts_with_one_line_naming_the_issue_and_where_it_is(self) -> None:
         self.start()
