@@ -1,9 +1,6 @@
-// A bot's subagent model: its settings screen records it as the host's delegation model, greys the
-// field out while the write is on its way, and clears it back to the bot's own model.
 import { app, assert, flow, mock, pass } from "./lib.mjs"
 
 await flow("delegation-model", async ({ page, profileId, until, shot, held }) => {
-  // The host's own record, which is what the screen must be writing.
   const hosted = async () => {
     const response = await fetch(`${mock}/api/plugins/memento/delegation`)
     return (await response.json()).delegation
@@ -36,7 +33,6 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
 
   await page.goto(`${app}/settings/bots/${profileId}/models`)
   await opener.waitFor({ timeout: 15_000 })
-  // Nothing recorded: every delegated task runs on the bot's own model.
   await opener.getByText("Default model").waitFor()
   await shot("inherited")
 
@@ -65,7 +61,6 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
   await page.reload()
   await opener.getByText("openrouter/openai/gpt-5-mini").waitFor({ timeout: 15_000 })
 
-  // Clearing it puts every delegated task back on the bot's own model.
   await opener.click()
   await picker.getByRole("button", { name: "Default model" }).first().click()
   await until(async () => (await hosted()) === null, 10_000, "the host to clear the pick")
@@ -73,7 +68,6 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
   assert.equal(writes.length, 2, "the clear is a write of its own")
   await shot("cleared")
 
-  // A host whose plugin can't record a delegation model shows no field at all.
   await page.route("**/api/plugins/memento/info", async (route) => {
     const info = await (await route.fetch()).json()
     await route.fulfill({

@@ -15,8 +15,6 @@ from unittest import mock
 
 
 class Result:
-    """What ``switch_model`` answers with, for a pick Hermes accepts or refuses."""
-
     def __init__(self, success, model="", provider="", error=""):
         self.success = success
         self.new_model = model

@@ -29,8 +29,6 @@ class CleanDelegationTest(unittest.TestCase):
         self.assertIsNone(host_model.clean_delegation({"delegation": None}))
 
     def test_a_body_that_says_nothing_is_a_client_bug(self) -> None:
-        # The route reads a missing key as a client bug, not as a request to clear a bot's model:
-        # a typo in a field name must not quietly put every task back on the bot's own.
         for body in ({}, {"delegationModel": {"provider": "a", "model": "b"}}):
             with self.assertRaisesRegex(ValueError, "needs a delegation key"):
                 host_model.clean_delegation(body)
@@ -102,7 +100,6 @@ class SetDelegationTest(unittest.TestCase):
         )
         with patch:
             self.assertIsNone(host_model.set_delegation(self.path, None))
-        # One pass, and the budget the section carries goes with it: it is still a section.
         self.assertEqual(calls["write"], [(self.path, "delegation", {"max_iterations": 60})])
         self.assertEqual(config["delegation"], {"max_iterations": 60})
         self.assertEqual(calls["switch"], [])
@@ -178,8 +175,6 @@ class SetDelegationTest(unittest.TestCase):
         self.assertEqual(saved, {"provider": "anthropic", "model": "claude-sonnet-4.5"})
 
     def test_a_pick_already_held_is_not_checked_again(self) -> None:
-        # It is the one Hermes resolved when it went in, so re-checking would spend a live provider
-        # probe on a pick that hasn't moved — and write a file that already says it.
         patch, calls, _ = hermes(
             self.config(delegation={"provider": "deepseek", "model": "c/d"})
         )

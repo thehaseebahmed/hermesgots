@@ -586,10 +586,6 @@ export function ModelMenu({
 // How long a just-saved default stays on show while the host's model is read again.
 const SETTLE_MS = 4000
 
-/**
- * A write to the host, said in the field's own place when the host refuses it: the control goes back
- * to the value the host still holds, and the reason is on screen.
- */
 function reportWrite(write: Promise<unknown>) {
   void write.catch((error: unknown) => {
     toast.error(error instanceof Error ? error.message : String(error))
@@ -654,8 +650,7 @@ export function DefaultModelSetting({
 
 /**
  * A bot's subagent model, in its settings: the model every task it delegates runs on, which is its
- * host's own delegation model. A host whose plugin can't record one shows no field at all, and a
- * write on its way greys the field out until the host's answer lands.
+ * host's own delegation model.
  */
 export function DelegationModelSetting({ profile }: { profile: Profile }) {
   const [open, setOpen] = useState(false)

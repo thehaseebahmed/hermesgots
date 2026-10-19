@@ -995,7 +995,6 @@ export async function setFallbackModels(
   return picks((await response.json())?.fallbacks)
 }
 
-/** Whatever part of a host's answer names a model, in order: both keys, and neither empty. */
 function picks(value: unknown): ModelChoice[] {
   if (!Array.isArray(value)) return []
   const named: ModelChoice[] = []
@@ -1007,7 +1006,6 @@ function picks(value: unknown): ModelChoice[] {
   return named
 }
 
-/** The one pick a `delegation` answer names, or null for one the host doesn't hold. */
 const pickOf = (value: unknown) => picks([value])[0] ?? null
 
 /**

@@ -35,8 +35,6 @@ FALLBACK_KEY = "fallback_providers"
 # The chain's older single-entry spelling. Hermes still reads it, so a write drops it: one source of
 # truth, as ``hermes fallback`` keeps.
 LEGACY_FALLBACK_KEY = "fallback_model"
-# Where Hermes's delegated tasks get their model, in the ``delegation`` section. Unset means a child
-# inherits the bot's own model, which is the picker's own default.
 DELEGATION_SECTION = "delegation"
 DELEGATION_PROVIDER = "provider"
 DELEGATION_MODEL = "model"
@@ -47,7 +45,6 @@ DELEGATION_NAMES = (DELEGATION_PROVIDER, DELEGATION_MODEL)
 ENDPOINT_KEYS = ("base_url", "api_key", "api_mode")
 # Hermes's own default provider, for a file that names none.
 DEFAULT_PROVIDER = "openrouter"
-
 
 
 def clean(body: Any) -> tuple[str, str]:
@@ -196,12 +193,6 @@ def set_delegation(config_path: Path, pick: Optional[Dict[str, str]]) -> Optiona
     """Make ``pick`` the model the profile's delegated tasks run on in ``config_path``; with None,
     clear it so a child inherits the bot's own model. A pick the profile doesn't already hold is
     checked by Hermes the way the main model is, and a refusal is a ValueError carrying its reason.
-
-    The section is written in one pass: two writes could leave the new model beside the old
-    provider, and a failure between them would leave it there. What else the section holds — a
-    budget, a concurrency, an endpoint — is carried over as it was, except that a pick naming
-    another provider drops the endpoint written for the old one, since Hermes reads a ``base_url``
-    as the provider being ``custom``.
     """
     from gateway.run import _load_gateway_config
     from utils import atomic_roundtrip_yaml_update
@@ -257,7 +248,6 @@ def _delegation_of(cfg: Dict[str, Any]) -> Optional[Dict[str, str]]:
 
 
 def _section_of(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """The ``delegation`` section as the file writes it, or an empty one."""
     section = cfg.get(DELEGATION_SECTION)
     return section if isinstance(section, dict) else {}
 

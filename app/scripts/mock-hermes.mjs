@@ -2127,8 +2127,6 @@ const PROFILE_PATH = /(?:^|\/)p\/([^/]+)(?=\/)/
 const profileOf = (req) => PROFILE_PATH.exec(req.url ?? "")?.[1] ?? ""
 // The fallback models the plugin's `fallbacks` route recorded, per profile.
 const fallbacksOf = new Map()
-// The model the plugin's `delegation` route recorded: what the profile's delegated tasks run on,
-// or nothing when they inherit the bot's own model.
 const delegationsOf = new Map()
 // The provider figure every later usage read serves, set by `usage?percent=N` and cleared by
 // `percent=`: a dev-only override, so an e2e flow can move an account from approaching to out
@@ -2138,15 +2136,11 @@ let usagePercent = null
 // become the host's model or one of its fallbacks.
 const PICKER_PROVIDERS = ["openrouter", "anthropic", "ollama-cloud"]
 
-/**
- * A pick one of the plugin's model routes takes, checked the way the host checks a model: both keys,
- * trimmed, on a provider the picker knows. `what` names it in a refusal — "Delegation", "Fallback 2".
- */
-function checkedPick(entry, what) {
+function checkedPick(entry, label) {
   const provider = entry?.provider?.trim?.() ?? ""
   const model = entry?.model?.trim?.() ?? ""
-  if (!provider) return { error: `${what} needs a provider` }
-  if (!model) return { error: `${what} needs a model` }
+  if (!provider) return { error: `${label} needs a provider` }
+  if (!model) return { error: `${label} needs a model` }
   if (!PICKER_PROVIDERS.includes(provider)) return { error: `Unknown provider '${provider}'.` }
   return { saved: { provider, model } }
 }
@@ -3081,7 +3075,6 @@ http
           delegationsOf.set(key, saved)
           return json(res, 200, { object: "memento.delegation", delegation: saved })
         }
-        // Nothing set: a delegated task inherits the bot's own model.
         delegationsOf.delete(key)
         return json(res, 200, { object: "memento.delegation", delegation: null })
       }

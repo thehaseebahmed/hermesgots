@@ -181,10 +181,9 @@ function RemoveBot({ profile, onDeleted }: { profile: Profile; onDeleted?: () =>
  * the URL, so each is a history entry of its own and back walks the way it was opened.
  *
  * General is what the bot is and how it is reached, the model it answers with is on Models with the
- * default and the fallbacks it falls back to, and the subagent model its delegated tasks run on,
- * and MCP is its servers. The MCP tab exists only where the bot's plugin
- * advertises that it can list them, so a bot on an older plugin has two tabs and a URL into a third
- * lands on General rather than on a screen that can't draw.
+ * default and the fallbacks it falls back to, and MCP is its servers. The MCP tab exists only where
+ * the bot's plugin advertises that it can list them, so a bot on an older plugin has two tabs and a
+ * URL into a third lands on General rather than on a screen that can't draw.
  *
  * A linked bot's address and key come from its host and aren't shown; a bot added by hand before
  * linking keeps its own.

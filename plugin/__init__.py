@@ -291,8 +291,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "sync_delegation",
                     "host_model",
                     "fallbacks",
-                    # The model the profile's delegated tasks run on, the host's own
-                    # `delegation.model` (host_model.py); a plugin without it shows no picker.
                     "delegation_model",
                     "queue",
                     "dictation",
