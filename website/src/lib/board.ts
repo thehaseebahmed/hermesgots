@@ -141,11 +141,10 @@ export function sampleBoard(): Board {
       const accept = 0.15 + random() * 0.2
       const chat = 0.1 + random() * 0.15
       const auto = Math.max(0, 1 - plan - accept - chat)
+      // Keyed by `MODES`, so a mode added there is a number to give here, not a silent zero.
+      const share: Record<Mode, number> = { plan, auto, accept_edits: accept, chat }
       const modes = Object.fromEntries(
-        Object.entries({ plan, auto, accept_edits: accept, chat }).map(([k, v]) => [
-          k,
-          Math.round(total * v),
-        ]),
+        MODES.map(({ key }) => [key, Math.round(total * share[key])]),
       ) as Record<Mode, number>
       return {
         model: name,

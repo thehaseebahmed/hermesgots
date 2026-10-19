@@ -27,7 +27,6 @@ KEEP_DAYS = 35
 KINDS = ("input", "output", "cache_write", "cache_read")
 # What the site names them: camel case, as its JSON does elsewhere.
 WIRE = {"input": "input", "output": "output", "cache_write": "cacheWrite", "cache_read": "cacheRead"}
-MODES = ("accept_edits", "auto", "plan")
 
 
 def _provider(value: Any) -> str:
@@ -83,7 +82,7 @@ def _record(kwargs: Dict[str, Any]) -> None:
     mode = "chat"
     if isinstance(session_id, str) and session_id:
         found = sessions.record_for(path, home, session_id)
-        if found and found.get("mode") in MODES:
+        if found and found.get("mode") in sessions.MODES:
             mode = found["mode"]
     conn = connect(path)
     try:

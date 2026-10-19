@@ -245,7 +245,7 @@ def connect(path: Path) -> sqlite3.Connection:
         )
         # v4: a session has a worktree in every repo of its project. v5: its newest plan file. v10: a
         # session's Theseus settings, kept so old rows and this schema agree (nothing reads it since
-        # Theseus became a goal). v15: the folder its generated files go to. v25: the task AFK
+        # Theseus became Auto). v15: the folder its generated files go to. v25: the task AFK
         # started it for, kept with the session so its pull request still names it after the claim.
         columns = {row[1] for row in conn.execute("PRAGMA table_info(project_sessions)")}
         for column in ("repos", "plan_file", "theseus", "files_dir", "task"):

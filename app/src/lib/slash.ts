@@ -65,11 +65,11 @@ export function slashToken(text: string, caret: number): SlashToken | null {
 }
 
 /**
- * Commands by name prefix — and only when the token is the whole message, which is the shape the
- * composer's own actions take (`localCommand`, `sendMode`), so the menu never offers one that
- * running would drop the rest of the message for — then the skills, in tiers: an exact name, a name
- * the query starts, a name that contains it, a fuzzy name, a category, a description. Ties keep
- * their order.
+ * Commands by name prefix — and only when the token is the whole message, the shape `localCommand`
+ * matches on, so the menu never offers one that running would drop the rest of the message for
+ * (`/steer` and `/queue` carry text instead and are hoisted with it, like a skill) — then the
+ * skills, in tiers: an exact name, a name the query starts, a name that contains it, a fuzzy name,
+ * a category, a description. Ties keep their order.
  */
 export function rankSlashItems(items: SlashItem[], token: SlashToken): SlashItem[] {
   const query = token.query.toLowerCase()
