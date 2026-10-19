@@ -14,7 +14,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import github, projects, push, tools_common
+from . import github, pipeline, projects, push, tools_common
 from .sessions import PR_FOOTER, WorkspaceError, _git
 from .store import db_path
 
@@ -492,6 +492,19 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
     record = sessions.record_for_call(path, home, task_id, session_id)
     if not record:
         return json.dumps({"error": "This session has no worktree to ship."})
+    if action == "ship":
+        staged = pipeline.read(record.get("pipeline"))
+        if pipeline.blocks_ship(staged):
+            return json.dumps(
+                {
+                    "error": (
+                        f"This session is in its {staged['stage'].capitalize()} stage of a staged "
+                        "task, so it can't ship yet: a build ends at the gate the host runs, and "
+                        "the critique stage that follows opens the pull request. Run the gate with "
+                        "afk_gate, end this run, and don't call pull_request with 'ship' again."
+                    )
+                }
+            )
     try:
         if action == "status":
             return json.dumps({"results": status(record)})

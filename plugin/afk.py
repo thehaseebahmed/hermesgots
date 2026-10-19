@@ -40,7 +40,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Tuple
 
-from . import chats, github, prompt_builder, sessions, tasks
+from . import chats, github, pipeline, prompt_builder, sessions, ship, tasks
 from .store import connect, db_path
 
 logger = logging.getLogger(__name__)
@@ -49,6 +49,12 @@ NO_REPOSITORY = "This project has no repository."
 NO_GITHUB = "No GitHub account on the server."
 # The same words the plugin already refuses an archived project a turn with (sessions._blocked).
 ARCHIVED = "This project is archived."
+# A skill the project picked that its bot no longer has: the sweep records it and claims nothing.
+MISSING_SKILL = (
+    'The skill "{name}" isn\'t one this bot has any more, so no task is claimed. '
+    "Pick another in AFK's settings."
+)
+CRITIQUE_FAILED = "The critique couldn't start."
 
 # How often a project left on is swept for work. A GitHub refusal ends that sweep and the next one
 # waits for its turn rather than asking again at once.
@@ -161,7 +167,29 @@ def read(
         "refusal": found["refusal"],
         "build_skill": found["build_skill"],
         "critique_skills": found["critique_skills"],
+        # The stage the task it holds is in, for the sheet's Working row (ADR 0018): None for a
+        # project holding nothing, and for a task that isn't staged.
+        "stage": _held_stage(hermes_home, found),
     }
+
+
+def _held_stage(hermes_home: Path, found: Dict[str, Any]) -> Optional[str]:
+    """The stage the task a project holds is in, read off the record of the session working it.
+
+    Only while it holds one: the stage outlives the hold on the session's own row — so a finished
+    task can still say how it got there — but nothing in the sheet names a task it isn't working,
+    and the strip that reads a finished one is its own change (#319). A store that can't be read
+    answers no stage rather than failing the sheet.
+    """
+    session_id = found.get("session_id")
+    if not found.get("task") or not session_id:
+        return None
+    try:
+        record = sessions.read(db_path(hermes_home), session_id)
+    except Exception:
+        logger.debug("memento: couldn't read the stage of %s", session_id, exc_info=True)
+        return None
+    return pipeline.stage(pipeline.read((record or {}).get("pipeline")))
 
 
 SKILL_FIELDS = ("build_skill", "critique_skills")
@@ -327,7 +355,11 @@ def stalled(
 
 
 def sweep(
-    hermes_home: Path, project_id: str, folders: Iterable[Any], archived: bool = False
+    hermes_home: Path,
+    project_id: str,
+    folders: Iterable[Any],
+    archived: bool = False,
+    skills: Optional[Iterable[str]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Claims the oldest ready task for a project left to work, if it isn't holding one.
 
@@ -340,6 +372,11 @@ def sweep(
     away from it. A GitHub refusal — no permission to write issues, a rate limit, no connection —
     records its reason and stops this sweep with the switch left on, so the sheet says why; the next
     sweep is the next attempt, not an immediate one.
+
+    ``skills`` is the names the profile can run, read once for a whole sweep; a project whose chosen
+    build or critique skill isn't among them claims nothing and records why, with its switch still
+    on, so a choice the user forgot about is visible instead of silently working around it (ADR
+    0018). A caller that can't read them passes None, and no choice is judged.
     """
     found = _row(hermes_home, project_id)
     if found is None:
@@ -356,6 +393,11 @@ def sweep(
         # before would sit beside that reason saying something GitHub no longer says.
         _forget_refusal(hermes_home, project_id, found)
         return None
+    if skills is not None:
+        missing = _missing_skill(found, skills)
+        if missing is not None:
+            _refuse(hermes_home, project_id, MISSING_SKILL.format(name=missing))
+            return None
     auth, _ = github.token(hermes_home)
     try:
         answers = tasks.read(hermes_home, folders)
@@ -399,6 +441,42 @@ def run_body(record: Dict[str, Any], task: Dict[str, Any]) -> Dict[str, Any]:
         "instructions": prompt_builder.afk_prompt(record, task),
         "input": [{"role": "user", "content": prompt_builder.afk_input(task)}],
     }
+
+
+def critique_body(record: Dict[str, Any], task: Dict[str, Any]) -> Dict[str, Any]:
+    """The second run's request: the same session, reviewing the build and opening the pull request.
+
+    The base branch is read from the worktree's own origin, so the critique hands it to its
+    delegates rather than each of them guessing which branch the change is against.
+    """
+    return {
+        "session_id": record["session_id"],
+        "instructions": prompt_builder.critique_prompt(record, task, base_branch(record)),
+        "input": [{"role": "user", "content": prompt_builder.critique_input(task)}],
+    }
+
+
+def base_branch(record: Dict[str, Any]) -> Optional[str]:
+    """The branch this session's work is against: its primary worktree's base."""
+    from . import projects
+
+    primary = next((repo.get("path") for repo in record.get("repos") or []), None)
+    return projects._base_branch(primary) if primary else None
+
+
+def _begin(
+    hermes_home: Path, path: Path, project_id: str, session_id: str
+) -> Optional[Dict[str, Any]]:
+    """Writes the pipeline a staged task starts with, answering it as the run's record carries it.
+
+    None for a project with no critique skill: that task is one run which ships, exactly as it was
+    before there were stages (ADR 0018). Written before the run is posted, so the build's own
+    instructions already know where they end.
+    """
+    found = _row(hermes_home, project_id) or {}
+    staged = pipeline.start(found.get("build_skill"), found.get("critique_skills") or [])
+    sessions.set_pipeline(path, session_id, staged)
+    return staged
 
 
 def publish(
@@ -460,6 +538,10 @@ async def start(
     try:
         await asyncio.to_thread(_adopt, hermes_home, project_id, session_id)
         sessions.apply_cwd(session_id, record["path"])
+        staged = await asyncio.to_thread(
+            _begin, hermes_home, db_path(hermes_home), project_id, session_id
+        )
+        record = {**record, "pipeline": staged}
         started = await outbox.post(
             adapter,
             profile,
@@ -530,6 +612,10 @@ def sweep_all(hermes_home: Path) -> List[Tuple[str, Dict[str, Any]]]:
         return claimed
     # One read of the project list, not one per project: a sweep only needs their folders.
     projects = sessions.projects(hermes_home / "projects.db")
+    # And one of the skills this bot can run, for every project's choice: a skill the profile no
+    # longer has stops that project's sweep (ADR 0018), and a host that can't list its skills
+    # judges nothing.
+    skills = _profile_skills(hermes_home)
     for project_id in due:
         project = projects.get(project_id)
         if project is None:
@@ -541,6 +627,7 @@ def sweep_all(hermes_home: Path) -> List[Tuple[str, Dict[str, Any]]]:
                 project_id,
                 project.folders,
                 bool(getattr(project, "archived", False)),
+                skills,
             )
         except Exception:
             logger.warning("memento: couldn't sweep AFK's project %s", project_id, exc_info=True)
@@ -610,13 +697,17 @@ def after_run(
 ) -> None:
     """The ``on_session_end`` hook: AFK's own task finished, or nothing is working it any more.
 
-    A run that finished hands the project its next task: its claim stays on GitHub, because the task
-    is in review, but the hold is what one task at a time is, so it goes and the sweep is asked to
-    look now. A run that stopped any other way is left exactly as it is — the session, its
+    A run that finished hands the project its next task: its claim stays on GitHub, because the
+    task is in review, but the hold is what one task at a time is, so it goes and the sweep is asked
+    to look now. A run that stopped any other way is left exactly as it is — the session, its
     transcript and its claim — and records why nothing is working the task (a failure, an
     interruption, or no reason at all), so the app shows the session where it shows a wait (ADR
     0015). Only a session AFK is holding is its own: every other project session just wakes the
     sweep, and a chat's turn says nothing about any work.
+
+    A staged task's run end is its stage's business instead (ADR 0018): a build that finished is
+    judged by its gate, which either starts the critique on the same session or stalls the task
+    where it stands, and a critique that finished is the end of the pipeline.
     """
     try:
         path, home = sessions._paths()
@@ -627,7 +718,11 @@ def after_run(
             completed=completed, failed=failed, interrupted=interrupted
         )
         project_id = holding_project(home, str(record.get("session_id") or ""))
+        staged = pipeline.read(record.get("pipeline"))
         if project_id is not None:
+            if staged is not None:
+                _stage_end(home, path, project_id, record, staged, stopped)
+                return
             if not stopped.finished:
                 _stall(home, project_id, _stopped(stopped))
                 return
@@ -635,6 +730,128 @@ def after_run(
         wake()
     except Exception:
         logger.debug("memento: couldn't wake AFK's sweep", exc_info=True)
+
+
+def _stage_end(
+    hermes_home: Path,
+    path: Path,
+    project_id: str,
+    record: Dict[str, Any],
+    staged: Dict[str, Any],
+    stopped: sessions.Outcome,
+) -> None:
+    """Settles a staged task whose run just ended: the gate's verdict, then the critique or a stall.
+
+    The gate's answer and the worktree's state are read only for a build that finished, since a run
+    that failed at either stage is a stall in the stage it stopped in and nothing is measured for
+    it. The stage is written before anything is started, so a critique that can't be posted leaves
+    a record that says where the task stands.
+    """
+    worktree: Iterable[Dict[str, Any]] = ()
+    if stopped.finished and staged["stage"] in (pipeline.BUILD, pipeline.GATE):
+        worktree = ship.status(record)
+    step = pipeline.advance(
+        staged, stopped=None if stopped.finished else _stopped(stopped), worktree=worktree
+    )
+    sessions.set_pipeline(path, record["session_id"], pipeline.moved(staged, step))
+    if step.stall:
+        _stall(hermes_home, project_id, step.stall)
+        return
+    if step.next == pipeline.CRITIQUE:
+        # The critique is the same session's next run: the hold keeps the task, and the stall
+        # clock starts again so the moment between the two runs isn't read as nothing working it.
+        _adopt(hermes_home, project_id, record["session_id"])
+        _critique(hermes_home, record)
+        return
+    _free(hermes_home, project_id)
+    wake()
+
+
+def _critique(hermes_home: Path, record: Dict[str, Any]) -> None:
+    """Starts the critique run on the task's own session, on the loop that owns the runs.
+
+    The hook runs in Hermes's own thread, so the run is posted there rather than awaited here. A
+    run that can't be started stalls the task instead: nothing is reviewing it, and the claim is
+    what the user finds it by.
+    """
+    project_id = str(record.get("project_id") or "")
+    held = _row(hermes_home, project_id) if project_id else None
+    task = (held or {}).get("task")
+    loop = _loop
+    if not isinstance(task, dict) or loop is None:
+        logger.warning(
+            "memento: AFK can't start the critique of %s (no task held or no loop)",
+            record.get("session_id"),
+        )
+        if project_id:
+            _stall(hermes_home, project_id, CRITIQUE_FAILED)
+        return
+    asyncio.run_coroutine_threadsafe(critique(sessions.adapter, hermes_home, record, task), loop)
+
+
+async def critique(adapter: Any, hermes_home: Path, record: Dict[str, Any], task: Dict[str, Any]) -> None:
+    """Posts the second run on the session: the build reviewed, and the pull request opened last."""
+    from . import link, outbox
+
+    issue = f"{task.get('repo')}#{task.get('number')}"
+    try:
+        started = await outbox.post(
+            adapter,
+            link.profile_name(hermes_home),
+            "/v1/runs",
+            critique_body(record, task),
+            authorization=_authorization(hermes_home),
+        )
+    except Exception as error:
+        logger.warning("memento: AFK couldn't start the critique for %s: %s", issue, error)
+        project_id = str(record.get("project_id") or "")
+        if project_id and holding_project(hermes_home, record["session_id"]) == project_id:
+            _stall(hermes_home, project_id, CRITIQUE_FAILED)
+        return
+    logger.info(
+        "memento: AFK is critiquing %s in %s (run %s)",
+        issue,
+        record["session_id"],
+        started.get("run_id"),
+    )
+
+
+def _missing_skill(found: Dict[str, Any], skills: Iterable[str]) -> Optional[str]:
+    """The first skill this project's next task would follow that its bot no longer has, if any.
+
+    The build skill is judged only where it is read: it shapes a staged build, and a project with no
+    critique skill runs one task as it always has, which never names it — refusing there would stop
+    work over a name that changes nothing about it (ADR 0018, and #327 leaves that path untouched).
+    """
+    critique = [
+        name for name in found.get("critique_skills") or [] if isinstance(name, str) and name
+    ]
+    judged = [found.get("build_skill"), *critique] if critique else critique
+    known = set(skills)
+    for name in judged:
+        if isinstance(name, str) and name and name not in known:
+            return name
+    return None
+
+
+def _profile_skills(hermes_home: Path) -> Optional[set]:
+    """The skill names this home's profile can run, or None when its host can't say.
+
+    Read the way the composer's ``/`` menu reads them (`skill_catalog`, the enabled and loadable
+    set), because only what the bot can actually run is worth refusing over. A Hermes whose skills
+    module moved answers None instead of stopping every sweep: a host that can't list its skills
+    isn't a host to judge a choice by.
+    """
+    from . import link, skill_catalog
+
+    try:
+        return {
+            str(skill.get("name") or "")
+            for skill in skill_catalog.read(link.profile_name(hermes_home))
+        }
+    except Exception:
+        logger.debug("memento: couldn't read this bot's skills", exc_info=True)
+        return None
 
 
 def _stopped(outcome: sessions.Outcome) -> str:

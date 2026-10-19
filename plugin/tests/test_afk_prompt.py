@@ -1,7 +1,7 @@
 import unittest
 from typing import Any, Dict
 
-from plugin import prompt_builder
+from plugin import pipeline, prompt_builder
 
 TASK: Dict[str, Any] = {
     "repo": "mock-user/memento",
@@ -94,6 +94,99 @@ class AfkPromptTests(unittest.TestCase):
     def test_the_url_falls_back_to_github_when_the_row_has_none(self) -> None:
         text = self.text(task={key: value for key, value in TASK.items() if key != "url"})
         self.assertIn("https://github.com/mock-user/memento/issues/265", text)
+
+
+class BuildStageTests(unittest.TestCase):
+    """What a staged task's build run is told: it ends at the gate, not at a pull request."""
+
+    RECORD = {**RECORD, "pipeline": pipeline.start("plan", ["code-review", "log-triage"])}
+
+    def text(self, record: Dict[str, Any] = None) -> str:
+        return prompt_builder.afk_prompt(record or self.RECORD, TASK)
+
+    def test_it_ends_at_the_gate_rather_than_at_a_pull_request(self) -> None:
+        text = self.text()
+        self.assertIn("Build stage", text)
+        self.assertIn("Step 5 above is not yours", text, "the ship step is given back explicitly")
+        self.assertIn("afk_gate", text)
+        self.assertIn("end the run", text)
+        self.assertIn("refuses 'ship' from this stage", text)
+
+    def test_it_names_the_skill_the_build_follows(self) -> None:
+        text = self.text()
+        self.assertIn('built by your skill "plan"', text)
+        self.assertIn('skill_view(name="plan")', text)
+        self.assertIn("A skill governs method only", text, "no skill unlocks the gate")
+
+    def test_a_staged_build_with_no_build_skill_names_none(self) -> None:
+        record = {**RECORD, "pipeline": pipeline.start(None, ["code-review"])}
+        self.assertNotIn("skill_view", self.text(record))
+
+    def test_an_unstaged_run_is_told_nothing_about_stages(self) -> None:
+        text = prompt_builder.afk_prompt(RECORD, TASK)
+        self.assertNotIn("Build stage", text)
+        self.assertNotIn("afk_gate", text, "a project with no critique skill is one run, as before")
+
+    def test_the_task_and_the_worktree_are_still_named(self) -> None:
+        text = self.text()
+        self.assertIn("mock-user/memento#265", text)
+        self.assertIn("/trees/afk-265", text)
+
+
+class CritiquePromptTests(unittest.TestCase):
+    """What the critique run is told: the work it reviews, by the skills chosen, and that it ships."""
+
+    RECORD = {**RECORD, "pipeline": {**pipeline.start("plan", ["code-review", "log-triage"]), "stage": "critique"}}
+
+    def text(self, base: str = "main") -> str:
+        return prompt_builder.critique_prompt(self.RECORD, TASK, base)
+
+    def test_it_reviews_what_the_build_did(self) -> None:
+        text = self.text()
+        self.assertIn("Critique stage", text)
+        self.assertIn("reviewing the build of mock-user/memento#265", text)
+        self.assertIn(TASK["url"], text, "the issue is where the reviewer reads the spec")
+        self.assertIn("/trees/afk-265", text)
+
+    def test_it_names_the_base_branch(self) -> None:
+        self.assertIn("The work is against the base branch main.", self.text())
+        self.assertNotIn(
+            "The work is against the base branch",
+            prompt_builder.critique_prompt(self.RECORD, TASK, None),
+            "an unknown base is left out rather than guessed",
+        )
+
+    def test_it_delegates_one_reviewer_per_skill(self) -> None:
+        text = self.text()
+        self.assertIn('"code-review"', text)
+        self.assertIn('"log-triage"', text)
+        self.assertIn("delegate_task", text)
+        self.assertIn("one reviewer for each", text)
+
+    def test_one_skill_asks_for_one_reviewer(self) -> None:
+        record = {**RECORD, "pipeline": {**pipeline.start(None, ["code-review"]), "stage": "critique"}}
+        text = prompt_builder.critique_prompt(record, TASK, "main")
+        self.assertIn("The critique skill is", text)
+        self.assertIn("delegate one reviewer for it", text)
+
+    def test_a_reviewer_reports_rather_than_implements(self) -> None:
+        text = self.text()
+        self.assertIn("reports rather than implements", text)
+        self.assertIn("changes nothing, commits nothing and ships nothing", text)
+
+    def test_it_fixes_once_and_ships_last(self) -> None:
+        text = self.text()
+        self.assertIn("fix it in one pass", text)
+        self.assertIn("there is no second review", text)
+        self.assertIn("action 'ship'", text)
+        self.assertIn("what the critique found and what changed", text)
+        self.assertIn("Leave the Closes line to the tool", text)
+
+    def test_its_input_names_what_it_reviews(self) -> None:
+        self.assertEqual(
+            prompt_builder.critique_input(TASK),
+            f"Critique the build of #265 ({TASK['url']})",
+        )
 
 
 if __name__ == "__main__":

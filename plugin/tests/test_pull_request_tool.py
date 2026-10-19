@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from plugin import ship
+from plugin import pipeline, ship
 from plugin.store import db_path
 
 
@@ -346,6 +346,41 @@ class RefusalTests(_Base):
         data = json.loads(ship.handle_legacy({}))
         self.assertIn("pull_request", data["error"])
         self.assertIn("ship", data["error"])
+
+
+class StageTests(_Base):
+    """A staged task's build can't ship: the critique stage opens the pull request instead."""
+
+    def staged(self, stage: str) -> dict:
+        return {**_record(self.tmp), "pipeline": {**pipeline.start("plan", ["code-review"]), "stage": stage}}
+
+    def test_a_build_cannot_ship(self) -> None:
+        answer = self._call({"action": "ship", "commit_message": "m"}, record=self.staged(pipeline.BUILD))
+        self.assertIn("Build stage", answer["error"], "the refusal names the stage")
+        self.assertIn("afk_gate", answer["error"])
+        self.assertIn("critique stage", answer["error"])
+
+    def test_a_task_at_its_gate_cannot_ship_either(self) -> None:
+        answer = self._call({"action": "ship", "commit_message": "m"}, record=self.staged(pipeline.GATE))
+        self.assertIn("Gate stage", answer["error"])
+
+    def test_a_critique_ships(self) -> None:
+        with patch("plugin.ship.ship", return_value=[]) as shipped:
+            answer = self._call(
+                {"action": "ship", "commit_message": "m"}, record=self.staged(pipeline.CRITIQUE)
+            )
+        shipped.assert_called_once()
+        self.assertNotIn("error", answer)
+
+    def test_a_session_that_is_not_staged_ships_as_it_always_did(self) -> None:
+        with patch("plugin.ship.ship", return_value=[]) as shipped:
+            self._call({"action": "ship", "commit_message": "m"})
+        shipped.assert_called_once()
+
+    def test_the_build_can_still_ask_what_it_has(self) -> None:
+        with patch("plugin.ship.status", return_value=[]):
+            answer = self._call({"action": "status"}, record=self.staged(pipeline.BUILD))
+        self.assertNotIn("error", answer, "status writes nothing, so a build may look")
 
 
 if __name__ == "__main__":
