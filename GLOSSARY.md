@@ -151,6 +151,30 @@ _Avoid_: assign, lock, pickup
 The task a project's AFK switch claimed and the session working it: the host's own record, one per project, which is why a project takes no second task while one is held. It lasts as long as the run; a finished run lets go of the hold and leaves the claim, and a session the user closes gives both back.
 _Avoid_: lock, lease, slot
 
+**Pipeline**:
+The stages an AFK task runs through — Build, Gate, Critique — sequenced by the host, which is what lets the work be checked between them. A project runs one only when it has picked a critique skill.
+_Avoid_: workflow, stage machine, chain, assembly line
+
+**Build**:
+The stage where an AFK task's work is written: the session's first run, shaped by the project's build skill when it has one. It ends at the gate and never by shipping.
+_Avoid_: implementation stage, implement, coding, development
+
+**Build skill**:
+The one of the profile's skills a project picks to govern how its Build is done. It shapes the method and never AFK's fixed points.
+_Avoid_: implementation skill, coding skill, builder
+
+**Gate**:
+The stage between a task's Build and its Critique: the host runs the repo's gates the build named and passes only a run that ended, a clean committed tree and every command at zero. A task that fails it stalls rather than being critiqued.
+_Avoid_: checkpoint, approval, quality gate, verification step
+
+**Critique**:
+The stage where a task's build is reviewed: one delegate per critique skill the project picked, unless a skill prescribes its own arrangement, and the session fixes what it accepts in one pass. "In review" is what the task is afterwards, waiting on the user.
+_Avoid_: code review, review stage, self-review, PR review
+
+**Critique skill**:
+One of the profile's skills a project picks to review a task's build. A project may pick several, each its own lens.
+_Avoid_: review skill, code-review skill
+
 **In review**:
 A task whose pull request is open and waiting on the user.
 _Avoid_: pending, awaiting merge, PR open
