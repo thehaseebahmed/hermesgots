@@ -13,8 +13,9 @@ const run = async ({ page, profileId, shot, until }) => {
   })
   const screen = `${app}/projects/${profileId}/${await makeProject(until, "AFK reasons")}`
 
-  // A host with no GitHub account can't read or claim a task, so it says so once: the frontier's own
-  // refusal is the same answer, and the sheet doesn't say it twice.
+  // A host with no GitHub account can't read or claim a task, so the switch is off and out of reach
+  // and the reason sits under it — once: the frontier's own refusal is the same answer, and the sheet
+  // doesn't say it twice.
   await page.route("**/api/plugins/memento/projects/*/afk", (route) =>
     route.request().method() === "GET"
       ? route.fulfill({
@@ -38,6 +39,7 @@ const run = async ({ page, profileId, shot, until }) => {
   const refusedTasks = page.waitForResponse(
     (response) => response.url().endsWith("/tasks") && response.status() === 409,
   )
+  const control = page.getByRole("switch", { name: "Work on its own" })
   await openAfk(page, screen)
   await refusedTasks
   await page.getByText(NO_GITHUB, { exact: true }).waitFor({ timeout: 15_000 })
@@ -46,7 +48,10 @@ const run = async ({ page, profileId, shot, until }) => {
     1,
     "the reason is said once, not as both the switch's and the frontier's",
   )
-  assert.equal(await page.getByRole("switch", { name: "Work on its own" }).count(), 0, "no switch")
+  assert.equal(await control.count(), 1, "the switch is shown, not hidden")
+  assert.equal(await control.isDisabled(), true, "and out of reach")
+  assert.equal(await control.getAttribute("aria-checked"), "false", "off")
+  assert.equal(await page.getByText("Turned off", { exact: true }).count(), 1, "reading its state")
   // Nothing is coming for the frontier either, so it isn't left spinning under the reason.
   assert.equal(
     await page.getByText("Reading tasks…", { exact: true }).count(),
@@ -75,11 +80,13 @@ const run = async ({ page, profileId, shot, until }) => {
   })
   await openAfk(page, screen)
   await page.getByRole("button", { name: "Close" }).waitFor({ timeout: 15_000 })
-  assert.equal(await page.getByRole("switch", { name: "Work on its own" }).count(), 0, "no switch")
+  assert.equal(await control.count(), 1, "a plugin that can't switch it still shows the switch")
+  assert.equal(await control.isDisabled(), true, "out of reach")
+  assert.equal(await control.getAttribute("aria-checked"), "false", "off")
   assert.equal(
-    await page.getByText("Work on its own", { exact: true }).count(),
-    0,
-    "and no row saying the plugin can't",
+    await page.getByText("Turned off", { exact: true }).count(),
+    1,
+    "the row says so rather than explaining the plugin",
   )
   await page.waitForTimeout(450)
   await shot("no-switch")
@@ -105,6 +112,12 @@ const run = async ({ page, profileId, shot, until }) => {
     "true",
     "a project left on keeps its switch",
   )
+  assert.equal(
+    await page.getByRole("switch", { name: "Work on its own" }).isDisabled(),
+    false,
+    "and it can still be turned off",
+  )
+  assert.equal(await page.getByText("Turned on", { exact: true }).count(), 1, "reading its state")
   assert.equal(await page.getByText(NO_GITHUB, { exact: true }).count(), 1, "and says why under it")
   await page.waitForTimeout(450)
   await shot("on-with-reason")
@@ -131,5 +144,5 @@ for (const width of [390, 1024]) {
   }
 }
 pass(
-  "AFK's pop-up says why it can't offer the switch — no GitHub account, said once, a project left on keeping its switch with the reason under it — and a plugin too old to switch it leaves the row out — at 390 and 1024px, light and dark",
+  "Away From Keyboard's pop-up shows its switch off and out of reach with the reason under it where the project can't be worked — no GitHub account, said once — leaves it off and disabled for a plugin too old to switch it, and keeps it live for a project already on, at 390 and 1024px, light and dark",
 )

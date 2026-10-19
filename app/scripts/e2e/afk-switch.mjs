@@ -31,13 +31,20 @@ const run = async ({ page, profileId, shot, until }) => {
     await shot(name)
   }
 
-  // The switch starts off, and turning it on is the host's answer rather than the device's.
+  // The switch starts off and in reach, and the row reads that state.
   await openAfk(page, screen)
   await control().waitFor({ timeout: 15_000 })
   assert.equal(await control().getAttribute("aria-checked"), "false", "AFK starts off")
+  assert.equal(
+    await control().isDisabled(),
+    false,
+    "a project that can be worked offers the switch",
+  )
+  assert.equal(await page.getByText("Turned off", { exact: true }).count(), 1, "the row says off")
   await snap("off")
   await control().click()
   await reads("true")
+  assert.equal(await page.getByText("Turned on", { exact: true }).count(), 1, "the row says on")
   await snap("on")
   const askedFirst = afkReads.length
 
@@ -52,6 +59,7 @@ const run = async ({ page, profileId, shot, until }) => {
   assert.ok(afkReads.length > askedFirst, "the reload asked the host again rather than the device")
   await control().click()
   await reads("false")
+  assert.equal(await page.getByText("Turned off", { exact: true }).count(), 1, "and back to off")
   await snap("turned-off")
 
   assert.deepEqual(errors, [], `no console error (${errors.join("; ")})`)
@@ -67,5 +75,5 @@ for (const width of [390, 1024]) {
   }
 }
 pass(
-  "a project's AFK pop-up switches it on and off on its host, and a reload reads the setting back, at 390 and 1024px, light and dark",
+  "AFK's pop-up switches a project on and off on its host — the row reading Turned off and Turned on — and a reload reads the setting back, at 390 and 1024px, light and dark",
 )

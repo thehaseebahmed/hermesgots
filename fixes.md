@@ -6,11 +6,11 @@ one change too wide for the branch's own review pass. It is recorded here instea
 a handler this branch never touched.
 
 Everything else both reviews found is applied on this branch rather than filed. From the standards pass:
-`AGENTS.md`'s route enumeration names `projects/{id}/afk` (`:216`), and the sheet no longer prints a line
-explaining that a plugin can't switch AFK on — a plugin without `afk_switch` leaves the row out, which is
-what `skills` ("no error line") and `mcps` ("no row and no screen rather than an error") already do, with
-the flow asserting the row's absence instead of the copy. The duplicated `makeProject`/`openAfk` the two
-flows carried are one pair in `lib.mjs`, beside `setUpBot`; `readAfk`/`read` stay two bodies because they
+`AGENTS.md`'s route enumeration names `projects/{id}/afk` (`:216`), and the sheet prints no line
+explaining what a plugin can't do: a plugin without `afk_switch` shows the switch off and disabled,
+matching the silence `skills` ("no error line") and `mcps` already keep, with the flow asserting the
+control's state rather than any copy. The duplicated `makeProject`/`openAfk` the two flows carried are
+one pair in `lib.mjs`, beside `setUpBot`; `readAfk`/`read` stay two bodies because they
 differ in five things (route, setter, failure wording, `noteFailure` label, feature) and one reader taking
 all five is longer and less clear than the two; `quiet` is `duplicate`, and `why`/`offers` are the
 `reason`/`canSwitch` the plugin's own words already use; `projects`, `afk` and the neighbours build their

@@ -1,10 +1,10 @@
 /**
  * AFK: a project's switch for working its own tasks, and the tasks it would work — the frontier,
  * what's ready oldest first, what somebody has already claimed, and what an open task still blocks.
- * The switch is the host's setting for the project, so it reads back the same on every device, and a
- * project that can't be left to work says why in its place. The frontier is there where the plugin
- * advertises `afk`, the switch where it advertises `afk_switch`: a Bot on an older plugin offers
- * either or both, according to what it answers.
+ * The switch is the host's setting for the project, so it reads back the same on every device. It is
+ * always shown: a project that can't be left to work (or a Bot on a plugin too old to switch one) has
+ * it off and disabled, with the reason underneath. The frontier is there where the plugin advertises
+ * `afk`, the switch where it advertises `afk_switch`.
  */
 import { useCallback, useState, type ReactNode } from "react"
 import { toast } from "sonner"
@@ -145,7 +145,7 @@ export function AfkPopup({
     <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent>
         <PopupHeader className="pb-2">
-          <PopupTitle>AFK</PopupTitle>
+          <PopupTitle>Away From Keyboard</PopupTitle>
         </PopupHeader>
         <div className="flex flex-col gap-6 px-4 pb-4 sm:px-6">
           <AfkSwitch
@@ -170,10 +170,14 @@ export function AfkPopup({
 }
 
 /**
- * The switch, or the reason the project can't be left to work, or that the plugin never could. A
- * project already left to work keeps its switch even once its reason is back — the account it read
- * tasks with is gone, say — because turning it off is still the user's to do, and the reason is
- * shown under it rather than in place of it.
+ * The switch, and what stopped it where something did. It is always in place — a project that can't be
+ * left to work, a plugin that can't switch it and a read that failed all show it off and out of reach,
+ * with the reason under it — so the row doesn't appear and disappear between projects. A project
+ * already left to work keeps its switch live even once its reason is back (the account it read tasks
+ * with is gone, say): turning it off is still the user's to do.
+ *
+ * The label reads the switch's state ("Turned off", "Turned on"); the control's own name stays what it
+ * does, so assistive tech hears the name and its checked state rather than a name that changes.
  */
 function AfkSwitch({
   answer,
@@ -188,32 +192,34 @@ function AfkSwitch({
   saving: boolean
   onToggle: (on: boolean) => void
 }) {
-  // A plugin that can't switch AFK on offers no row at all, rather than a line explaining itself.
-  if (answer === "no") return null
-  if (answer === "unknown") return null
-  if (error) return <p className="px-1 text-sm text-destructive">{error}</p>
   const reason = afk?.reason ?? undefined
-  // A project that can't be worked has nothing to switch on; one already on can still be switched off.
-  const canSwitch = afk && (afk.on || !reason)
+  const on = afk?.on ?? false
+  // The host has to say the project can be worked, and the switch has to have been read back.
+  const canSwitch = answer === "yes" && Boolean(afk) && !saving && !error && (on || !reason)
+  const reading = answer === "yes" && !afk && !error
   return (
     <div className="flex flex-col gap-1">
       <div className="flex min-h-11 items-center justify-between gap-3 px-1">
-        <span className="text-base">Work on its own</span>
-        {!afk ? (
+        <span className="text-base">{on ? "Turned on" : "Turned off"}</span>
+        {reading ? (
           <Spinner className="size-4" />
-        ) : canSwitch ? (
+        ) : (
           <Switch
             aria-label="Work on its own"
-            checked={afk.on}
-            disabled={saving}
+            checked={on}
+            disabled={!canSwitch}
             onCheckedChange={onToggle}
           />
-        ) : null}
+        )}
       </div>
-      {reason && (
-        <p className="px-1 text-sm text-muted-foreground" role="status">
-          {reason}
-        </p>
+      {error ? (
+        <p className="px-1 text-sm text-destructive">{error}</p>
+      ) : (
+        reason && (
+          <p className="px-1 text-sm text-muted-foreground" role="status">
+            {reason}
+          </p>
+        )
       )}
     </div>
   )
