@@ -281,6 +281,23 @@ function helpers(page) {
 
 export const pass = (text) => console.log(`PASS: ${text}`)
 
+/** The mock's own key, for the calls a flow makes to it as another device would. */
+export const mockAuth = {
+  "Content-Type": "application/json",
+  Authorization: "Bearer mock-key",
+}
+
+/**
+ * Compresses a chat on the mock: Hermes rotates `session` onto `child`, as it does mid-run, and
+ * keys what comes after on the child. Answers the mock's response, so a flow can assert it took.
+ */
+export const compress = (session, child) =>
+  fetch(`${mock}/__mock/compress`, {
+    method: "POST",
+    headers: mockAuth,
+    body: JSON.stringify({ session, child }),
+  })
+
 /**
  * Creates a project on the mock and waits for the clone to land, so its screen offers the options
  * menu; answers its id. `until` is `helpers(page)`'s poll, and the name is the flow's own so a run's

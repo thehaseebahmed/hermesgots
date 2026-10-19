@@ -655,8 +655,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         session_id = request.match_info["session_id"]
         # On the loop thread, like store_path: the profile scope isn't visible inside to_thread.
         home = hermes_home()
-        # The lineage walk reads that store itself, so nothing here needs the session API.
-        live, _ = await asyncio.to_thread(sessions.live_runs, adapter, None, home)
+        live, _ = await asyncio.to_thread(sessions.live_runs, adapter, home=home)
         found = await asyncio.to_thread(delegation.children, home, session_id, set(live))
         # Never a 404 for an unknown session: the app reads a 404 as a missing plugin.
         return web.json_response({"object": "memento.agents", "session_id": session_id, "agents": found})
@@ -1172,14 +1171,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if denied is not None:
             return denied
         owned = owned_runs(request)
-        # On the loop thread: the profile scope isn't visible inside to_thread, and the lineage walk
-        # reads that profile's own store — never the session API, which drains a live turn's token
-        # writes and would stall this poll behind the turn it is asked about.
+        # On the loop thread: the profile scope isn't visible inside to_thread.
         home = hermes_home()
-        live, run_ids = await asyncio.to_thread(sessions.live_runs, adapter, owned, home)
+        known: Dict[str, str] = {}
+        live, run_ids = await asyncio.to_thread(sessions.live_runs, adapter, owned, home, known)
         try:
             waiting = await asyncio.to_thread(
-                sessions.waiting, adapter, store_path(), home, owned
+                sessions.waiting, adapter, store_path(), home, owned, known
             )
         except Exception:
             logger.debug("memento: reading waiting sessions failed", exc_info=True)
@@ -1187,7 +1185,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         try:
             # A goal paused or blocked by the judge waits on the user too, and outranks its own note:
             # a question the run asked is what the turn is doing right now.
-            waiting = {**await asyncio.to_thread(goal.waiting, hermes_home()), **waiting}
+            waiting = {**await asyncio.to_thread(goal.waiting, home), **waiting}
         except Exception:
             logger.debug("memento: reading waiting goals failed", exc_info=True)
         return web.json_response(
@@ -1208,8 +1206,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         open_db = getattr(adapter, "_ensure_session_db_async", None)
         db = await open_db() if callable(open_db) else None
         return await stream.serve(
-            web, request, stream.sse_headers(adapter, request), path, str(path), db,
-            home / "state.db", cursor, VERSION,
+            web, request, stream.sse_headers(adapter, request), path, str(path), db, home,
+            cursor, VERSION,
             request.query.get("device") or None,
         )
 
