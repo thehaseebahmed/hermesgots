@@ -118,9 +118,9 @@ class SetDelegationTest(unittest.TestCase):
             host_model.set_delegation(self.path, None)
         self.assertEqual(calls["write"], [(self.path, "delegation", None)])
 
-    def test_another_provider_drops_the_endpoint_written_for_the_old_one(self) -> None:
-        # Hermes reads a ``base_url`` as the provider being ``custom``, so leaving one behind would
-        # make the field's answer a lie about where a child runs.
+    def test_a_pick_drops_the_endpoint_a_user_wrote(self) -> None:
+        # Hermes reads a ``base_url`` ahead of a provider, so leaving one behind would make the
+        # field's answer a lie about where a child runs.
         patch, _, config = hermes(
             self.config(
                 delegation={
@@ -139,7 +139,7 @@ class SetDelegationTest(unittest.TestCase):
             {"max_iterations": 60, "provider": "deepseek", "model": "c/d"},
         )
 
-    def test_the_same_provider_keeps_its_endpoint(self) -> None:
+    def test_a_pick_on_the_same_provider_drops_it_too(self) -> None:
         patch, _, config = hermes(
             self.config(
                 delegation={
@@ -152,13 +152,23 @@ class SetDelegationTest(unittest.TestCase):
         with patch:
             host_model.set_delegation(self.path, {"provider": "relay", "model": "gpt-5-mini"})
         self.assertEqual(
-            config["delegation"],
-            {
-                "provider": "relay",
-                "model": "gpt-5-mini",
-                "base_url": "https://relay.example/v1",
-            },
+            config["delegation"], {"provider": "relay", "model": "gpt-5-mini"}
         )
+
+    def test_clearing_drops_the_endpoint_as_well(self) -> None:
+        patch, _, config = hermes(
+            self.config(
+                delegation={
+                    "provider": "relay",
+                    "model": "gpt-5",
+                    "base_url": "https://relay.example/v1",
+                    "max_iterations": 60,
+                }
+            )
+        )
+        with patch:
+            host_model.set_delegation(self.path, None)
+        self.assertEqual(config["delegation"], {"max_iterations": 60})
 
     def test_a_refused_pick_writes_nothing(self) -> None:
         patch, calls, _ = hermes(
@@ -233,7 +243,22 @@ class ReadDelegationTest(unittest.TestCase):
                 {"provider": "openrouter", "model": "a/b"},
             )
 
-    def test_the_section_comes_back_as_provider_and_model_only(self) -> None:
+    def test_a_pick_reads_back_as_provider_and_model_only(self) -> None:
+        patch, _, _ = hermes(
+            {
+                "model": {"default": "old", "provider": "openrouter"},
+                "delegation": {"provider": "relay", "model": "gpt-5", "max_iterations": 60},
+            }
+        )
+        with patch:
+            self.assertEqual(
+                host_model.read_delegation(self.path),
+                {"provider": "relay", "model": "gpt-5"},
+            )
+
+    def test_a_hand_written_endpoint_reads_as_nothing(self) -> None:
+        # Hermes runs the endpoint ahead of the provider, so the field can't name what the section
+        # does; a write from the field drops it again.
         patch, _, _ = hermes(
             {
                 "model": {"default": "old", "provider": "openrouter"},
@@ -246,10 +271,7 @@ class ReadDelegationTest(unittest.TestCase):
             }
         )
         with patch:
-            self.assertEqual(
-                host_model.read_delegation(self.path),
-                {"provider": "relay", "model": "gpt-5"},
-            )
+            self.assertIsNone(host_model.read_delegation(self.path))
 
     def test_nothing_set_is_the_bots_own_model(self) -> None:
         for config in (
