@@ -145,6 +145,10 @@ const GITHUB = !process.env.MOCK_NO_GITHUB
 // Projects left to work their own tasks: AFK's switch, which the mock keeps per project the way the
 // plugin keeps it in its store, so a page reload reads the same answer back.
 const afkProjects = new Set()
+// ...and the ones its sweep has since claimed a task for. Turning a project on wakes the plugin's
+// loop, so the claim lands after the switch's own answer and shows on the next read — which is what
+// the sheet's poll is there for, and why the mock sweeps on a read rather than on the POST.
+const afkSwept = new Set()
 // What the media route serves for chart.png: navy sky, teal ground, a sun.
 const MOCK_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAHgAAABLCAIAAAA06NSGAAAAuklEQVR42u3aQQmAABBE0anhxQYW8mIDz0Y0jhFsIII4iDz4Cd5xZzNMiwoFAWjQAg0aNAXQoAX6dsc+Xwf6deI3uEO5Yx3KHetQ7liHcsc6lDvWoEF/T/mJNWjQoEGDBg0aNGjQoEGDBu3W4dYB2j0atIXFZmgFt4L76/CpBNrvHWiBBi3QoEEL9H+gx21VIdCgQQs0aNAIQIMWaNCgKYAGLdCgQVMADVqgQYMWaNACDRq0QIMW6E92AjwFRtd/9tVBAAAAAElFTkSuQmCC",
@@ -970,8 +974,8 @@ const mockTask = (repo, number, title, extra = {}) => ({
 const projectTasks = (project) => {
   const repo = repoOf(project)
   const task = (number, title, extra = {}) => mockTask(repo, number, title, extra)
-  const afk = afkProjects.has(project.id)
-  const oldest = task(AFK_TASK, "The frontier is read from GitHub and listed")
+  const afk = afkSwept.has(project.id)
+  const oldest = task(AFK_TASK, AFK_TITLE)
   return {
     object: "memento.tasks",
     project_id: project.id,
@@ -1020,9 +1024,9 @@ function afkAnswer(project, reason) {
     project_id: project.id,
     on,
     reason,
-    // A project turned on is swept at once, but the claim lands after the switch's own answer, so
-    // the task shows on the next read — as the plugin's POST answers before its loop gets there.
-    task: on ? afkTask(project) : null,
+    // The sweep that claims it runs after the switch's own answer, so the task lands on the next
+    // read rather than in the POST's answer.
+    task: afkSwept.has(project.id) ? afkTask(project) : null,
     refusal: null,
   }
 }
@@ -3151,9 +3155,14 @@ http
           return json(res, 400, { error: { message: "on must be true or false." } })
         if (on && reason) return json(res, 409, { error: { message: reason } })
         if (on) afkProjects.add(found.id)
-        else afkProjects.delete(found.id)
+        else {
+          afkProjects.delete(found.id)
+          afkSwept.delete(found.id)
+        }
         return json(res, 200, afkAnswer(found, reason))
       }
+      // The sweep the switch woke has run by the next read, so this one holds the task it claimed.
+      if (afkProjects.has(found.id)) afkSwept.add(found.id)
       return json(res, 200, afkAnswer(found, reason))
     }
     if (PLUGIN && !profile && projectRoute?.[2] === "/usage") {

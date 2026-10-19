@@ -219,13 +219,13 @@ def slug(task: Any = None) -> str:
 
 
 def _project(projects_db: Path, project_id: str) -> Any:
-    project = _projects(projects_db).get(project_id)
+    project = projects(projects_db).get(project_id)
     if project is None:
         raise ValueError("No such project.")
     return project
 
 
-def _projects(projects_db: Path) -> Dict[str, Any]:
+def projects(projects_db: Path) -> Dict[str, Any]:
     """Every project by id, read once: a caller sweeping many projects needs one list, not one each."""
     from hermes_cli import projects_db as pdb
 

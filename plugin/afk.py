@@ -23,7 +23,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -46,8 +45,6 @@ HELD = ("repo", "number", "title", "url", "created_at")
 
 _loop: Optional[asyncio.AbstractEventLoop] = None
 _event: Optional["asyncio.Event"] = None
-# One claim at a time: the loop's sweep and a wake from a finished session can't both take a task.
-_claiming = threading.Lock()
 
 
 class Refused(Exception):
@@ -78,7 +75,8 @@ def reason(
 def state(
     hermes_home: Path, project_id: str, folders: Iterable[Any], archived: bool = False
 ) -> Dict[str, Any]:
-    """The project's switch as the app reads it: whether it's on, and why it can't be."""
+    """The project's switch on its own: whether it's on, and why it can't be. `read` is the sheet's
+    whole answer, which carries the task held and the last refusal beside these two."""
     found = read(hermes_home, project_id, folders, archived)
     return {"on": found["on"], "reason": found["reason"]}
 
@@ -129,18 +127,6 @@ def is_on(hermes_home: Path, project_id: str) -> bool:
     return bool(found and found["on"])
 
 
-def held(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
-    """The task AFK is holding for the project: one it has claimed and not yet finished with."""
-    found = _row(hermes_home, project_id)
-    return found["task"] if found else None
-
-
-def refusal(hermes_home: Path, project_id: str) -> Optional[str]:
-    """The last reason GitHub refused the sweep, until a sweep gets an answer again."""
-    found = _row(hermes_home, project_id)
-    return found["refusal"] if found else None
-
-
 def read(
     hermes_home: Path, project_id: str, folders: Iterable[Any], archived: bool = False
 ) -> Dict[str, Any]:
@@ -170,50 +156,50 @@ def sweep(
     rate limit, no connection — records its reason and stops this sweep with the switch left on, so
     the sheet says why; the next sweep is the next attempt, not an immediate one.
     """
-    with _claiming:
-        found = _row(hermes_home, project_id)
-        if found is None or not found["on"]:
-            return
-        why = reason(hermes_home, folders, archived)
-        if why == NO_GITHUB:
-            _refuse(hermes_home, project_id, why)
-            return
-        if why is not None or found["task"] is not None:
-            # Put away, with no repository to read, or already holding the task it took.
-            return
-        auth, _ = github.token(hermes_home)
-        try:
-            answers = tasks.read(hermes_home, folders)
-        except github.GitHubError as error:
-            _refuse(hermes_home, project_id, str(error))
-            return
-        if found["refusal"] is not None:
-            # GitHub answered, so whatever it refused before is stale.
-            _clear_refusal(hermes_home, project_id)
-        ready = answers.get("ready") or []
-        if not ready:
-            return
-        task = ready[0]
-        try:
-            github.claim_issue(
-                task["repo"], task["number"], github.login(auth), tasks.CLAIM_LABEL, auth
-            )
-        except github.GitHubError as error:
-            _refuse(hermes_home, project_id, str(error))
-            return
-        _hold(hermes_home, project_id, task)
+    found = _row(hermes_home, project_id)
+    if found is None or not found["on"]:
+        return
+    if found["task"] is not None:
+        # Already holding the task it took: the session that works it is what frees the next one.
+        return
+    why = reason(hermes_home, folders, archived)
+    if why is not None:
+        # Put away, with no repository to read, or no account to read it with: the sheet's own
+        # reason already says so, and it isn't GitHub refusing anything.
+        return
+    auth, _ = github.token(hermes_home)
+    try:
+        answers = tasks.read(hermes_home, folders)
+    except github.GitHubError as error:
+        _refuse(hermes_home, project_id, str(error))
+        return
+    if found["refusal"] is not None:
+        # GitHub answered, so whatever it refused before is stale.
+        _clear_refusal(hermes_home, project_id)
+    ready = answers.get("ready") or []
+    if not ready:
+        return
+    task = ready[0]
+    try:
+        github.claim_issue(
+            task["repo"], task["number"], github.login(auth), tasks.CLAIM_LABEL, auth
+        )
+    except github.GitHubError as error:
+        _refuse(hermes_home, project_id, str(error))
+        return
+    _hold(hermes_home, project_id, task)
 
 
-def enabled_projects(hermes_home: Path) -> List[Dict[str, Any]]:
-    """Every project left to work, with the task it holds: one read for a whole sweep."""
+def enabled_projects(hermes_home: Path) -> List[str]:
+    """Every project left to work: one read for a whole sweep, which reads each row as it goes."""
     conn = connect(db_path(hermes_home))
     try:
         rows = conn.execute(
-            "SELECT project_id, task FROM project_afk WHERE enabled = 1 ORDER BY project_id"
+            "SELECT project_id FROM project_afk WHERE enabled = 1 ORDER BY project_id"
         ).fetchall()
     finally:
         conn.close()
-    return [{"project_id": row[0], "task": row[1]} for row in rows]
+    return [str(row[0]) for row in rows]
 
 
 def sweep_all(hermes_home: Path) -> None:
@@ -224,21 +210,21 @@ def sweep_all(hermes_home: Path) -> None:
     if not left_on:
         return
     # One read of the project list, not one per project: a sweep only needs their folders.
-    projects = sessions._projects(hermes_home / "projects.db")
-    for row in left_on:
-        project = projects.get(row["project_id"])
-        if project is None or row["task"]:
-            # A row whose project is gone, or one already holding the task it took.
+    projects = sessions.projects(hermes_home / "projects.db")
+    for project_id in left_on:
+        project = projects.get(project_id)
+        if project is None:
+            # A row whose project is gone.
             continue
         try:
             sweep(
                 hermes_home,
-                row["project_id"],
+                project_id,
                 project.folders,
                 bool(getattr(project, "archived", False)),
             )
         except Exception:
-            logger.debug("memento: couldn't sweep AFK's project %s", row["project_id"], exc_info=True)
+            logger.warning("memento: couldn't sweep AFK's project %s", project_id, exc_info=True)
 
 
 async def run(adapter: Any) -> None:
@@ -251,14 +237,18 @@ async def run(adapter: Any) -> None:
 
     async def sweep_homes() -> None:
         # Every home this process serves, not just its own: a /p/<profile> bot keeps its own store.
+        # One home's trouble is that home's: a store it can't read must not stop the rest.
         for one in link.served_homes(adapter):
-            await asyncio.to_thread(sweep_all, one)
+            try:
+                await asyncio.to_thread(sweep_all, one)
+            except Exception:
+                logger.warning("memento: AFK couldn't sweep the home at %s", one, exc_info=True)
 
     while True:
         try:
             await sweep_homes()
         except Exception:
-            logger.debug("memento: AFK's sweep failed", exc_info=True)
+            logger.warning("memento: AFK's sweep failed", exc_info=True)
         try:
             await asyncio.wait_for(_event.wait(), SWEEP_SECONDS)
         except asyncio.TimeoutError:
@@ -299,23 +289,20 @@ def _hold(hermes_home: Path, project_id: str, task: Dict[str, Any]) -> None:
     _update(
         hermes_home,
         project_id,
-        "task = ?, claimed_at = ?, refusal = NULL, refused_at = NULL",
-        (json.dumps(row), int(time.time())),
+        task=json.dumps(row),
+        claimed_at=int(time.time()),
+        refusal=None,
+        refused_at=None,
     )
 
 
 def _refuse(hermes_home: Path, project_id: str, why: str) -> None:
     """Records why GitHub refused the sweep, which the app's sheet shows under the switch."""
-    _update(
-        hermes_home,
-        project_id,
-        "refusal = ?, refused_at = ?",
-        (why, int(time.time())),
-    )
+    _update(hermes_home, project_id, refusal=why, refused_at=int(time.time()))
 
 
 def _clear_refusal(hermes_home: Path, project_id: str) -> None:
-    _update(hermes_home, project_id, "refusal = NULL, refused_at = NULL", ())
+    _update(hermes_home, project_id, refusal=None, refused_at=None)
 
 
 def _row(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
@@ -347,14 +334,18 @@ def _task(value: Any) -> Optional[Dict[str, Any]]:
     return found if isinstance(found, dict) else None
 
 
-def _update(hermes_home: Path, project_id: str, assignments: str, values: tuple) -> None:
+def _update(hermes_home: Path, project_id: str, **fields: Any) -> None:
     """Writes the named fields of the project's AFK row; a project with no row stays without one."""
+    assignments = ", ".join(f"{name} = ?" for name in fields)
     conn = connect(db_path(hermes_home))
     try:
-        conn.execute(
+        cursor = conn.execute(
             f"UPDATE project_afk SET {assignments} WHERE project_id = ?",
-            (*values, project_id),
+            (*fields.values(), project_id),
         )
+        if cursor.rowcount == 0:
+            # The project's row went away under the sweep (removed, or forgotten with the project).
+            logger.warning("memento: AFK had no row for project %s to record", project_id)
     finally:
         conn.close()
 

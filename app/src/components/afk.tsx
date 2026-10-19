@@ -66,9 +66,6 @@ export function AfkPopup({
   const read = useCallback(
     (signal: AbortSignal) => {
       if (unsupported.cooling(key)) return
-      // A fresh read drops the last failure at once; the list it replaces stays until the answer
-      // lands, so a sheet opened again doesn't flash a spinner over tasks already in hand.
-      setError(undefined)
       // A read that never answers is treated as lost rather than left hanging on the host.
       void getProjectTasks(
         config,
@@ -78,6 +75,8 @@ export function AfkPopup({
         .then((next) => {
           unsupported.clear(key)
           if (signal.aborted) return
+          // The answer replaces the last failure too: what's on screen is the list it brought.
+          setError(undefined)
           setTasks(next)
         })
         .catch((failure: unknown) => {
@@ -122,24 +121,29 @@ export function AfkPopup({
     [config, key, projectId],
   )
   // The switch's own read, only where the plugin has it: a Host that can't answer is never asked.
-  // It keeps reading while the sheet is open, because turning the project on wakes a sweep on the
-  // host: the task it claims, or why GitHub refused it, lands after the switch's own answer.
-  usePoll(readAfk, AFK_MS, [key, projectId], {
+  // While the project is off nothing here can change but the user's own write, so there is no timer;
+  // once it's on the sheet keeps reading at AFK_MS, because turning it on wakes a sweep on the host
+  // and the task it claims, or why GitHub refused it, lands after the switch's own answer.
+  usePoll(readAfk, afk?.on ? AFK_MS : false, [key, projectId], {
     active: open && switchable === "yes",
     onShow: false,
   })
 
   // Taking a task moves it out of the frontier, so the list is read again when AFK's answer names
-  // the one it holds — and when it lets one go, which puts it back.
+  // the one it holds — and when it lets one go, which puts it back. Not when the frontier already
+  // has it claimed: that read is the same list, only fresher.
   const held = afk?.task ? `${afk.task.repo}#${afk.task.number}` : ""
+  const listed =
+    Boolean(held) && Boolean(tasks?.claimed.some((row) => `${row.repo}#${row.number}` === held))
   const seen = useRef(held)
   useEffect(() => {
     if (seen.current === held) return
     seen.current = held
+    if (listed) return
     const controller = new AbortController()
     read(controller.signal)
     return () => controller.abort()
-  }, [held, read])
+  }, [held, listed, read])
 
   const turn = async (on: boolean) => {
     setSaving(true)
@@ -169,12 +173,9 @@ export function AfkPopup({
             saving={saving}
             onToggle={(on) => void turn(on)}
           />
-          <Working
-            on={Boolean(afk?.on)}
-            task={afk?.task}
-            refusal={afk?.refusal}
-            manyRepos={manyRepos}
-          />
+          {/* Only a project left to work has anything to say here: a task held under an off switch
+              reads as still working. */}
+          {afk?.on && <Working task={afk.task} refusal={afk.refusal} manyRepos={manyRepos} />}
           <Tasks
             tasks={tasks}
             error={error}
@@ -252,17 +253,15 @@ function AfkSwitch({
  * isn't left to work says nothing: the task it holds is released with the claim (#270), not here.
  */
 function Working({
-  on,
   task,
   refusal,
   manyRepos,
 }: {
-  on: boolean
   task: ProjectIssue | null | undefined
   refusal: string | null | undefined
   manyRepos: boolean
 }) {
-  if (!on || (!task && !refusal)) return null
+  if (!task && !refusal) return null
   return (
     <div className="flex flex-col gap-3">
       {refusal && (

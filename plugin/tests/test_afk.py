@@ -23,10 +23,8 @@ from plugin.afk import (
     NO_GITHUB,
     NO_REPOSITORY,
     Refused,
-    held,
     is_on,
     read,
-    refusal,
     set_on,
     state,
     sweep,
@@ -272,7 +270,6 @@ class ClaimTests(unittest.TestCase):
         self.label_exists = True
         self.write_error: Exception | None = None
         self.read_error: Exception | None = None
-        self.paths: List[str] = []
         self.writes: List[tuple] = []
         self._patches = [
             patch.object(github, "token", return_value=("token", "env")),
@@ -299,7 +296,6 @@ class ClaimTests(unittest.TestCase):
         return read(self.home, "p1", self.folders())
 
     def answer_get(self, path: str, auth: Any) -> Any:
-        self.paths.append(path)
         if path == "/user":
             return {"login": "mock-user"}
         if path.startswith("/repos/mock-user/memento/labels/"):
@@ -329,7 +325,7 @@ class ClaimTests(unittest.TestCase):
             issue_row(265, created="2026-10-01T00:00:00Z"),
         ]
         self.sweep()
-        self.assertEqual(held(self.home, "p1")["number"], 265, "the oldest is the one AFK takes")
+        self.assertEqual(self.shown()["task"]["number"], 265, "the oldest is the one AFK takes")
         self.assertEqual(
             self.writes,
             [
@@ -363,7 +359,7 @@ class ClaimTests(unittest.TestCase):
             issue_row(266, created="2026-10-02T00:00:00Z"),
         ]
         self.sweep()
-        self.assertEqual(held(self.home, "p1")["number"], 266, "the next ready one is taken")
+        self.assertEqual(self.shown()["task"]["number"], 266, "the next ready one is taken")
 
     def test_one_task_at_a_time_even_when_several_are_ready(self) -> None:
         self.on()
@@ -375,13 +371,13 @@ class ClaimTests(unittest.TestCase):
         self.sweep()
         asked = len(self.writes)
         self.sweep()
-        self.assertEqual(held(self.home, "p1")["number"], 265, "the task it holds is still its own")
+        self.assertEqual(self.shown()["task"]["number"], 265, "the task it holds is still its own")
         self.assertEqual(len(self.writes), asked, "the second sweep claims nothing while one is held")
 
     def test_nothing_is_claimed_before_the_switch_is_on(self) -> None:
         self.issues = [issue_row(265)]
         self.sweep()
-        self.assertIsNone(held(self.home, "p1"), "a project that isn't left to work is never swept")
+        self.assertIsNone(self.shown()["task"], "a project that isn't left to work is never swept")
         self.assertEqual(self.writes, [])
 
     def test_a_refusal_stops_the_sweep_with_the_switch_left_on_and_its_reason_kept(self) -> None:
@@ -390,7 +386,7 @@ class ClaimTests(unittest.TestCase):
         self.write_error = github.GitHubError("Resource not accessible by personal access token", 403)
         self.sweep()
         shown = self.shown()
-        self.assertIsNone(held(self.home, "p1"), "a task GitHub refused is not held")
+        self.assertIsNone(self.shown()["task"], "a task GitHub refused is not held")
         self.assertEqual(shown["refusal"], "Resource not accessible by personal access token")
         self.assertTrue(shown["on"], "a GitHub refusal doesn't turn the project off")
         self.assertTrue(is_on(self.home, "p1"), "the switch stays on")
@@ -404,6 +400,16 @@ class ClaimTests(unittest.TestCase):
         self.assertTrue(is_on(self.home, "p1"))
         self.assertEqual(self.writes, [])
 
+    def test_a_missing_account_is_the_switchs_reason_and_not_a_refusal(self) -> None:
+        self.on()
+        self.issues = [issue_row(265)]
+        with patch.object(github, "token", return_value=(None, "none")):
+            self.sweep()
+            shown = self.shown()
+        self.assertEqual(shown["reason"], NO_GITHUB)
+        self.assertIsNone(shown["refusal"], "a fact the switch already says isn't a refusal as well")
+        self.assertEqual(self.writes, [])
+
     def test_a_successful_sweep_clears_the_last_refusal(self) -> None:
         self.on()
         self.issues = [issue_row(265)]
@@ -413,7 +419,7 @@ class ClaimTests(unittest.TestCase):
         self.write_error = None
         self.sweep()
         self.assertIsNone(self.shown()["refusal"], "GitHub answered, so the reason is stale")
-        self.assertEqual(held(self.home, "p1")["number"], 265)
+        self.assertEqual(self.shown()["task"]["number"], 265)
 
     def test_an_empty_frontier_holds_nothing_and_clears_an_old_refusal(self) -> None:
         self.on()
@@ -423,7 +429,7 @@ class ClaimTests(unittest.TestCase):
         self.read_error = None
         self.issues = []
         self.sweep()
-        self.assertIsNone(held(self.home, "p1"))
+        self.assertIsNone(self.shown()["task"])
         self.assertIsNone(self.shown()["refusal"])
         self.assertEqual(self.writes, [])
 

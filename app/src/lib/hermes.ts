@@ -2511,11 +2511,7 @@ export async function getLibraryFile(
 }
 
 /** One of a project's tasks: an issue the user has marked ready for an agent to work. */
-export interface ProjectTask {
-  repo: string
-  number: number
-  title: string
-  url: string | null
+export interface ProjectTask extends ProjectIssue {
   /** Who has it, when a person took it. */
   assignees: string[]
   /** What's still open ahead of it, when it can't be started yet. */
@@ -2553,15 +2549,14 @@ function parseIssue(value: unknown): ProjectIssue | null {
 }
 
 function parseTask(value: unknown): ProjectTask | null {
+  // The task's own fields are the issue's: a field added to one is read for both.
+  const issue = parseIssue(value)
+  if (!issue) return null
   const found = (value ?? {}) as Record<string, unknown>
-  if (typeof found.number !== "number") return null
   const assignees = found.assignees
   const blockers = found.blockers
   return {
-    repo: str(found.repo),
-    number: found.number,
-    title: str(found.title),
-    url: str(found.url) || null,
+    ...issue,
     assignees: Array.isArray(assignees)
       ? assignees.filter((login): login is string => typeof login === "string")
       : [],
@@ -2607,7 +2602,7 @@ export async function getProjectTasks(
 /**
  * A project's AFK switch: whether it is left to work its own tasks, and why it can't be. The
  * setting is the host's, so it is the same on every device the project is opened from. Needs
- * plugin 0.50.
+ * plugin 0.50, and 0.51 for the task it holds and the last refusal.
  */
 export interface ProjectAfk {
   on: boolean

@@ -168,12 +168,18 @@ def is_missing(error: "GitHubError") -> bool:
     return "Not Found" in str(error)
 
 
+def _user(auth: Optional[str]) -> Dict[str, Any]:
+    """The account a token belongs to, as GitHub answers for it."""
+    found = _get("/user", auth)
+    return found if isinstance(found, dict) else {}
+
+
 def status(hermes_home: Path) -> Dict[str, Any]:
     auth, source = token(hermes_home)
     if not auth:
         return {"connected": False, "source": source, "login": None}
     try:
-        user = _get("/user", auth)
+        user = _user(auth)
     except GitHubError as error:
         return {"connected": False, "source": source, "login": None, "error": str(error)}
     return {"connected": True, "source": source, "login": user.get("login")}
@@ -201,8 +207,7 @@ def repos(hermes_home: Path) -> List[Dict[str, Any]]:
 
 def login(auth: Optional[str]) -> str:
     """The login of the account a token belongs to: who a claim is assigned to."""
-    user = _get("/user", auth)
-    found = user.get("login") if isinstance(user, dict) else None
+    found = _user(auth).get("login")
     if not isinstance(found, str) or not found:
         raise GitHubError("GitHub didn't say whose account the token is.")
     return found
