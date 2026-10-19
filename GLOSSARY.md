@@ -119,6 +119,10 @@ _Avoid_: model choice, selected model, current model
 The host's record of the models a chat's calls ran on, one row per change. A thread's divider is drawn from these, wherever they name a turn; where they don't — the newest turn, or one still being written — the model this device sent it with stands until the host has recorded the call.
 _Avoid_: model switch, model update, fallback
 
+**Subagent model**:
+The model a bot's delegated tasks run on, set in its settings and held on its host as Hermes's own delegation model. Nothing set means a delegated task inherits the bot's own model.
+_Avoid_: second opinion, delegation model, child model
+
 **AFK**:
 A project being worked without its user present. On, Gots claims its ready tasks and works them one at a time until the switch is turned off.
 _Avoid_: autopilot, unattended mode, auto mode, yolo

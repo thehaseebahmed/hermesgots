@@ -976,7 +976,7 @@ export async function getFallbackModels(
     headers: headers(config),
     signal,
   })
-  return fallbackList((await response.json())?.fallbacks)
+  return picks((await response.json())?.fallbacks)
 }
 
 /** Makes `fallbacks` the bot's chain on its host, in order; an empty list clears it. Answers with
@@ -992,18 +992,52 @@ export async function setFallbackModels(
     body: JSON.stringify({ fallbacks }),
     signal,
   })
-  return fallbackList((await response.json())?.fallbacks)
+  return picks((await response.json())?.fallbacks)
 }
 
-/** Whatever part of a `fallbacks` answer is a usable pick, in order. */
-function fallbackList(value: unknown): Fallback[] {
+function picks(value: unknown): ModelChoice[] {
   if (!Array.isArray(value)) return []
-  const entries: Fallback[] = []
+  const named: ModelChoice[] = []
   for (const entry of value) {
     const { provider, model } = (entry ?? {}) as { provider?: unknown; model?: unknown }
-    if (typeof provider === "string" && typeof model === "string") entries.push({ provider, model })
+    if (typeof provider === "string" && typeof model === "string" && provider && model)
+      named.push({ provider: provider.trim(), model: model.trim() })
   }
-  return entries
+  return named
+}
+
+const pickOf = (value: unknown) => picks([value])[0] ?? null
+
+/**
+ * The model a bot's delegated tasks run on, from its host's `delegation` section (Hermes's own
+ * `delegation.model`); `null` when a child inherits the bot's own model. Newer plugin only; a host
+ * without the route answers 404.
+ */
+export async function getDelegationModel(
+  config: HermesConfig,
+  signal?: AbortSignal,
+): Promise<ModelChoice | null> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/delegation`, {
+    headers: headers(config),
+    signal,
+  })
+  return pickOf((await response.json())?.delegation)
+}
+
+/** Makes `pick` the model the bot's delegated tasks run on; `null` clears it, so a child inherits
+ * the bot's own. Answers with what the host holds, and throws with its reason when it refuses. */
+export async function setDelegationModel(
+  config: HermesConfig,
+  pick: ModelChoice | null,
+  signal?: AbortSignal,
+): Promise<ModelChoice | null> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/delegation`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ delegation: pick }),
+    signal,
+  })
+  return pickOf((await response.json())?.delegation)
 }
 
 export async function checkHealth(config: HermesConfig) {

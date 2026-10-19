@@ -7,7 +7,11 @@ import { toast } from "sonner"
 import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BOTS } from "@/components/bots"
-import { DefaultModelSetting, FallbackModelsSetting } from "@/components/chat/model-picker"
+import {
+  DefaultModelSetting,
+  DelegationModelSetting,
+  FallbackModelsSetting,
+} from "@/components/chat/model-picker"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -505,6 +509,7 @@ export function BotEditor({
               />
             </Field>
           )}
+          <DelegationModelSetting profile={profile} />
           <FallbackModelsSetting profile={profile} />
         </FieldGroup>
       </TabsContent>

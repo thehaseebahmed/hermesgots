@@ -136,6 +136,11 @@ const FLOWS = {
     about:
       "A bot's fallback models are recorded on its host: two picks in order, one removed, no third",
   },
+  "delegation-model": {
+    script: "e2e/delegation-model.mjs",
+    about:
+      "A bot's subagent model is recorded as its host's delegation model, cleared back to the bot's own",
+  },
   mcps: {
     script: "e2e/mcps.mjs",
     about:

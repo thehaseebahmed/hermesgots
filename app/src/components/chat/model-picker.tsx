@@ -28,11 +28,12 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/in
 import { Spinner } from "@/components/ui/spinner"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { rememberModel, type ModelChoice, type Profile } from "@/lib/db"
+import { useDelegationModel } from "@/lib/delegation"
 import { MAX_FALLBACKS, withFallback } from "@/lib/fallback-list"
 import { useFallbackModels } from "@/lib/fallbacks"
 import { formatTokens } from "@/lib/format"
-import type { Fallback, ModelProvider } from "@/lib/hermes"
-import { fullModel, hostChoice, shortModel, useModelInfo } from "@/lib/model-info"
+import type { ModelProvider } from "@/lib/hermes"
+import { botModel, fullModel, hostChoice, shortModel, useModelInfo } from "@/lib/model-info"
 import { MAX_COST_TIER, modelFacts, useModelCatalog, type Catalog } from "@/lib/models"
 import { overallScoreOf, useOverallRankings, type RankingsPayload } from "@/lib/rankings"
 import { cn } from "@/lib/utils"
@@ -585,6 +586,12 @@ export function ModelMenu({
 // How long a just-saved default stays on show while the host's model is read again.
 const SETTLE_MS = 4000
 
+function reportWrite(write: Promise<unknown>) {
+  void write.catch((error: unknown) => {
+    toast.error(error instanceof Error ? error.message : String(error))
+  })
+}
+
 /** A bot's default model, in its settings: what its chats run on unless they pick another. */
 export function DefaultModelSetting({
   profile,
@@ -599,11 +606,10 @@ export function DefaultModelSetting({
   const [saving, setSaving] = useState<ModelChoice>()
   const info = useModelInfo(profile)
   const providers = info?.providers ?? []
-  const host = hostChoice(info)
   const hostModel = profile.hostModel
   // Until the host answers, the model it last had, greyed out: it's remembered, not a live answer.
   const loading = info === undefined && !saving
-  const current = saving ?? profile.modelChoice ?? host ?? hostModel
+  const current = saving ?? botModel(profile, info)
   const stale = Boolean(hostModel) && current === hostModel
   return (
     <>
@@ -643,6 +649,57 @@ export function DefaultModelSetting({
 }
 
 /**
+ * A bot's subagent model, in its settings: the model every task it delegates runs on, which is its
+ * host's own delegation model.
+ */
+export function DelegationModelSetting({ profile }: { profile: Profile }) {
+  const [open, setOpen] = useState(false)
+  const field = useRef<HTMLButtonElement>(null)
+  const { pick, supported, saving, save } = useDelegationModel(profile)
+  const info = useModelInfo(profile)
+  const providers = info?.providers ?? []
+  if (!supported) return null
+  // The bot's own model, which is what a task that inherits runs on.
+  const own = botModel(profile, info)
+
+  return (
+    <Field aria-labelledby="delegation-model-label" aria-busy={saving || undefined}>
+      <div className="flex items-center gap-2">
+        <FieldLabel id="delegation-model-label">Subagent model</FieldLabel>
+        {saving && <Spinner className="size-3.5" />}
+      </div>
+      <Button
+        ref={field}
+        id="delegation-model"
+        type="button"
+        variant="outline"
+        aria-label={`Subagent model: ${pick ? fullModel(pick) : "Default model"}`}
+        className="h-11 w-full justify-between gap-2 font-normal"
+        disabled={!providers.length || saving}
+        onClick={() => setOpen(true)}
+      >
+        <span className="truncate">{pick ? fullModel(pick) : "Default model"}</span>
+        <ChevronDownIcon className="shrink-0 text-muted-foreground" />
+      </Button>
+      <Popup open={open} onOpenChange={setOpen} anchor={field}>
+        <PopupContent initialFocus={false} fixedHeight={PICKER_HEIGHT}>
+          <ModelPicker
+            providers={providers}
+            fallback={{ label: "Default model", model: own?.model }}
+            recent={profile.recentModels}
+            choice={pick}
+            onChoose={(next) => {
+              reportWrite(save(next))
+              setOpen(false)
+            }}
+          />
+        </PopupContent>
+      </Popup>
+    </Field>
+  )
+}
+
+/**
  * A bot's fallback models, in its settings: the picks its host records after the default, in the
  * order it holds them. A host whose plugin can't record them shows no field at all, and a write on
  * its way greys the rows out until the host's answer lands.
@@ -659,11 +716,6 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
   // A row's picker needs the host's model list, and a write on its way blocks every pick regardless.
   const cannotEdit = !providers.length || saving
 
-  const write = (next: Fallback[]) => {
-    void save(next).catch((error: unknown) => {
-      toast.error(error instanceof Error ? error.message : String(error))
-    })
-  }
   const chosen = open === undefined ? undefined : list[open]
 
   return (
@@ -696,7 +748,7 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
               className="size-11 shrink-0"
               aria-label={`Remove fallback ${index + 1}`}
               disabled={saving}
-              onClick={() => write(withFallback(list, index, undefined))}
+              onClick={() => reportWrite(save(withFallback(list, index, undefined)))}
             >
               <XIcon />
             </Button>
@@ -733,7 +785,7 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
               // Picking None on a row drops that fallback; on the add row it is nothing to add, so
               // nothing is written either.
               if (open !== undefined && (next !== undefined || open < list.length)) {
-                write(withFallback(list, open, next))
+                reportWrite(save(withFallback(list, open, next)))
               }
               if (next) void rememberModel(profile.id, next)
               setOpen(undefined)

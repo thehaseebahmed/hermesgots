@@ -2127,6 +2127,7 @@ const PROFILE_PATH = /(?:^|\/)p\/([^/]+)(?=\/)/
 const profileOf = (req) => PROFILE_PATH.exec(req.url ?? "")?.[1] ?? ""
 // The fallback models the plugin's `fallbacks` route recorded, per profile.
 const fallbacksOf = new Map()
+const delegationsOf = new Map()
 // The provider figure every later usage read serves, set by `usage?percent=N` and cleared by
 // `percent=`: a dev-only override, so an e2e flow can move an account from approaching to out
 // without restarting the mock (which the env alone can't do mid-run).
@@ -2134,6 +2135,15 @@ let usagePercent = null
 // The providers the picker lists (see /api/model/options below): a model from one of these can
 // become the host's model or one of its fallbacks.
 const PICKER_PROVIDERS = ["openrouter", "anthropic", "ollama-cloud"]
+
+function checkedPick(entry, label) {
+  const provider = entry?.provider?.trim?.() ?? ""
+  const model = entry?.model?.trim?.() ?? ""
+  if (!provider) return { error: `${label} needs a provider` }
+  if (!model) return { error: `${label} needs a model` }
+  if (!PICKER_PROVIDERS.includes(provider)) return { error: `Unknown provider '${provider}'.` }
+  return { saved: { provider, model } }
+}
 // Whether a refresh has probed the custom endpoint in /api/model/options.
 let customProbed = false
 const eventLogs = new Map()
@@ -2596,6 +2606,7 @@ http
           "push",
           "host_model",
           "fallbacks",
+          "delegation_model",
           "skills",
           "queue",
           "dictation",
@@ -3030,29 +3041,42 @@ http
           return json(res, 400, { error: { message: "A bot takes at most 2 fallback models" } })
         }
         // Each pick is checked the way the host's `model` route checks the main one.
+        const saved = []
         for (const [at, entry] of entries.entries()) {
-          const provider = entry?.provider?.trim?.() ?? ""
-          const model = entry?.model?.trim?.() ?? ""
-          if (!provider || !model) {
-            return json(res, 400, {
-              error: {
-                message: provider
-                  ? `Fallback ${at + 1} needs a model`
-                  : `Fallback ${at + 1} needs a provider`,
-              },
-            })
-          }
-          if (!PICKER_PROVIDERS.includes(provider)) {
-            return json(res, 400, { error: { message: `Unknown provider '${provider}'.` } })
-          }
+          const { saved: pick, error } = checkedPick(entry, `Fallback ${at + 1}`)
+          if (error) return json(res, 400, { error: { message: error } })
+          saved.push(pick)
         }
-        const saved = entries.map((entry) => ({
-          provider: entry.provider.trim(),
-          model: entry.model.trim(),
-        }))
         if (saved.length) fallbacksOf.set(key, saved)
         else fallbacksOf.delete(key)
         return json(res, 200, { object: "memento.fallbacks", fallbacks: saved })
+      }
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/delegation") {
+      const key = pluginProfile ?? ""
+      if (req.method === "GET") {
+        return json(res, 200, {
+          object: "memento.delegation",
+          delegation: delegationsOf.get(key) ?? null,
+        })
+      }
+      if (req.method === "POST") {
+        const body = await readBody(req)
+        // A body that says nothing about the delegation model is a client bug, not a request to
+        // put every task back on the bot's own: the route refuses it, as the plugin does.
+        if (!("delegation" in body)) {
+          return json(res, 400, {
+            error: { message: "Body needs a delegation key: an object, or null to clear it" },
+          })
+        }
+        if (body.delegation != null) {
+          const { saved, error } = checkedPick(body.delegation, "Delegation")
+          if (error) return json(res, 400, { error: { message: error } })
+          delegationsOf.set(key, saved)
+          return json(res, 200, { object: "memento.delegation", delegation: saved })
+        }
+        delegationsOf.delete(key)
+        return json(res, 200, { object: "memento.delegation", delegation: null })
       }
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/github") {
