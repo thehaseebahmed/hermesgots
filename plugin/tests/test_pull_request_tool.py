@@ -187,7 +187,7 @@ TASK = {
 
 
 class AfkTaskTests(_Base):
-    def _ship(self, task=None, repo_root=None):
+    def _ship(self, task=None, repo_root=None, body=None):
         sent = []
 
         def request(path, auth, method="GET", data=None):
@@ -211,7 +211,7 @@ class AfkTaskTests(_Base):
             patch("plugin.push.notify") as notify,
         ):
             lock.return_value.acquire.return_value = True
-            ship.ship(Path(self.tmp), "s1", record, "msg", "T", None, True, False)
+            ship.ship(Path(self.tmp), "s1", record, "msg", "T", body, True, False)
         created = [call for call in sent if call[0].endswith("/pulls") and call[1] == "POST"]
         return (created[0][2] if created else None), notify
 
@@ -219,6 +219,11 @@ class AfkTaskTests(_Base):
         data, _ = self._ship(task=TASK)
         self.assertIs(data["draft"], True, "the pull request stays a draft")
         self.assertIn("Closes #265", data["body"])
+
+    def test_the_body_the_run_wrote_carries_the_closing_line(self):
+        data, _ = self._ship(task=TASK, body="## Summary\n\nWork.\n\n## How to test\n\nRun it.")
+        self.assertIn("Work.", data["body"])
+        self.assertIn("Closes #265", data["body"].splitlines())
 
     def test_another_repository_does_not_close_the_task(self):
         data, _ = self._ship(task=TASK, repo_root="o/other")
@@ -272,6 +277,21 @@ class AfkUpdateTests(_Base):
         ):
             ship.update(Path(self.tmp), record, None, "Body.\n\nCloses #265")
         self.assertEqual(upd.call_args.args[3].count("Closes #265"), 1)
+
+
+    def test_a_body_closing_a_longer_number_still_closes_this_task(self):
+        pr = {"number": 7, "state": "open", "title": "old", "url": "u"}
+        record = _record(self.tmp)
+        record["task"] = {**TASK, "number": 26}
+        with (
+            patch("plugin.github.token", return_value=("tok", "u")),
+            patch("plugin.github.origin_repo", return_value="o/r"),
+            patch("plugin.github.pull_request", return_value=pr),
+            patch("plugin.github.update_pull_request", return_value=pr) as upd,
+            patch("plugin.github.forget_pull_request"),
+        ):
+            ship.update(Path(self.tmp), record, None, "Body.\n\nCloses #265")
+        self.assertIn("Closes #26", upd.call_args.args[3].splitlines())
 
 
 class UpdateTests(_Base):

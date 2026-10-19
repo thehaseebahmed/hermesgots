@@ -208,14 +208,14 @@ def _body(
     if not body:
         log = _git(tree, "log", "--reverse", "--format=- %s", f"origin/{base}..HEAD") if base else None
         body = log.stdout.strip() if log is not None and log.returncode == 0 else ""
-    body = _referenced(body, reference)
+    body = _with_reference(body, reference)
     if PR_FOOTER in body:
         return body
     return f"{body}\n\n{PR_FOOTER}" if body else PR_FOOTER
 
 
-def _referenced(body: str, reference: Optional[str]) -> str:
-    if not reference or reference in body:
+def _with_reference(body: str, reference: Optional[str]) -> str:
+    if not reference or any(line.strip() == reference for line in body.splitlines()):
         return body
     if PR_FOOTER in body:
         return body.replace(PR_FOOTER, f"{reference}\n\n{PR_FOOTER}", 1)
@@ -367,7 +367,7 @@ def update(
                 name,
                 pr["number"],
                 title,
-                _referenced(body, reference) if body else body,
+                _with_reference(body, reference) if body else body,
                 auth,
             )
             github.forget_pull_request(repo["repo_root"], repo["branch"])
