@@ -11,6 +11,8 @@ const mock = process.env.MOCK_URL ?? "http://localhost:18642"
 const offMock = process.env.OFF_MOCK_URL
 const shots = process.env.SHOTS_DIR
 const SENTENCE = "Let's ship the dictation feature today."
+// Long enough for the stop a dead recorder never sends (STOP_MS) plus the state to render.
+const FAILED_MS = 2500
 const fakeMic = ["--no-sandbox", "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"]
 const browser = await chromium.launch({ headless: true, args: fakeMic })
 
@@ -189,16 +191,16 @@ try {
     const before = (await clips()).length
     await mic.click()
     await page.getByRole("button", { name: "Stop" }).waitFor()
-    await page.getByRole("button", { name: "Retry" }).waitFor({ timeout: 2500 })
+    await page.getByRole("button", { name: "Retry" }).waitFor({ timeout: FAILED_MS })
     assert.equal(await page.getByText("Transcribing…").count(), 0, "no transcribing that never ends")
     await page.getByText("The recording stopped.").waitFor()
     await shot(page, "phone-light-9-recorder-failed")
 
     await retried(page)
-    assert.equal((await clips()).length, before + 1, "one piece reached the host")
+    assert.equal((await clips()).length, before + 1, "one phrase reached the host")
 
     await mic.click()
-    await page.getByRole("button", { name: "Retry" }).waitFor({ timeout: 2500 })
+    await page.getByRole("button", { name: "Retry" }).waitFor({ timeout: FAILED_MS })
     await page.getByRole("button", { name: "Discard" }).click()
     await mic.waitFor()
     assert.equal((await clips()).length, before + 1, "Discard sent nothing")
@@ -219,7 +221,8 @@ try {
     await page.getByRole("button", { name: "Stop" }).waitFor()
     await page.waitForTimeout(1500)
     await page.evaluate(() => window.__mic.getAudioTracks()[0].dispatchEvent(new Event("ended")))
-    await page.getByRole("button", { name: "Retry" }).waitFor({ timeout: 2500 })
+    await page.getByRole("button", { name: "Retry" }).waitFor({ timeout: FAILED_MS })
+    assert.equal(await page.getByText("Transcribing…").count(), 0, "no transcribing that never ends")
     await page.getByText("The microphone is in use by another app.").waitFor()
     await shot(page, "phone-light-10-track-ended")
     await retried(page)
