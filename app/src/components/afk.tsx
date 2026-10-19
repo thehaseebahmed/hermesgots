@@ -7,9 +7,27 @@
  * `afk`, the switch where it advertises `afk_switch`.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { ChevronDownIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { connectionKey } from "@/lib/connection"
@@ -20,20 +38,26 @@ import {
   getProjectAfk,
   getProjectTasks,
   setProjectAfk,
+  setProjectAfkSkills,
   type HermesConfig,
   type ProjectAfk,
   type ProjectIssue,
   type ProjectTasks,
   type ProjectTask,
+  type Skill,
 } from "@/lib/hermes"
 import { usePoll } from "@/lib/poll"
 import { noteFailure } from "@/lib/report"
+import { useSkills } from "@/lib/skills"
 
 /** The feature the plugin advertises when it can read a project's tasks. */
 export const AFK_FEATURE = "afk"
 
 /** And the one it advertises when it can turn the switch on and off. */
 export const AFK_SWITCH_FEATURE = "afk_switch"
+
+/** And the one it advertises when it can keep the skills a project's work follows. */
+export const AFK_SKILLS_FEATURE = "afk_skills"
 
 /** A Bot whose plugin answers without the route is left alone for a while, like every other read. */
 const unsupported = cooldown()
@@ -62,6 +86,10 @@ export function AfkPopup({
   const [saving, setSaving] = useState(false)
   const key = connectionKey(config)
   const switchable = usePluginFeature(config, AFK_SWITCH_FEATURE)
+  const withSkills = usePluginFeature(config, AFK_SKILLS_FEATURE)
+  // The pickers' list is the bot's own skills, read the way the composer's `/` menu reads them: only
+  // what this profile can run now. Asked only where the host can hold a choice at all.
+  const skills = useSkills(config, open && withSkills === "yes")
 
   const read = useCallback(
     (signal: AbortSignal) => {
@@ -126,7 +154,9 @@ export function AfkPopup({
   // once it's on the sheet keeps reading at AFK_MS, because turning it on wakes a sweep on the host
   // and the task it claims, or why GitHub refused it, lands after the switch's own answer.
   usePoll(readAfk, afk?.on ? AFK_MS : false, [key, projectId], {
-    active: open && switchable === "yes",
+    // Read where either feature wants the row: a host that can hold a skill choice answers it here,
+    // whether or not it can also switch a project on.
+    active: open && (switchable === "yes" || withSkills === "yes"),
     onShow: false,
   })
 
@@ -146,17 +176,20 @@ export function AfkPopup({
     return () => controller.abort()
   }, [held, listed, read])
 
-  const turn = async (on: boolean) => {
+  // Every write shows the host's answer: a write it refused never reads back as done.
+  const save = async (write: () => Promise<ProjectAfk>) => {
     setSaving(true)
     try {
-      // The host's answer is what the switch shows: a write it refused never reads back as done.
-      setAfk(await setProjectAfk(config, projectId, on))
+      setAfk(await write())
     } catch (failure) {
       toast.error(failure instanceof Error ? failure.message : "Couldn't save that.")
     } finally {
       setSaving(false)
     }
   }
+  const turn = (on: boolean) => save(() => setProjectAfk(config, projectId, on))
+  const choose = (buildSkill: string | null, critiqueSkills: string[]) =>
+    save(() => setProjectAfkSkills(config, projectId, buildSkill, critiqueSkills))
 
   const manyRepos = (tasks?.repos.length ?? 0) > 1
 
@@ -174,6 +207,16 @@ export function AfkPopup({
             saving={saving}
             onToggle={(on) => void turn(on)}
           />
+          {/* Under the switch: the same setting, and a choice is the project's even with nothing
+              left to work. */}
+          {withSkills === "yes" && afk && !afkError && (
+            <AfkSkills
+              afk={afk}
+              skills={skills.status === "ok" ? skills.skills : []}
+              loading={skills.status === "loading"}
+              onChoose={choose}
+            />
+          )}
           {/* Only a project left to work has anything to say here: a task held under an off switch
               reads as still working. */}
           {afk?.on && <Working task={afk.task} refusal={afk.refusal} manyRepos={manyRepos} />}
@@ -188,6 +231,21 @@ export function AfkPopup({
         </div>
       </PopupContent>
     </Popup>
+  )
+}
+
+type Choice = Pick<ProjectAfk, "buildSkill" | "critiqueSkills">
+
+function sameNames(one: string[], other: string[]) {
+  return one.length === other.length && one.every((name, index) => name === other[index])
+}
+
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex min-h-11 items-center justify-between gap-3 px-1">
+      <span className="text-base">{label}</span>
+      {children}
+    </div>
   )
 }
 
@@ -221,8 +279,7 @@ function AfkSwitch({
   const reading = answer === "yes" && !afk && !error
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex min-h-11 items-center justify-between gap-3 px-1">
-        <span className="text-base">{on ? "Turned on" : "Turned off"}</span>
+      <Row label={on ? "Turned on" : "Turned off"}>
         {reading ? (
           <Spinner className="size-4" />
         ) : (
@@ -233,7 +290,7 @@ function AfkSwitch({
             onCheckedChange={onToggle}
           />
         )}
-      </div>
+      </Row>
       {error ? (
         <p className="px-1 text-sm text-destructive">{error}</p>
       ) : (
@@ -243,6 +300,158 @@ function AfkSwitch({
           </p>
         )
       )}
+    </div>
+  )
+}
+
+/**
+ * The skills this project's work follows, kept on its host with the switch. A name the profile has
+ * since lost still shows on the row, so the project says what it holds; the menus offer only what the
+ * bot can run now.
+ */
+function AfkSkills({
+  afk,
+  skills,
+  loading,
+  onChoose,
+}: {
+  afk: ProjectAfk
+  skills: Skill[]
+  /** The bot's list is still being read: the rows wait rather than offering nothing to pick. */
+  loading: boolean
+  onChoose: (buildSkill: string | null, critiqueSkills: string[]) => Promise<void>
+}) {
+  // What the rows show while a write is on its way. The host's answer is a round trip behind, so a
+  // second tick inside that window would recompute from the list before the first one landed and
+  // drop the pick between them: the draft is the truth until the write that carried it comes back.
+  const [draft, setDraft] = useState<Choice | null>(null)
+  const chosen = draft ?? afk
+  const queued = useRef<Choice | null>(null)
+  const writes = useRef<Promise<void>>(Promise.resolve())
+  const names = skills.map((skill) => skill.name)
+
+  const write = (next: Choice) => {
+    // A tick that changes nothing is no write: re-picking the value a row already holds would be a
+    // request, a row rewritten on the host and a fresh answer, all for the same setting.
+    if (
+      next.buildSkill === chosen.buildSkill &&
+      sameNames(next.critiqueSkills, chosen.critiqueSkills)
+    )
+      return
+    setDraft(next)
+    queued.current = next
+    // One write at a time, in the order the ticks came: the answer to the second must not land
+    // before the first, or the row would read a list from before the last pick.
+    writes.current = writes.current.then(async () => {
+      await onChoose(next.buildSkill, next.critiqueSkills)
+      // A newer draft is still the user's; otherwise the host's answer takes the row over.
+      if (queued.current === next) {
+        queued.current = null
+        setDraft(null)
+      }
+    })
+  }
+
+  return (
+    <div className="flex flex-col gap-2" data-afk-skills>
+      <h3 className="px-1 pb-1 text-sm text-muted-foreground">Skills</h3>
+      <div className="flex flex-col gap-1">
+        <Row label="Build">
+          {loading ? (
+            <Spinner className="size-4" />
+          ) : (
+            <Select
+              value={chosen.buildSkill}
+              items={[
+                { value: null, label: "None" },
+                ...names.map((name) => ({ value: name, label: name })),
+              ]}
+              onValueChange={(value) =>
+                write({
+                  buildSkill: typeof value === "string" ? value : null,
+                  critiqueSkills: chosen.critiqueSkills,
+                })
+              }
+            >
+              <SelectTrigger aria-label="Build skill" className="h-11 w-52">
+                {/* The stored name shows even when the profile has lost it: the row names the project's
+                choice rather than reading as nothing chosen. */}
+                <SelectValue>
+                  {(value) => (typeof value === "string" && value ? value : "None")}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={null}>None</SelectItem>
+                {names.map((name) => (
+                  <SelectItem key={name} value={name}>
+                    {name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </Row>
+        <Row label="Critique">
+          {loading ? (
+            <Spinner className="size-4" />
+          ) : (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    aria-label="Critique skills"
+                    className="h-auto min-h-11 w-52 justify-between gap-2 rounded-4xl py-2 pr-2.5 pl-3 font-normal"
+                    disabled={names.length === 0 && chosen.critiqueSkills.length === 0}
+                  />
+                }
+              >
+                <span className="min-w-0 truncate">
+                  {chosen.critiqueSkills.length > 0 ? chosen.critiqueSkills.join(", ") : "None"}
+                </span>
+                <ChevronDownIcon className="shrink-0 text-muted-foreground" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="max-h-80 min-w-52 overflow-y-auto">
+                {names.map((name) => {
+                  const picked = chosen.critiqueSkills.includes(name)
+                  return (
+                    <DropdownMenuCheckboxItem
+                      key={name}
+                      checked={picked}
+                      // The menu stays open for the next lens: picking the critique is picking several.
+                      closeOnClick={false}
+                      className="min-h-11"
+                      onCheckedChange={(checked) =>
+                        write({
+                          buildSkill: chosen.buildSkill,
+                          critiqueSkills: checked
+                            ? [...chosen.critiqueSkills, name]
+                            : chosen.critiqueSkills.filter((one) => one !== name),
+                        })
+                      }
+                    >
+                      {name}
+                    </DropdownMenuCheckboxItem>
+                  )
+                })}
+                {chosen.critiqueSkills.length > 0 && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className="min-h-11"
+                      onClick={() => write({ buildSkill: chosen.buildSkill, critiqueSkills: [] })}
+                    >
+                      Clear
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </Row>
+      </div>
+      <Separator />
     </div>
   )
 }

@@ -26,6 +26,7 @@ repository to read tasks from, the host has no GitHub account to read or claim o
 project has been put away. The reason is the host's own answer rather than the app's guess, because
 the host is what would do the work — and turning a project on is refused with that reason, so nothing
 is ever left half on.
+
 """
 
 from __future__ import annotations
@@ -133,20 +134,96 @@ def forget(hermes_home: Path, project_id: str) -> None:
 def read(
     hermes_home: Path, project_id: str, folders: Iterable[Any], archived: bool = False
 ) -> Dict[str, Any]:
-    """Everything the app's sheet shows: the switch and its reason, the task held, the last refusal.
+    """Everything the app's sheet shows: the switch and its reason, the task held, the last refusal,
+    and the skills this project's work follows.
 
     An archived project is turned off here if anything had left it on, and reads off whatever
     happens: it was put away, so its switch isn't a setting anything acts on. Writing it off rather
     than only masking it is what keeps a restore from resuming work no one asked for — a project
     archived where this plugin didn't do it (Hermes's own dashboard or CLI) still has its old row.
     """
-    found = _row(hermes_home, project_id) or {"on": False, "task": None, "refusal": None}
+    found = _row(hermes_home, project_id) or {
+        "on": False,
+        "task": None,
+        "refusal": None,
+        "build_skill": None,
+        "critique_skills": [],
+    }
     why = reason(hermes_home, folders, archived)
     on = found["on"]
     if on and why == ARCHIVED:
         turn_off(hermes_home, project_id)
         on = False
-    return {"on": on, "reason": why, "task": found["task"], "refusal": found["refusal"]}
+    return {
+        "on": on,
+        "reason": why,
+        "task": found["task"],
+        "refusal": found["refusal"],
+        "build_skill": found["build_skill"],
+        "critique_skills": found["critique_skills"],
+    }
+
+
+SKILL_FIELDS = ("build_skill", "critique_skills")
+
+
+def skills_from(body: Dict[str, Any]) -> Tuple[Optional[str], List[str]]:
+    """The skills a write names, or ``ValueError`` saying what's wrong.
+
+    Both fields or neither: the sheet writes the two pickers together, so a body naming one leaves
+    the other's meaning to a guess.
+    """
+    if any(field not in body for field in SKILL_FIELDS):
+        raise ValueError("A skills write names build_skill and critique_skills.")
+    build_skill = body["build_skill"]
+    if build_skill is not None and not isinstance(build_skill, str):
+        raise ValueError("build_skill must be a skill's name or null.")
+    critique_skills = body["critique_skills"]
+    if not isinstance(critique_skills, list) or not all(
+        isinstance(name, str) for name in critique_skills
+    ):
+        raise ValueError("critique_skills must be a list of skill names.")
+    return build_skill, critique_skills
+
+
+def write_from(body: Dict[str, Any]) -> Tuple[str, Any]:
+    """What a write names — ``"on"`` with its flag, or ``"skills"`` with the pair — or ValueError.
+
+    One write, one shape: the skills land before the switch wakes the sweep, so a body naming both
+    could write the choice and then be refused, leaving half of it written.
+    """
+    switch = "on" in body
+    choosing = any(field in body for field in SKILL_FIELDS)
+    if switch and choosing:
+        raise ValueError("A write names either on or the skills, not both.")
+    if switch:
+        on = body["on"]
+        if not isinstance(on, bool):
+            raise ValueError("on must be true or false.")
+        return "on", on
+    if choosing:
+        return "skills", skills_from(body)
+    raise ValueError("on, build_skill or critique_skills is needed.")
+
+
+def set_skills(
+    hermes_home: Path,
+    project_id: str,
+    build_skill: Optional[str],
+    critique_skills: Iterable[str],
+) -> None:
+    """Keeps the skills this project's AFK work follows, on the project's row beside the switch.
+
+    A project with no row yet gets one with its switch off: the pickers sit under the switch, not
+    behind it, so choosing a skill is no reason to start working anything.
+    """
+    _upsert(
+        hermes_home,
+        project_id,
+        build_skill=_name(build_skill),
+        critique_skills=json.dumps(_names(critique_skills)),
+        at=int(time.time()),
+    )
 
 
 def release(
@@ -674,14 +751,13 @@ def _forget_refusal(hermes_home: Path, project_id: str, found: Dict[str, Any]) -
 
 
 def _row(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
-    """The project's AFK row, read once: its switch, the task it holds, its last refusal, the session
-    working that task, why it stalled and since when it was claimed.
-    """
+    """The project's AFK row, read once: its switch, the task it holds and what is working it."""
     conn = connect(db_path(hermes_home))
     try:
         row = conn.execute(
-            """SELECT enabled, task, refusal, session_id, stalled, claimed_at FROM project_afk
-               WHERE project_id = ?""",
+            """SELECT enabled, task, refusal, session_id, stalled, claimed_at,
+                      build_skill, critique_skills
+               FROM project_afk WHERE project_id = ?""",
             (project_id,),
         ).fetchone()
     finally:
@@ -695,7 +771,41 @@ def _row(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
         "session_id": row[3] if isinstance(row[3], str) and row[3] else None,
         "stalled": row[4] if isinstance(row[4], str) and row[4] else None,
         "claimed_at": int(row[5]) if isinstance(row[5], (int, float)) else None,
+        "build_skill": _name(row[6]),
+        "critique_skills": _names(_list(row[7])),
     }
+
+
+def _name(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    return value.strip() or None
+
+
+def _names(values: Iterable[Any]) -> List[str]:
+    """The names a choice holds, each once, in the order the user picked them."""
+    found: List[str] = []
+    for value in values:
+        name = _name(value)
+        if name is not None and name not in found:
+            found.append(name)
+    return found
+
+
+def _column(value: Any, kind: type) -> Any:
+    """The JSON a column holds when it is a `kind`, else None: a row written before the column, or by
+    hand, reads as nothing rather than failing the sheet."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        found = json.loads(value)
+    except ValueError:
+        return None
+    return found if isinstance(found, kind) else None
+
+
+def _list(value: Any) -> List[Any]:
+    return _column(value, list) or []
 
 
 class Hold(NamedTuple):
@@ -732,13 +842,29 @@ def _holding_rows(hermes_home: Path) -> List[Hold]:
 
 def _task(value: Any) -> Optional[Dict[str, Any]]:
     """The task a row's JSON column holds, or None when it holds nothing a sheet can show."""
-    if not isinstance(value, str) or not value:
-        return None
+    return _column(value, dict)
+
+
+def _upsert(hermes_home: Path, project_id: str, **fields: Any) -> None:
+    """Writes the named columns of the project's row, making the row where the project has none.
+
+    One statement for every writer, so a column is never added to an insert and forgotten in an
+    update. Nothing a caller doesn't name is touched, so the switch and the skills leave each other
+    alone; a fresh row starts switched off.
+    """
+    row = {"enabled": 0, **fields}
+    columns = ", ".join(row)
+    placeholders = ", ".join("?" for _ in row)
+    assignments = ", ".join(f"{name} = excluded.{name}" for name in fields)
+    conn = connect(db_path(hermes_home))
     try:
-        found = json.loads(value)
-    except ValueError:
-        return None
-    return found if isinstance(found, dict) else None
+        conn.execute(
+            f"""INSERT INTO project_afk (project_id, {columns}) VALUES (?, {placeholders})
+                ON CONFLICT(project_id) DO UPDATE SET {assignments}""",
+            (project_id, *row.values()),
+        )
+    finally:
+        conn.close()
 
 
 def _update(hermes_home: Path, project_id: str, **fields: Any) -> None:
@@ -758,13 +884,4 @@ def _update(hermes_home: Path, project_id: str, **fields: Any) -> None:
 
 
 def _write(hermes_home: Path, project_id: str, on: bool) -> None:
-    conn = connect(db_path(hermes_home))
-    try:
-        # The switch's own columns only: the task it holds and the last refusal are the sweep's.
-        conn.execute(
-            """INSERT INTO project_afk (project_id, enabled, at) VALUES (?, ?, ?)
-               ON CONFLICT(project_id) DO UPDATE SET enabled = excluded.enabled, at = excluded.at""",
-            (project_id, 1 if on else 0, int(time.time())),
-        )
-    finally:
-        conn.close()
+    _upsert(hermes_home, project_id, enabled=1 if on else 0, at=int(time.time()))
