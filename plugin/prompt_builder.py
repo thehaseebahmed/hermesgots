@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from . import tasks
+
 # Added to the run's instructions in plan mode. Fixed per mode, so the prompt cache holds across
 # the turns of one mode. The app's mock repeats it; keep them the same.
 _PLAN_INSTRUCTIONS = """You are in plan mode: change nothing. Read what you need. Then, before you write the plan, settle every choice the user would otherwise be left to make: ask with the clarify tool, every question in one call, your recommended answer first. If you can't ask (no clarify tool, or no answer came), decide it yourself and record the decision under Risks and assumptions. Then make your whole final reply the plan below and stop; the user approves it before you act. It is saved to a file as written, so write it for someone who hasn't read this chat, and a plan with an open question isn't finished. Use this Markdown shape exactly:
@@ -45,22 +47,16 @@ _PR_INSTRUCTIONS = (
     "Summary, Changes and How to test sections. The pull request stays a draft. Pass force: true "
     "only after a rebase or amend. action 'update' changes the open pull request's title or body, "
     "and 'status' reports without writing. Merging and closing are the user's decision: the tool "
-    "refuses them, so ask the user with clarify instead."
+    "refuses them, "
 )
-# The same sentence an AFK run gets instead: there is nobody to ask, so the pull request says it's
-# ready rather than the agent waiting on an answer it can't get.
-_ASK_ABOUT_MERGING = "so ask the user with clarify instead."
-_ASK_ABOUT_MERGING_UNATTENDED = (
+# What settles that decision, by kind of run: a session with the user there says to ask, since the
+# tool won't merge for them; an AFK run has nobody to ask, so the pull request says it is ready.
+_MERGE_ASK = "so ask the user with clarify instead."
+_MERGE_READY = (
     "and nobody is here to be asked, so say in the pull request that it is ready to merge and "
     "leave it a draft."
 )
 
-
-def _pr_instructions(unattended: bool) -> str:
-    """The shipping rules, with the merge question settled the way this run can settle it."""
-    if not unattended:
-        return _PR_INSTRUCTIONS
-    return _PR_INSTRUCTIONS.replace(_ASK_ABOUT_MERGING, _ASK_ABOUT_MERGING_UNATTENDED)
 # The same condition as _PR_INSTRUCTIONS: only code sessions get it.
 _DONE_INSTRUCTIONS = (
     "Two things the run's prompt emphasises once the work is done: don't share the pull request url "
@@ -105,6 +101,11 @@ The rules:
 - No TODOs, commented-out code, debug prints or secrets in what you commit. Never push to the default branch, and keep all work inside the worktree."""
 
 
+def _pr_instructions(unattended: bool) -> str:
+    """The shipping rules, with the merge question settled the way this run can settle it."""
+    return _PR_INSTRUCTIONS + (_MERGE_READY if unattended else _MERGE_ASK)
+
+
 def session_prompt(record: Dict[str, Any], unattended: bool = False) -> str:
     """What the run's system prompt tells the agent: its worktrees (fixed per session), where its
     generated files go, how to keep the user in the loop as it works, how to open its pull request
@@ -141,7 +142,7 @@ def afk_prompt(record: Dict[str, Any], task: Dict[str, Any]) -> str:
 def _afk_task_line(task: Dict[str, Any]) -> str:
     """The one line that is the task's: what to implement, and where its own text is."""
     repo, number = task.get("repo"), task.get("number")
-    url = task.get("url") or (f"https://github.com/{repo}/issues/{number}" if repo else "")
+    url = tasks.issue_url(task)
     where = f" ({url})" if url else ""
     read = f"gh issue view {number} --repo {repo} --comments" if repo else "the API"
     return (

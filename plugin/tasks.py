@@ -53,6 +53,19 @@ def parse_blocked_by(body: Any) -> List[int]:
 SHOWN = ("repo", "number", "title", "url", "created_at", "assignees", "blockers")
 
 
+def issue_url(task: Dict[str, Any]) -> str:
+    """Where the task's issue is: the url the read filled in, else GitHub's own address for it.
+
+    A row read from the tracker carries the issue's url; one held from an older sweep may not, and a
+    repository's issue address is the same page.
+    """
+    url = task.get("url")
+    if url:
+        return str(url)
+    repo = task.get("repo")
+    return f"https://github.com/{repo}/issues/{task.get('number')}" if repo else ""
+
+
 def groups(tasks: Iterable[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     """The project's tasks grouped the way AFK reads them: ready, claimed and blocked.
 
