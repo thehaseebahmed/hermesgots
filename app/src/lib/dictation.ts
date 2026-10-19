@@ -20,15 +20,6 @@ import {
 } from "@/lib/hermes"
 import { usePoll } from "@/lib/poll"
 
-/**
- * Dictation: the clip is recorded here and turned into text by the bot's own faster-whisper,
- * through the Gots plugin (`plugin/dictation.py`). Hermes's local model doesn't stream, so the
- * recording is cut at the speaker's pauses and each piece is sent while they keep talking: on Stop
- * only the last piece is left to wait for. Until its text is in, a recording is kept on the device
- * (`db.dictations`, under the composer's draft key). The mic is greyed out until the host says it can.
- */
-
-// What each host last said about dictating; no `info` when it hasn't answered yet.
 const infos = new Map<string, { at: number; info?: DictationInfo }>()
 const { subscribe, notify } = createSignal()
 
@@ -83,21 +74,17 @@ export function useDictationInfo(config: HermesConfig) {
 
 /** The longest recording; at 24 kbps it stays far under the API server's 10 MB body limit. */
 const MAX_MS = 10 * 60 * 1000
-/** Shorter than this is a stray tap, not speech. */
 const MIN_MS = 300
 /** A cold host may load (or first download) its model inside this request. */
 const TRANSCRIBE_MS = 120_000
 const TYPES = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4", "audio/webm"]
 const BARS = 32
 const SAMPLE_MS = 50
-// A piece is cut at a pause once it holds some speech: long enough that Whisper has a sentence to
-// work with, and sooner at a shorter pause once it's long.
 const PIECE_MS = 6000
 const PAUSE_MS = 700
 const LONG_PIECE_MS = 25_000
 const SHORT_PAUSE_MS = 350
-// Loudness (RMS of the wave, 0 to 1) under which the mic counts as quiet: a few times the room's
-// own noise, within these bounds.
+// Loudness (RMS of the wave, 0 to 1) under which the mic counts as quiet.
 const QUIET_MIN = 0.012
 const QUIET_MAX = 0.05
 const SAVE_MS = 2000
@@ -124,7 +111,6 @@ function recordingType() {
   return TYPES.find((type) => MediaRecorder.isTypeSupported?.(type))
 }
 
-/** The words for a mic or recorder failure; `otherwise` is what an unnamed one means here. */
 function micError(error: unknown, otherwise: string) {
   const name = error instanceof DOMException ? error.name : ""
   if (name === "NotAllowedError" || name === "SecurityError") return "Microphone access is blocked."
@@ -135,14 +121,12 @@ function micError(error: unknown, otherwise: string) {
 
 export type DictationStatus = "idle" | "listening" | "transcribing" | "failed"
 
-/** One recorder's stretch of the recording; a cut at a pause starts the next. */
 interface Segment {
   recorder: MediaRecorder
   chunks: Blob[]
   startedAt: number
   /** Whether the meter has heard speech in it (always, when there's no meter). */
   heard: boolean
-  /** Too short to send: the last moment before Stop, after a cut. */
   skip?: boolean
   stopped: Promise<void>
   /** Turns what the recorder flushed into a piece, once, however the segment ends. */
@@ -251,8 +235,7 @@ function stopSegments(recording: Recording) {
   const open = [...recording.segments]
   for (const segment of open) if (segment.recorder.state !== "inactive") segment.recorder.stop()
   recording.stoppedAt ??= Date.now()
-  // A recorder that errored fires no stop of its own, and one the browser dropped may fire none
-  // either: the take is closed with the audio it flushed rather than waiting on a stop that can't come.
+  // A recorder that errored fires no stop of its own: close it with the audio it flushed.
   return Promise.all(
     open.map(
       (segment) =>
@@ -358,8 +341,7 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
           current.pieces.push({ blob: new Blob(segment.chunks, { type }), text: null })
         }
         save(current, true)
-        // Pieces go while the speaker carries on; one that fails is tried again with the next. A
-        // take that died waits for Retry instead, so its failure stays the bar's one message.
+        // A take that died waits for Retry instead, so its failure stays the bar's one message.
         if (session.current === current && !current.failure) void drain(current)
         stopped()
       }
@@ -440,9 +422,8 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
     [openSegment],
   )
 
-  /** Starts recording; false when the mic couldn't be had. */
   const start = useCallback(async () => {
-    if (session.current || !canRecord()) return false
+    if (session.current || !canRecord()) return
     const current = newSession(latest.current.key)
     session.current = current
     setError(null)
@@ -468,7 +449,7 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
     // Cancelled while the mic was asked for.
     if (session.current !== current) {
       stream.getTracks().forEach((track) => track.stop())
-      return false
+      return
     }
     const recording: Recording = {
       stream,
@@ -496,7 +477,6 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
       void end(recording)
       if (session.current === current) setLevels(null)
     }, MAX_MS)
-    return true
   }, [fail, monitor, openSegment, showIdle])
 
   /** Waits for every piece's text: the whole of it, or null with the recording kept for `retry`. */

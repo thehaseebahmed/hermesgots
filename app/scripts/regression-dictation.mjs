@@ -1,6 +1,5 @@
-// Run with Vite on APP_URL and an isolated mock on MOCK_URL (MOCK_DICTATION=off on OFF_MOCK_URL).
-// Requires Playwright; Chromium's fake microphone stands in for a real one, and for the pieces cut
-// at pauses it plays a made-up voice that stops for a moment twice.
+// Chromium's fake microphone stands in for a real one; the long recording plays a made-up voice
+// that stops for a moment twice, so the cut at a pause is what those blocks test.
 import assert from "node:assert/strict"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -15,7 +14,6 @@ const SENTENCE = "Let's ship the dictation feature today."
 const fakeMic = ["--no-sandbox", "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"]
 const browser = await chromium.launch({ headless: true, args: fakeMic })
 
-/** 7s of a buzzing, syllable-shaped voice, 1.5s of quiet, 7s more, 1.5s, 4s, then quiet. */
 function speech() {
   const rate = 48000
   const parts = [[0.5, 0], [7, 1], [1.5, 0], [7, 1], [1.5, 0], [4, 1], [3, 0]]
@@ -112,7 +110,6 @@ try {
     const composer = page.getByRole("textbox").last()
     const mic = page.getByRole("button", { name: "Voice", exact: true })
 
-    // Tap to toggle: the bar records until Stop, then the host's text lands at the cursor.
     await composer.fill("Note:")
     await mic.click()
     await page.getByRole("button", { name: "Stop" }).waitFor()
@@ -129,7 +126,6 @@ try {
     assert.equal(await composer.inputValue(), `Note: ${SENTENCE}`)
     await shot(page, `${label}-3-inserted`)
 
-    // Hold to talk: letting go finishes.
     await composer.fill("")
     const box = await mic.boundingBox()
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
@@ -143,7 +139,6 @@ try {
     )
     assert.equal(await composer.inputValue(), SENTENCE)
 
-    // Cancel drops the clip without asking the host.
     await mic.click()
     await page.getByRole("button", { name: "Cancel" }).click()
     await mic.waitFor()
@@ -199,11 +194,9 @@ try {
     await page.getByText("The recording stopped.").waitFor()
     await shot(page, "phone-light-9-recorder-failed")
 
-    // Retry sends the piece already recorded and lands its text.
     await retried(page)
     assert.equal((await clips()).length, before + 1, "one piece reached the host")
 
-    // Discard keeps nothing: no clip sent, and the kept recording is gone from the device.
     await mic.click()
     await page.getByRole("button", { name: "Retry" }).waitFor({ timeout: 2500 })
     await page.getByRole("button", { name: "Discard" }).click()
