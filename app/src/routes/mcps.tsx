@@ -341,7 +341,7 @@ function ServerRow({
             className={cn(
               // The line reads exactly where a plain subtitle would: its 44px touch target grows
               // below the text, and the negative margin keeps that height out of the row's layout.
-              "flex min-h-11 items-start -mx-1 -mb-6 px-1 text-left text-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring",
+              "-mx-1 -mb-6 flex min-h-11 items-start px-1 text-left text-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring",
               line.failed ? "text-destructive" : "text-warning",
             )}
             onClick={onGrant}
@@ -667,53 +667,60 @@ function ConfigTab({
         )}
       </FieldGroup>
 
-      {rows.length > 0 && (
-        <FieldGroup>
-          {rows.map((row, index) => {
-            const known = detail.values.find((value) => value.name === row.name)
-            return (
-              <Field key={`${row.name}-${index}`} data-value={row.name}>
-                {/* The environment name is the whole of the row: nothing describes a value this
+      {(rows.length > 0 || editable) && (
+        <section className="flex flex-col gap-2" data-mcp-section="values">
+          <h2 className="px-1 text-sm font-medium text-muted-foreground">Environment variables</h2>
+          {rows.length > 0 && (
+            <FieldGroup>
+              {rows.map((row, index) => {
+                const known = detail.values.find((value) => value.name === row.name)
+                return (
+                  <Field key={`${row.name}-${index}`} data-value={row.name}>
+                    {/* The environment name is the whole of the row: nothing describes a value this
                     server's block holds, so there is no second line to write. */}
-                <FieldLabel htmlFor={`mcp-config-value-${index}`} className="font-mono text-sm">
-                  {row.name || known?.name}
-                </FieldLabel>
-                <Input
-                  id={`mcp-config-value-${index}`}
-                  className="h-11"
-                  type="password"
-                  autoComplete="off"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  placeholder={known?.set ? SET_PLACEHOLDER : undefined}
-                  value={row.value}
-                  disabled={!editable}
-                  onChange={(event) =>
-                    setRows((current) =>
-                      current.map((item, at) =>
-                        at === index ? { ...item, value: event.target.value } : item,
-                      ),
-                    )
-                  }
-                />
-              </Field>
-            )
-          })}
-        </FieldGroup>
+                    <FieldLabel htmlFor={`mcp-config-value-${index}`} className="font-mono text-sm">
+                      {row.name || known?.name}
+                    </FieldLabel>
+                    <Input
+                      id={`mcp-config-value-${index}`}
+                      className="h-11"
+                      type="password"
+                      autoComplete="off"
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      placeholder={known?.set ? SET_PLACEHOLDER : undefined}
+                      value={row.value}
+                      disabled={!editable}
+                      onChange={(event) =>
+                        setRows((current) =>
+                          current.map((item, at) =>
+                            at === index ? { ...item, value: event.target.value } : item,
+                          ),
+                        )
+                      }
+                    />
+                  </Field>
+                )
+              })}
+            </FieldGroup>
+          )}
+          {editable && (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 rounded-full"
+              onClick={() => setRows((current) => [...current, { name: "", value: "" }])}
+            >
+              <PlusIcon data-icon="inline-start" />
+              Add a value
+            </Button>
+          )}
+        </section>
       )}
 
       {editable && (
         <div className="flex flex-col gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            className="h-11 rounded-full"
-            onClick={() => setRows((current) => [...current, { name: "", value: "" }])}
-          >
-            <PlusIcon data-icon="inline-start" />
-            Add a value
-          </Button>
           <Button
             size="lg"
             className="h-11 rounded-full"
@@ -1200,60 +1207,68 @@ function CustomServerSheet({
                     onChange={(event) => setDraft({ ...draft, args: event.target.value })}
                   />
                 </Field>
-                {rows.map((row, index) => (
-                  <Field key={index} data-value={row.name}>
-                    <FieldLabel htmlFor={`mcp-custom-value-${index}`}>Value</FieldLabel>
-                    <div className="flex items-center gap-2">
-                      <Input
-                        id={`mcp-custom-value-name-${index}`}
-                        aria-label="Name"
-                        className="h-11 min-w-0 flex-1 font-mono text-sm"
-                        autoComplete="off"
-                        autoCapitalize="off"
-                        spellCheck={false}
-                        placeholder="TOKEN"
-                        value={row.name}
-                        onChange={(event) =>
-                          setRows((current) =>
-                            current.map((item, at) =>
-                              at === index ? { ...item, name: event.target.value } : item,
-                            ),
-                          )
-                        }
-                      />
-                      <Input
-                        id={`mcp-custom-value-${index}`}
-                        aria-label="Value"
-                        className="h-11 min-w-0 flex-1"
-                        type="password"
-                        autoComplete="off"
-                        spellCheck={false}
-                        value={row.value}
-                        onChange={(event) =>
-                          setRows((current) =>
-                            current.map((item, at) =>
-                              at === index ? { ...item, value: event.target.value } : item,
-                            ),
-                          )
-                        }
-                      />
-                    </div>
-                  </Field>
-                ))}
               </>
             )}
           </FieldGroup>
 
           {draft.transport === "stdio" && (
-            <Button
-              type="button"
-              variant="outline"
-              className="h-11 rounded-full"
-              onClick={() => setRows((current) => [...current, { name: "", value: "" }])}
-            >
-              <PlusIcon data-icon="inline-start" />
-              Add a value
-            </Button>
+            <section className="flex flex-col gap-2" data-mcp-section="values">
+              <h2 className="px-1 text-sm font-medium text-muted-foreground">
+                Environment variables
+              </h2>
+              {rows.length > 0 && (
+                <FieldGroup>
+                  {rows.map((row, index) => (
+                    <Field key={index} data-value={row.name}>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          id={`mcp-custom-value-name-${index}`}
+                          aria-label="Name"
+                          className="h-11 min-w-0 flex-1 font-mono text-sm"
+                          autoComplete="off"
+                          autoCapitalize="off"
+                          spellCheck={false}
+                          placeholder="TOKEN"
+                          value={row.name}
+                          onChange={(event) =>
+                            setRows((current) =>
+                              current.map((item, at) =>
+                                at === index ? { ...item, name: event.target.value } : item,
+                              ),
+                            )
+                          }
+                        />
+                        <Input
+                          id={`mcp-custom-value-${index}`}
+                          aria-label="Value"
+                          className="h-11 min-w-0 flex-1"
+                          type="password"
+                          autoComplete="off"
+                          spellCheck={false}
+                          value={row.value}
+                          onChange={(event) =>
+                            setRows((current) =>
+                              current.map((item, at) =>
+                                at === index ? { ...item, value: event.target.value } : item,
+                              ),
+                            )
+                          }
+                        />
+                      </div>
+                    </Field>
+                  ))}
+                </FieldGroup>
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11 rounded-full"
+                onClick={() => setRows((current) => [...current, { name: "", value: "" }])}
+              >
+                <PlusIcon data-icon="inline-start" />
+                Add a value
+              </Button>
+            </section>
           )}
 
           <Button

@@ -42,7 +42,9 @@ transport and its fields, then one field per environment name the block holds. T
 whole of the field's title and there is no second line: only the Catalogue's own manifest writes
 prose for a value, and a server's block does not come with one — a server the form added by hand can
 share a catalogue entry's name and mean something else entirely, so matching a name against the
-Catalogue would caption someone else's variable. A value the bot already holds stands
+Catalogue would caption someone else's variable. The values keep to themselves under a heading of their
+own, *Environment variables*, with *Add a value* beneath them, so the block's transport and the
+names it sets read as the two separate things they are. A value the bot already holds stands
 empty with *Set* as its placeholder: the Host answers only *whether* it holds one and never its
 content, so typing over it is what replaces it and leaving it alone sends nothing. One Save writes
 the block once, enabled when something changed, because a write per keystroke would be a rewrite and

@@ -91,11 +91,7 @@ const run = async ({ page, profileId, shot, until }) => {
       true,
       "the form stays open on a refused add",
     )
-    assert.equal(
-      await page.locator("[data-mcp]").count(),
-      servers + 1,
-      "and nothing was added",
-    )
+    assert.equal(await page.locator("[data-mcp]").count(), servers + 1, "and nothing was added")
     await shot("refused")
     // The refusal is said over the sheet and clears itself; the form is usable again once it has.
     await page
@@ -113,6 +109,7 @@ const run = async ({ page, profileId, shot, until }) => {
     await page.getByRole("button", { name: "Add a value", exact: true }).click()
     await page.locator("#mcp-custom-value-name-0").fill("ACME_TOKEN")
     await page.locator("#mcp-custom-value-0").fill(TOKEN)
+    await shot("stdio-form")
     await addButton().click()
     await page.locator('[data-mcp="local"]').waitFor({ timeout: 15_000 })
     assert.equal(writes.length, 3, "the two refused and accepted writes were the only ones")
@@ -127,11 +124,7 @@ const run = async ({ page, profileId, shot, until }) => {
       },
       "a stdio server carries its argv and the one value it declares",
     )
-    assert.equal(
-      await page.locator("[data-mcp]").count(),
-      servers + 2,
-      "and it joins the list too",
-    )
+    assert.equal(await page.locator("[data-mcp]").count(), servers + 2, "and it joins the list too")
     await shot("stdio")
 
     // A name Hermes won't take at all is refused with the Host's own sentence.
@@ -151,9 +144,7 @@ const run = async ({ page, profileId, shot, until }) => {
     await sheet().waitFor({ state: "hidden", timeout: 15_000 })
     const shown = [
       await page.locator("body").innerText(),
-      ...(await page
-        .locator("input")
-        .evaluateAll((nodes) => nodes.map((node) => node.value))),
+      ...(await page.locator("input").evaluateAll((nodes) => nodes.map((node) => node.value))),
     ].join("\n")
     assert.ok(!shown.includes(TOKEN), "the value typed into the form is not shown back")
 
