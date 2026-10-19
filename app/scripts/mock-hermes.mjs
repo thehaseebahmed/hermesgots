@@ -949,7 +949,10 @@ const projectLibrary = (projectId) => {
 }
 // A project's ready tasks as the plugin's read reports them: two ready (oldest first), one claimed
 // by Gots' own mark, and one blocked by the task it waits on. The numbers and titles never change,
-// so a flow can assert them on whatever project it made.
+// so a flow can assert them on whatever project it made. A project left to work has had its oldest
+// ready task claimed by AFK — the mock's own sweep — so it is claimed here and gone from the ready
+// group, as the plugin's read would report it.
+const AFK_TASK = 265
 const projectTasks = (project) => {
   const repo = project.folders.find((folder) => folder.repo)?.repo ?? "mock-user/memento"
   const task = (number, title, extra = {}) => ({
@@ -962,15 +965,19 @@ const projectTasks = (project) => {
     blockers: [],
     ...extra,
   })
+  const afk = afkProjects.has(project.id)
+  const oldest = task(AFK_TASK, "The frontier is read from GitHub and listed")
   return {
     object: "memento.tasks",
     project_id: project.id,
     repos: [repo],
-    ready: [
-      task(265, "The frontier is read from GitHub and listed"),
-      task(266, "The switch: AFK is a project's own setting on the host"),
+    ready: afk
+      ? [task(266, "The switch: AFK is a project's own setting on the host")]
+      : [oldest, task(266, "The switch: AFK is a project's own setting on the host")],
+    claimed: [
+      ...(afk ? [{ ...oldest, assignees: ["mock-user"] }] : []),
+      task(267, "AFK claims the next ready task", { assignees: ["mock-user"] }),
     ],
-    claimed: [task(267, "AFK claims the next ready task", { assignees: ["mock-user"] })],
     blocked: [
       task(268, "The claimed task is worked in its own session", {
         blockers: [
@@ -984,6 +991,18 @@ const projectTasks = (project) => {
         ],
       }),
     ],
+  }
+}
+
+/** The task the mock's AFK holds for a project left to work: its oldest ready one. */
+function afkTask(project) {
+  const repo = project.folders.find((folder) => folder.repo)?.repo ?? "mock-user/memento"
+  return {
+    repo,
+    number: AFK_TASK,
+    title: "The frontier is read from GitHub and listed",
+    url: `https://github.com/${repo}/issues/${AFK_TASK}`,
+    created_at: `2026-10-01T09:00:00Z`,
   }
 }
 
@@ -3112,13 +3131,24 @@ http
         if (on && reason) return json(res, 409, { error: { message: reason } })
         if (on) afkProjects.add(found.id)
         else afkProjects.delete(found.id)
-        return json(res, 200, { object: "memento.afk", project_id: found.id, on, reason })
+        return json(res, 200, {
+          object: "memento.afk",
+          project_id: found.id,
+          on,
+          reason,
+          // A project turned on is swept at once, so the oldest ready task is the one it holds.
+          task: on ? afkTask(found) : null,
+          refusal: null,
+        })
       }
+      const on = afkProjects.has(found.id)
       return json(res, 200, {
         object: "memento.afk",
         project_id: found.id,
-        on: afkProjects.has(found.id),
+        on,
         reason,
+        task: on ? afkTask(found) : null,
+        refusal: null,
       })
     }
     if (PLUGIN && !profile && projectRoute?.[2] === "/usage") {

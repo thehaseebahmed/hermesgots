@@ -6,7 +6,7 @@
  * it off and disabled, with the reason underneath. The frontier is there where the plugin advertises
  * `afk`, the switch where it advertises `afk_switch`.
  */
-import { useCallback, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { toast } from "sonner"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
@@ -15,13 +15,14 @@ import { Switch } from "@/components/ui/switch"
 import { connectionKey } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { usePluginFeature, type PluginFeatureAnswer } from "@/lib/features"
-import { READ_TIMEOUT_MS } from "@/lib/freshness"
+import { AFK_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import {
   getProjectAfk,
   getProjectTasks,
   setProjectAfk,
   type HermesConfig,
   type ProjectAfk,
+  type ProjectAfkTask,
   type ProjectBlocker,
   type ProjectTasks,
   type ProjectTask,
@@ -122,10 +123,24 @@ export function AfkPopup({
     [config, key, projectId],
   )
   // The switch's own read, only where the plugin has it: a Host that can't answer is never asked.
-  usePoll(readAfk, false, [key, projectId], {
+  // It keeps reading while the sheet is open, because turning the project on wakes a sweep on the
+  // host: the task it claims, or why GitHub refused it, lands after the switch's own answer.
+  usePoll(readAfk, AFK_MS, [key, projectId], {
     active: open && switchable === "yes",
     onShow: false,
   })
+
+  // Taking a task moves it out of the frontier, so the list is read again when AFK's answer names
+  // the one it holds — and when it lets one go, which puts it back.
+  const held = afk?.task ? `${afk.task.repo}#${afk.task.number}` : ""
+  const seen = useRef(held)
+  useEffect(() => {
+    if (seen.current === held) return
+    seen.current = held
+    const controller = new AbortController()
+    read(controller.signal)
+    return () => controller.abort()
+  }, [held, read])
 
   const turn = async (on: boolean) => {
     setSaving(true)
@@ -155,6 +170,7 @@ export function AfkPopup({
             saving={saving}
             onToggle={(on) => void turn(on)}
           />
+          <Working task={afk?.task} refusal={afk?.refusal} manyRepos={manyRepos} />
           <Tasks
             tasks={tasks}
             error={error}
@@ -220,6 +236,54 @@ function AfkSwitch({
             {reason}
           </p>
         )
+      )}
+    </div>
+  )
+}
+
+/**
+ * What the sweep is doing: the task AFK holds, and why GitHub last refused it. Neither is the
+ * switch's own reason — a refusal leaves the switch on — so they read as the sweep's answer rather
+ * than as the project's, and both simply disappear when there is nothing to say.
+ */
+function Working({
+  task,
+  refusal,
+  manyRepos,
+}: {
+  task: ProjectAfkTask | null | undefined
+  refusal: string | null | undefined
+  manyRepos: boolean
+}) {
+  if (!task && !refusal) return null
+  return (
+    <div className="flex flex-col gap-3">
+      {refusal && (
+        <p data-refusal className="px-1 text-sm text-destructive" role="status">
+          {refusal}
+        </p>
+      )}
+      {task && (
+        <section aria-label="Working" data-working>
+          <h3 className="px-1 pb-1 text-sm text-muted-foreground">Working</h3>
+          <a
+            href={task.url ?? undefined}
+            target="_blank"
+            rel="noreferrer"
+            data-task={task.number}
+            className="flex min-h-11 flex-col justify-center gap-0.5 rounded-2xl px-3 py-2 outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <span className="flex min-w-0 items-start gap-2">
+              <span className="shrink-0 pt-0.5 font-mono text-xs text-muted-foreground">
+                #{task.number}
+              </span>
+              <span className="min-w-0 flex-1 text-base leading-snug break-words">
+                {task.title}
+              </span>
+            </span>
+            {manyRepos && <span className="pl-8 text-sm text-muted-foreground">{task.repo}</span>}
+          </a>
+        </section>
       )}
     </div>
   )

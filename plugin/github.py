@@ -199,6 +199,50 @@ def repos(hermes_home: Path) -> List[Dict[str, Any]]:
     ]
 
 
+def login(auth: Optional[str]) -> str:
+    """The login of the account a token belongs to: who a claim is assigned to."""
+    user = _get("/user", auth)
+    found = user.get("login") if isinstance(user, dict) else None
+    if not isinstance(found, str) or not found:
+        raise GitHubError("GitHub didn't say whose account the token is.")
+    return found
+
+
+# Gots's claim mark, created on the repository the first time AFK claims a task there (ADR 0012).
+CLAIM_COLOR = "0e8a16"
+CLAIM_DESCRIPTION = "Gots is working this task."
+
+
+def claim_issue(repo: str, number: int, account: str, label: str, auth: Optional[str]) -> None:
+    """Claims one issue: marked with ``label`` and assigned to ``account``, in that order.
+
+    The label is applied before the assignment, so a write that fails halfway leaves a task that
+    still reads as claimed (the mark is on it) rather than one assigned to the host's user with
+    nothing saying an agent has it. The label itself is created on the repository when it isn't
+    there yet, because a label that doesn't exist can't be applied.
+    """
+    _ensure_label(repo, label, auth)
+    _request(f"/repos/{repo}/issues/{number}/labels", auth, "POST", {"labels": [label]})
+    _request(f"/repos/{repo}/issues/{number}/assignees", auth, "POST", {"assignees": [account]})
+
+
+def _ensure_label(repo: str, label: str, auth: Optional[str]) -> None:
+    """Creates the label on the repository when it has none of that name; leaves one that's there."""
+    path = f"/repos/{repo}/labels/{urllib.parse.quote(label, safe='')}"
+    try:
+        _get(path, auth)
+        return
+    except GitHubError as error:
+        if not is_missing(error):
+            raise
+    _request(
+        f"/repos/{repo}/labels",
+        auth,
+        "POST",
+        {"name": label, "color": CLAIM_COLOR, "description": CLAIM_DESCRIPTION},
+    )
+
+
 def _destination(raw: Any) -> str:
     if not isinstance(raw, str) or not raw.strip():
         raise GitHubError("Pick a folder to clone into.", 400)

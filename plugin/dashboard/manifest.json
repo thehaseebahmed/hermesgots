@@ -1,9 +1,9 @@
 {
   "name": "memento",
   "label": "Gots",
-  "description": "Status of the Gots plugin, which serves cron run history to the Gots app, reads a project's GitHub tasks as AFK's frontier, holds AFK's switch for a project, and labels its chats.",
+  "description": "Status of the Gots plugin, which serves cron run history to the Gots app, reads a project's GitHub tasks as AFK's frontier, claims the oldest ready one, holds AFK's switch for a project, and labels its chats.",
   "icon": "Smartphone",
-  "version": "0.50.0",
+  "version": "0.51.0",
   "tab": { "path": "/memento", "position": "end" },
   "entry": "dist/index.js",
   "api": "plugin_api.py"

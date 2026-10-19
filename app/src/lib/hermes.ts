@@ -2613,6 +2613,29 @@ export interface ProjectAfk {
   on: boolean
   /** What stops the project being left to work, when something does; null when it can be. */
   reason: string | null
+  /** The task AFK has claimed and is working, while it holds one. */
+  task: ProjectAfkTask | null
+  /** Why GitHub last refused the sweep. The switch stays on, so this is not `reason`. */
+  refusal: string | null
+}
+
+/** The task AFK holds for a project: one it has claimed on GitHub and not finished with. */
+export interface ProjectAfkTask {
+  repo: string
+  number: number
+  title: string
+  url: string | null
+}
+
+function parseAfkTask(value: unknown): ProjectAfkTask | null {
+  const found = (value ?? {}) as Record<string, unknown>
+  if (typeof found.number !== "number") return null
+  return {
+    repo: str(found.repo),
+    number: found.number,
+    title: str(found.title),
+    url: str(found.url) || null,
+  }
 }
 
 function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
@@ -2621,7 +2644,14 @@ function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
   if (!body || typeof body.on !== "boolean") {
     throw new HermesError("Hermes answered without AFK's setting.")
   }
-  return { on: body.on, reason: str(body.reason) || null }
+  // A plugin from before the sweep answers neither field; that's no task and no refusal, not a
+  // failure to read the switch.
+  return {
+    on: body.on,
+    reason: str(body.reason) || null,
+    task: parseAfkTask(body.task),
+    refusal: str(body.refusal) || null,
+  }
 }
 
 function projectPath(config: HermesConfig, projectId: string, route: "tasks" | "afk") {

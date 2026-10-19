@@ -187,6 +187,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             asyncio.ensure_future(alerts.run(home)),
             # Research missions write up once their researcher stops; see research.py.
             asyncio.ensure_future(research.run(home)),
+            # Projects left to work their own tasks are swept for work while the host runs; see
+            # afk.py. A sweep is woken when one is turned on and when a session finishes.
+            asyncio.ensure_future(afk.run(home)),
         ]
         yield
         for task in tasks:
@@ -944,8 +947,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         project, refused = await resolve_project(project_id)
         if refused is not None:
             return refused
+        # A bot at /p/<profile> has its own store, which the sweep's loop can't see until it's asked
+        # to sweep this profile's home too; reading its sheet is what asks.
+        afk.watch(hermes_home())
         found = await asyncio.to_thread(
-            afk.state,
+            afk.read,
             hermes_home(),
             project_id,
             project.folders,
@@ -967,13 +973,22 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         project, refused = await resolve_project(project_id)
         if refused is not None:
             return refused
+        # Turning it on is the profile's, so its home is swept from now on (see the read above).
+        afk.watch(hermes_home())
         try:
-            found = await asyncio.to_thread(
+            await asyncio.to_thread(
                 afk.set_on,
                 hermes_home(),
                 project_id,
                 project.folders,
                 on,
+                bool(getattr(project, "archived", False)),
+            )
+            found = await asyncio.to_thread(
+                afk.read,
+                hermes_home(),
+                project_id,
+                project.folders,
                 bool(getattr(project, "archived", False)),
             )
         except afk.Refused as why:
@@ -1820,6 +1835,8 @@ def register(ctx) -> None:
         register_hook("on_session_end", goal.turn_finished)
         # The run is over, so a queued message can go now rather than at the next tick.
         register_hook("on_session_end", lambda **_kwargs: outbox.wake())
+        # And AFK looks for the next task now when a project session ends; see afk.py.
+        register_hook("on_session_end", afk.after_run)
     register_cli = getattr(ctx, "register_cli_command", None)
     if register_cli is not None:
         register_cli(
