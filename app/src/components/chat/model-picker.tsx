@@ -675,6 +675,7 @@ export function DelegationModelSetting({ profile }: { profile: Profile }) {
         id="delegation-model"
         type="button"
         variant="outline"
+        aria-label={`Second opinion: ${pick ? fullModel(pick) : "Same as the bot"}`}
         className="h-11 w-full justify-between gap-2 font-normal"
         disabled={!providers.length || saving}
         onClick={() => setOpen(true)}
