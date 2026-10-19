@@ -70,7 +70,11 @@ const run = async ({ page, profileId, shot, until }) => {
     // Each environment value is one field titled with the name it lands under, and nothing else:
     // no catalogue entry describes a value this server's block holds.
     const label = page.locator('[data-value="GITHUB_TOKEN"] label')
-    assert.equal(await label.innerText(), "GITHUB_TOKEN", "the value's name is the whole of the row")
+    assert.equal(
+      await label.innerText(),
+      "GITHUB_TOKEN",
+      "the value's name is the whole of the row",
+    )
     // It is masked, and what the bot holds is not on the screen: the field stands empty and says Set.
     const field = page.locator('[data-value="GITHUB_TOKEN"] input')
     assert.equal(await field.getAttribute("type"), "password", "the value's field is masked")
@@ -116,12 +120,46 @@ const run = async ({ page, profileId, shot, until }) => {
       "Save to be disabled again once the block matches what was written",
     )
 
+    // A value the form adds types its own name: the row the block holds is titled by the name it
+    // already has, while Add a value has nothing to title it with until one is typed.
+    await sheet().getByRole("button", { name: "Add a value", exact: true }).click()
+    const added = page.locator('[data-value=""] input').first()
+    assert.equal(
+      await added.getAttribute("placeholder"),
+      "NAME",
+      "a value the form added asks for its name, which no block entry can",
+    )
+    await added.fill("EXTRA_TOKEN")
+    await page.locator('[data-value="EXTRA_TOKEN"] input').nth(1).fill("typed-here")
+    assert.equal(
+      await save.isDisabled(),
+      false,
+      "a named value with something typed in it is a change to write",
+    )
+    await shot("added-value")
+    await save.click()
+    await until(
+      () => Promise.resolve(writes.length === 2),
+      15_000,
+      "the write the added value made",
+    )
+    assert.equal(
+      writes.at(-1).body.values?.EXTRA_TOKEN,
+      "typed-here",
+      "the value the row was named for reaches the Host",
+    )
+    await until(
+      () => save.isDisabled().then((disabled) => disabled),
+      15_000,
+      "Save to be disabled once the added value is written",
+    )
+
     // Arguments are one line that reaches the Host as argv: a path with a space survives the trip.
     await page.locator("#mcp-config-args").fill('-y "/srv/my servers/github"')
     await save.click()
-    await until(() => Promise.resolve(writes.length === 2), 15_000, "the second write")
+    await until(() => Promise.resolve(writes.length === 3), 15_000, "the third write")
     assert.deepEqual(
-      writes[1].body.args,
+      writes[2].body.args,
       ["-y", "/srv/my servers/github"],
       "an argument with a space reaches the Host as one argument",
     )
@@ -135,7 +173,11 @@ const run = async ({ page, profileId, shot, until }) => {
       "every tool the server offers is listed, from the cache the row's own count came from",
     )
     assert.equal(
-      await page.locator('[data-tool]').first().innerText().then((text) => text.includes("\n")),
+      await page
+        .locator("[data-tool]")
+        .first()
+        .innerText()
+        .then((text) => text.includes("\n")),
       true,
       "each tool is its name and what it does",
     )
@@ -182,9 +224,7 @@ const run = async ({ page, profileId, shot, until }) => {
     // Nothing of what the bot held, or of what was typed, is anywhere on the screen.
     const shown = [
       await page.locator("body").innerText(),
-      ...(await page
-        .locator("input")
-        .evaluateAll((nodes) => nodes.map((node) => node.value))),
+      ...(await page.locator("input").evaluateAll((nodes) => nodes.map((node) => node.value))),
     ].join("\n")
     assert.ok(!shown.includes(HELD), "the value the bot held is never shown")
     assert.ok(!shown.includes(TYPED), "what was typed is not shown back either")
@@ -206,5 +246,5 @@ for (const width of [390, 1024]) {
   }
 }
 pass(
-  "a server's row opens its own sheet with Config and Tools, Config shows the block with each value titled by its environment name and subtitled with the manifest's own words, a value the bot holds stands empty and reads as set, Save writes the whole block once with arguments split into argv, Tools lists what the server offers from the cache and Load tools asks for a fresh list, and a plugin's block is read and not edited, at 390 and 1024px, light and dark",
+  "a server's row opens its own sheet with Config and Tools, Config shows the block with each value titled by its environment name and nothing else, a value the form added typing its own name, a value the bot holds standing empty and reading as set, Save writes the whole block once with arguments split into argv, Tools lists what the server offers from the cache and Load tools asks for a fresh list, and a plugin's block is read and not edited, at 390 and 1024px, light and dark",
 )

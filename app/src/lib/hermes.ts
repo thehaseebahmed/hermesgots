@@ -342,9 +342,10 @@ export async function respondToApproval(
   })
 }
 
-export async function listModels(config: HermesConfig): Promise<string[]> {
+export async function listModels(config: HermesConfig, signal?: AbortSignal): Promise<string[]> {
   const response = await request(endpoint(config.baseUrl, "/models"), {
     headers: headers(config),
+    signal,
   })
   const body = await response.json()
   return Array.isArray(body?.data) ? body.data.map((m: { id: string }) => m.id) : []

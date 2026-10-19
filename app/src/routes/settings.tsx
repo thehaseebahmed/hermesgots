@@ -42,7 +42,8 @@ import { toast } from "sonner"
 
 import { AccountSettings } from "@/components/account-settings"
 import { CommunitySettings } from "@/components/community-settings"
-import { BotEditor, type BotTab } from "@/components/bot-settings"
+import { BotEditor } from "@/components/bot-settings"
+import { BOT_TABS, type BotTab } from "@/lib/bot-tabs"
 import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { OnlineDot } from "@/components/bot-card"
@@ -149,8 +150,7 @@ export function SettingsPage() {
     return <Navigate to="/settings" replace />
   // The bot tabs: a hand-typed address naming one this screen doesn't have lands on the bot itself,
   // and one asked for on anything but a bot lands on the section without it.
-  const TABS: BotTab[] = ["general", "models", "mcps"]
-  if (tab && !TABS.includes(tab as BotTab))
+  if (tab && !BOT_TABS.includes(tab as BotTab))
     return <Navigate to={botId ? `/settings/bots/${botId}` : "/settings"} replace />
   if (tab && (section !== "bots" || !botId)) return <Navigate to="/settings" replace />
   // General's address is the bot's own: one URL per tab, and none of them an alias of another.

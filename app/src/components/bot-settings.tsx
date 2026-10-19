@@ -48,6 +48,8 @@ import {
   type Profile,
 } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
+import { type BotTab } from "@/lib/bot-tabs"
+import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import { checkHealth, getPluginVersion, listModels } from "@/lib/hermes"
 import { useMcpFeatureAnswers } from "@/lib/mcps"
 import { setDefaultModel } from "@/lib/model-info"
@@ -65,8 +67,7 @@ type Connection =
   | { state: "ok"; plugin: string | null }
   | { state: "error"; message: string }
 
-/** Which of the bot's screens is showing; the URL's third segment is this. */
-export type BotTab = "general" | "models" | "mcps"
+export type { BotTab }
 
 /** Hermes's default model id; any other advertised id is the profile's name. */
 const UNNAMED_MODEL = "hermes-agent"
@@ -235,7 +236,10 @@ export function BotEditor({
     let cancelled = false
     void (async () => {
       try {
-        const ids = await listModels(linked ? profile : { baseUrl, apiKey })
+        const ids = await listModels(
+          linked ? profile : { baseUrl, apiKey },
+          AbortSignal.timeout(READ_TIMEOUT_MS),
+        )
         if (!cancelled) setModels(ids)
       } catch {
         // The tab says it couldn't read them; Test connection in General says why in the Host's words.

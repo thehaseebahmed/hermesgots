@@ -30,7 +30,6 @@ import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { Profile } from "@/lib/db"
-import { MCP_WORK_MS } from "@/lib/freshness"
 import { offersAccess } from "@/lib/mcp-access"
 import { collectedValues, fieldValue, missingValues, searchCatalogue } from "@/lib/mcp-catalogue"
 import {
@@ -38,6 +37,7 @@ import {
   configDraft,
   configEdit,
   customReady,
+  transportReady,
   customServer,
   healthLine,
   type ConfigDraft,
@@ -90,14 +90,16 @@ const SET_PLACEHOLDER = "Set — type to replace"
  */
 export function McpsTab({ profile }: { profile: Profile }) {
   const answers = useMcpFeatureAnswers(profile)
+  // The server whose Server access sheet is open, by name: while it is, the screen keeps reading, so
+  // the wait sees the access land on a row whose own state would never move it.
+  const [granting, setGranting] = useState<string | null>(null)
   const { servers, setEnabled, remove, saveConfig, addCustom, install, grant, deliver, reload } =
-    useMcpServers(profile, answers.list === "yes")
+    useMcpServers(profile, answers.list === "yes", granting !== null)
   const [adding, setAdding] = useState(false)
   const [browsing, setBrowsing] = useState(false)
   const [customising, setCustomising] = useState(false)
-  // The server whose sheet is open, by name, and the one whose Server access sheet is.
+  // The server whose sheet is open, by name.
   const [opened, setOpened] = useState<string | null>(null)
-  const [granting, setGranting] = useState<string | null>(null)
   // The server a removal is being confirmed for, and whether that removal is on its way.
   const [removing, setRemoving] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -105,6 +107,9 @@ export function McpsTab({ profile }: { profile: Profile }) {
   const grantingServer = servers?.find((server) => server.name === granting)
   const mine = servers?.filter((server) => server.source === "config") ?? []
   const theirs = servers?.filter((server) => server.source === "plugin") ?? []
+  // A sheet only exists where the Host advertises a tab for it, so a row whose name could open
+  // nothing keeps its name plain.
+  const sheetOpenable = answers.config === "yes" || answers.tools === "yes"
 
   async function confirmRemove() {
     if (removing === null) return
@@ -152,6 +157,7 @@ export function McpsTab({ profile }: { profile: Profile }) {
                 server={server}
                 writable={answers.write === "yes"}
                 canAuthenticate={offersAccess(answers.access === "yes", server.access)}
+                openable={sheetOpenable}
                 onToggle={setEnabled}
                 onOpen={() => setOpened(server.name)}
                 onGrant={() => setGranting(server.name)}
@@ -171,6 +177,7 @@ export function McpsTab({ profile }: { profile: Profile }) {
                 server={server}
                 writable={false}
                 canAuthenticate={false}
+                openable={sheetOpenable}
                 onToggle={setEnabled}
                 onOpen={() => setOpened(server.name)}
                 onGrant={() => setGranting(server.name)}
@@ -305,6 +312,7 @@ function ServerRow({
   server,
   writable,
   canAuthenticate,
+  openable,
   onToggle,
   onOpen,
   onGrant,
@@ -312,6 +320,7 @@ function ServerRow({
   server: McpServer
   writable: boolean
   canAuthenticate: boolean
+  openable: boolean
   onToggle: (name: string, enabled: boolean) => Promise<void>
   onOpen: () => void
   onGrant: () => void
@@ -325,14 +334,20 @@ function ServerRow({
     <div className={rowClass} data-mcp={server.name}>
       <ServerIcon className="size-5 shrink-0 text-muted-foreground" />
       <span className="flex min-w-0 flex-1 flex-col">
-        <button
-          type="button"
-          className="min-w-0 truncate rounded-lg text-left text-base outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-          aria-haspopup="dialog"
-          onClick={onOpen}
-        >
-          {server.name}
-        </button>
+        {openable ? (
+          <button
+            type="button"
+            className="min-w-0 truncate rounded-lg text-left text-base outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+            aria-haspopup="dialog"
+            onClick={onOpen}
+          >
+            {server.name}
+          </button>
+        ) : (
+          // A Host that can't show a server's sheet leaves its name plain, rather than a button
+          // that would open nothing.
+          <span className="truncate text-base">{server.name}</span>
+        )}
         {line.authenticate ? (
           // A failure the Host says access can fix stays a failure to read, so its colour comes from
           // that rather than from the line being tappable.
@@ -498,8 +513,8 @@ function ServerSheet({
  * One server's block: the transport it runs, how it authenticates, and one field per environment
  * value with what the Host knows about it — never its content, only whether it holds one.
  *
- * A field is titled with the name the value lands under on the Host and subtitled with the prompt its
- * entry writes for people, where that says anything the name doesn't. A value the bot already holds
+ * A field is titled with the name the value lands under on the Host and says nothing else: a block
+ * carries no prose, and a catalogue entry of the same name describes someone else's variable. A value the bot already holds
  * stands empty with Set as its placeholder: typing into it replaces what it holds, and leaving it
  * alone sends nothing. Everything is drafted in this component's own state and written by one Save —
  * a config write and a reconcile per keystroke would be a rewrite per character.
@@ -546,10 +561,7 @@ function ConfigTab({
   // that could have arrived again since.
   const block: McpServerDetail = detail
   const editable = block.editable
-  const canSave =
-    editable &&
-    configChanged(block, draft, rows) &&
-    (draft.transport === "http" ? Boolean(draft.url.trim()) : Boolean(draft.command.trim()))
+  const canSave = editable && configChanged(block, draft, rows) && transportReady(draft)
 
   async function save() {
     if (!draft) return
@@ -674,16 +686,36 @@ function ConfigTab({
             <FieldGroup>
               {rows.map((row, index) => {
                 const known = detail.values.find((value) => value.name === row.name)
+                // The name is the whole of a row the block holds — nothing describes a value here,
+                // so there is no second line — while a row the form added types its own.
                 return (
                   <Field key={`${row.name}-${index}`} data-value={row.name}>
-                    {/* The environment name is the whole of the row: nothing describes a value this
-                    server's block holds, so there is no second line to write. */}
-                    <FieldLabel
-                      htmlFor={`mcp-config-value-${index}`}
-                      className="text-sm font-medium text-muted-foreground"
-                    >
-                      {row.name || known?.name}
-                    </FieldLabel>
+                    {row.named ? (
+                      <Input
+                        aria-label="Name"
+                        className="h-11 font-mono text-sm"
+                        autoComplete="off"
+                        autoCapitalize="off"
+                        spellCheck={false}
+                        placeholder="NAME"
+                        value={row.name}
+                        disabled={!editable}
+                        onChange={(event) =>
+                          setRows((current) =>
+                            current.map((item, at) =>
+                              at === index ? { ...item, name: event.target.value } : item,
+                            ),
+                          )
+                        }
+                      />
+                    ) : (
+                      <FieldLabel
+                        htmlFor={`mcp-config-value-${index}`}
+                        className="text-sm font-medium text-muted-foreground"
+                      >
+                        {row.name || known?.name}
+                      </FieldLabel>
+                    )}
                     <Input
                       id={`mcp-config-value-${index}`}
                       className="h-11"
@@ -713,7 +745,9 @@ function ConfigTab({
               type="button"
               variant="outline"
               className="h-11 rounded-full"
-              onClick={() => setRows((current) => [...current, { name: "", value: "" }])}
+              onClick={() =>
+                setRows((current) => [...current, { name: "", value: "", named: true }])
+              }
             >
               <PlusIcon data-icon="inline-start" />
               Add a value
@@ -758,7 +792,7 @@ function ConfigTab({
  * and not something the sheet does on opening.
  */
 function ToolsTab({ profile, server }: { profile: McpServerConfig; server: McpServer }) {
-  const { tools, probing, probe } = useMcpServerTools(profile, server.name, true)
+  const { tools, probing, failed, probe } = useMcpServerTools(profile, server.name, true)
   return (
     <div className="flex flex-col gap-4 px-4 py-4">
       {tools !== undefined && tools.tools.length > 0 && (
@@ -777,6 +811,7 @@ function ToolsTab({ profile, server }: { profile: McpServerConfig; server: McpSe
           ))}
         </Group>
       )}
+      {failed && <p className="text-sm text-destructive">{failed}</p>}
       <Button
         type="button"
         variant={tools?.tools.length ? "outline" : "default"}
@@ -1364,15 +1399,6 @@ function ServerAccessSheet({
     const timer = window.setTimeout(() => setExpired(true), Math.max(1, flow.expires) * 1000)
     return () => window.clearTimeout(timer)
   }, [open, flow, expired])
-
-  // While the sheet is open on a running flow the row is read again at the screen's own work pace:
-  // the screen's poll follows a connecting or waiting server, and a *failed* row a flow is running
-  // for is neither, so without this the wait would never see the access land on that row.
-  useEffect(() => {
-    if (!open || !flow) return
-    const timer = window.setInterval(() => void reload(), MCP_WORK_MS)
-    return () => window.clearInterval(timer)
-  }, [open, flow, reload])
 
   // The row's own read is the answer: once it says on, the access landed and the sheet is done.
   useEffect(() => {

@@ -79,11 +79,13 @@ export type McpFeatureAnswers = Record<keyof typeof MCP_FEATURES, McpFeatureAnsw
 /** A bot's server as the client takes it: one of a profile or of a Hermes plugin beside it. */
 export type McpServerConfig = Pick<HermesConfig, "baseUrl" | "apiKey"> | null | undefined
 
-/** Whether the screen must keep reading: connecting and waiting on Server access move on their own. */
+/**
+ * Whether the screen must keep reading: a server the Host is still starting gets there on its own.
+ * A server waiting on Server access is steady — nothing moves it but the user — so the screen reads
+ * it once, and again only while a flow for it is open (`watching`).
+ */
 function keepsReading(servers: McpServer[] | undefined) {
-  return Boolean(
-    servers?.some((server) => server.state === "connecting" || server.state === "needs_access"),
-  )
+  return Boolean(servers?.some((server) => server.state === "connecting"))
 }
 
 /**
@@ -122,18 +124,6 @@ export function useMcpFeatureAnswers(server: McpServerConfig): McpFeatureAnswers
 }
 
 /** What this Bot's plugin answered about its MCP servers (see `McpFeatureAnswer`). */
-export function useMcpFeatureAnswer(server: McpServerConfig): McpFeatureAnswer {
-  return useMcpFeatureAnswers(server).list
-}
-
-/**
- * Whether this Bot's plugin can list its MCP servers, so its row exists: true only for an answer
- * that carries the feature, false while it's unknown and for a Bot whose Hermes is too old.
- */
-export function useMcpFeature(server: McpServerConfig) {
-  return useMcpFeatureAnswer(server) === "yes"
-}
-
 /** Bots whose plugin has no `mcp` route (an older plugin), each left alone for a while. */
 const unsupported = cooldown()
 
@@ -146,7 +136,7 @@ const unsupported = cooldown()
  * servers the Host says the bot has; a write that fails is thrown for the screen to report, leaving
  * the list as it was.
  */
-export function useMcpServers(server: McpServerConfig, active: boolean) {
+export function useMcpServers(server: McpServerConfig, active: boolean, watching = false) {
   const [servers, setServers] = useState<McpServer[] | undefined>(undefined)
   const config = serverConfig(server)
   const { baseUrl, apiKey } = config
@@ -170,7 +160,7 @@ export function useMcpServers(server: McpServerConfig, active: boolean) {
         },
       )
     },
-    keepsReading(servers) ? MCP_WORK_MS : false,
+    keepsReading(servers) || watching ? MCP_WORK_MS : false,
     [key],
     { active: active && Boolean(key) },
   )
@@ -352,6 +342,9 @@ export function useMcpServerTools(
 ) {
   const [found, setFound] = useState<McpTools | undefined>(undefined)
   const [probing, setProbing] = useState(false)
+  // The Host's own sentence for a probe it refused: the one tap that reaches the server says why,
+  // rather than leaving a button that looks like nothing happened.
+  const [failed, setFailed] = useState<string | undefined>(undefined)
   const config = serverConfig(server)
   const key = config.baseUrl && config.apiKey ? connectionKey(config) : ""
   usePoll(
@@ -370,6 +363,7 @@ export function useMcpServerTools(
   const probe = useCallback(async () => {
     if (!name) return
     setProbing(true)
+    setFailed(undefined)
     try {
       setFound(
         await probeMcpServerTools(
@@ -378,11 +372,13 @@ export function useMcpServerTools(
           AbortSignal.timeout(MCP_TOOLS_MS),
         ),
       )
+    } catch (error) {
+      setFailed(error instanceof Error ? error.message : "Couldn't load those.")
     } finally {
       setProbing(false)
     }
   }, [config.baseUrl, config.apiKey, name])
-  return { tools: found, probing, probe }
+  return { tools: found, probing, failed, probe }
 }
 
 /**

@@ -1151,12 +1151,12 @@ def _declared_value(spec: Any, get_env: Callable[[str], Any]) -> Dict[str, Any]:
     is never answered (Hermes's own form leaves one out, and the field is masked, so a default in it
     would be a credential on screen); a plain value's default is what makes the common case one tap.
     """
-    secret = getattr(spec, "secret", True) is not False
+    shape = _value_shape(spec)
     return {
-        **_value_shape(spec),
+        **shape,
         "prompt": getattr(spec, "prompt", "") or "",
-        "default": "" if secret else (getattr(spec, "default", "") or ""),
-        "set": bool(get_env(getattr(spec, "name", ""))),
+        "default": "" if shape["secret"] else (getattr(spec, "default", "") or ""),
+        "set": bool(get_env(shape["name"])),
     }
 
 

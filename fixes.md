@@ -1587,3 +1587,94 @@ user's message — read in the tree and matched against the transcript and the r
 four chat flows (`chat-message`, `reattach`, `history-pages` and the branch's new `history-generations`)
 all pass, and none of them stops a reply and sends in the same breath, or asserts what a compaction's
 seam row looks like.
+
+# Deferred fixes from the simplify pass on the MCP tab
+
+A cleanup review of the bot's MCP tab (`feat(settings): MCP as a tab…`, ADR 0014) — four parallel
+reviewers: reuse, quality, efficiency, altitude — over the nine source files the change touched
+(`app/src/routes/mcps.tsx`, `bot-settings.tsx`, `settings.tsx`, `app/src/lib/mcp.ts` and its four MCP
+modules, `plugin/mcp.py`, `plugin/__init__.py`). What the review found that a cleanup pass could
+apply is applied on the branch. What is left is here: each one collapses a mechanism rather than a
+call site, so each is its own decision.
+
+## Risky
+
+### 1. `plugin/mcp.py`'s eight import bundles and eight gates are one table
+
+`_hermes`, `_hermes_write`, `_hermes_remove`, `_hermes_catalogue`, `_hermes_install`,
+`_hermes_configure`, `_hermes_access` and `_hermes_tools` each late-import their own symbol set and
+re-key it, and `available`, `writable`, `removable`, `browsable`, `addable`, `accessible`,
+`configurable` and `tool_readable` are the same five-line `try: load() / except McpError: return
+str(error) / return None` body with their own prose. `FEATURES` already pairs each feature with its
+gate, so the table and the functions encode the same wiring twice, and the same key names different
+things (`"scope"` is the read scope in `_hermes`/`_hermes_catalogue`/`_hermes_access` and the write
+scope in `_hermes_write`, while `_hermes_install` renames both).
+
+- Cost: a control can be advertised for a verb whose loader no longer matches (a `KeyError` at the
+  route, no error at the gate), and a seventh verb costs a loader, a gate, a docstring and a
+  `FEATURES` row.
+- Suggested fix: one symbol-to-importer table resolved once, with `FEATURES` naming required symbols
+  instead of bespoke functions; `_gate` built from it, keeping each function's docstring.
+- Why it is risky: it rewrites ~320 lines of the module every MCP route depends on, and the gates are
+  what decide which controls a host is offered. It wants its own branch with the plugin suite green
+  on both ends of the change.
+
+### 2. `plugin/__init__.py` factors two of its twelve MCP routes
+
+`mcp_read` encodes the guard, the profile, the two error mappings and the `{"object": …}` wrap, and
+the other ten handlers write the same fourteen lines by hand.
+
+- Cost: a change to the error mapping (a new status, a redaction) is ten edits, and a 501-versus-400
+  mix-up in one of them is a silent regression.
+- Suggested fix: widen the factory to take the verb, the answer key and an optional body validator,
+  or drop it and write the two reads like the file's other routes.
+- Why it is risky: the ten routes are what the whole MCP tab calls; a wrong mapping shows up as a
+  screen that says the wrong thing rather than a test failure.
+
+## Careful
+
+### 3. The Config tab and the custom form carry the same transport fields
+
+`ConfigTab` and `CustomServerSheet` render Transport, Address, Authentication, Token, Command and
+Arguments from the same `ConfigDraft`, differing only in the id prefixes and whether the fields are
+disabled — around ninety duplicated lines. The value rows are the same shape again.
+
+- Cost: a field change (a new authentication kind, a masking rule, an argument hint) has to land in
+  two places, and the two forms drift without a test noticing.
+- Suggested fix: one `<ServerFields draft onChange editable idPrefix>` and one `<ValueRows>`, called
+  from both.
+- Why it is careful: it moves the ids the e2e flows locate their fields by, across two sheets and
+  eight flows, so it wants the flows rewritten in the same change rather than after it.
+
+### 4. The MCP client's readers repeat three idioms
+
+`parseMcpServers`, `parseMcpCatalogue`, `parseMcpServerDetail` and `parseMcpTools` each roll their own
+`(value as {object?: {key}})?.object?.key` unwrap, `Array.isArray` check and drop-unnamed-row filter,
+and `probeMcpServerTools` is `listMcpServerTools` with a different method and no shared path builder.
+
+- Cost: six copies of two idioms, and eight hand-built `…/mcp/<name>…` paths; the `str` helper that
+  would cover half of it sits two thousand lines below the MCP block.
+- Suggested fix: a `namedRows(value, key, parse)` reader and an `mcpPath(config, …segments)` beside
+  the existing `endpoint`/`serverRoot` helpers, with the probe named as an option rather than a copy.
+- Why it is careful: it touches every MCP read the app makes, and the readers' strictness is what
+  keeps a malformed Host answer from drawing a half-row.
+
+### 5. `Segmented` is the third copy of one pill control
+
+`mcps.tsx`'s `Segmented`, the goal wizard's and the research screen's are the same choice control at
+three sizes (`h-11`, `min-h-9`, `min-h-10`), with `aria-checked` in one and `aria-pressed` in another.
+
+- Cost: three diverging styles for one choice, and three places to fix its roles or its height.
+- Suggested fix: one component under `app/src/components/`, sized by a prop, with the three call
+  sites moved onto it.
+- Why it is careful: it edits two screens this change doesn't otherwise touch, so it belongs with a
+  pass over the controls rather than with the MCP tab.
+
+## Not entries
+
+The feature-answer cache (`answered` in `lib/mcps.ts`) never forgets a connection and never invalidates
+an answer, so a bot whose plugin is upgraded keeps its old answer until a reload. It is left as it is:
+the map is one entry per bot the user has opened, the screen asks again on the next editor open, and a
+TTL would need a clock this module doesn't have. The same-read cost the review measured for the
+`/info` gate list (nine serialized thread hops per call) is a millisecond on a route the app already
+caches, so it is not worth a change on its own.

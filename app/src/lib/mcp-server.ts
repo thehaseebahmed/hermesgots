@@ -23,9 +23,7 @@ export function healthLine(
 ): { text: string; authenticate: boolean; failed: boolean } {
   if (server.state === "needs_access") {
     return {
-      text: canAuthenticate
-        ? "Click here to authenticate"
-        : "Needs Authentication",
+      text: canAuthenticate ? "Click here to authenticate" : "Needs Authentication",
       authenticate: canAuthenticate,
       failed: false,
     }
@@ -61,10 +59,12 @@ export interface ConfigDraft {
   token: string
 }
 
-/** One environment value the form is editing: the name the Host knows, and what was typed over. */
+/** One environment value a form is editing: the name it lands under, and what was typed. */
 export interface ValueDraft {
   name: string
   value: string
+  /** A row the form added, whose name is typed here rather than read from the block. */
+  named?: boolean
 }
 
 /** The draft a server's Config tab opens with. */
@@ -197,35 +197,21 @@ export function configChanged(
   return splitArgs(draft.args).join("\u0000") !== detail.args.join("\u0000")
 }
 
+/** Whether the draft says enough about where the server is: an address, or a command to run. */
+export function transportReady(draft: ConfigDraft): boolean {
+  return draft.transport === "http" ? Boolean(draft.url.trim()) : Boolean(draft.command.trim())
+}
+
 /**
- * What the custom form adds: a name and one transport, with the values typed for a stdio server.
+ * What the custom form adds: the same edit the Config tab saves, under the name the form asked for.
  * Hermes's own write refuses the rest — a name the bot has, a name a plugin provides, a block its
  * validator won't take — so nothing is decided here beyond what the form can't send.
  */
 export function customServer(name: string, draft: ConfigDraft, rows: ValueDraft[]) {
-  const values = typedValues(rows)
-  const carried = Object.keys(values).length ? { values } : {}
-  if (draft.transport === "http") {
-    const token = draft.token.trim()
-    return {
-      name: name.trim(),
-      transport: "http" as const,
-      url: draft.url.trim(),
-      auth: draft.auth,
-      ...(draft.auth === "header" && token ? { token } : {}),
-    }
-  }
-  return {
-    name: name.trim(),
-    transport: "stdio" as const,
-    command: draft.command.trim(),
-    args: splitArgs(draft.args),
-    ...carried,
-  }
+  return { name: name.trim(), ...configEdit(draft, rows) }
 }
 
 /** Whether a custom server has the two things every one needs: a name and its transport's field. */
 export function customReady(name: string, draft: ConfigDraft): boolean {
-  if (!name.trim()) return false
-  return draft.transport === "http" ? Boolean(draft.url.trim()) : Boolean(draft.command.trim())
+  return Boolean(name.trim()) && transportReady(draft)
 }
