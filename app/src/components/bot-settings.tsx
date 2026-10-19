@@ -510,8 +510,8 @@ export function BotEditor({
               />
             </Field>
           )}
-          <FallbackModelsSetting profile={profile} />
           <DelegationModelSetting profile={profile} />
+          <FallbackModelsSetting profile={profile} />
         </FieldGroup>
       </TabsContent>
 
