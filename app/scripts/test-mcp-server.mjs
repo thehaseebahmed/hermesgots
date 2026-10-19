@@ -56,7 +56,7 @@ test("a waiting server invites the tap where the Host can start the flow", () =>
 
 test("a waiting server whose Host can't start the flow says so without inviting a tap", () => {
   const line = healthLine(server({ state: "needs_access" }), { canAuthenticate: false })
-  assert.equal(line.text, "Needs Authentication")
+  assert.equal(line.text, "Waiting on Server access")
   assert.equal(line.authenticate, false)
 })
 

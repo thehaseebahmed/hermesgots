@@ -2,7 +2,7 @@
 // a request, kept here so the cases that read oddly (a Host that says nothing about a row, an answer
 // with no URL because the stored access still works, an expiry Hermes didn't send) are driven by
 // `scripts/test-mcp-access.mjs` instead of by a browser flow. `hermes.ts` is the client that carries
-// these values over the wire; `routes/mcps.tsx` is what shows them.
+// these values over the wire; `components/mcps-tab.tsx` is what shows them.
 
 /** Whether the Host can start Server access for a row: the wire's own `access` flag, in Gots' words. */
 export type McpAccessOffer = "startable" | "none"

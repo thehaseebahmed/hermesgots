@@ -59,15 +59,13 @@ import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
 import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { MIN_PLUGIN_VERSION, pluginOutdated } from "@/lib/version"
-import { McpsTab } from "@/routes/mcps"
+import { McpsTab } from "@/components/mcps-tab"
 
 type Connection =
   | { state: "idle" }
   | { state: "testing" }
   | { state: "ok"; plugin: string | null }
   | { state: "error"; message: string }
-
-export type { BotTab }
 
 /** Hermes's default model id; any other advertised id is the profile's name. */
 const UNNAMED_MODEL = "hermes-agent"

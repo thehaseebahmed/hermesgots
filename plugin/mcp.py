@@ -452,13 +452,27 @@ def edit(profile: Optional[str], name: str, body: Dict[str, Any]) -> List[Dict[s
         _writable_server(hermes, name)
         servers, _ = hermes["sources"](hermes["servers"]())
         block = _edited(hermes, name, _server_block(servers, name), body)
-        values = _typed(hermes, body.get("values"))
-        if not hermes["save_server"](name, block):
-            raise McpError(_refusal(hermes, name, block))
-        for key, value in values.items():
-            hermes["save_env"](key, value)
-        hermes["reconcile"]()
-        return _all_rows(hermes)
+        return _write_block(hermes, name, block, body.get("values"))
+
+
+def _write_block(
+    hermes: Dict[str, Any], name: str, block: Dict[str, Any], typed: Any
+) -> List[Dict[str, Any]]:
+    """Write one server's block and the values typed into it, then answer the servers left.
+
+    Call it inside the profile's write scope, after the name is known to be one this bot may change.
+    Hermes's validator has the last word on the block; the values a form typed are the only ones
+    written, and each lands in the profile's ``.env`` while the block keeps its ``${NAME}``
+    reference, so no credential is ever part of a configuration. Shared by the Config save and a
+    custom add, because both land a block the same way (ADR 0014).
+    """
+    values = _typed(hermes, typed)
+    if not hermes["save_server"](name, block):
+        raise McpError(_refusal(hermes, name, block))
+    for key, value in values.items():
+        hermes["save_env"](key, value)
+    hermes["reconcile"]()
+    return _all_rows(hermes)
 
 
 def custom(profile: Optional[str], body: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -467,7 +481,7 @@ def custom(profile: Optional[str], body: Dict[str, Any]) -> List[Dict[str, Any]]
     ``body`` is a name and exactly one transport — ``url``, or ``command`` with ``args`` — plus an
     HTTP server's ``auth`` and optional ``token``, and the environment ``values`` a stdio one needs.
     It is the Dashboard's own create contract (``hermes mcp add``, ``POST /api/mcp/servers``) with one
-    deliberate difference: a value goes to the profile's ``.env`` and the block holds Heremes's
+    deliberate difference: a value goes to the profile's ``.env`` and the block holds Hermes's
     ``${NAME}`` reference, as a Catalogue add already does, rather than inline — so a credential
     never lands in ``config.yaml`` (ADR 0014).
 
@@ -485,13 +499,7 @@ def custom(profile: Optional[str], body: Dict[str, Any]) -> List[Dict[str, Any]]
         if body.get("url") and body.get("command"):
             raise McpError("A server has either an address or a command, never both.", 400)
         block = _edited(hermes, name, {}, body)
-        values = _typed(hermes, body.get("values"))
-        if not hermes["save_server"](name, block):
-            raise McpError(_refusal(hermes, name, block))
-        for key, value in values.items():
-            hermes["save_env"](key, value)
-        hermes["reconcile"]()
-        return _all_rows(hermes)
+        return _write_block(hermes, name, block, body.get("values"))
 
 
 def tools(profile: Optional[str], name: str) -> Dict[str, Any]:
@@ -553,6 +561,7 @@ def _hermes_configure() -> Dict[str, Any]:
 def _hermes_tools() -> Dict[str, Any]:
     """The readers plus the schema cache and the one-server probe (see ``_TOOLS``)."""
     return _load(_TOOLS)
+
 
 # A value's content, when the block holds a reference rather than the value itself.
 _REFERENCE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")

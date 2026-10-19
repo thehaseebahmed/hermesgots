@@ -324,7 +324,6 @@ export function GoalWizard({
                   Reviewers look at the work in subagents of their own before it's called done.
                 </span>
                 <Segmented
-                  size="sm"
                   label="Reviewers"
                   options={REVIEWER_COUNTS.map((n) => ({
                     id: n,
@@ -336,7 +335,6 @@ export function GoalWizard({
                 {spec.reviewers > 0 && (
                   <>
                     <Segmented
-                      size="sm"
                       label="What they look at"
                       options={REVIEW_KINDS.map(({ id, label }) => ({ id, label }))}
                       value={spec.reviewKind}

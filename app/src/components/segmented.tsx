@@ -2,15 +2,6 @@ import type { LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
-const SIZES = {
-  /** The goal wizard's rows, inside a long form. */
-  sm: "min-h-9",
-  /** A research form's rows. */
-  md: "min-h-10",
-  /** A sheet's one choice, where the target has to stand on its own. */
-  lg: "min-h-11",
-}
-
 /**
  * A row of pills where one of a few values is active, each a radio of one group.
  *
@@ -24,14 +15,12 @@ export function Segmented<T extends string | number>({
   options,
   value,
   onChange,
-  size = "md",
   disabled,
 }: {
   label: string
   options: { id: T; label: string; icon?: LucideIcon }[]
   value: T
   onChange: (value: T) => void
-  size?: keyof typeof SIZES
   disabled?: boolean
 }) {
   return (
@@ -48,8 +37,8 @@ export function Segmented<T extends string | number>({
             disabled={disabled}
             onClick={() => onChange(option.id)}
             className={cn(
-              "flex flex-1 items-center justify-center gap-1.5 rounded-full px-3 text-sm font-medium text-muted-foreground transition-colors disabled:opacity-50",
-              SIZES[size],
+              // 44px: the pills are the only control in their row, and a thumb hits the target.
+              "flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-full px-3 text-sm font-medium text-muted-foreground transition-colors disabled:opacity-50",
               on && "bg-background text-foreground shadow-sm",
             )}
           >

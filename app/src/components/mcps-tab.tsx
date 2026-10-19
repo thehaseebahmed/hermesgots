@@ -149,45 +149,25 @@ export function McpsTab({ profile }: { profile: Profile }) {
         </Group>
       )}
 
-      {mine.length > 0 && (
-        <section className="flex flex-col gap-2" data-mcp-section="config">
-          <h2 className="px-2 text-sm font-medium text-muted-foreground">Your servers</h2>
-          <Group>
-            {mine.map((server) => (
-              <ServerRow
-                key={server.name}
-                server={server}
-                writable={answers.write === "yes"}
-                canAuthenticate={offersAccess(answers.access === "yes", server.access)}
-                openable={sheetOpenable}
-                onToggle={setEnabled}
-                onOpen={() => setOpened(server.name)}
-                onGrant={() => setGranting(server.name)}
-              />
-            ))}
-          </Group>
-        </section>
-      )}
+      <ServerSection
+        title="Your servers"
+        section="config"
+        servers={mine}
+        openable={sheetOpenable}
+        writable={answers.write === "yes"}
+        canAuthenticate={(server) => offersAccess(answers.access === "yes", server.access)}
+        onToggle={setEnabled}
+        onOpen={setOpened}
+        onGrant={setGranting}
+      />
 
-      {theirs.length > 0 && (
-        <section className="flex flex-col gap-2" data-mcp-section="plugin">
-          <h2 className="px-2 text-sm font-medium text-muted-foreground">From plugins</h2>
-          <Group>
-            {theirs.map((server) => (
-              <ServerRow
-                key={server.name}
-                server={server}
-                writable={false}
-                canAuthenticate={false}
-                openable={sheetOpenable}
-                onToggle={setEnabled}
-                onOpen={() => setOpened(server.name)}
-                onGrant={() => setGranting(server.name)}
-              />
-            ))}
-          </Group>
-        </section>
-      )}
+      <ServerSection
+        title="From plugins"
+        section="plugin"
+        servers={theirs}
+        openable={sheetOpenable}
+        onOpen={setOpened}
+      />
 
       <AddServerSheet
         open={adding}
@@ -269,6 +249,56 @@ export function McpsTab({ profile }: { profile: Profile }) {
 }
 
 /**
+ * One of the screen's two lists: a heading and the rows under it, with nothing at all when the list
+ * is empty — a heading over no rows says there are none, and the screen drops it instead.
+ *
+ * A user managed server gets the switch, the sheet and the access flow; a plugin's gets only the sheet,
+ * because Hermes refuses to modify what a plugin provides (ADR 0014).
+ */
+function ServerSection({
+  title,
+  section,
+  servers,
+  openable,
+  writable = false,
+  canAuthenticate,
+  onToggle,
+  onOpen,
+  onGrant,
+}: {
+  title: string
+  section: string
+  servers: McpServer[]
+  openable: boolean
+  writable?: boolean
+  canAuthenticate?: (server: McpServer) => boolean
+  onToggle?: (name: string, enabled: boolean) => Promise<void>
+  onOpen: (name: string) => void
+  onGrant?: (name: string) => void
+}) {
+  if (servers.length === 0) return null
+  return (
+    <section className="flex flex-col gap-2" data-mcp-section={section}>
+      <h2 className="px-2 text-sm font-medium text-muted-foreground">{title}</h2>
+      <Group>
+        {servers.map((server) => (
+          <ServerRow
+            key={server.name}
+            server={server}
+            writable={writable}
+            canAuthenticate={canAuthenticate?.(server) ?? false}
+            openable={openable}
+            onToggle={onToggle}
+            onOpen={() => onOpen(server.name)}
+            onGrant={onGrant ? () => onGrant(server.name) : undefined}
+          />
+        ))}
+      </Group>
+    </section>
+  )
+}
+
+/**
  * One server: its name, its health, and the switch its Host advertises.
  *
  * The name is the button opening the server's sheet, and the health line sits under it — a button of
@@ -279,26 +309,28 @@ export function McpsTab({ profile }: { profile: Profile }) {
  */
 function ServerRow({
   server,
-  writable,
-  canAuthenticate,
+  writable = false,
+  canAuthenticate = false,
   openable,
   onToggle,
   onOpen,
   onGrant,
 }: {
   server: McpServer
-  writable: boolean
-  canAuthenticate: boolean
+  /** Whether this Host can write this bot's config, so the row may offer its switch. */
+  writable?: boolean
+  /** Whether the Host can start Server access, so the health line may be the tap. */
+  canAuthenticate?: boolean
   openable: boolean
-  onToggle: (name: string, enabled: boolean) => Promise<void>
+  onToggle?: (name: string, enabled: boolean) => Promise<void>
   onOpen: () => void
-  onGrant: () => void
+  onGrant?: () => void
 }) {
   const [saving, setSaving] = useState(false)
   const line = healthLine(server, { canAuthenticate })
   // A server a Hermes plugin provides is read-only, and so is every row of a Host that can't write,
   // so no switch is offered where one could only come back refused.
-  const editable = server.source === "config" && writable
+  const editable = server.source === "config" && writable && onToggle !== undefined
   return (
     <div className={rowClass} data-mcp={server.name}>
       <ServerIcon className="size-5 shrink-0 text-muted-foreground" />
@@ -323,9 +355,10 @@ function ServerRow({
           <button
             type="button"
             className={cn(
-              // The line reads exactly where a plain subtitle would: its 44px touch target grows
-              // below the text, and the negative margin keeps that height out of the row's layout.
-              "-mx-1 -mb-6 flex min-h-11 items-start px-1 text-left text-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring",
+              // The line reads exactly where a plain subtitle would — the target grows below the
+              // text rather than around it, so the row is its own height and nothing overlaps the
+              // row beneath, whose switch is a tap of its own.
+              "-mx-1 flex min-h-11 items-start px-1 pt-0 pb-3 text-left text-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring",
               line.failed ? "text-destructive" : "text-warning",
             )}
             onClick={onGrant}
@@ -350,6 +383,7 @@ function ServerRow({
           disabled={saving}
           onCheckedChange={async (checked) => {
             setSaving(true)
+            if (!onToggle) return
             try {
               await onToggle(server.name, checked)
             } catch (error) {
@@ -478,16 +512,6 @@ function ServerSheet({
   )
 }
 
-/**
- * One server's block: the transport it runs, how it authenticates, and one field per environment
- * value with what the Host knows about it — never its content, only whether it holds one.
- *
- * A field is titled with the name the value lands under on the Host and says nothing else: a block
- * carries no prose, and a catalogue entry of the same name describes someone else's variable. A value the bot already holds
- * stands empty with Set as its placeholder: typing into it replaces what it holds, and leaving it
- * alone sends nothing. Everything is drafted in this component's own state and written by one Save —
- * a config write and a reconcile per keystroke would be a rewrite per character.
- */
 /** A server's transport and the fields it needs, shared by its Config tab and the custom form.
  *
  * Both edit the same block — an address or a command, an authentication kind and the token, the
@@ -514,7 +538,6 @@ function ServerFields({
       <Field>
         <FieldLabel>Transport</FieldLabel>
         <Segmented
-          size="lg"
           label="Transport"
           value={draft.transport}
           disabled={!editable}
@@ -546,7 +569,6 @@ function ServerFields({
           <Field>
             <FieldLabel>Authentication</FieldLabel>
             <Segmented
-              size="lg"
               label="Authentication"
               value={draft.auth}
               disabled={!editable}
@@ -695,6 +717,17 @@ function ValueSection({
   )
 }
 
+/**
+ * One server's block: the transport it runs, how it authenticates, and one field per environment
+ * value with what the Host knows about it — never its content, only whether it holds one.
+ *
+ * A field is titled with the name the value lands under on the Host and says nothing else: a block
+ * carries no prose, and a catalogue entry of the same name describes someone else's variable. A
+ * value the bot already holds stands empty with Set as its placeholder: typing into it replaces
+ * what it holds, and leaving it alone sends nothing. Everything is drafted in this component's own
+ * state and written by one Save — a config write and a reconcile per keystroke would be a rewrite
+ * per character.
+ */
 function ConfigTab({
   profile,
   server,

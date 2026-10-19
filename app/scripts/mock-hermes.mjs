@@ -11,7 +11,7 @@
 // labels a chat as Gots's on POST /api/plugins/memento/sessions/{id}/label. Its
 // GET /api/plugins/memento/sessions/{id}/context reports a keyed session's latest model call, and
 // GET /api/plugins/memento/skills serves the composer's `/` menu (three skills, no profile scope),
-// and GET /api/plugins/memento/mcp the Bot's MCP servers a screen of its own lists (name, state,
+// and GET /api/plugins/memento/mcp the Bot's MCP servers the Bot's editor lists in its MCP tab (name, state,
 // source, and the Host's own reason on a failed one; MOCK_MCP=off is a Hermes whose plugin can't).
 // GET /api/plugins/memento/usage?provider=… serves two windows (Session + Weekly) whose
 // used_percent is MOCK_USAGE_PERCENT (default 94 so the composer banner shows; 0 → no windows), and
@@ -81,11 +81,17 @@
 // plugin/dictation.py with faster-whisper; MOCK_DICTATION=off reports it unavailable (the mic hides)
 // and MOCK_DICTATION=fail answers every clip with an error. GET /__mock/dictation lists the clips it
 // was sent (size, type, hint and the text before each), for the regression script.
-// GET /api/plugins/memento/mcp lists the bot's MCP servers, …/mcp/catalogue the Catalogue Hermes
-// offers with each entry marked as the bot's own servers have it, POST …/mcp/{name}/enabled switches
-// one and DELETE …/mcp/{name} takes one away (held in `mcpRemoved` apart from the definition above),
-// with MOCK_MCP=off a plugin that has neither route nor feature; POST /__mock/mcp puts back every
-// server a flow removed.
+// GET /api/plugins/memento/mcp lists the bot's MCP servers and …/mcp/catalogue the Catalogue Hermes
+// offers, each entry marked as the bot's servers have it (and `needs_config` where it declares
+// values); GET …/mcp/catalogue/{name} is one entry with the values it declares. GET …/mcp/{name} is
+// one server's block (or `mcpBlockRefusal`'s error), POST …/mcp/{name}/config rewrites it, and
+// GET/POST …/mcp/{name}/tools are the schema-cache read and the one probe; POST …/mcp/install adds a
+// Catalogue entry and POST …/mcp/custom a server the Catalogue doesn't offer. POST …/mcp/{name}/enabled
+// switches one and DELETE …/mcp/{name} takes one away (held in `mcpRemoved` apart from the definition
+// above). POST …/mcp/{name}/access starts Server access and …/access/callback takes the pasted
+// address. The features it advertises follow its route set (`mcps`, `mcps_write`, `mcps_remove`,
+// `mcps_catalogue`, `mcps_add`, `mcps_access`, `mcps_config`, `mcps_tools`); with MOCK_MCP=off a
+// plugin that has none of them. POST /__mock/mcp puts back every server a flow removed.
 // Research missions (GET and POST /api/plugins/memento/research, …/research/{id} and its actions)
 // live in mock-research.mjs.
 //
@@ -709,11 +715,14 @@ const PENDING_CHECK_S = 12
 /** Project sessions as the plugin's memento.db holds them, by Hermes session id. */
 const projectSessions = new Map()
 // The plugin's pull request instruction (prompt_builder._PR_INSTRUCTIONS), word for word.
-const PR_INSTRUCTIONS = "When the work is done and you've checked it, ship it yourself with the pull_request tool and action 'ship': it commits what's left, pushes this branch and opens a draft pull request, or pushes to the one open. Don't ask first, and don't use git push or gh for it. Write the description from the repo's pull request template when it has one (named below), else with Summary, Changes and How to test sections. The pull request stays a draft. Pass force: true only after a rebase or amend. action 'update' changes the open pull request's title or body, and 'status' reports without writing. Merging and closing are the user's decision: the tool refuses them, so ask the user with clarify instead."
+const PR_INSTRUCTIONS =
+  "When the work is done and you've checked it, ship it yourself with the pull_request tool and action 'ship': it commits what's left, pushes this branch and opens a draft pull request, or pushes to the one open. Don't ask first, and don't use git push or gh for it. Write the description from the repo's pull request template when it has one (named below), else with Summary, Changes and How to test sections. The pull request stays a draft. Pass force: true only after a rebase or amend. action 'update' changes the open pull request's title or body, and 'status' reports without writing. Merging and closing are the user's decision: the tool refuses them, so ask the user with clarify instead."
 // The plugin's done-work emphasis (prompt_builder._DONE_INSTRUCTIONS), word for word.
-const DONE_INSTRUCTIONS = "Two things the run's prompt emphasises once the work is done: don't share the pull request url or the commit message in your reply — the pull_request result and the session's pull request list already surface them where the user sees them. And before you finish, update your todo list to its final state: every item completed, or cancelled where it was dropped."
+const DONE_INSTRUCTIONS =
+  "Two things the run's prompt emphasises once the work is done: don't share the pull request url or the commit message in your reply — the pull_request result and the session's pull request list already surface them where the user sees them. And before you finish, update your todo list to its final state: every item completed, or cancelled where it was dropped."
 // The plugin's working-rhythm guidance (prompt_builder._PROGRESS_UPDATES_INSTRUCTIONS), word for word.
-const PROGRESS_UPDATES_INSTRUCTIONS = "Keep the user in the loop as you work, at a working rhythm rather than a running commentary. Post a short update between checkpoints — what landed, what you're doing next — so a long stretch of tool calls never reads as a hang. Keep the todo list current as you go: mark items done as they land and add what you discover. When something keeps failing, say what you tried and what you now think is wrong before the next attempt. Thinking out loud while you plan is welcome. Don't narrate each edit, read or command — the tool calls already show those; keep what you do say technical enough to follow the work without spelling out every implementation detail."
+const PROGRESS_UPDATES_INSTRUCTIONS =
+  "Keep the user in the loop as you work, at a working rhythm rather than a running commentary. Post a short update between checkpoints — what landed, what you're doing next — so a long stretch of tool calls never reads as a hang. Keep the todo list current as you go: mark items done as they land and add what you discover. When something keeps failing, say what you tried and what you now think is wrong before the next attempt. Thinking out loud while you plan is welcome. Don't narrate each edit, read or command — the tool calls already show those; keep what you do say technical enough to follow the work without spelling out every implementation detail."
 // A chat's goal rides in Auto: Hermes's goal keeps the session working between runs.
 const MODES = ["accept_edits", "auto", "plan"]
 // A chat's goal, as the plugin's goal routes carry it: Hermes's own state, kept per session.
@@ -2677,7 +2686,10 @@ http
             args: block.args ?? [],
             auth: block.auth ?? "none",
             editable: server.source === "config",
-            values: block.values.map((value) => ({ name: value.name, set: mcpEnv.has(value.name) })),
+            values: block.values.map((value) => ({
+              name: value.name,
+              set: mcpEnv.has(value.name),
+            })),
           },
         },
       })

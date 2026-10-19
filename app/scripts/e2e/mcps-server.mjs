@@ -2,11 +2,11 @@
 // is shown and saved, and Tools, where what it offers is listed.
 //
 // Config is everything the block holds for a server the bot's own config keeps: the transport and
-// its fields, then one field per environment value, titled with the name the value lands under on the
-// Host and subtitled with the prompt its manifest writes for people — the other way round from where
-// this form started. A value the bot already holds stands empty with Set as its placeholder, so its
-// content is never on the screen; typing into that field is what replaces it. Nothing is written
-// until Save, which is one write for the whole block, and Save is only there once something changed.
+// its fields, then one field per environment value under *Environment variables*, titled with the
+// name the value lands under on the Host and nothing else — a block carries no prose. A value the
+// bot already holds stands empty with Set as its placeholder, so its content is never on the
+// screen; typing into that field is what replaces it. Nothing is written until Save, which is one
+// write for the whole block, and Save is only there once something changed.
 // Arguments are one line and reach the Host as argv, so a path with a space survives.
 //
 // Tools reads Hermes's schema cache, which connects nothing: what the server offers is there to read

@@ -4,9 +4,11 @@ A bot's MCP servers were shown with a badge for each of six state words — on, 
 failed, needs access, provided by a plugin — and Server access was a separate button. A badge is a
 word off a list the user has to learn, and it says nothing about the thing they actually want to
 know. So a row is now its name over its health, in prose: *Healthy: 78 tools*, *Off*,
-*Connecting…*, the Host's own failure text, or *Click here to authenticate* —
-and that last line is itself the tap that starts the flow, so the waiting row and the way out of it
-are the same words. A failure the Host says Server access can fix keeps its reason as the line and
+*Connecting…*, the Host's own failure text, *Click here to authenticate*, or *Waiting on Server
+access* where the Host cannot start that flow — and the authenticate line is itself the tap, so the
+waiting row and the way out of it are the same words. A line offering a tap the Host cannot honour
+would be a promise the screen keeps breaking, so the one it cannot start says what the server is
+waiting for and is plain text. A failure the Host says Server access can fix keeps its reason as the line and
 that line stays the tap: a grant that failed leaves the failure on screen and the way back into the
 flow on it, which is what the separate button used to be for.
 

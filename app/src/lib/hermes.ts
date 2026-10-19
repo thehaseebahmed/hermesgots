@@ -783,8 +783,8 @@ export function parseMcpTools(value: unknown): McpTools {
 
 /**
  * One of the bot's servers with the block it runs (the Gots plugin's `GET /mcp/<name>`): the
- * transport and its fields, and one row per environment name with the prompt its Catalogue entry
- * writes. A read only, and the only thing it says about a value the bot holds is whether it has one.
+ * transport and its fields, and one row per environment name the block holds. A read only, and the
+ * only thing it says about a value the bot holds is whether it has one.
  */
 export async function getMcpServer(
   config: HermesConfig,

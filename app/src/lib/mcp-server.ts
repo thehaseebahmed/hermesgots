@@ -23,7 +23,9 @@ export function healthLine(
 ): { text: string; authenticate: boolean; failed: boolean } {
   if (server.state === "needs_access") {
     return {
-      text: canAuthenticate ? "Click here to authenticate" : "Needs Authentication",
+      // A Host that can't start the flow can't offer the tap, and a line offering one it can't
+      // honour is worse than a line saying what the server is waiting for.
+      text: canAuthenticate ? "Click here to authenticate" : "Waiting on Server access",
       authenticate: canAuthenticate,
       failed: false,
     }
