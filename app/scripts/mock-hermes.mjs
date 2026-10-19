@@ -32,7 +32,9 @@
 // POST projects/{id}, projects/{id}/retry and projects/{id}/remove edit (name, description,
 // archived, pinned), retry and delete one. POST projects/{id}/repos clones another repo in (4s; a
 // name like `fail` fails it) and POST …/repos/remove takes one out (2s); GET …/usage sums made-up
-// usage. While a repo is being added, a new session's workspace is refused, and a session whose repo
+// usage. GET projects/{id}/tasks answers the project's ready tasks (the frontier AFK works: ready
+// oldest first, claimed, blocked with the blocker) and 409s when the host has no GitHub account.
+// While a repo is being added, a new session's workspace is refused, and a session whose repo
 // was removed is refused with the reason, which the workspace also reports as `blocked`.
 // Chats are titled like Hermes does: a slice of the opener at once, a "model" title a moment later,
 // readable on GET /api/sessions/{id}. Sessions are keyed by X-Hermes-Session-Id when a key is sent,
@@ -677,6 +679,46 @@ const projectLibrary = (projectId) => {
     .map(([name, files]) => ({ name, files: files.sort((a, b) => b.at - a.at) }))
     .sort((a, b) => a.name.localeCompare(b.name))
 }
+// A project's ready tasks as the plugin's read reports them: two ready (oldest first), one claimed
+// by Gots' own mark, and one blocked by the task it waits on. The numbers and titles never change,
+// so a flow can assert them on whatever project it made.
+const projectTasks = (project) => {
+  const repo = project.folders.find((folder) => folder.repo)?.repo ?? "mock-user/memento"
+  const task = (number, title, extra = {}) => ({
+    repo,
+    number,
+    title,
+    url: `https://github.com/${repo}/issues/${number}`,
+    created_at: `2026-10-${String(number - 264).padStart(2, "0")}T09:00:00Z`,
+    assignees: [],
+    blockers: [],
+    ...extra,
+  })
+  return {
+    object: "memento.tasks",
+    project_id: project.id,
+    repos: [repo],
+    ready: [
+      task(265, "The frontier is read from GitHub and listed"),
+      task(266, "The switch: AFK is a project's own setting on the host"),
+    ],
+    claimed: [task(267, "AFK claims the next ready task", { assignees: ["mock-user"] })],
+    blocked: [
+      task(268, "The claimed task is worked in its own session", {
+        blockers: [
+          {
+            repo,
+            number: 267,
+            title: "AFK claims the next ready task",
+            url: `https://github.com/${repo}/issues/267`,
+            state: "open",
+          },
+        ],
+      }),
+    ],
+  }
+}
+
 const RUN_ERROR = "Timed out waiting for https://status.example.com"
 
 /** A run as a row of Hermes's cron execution ledger. */
@@ -1619,7 +1661,7 @@ http
       return json(res, 200, {
         name: "memento",
         version: PLUGIN_VERSION,
-        features: ["cron_runs", "session_label", "chats", "draft_text", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "goal", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "skills", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : []), ...(MCPS ? ["mcps", "mcps_write", "mcps_remove", "mcps_catalogue", "mcps_add", "mcps_access"] : [])],
+        features: ["cron_runs", "session_label", "chats", "draft_text", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "goal", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "skills", "queue", "dictation", "afk", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : []), ...(MCPS ? ["mcps", "mcps_write", "mcps_remove", "mcps_catalogue", "mcps_add", "mcps_access"] : [])],
         clarify: true,
         hooks: true,
         goal:
@@ -1921,7 +1963,7 @@ http
       cloneProject(project, root)
       return json(res, 202, { object: "memento.project", ...project })
     }
-    const projectRoute = /^\/api\/plugins\/memento\/projects\/([^/]+)(\/remove|\/retry|\/repos|\/repos\/remove|\/usage|\/library)?$/.exec(url.pathname)
+    const projectRoute = /^\/api\/plugins\/memento\/projects\/([^/]+)(\/remove|\/retry|\/repos|\/repos\/remove|\/usage|\/library|\/tasks)?$/.exec(url.pathname)
     if (PLUGIN && !profile && projectRoute?.[2] === "/library") {
       // The project's filed files, every session's merged by folder; a missing project 404s.
       const found = mockProjects().find((p) => p.id === decodeURIComponent(projectRoute[1]))
@@ -1932,6 +1974,24 @@ http
         project_id: found.id,
         folders: projectLibrary(found.id),
       })
+    }
+    if (PLUGIN && !profile && req.method === "GET" && projectRoute?.[2] === "/tasks") {
+      // A project's tasks as the plugin's read reports them: the frontier AFK works, and what is
+      // out of it. A project still cloning has no folders to read yet, so it answers empty groups
+      // rather than a 404 — the plugin's own answer while it clones.
+      const found = mockProjects().find((p) => p.id === decodeURIComponent(projectRoute[1]))
+      if (!found) return json(res, 404, { error: { message: "No such project." } })
+      if (found.status === "cloning")
+        return json(res, 200, {
+          object: "memento.tasks",
+          project_id: found.id,
+          repos: [],
+          ready: [],
+          claimed: [],
+          blocked: [],
+        })
+      if (!GITHUB) return json(res, 409, { error: { message: "No GitHub account on the server." } })
+      return json(res, 200, projectTasks(found))
     }
     if (PLUGIN && !profile && projectRoute?.[2] === "/usage") {
       const found = mockProjects().find((p) => p.id === decodeURIComponent(projectRoute[1]))

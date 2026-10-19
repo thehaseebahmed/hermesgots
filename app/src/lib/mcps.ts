@@ -15,10 +15,11 @@
  * hasn't answered yet is left to answer rather than flashing its screen away. A plugin without the
  * route is left alone like every other optional one.
  */
-import { useCallback, useState, useSyncExternalStore } from "react"
+import { useCallback, useState } from "react"
 
 import { connectionKey, serverConfig } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
+import { usePluginFeatureAnswers, type PluginFeatureAnswer } from "@/lib/features"
 import {
   MCP_ACCESS_MS,
   MCP_INSTALL_MS,
@@ -29,7 +30,6 @@ import {
 import {
   deliverMcpAccess,
   getMcpCatalogueEntry,
-  getPluginFeatureList,
   installMcpServer,
   listMcpCatalogue,
   listMcpServers,
@@ -45,7 +45,6 @@ import {
 } from "@/lib/hermes"
 import { usePoll } from "@/lib/poll"
 import { noteFailure } from "@/lib/report"
-import { createSignal } from "@/lib/store"
 
 /**
  * Every MCP feature this screen asks its Bot's Host about, by the key it answers under: `list` gates
@@ -106,26 +105,8 @@ function landRead<T>(
     })
 }
 
-// The feature lists the connections' plugins answered; only a real answer is remembered, so a Host
-// that was away is asked again the next time its editor is opened.
-const answered = new Map<string, string[]>()
-const { subscribe, notify } = createSignal()
-
-async function readFeature(config: HermesConfig) {
-  const key = connectionKey(config)
-  if (answered.has(key)) return
-  const features = await getPluginFeatureList(config)
-  // No answer at all (the Host couldn't be read): nothing is remembered, so it is asked again.
-  if (!features) return
-  answered.set(key, features)
-  notify()
-}
-
-/**
- * What a Bot's plugin answered about a feature: `yes` it advertises it, `no` it answered without it,
- * and `unknown` while there is no answer yet — which is nothing to act on rather than an absence.
- */
-export type McpFeatureAnswer = "unknown" | "yes" | "no"
+/** What a Bot's plugin answered about one of those (see `PluginFeatureAnswer`). */
+export type McpFeatureAnswer = PluginFeatureAnswer
 
 /**
  * What this Bot's plugin answered about its MCP servers: the feature each control needs — `list` for
@@ -135,25 +116,7 @@ export type McpFeatureAnswer = "unknown" | "yes" | "no"
  * all.
  */
 export function useMcpFeatureAnswers(server: McpServerConfig): McpFeatureAnswers {
-  const baseUrl = server?.baseUrl ?? ""
-  const apiKey = server?.apiKey ?? ""
-  const key = baseUrl && apiKey ? connectionKey({ baseUrl, apiKey }) : ""
-  const read = (feature: string): McpFeatureAnswer => {
-    const features = key ? answered.get(key) : undefined
-    if (!features) return "unknown"
-    return features.includes(feature) ? "yes" : "no"
-  }
-  const list = useSyncExternalStore(subscribe, () => read(MCP_FEATURES.list))
-  const write = useSyncExternalStore(subscribe, () => read(MCP_FEATURES.write))
-  const removable = useSyncExternalStore(subscribe, () => read(MCP_FEATURES.removable))
-  const catalogue = useSyncExternalStore(subscribe, () => read(MCP_FEATURES.catalogue))
-  const add = useSyncExternalStore(subscribe, () => read(MCP_FEATURES.add))
-  const access = useSyncExternalStore(subscribe, () => read(MCP_FEATURES.access))
-  usePoll(() => void readFeature({ baseUrl, apiKey }), false, [baseUrl, apiKey], {
-    active: Boolean(key),
-    onShow: false,
-  })
-  return { list, write, removable, catalogue, add, access }
+  return usePluginFeatureAnswers(server, MCP_FEATURES)
 }
 
 /** What this Bot's plugin answered about its MCP servers (see `McpFeatureAnswer`). */

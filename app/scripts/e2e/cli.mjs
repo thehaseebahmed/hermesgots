@@ -144,6 +144,11 @@ const FLOWS = {
     about:
       "A bot's MCP servers list from its editor row, with a switch on each of its own servers and none on a plugin's, at phone and tablet widths",
   },
+  afk: {
+    script: "e2e/afk.mjs",
+    about:
+      "A project's options menu opens AFK's frontier: ready oldest first, claimed marked, blocked naming its open blocker, with no row for a plugin that can't read it",
+  },
   "mcps-gate": {
     script: "e2e/mcps-gate.mjs",
     about:

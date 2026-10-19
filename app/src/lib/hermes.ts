@@ -2298,6 +2298,100 @@ export async function getLibraryFile(
   return response.blob()
 }
 
+/** One of a project's tasks: an issue the user has marked ready for an agent to work. */
+export interface ProjectTask {
+  repo: string
+  number: number
+  title: string
+  url: string | null
+  /** Who has it, when a person took it. */
+  assignees: string[]
+  /** What's still open ahead of it, when it can't be started yet. */
+  blockers: ProjectBlocker[]
+}
+
+/** A task another one waits on. */
+export interface ProjectBlocker {
+  repo: string
+  number: number
+  title: string
+  url: string | null
+}
+
+/**
+ * A project's tasks as AFK reads them: the frontier — what's ready, oldest first — and what is out
+ * of it, claimed or blocked by an open task. Needs plugin 0.49.
+ */
+export interface ProjectTasks {
+  repos: string[]
+  ready: ProjectTask[]
+  claimed: ProjectTask[]
+  blocked: ProjectTask[]
+}
+
+function parseBlocker(value: unknown): ProjectBlocker | null {
+  const found = (value ?? {}) as Record<string, unknown>
+  if (typeof found.number !== "number") return null
+  return {
+    repo: str(found.repo),
+    number: found.number,
+    title: str(found.title),
+    url: str(found.url) || null,
+  }
+}
+
+function parseTask(value: unknown): ProjectTask | null {
+  const found = (value ?? {}) as Record<string, unknown>
+  if (typeof found.number !== "number") return null
+  const assignees = found.assignees
+  const blockers = found.blockers
+  return {
+    repo: str(found.repo),
+    number: found.number,
+    title: str(found.title),
+    url: str(found.url) || null,
+    assignees: Array.isArray(assignees)
+      ? assignees.filter((login): login is string => typeof login === "string")
+      : [],
+    blockers: Array.isArray(blockers)
+      ? blockers.map(parseBlocker).filter((blocker): blocker is ProjectBlocker => blocker !== null)
+      : [],
+  }
+}
+
+function parseTasks(value: unknown): ProjectTask[] {
+  return Array.isArray(value)
+    ? value.map(parseTask).filter((task): task is ProjectTask => task !== null)
+    : []
+}
+
+/** A project's tasks, read from its repositories' GitHub issues through the Gots plugin. */
+export async function getProjectTasks(
+  config: HermesConfig,
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<ProjectTasks> {
+  const response = await request(
+    `${pluginRoot(config.baseUrl)}/projects/${encodeURIComponent(projectId)}/tasks`,
+    { headers: headers(config), signal },
+  )
+  const body = (await response.json()) as Record<string, unknown> | null
+  // A 200 that carries no list isn't an empty frontier: saying nothing is ready would be a lie
+  // about a read that never happened.
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new HermesError("Hermes answered without a task list.")
+  }
+  const repos = body.repos
+  return {
+    repos: Array.isArray(repos)
+      ? repos.filter((repo): repo is string => typeof repo === "string")
+      : [],
+    ready: parseTasks(body.ready),
+    claimed: parseTasks(body.claimed),
+    blocked: parseTasks(body.blocked),
+  }
+}
+
 export type LiveRunStatus = "running" | "waiting_for_approval"
 
 /** Why a session waits on the user. */

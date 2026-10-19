@@ -51,6 +51,7 @@ from . import (
     push,
     ship,
     stream,
+    tasks,
     todos,
     usage,
 )
@@ -267,6 +268,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "prs",
                     "plans",
                     "library",
+                    # A project's ready tasks, read from its repositories' GitHub issues; see tasks.py.
+                    "afk",
                     "clarify",
                     "todo_tool",
                     "agents",
@@ -894,6 +897,20 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "No such project.", 404)
         return web.json_response({"object": "memento.project.usage", **found})
 
+    async def resolve_project(project_id: str):
+        """A project, or the response that says why it can't be read — its two routes' own answer."""
+        try:
+            return (
+                await asyncio.to_thread(
+                    sessions._project, hermes_home() / "projects.db", project_id
+                ),
+                None,
+            )
+        except ValueError:
+            return None, _error(web, "No such project.", 404)
+        except ImportError:
+            return None, _error(web, "This Hermes version has no Projects.", 501)
+
     async def project_library(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -904,19 +921,35 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return web.json_response(
                 {"object": "memento.library", "project_id": project_id, "folders": []}
             )
-        try:
-            project = await asyncio.to_thread(
-                sessions._project, hermes_home() / "projects.db", project_id
-            )
-        except ValueError:
-            return _error(web, "No such project.", 404)
-        except ImportError:
-            return _error(web, "This Hermes version has no Projects.", 501)
+        project, refused = await resolve_project(project_id)
+        if refused is not None:
+            return refused
         root = library.library_root(project)
         folders = await asyncio.to_thread(library.tree, root)
         return web.json_response(
             {"object": "memento.library", "project_id": project_id, "folders": folders}
         )
+
+    async def project_tasks(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        project_id = request.match_info["project_id"]
+        # A project still being cloned has no checkout to read a task from yet.
+        if clones.is_pending_id(project_id):
+            return web.json_response(
+                {"object": "memento.tasks", "project_id": project_id, **tasks.empty()}
+            )
+        project, refused = await resolve_project(project_id)
+        if refused is not None:
+            return refused
+        try:
+            found = await asyncio.to_thread(tasks.read, hermes_home(), project.folders)
+        except github.GitHubError as error:
+            # GitHub's own reason is the answer: there's no account on this server, or its token
+            # was refused, and the sheet says so instead of showing an empty frontier.
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "memento.tasks", "project_id": project_id, **found})
 
     async def session_db():
         open_db = getattr(adapter, "_ensure_session_db_async", None)
@@ -1269,6 +1302,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/projects/{{project_id}}/repos/remove", remove_repo)
     app.router.add_get(f"{PREFIX}/projects/{{project_id}}/usage", project_usage)
     app.router.add_get(f"{PREFIX}/projects/{{project_id}}/library", project_library)
+    app.router.add_get(f"{PREFIX}/projects/{{project_id}}/tasks", project_tasks)
     app.router.add_post(f"{PREFIX}/model", set_host_model)
     app.router.add_get(f"{PREFIX}/fallbacks", get_fallbacks)
     app.router.add_get(f"{PREFIX}/skills", list_skills)

@@ -162,6 +162,7 @@ pnpm mock
 | POST | `/api/plugins/memento/projects/{id}` | Rename/describe project |
 | POST | `/api/plugins/memento/projects/{id}/remove` | Delete project |
 | GET | `/api/plugins/memento/projects` | List all projects with activity |
+| GET | `/api/plugins/memento/projects/{id}/tasks` | The project's tasks as AFK reads them: two ready (265, 266), one claimed (267, `mock-user`), one blocked by 267; empty groups while the project clones, 409 without a GitHub account |
 | GET/POST | `/api/plugins/memento/chats` | Chat list sync (newer record wins) |
 | POST | `/api/plugins/memento/sessions/{id}/label` | Mark session as Gots-owned |
 | GET | `/api/plugins/memento/sessions/{id}/context` | Latest model call prompt/output tokens |

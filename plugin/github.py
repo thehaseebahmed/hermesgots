@@ -102,6 +102,17 @@ def token(hermes_home: Path) -> tuple[Optional[str], Optional[str]]:
     return (value, "gh") if value else (None, None)
 
 def _request(path: str, auth: Optional[str], method: str = "GET", data: Optional[Dict[str, Any]] = None) -> Any:
+    return _fetch(path, auth, method, data)[0]
+
+
+def _page(path: str, auth: Optional[str]) -> Tuple[Any, str]:
+    """A GET's body and its ``Link`` header: how GitHub says there is another page of a list."""
+    return _fetch(path, auth)
+
+
+def _fetch(
+    path: str, auth: Optional[str], method: str = "GET", data: Optional[Dict[str, Any]] = None
+) -> Tuple[Any, str]:
     # Without a token, public repos still answer (rate-limited).
     request = urllib.request.Request(
         f"{API}{path}",
@@ -118,8 +129,9 @@ def _request(path: str, auth: Optional[str], method: str = "GET", data: Optional
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
             raw = response.read()
+            link = response.headers.get("Link") or ""
             # A DELETE answers 204 with no body.
-            return json.loads(raw) if raw.strip() else None
+            return (json.loads(raw) if raw.strip() else None), link
     except urllib.error.HTTPError as error:
         if error.code == 401:
             raise GitHubError("GitHub rejected the server's token.", 401) from None
@@ -144,7 +156,16 @@ def _error_message(error: urllib.error.HTTPError) -> Optional[str]:
 
 
 def _get(path: str, auth: Optional[str]) -> Any:
-    return _request(path, auth)
+    return _fetch(path, auth)[0]
+
+
+def is_missing(error: "GitHubError") -> bool:
+    """Whether GitHub said the thing isn't there.
+
+    Every HTTP failure but a 401 arrives as GitHub's own wording rather than its status, so this is
+    the one place that reads a 404 out of it.
+    """
+    return "Not Found" in str(error)
 
 
 def status(hermes_home: Path) -> Dict[str, Any]:
@@ -473,7 +494,7 @@ def delete_branch(repo: str, branch: str, auth: str) -> None:
     try:
         _request(f"/repos/{repo}/git/refs/{_ref(branch)}", auth, "DELETE")
     except GitHubError as error:
-        if "Reference does not exist" not in str(error) and "Not Found" not in str(error):
+        if "Reference does not exist" not in str(error) and not is_missing(error):
             raise
 
 
