@@ -2493,7 +2493,8 @@ export async function getProjectTasks(
 /**
  * A project's AFK switch: whether it is left to work its own tasks, and why it can't be. The
  * setting is the host's, so it is the same on every device the project is opened from. Needs
- * plugin 0.50, and 0.51 for the task it holds and the last refusal.
+ * plugin 0.50, 0.51 for the task it holds and the last refusal, and 0.56 for the skills its work
+ * follows.
  */
 export interface ProjectAfk {
   on: boolean
@@ -2503,6 +2504,19 @@ export interface ProjectAfk {
   task: ProjectIssue | null
   /** Why GitHub last refused the sweep. The switch stays on, so this is not `reason`. */
   refusal: string | null
+  /** The one of the bot's skills that governs how AFK builds a task here, when the project picked
+   * one. */
+  buildSkill: string | null
+  /** The bot's skills the critique of a task follows, in the order the project picked them. */
+  critiqueSkills: string[]
+}
+
+/** The skill names in a list the host sent, each once, in its order. */
+function skillNames(value: unknown): string[] {
+  const names = Array.isArray(value)
+    ? value.filter((name): name is string => typeof name === "string")
+    : []
+  return [...new Set(names.map((name) => name.trim()).filter(Boolean))]
 }
 
 function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
@@ -2511,13 +2525,15 @@ function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
   if (!body || typeof body.on !== "boolean") {
     throw new HermesError("Hermes answered without AFK's setting.")
   }
-  // A plugin from before the sweep answers neither field; that's no task and no refusal, not a
-  // failure to read the switch.
+  // A plugin from before the sweep answers neither the task nor the refusal, and one from before the
+  // pickers answers no skills: that's nothing chosen, not a failure to read the switch.
   return {
     on: body.on,
     reason: str(body.reason) || null,
     task: parseIssue(body.task),
     refusal: str(body.refusal) || null,
+    buildSkill: str(body.build_skill) || null,
+    critiqueSkills: skillNames(body.critique_skills),
   }
 }
 
@@ -2548,6 +2564,26 @@ export async function setProjectAfk(
     method: "POST",
     headers: headers(config),
     body: JSON.stringify({ on }),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  return parseAfk((await response.json()) as Record<string, unknown> | null)
+}
+
+/**
+ * Keeps the skills a project's AFK work follows — one to build by and the ones to critique — on its
+ * host, answering the setting it now holds. The two are written together: a write naming one would
+ * leave the other's meaning to a guess.
+ */
+export async function setProjectAfkSkills(
+  config: HermesConfig,
+  projectId: string,
+  buildSkill: string | null,
+  critiqueSkills: string[],
+): Promise<ProjectAfk> {
+  const response = await request(projectPath(config, projectId, "afk"), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ build_skill: buildSkill, critique_skills: critiqueSkills }),
     signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
   })
   return parseAfk((await response.json()) as Record<string, unknown> | null)

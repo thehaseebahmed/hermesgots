@@ -156,6 +156,11 @@ const FLOWS = {
     about:
       "AFK's switch turns a project on and off on its host, and a reload reads that setting back — the project's, not the device's",
   },
+  "afk-skills": {
+    script: "e2e/afk-skills.mjs",
+    about:
+      "AFK's pop-up picks one skill to build by and any number to critique from the bot's own list, kept on the host apart from another project's, with no pickers on an older plugin",
+  },
   "afk-switch-reasons": {
     script: "e2e/afk-switch-reasons.mjs",
     about:

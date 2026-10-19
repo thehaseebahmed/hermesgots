@@ -1,15 +1,35 @@
 /**
- * AFK: a project's switch for working its own tasks, and the tasks it would work — the frontier,
- * what's ready oldest first, what somebody has already claimed, and what an open task still blocks.
+ * AFK: a project's switch for working its own tasks, the skills that work follows, and the tasks it
+ * would work — the frontier, what's ready oldest first, what somebody has already claimed, and what
+ * an open task still blocks.
  * The switch is the host's setting for the project, so it reads back the same on every device. It is
  * always shown: a project that can't be left to work (or a Bot on a plugin too old to switch one) has
- * it off and disabled, with the reason underneath. The frontier is there where the plugin advertises
- * `afk`, the switch where it advertises `afk_switch`.
+ * it off and disabled, with the reason underneath. Under it sit the two skill pickers — one for the
+ * Build, one or more for the Critique — where the plugin advertises `afk_skills`, both listing the
+ * bot's own live skills. The frontier is there where the plugin advertises `afk`, the switch where it
+ * advertises `afk_switch`.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { ChevronDownIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { connectionKey } from "@/lib/connection"
@@ -20,20 +40,26 @@ import {
   getProjectAfk,
   getProjectTasks,
   setProjectAfk,
+  setProjectAfkSkills,
   type HermesConfig,
   type ProjectAfk,
   type ProjectIssue,
   type ProjectTasks,
   type ProjectTask,
+  type Skill,
 } from "@/lib/hermes"
 import { usePoll } from "@/lib/poll"
 import { noteFailure } from "@/lib/report"
+import { useSkills } from "@/lib/skills"
 
 /** The feature the plugin advertises when it can read a project's tasks. */
 export const AFK_FEATURE = "afk"
 
 /** And the one it advertises when it can turn the switch on and off. */
 export const AFK_SWITCH_FEATURE = "afk_switch"
+
+/** And the one it advertises when it can keep the skills a project's work follows. */
+export const AFK_SKILLS_FEATURE = "afk_skills"
 
 /** A Bot whose plugin answers without the route is left alone for a while, like every other read. */
 const unsupported = cooldown()
@@ -62,6 +88,10 @@ export function AfkPopup({
   const [saving, setSaving] = useState(false)
   const key = connectionKey(config)
   const switchable = usePluginFeature(config, AFK_SWITCH_FEATURE)
+  const withSkills = usePluginFeature(config, AFK_SKILLS_FEATURE)
+  // The pickers' list is the bot's own skills, read the way the composer's `/` menu reads them: only
+  // what this profile can run now. Asked only where the host can hold a choice at all.
+  const skills = useSkills(config, open && withSkills === "yes")
 
   const read = useCallback(
     (signal: AbortSignal) => {
@@ -158,6 +188,19 @@ export function AfkPopup({
     }
   }
 
+  // The same for a skill choice, which is the project's too — one write naming both pickers, since
+  // only one of them changes and the other has to keep what it had.
+  const choose = async (buildSkill: string | null, critiqueSkills: string[]) => {
+    setSaving(true)
+    try {
+      setAfk(await setProjectAfkSkills(config, projectId, buildSkill, critiqueSkills))
+    } catch (failure) {
+      toast.error(failure instanceof Error ? failure.message : "Couldn't save that.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const manyRepos = (tasks?.repos.length ?? 0) > 1
 
   return (
@@ -174,6 +217,16 @@ export function AfkPopup({
             saving={saving}
             onToggle={(on) => void turn(on)}
           />
+          {/* Under the switch, because it is the same setting: what the work does when it is left
+              to run. A choice is the project's even with nothing left to work. */}
+          {withSkills === "yes" && afk && !afkError && skills.status === "ok" && (
+            <AfkSkills
+              afk={afk}
+              skills={skills.skills}
+              saving={saving}
+              onChoose={(buildSkill, critiqueSkills) => void choose(buildSkill, critiqueSkills)}
+            />
+          )}
           {/* Only a project left to work has anything to say here: a task held under an off switch
               reads as still working. */}
           {afk?.on && <Working task={afk.task} refusal={afk.refusal} manyRepos={manyRepos} />}
@@ -243,6 +296,111 @@ function AfkSwitch({
           </p>
         )
       )}
+    </div>
+  )
+}
+
+/**
+ * The skills this project's AFK work follows: the one that governs how a task is built, and the ones
+ * its critique follows. Both lists are the bot's own live skills, read the way the composer's `/`
+ * menu reads them, and the choice is the project's — kept on its host, so a reload, another device
+ * and a restarted host read the same one back. Either is left at None by default: nothing chosen
+ * works the way AFK always has.
+ *
+ * A name the profile has since lost stays on the row and shows here, so the project says what it
+ * holds; the pickers still offer only what the bot can run now, and Clear takes the lost one away.
+ */
+function AfkSkills({
+  afk,
+  skills,
+  saving,
+  onChoose,
+}: {
+  afk: ProjectAfk
+  skills: Skill[]
+  saving: boolean
+  onChoose: (buildSkill: string | null, critiqueSkills: string[]) => void
+}) {
+  const critique = afk.critiqueSkills
+  const names = skills.map((skill) => skill.name)
+  return (
+    <div className="flex flex-col gap-1" data-afk-skills>
+      <div className="flex min-h-11 items-center justify-between gap-3 px-1">
+        <span className="text-base">Build</span>
+        <Select
+          value={afk.buildSkill}
+          items={[
+            { value: null, label: "None" },
+            ...names.map((name) => ({ value: name, label: name })),
+          ]}
+          onValueChange={(value) => onChoose(typeof value === "string" ? value : null, critique)}
+        >
+          <SelectTrigger aria-label="Build skill" className="h-11 max-w-52" disabled={saving}>
+            {/* The stored name shows even when the profile has lost it: the row names the project's
+                choice rather than reading as nothing chosen. */}
+            <SelectValue>
+              {(value) => (typeof value === "string" && value ? value : "None")}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={null}>None</SelectItem>
+            {names.map((name) => (
+              <SelectItem key={name} value={name}>
+                {name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="flex min-h-11 items-center justify-between gap-3 px-1">
+        <span className="text-base">Critique</span>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                type="button"
+                variant="secondary"
+                aria-label="Critique skills"
+                className="h-auto min-h-11 max-w-52 gap-2 rounded-4xl py-2 pr-2.5 pl-3 font-normal"
+                disabled={saving || (names.length === 0 && critique.length === 0)}
+              />
+            }
+          >
+            <span className="truncate">{critique.length > 0 ? critique.join(", ") : "None"}</span>
+            <ChevronDownIcon className="shrink-0 text-muted-foreground" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="max-h-80 min-w-52 overflow-y-auto">
+            {names.map((name) => {
+              const picked = critique.includes(name)
+              return (
+                <DropdownMenuCheckboxItem
+                  key={name}
+                  checked={picked}
+                  // The menu stays open for the next lens: picking the critique is picking several.
+                  closeOnClick={false}
+                  className="min-h-11"
+                  onCheckedChange={(checked) =>
+                    onChoose(
+                      afk.buildSkill,
+                      checked ? [...critique, name] : critique.filter((one) => one !== name),
+                    )
+                  }
+                >
+                  {name}
+                </DropdownMenuCheckboxItem>
+              )
+            })}
+            {critique.length > 0 && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem className="min-h-11" onClick={() => onChoose(afk.buildSkill, [])}>
+                  Clear
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </div>
   )
 }

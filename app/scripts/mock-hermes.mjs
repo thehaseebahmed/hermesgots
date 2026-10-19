@@ -34,6 +34,9 @@
 // name like `fail` fails it) and POST …/repos/remove takes one out (2s); GET …/usage sums made-up
 // usage. GET projects/{id}/tasks answers the project's ready tasks (the frontier AFK works: ready
 // oldest first, claimed, blocked with the blocker) and 409s when the host has no GitHub account.
+// GET projects/{id}/afk answers AFK's switch and the skills its work follows (`build_skill`,
+// `critique_skills`), kept per project in this process the way the plugin keeps them in its store;
+// POST writes either — `{ on }` for the switch, the two skill names together for the pickers.
 // While a repo is being added, a new session's workspace is refused, and a session whose repo
 // was removed is refused with the reason, which the workspace also reports as `blocked`.
 // Chats are titled like Hermes does: a slice of the opener at once, a "model" title a moment later,
@@ -152,6 +155,9 @@ const afkSwept = new Set()
 // The projects whose claimed task nothing is working any more: its run failed, or the host restarted
 // mid-run and adopted the session. A flow sets this to drive a stalled AFK session without a run.
 const afkStalled = new Map()
+// The skills each project's AFK work follows — one to build by, the ones to critique — as the plugin
+// keeps them on the project's row: the names from the profile's live list, not the skills.
+const afkSkills = new Map()
 // What the media route serves for chart.png: navy sky, teal ground, a sun.
 const MOCK_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAHgAAABLCAIAAAA06NSGAAAAuklEQVR42u3aQQmAABBE0anhxQYW8mIDz0Y0jhFsIII4iDz4Cd5xZzNMiwoFAWjQAg0aNAXQoAX6dsc+Xwf6deI3uEO5Yx3KHetQ7liHcsc6lDvWoEF/T/mJNWjQoEGDBg0aNGjQoEGDBu3W4dYB2j0atIXFZmgFt4L76/CpBNrvHWiBBi3QoEEL9H+gx21VIdCgQQs0aNAIQIMWaNCgKYAGLdCgQVMADVqgQYMWaNACDRq0QIMW6E92AjwFRtd/9tVBAAAAAElFTkSuQmCC",
@@ -1036,6 +1042,7 @@ function afkSweep(project) {
 /** AFK's answer for a project: its switch, the task it holds, and its last refusal (none mocked). */
 function afkAnswer(project, reason) {
   const on = afkProjects.has(project.id)
+  const skills = afkSkills.get(project.id) ?? { build_skill: null, critique_skills: [] }
   return {
     object: "memento.afk",
     project_id: project.id,
@@ -1045,6 +1052,7 @@ function afkAnswer(project, reason) {
     // read rather than in the POST's answer.
     task: afkSwept.has(project.id) ? afkTask(project) : null,
     refusal: null,
+    ...skills,
   }
 }
 
@@ -2612,6 +2620,7 @@ http
           "dictation",
           "afk",
           "afk_switch",
+          "afk_skills",
           ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : []),
           ...(MCPS
             ? [
@@ -3181,14 +3190,34 @@ http
         return json(res, 404, { error: { message: "No such project." } })
       const reason = afkReason(found)
       if (req.method === "POST") {
-        const { on } = await readBody(req)
-        if (typeof on !== "boolean")
-          return json(res, 400, { error: { message: "on must be true or false." } })
-        if (on && reason) return json(res, 409, { error: { message: reason } })
-        if (on) afkProjects.add(found.id)
-        else {
-          afkProjects.delete(found.id)
-          afkSwept.delete(found.id)
+        const body = await readBody(req)
+        const { on } = body
+        const skills = "build_skill" in body || "critique_skills" in body
+        if (typeof on !== "boolean" && !skills)
+          return json(res, 400, {
+            error: { message: "on, build_skill or critique_skills is needed." },
+          })
+        // The two pickers are written together and both name what the project's work follows, as
+        // the plugin's own row holds them: the names, not the skills themselves.
+        if (skills) {
+          if ("build_skill" in body && body.build_skill !== null && typeof body.build_skill !== "string")
+            return json(res, 400, { error: { message: "build_skill must be a skill's name or null." } })
+          if (!Array.isArray(body.critique_skills) || !body.critique_skills.every((n) => typeof n === "string"))
+            return json(res, 400, {
+              error: { message: "critique_skills must be a list of skill names." },
+            })
+          afkSkills.set(found.id, {
+            build_skill: body.build_skill ?? null,
+            critique_skills: body.critique_skills,
+          })
+        }
+        if (typeof on === "boolean") {
+          if (on && reason) return json(res, 409, { error: { message: reason } })
+          if (on) afkProjects.add(found.id)
+          else {
+            afkProjects.delete(found.id)
+            afkSwept.delete(found.id)
+          }
         }
         return json(res, 200, afkAnswer(found, reason))
       }
@@ -3314,6 +3343,7 @@ http
           return json(res, 404, { error: { message: "No failed project to retry." } })
         // The retry makes the project again under a new id, so the old one's switch is forgotten.
         afkProjects.delete(found.id)
+        afkSkills.delete(found.id)
         for (const folder of found.folders) folder.status = "queued"
         found.status = "cloning"
         found.error = null
@@ -3323,8 +3353,10 @@ http
       if (projectRoute[2]) {
         clearTimeout(cloning.get(found.id))
         cloning.delete(found.id)
-        // Deleting a project forgets its switch, as the plugin's `projects.remove` does.
+        // Deleting a project forgets its switch, as the plugin's `projects.remove` does — and the
+        // skills its work followed, since they live on the same row.
         afkProjects.delete(found.id)
+        afkSkills.delete(found.id)
         all.splice(all.indexOf(found), 1)
         return json(res, 200, { object: "memento.project", removed: true })
       }
