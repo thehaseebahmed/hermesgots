@@ -549,6 +549,96 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, mcp.UNAVAILABLE_ACCESS, 501)
         return web.json_response({"object": {"access": delivered}})
 
+    async def get_mcp_server(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        # One of the bot's servers as its Config tab is built from it: the transport and arguments,
+        # and one row per environment name with the prompt its Catalogue entry writes — never a
+        # value the bot holds, only whether it holds one. Nothing is connected or written, and a
+        # host without those built-ins is a 501. See mcp.py.
+        profile = request_profile()
+        name = request.match_info["name"]
+        try:
+            found = await asyncio.to_thread(mcp.detail, profile, name)
+        except mcp.McpError as error:
+            return _error(web, str(error), error.status)
+        except ImportError:
+            return _error(web, mcp.UNAVAILABLE, 501)
+        return web.json_response({"object": {"server": found}})
+
+    async def save_mcp_server(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, 'Body must describe the server\'s configuration: {"transport": ...}', 400)
+        # The save rewrites the profile's own block through Hermes's validator and writer, and its
+        # reconcile, all inside this bot's profile scope; a server a Hermes plugin provides is
+        # refused there, and a host without those built-ins is a 501. See mcp.py.
+        profile = request_profile()
+        name = request.match_info["name"]
+        try:
+            servers = await asyncio.to_thread(mcp.edit, profile, name, body)
+        except mcp.McpError as error:
+            return _error(web, str(error), error.status)
+        except ImportError:
+            return _error(web, mcp.UNAVAILABLE, 501)
+        return web.json_response({"object": {"servers": servers}})
+
+    async def add_custom_mcp_server(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None or not isinstance(body.get("name"), str) or not body["name"]:
+            return _error(web, 'Body must be {"name": "<server>", "url": ... } or {..., "command": ...}', 400)
+        # A server the Catalogue doesn't offer, written the way an add from the Catalogue is — the
+        # validator, Hermes's own writer, the environment writer for its values, the reconcile — all
+        # inside this bot's profile scope. A host without those built-ins is a 501. See mcp.py.
+        try:
+            servers = await asyncio.to_thread(mcp.custom, request_profile(), body)
+        except mcp.McpError as error:
+            return _error(web, str(error), error.status)
+        except ImportError:
+            return _error(web, mcp.UNAVAILABLE, 501)
+        return web.json_response({"object": {"servers": servers}})
+
+    async def read_mcp_tools(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        # Hermes's own schema cache, which is what a registration wrote: no server is connected, so
+        # opening a server's Tools tab cannot spawn one. Empty with `cached` false for a server that
+        # has never connected; the probe below is the tap that asks the server itself. See mcp.py.
+        profile = request_profile()
+        name = request.match_info["name"]
+        try:
+            found = await asyncio.to_thread(mcp.tools, profile, name)
+        except mcp.McpError as error:
+            return _error(web, str(error), error.status)
+        except ImportError:
+            return _error(web, mcp.UNAVAILABLE, 501)
+        return web.json_response({"object": {"tools": found}})
+
+    async def probe_mcp_tools(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        # The one read that reaches the server: Hermes's own single-server probe connects it, lists
+        # what it offers and disconnects, without registering anything. Only a tap asks for it, which
+        # is why it is a POST — and a host without that built-in is a 501. See mcp.py.
+        profile = request_profile()
+        name = request.match_info["name"]
+        try:
+            found = await asyncio.to_thread(mcp.probe_tools, profile, name)
+        except mcp.McpError as error:
+            return _error(web, str(error), error.status)
+        except ImportError:
+            return _error(web, mcp.UNAVAILABLE, 501)
+        return web.json_response({"object": {"tools": found}})
+
     async def set_fallbacks(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -1366,9 +1456,16 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/mcp/catalogue", list_mcp_catalogue)
     app.router.add_get(f"{PREFIX}/mcp/catalogue/{{name}}", get_mcp_catalogue_entry)
     app.router.add_post(f"{PREFIX}/mcp/install", install_mcp_server)
+    app.router.add_post(f"{PREFIX}/mcp/custom", add_custom_mcp_server)
     app.router.add_post(f"{PREFIX}/mcp/{{name}}/enabled", set_mcp_server_enabled)
     app.router.add_post(f"{PREFIX}/mcp/{{name}}/access", start_mcp_access)
     app.router.add_post(f"{PREFIX}/mcp/{{name}}/access/callback", deliver_mcp_access)
+    app.router.add_post(f"{PREFIX}/mcp/{{name}}/config", save_mcp_server)
+    app.router.add_get(f"{PREFIX}/mcp/{{name}}/tools", read_mcp_tools)
+    app.router.add_post(f"{PREFIX}/mcp/{{name}}/tools", probe_mcp_tools)
+    # One server's own block, registered after the Catalogue's names so `mcp/catalogue` is the
+    # Catalogue rather than a server called catalogue.
+    app.router.add_get(f"{PREFIX}/mcp/{{name}}", get_mcp_server)
     app.router.add_delete(f"{PREFIX}/mcp/{{name}}", remove_mcp_server)
     app.router.add_post(f"{PREFIX}/fallbacks", set_fallbacks)
     app.router.add_get(f"{PREFIX}/github", github_status)

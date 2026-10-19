@@ -42,7 +42,7 @@ import { toast } from "sonner"
 
 import { AccountSettings } from "@/components/account-settings"
 import { CommunitySettings } from "@/components/community-settings"
-import { BotEditor } from "@/components/bot-settings"
+import { BotEditor, type BotTab } from "@/components/bot-settings"
 import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { OnlineDot } from "@/components/bot-card"
@@ -127,7 +127,7 @@ const MenuContext = createContext<{ active?: string; replace: boolean }>({ repla
  * open by default.
  */
 export function SettingsPage() {
-  const { section, botId } = useParams()
+  const { section, botId, tab } = useParams()
   const large = useLarge()
   const { up, root } = useNav()
   const { account } = useSyncState()
@@ -147,9 +147,23 @@ export function SettingsPage() {
 
   if (section && section !== "bots" && !SECTIONS[section])
     return <Navigate to="/settings" replace />
+  // The bot tabs: a hand-typed address naming one this screen doesn't have lands on the bot itself,
+  // and one asked for on anything but a bot lands on the section without it.
+  const TABS: BotTab[] = ["general", "models", "mcps"]
+  if (tab && !TABS.includes(tab as BotTab))
+    return <Navigate to={botId ? `/settings/bots/${botId}` : "/settings"} replace />
+  if (tab && (section !== "bots" || !botId)) return <Navigate to="/settings" replace />
+  // General's address is the bot's own: one URL per tab, and none of them an alias of another.
+  if (tab === "general") return <Navigate to={`/settings/bots/${botId}`} replace />
   if (!large)
     return screen ? (
-      <SectionScreen section={screen} botId={botId} botName={botName} profiles={profiles} />
+      <SectionScreen
+        section={screen}
+        botId={botId}
+        botName={botName}
+        tab={tab as BotTab | undefined}
+        profiles={profiles}
+      />
     ) : (
       <MenuScreen profiles={profiles} />
     )
@@ -168,7 +182,12 @@ export function SettingsPage() {
         className="duration-200 ease-out motion-safe:animate-in motion-safe:fade-in-0"
       >
         {open === "bots" ? (
-          <BotSection profiles={profiles} botId={botId} onDeleted={() => root("/settings")} />
+          <BotSection
+            profiles={profiles}
+            botId={botId}
+            tab={tab as BotTab | undefined}
+            onDeleted={() => root("/settings")}
+          />
         ) : (
           SECTIONS[open].render()
         )}
@@ -181,17 +200,25 @@ export function SettingsPage() {
 function BotSection({
   profiles,
   botId,
+  tab,
   onDeleted,
 }: {
   profiles: Profile[] | undefined
   botId?: string
+  tab?: BotTab
   onDeleted: () => void
 }) {
   const bot = profiles?.find((p) => p.id === botId)
   if (profiles === undefined) return null
   if (!bot) return <Navigate to="/settings" replace />
   return (
-    <BotEditor key={bot.id} profile={bot} canDelete={profiles.length > 1} onDeleted={onDeleted} />
+    <BotEditor
+      key={bot.id}
+      profile={bot}
+      tab={tab}
+      canDelete={profiles.length > 1}
+      onDeleted={onDeleted}
+    />
   )
 }
 
@@ -573,11 +600,13 @@ function SectionScreen({
   section,
   botId,
   botName,
+  tab,
   profiles,
 }: {
   section: string
   botId?: string
   botName?: string
+  tab?: BotTab
   profiles: Profile[] | undefined
 }) {
   const { up, root } = useNav()
@@ -600,7 +629,12 @@ function SectionScreen({
       {page
         ? page.render()
         : botId && (
-            <BotSection profiles={profiles} botId={botId} onDeleted={() => root("/settings")} />
+            <BotSection
+              profiles={profiles}
+              botId={botId}
+              tab={tab}
+              onDeleted={() => root("/settings")}
+            />
           )}
     </Screen>
   )

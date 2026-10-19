@@ -1,12 +1,13 @@
-// Picking an entry from the Catalogue adds that server to the Bot, at
-// /settings/bots/<botId>/mcps. The form an entry opens asks for the values its manifest declares:
-// titled with the prompt the manifest writes for people and subtitled with the name the value lands
-// under, a required one starred, a secret masked, a default the manifest pins filled in and a value
-// the Bot already holds standing empty with Set as its placeholder — typing over that field is what
-// replaces what the Bot holds. A required value left empty refuses the add and marks that field; a
-// value typed in is never shown back on the screen afterwards, only that it is set; and a
-// configuration Hermes's own validator refuses surfaces its reason and leaves nothing half-added. An
-// entry that declares no values is added in one tap. Phone and tablet, light and dark.
+// Adding a server from Hermes's Catalogue, at /settings/bots/<botId>/mcps. An entry that declares
+// values opens a form: one field per value, titled with the name the value lands under on the Host
+// and subtitled with the prompt its manifest writes for people, a required one starred, a secret
+// masked, a default the manifest pins filled in and a value the Bot already holds standing empty with
+// Set as its placeholder — typing over that field is what replaces what the Bot holds. A required
+// value left empty refuses the add and marks that field; a value typed in is never shown back on the
+// screen afterwards, only that it is set. An entry that declares no values is added by the tap that
+// picks it, with no form at all, and an added entry leaves the Catalogue rather than being marked in
+// it. A configuration Hermes's own validator refuses surfaces its reason and leaves nothing
+// half-added. Phone and tablet, light and dark.
 import { app, assert, flow, mock, pass } from "./lib.mjs"
 
 // A value the form is filled with, and one the Bot's environment already holds — what the screen may
@@ -39,13 +40,17 @@ const run = async ({ page, profileId, shot, until }) => {
     await page.locator('[data-mcp="github"]').waitFor({ timeout: 15_000 })
     const servers = await page.locator("[data-mcp]").count()
 
-    // Picking an entry opens its form: one field per value the manifest declares.
-    const open = async (name) => {
+    // The Add action's first sheet leads into the Catalogue; picking an entry that declares values
+    // opens its form above it.
+    const browse = async () => {
       await page.getByRole("button", { name: "Add a server" }).click()
-      await page
-        .getByRole("dialog")
-        .getByRole("heading", { name: "Catalogue" })
-        .waitFor({ timeout: 15_000 })
+      await page.locator('[data-mcp-source="catalogue"]').click()
+      await page.getByRole("dialog").getByRole("heading", { name: "Catalogue" }).waitFor({
+        timeout: 15_000,
+      })
+    }
+    const open = async (name) => {
+      await browse()
       await page.locator(`[data-catalogue="${name}"]`).click()
       await page.getByRole("dialog").getByRole("heading", { name }).waitFor({ timeout: 15_000 })
     }
@@ -57,6 +62,22 @@ const run = async ({ page, profileId, shot, until }) => {
       await page.locator("[data-value]").count(),
       3,
       "the form has one field per value the entry declares",
+    )
+
+    // Each field is titled with the environment name it lands under, and subtitled with what the
+    // manifest writes for people — the other way round from where this form started.
+    const title = page.locator('[data-value="SLACK_BOT_TOKEN"] label > span').first()
+    const subtitle = page.locator('[data-value="SLACK_BOT_TOKEN"] label > span').nth(1)
+    assert.equal(await title.innerText(), "SLACK_BOT_TOKEN *", "the name is the field's title")
+    assert.equal(
+      await subtitle.innerText(),
+      "Slack bot token",
+      "the manifest's own words are the field's subtitle",
+    )
+    assert.equal(
+      await page.locator('[data-value="SLACK_CHANNEL"] label > span').nth(1).innerText(),
+      "Channel to post to by default",
+      "and the same for a plain value",
     )
 
     // A required one is marked; an optional one is not.
@@ -121,8 +142,8 @@ const run = async ({ page, profileId, shot, until }) => {
     await shot("required")
 
     // Filled in, the add lands: the Host's own answer is the list the screen shows, with the new
-    // server on it and the state it is in. The channel keeps the default the manifest pinned — it is
-    // not touched, and the add still carries it, so the manifest's own reference is resolved.
+    // server on it and its health. The channel keeps the default the manifest pinned — it is not
+    // touched, and the add still carries it, so the manifest's own reference is resolved.
     await page.locator('[data-value="SLACK_BOT_TOKEN"] input').fill(TOKEN)
     await page.getByRole("button", { name: "Add", exact: true }).click()
     await page.locator('[data-mcp="slack"]').waitFor({ timeout: 15_000 })
@@ -132,11 +153,10 @@ const run = async ({ page, profileId, shot, until }) => {
       "the added server joins the Bot's list",
     )
     assert.ok(
-      await page.locator('[data-mcp="slack"]').getByText("on", { exact: true }).isVisible(),
-      "the added server reads with its state",
+      await page.locator('[data-mcp="slack"]').getByText("Healthy", { exact: true }).isVisible(),
+      "the added server reads with its health",
     )
-    // The form and the Catalogue behind it leave together: the form goes at once, and the sheet it
-    // was stacked on slides out.
+    // The form and the Catalogue behind it leave together.
     await until(
       () =>
         page
@@ -154,73 +174,56 @@ const run = async ({ page, profileId, shot, until }) => {
     )
     await shot("added")
 
-    // The screen reports only whether a declared value is set, never its content: the form of the
-    // entry that was just added reads a value that is set, and what was typed is nowhere on it.
-    await open("slack")
-    const written = page.locator('[data-value="SLACK_BOT_TOKEN"] input')
+    // The tab reports only whether a declared value is set, never its content — and the Catalogue no
+    // longer lists an entry this Bot now has, rather than listing it as added.
+    await browse()
     assert.equal(
-      await written.inputValue(),
-      "",
-      "a value the Bot holds is not shown back, even right after an add",
+      await page.locator('[data-catalogue="slack"]').count(),
+      0,
+      "the entry that was added leaves the Catalogue",
     )
-    assert.match(
-      (await written.getAttribute("placeholder")) ?? "",
-      /^Set/,
-      "and its field reads as set, so typing over it replaces the value",
-    )
-    // Every sheet on screen at once: nothing of what was typed, or of what the Bot held, is on any
-    // of them — in the text they render or in any field still standing.
-    const sheets = page.locator('[role="dialog"]:visible')
-    const shown = [
-      ...(await sheets.allInnerTexts()),
-      ...(await sheets.locator("input").evaluateAll((nodes) => nodes.map((node) => node.value))),
-    ].join("\n")
-    assert.ok(!shown.includes(TOKEN), "what was typed into the form is not shown back")
-    assert.ok(!shown.includes(HELD), "the value the Bot held is not shown back")
-    await shot("set")
+    await page.keyboard.press("Escape")
+    await page.locator("[data-catalogue]").first().waitFor({ state: "hidden", timeout: 15_000 })
 
-    // Back from a form lands on the Catalogue, with the entry it was about marked Added.
-    await page.getByRole("button", { name: "Catalogue" }).click()
-    const sheet = page.getByRole("dialog")
-    await sheet.getByRole("heading", { name: "Catalogue" }).waitFor({ timeout: 15_000 })
-    assert.equal(
-      await page.locator('[data-catalogue="slack"]').getByText("Added", { exact: true }).count(),
-      1,
-      "the entry that was added reads as added in the Catalogue",
-    )
-    await shot("catalogue-added")
-
-    // An entry that declares no values is added in one tap.
+    // An entry that declares no values is added by the tap that picks it, with no form at all.
+    await browse()
     await page.locator('[data-catalogue="stripe"]').click()
-    await sheet.getByRole("heading", { name: "stripe" }).waitFor({ timeout: 15_000 })
+    await page.locator('[data-mcp="stripe"]').waitFor({ timeout: 15_000 })
+    assert.equal(
+      await page.locator('[data-mcp]').count(),
+      servers + 2,
+      "the entry that declares no values joins the list on its one tap",
+    )
     assert.equal(
       await page.locator("[data-value]").count(),
       0,
-      "an entry that declares no values has no fields",
+      "and no form was opened for it",
     )
-    await page.getByRole("button", { name: "Add", exact: true }).click()
-    await page.locator('[data-mcp="stripe"]').waitFor({ timeout: 15_000 })
-    assert.equal(
-      await page.locator("[data-mcp]").count(),
-      servers + 2,
-      "the entry that declares no values joins the list",
-    )
+    assert.equal(adds.length, 2, "its add was sent once, off the tap")
+    assert.deepEqual(adds[1], { name: "stripe", values: {} }, "one tap carries nothing to fill in")
+    await shot("one-tap")
 
     // A configuration Hermes's own validator refuses surfaces its reason and leaves nothing
-    // half-added: the form stays open with the reason on the screen, and no server joins the list.
-    await open("unvetted")
-    await page.getByRole("button", { name: "Add", exact: true }).click()
+    // half-added: the reason is said, the Catalogue stays, and no server joins the list.
+    await browse()
+    await page.locator('[data-catalogue="unvetted"]').click()
     await page.getByText(/was NOT saved/).waitFor({ timeout: 15_000 })
-    assert.ok(
-      await page.getByRole("dialog").getByRole("heading", { name: "unvetted" }).isVisible(),
-      "the form stays open on a refused write",
-    )
     assert.equal(
       await page.locator('[data-mcp="unvetted"]').count(),
       0,
       "a refused write adds nothing",
     )
     await shot("refused")
+
+    // Nothing of what was typed, or of what the Bot held, is anywhere on the screen.
+    const shown = [
+      await page.locator("body").innerText(),
+      ...(await page
+        .locator("input")
+        .evaluateAll((nodes) => nodes.map((node) => node.value))),
+    ].join("\n")
+    assert.ok(!shown.includes(TOKEN), "what was typed into the form is not shown back")
+    assert.ok(!shown.includes(HELD), "the value the Bot held is not shown back")
 
     assert.deepEqual(errors, [], `no error in the console (${errors.join("; ")})`)
   } finally {
@@ -239,5 +242,5 @@ for (const width of [390, 1024]) {
   }
 }
 pass(
-  "picking an entry opens its form with a field per declared value, required ones starred and titled with the manifest's own prompt, defaults filled in and secrets masked, a value the Bot holds standing empty and reading as set, a required value left empty refuses the add and marks the field, an add writes the server with the default left standing and shows it with its state, the screen reports a declared value as set and never shows its content, an entry with no values is added in one tap, and a refused write surfaces its reason and adds nothing, at 390 and 1024px, light and dark",
+  "picking a Catalogue entry with values opens its form with a field per value, titled with the environment name and subtitled with the manifest's own prompt, required ones starred, defaults filled in and secrets masked, a value the Bot holds standing empty and reading as set, a required value left empty refuses the add and marks the field, an add writes the server and leaves the Catalogue, an entry with no values is added by its one tap, and a refused write surfaces its reason and adds nothing, at 390 and 1024px, light and dark",
 )

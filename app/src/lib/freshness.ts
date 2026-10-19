@@ -62,6 +62,14 @@ export const MCP_WORK_MS = 3_000
  * entry's own repository: longer than a switch's write, so a slow one isn't given up on early. */
 export const MCP_INSTALL_MS = 2 * 60_000
 
+/** Saving a server's own block, or adding one by hand: a config write and the host's reconcile,
+ * which takes a per-home lock and can back off, so it is given what an add is. */
+export const MCP_SAVE_MS = 2 * 60_000
+
+/** Listing one server's tools by having the host connect it once: as long as that server may take
+ * to answer, since the probe waits on its own connect timeout rather than a read's. */
+export const MCP_TOOLS_MS = 90_000
+
 /** The Code and Routines lists. */
 export const LIST_MS = 60_000
 /** Whether the host can hold a goal (Hermes's `/goal`, through the plugin). */

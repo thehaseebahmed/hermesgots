@@ -23,25 +23,35 @@ import { usePluginFeatureAnswers, type PluginFeatureAnswer } from "@/lib/feature
 import {
   MCP_ACCESS_MS,
   MCP_INSTALL_MS,
+  MCP_SAVE_MS,
+  MCP_TOOLS_MS,
   MCP_WORK_MS,
   READ_TIMEOUT_MS,
   WRITE_TIMEOUT_MS,
 } from "@/lib/freshness"
 import {
+  addCustomMcpServer,
   deliverMcpAccess,
   getMcpCatalogueEntry,
+  getMcpServer,
   installMcpServer,
   listMcpCatalogue,
   listMcpServers,
+  listMcpServerTools,
+  probeMcpServerTools,
   removeMcpServer,
+  saveMcpServer,
   setMcpServerEnabled,
   startMcpAccess,
   type HermesConfig,
   type McpAccess,
   type McpCatalogueEntry,
   type McpCatalogueEntryDetail,
+  type McpCustomServer,
   type McpServer,
-  type McpState,
+  type McpServerDetail,
+  type McpServerEdit,
+  type McpTools,
 } from "@/lib/hermes"
 import { usePoll } from "@/lib/poll"
 import { noteFailure } from "@/lib/report"
@@ -59,20 +69,12 @@ export const MCP_FEATURES = {
   catalogue: "mcps_catalogue",
   add: "mcps_add",
   access: "mcps_access",
+  config: "mcps_config",
+  tools: "mcps_tools",
 } as const
 
 /** What each of those features this Bot's Host answered (see `McpFeatureAnswer`). */
 export type McpFeatureAnswers = Record<keyof typeof MCP_FEATURES, McpFeatureAnswer>
-
-/** Gots' own word for each state a server can be in; Hermes's finer states collapse into these. */
-export const MCP_STATE_WORDS: Record<McpState, string> = {
-  on: "on",
-  off: "off",
-  connecting: "connecting",
-  failed: "failed",
-  needs_access: "needs access",
-  plugin: "provided by a plugin",
-}
 
 /** A bot's server as the client takes it: one of a profile or of a Hermes plugin beside it. */
 export type McpServerConfig = Pick<HermesConfig, "baseUrl" | "apiKey"> | null | undefined
@@ -224,6 +226,31 @@ export function useMcpServers(server: McpServerConfig, active: boolean) {
       noteFailure("Reading the bot's MCP servers", error)
     }
   }, [baseUrl, apiKey, key])
+  const saveConfig = useCallback(
+    async (name: string, edit: McpServerEdit) => {
+      // A block save is a config write and the Host's reconcile, which can back off, so it is given
+      // what an add is rather than a switch's write; the Host's own answer is what the list becomes.
+      const left = await saveMcpServer(
+        { baseUrl, apiKey },
+        name,
+        edit,
+        AbortSignal.timeout(MCP_SAVE_MS),
+      )
+      setServers(left)
+    },
+    [baseUrl, apiKey],
+  )
+  const addCustom = useCallback(
+    async (server: McpCustomServer) => {
+      const left = await addCustomMcpServer(
+        { baseUrl, apiKey },
+        server,
+        AbortSignal.timeout(MCP_SAVE_MS),
+      )
+      setServers(left)
+    },
+    [baseUrl, apiKey],
+  )
   const grant = useCallback(
     async (name: string): Promise<McpAccess> =>
       // The Host discovers the provider and waits for its authorization URL before answering, which
@@ -237,7 +264,7 @@ export function useMcpServers(server: McpServerConfig, active: boolean) {
     },
     [baseUrl, apiKey],
   )
-  return { servers, setEnabled, remove, install, grant, deliver, reload }
+  return { servers, setEnabled, remove, install, saveConfig, addCustom, grant, deliver, reload }
 }
 
 /**
@@ -266,6 +293,96 @@ export function useMcpCatalogue(server: McpServerConfig, active: boolean) {
     { active: active && Boolean(key), onShow: false },
   )
   return entries
+}
+
+/**
+ * One server's own block, read when its sheet opens and again each time it is opened: what its
+ * Config tab is built from. `detail` is undefined until a read lands, and `failedFor` says the read
+ * that was meant to answer it came back an error, so the tab can say so rather than standing there
+ * as an empty stub. An answer for a different server is never handed back, and nothing is written by
+ * reading this.
+ */
+export function useMcpServerDetail(
+  server: McpServerConfig,
+  name: string | undefined,
+  active: boolean,
+): { detail?: McpServerDetail; failed: boolean; reload: () => void } {
+  const [detail, setDetail] = useState<McpServerDetail | undefined>(undefined)
+  const [failedFor, setFailedFor] = useState<string | undefined>(undefined)
+  const [attempt, setAttempt] = useState(0)
+  const config = serverConfig(server)
+  const key = config.baseUrl && config.apiKey ? connectionKey(config) : ""
+  usePoll(
+    (signal) => {
+      landRead(
+        () => getMcpServer(config, name ?? "", signal),
+        signal,
+        (found) => {
+          setDetail(found)
+          setFailedFor(undefined)
+        },
+        (error) => {
+          setFailedFor(name)
+          noteFailure("Reading a server's configuration", error)
+        },
+      )
+    },
+    false,
+    [key, name, attempt],
+    // Opening the sheet is the whole trigger, as it is for a catalogue entry.
+    { active: active && Boolean(key) && Boolean(name), onShow: false },
+  )
+  return {
+    detail: name !== undefined && detail?.name === name ? detail : undefined,
+    failed: name !== undefined && failedFor === name,
+    reload: () => setAttempt((count) => count + 1),
+  }
+}
+
+/**
+ * One server's tools: Hermes's own schema cache when the sheet opens — so opening it never connects
+ * anything — and `probe` for the tap that asks the server itself, given `MCP_TOOLS_MS` because the
+ * Host connects it once, lists what it offers and disconnects. An undefined answer means no read has
+ * landed yet; a cache miss is an empty list with `cached` false rather than an error.
+ */
+export function useMcpServerTools(
+  server: McpServerConfig,
+  name: string | undefined,
+  active: boolean,
+) {
+  const [found, setFound] = useState<McpTools | undefined>(undefined)
+  const [probing, setProbing] = useState(false)
+  const config = serverConfig(server)
+  const key = config.baseUrl && config.apiKey ? connectionKey(config) : ""
+  usePoll(
+    (signal) => {
+      landRead(
+        () => listMcpServerTools(config, name ?? "", signal),
+        signal,
+        setFound,
+        (error) => noteFailure("Reading a server's tools", error),
+      )
+    },
+    false,
+    [key, name],
+    { active: active && Boolean(key) && Boolean(name), onShow: false },
+  )
+  const probe = useCallback(async () => {
+    if (!name) return
+    setProbing(true)
+    try {
+      setFound(
+        await probeMcpServerTools(
+          { baseUrl: config.baseUrl, apiKey: config.apiKey },
+          name,
+          AbortSignal.timeout(MCP_TOOLS_MS),
+        ),
+      )
+    } finally {
+      setProbing(false)
+    }
+  }, [config.baseUrl, config.apiKey, name])
+  return { tools: found, probing, probe }
 }
 
 /**

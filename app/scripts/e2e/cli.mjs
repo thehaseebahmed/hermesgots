@@ -142,7 +142,7 @@ const FLOWS = {
   mcps: {
     script: "e2e/mcps.mjs",
     about:
-      "A bot's MCP servers list from its editor row, with a switch on each of its own servers and none on a plugin's, at phone and tablet widths",
+      "A bot's MCP servers are a tab of its settings, with Add a server on top, its own servers and its plugin's under headings, each row a name over its health, at phone and tablet widths",
   },
   afk: {
     script: "e2e/afk.mjs",
@@ -162,12 +162,12 @@ const FLOWS = {
   "mcps-gate": {
     script: "e2e/mcps-gate.mjs",
     about:
-      "A bot whose plugin answers without `mcps` has no row in its editor, its screen's URL returns to the bot, and the controls each advertises apart are offered apart",
+      "A bot whose plugin answers without `mcps` has no MCP tab, its tab's URL returns to the bot, and the controls each advertises apart are offered apart",
   },
   "mcps-catalogue": {
     script: "e2e/mcps-catalogue.mjs",
     about:
-      "A Bot's Add action opens Hermes's Catalogue, marking the entries it already has, and a search narrows it",
+      "A Bot's Add action opens Hermes's Catalogue, which lists only the entries it doesn't have, and a search narrows it",
   },
   "mcps-remove": {
     script: "e2e/mcps-remove.mjs",
@@ -177,12 +177,22 @@ const FLOWS = {
   "mcps-add": {
     script: "e2e/mcps-add.mjs",
     about:
-      "Picking a Catalogue entry opens a form of the values it declares, an add writes the server and shows it, and the screen reports a value as set without ever showing its content",
+      "Picking a Catalogue entry opens a form of the values it declares, titled by value name and subtitled by prompt, an entry with nothing to fill is one tap, and an add writes the server and leaves the Catalogue",
+  },
+  "mcps-server": {
+    script: "e2e/mcps-server.mjs",
+    about:
+      "A server's own sheet shows its Config — the block, its values, one Save — and its Tools, from the schema cache, with Load tools for a fresh list",
+  },
+  "mcps-custom": {
+    script: "e2e/mcps-custom.mjs",
+    about:
+      "A custom server is added from a form of its name and transport, and the Host's own refusal of a name it won't take is what the form says",
   },
   "mcps-access": {
     script: "e2e/mcps-access.mjs",
     about:
-      "Grant access on a waiting server starts the Host's flow, shows its URL, takes the pasted callback, and clears the row by itself, at phone and tablet widths",
+      "Server access starts from a waiting server's own health line, shows the Host's URL, takes the pasted callback, and clears the row by itself, at phone and tablet widths",
   },
   "fallbacks-silent-host": {
     script: "e2e/fallbacks-silent-host.mjs",

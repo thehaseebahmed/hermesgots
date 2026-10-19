@@ -90,6 +90,7 @@ so no control is offered whose every tap could only fail.
 
 from __future__ import annotations
 
+import re
 import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
@@ -410,6 +411,463 @@ def accessible() -> Optional[str]:
     return None
 
 
+def configurable() -> Optional[str]:
+    """Why one server's own configuration can't be read or written from here, or None when it can.
+
+    Reading a block and writing it back is the writers' set plus Hermes's validator, its environment
+    writer and that writer's name guard — and the catalogue is *not* one of them: a server typed in by
+    hand has no entry, so the Config screen works on a host with no Catalogue at all. ``info``
+    advertises it as its own feature, so a host without these offers no Config tab rather than one
+    whose save could only fail.
+    """
+    try:
+        _hermes_configure()
+    except McpError as error:
+        return str(error)
+    return None
+
+
+def tool_readable() -> Optional[str]:
+    """Why a server's tools can't be listed from here, or None when they can.
+
+    The cache read and the one-server probe are a newer set than the block writers — a host can list,
+    switch and edit servers without the schema cache — so the Tools tab has its own gate, and a host
+    without it offers no Tools tab.
+    """
+    try:
+        _hermes_tools()
+    except McpError as error:
+        return str(error)
+    return None
+
+
+def detail(profile: Optional[str], name: str) -> Dict[str, Any]:
+    """One of ``profile``'s servers as the Config screen is built from it, never a value it holds.
+
+    The transport and what it runs — a URL, or a command and its arguments — plus one value row per
+    environment name, each with the prompt its Catalogue entry writes for it where the entry declares
+    one, whether it is required, whether its field is masked, and whether the bot already holds it.
+    The content of a value is never answered, whether it sits in the profile's ``.env`` behind a
+    ``${NAME}`` reference or inline in the block; ``set`` is the whole of what the screen may know.
+
+    A server a Hermes plugin provides is answered too, with ``editable`` false: Hermes refuses to
+    modify those, and the screen shows what the plugin's own ``mcp.json`` runs without a Save.
+
+    ``profile`` is a profile name, or None for the process's own. Blocking — the profile's config and
+    ``.env`` are read, and the catalogue may be scanned for the entry a name matches — so call it
+    from a worker thread, never the event loop. Nothing is connected, started or written.
+    """
+    hermes = _hermes_configure()
+    with hermes["read_scope"](profile):
+        servers, owners = hermes["sources"](hermes["servers"]())
+        cfg = _server_block(servers, name)
+        return _detail(name, cfg, bool(owners.get(name)), hermes)
+
+
+def edit(profile: Optional[str], name: str, body: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Save the Config screen's edit of one of ``profile``'s servers, and answer the servers left.
+
+    The body carries the transport the form ended on and its fields: ``url`` or ``command``/``args``
+    for a stdio server, ``auth`` (``none``/``header``/``oauth``) and an optional ``token`` for an
+    HTTP one, and ``values`` — the environment values typed over, by name. An empty value is left as
+    it is, so a value the bot holds is never asked for again; a typed one is written to the
+    profile's ``.env`` and the block keeps Hermes's ``${NAME}`` reference, so the configuration never
+    holds a credential. Switching transport drops the old one's fields, since a URL and a command are
+    never both.
+
+    The block is built from the one the profile has, so every key this screen doesn't manage — a
+    server's ``enabled`` flag, its OAuth client block, a connect timeout — is left exactly as it was.
+    Hermes's own validator has the last word: a block it refuses is a 400 carrying its own sentence,
+    and a server a Hermes plugin provides, or one the profile doesn't have, is refused the same way.
+    Hermes's own reconcile follows, so the change is live for the bot's next turn.
+
+    ``profile`` is a profile name, or None for the process's own. Blocking — config I/O, the
+    environment write and a reconcile — so call it from a worker thread, never the event loop.
+    """
+    hermes = _hermes_configure()
+    with hermes["write_scope"](profile):
+        _writable_server(hermes, name)
+        servers, _ = hermes["sources"](hermes["servers"]())
+        block = _edited(hermes, name, _server_block(servers, name), body)
+        values = _typed(hermes, body.get("values"))
+        if not hermes["save_server"](name, block):
+            raise McpError(_refusal(hermes, name, block))
+        for key, value in values.items():
+            hermes["save_env"](key, value)
+        hermes["reconcile"]()
+        return _all_rows(hermes)
+
+
+def custom(profile: Optional[str], body: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Add a server the Catalogue doesn't offer, from what the form collected, and answer the list.
+
+    ``body`` is a name and exactly one transport — ``url``, or ``command`` with ``args`` — plus an
+    HTTP server's ``auth`` and optional ``token``, and the environment ``values`` a stdio one needs.
+    It is the Dashboard's own create contract (``hermes mcp add``, ``POST /api/mcp/servers``) with one
+    deliberate difference: a value goes to the profile's ``.env`` and the block holds Heremes's
+    ``${NAME}`` reference, as a Catalogue add already does, rather than inline — so a credential
+    never lands in ``config.yaml`` (ADR 0014).
+
+    The write is the same one an add from the Catalogue takes — Hermes's validator, then its own
+    ``_save_mcp_server``, then the reconcile — so a configuration it refuses is a 400 carrying its
+    own sentence and nothing is half-added. A name the profile already has, or one a Hermes plugin
+    provides, is refused before anything is built: a custom add never overwrites.
+
+    ``profile`` is a profile name, or None for the process's own. Blocking — config I/O, the
+    environment write and a reconcile — so call it from a worker thread, never the event loop.
+    """
+    hermes = _hermes_configure()
+    with hermes["write_scope"](profile):
+        name = _new_name(hermes, body.get("name"))
+        if body.get("url") and body.get("command"):
+            raise McpError("A server has either an address or a command, never both.", 400)
+        block = _edited(hermes, name, {}, body)
+        values = _typed(hermes, body.get("values"))
+        if not hermes["save_server"](name, block):
+            raise McpError(_refusal(hermes, name, block))
+        for key, value in values.items():
+            hermes["save_env"](key, value)
+        hermes["reconcile"]()
+        return _all_rows(hermes)
+
+
+def tools(profile: Optional[str], name: str) -> Dict[str, Any]:
+    """The tools ``profile``'s server ``name`` offers, from Hermes's own schema cache.
+
+    Hermes writes that cache on every successful registration — the tools' names, descriptions and
+    input schemas, keyed by the configuration it read them from — so this answers a connected or
+    lazily registered server's tools without connecting anything, and an empty answer with
+    ``cached`` false for one that has never connected (or whose configuration has changed since).
+    The screen offers ``probe`` for that case rather than connecting on its own (ADR 0014).
+
+    A server a Hermes plugin provides is answered like any other: its tools are the plugin's, and
+    reading them changes nothing.
+
+    ``profile`` is a profile name, or None for the process's own. Blocking — the cache is a file read
+    and the profile's config is read for the fingerprint — so call it from a worker thread, never the
+    event loop.
+    """
+    hermes = _hermes_tools()
+    with hermes["read_scope"](profile):
+        cfg = _server_block(hermes["sources"](hermes["servers"]())[0], name)
+        entry = hermes["cached"](name, hermes["fingerprint"](cfg))
+        if not entry:
+            return {"name": name, "cached": False, "tools": []}
+        return {"name": name, "cached": True, "tools": _tool_rows(hermes["from_cache"](entry))}
+
+
+def probe_tools(profile: Optional[str], name: str) -> Dict[str, Any]:
+    """List ``profile``'s server ``name``'s tools by connecting it once, then disconnecting it.
+
+    This is the one read here that reaches the server, so it is never on a screen's open: the app
+    asks for it when the user taps Load tools, given a long timeout, and Hermes's own one-server probe
+    connects with the server's own ``connect_timeout``, lists what it offers and shuts it down
+    without registering anything. A failure is Hermes's own sentence, redacted of anything its
+    transport may have printed, and is a 400 rather than a 500.
+
+    ``profile`` is a profile name, or None for the process's own. Blocking, for as long as the
+    server takes to answer, so call it from a worker thread, never the event loop.
+    """
+    hermes = _hermes_tools()
+    with hermes["read_scope"](profile):
+        cfg = _server_block(hermes["sources"](hermes["servers"]())[0], name)
+        try:
+            found = hermes["probe"](name, cfg)
+        except Exception as error:  # noqa: BLE001 - Hermes raises whatever its transport did
+            raise McpError(_probe_reason(hermes, name, error), 400) from error
+        return {
+            "name": name,
+            "cached": False,
+            "tools": [{"name": str(tool), "description": str(text or "")} for tool, text in found],
+        }
+
+
+def _hermes_configure() -> Dict[str, Any]:
+    """The writers plus what reading and saving one server's block needs, imported at call time.
+
+    The catalogue is deliberately outside this set: a server typed in by hand has no entry, so a host
+    whose catalogue module moved still edits one. Its entry read is looked for separately, only to
+    carry the prompts a manifest writes for the values it declares — a screen without it shows the
+    environment names alone rather than losing Config.
+    """
+    readers = _hermes()
+    hermes = _hermes_write()
+    try:
+        from hermes_cli.config import (
+            get_env_value,
+            save_env_value,
+            validate_env_var_name_for_write,
+        )
+        from hermes_cli.mcp_config import _save_bearer_auth_token, _save_mcp_server
+        from hermes_cli.mcp_security import validate_mcp_server_entry
+    except ImportError as error:
+        raise McpError(UNAVAILABLE, 501) from error
+    return {
+        **hermes,
+        "read_scope": readers["scope"],
+        "write_scope": hermes["scope"],
+        "save_server": _save_mcp_server,
+        "validate": validate_mcp_server_entry,
+        "get_env": get_env_value,
+        "save_env": save_env_value,
+        "check_name": validate_env_var_name_for_write,
+        "bearer": _save_bearer_auth_token,
+        "entry": _entry_reader(),
+    }
+
+
+def _entry_reader() -> Callable[[str], Any]:
+    """Hermes's own one-entry read where this host has it, else one that answers nothing.
+
+    A value row's prompt comes from the entry a server's name matches; a host with no catalogue
+    answers None for every name, and the rows still list the environment names the block holds.
+    """
+    try:
+        from hermes_cli.mcp_catalog import get_entry
+    except ImportError:
+        return lambda _name: None
+    return get_entry
+
+
+def _hermes_tools() -> Dict[str, Any]:
+    """The readers plus Hermes's schema cache and its one-server probe, imported at call time.
+
+    Both are newer than the writers — a host can list, switch and edit servers without them — so the
+    Tools tab is advertised apart, and the probe is reached only by the tap that asks for it.
+    """
+    hermes = _hermes()
+    try:
+        from hermes_cli.mcp_config import _probe_single_server, redact_mcp_probe_text
+        from tools.mcp_schema_cache import (
+            config_fingerprint,
+            get_cached_entry,
+            tools_from_cache_entry,
+        )
+    except ImportError as error:
+        raise McpError(UNAVAILABLE, 501) from error
+    return {
+        **hermes,
+        "read_scope": hermes["scope"],
+        "fingerprint": config_fingerprint,
+        "cached": get_cached_entry,
+        "from_cache": tools_from_cache_entry,
+        "probe": _probe_single_server,
+        "redact": redact_mcp_probe_text,
+    }
+
+
+# A value's content, when the block holds a reference rather than the value itself.
+_REFERENCE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
+
+
+def _server_block(servers: Dict[str, Any], name: str) -> Dict[str, Any]:
+    """One server's own block, or a 400 for one this bot doesn't have."""
+    if name not in servers:
+        raise McpError(f"No MCP server named {name!r} on this bot.", 400)
+    block = servers[name]
+    return block if isinstance(block, dict) else {}
+
+
+def _detail(
+    name: str, cfg: Dict[str, Any], plugin: bool, hermes: Dict[str, Any]
+) -> Dict[str, Any]:
+    """One server as the Config screen is built from it. Call it inside the profile's scope."""
+    transport = "http" if cfg.get("url") else "stdio"
+    return {
+        "name": name,
+        "source": "plugin" if plugin else "config",
+        "transport": transport,
+        "url": str(cfg.get("url") or ""),
+        "command": str(cfg.get("command") or ""),
+        "args": [str(argument) for argument in (cfg.get("args") or [])],
+        "auth": _auth(cfg),
+        "editable": not plugin,
+        "values": _value_rows(name, cfg, hermes),
+    }
+
+
+def _auth(cfg: Dict[str, Any]) -> str:
+    """What the server's configuration declares about how it authenticates."""
+    if cfg.get("auth") == "oauth":
+        return "oauth"
+    return "header" if cfg.get("headers") else "none"
+
+
+def _value_rows(name: str, cfg: Dict[str, Any], hermes: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """One row per environment name: the block's own, then any its Catalogue entry declares.
+
+    The block's names come first, A to Z, then a declared value the block has no line for — a
+    manifest can gain one after a server was added — each marked not set. A prompt is the entry's own
+    where it writes one, and empty otherwise; a value nothing declares is masked, since the screen
+    can't tell a credential from a setting and masking is the harmless side to guess wrong on.
+    """
+    declared = _declared_for(hermes, name)
+    prompts = {
+        str(getattr(spec, "name", "")): getattr(spec, "prompt", "") or "" for spec in declared
+    }
+    secrets = {
+        str(getattr(spec, "name", "")): getattr(spec, "secret", True) is not False
+        for spec in declared
+    }
+    required = {
+        str(getattr(spec, "name", "")): getattr(spec, "required", True) is not False
+        for spec in declared
+    }
+    block = cfg.get("env") if isinstance(cfg.get("env"), dict) else {}
+    names = sorted({str(key) for key in block} | set(prompts))
+    return [
+        {
+            "name": key,
+            "prompt": prompts.get(key, ""),
+            "required": required.get(key, False),
+            "secret": secrets.get(key, True),
+            "set": _holds(block, key, hermes),
+        }
+        for key in names
+    ]
+
+
+def _declared_for(hermes: Dict[str, Any], name: str) -> List[Any]:
+    """The values a Catalogue entry matching this server's name declares, if there is one."""
+    try:
+        found = hermes["entry"](name)
+    except Exception:  # noqa: BLE001 - a catalogue that can't be read is no prompts, not a failure
+        return []
+    return _env_specs(found) if found is not None else []
+
+
+def _holds(block: Dict[str, Any], key: str, hermes: Dict[str, Any]) -> bool:
+    """Whether this bot holds a value for ``key`` — in the block, or where a reference points."""
+    value = block.get(key)
+    if isinstance(value, str):
+        reference = _REFERENCE.match(value.strip())
+        if reference:
+            return bool(hermes["get_env"](reference.group(1)))
+        if value.strip():
+            return True
+    return bool(hermes["get_env"](key))
+
+
+def _edited(
+    hermes: Dict[str, Any], name: str, cfg: Dict[str, Any], body: Dict[str, Any]
+) -> Dict[str, Any]:
+    """The block the Config screen's body describes, built on the one the profile has.
+
+    Every key the screen doesn't manage is carried over as it was, so a server's ``enabled`` flag, its
+    OAuth client block and any tuning the Host holds survive an edit. Only the keys that belong to the
+    transport being left are dropped, since a URL and a command are never both.
+    """
+    transport = str(
+        body.get("transport") or ("http" if (body.get("url") or cfg.get("url")) else "stdio")
+    )
+    if transport not in ("http", "stdio"):
+        raise McpError(f"{transport!r} is not a transport Gots can write.", 400)
+    edited = dict(cfg)
+    if transport == "http":
+        url = str(body.get("url") or "").strip()
+        if not url:
+            raise McpError("An HTTP server needs an address.", 400)
+        for key in ("command", "args", "env"):
+            edited.pop(key, None)
+        edited["url"] = url
+        auth = str(body.get("auth") or "none").strip().lower()
+        if auth not in ("none", "header", "oauth"):
+            raise McpError(f"{auth!r} is not an authentication Gots can write.", 400)
+        edited.pop("auth", None)
+        if auth == "oauth":
+            edited["auth"] = "oauth"
+        if auth == "header":
+            token = str(body.get("token") or "").strip()
+            if token:
+                edited["headers"] = hermes["bearer"](name, token)
+            elif not edited.get("headers"):
+                raise McpError("A header needs a token.", 400)
+        else:
+            edited.pop("headers", None)
+    else:
+        command = str(body.get("command") or "").strip()
+        if not command:
+            raise McpError("A stdio server needs a command.", 400)
+        for key in ("url", "headers", "auth"):
+            edited.pop(key, None)
+        edited["command"] = command
+        arguments = body.get("args")
+        if isinstance(arguments, list) and arguments:
+            edited["args"] = [str(argument) for argument in arguments]
+        else:
+            edited.pop("args", None)
+        env = dict(edited["env"]) if isinstance(edited.get("env"), dict) else {}
+        # A value typed over becomes the reference Hermes resolves at load; the value itself goes to
+        # the profile's .env after the block has landed, so a refused block writes nothing.
+        for key, value in _typed(hermes, body.get("values")).items():
+            env[key] = "${%s}" % key
+        if env:
+            edited["env"] = env
+        else:
+            edited.pop("env", None)
+    return edited
+
+
+def _typed(hermes: Dict[str, Any], values: Any) -> Dict[str, str]:
+    """The environment values a body typed over, each name checked the way Hermes writes one.
+
+    An empty value is nothing typed, so a value the bot already holds stands untouched. A name
+    Hermes's own writer would refuse is a 400 for the whole save before anything is written.
+    """
+    if values is None:
+        return {}
+    if not isinstance(values, dict) or not all(
+        isinstance(key, str) and isinstance(value, str) for key, value in values.items()
+    ):
+        raise McpError('Values must be {"NAME": "value"}.', 400)
+    typed: Dict[str, str] = {}
+    for key, value in values.items():
+        if not value.strip():
+            continue
+        try:
+            hermes["check_name"](key)
+        except ValueError as error:
+            raise McpError(str(error), 400) from error
+        typed[key] = value
+    return typed
+
+
+def _new_name(hermes: Dict[str, Any], raw: Any) -> str:
+    """The name a custom add will use, or the 400 that refuses it before anything is built."""
+    name = raw.strip() if isinstance(raw, str) else ""
+    if not name:
+        raise McpError("A server needs a name.", 400)
+    servers, owners = hermes["sources"](hermes["servers"]())
+    if owners.get(name):
+        raise McpError(f"{name} is provided by a Hermes plugin, so it can't be added.", 400)
+    if name in servers:
+        raise McpError(f"This bot already has an MCP server named {name}.", 400)
+    return name
+
+
+def _tool_rows(found: List[Any]) -> List[Dict[str, Any]]:
+    """Hermes's cached tool dicts as the list is drawn from them: a name and what it does."""
+    rows = []
+    for tool in found:
+        if not isinstance(tool, dict):
+            continue
+        name = tool.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        description = tool.get("description")
+        rows.append({"name": name, "description": description if isinstance(description, str) else ""})
+    return rows
+
+
+def _probe_reason(hermes: Dict[str, Any], name: str, error: Exception) -> str:
+    """Why a probe failed, in Hermes's own words where it has any, redacted of what it printed."""
+    try:
+        text = hermes["redact"](error)
+    except Exception:  # noqa: BLE001 - a redactor that can't read an error is no reason at all
+        text = ""
+    return str(text) if text else f"Couldn't reach {name}."
+
+
 def start_access(profile: Optional[str], name: str) -> Dict[str, Any]:
     """Start (or resume) a Server access flow for ``name``, answering the URL to open and its life.
 
@@ -555,6 +1013,8 @@ FEATURES: Tuple[Tuple[str, Callable[[], Optional[str]]], ...] = (
     ("mcps_catalogue", browsable),
     ("mcps_add", addable),
     ("mcps_access", accessible),
+    ("mcps_config", configurable),
+    ("mcps_tools", tool_readable),
 )
 
 
@@ -593,7 +1053,18 @@ def _catalogue_entry(entry: Any, servers: Dict[str, Any]) -> Dict[str, Any]:
         "name": name,
         "description": getattr(entry, "description", "") or "",
         "installed": name in servers,
+        "needs_config": _needs_config(entry),
     }
+
+
+def _needs_config(entry: Any) -> bool:
+    """Whether adding an entry leaves anything to fill in, so a tap on the list can decide.
+
+    Only the values its manifest declares count. OAuth is not one of them: an OAuth entry is added
+    with its marker and reads ``needs_access``, and the tap that adds it has nothing to ask — so the
+    screen adds it at once and offers Server access on its row afterwards (ADR 0014).
+    """
+    return bool(_env_specs(entry))
 
 
 def entry(profile: Optional[str], name: str) -> Dict[str, Any]:
@@ -836,11 +1307,17 @@ def _rows(
 
 
 def _server(name: str, cfg: Any, owner: Optional[str], status: Any, tokens_present: Any) -> Dict[str, Any]:
-    """One server in the app's own shape: Gots' state word, whether it is on, where it comes from."""
+    """One server in the app's own shape: Gots' state word, whether it is on, where it comes from.
+
+    A connected or lazily registered server also carries ``tools``: Hermes's cached read answers the
+    count it holds for those, and ``0`` for one it has no runtime state for — which is not a count, so
+    it is left out rather than reported as nothing to offer (``app/src/lib/mcp-server.ts``).
+    """
     cfg = cfg if isinstance(cfg, dict) else {}
     status = status if isinstance(status, dict) else {}
     state = _state(name, cfg, owner, status, tokens_present)
-    return {
+    connected = _connected(status)
+    row = {
         "name": name,
         "state": state,
         "enabled": _enabled(cfg),
@@ -848,6 +1325,11 @@ def _server(name: str, cfg: Any, owner: Optional[str], status: Any, tokens_prese
         "reason": _reason(state, status),
         "access": _grantable(cfg, owner, state),
     }
+    count = status.get("tools")
+    if isinstance(count, int) and not isinstance(count, bool):
+        if connected or status.get("status") == "lazy":
+            row["tools"] = count
+    return row
 
 
 def _grantable(cfg: Dict[str, Any], owner: Optional[str], state: str) -> bool:

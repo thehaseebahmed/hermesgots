@@ -1,21 +1,18 @@
-import { useCallback, useEffect, useState } from "react"
-import { useLiveQuery } from "dexie-react-hooks"
+import { useEffect, useState } from "react"
 import {
   ArrowLeftIcon,
   CheckIcon,
   ChevronRightIcon,
   CopyIcon,
-  KeyRoundIcon,
   PlusIcon,
   ServerIcon,
   Trash2Icon,
 } from "lucide-react"
-import { Navigate, useParams } from "react-router"
 import { toast } from "sonner"
 
 import { ItemSearch } from "@/components/item-list"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
-import { Group, linkRowClass, rowClass, RowText, Screen } from "@/components/settings-chrome"
+import { Group, linkRowClass, rowClass, RowText } from "@/components/settings-chrome"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,91 +23,96 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
-import { listProfiles } from "@/lib/db"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import type { Profile } from "@/lib/db"
 import { MCP_WORK_MS } from "@/lib/freshness"
-import { collectedValues, fieldValue, missingValues, searchCatalogue } from "@/lib/mcp-catalogue"
 import { offersAccess } from "@/lib/mcp-access"
+import { collectedValues, fieldValue, missingValues, searchCatalogue } from "@/lib/mcp-catalogue"
+import {
+  configChanged,
+  configDraft,
+  configEdit,
+  customReady,
+  customServer,
+  healthLine,
+  type ConfigDraft,
+  type ValueDraft,
+} from "@/lib/mcp-server"
 import {
   useMcpCatalogue,
   useMcpCatalogueEntry,
   useMcpFeatureAnswers,
+  useMcpServerDetail,
   useMcpServers,
-  MCP_STATE_WORDS,
+  useMcpServerTools,
   type McpServerConfig,
 } from "@/lib/mcps"
-import type { McpAccess, McpCatalogueEntry, McpServer, McpState } from "@/lib/hermes"
-import { useWide } from "@/lib/media"
-import { setBackGuard } from "@/lib/native"
-import { useNav } from "@/lib/nav"
+import type {
+  McpAccess,
+  McpCatalogueEntry,
+  McpCustomServer,
+  McpServer,
+  McpServerDetail,
+  McpServerEdit,
+} from "@/lib/hermes"
+import { cn } from "@/lib/utils"
 
-/**
- * How tall the sheet holding the Catalogue is, so it holds between its two views — the entries, then
- * one entry's form — the way the model picker's does.
- */
+/** How tall the sheet holding the Catalogue is, so it holds its two views the way the picker does. */
 const CATALOGUE_HEIGHT = "h-[min(32rem,85dvh)]"
 
-/** How loud each state reads: a failed server is the only one that is a problem. */
-const STATE_TONES: Record<McpState, "secondary" | "outline" | "destructive"> = {
-  on: "secondary",
-  off: "outline",
-  connecting: "outline",
-  failed: "destructive",
-  needs_access: "outline",
-  plugin: "outline",
-}
+/** How tall a server's own sheet is, so its two tabs hold their place between switches. */
+const SERVER_HEIGHT = "h-[min(34rem,85dvh)]"
 
 /**
- * A Bot's MCP servers: every one the Bot's Hermes profile has, each with the state it is in, a
- * switch that turns one on or off for that Bot and a removal behind a confirmation, each wherever
- * its own feature is advertised. A server a Hermes plugin provides is read as what it is and carries
- * no control, because Hermes refuses to modify one; a Host that can list servers without being able
- * to change them has no switch, and one that can switch but predates the removal has no removal, so
- * no control is ever offered whose every tap could only fail. An Add action opens Hermes's Catalogue
- * as a searchable list, marking the entries this Bot already has and adding the one that is picked —
- * its form asking for the values that entry declares — wherever the Host advertises both that it can
- * read a Catalogue and that it can add from one, since the action's whole work is the adding.
- * Reached from the Bot's own row in Settings and by URL; back returns to the Bot. A Bot whose Hermes
- * can't list them has no screen at all, so its URL sends the user back to the Bot, while one whose
- * Host hasn't answered yet draws nothing rather than flashing its screen away.
+ * What a field for a value the Bot already holds says: the Host reports that it has one and never its
+ * content, so the field stands empty with this as its placeholder, and typing over it replaces it.
  */
-export function McpsPage() {
-  const { botId } = useParams()
-  const { up } = useNav()
-  const profiles = useLiveQuery(listProfiles, [])
-  const profile = profiles?.find((p) => p.id === botId)
-  const { list, write, removable, catalogue, add, access } = useMcpFeatureAnswers(profile)
-  const { servers, setEnabled, remove, install, grant, deliver, reload } = useMcpServers(
-    profile,
-    list === "yes",
-  )
-  // The name of the server a removal is being confirmed for, and whether that removal is on its way.
+const SET_PLACEHOLDER = "Set — type to replace"
+
+/**
+ * A bot's MCP servers, as a tab of its Settings: Add a server on top, then the servers the bot's own
+ * configuration holds, then the ones a Hermes plugin provides.
+ *
+ * Every row is its name over its health — *Healthy: 78 tools* where Hermes reports a count, the
+ * Host's own sentence where it failed, *Needs Authentication: Click here to authenticate* where
+ * Server access is what stands in the way — and that health line is the button starting the flow, so
+ * the waiting row and the way out of it are one line. Tapping the name opens the server's own sheet:
+ * Config, where its block is shown and saved, and Tools, where what it offers is listed (ADR 0014).
+ *
+ * A heading with nothing under it is left out, so a bot with no servers shows the Add row alone. The
+ * Add action's two ways in — the Catalogue and the custom form — need the same write a Config save
+ * does, so neither is offered where the Host can't write.
+ */
+export function McpsTab({ profile }: { profile: Profile }) {
+  const answers = useMcpFeatureAnswers(profile)
+  const { servers, setEnabled, remove, saveConfig, addCustom, install, grant, deliver, reload } =
+    useMcpServers(profile, answers.list === "yes")
+  const [adding, setAdding] = useState(false)
+  const [browsing, setBrowsing] = useState(false)
+  const [customising, setCustomising] = useState(false)
+  // The server whose sheet is open, by name, and the one whose Server access sheet is.
+  const [opened, setOpened] = useState<string | null>(null)
+  const [granting, setGranting] = useState<string | null>(null)
+  // The server a removal is being confirmed for, and whether that removal is on its way.
   const [removing, setRemoving] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [browsing, setBrowsing] = useState(false)
-  // The server whose Server access sheet is open, by name, so the sheet follows the row's own read.
-  const [granting, setGranting] = useState<string | null>(null)
+  const openedServer = servers?.find((server) => server.name === opened)
   const grantingServer = servers?.find((server) => server.name === granting)
-  const profileId = profile?.id
-  // Android's back does what the header's button does: it returns to the Bot.
-  const back = useCallback(
-    () => up(profileId ? `/settings/bots/${profileId}` : "/settings"),
-    [up, profileId],
-  )
-  useEffect(() => setBackGuard(() => (back(), true)), [back])
+  const mine = servers?.filter((server) => server.source === "config") ?? []
+  const theirs = servers?.filter((server) => server.source === "plugin") ?? []
 
   async function confirmRemove() {
     if (removing === null) return
     setBusy(true)
     try {
-      // The list becomes the servers the Host says are left, so the row goes on the answer itself.
       await remove(removing)
       setRemoving(null)
+      setOpened(null)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't remove that.")
     } finally {
@@ -118,58 +120,20 @@ export function McpsPage() {
     }
   }
 
-  if (profiles === undefined) return null
-  if (!profile) return <Navigate to="/settings" replace />
-  // The plugin answered without the feature: there is nothing to list, so a hand-typed URL lands
-  // back on the Bot rather than on a blank screen with no way out.
-  if (list === "no") return <Navigate to={`/settings/bots/${profile.id}`} replace />
-  // Still unanswered: nothing is drawn, so a good Bot's screen doesn't flash away on a direct visit.
-  if (list !== "yes") return null
+  // Nothing is drawn until the Host has answered that it lists servers: the tab only exists for a
+  // Host that does, so a blank frame here is the tab arriving rather than a bot without one.
+  if (answers.list !== "yes") return null
 
   return (
-    <Screen
-      title="MCP servers"
-      leading={
-        <Button
-          variant="outline"
-          size="icon-lg"
-          className="size-11 rounded-full"
-          onClick={() => up(`/settings/bots/${profile.id}`)}
-          aria-label="Back"
-        >
-          <ArrowLeftIcon />
-        </Button>
-      }
-    >
-      {servers === undefined ? null : servers.length === 0 ? (
-        <p className="px-1 text-sm text-muted-foreground">No MCP servers.</p>
-      ) : (
-        <Group>
-          {servers.map((server) => (
-            <ServerRow
-              key={server.name}
-              server={server}
-              writable={write === "yes"}
-              removable={removable === "yes"}
-              grantable={offersAccess(access === "yes", server.access)}
-              onToggle={setEnabled}
-              onRemove={() => setRemoving(server.name)}
-              onGrant={() => setGranting(server.name)}
-            />
-          ))}
-        </Group>
-      )}
-
-      {/* Adding one is the Catalogue plus the write that lands it, so the action exists only where
-          the Host advertises both: a Host that can read a Catalogue but not add from one has no
-          action whose whole work it couldn't do. */}
-      {catalogue === "yes" && add === "yes" && (
+    <div className="flex flex-col gap-4" data-mcp-tab>
+      {answers.add === "yes" && (
         <Group>
           <button
             type="button"
             className={linkRowClass}
             aria-haspopup="dialog"
-            onClick={() => setBrowsing(true)}
+            data-mcp-add
+            onClick={() => setAdding(true)}
           >
             <PlusIcon className="size-5 shrink-0 text-muted-foreground" />
             <RowText title="Add a server" />
@@ -178,6 +142,59 @@ export function McpsPage() {
         </Group>
       )}
 
+      {mine.length > 0 && (
+        <section className="flex flex-col gap-2" data-mcp-section="config">
+          <h2 className="px-2 text-sm font-medium text-muted-foreground">Your servers</h2>
+          <Group>
+            {mine.map((server) => (
+              <ServerRow
+                key={server.name}
+                server={server}
+                writable={answers.write === "yes"}
+                canAuthenticate={offersAccess(answers.access === "yes", server.access)}
+                onToggle={setEnabled}
+                onOpen={() => setOpened(server.name)}
+                onGrant={() => setGranting(server.name)}
+              />
+            ))}
+          </Group>
+        </section>
+      )}
+
+      {theirs.length > 0 && (
+        <section className="flex flex-col gap-2" data-mcp-section="plugin">
+          <h2 className="px-2 text-sm font-medium text-muted-foreground">From plugins</h2>
+          <Group>
+            {theirs.map((server) => (
+              <ServerRow
+                key={server.name}
+                server={server}
+                writable={false}
+                canAuthenticate={false}
+                onToggle={setEnabled}
+                onOpen={() => setOpened(server.name)}
+                onGrant={() => setGranting(server.name)}
+              />
+            ))}
+          </Group>
+        </section>
+      )}
+
+      <AddServerSheet
+        open={adding}
+        onOpenChange={setAdding}
+        onCatalogue={() => {
+          setAdding(false)
+          setBrowsing(true)
+        }}
+        onCustom={() => {
+          setAdding(false)
+          setCustomising(true)
+        }}
+        catalogue={answers.catalogue === "yes"}
+        custom={answers.add === "yes"}
+      />
+
       <McpCatalogueSheet
         open={browsing}
         onOpenChange={setBrowsing}
@@ -185,9 +202,24 @@ export function McpsPage() {
         install={install}
       />
 
+      <CustomServerSheet open={customising} onOpenChange={setCustomising} add={addCustom} />
+
+      {openedServer && (answers.config === "yes" || answers.tools === "yes") && (
+        <ServerSheet
+          profile={profile}
+          server={openedServer}
+          open
+          onOpenChange={(next) => !next && setOpened(null)}
+          config={answers.config === "yes"}
+          tools={answers.tools === "yes"}
+          removable={answers.removable === "yes"}
+          saveConfig={saveConfig}
+          onRemove={() => setRemoving(openedServer.name)}
+        />
+      )}
+
       {/* The flow is the Host's: the sheet starts it, shows the URL to open in a browser, and takes
-          the address that browser ended on when it ran on this phone instead. It closes when the
-          row's own read says the access landed. */}
+          the address that browser ended on when it ran on this phone instead. */}
       {grantingServer && (
         <ServerAccessSheet
           server={grantingServer}
@@ -223,76 +255,106 @@ export function McpsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </Screen>
+    </div>
+  )
+}
+
+/** A row of buttons where one of a few values is active, each a full-height touch target. */
+function Segmented<T extends string>({
+  value,
+  options,
+  onChange,
+  label,
+  disabled,
+}: {
+  value: T
+  options: { value: T; label: string }[]
+  onChange: (value: T) => void
+  label: string
+  disabled?: boolean
+}) {
+  return (
+    <div role="group" aria-label={label} className="flex gap-2">
+      {options.map((option) => (
+        <Button
+          key={option.value}
+          type="button"
+          variant={value === option.value ? "secondary" : "outline"}
+          className="h-11 flex-1 rounded-full"
+          aria-pressed={value === option.value}
+          disabled={disabled}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </Button>
+      ))}
+    </div>
   )
 }
 
 /**
- * One server: its name, the Host's own reason when it failed, Gots' word for its state, and the
- * switch and removal its Host advertises. Each control follows its own feature, so a Host that can
- * switch a server but not remove one offers the switch alone. The switch follows the server's own
- * on/off flag rather than the state word, which folds several of the Host's states into "on".
+ * One server: its name, its health, and the switch its Host advertises.
  *
- * Grant access is the one control a waiting or failing OAuth server offers: a labelled button where
- * there is room, and a key icon on a phone, where a row already carries a badge, a switch and a
- * removal. It follows the Host's own `access`, so the screen never decides for itself which server's
- * Server access can be started.
+ * The name is the button opening the server's sheet, and the health line sits under it — a button of
+ * its own where it is the way to start Server access, plain text everywhere else. The switch follows
+ * the server's own on/off flag rather than its state word, which folds several of the Host's states
+ * into "on", and it is the only control a row carries: removing a server lives in its Config tab
+ * with the rest of what changes it.
  */
 function ServerRow({
   server,
   writable,
-  removable,
-  grantable,
+  canAuthenticate,
   onToggle,
-  onRemove,
+  onOpen,
   onGrant,
 }: {
   server: McpServer
   writable: boolean
-  removable: boolean
-  grantable: boolean
+  canAuthenticate: boolean
   onToggle: (name: string, enabled: boolean) => Promise<void>
-  onRemove: () => void
+  onOpen: () => void
   onGrant: () => void
 }) {
   const [saving, setSaving] = useState(false)
-  const wide = useWide()
+  const line = healthLine(server, { canAuthenticate })
   // A server a Hermes plugin provides is read-only, and so is every row of a Host that can't write,
-  // so neither a switch nor a removal is offered where one could only come back refused.
+  // so no switch is offered where one could only come back refused.
   const editable = server.source === "config" && writable
-  const droppable = editable && removable
-  const state = <Badge variant={STATE_TONES[server.state]}>{MCP_STATE_WORDS[server.state]}</Badge>
-  // The key button costs a row ~44px it doesn't have beside the badge on a phone, so there the state
-  // drops under the name rather than squeezing the name to a letter.
-  const badgeUnderName = !wide && grantable
   return (
     <div className={rowClass} data-mcp={server.name}>
       <ServerIcon className="size-5 shrink-0 text-muted-foreground" />
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-base">{server.name}</span>
-        {server.reason && <span className="text-sm text-destructive">{server.reason}</span>}
-        {badgeUnderName && <span className="mt-1 self-start">{state}</span>}
-      </span>
-      {!badgeUnderName && state}
-      {grantable && (
-        <Button
-          variant={wide ? "outline" : "ghost"}
-          size={wide ? "sm" : "icon-lg"}
-          className={
-            wide
-              ? "h-11 shrink-0 rounded-full"
-              : "size-11 shrink-0 rounded-full text-muted-foreground"
-          }
-          onClick={onGrant}
-          aria-label={`Grant access to ${server.name}`}
+        <button
+          type="button"
+          className="min-w-0 truncate rounded-lg text-left text-base outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+          aria-haspopup="dialog"
+          onClick={onOpen}
         >
-          <KeyRoundIcon />
-          {wide && "Grant access"}
-        </Button>
-      )}
+          {server.name}
+        </button>
+        {line.authenticate ? (
+          <button
+            type="button"
+            className="-mx-1 min-h-11 px-1 text-left text-sm text-primary outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={onGrant}
+          >
+            {line.text}
+          </button>
+        ) : (
+          <span
+            className={cn(
+              "line-clamp-2 text-sm",
+              line.failed ? "text-destructive" : "text-muted-foreground",
+            )}
+          >
+            {line.text}
+          </span>
+        )}
+      </span>
       {editable && (
         <Switch
-          aria-label={server.name}
+          aria-label={`${server.name} on`}
           checked={server.enabled}
           disabled={saving}
           onCheckedChange={async (checked) => {
@@ -307,18 +369,906 @@ function ServerRow({
           }}
         />
       )}
-      {droppable && (
+    </div>
+  )
+}
+
+/** The Add row's two ways in: Hermes's Catalogue, or a server typed in by hand. */
+function AddServerSheet({
+  open,
+  onOpenChange,
+  onCatalogue,
+  onCustom,
+  catalogue,
+  custom,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onCatalogue: () => void
+  onCustom: () => void
+  catalogue: boolean
+  custom: boolean
+}) {
+  return (
+    <Popup open={open} onOpenChange={onOpenChange}>
+      <PopupContent initialFocus={false}>
+        <PopupHeader>
+          <PopupTitle>Add a server</PopupTitle>
+        </PopupHeader>
+        <div className="px-4 pb-6">
+          <Group>
+            {catalogue && (
+              <button
+                type="button"
+                className={linkRowClass}
+                data-mcp-source="catalogue"
+                onClick={onCatalogue}
+              >
+                <ServerIcon className="size-5 shrink-0 text-muted-foreground" />
+                <RowText title="Catalogue" />
+                <ChevronRightIcon className="size-5 shrink-0 text-muted-foreground" />
+              </button>
+            )}
+            {custom && (
+              <button
+                type="button"
+                className={linkRowClass}
+                data-mcp-source="custom"
+                onClick={onCustom}
+              >
+                <PlusIcon className="size-5 shrink-0 text-muted-foreground" />
+                <RowText title="Custom server" />
+                <ChevronRightIcon className="size-5 shrink-0 text-muted-foreground" />
+              </button>
+            )}
+          </Group>
+        </div>
+      </PopupContent>
+    </Popup>
+  )
+}
+
+/**
+ * One server's own sheet: Config, where its block is shown and saved, and Tools, where what it offers
+ * is listed. Each tab exists only where the Host advertises the read behind it, so a Host that can't
+ * describe a block offers no Config tab rather than an empty one.
+ */
+function ServerSheet({
+  profile,
+  server,
+  open,
+  onOpenChange,
+  config,
+  tools,
+  removable,
+  saveConfig,
+  onRemove,
+}: {
+  profile: McpServerConfig
+  server: McpServer
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  config: boolean
+  tools: boolean
+  removable: boolean
+  saveConfig: (name: string, edit: McpServerEdit) => Promise<void>
+  onRemove: () => void
+}) {
+  return (
+    <Popup open={open} onOpenChange={onOpenChange}>
+      <PopupContent initialFocus={false} fixedHeight={SERVER_HEIGHT}>
+        <PopupHeader>
+          <PopupTitle>{server.name}</PopupTitle>
+        </PopupHeader>
+        <Tabs defaultValue={config ? "config" : "tools"} className="min-h-0 flex-1">
+          <TabsList>
+            {config && <TabsTrigger value="config">Config</TabsTrigger>}
+            {tools && <TabsTrigger value="tools">Tools</TabsTrigger>}
+          </TabsList>
+          {config && (
+            <TabsContent value="config" className="flex-1 overflow-y-auto">
+              <ConfigTab
+                profile={profile}
+                server={server}
+                saveConfig={saveConfig}
+                removable={removable}
+                onRemove={onRemove}
+              />
+            </TabsContent>
+          )}
+          {tools && (
+            <TabsContent value="tools" className="flex-1 overflow-y-auto">
+              <ToolsTab profile={profile} server={server} />
+            </TabsContent>
+          )}
+        </Tabs>
+      </PopupContent>
+    </Popup>
+  )
+}
+
+/**
+ * One server's block: the transport it runs, how it authenticates, and one field per environment
+ * value with what the Host knows about it — never its content, only whether it holds one.
+ *
+ * A field is titled with the name the value lands under on the Host and subtitled with the prompt its
+ * entry writes for people, where that says anything the name doesn't. A value the bot already holds
+ * stands empty with Set as its placeholder: typing into it replaces what it holds, and leaving it
+ * alone sends nothing. Everything is drafted in this component's own state and written by one Save —
+ * a config write and a reconcile per keystroke would be a rewrite per character.
+ */
+function ConfigTab({
+  profile,
+  server,
+  saveConfig,
+  removable,
+  onRemove,
+}: {
+  profile: McpServerConfig
+  server: McpServer
+  saveConfig: (name: string, edit: McpServerEdit) => Promise<void>
+  removable: boolean
+  onRemove: () => void
+}) {
+  const { detail, failed, reload } = useMcpServerDetail(profile, server.name, true)
+  const [draft, setDraft] = useState<ConfigDraft | undefined>(undefined)
+  const [rows, setRows] = useState<ValueDraft[]>([])
+  const [saving, setSaving] = useState(false)
+  // The answer this component's fields were built from: a read, or a save's re-read, that is newer
+  // than it is the one the fields take — during render, so no frame shows the old block's fields.
+  const [seeded, setSeeded] = useState<McpServerDetail | undefined>(undefined)
+  if (detail && detail !== seeded) {
+    setSeeded(detail)
+    setDraft(configDraft(detail))
+    setRows(detail.values.map((value) => ({ name: value.name, value: "" })))
+  }
+
+  if (failed && !detail) {
+    return (
+      <div className="flex flex-col gap-4 px-4 py-4">
+        <p className="text-sm text-muted-foreground">Couldn't load this server's configuration.</p>
+        <Button variant="outline" className="h-11 rounded-full" onClick={reload}>
+          Try again
+        </Button>
+      </div>
+    )
+  }
+  if (!detail || !draft) return null
+
+  // Narrowed once, so the callbacks below read the block the screen is showing rather than a value
+  // that could have arrived again since.
+  const block: McpServerDetail = detail
+  const editable = block.editable
+  const canSave =
+    editable &&
+    configChanged(block, draft, rows) &&
+    (draft.transport === "http" ? Boolean(draft.url.trim()) : Boolean(draft.command.trim()))
+
+  async function save() {
+    if (!draft) return
+    setSaving(true)
+    try {
+      await saveConfig(block.name, configEdit(draft, rows))
+      // What was typed leaves the fields with the write: the re-read is what says the bot now holds
+      // it, and Save has nothing left to send until something changes again.
+      setRows((current) => current.map((row) => ({ ...row, value: "" })))
+      reload()
+      toast.success("Saved.")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't save that.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4 px-4 py-4">
+      <FieldGroup>
+        <Field>
+          <FieldLabel>Transport</FieldLabel>
+          <Segmented
+            label="Transport"
+            value={draft.transport}
+            disabled={!editable}
+            options={[
+              { value: "http", label: "HTTP" },
+              { value: "stdio", label: "stdio" },
+            ]}
+            onChange={(transport) => setDraft({ ...draft, transport })}
+          />
+        </Field>
+
+        {draft.transport === "http" ? (
+          <>
+            <Field>
+              <FieldLabel htmlFor="mcp-config-url">Address</FieldLabel>
+              <Input
+                id="mcp-config-url"
+                className="h-11 font-mono text-sm"
+                inputMode="url"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder="https://example.com/mcp"
+                value={draft.url}
+                disabled={!editable}
+                onChange={(event) => setDraft({ ...draft, url: event.target.value })}
+              />
+            </Field>
+            <Field>
+              <FieldLabel>Authentication</FieldLabel>
+              <Segmented
+                label="Authentication"
+                value={draft.auth}
+                disabled={!editable}
+                options={[
+                  { value: "none", label: "None" },
+                  { value: "header", label: "Header" },
+                  { value: "oauth", label: "OAuth" },
+                ]}
+                onChange={(auth) => setDraft({ ...draft, auth })}
+              />
+            </Field>
+            {draft.auth === "header" && (
+              <Field>
+                <FieldLabel htmlFor="mcp-config-token">Token</FieldLabel>
+                <Input
+                  id="mcp-config-token"
+                  className="h-11 font-mono text-sm"
+                  type="password"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder={detail.auth === "header" ? SET_PLACEHOLDER : undefined}
+                  value={draft.token}
+                  disabled={!editable}
+                  onChange={(event) => setDraft({ ...draft, token: event.target.value })}
+                />
+              </Field>
+            )}
+          </>
+        ) : (
+          <>
+            <Field>
+              <FieldLabel htmlFor="mcp-config-command">Command</FieldLabel>
+              <Input
+                id="mcp-config-command"
+                className="h-11 font-mono text-sm"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder="npx"
+                value={draft.command}
+                disabled={!editable}
+                onChange={(event) => setDraft({ ...draft, command: event.target.value })}
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="mcp-config-args">Arguments</FieldLabel>
+              <Input
+                id="mcp-config-args"
+                className="h-11 font-mono text-sm"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder="-y @modelcontextprotocol/server-github"
+                value={draft.args}
+                disabled={!editable}
+                onChange={(event) => setDraft({ ...draft, args: event.target.value })}
+              />
+            </Field>
+          </>
+        )}
+      </FieldGroup>
+
+      {rows.length > 0 && (
+        <FieldGroup>
+          {rows.map((row, index) => {
+            const known = detail.values.find((value) => value.name === row.name)
+            const prompt = known?.prompt && known.prompt !== known.name ? known.prompt : ""
+            return (
+              <Field key={`${row.name}-${index}`} data-value={row.name}>
+                <FieldLabel
+                  htmlFor={`mcp-config-value-${index}`}
+                  className="flex-col items-start gap-0.5"
+                >
+                  <span className="font-mono text-sm">
+                    {row.name || known?.name}
+                    {known?.required && <span aria-hidden="true">{" *"}</span>}
+                  </span>
+                  {prompt && (
+                    <span className="text-xs font-normal text-muted-foreground">{prompt}</span>
+                  )}
+                </FieldLabel>
+                <Input
+                  id={`mcp-config-value-${index}`}
+                  className="h-11"
+                  type={known?.secret === false ? "text" : "password"}
+                  autoComplete="off"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  placeholder={known?.set ? SET_PLACEHOLDER : undefined}
+                  value={row.value}
+                  disabled={!editable}
+                  onChange={(event) =>
+                    setRows((current) =>
+                      current.map((item, at) =>
+                        at === index ? { ...item, value: event.target.value } : item,
+                      ),
+                    )
+                  }
+                />
+              </Field>
+            )
+          })}
+        </FieldGroup>
+      )}
+
+      {editable && (
+        <div className="flex flex-col gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            className="h-11 rounded-full"
+            onClick={() => setRows((current) => [...current, { name: "", value: "" }])}
+          >
+            <PlusIcon data-icon="inline-start" />
+            Add a value
+          </Button>
+          <Button
+            size="lg"
+            className="h-11 rounded-full"
+            disabled={!canSave || saving}
+            onClick={() => void save()}
+          >
+            {saving && <Spinner />}
+            Save
+          </Button>
+        </div>
+      )}
+
+      {editable && removable && (
         <Button
+          type="button"
           variant="ghost"
-          size="icon-lg"
-          className="size-11 rounded-full text-muted-foreground"
+          className="h-11 rounded-full text-destructive"
           onClick={onRemove}
-          aria-label={`Remove ${server.name}`}
         >
-          <Trash2Icon />
+          <Trash2Icon data-icon="inline-start" />
+          Remove server
         </Button>
       )}
     </div>
+  )
+}
+
+/**
+ * What one server offers, from Hermes's own schema cache — a read that connects nothing — and the
+ * Load tools tap that asks the server itself when the cache has nothing or someone wants it fresh.
+ * The Host connects that one server, lists what it offers and disconnects, which is why it is a tap
+ * and not something the sheet does on opening.
+ */
+function ToolsTab({ profile, server }: { profile: McpServerConfig; server: McpServer }) {
+  const { tools, probing, probe } = useMcpServerTools(profile, server.name, true)
+  return (
+    <div className="flex flex-col gap-4 px-4 py-4">
+      {tools !== undefined && tools.tools.length > 0 && (
+        <Group>
+          {tools.tools.map((tool) => (
+            <div key={tool.name} className={rowClass} data-tool={tool.name}>
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate font-mono text-sm">{tool.name}</span>
+                {tool.description && (
+                  <span className="line-clamp-3 text-sm text-muted-foreground">
+                    {tool.description}
+                  </span>
+                )}
+              </span>
+            </div>
+          ))}
+        </Group>
+      )}
+      <Button
+        type="button"
+        variant={tools?.tools.length ? "outline" : "default"}
+        className="h-11 rounded-full"
+        disabled={probing}
+        onClick={() => void probe()}
+      >
+        {probing && <Spinner />}
+        Load tools
+      </Button>
+    </div>
+  )
+}
+
+/**
+ * Hermes's Catalogue as the Bot's Host offers it: the entries this Bot doesn't have, searched over
+ * both their names and what Hermes says each one is. A tap adds it — at once where the entry declares
+ * nothing to fill in, and through its form where it does — so the entry that needs nothing from the
+ * user takes nothing from them (ADR 0014).
+ */
+function McpCatalogueSheet({
+  open,
+  onOpenChange,
+  server,
+  install,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  server: McpServerConfig
+  install: (name: string, values: Record<string, string>) => Promise<void>
+}) {
+  const entries = useMcpCatalogue(server, open)
+  const [query, setQuery] = useState("")
+  // The entry whose form is open, by name: one at a time, stacked above the list it was picked from.
+  const [picking, setPicking] = useState<string | undefined>(undefined)
+  const [installing, setInstalling] = useState<string | undefined>(undefined)
+  const shown =
+    entries === undefined
+      ? undefined
+      : searchCatalogue(
+          entries.filter((entry) => !entry.installed),
+          query,
+        )
+
+  async function add(entry: McpCatalogueEntry) {
+    if (entry.needsConfig) {
+      setPicking(entry.name)
+      return
+    }
+    setInstalling(entry.name)
+    try {
+      await install(entry.name, {})
+      onOpenChange(false)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't add that.")
+    } finally {
+      setInstalling(undefined)
+    }
+  }
+
+  return (
+    <Popup
+      open={open}
+      onOpenChange={(next) => {
+        // What was searched for, and the form if one was open, are a fresh start next time.
+        if (!next) {
+          setQuery("")
+          setPicking(undefined)
+        }
+        onOpenChange(next)
+      }}
+    >
+      <PopupContent initialFocus={false} fixedHeight={CATALOGUE_HEIGHT}>
+        <PopupHeader>
+          <PopupTitle>Catalogue</PopupTitle>
+        </PopupHeader>
+        <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-6 pt-2 pb-4">
+          <ItemSearch value={query} onChange={setQuery} label="Search the catalogue" />
+          {shown === undefined ? null : shown.length === 0 ? (
+            <p className="px-1 text-sm text-muted-foreground">
+              {query.trim() ? `Nothing matches “${query.trim()}”.` : "Nothing left to add."}
+            </p>
+          ) : (
+            <Group>
+              {shown.map((entry) => (
+                <CatalogueRow
+                  key={entry.name}
+                  entry={entry}
+                  installing={installing === entry.name}
+                  disabled={installing !== undefined}
+                  onOpen={() => void add(entry)}
+                />
+              ))}
+            </Group>
+          )}
+        </div>
+        {/* One entry's form: a sheet stacked on this one, dismissed back to the Catalogue. It renders
+            inside this sheet's tree so Base UI keeps the nesting. */}
+        {picking && (
+          <Popup open onOpenChange={(next) => !next && setPicking(undefined)}>
+            <PopupContent initialFocus={false} fixedHeight={CATALOGUE_HEIGHT}>
+              <McpEntryForm
+                server={server}
+                name={picking}
+                install={install}
+                onBack={() => setPicking(undefined)}
+                onAdded={() => {
+                  setPicking(undefined)
+                  onOpenChange(false)
+                }}
+              />
+            </PopupContent>
+          </Popup>
+        )}
+      </PopupContent>
+    </Popup>
+  )
+}
+
+/** One Catalogue entry: what Hermes calls it and what it is; a tap adds it, or opens its form. */
+function CatalogueRow({
+  entry,
+  installing,
+  disabled,
+  onOpen,
+}: {
+  entry: McpCatalogueEntry
+  installing: boolean
+  disabled: boolean
+  onOpen: () => void
+}) {
+  return (
+    <button
+      type="button"
+      className={linkRowClass}
+      data-catalogue={entry.name}
+      disabled={disabled}
+      onClick={onOpen}
+    >
+      <ServerIcon className="size-5 shrink-0 text-muted-foreground" />
+      <RowText title={entry.name} subtitle={entry.description || undefined} />
+      {installing ? (
+        <Spinner />
+      ) : (
+        <ChevronRightIcon className="size-5 shrink-0 text-muted-foreground" />
+      )}
+    </button>
+  )
+}
+
+/**
+ * One Catalogue entry's form: a field per value the entry declares, and the Add that writes them.
+ *
+ * A field is titled with the name the value lands under on the Host and subtitled with the prompt the
+ * entry writes for people, where that says anything the name doesn't; a secret's is masked and a
+ * required one is starred. A required field left empty (or a space or two, which is nothing typed in)
+ * refuses the add and marks that field, and a value the Bot already holds has a field of its own,
+ * standing empty and saying so. Adding closes the form and the Catalogue behind it, and what the
+ * screen's list becomes is the Host's own answer.
+ */
+function McpEntryForm({
+  server,
+  name,
+  install,
+  onBack,
+  onAdded,
+}: {
+  server: McpServerConfig
+  name: string
+  install: (name: string, values: Record<string, string>) => Promise<void>
+  onBack: () => void
+  onAdded: () => void
+}) {
+  const { entry, failed } = useMcpCatalogueEntry(server, name, true)
+  const [entered, setEntered] = useState<Record<string, string>>({})
+  const [missing, setMissing] = useState<string[]>([])
+  const [adding, setAdding] = useState(false)
+
+  async function add() {
+    if (!entry) return
+    const gaps = missingValues(entry.values, entered)
+    setMissing(gaps)
+    if (gaps.length) return
+    setAdding(true)
+    try {
+      await install(entry.name, collectedValues(entry.values, entered))
+      onAdded()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't add that.")
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  return (
+    <>
+      {/* The back control and the title share one row so the two line up: an absolutely placed control
+          beside a centred title leaves the title off the sheet's middle and the control sitting low. */}
+      <PopupHeader className="flex-row items-center gap-2 pl-2 text-left">
+        <Button
+          variant="ghost"
+          size="icon-lg"
+          className="size-11 shrink-0"
+          aria-label="Catalogue"
+          onClick={onBack}
+        >
+          <ArrowLeftIcon />
+        </Button>
+        <div className="min-w-0 flex-1">
+          <PopupTitle className="justify-start text-left">{name}</PopupTitle>
+        </div>
+      </PopupHeader>
+      <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-6 pt-2 pb-4">
+        {/* A read that came back an error: said, rather than left as a form with nothing in it. */}
+        {failed && entry === undefined && (
+          <p className="px-1 text-sm text-muted-foreground">Couldn't load this entry's values.</p>
+        )}
+        <FieldGroup>
+          {entry?.values.map((value) => (
+            <Field key={value.name} data-value={value.name} data-required={value.required}>
+              {/* Hermes names a value twice: the name it lands under on the Host, and the prompt its
+                  manifest writes for people. The name is the title — it is what the field becomes —
+                  and the prompt is the subtext. */}
+              <FieldLabel
+                htmlFor={`mcp-value-${value.name}`}
+                className="flex-col items-start gap-0.5"
+              >
+                <span className="font-mono text-sm">
+                  {value.name}
+                  {value.required && <span aria-hidden="true">{" *"}</span>}
+                </span>
+                {value.prompt && value.prompt !== value.name && (
+                  <span className="text-xs font-normal text-muted-foreground">{value.prompt}</span>
+                )}
+              </FieldLabel>
+              <Input
+                id={`mcp-value-${value.name}`}
+                className="h-11"
+                // A credential is masked as it is typed; a plain value is not.
+                type={value.secret ? "password" : "text"}
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder={value.set ? SET_PLACEHOLDER : undefined}
+                value={fieldValue(value, entered)}
+                aria-required={value.required || undefined}
+                aria-invalid={missing.includes(value.name)}
+                onChange={(event) => {
+                  const given = event.target.value
+                  setEntered((current) => ({ ...current, [value.name]: given }))
+                  // Filling a field in takes the mark off it: the refusal was about the field as it
+                  // was, and the next Add is what judges it again.
+                  setMissing((current) => current.filter((name) => name !== value.name))
+                }}
+              />
+            </Field>
+          ))}
+        </FieldGroup>
+        <Button
+          size="lg"
+          className="h-11 rounded-full"
+          disabled={adding || !entry}
+          onClick={() => void add()}
+        >
+          {adding && <Spinner />}
+          Add
+        </Button>
+      </div>
+    </>
+  )
+}
+
+/**
+ * A server typed in by hand: a name, one transport and what it needs — a URL with how it
+ * authenticates, or a command with its arguments and environment values. It is Hermes's own create
+ * contract, and the Host has the last word on it: a name the bot already has, one a plugin provides
+ * and a configuration its validator won't take each come back refused, in its own words.
+ */
+function CustomServerSheet({
+  open,
+  onOpenChange,
+  add,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  add: (server: McpCustomServer) => Promise<void>
+}) {
+  const blank: ConfigDraft = {
+    transport: "http",
+    url: "",
+    command: "",
+    args: "",
+    auth: "none",
+    token: "",
+  }
+  const [name, setName] = useState("")
+  const [draft, setDraft] = useState<ConfigDraft>(blank)
+  const [rows, setRows] = useState<ValueDraft[]>([])
+  const [adding, setAdding] = useState(false)
+
+  // The form is blank the next time it opens, whether it was closed or the add closed it.
+  function reset() {
+    setName("")
+    setDraft(blank)
+    setRows([])
+  }
+
+  async function save() {
+    setAdding(true)
+    try {
+      await add(customServer(name, draft, rows))
+      reset()
+      onOpenChange(false)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't add that.")
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  return (
+    <Popup
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) reset()
+        onOpenChange(next)
+      }}
+    >
+      <PopupContent initialFocus={false} fixedHeight={SERVER_HEIGHT}>
+        <PopupHeader>
+          <PopupTitle>Custom server</PopupTitle>
+        </PopupHeader>
+        <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-4 py-4">
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="mcp-custom-name">Name</FieldLabel>
+              <Input
+                id="mcp-custom-name"
+                className="h-11 font-mono text-sm"
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+              />
+            </Field>
+            <Field>
+              <FieldLabel>Transport</FieldLabel>
+              <Segmented
+                label="Transport"
+                value={draft.transport}
+                options={[
+                  { value: "http", label: "HTTP" },
+                  { value: "stdio", label: "stdio" },
+                ]}
+                onChange={(transport) => setDraft({ ...draft, transport })}
+              />
+            </Field>
+
+            {draft.transport === "http" ? (
+              <>
+                <Field>
+                  <FieldLabel htmlFor="mcp-custom-url">Address</FieldLabel>
+                  <Input
+                    id="mcp-custom-url"
+                    className="h-11 font-mono text-sm"
+                    inputMode="url"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    placeholder="https://example.com/mcp"
+                    value={draft.url}
+                    onChange={(event) => setDraft({ ...draft, url: event.target.value })}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel>Authentication</FieldLabel>
+                  <Segmented
+                    label="Authentication"
+                    value={draft.auth}
+                    options={[
+                      { value: "none", label: "None" },
+                      { value: "header", label: "Header" },
+                      { value: "oauth", label: "OAuth" },
+                    ]}
+                    onChange={(auth) => setDraft({ ...draft, auth })}
+                  />
+                </Field>
+                {draft.auth === "header" && (
+                  <Field>
+                    <FieldLabel htmlFor="mcp-custom-token">Token</FieldLabel>
+                    <Input
+                      id="mcp-custom-token"
+                      className="h-11 font-mono text-sm"
+                      type="password"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={draft.token}
+                      onChange={(event) => setDraft({ ...draft, token: event.target.value })}
+                    />
+                  </Field>
+                )}
+              </>
+            ) : (
+              <>
+                <Field>
+                  <FieldLabel htmlFor="mcp-custom-command">Command</FieldLabel>
+                  <Input
+                    id="mcp-custom-command"
+                    className="h-11 font-mono text-sm"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    placeholder="npx"
+                    value={draft.command}
+                    onChange={(event) => setDraft({ ...draft, command: event.target.value })}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="mcp-custom-args">Arguments</FieldLabel>
+                  <Input
+                    id="mcp-custom-args"
+                    className="h-11 font-mono text-sm"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    placeholder="-y @modelcontextprotocol/server-github"
+                    value={draft.args}
+                    onChange={(event) => setDraft({ ...draft, args: event.target.value })}
+                  />
+                </Field>
+                {rows.map((row, index) => (
+                  <Field key={index} data-value={row.name}>
+                    <FieldLabel htmlFor={`mcp-custom-value-${index}`}>Value</FieldLabel>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id={`mcp-custom-value-name-${index}`}
+                        aria-label="Name"
+                        className="h-11 min-w-0 flex-1 font-mono text-sm"
+                        autoComplete="off"
+                        autoCapitalize="off"
+                        spellCheck={false}
+                        placeholder="TOKEN"
+                        value={row.name}
+                        onChange={(event) =>
+                          setRows((current) =>
+                            current.map((item, at) =>
+                              at === index ? { ...item, name: event.target.value } : item,
+                            ),
+                          )
+                        }
+                      />
+                      <Input
+                        id={`mcp-custom-value-${index}`}
+                        aria-label="Value"
+                        className="h-11 min-w-0 flex-1"
+                        type="password"
+                        autoComplete="off"
+                        spellCheck={false}
+                        value={row.value}
+                        onChange={(event) =>
+                          setRows((current) =>
+                            current.map((item, at) =>
+                              at === index ? { ...item, value: event.target.value } : item,
+                            ),
+                          )
+                        }
+                      />
+                    </div>
+                  </Field>
+                ))}
+              </>
+            )}
+          </FieldGroup>
+
+          {draft.transport === "stdio" && (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 rounded-full"
+              onClick={() => setRows((current) => [...current, { name: "", value: "" }])}
+            >
+              <PlusIcon data-icon="inline-start" />
+              Add a value
+            </Button>
+          )}
+
+          <Button
+            size="lg"
+            className="h-11 rounded-full"
+            disabled={!customReady(name, draft) || adding}
+            onClick={() => void save()}
+          >
+            {adding && <Spinner />}
+            Add
+          </Button>
+        </div>
+      </PopupContent>
+    </Popup>
   )
 }
 
@@ -533,238 +1483,5 @@ function ServerAccessSheet({
         </div>
       </PopupContent>
     </Popup>
-  )
-}
-
-/**
- * Hermes's Catalogue as the Bot's Host offers it: every entry Hermes has, each marked with whether
- * this Bot already has it and a search over both the names and what Hermes says each entry is. Read
- * from the Host each time it is opened and nothing more — nothing is polled, since nothing in a
- * catalogue moves on its own. A search that was typed and matched nothing says so rather than
- * reading as a Host with no catalogue at all. Picking an entry opens its form as a sheet of its own,
- * stacked on this one, so the list is one back away and the form never sits over the entry it is
- * about; adding writes the Bot and closes both, and the servers the Host answers with take the
- * screen's list.
- */
-function McpCatalogueSheet({
-  open,
-  onOpenChange,
-  server,
-  install,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  server: McpServerConfig
-  install: (name: string, values: Record<string, string>) => Promise<void>
-}) {
-  const entries = useMcpCatalogue(server, open)
-  const [query, setQuery] = useState("")
-  // The entry whose form is open, by name: one at a time, above the list it was picked from.
-  const [picking, setPicking] = useState<string | undefined>(undefined)
-  const shown = entries === undefined ? undefined : searchCatalogue(entries, query)
-  return (
-    <Popup
-      open={open}
-      onOpenChange={(next) => {
-        // What was searched for, and the form if one was open, are a fresh start next time.
-        if (!next) {
-          setQuery("")
-          setPicking(undefined)
-        }
-        onOpenChange(next)
-      }}
-    >
-      <PopupContent initialFocus={false} fixedHeight={CATALOGUE_HEIGHT}>
-        <PopupHeader>
-          <PopupTitle>Catalogue</PopupTitle>
-        </PopupHeader>
-        <div className="flex flex-col gap-4 px-6 pt-2 pb-4">
-          <ItemSearch value={query} onChange={setQuery} label="Search the catalogue" />
-          {shown === undefined ? null : shown.length === 0 ? (
-            <p className="px-1 text-sm text-muted-foreground">
-              {query.trim() ? `Nothing matches “${query.trim()}”.` : "No entries."}
-            </p>
-          ) : (
-            <Group>
-              {shown.map((entry) => (
-                <CatalogueRow
-                  key={entry.name}
-                  entry={entry}
-                  onOpen={() => setPicking(entry.name)}
-                />
-              ))}
-            </Group>
-          )}
-        </div>
-        {/* One entry's form: a sheet stacked on this one, dismissed back to the Catalogue. It renders
-            inside this sheet's tree so Base UI registers the nesting. */}
-        {picking && (
-          <Popup open onOpenChange={(next) => !next && setPicking(undefined)}>
-            <PopupContent initialFocus={false} fixedHeight={CATALOGUE_HEIGHT}>
-              <McpEntryForm
-                server={server}
-                name={picking}
-                install={install}
-                onBack={() => setPicking(undefined)}
-                onAdded={() => {
-                  setPicking(undefined)
-                  onOpenChange(false)
-                }}
-              />
-            </PopupContent>
-          </Popup>
-        )}
-      </PopupContent>
-    </Popup>
-  )
-}
-
-/** One Catalogue entry: what Hermes calls it, what it is, and whether this Bot already has it. */
-function CatalogueRow({ entry, onOpen }: { entry: McpCatalogueEntry; onOpen: () => void }) {
-  return (
-    <button
-      type="button"
-      className={linkRowClass}
-      data-catalogue={entry.name}
-      aria-haspopup="dialog"
-      onClick={onOpen}
-    >
-      <ServerIcon className="size-5 shrink-0 text-muted-foreground" />
-      <RowText title={entry.name} subtitle={entry.description || undefined} />
-      {entry.installed && <Badge variant="secondary">Added</Badge>}
-      <ChevronRightIcon className="size-5 shrink-0 text-muted-foreground" />
-    </button>
-  )
-}
-
-/**
- * What a field for a value the Bot already holds says: the Host reports that it has one and never its
- * content, so the field stands empty with this as its placeholder and typing over it replaces the
- * value.
- */
-const SET_PLACEHOLDER = "Set — type to replace"
-
-/**
- * One Catalogue entry's form: a field per value the entry declares, and the Add that writes them.
- *
- * What is typed in lives in this component's own state and nowhere else — it is never written to the
- * device and never read back from the Host, which reports only whether it already holds a value for
- * a declared one. A field is titled with the prompt the entry writes for people and subtitled with
- * the name the value lands under on the Host, a secret's is masked, and a required one is starred;
- * a required field left empty (or a space or two, which is nothing typed in) refuses the add and
- * marks that field. A value the Bot already holds has a field of its own, standing empty and saying
- * so: typing into it replaces what the Host holds, and leaving it alone sends nothing at all. Adding
- * closes the form and the Catalogue behind it, and what the screen's list becomes is the Host's own
- * answer; a Host that refuses the add answers with its own reason, which the form reports.
- */
-function McpEntryForm({
-  server,
-  name,
-  install,
-  onBack,
-  onAdded,
-}: {
-  server: McpServerConfig
-  name: string
-  install: (name: string, values: Record<string, string>) => Promise<void>
-  onBack: () => void
-  onAdded: () => void
-}) {
-  const { entry, failed } = useMcpCatalogueEntry(server, name, true)
-  const [entered, setEntered] = useState<Record<string, string>>({})
-  const [missing, setMissing] = useState<string[]>([])
-  const [adding, setAdding] = useState(false)
-
-  async function add() {
-    if (!entry) return
-    const gaps = missingValues(entry.values, entered)
-    setMissing(gaps)
-    if (gaps.length) return
-    setAdding(true)
-    try {
-      await install(entry.name, collectedValues(entry.values, entered))
-      onAdded()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't add that.")
-    } finally {
-      setAdding(false)
-    }
-  }
-
-  return (
-    <>
-      {/* The back control and the title share one row so the two line up: an absolutely placed control
-          beside a centred title leaves the title off the sheet's middle and the control sitting low. */}
-      <PopupHeader className="flex-row items-center gap-2 pl-2 text-left">
-        <Button
-          variant="ghost"
-          size="icon-lg"
-          className="size-11 shrink-0"
-          aria-label="Catalogue"
-          onClick={onBack}
-        >
-          <ArrowLeftIcon />
-        </Button>
-        <div className="min-w-0 flex-1">
-          <PopupTitle className="justify-start text-left">{name}</PopupTitle>
-        </div>
-      </PopupHeader>
-      <div className="flex flex-col gap-4 px-6 pt-2 pb-4">
-        {/* A read that came back an error: said, rather than left as a form with nothing in it. */}
-        {failed && entry === undefined && (
-          <p className="px-1 text-sm text-muted-foreground">Couldn't load this entry's values.</p>
-        )}
-        <FieldGroup>
-          {entry?.values.map((value) => (
-            <Field key={value.name} data-value={value.name} data-required={value.required}>
-              {/* Hermes names a value twice: the prompt its manifest writes for people, and the name
-                  the value lands under on the Host. The prompt is the title and the name is the
-                  subtext, so a field reads as the thing being asked for, not as an env var. */}
-              <FieldLabel
-                htmlFor={`mcp-value-${value.name}`}
-                className="flex-col items-start gap-0.5"
-              >
-                <span>
-                  {value.prompt || value.name}
-                  {value.required && <span aria-hidden="true">{" *"}</span>}
-                </span>
-                {value.prompt && (
-                  <span className="text-xs font-normal text-muted-foreground">{value.name}</span>
-                )}
-              </FieldLabel>
-              <Input
-                id={`mcp-value-${value.name}`}
-                className="h-11"
-                // A credential is masked as it is typed; a plain value is not.
-                type={value.secret ? "password" : "text"}
-                autoComplete="off"
-                autoCapitalize="off"
-                autoCorrect="off"
-                spellCheck={false}
-                placeholder={value.set ? SET_PLACEHOLDER : undefined}
-                value={fieldValue(value, entered)}
-                aria-required={value.required || undefined}
-                aria-invalid={missing.includes(value.name)}
-                onChange={(e) => {
-                  const given = e.target.value
-                  setEntered((current) => ({ ...current, [value.name]: given }))
-                  // Filling a field in takes the mark off it: the refusal was about the field as it
-                  // was, and the next Add is what judges it again.
-                  setMissing((current) => current.filter((name) => name !== value.name))
-                }}
-              />
-            </Field>
-          ))}
-        </FieldGroup>
-        <Button
-          size="lg"
-          className="h-11 rounded-full"
-          disabled={adding || !entry}
-          onClick={() => void add()}
-        >
-          Add
-        </Button>
-      </div>
-    </>
   )
 }
