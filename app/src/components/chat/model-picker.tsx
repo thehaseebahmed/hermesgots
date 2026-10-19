@@ -675,19 +675,19 @@ export function DelegationModelSetting({ profile }: { profile: Profile }) {
         id="delegation-model"
         type="button"
         variant="outline"
-        aria-label={`Subagent model: ${pick ? fullModel(pick) : "Same as the bot"}`}
+        aria-label={`Subagent model: ${pick ? fullModel(pick) : "Default model"}`}
         className="h-11 w-full justify-between gap-2 font-normal"
         disabled={!providers.length || saving}
         onClick={() => setOpen(true)}
       >
-        <span className="truncate">{pick ? fullModel(pick) : "Same as the bot"}</span>
+        <span className="truncate">{pick ? fullModel(pick) : "Default model"}</span>
         <ChevronDownIcon className="shrink-0 text-muted-foreground" />
       </Button>
       <Popup open={open} onOpenChange={setOpen} anchor={field}>
         <PopupContent initialFocus={false} fixedHeight={PICKER_HEIGHT}>
           <ModelPicker
             providers={providers}
-            fallback={{ label: "Same as the bot", model: own?.model }}
+            fallback={{ label: "Default model", model: own?.model }}
             recent={profile.recentModels}
             choice={pick}
             onChoose={(next) => {

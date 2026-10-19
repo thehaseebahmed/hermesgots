@@ -37,7 +37,7 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
   await page.goto(`${app}/settings/bots/${profileId}/models`)
   await opener.waitFor({ timeout: 15_000 })
   // Nothing recorded: every delegated task runs on the bot's own model.
-  await opener.getByText("Same as the bot").waitFor()
+  await opener.getByText("Default model").waitFor()
   await shot("inherited")
 
   // A pick is written whole, so while it is on its way the field is greyed out and says so.
@@ -67,9 +67,9 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
 
   // Clearing it puts every delegated task back on the bot's own model.
   await opener.click()
-  await picker.getByRole("button", { name: "Same as the bot" }).first().click()
+  await picker.getByRole("button", { name: "Default model" }).first().click()
   await until(async () => (await hosted()) === null, 10_000, "the host to clear the pick")
-  await opener.getByText("Same as the bot").waitFor()
+  await opener.getByText("Default model").waitFor()
   assert.equal(writes.length, 2, "the clear is a write of its own")
   await shot("cleared")
 
