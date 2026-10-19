@@ -690,7 +690,6 @@ export function DelegationModelSetting({ profile }: { profile: Profile }) {
             choice={pick}
             onChoose={(next) => {
               reportWrite(save(next))
-              if (next) void rememberModel(profile.id, next)
               setOpen(false)
             }}
           />
