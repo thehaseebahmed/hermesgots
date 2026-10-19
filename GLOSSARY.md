@@ -216,7 +216,7 @@ _Avoid_: whisper model, STT model, engine, ASR
 ## Testing
 
 **Tier**:
-One of the three places a test can sit — unit, component or end-to-end — each owning a class of failure rather than what the tiers below it leave over.
+One of the three places a test can sit — unit, component or end-to-end — each named for the class of failure it owns.
 _Avoid_: level, layer, test type, pyramid
 
 **Flow**:
@@ -229,4 +229,4 @@ _Avoid_: suite, run, regression set, full test
 
 **Test host**:
 The stand-in for a bot's Hermes that a test talks to, answering in the shapes the real one answers. It is not a Host: what it says is no evidence about the machine a bot's Hermes runs on.
-_Avoid_: mock, fake, stub, fixture
+_Avoid_: fake, stub, fixture

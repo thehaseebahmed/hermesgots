@@ -1,18 +1,19 @@
 # A test belongs to the cheapest tier that would fail for its reason
 
-Sixty browser flows is what "everything a unit test cannot do goes to end-to-end" produces. The unit
-tier is a pure rule: a module of TypeScript run by `node --test`, with no DOM, no database and no
-HTTP. So a change that renders a screen, opens a sheet or reads the device's database has exactly
-one home — a flow, with a dev server and up to four test hosts behind it — and the set only grows.
+Fifty-nine browser flows is what "everything a unit test cannot do goes to end-to-end" produces. The
+unit tier is a pure rule: a module of TypeScript run by `node --test`, with no DOM, no database and
+no HTTP. So a change that renders a screen, opens a sheet or reads the device's database has exactly
+one home — a flow, with a dev server and up to three test hosts behind it — and the set only grows.
 Nothing asks a flow to justify itself, and a flow nobody runs never argues for its own deletion, so
 each one is a permanent cost paid for a single assertion.
 
 Three tiers, each owning a class of failure rather than what is left over:
 
-- **Unit** — a pure rule: a derivation, a parser, a placement, a string. No DOM, no database, no HTTP.
-- **Component** — how the app renders and wires those rules: a screen or sheet rendered over a
-  seeded device database with the HTTP boundary faked, in one process, in CI.
-- **End-to-end** — what only a real browser against a host can show: a stream that survives a
+- **Unit** — a pure rule's answer is wrong: a derivation, a parser, a placement, a string. No DOM,
+  no database, no HTTP.
+- **Component** — the app renders or wires those rules wrongly: a screen or sheet over a seeded
+  device database with the HTTP boundary faked, in one process, in CI.
+- **End-to-end** — only a real browser against a test host can show it: a stream that survives a
   reload, a request or write budget measured over wall-clock, a run started somewhere else, a
   compression mid-run, real layout at two widths.
 
@@ -31,10 +32,10 @@ or an element's height would pass whatever the CSS says.
 ## Considered options
 
 - **Two tiers, with end-to-end by residue.** The shape the repository has now, and the one that got
-  it to sixty flows. Rejected because a residue has no ceiling: every change that touches a screen,
-  however small, is an argument for a browser, and nothing punishes a sixty-first flow. The cost is
-  not the flow that is written but the sixty that stay, each one run by hand and rarely read against
-  what it asserts.
+  it to fifty-nine flows. Rejected because a residue has no ceiling: every change that touches a
+  screen, however small, is an argument for a browser, and nothing punishes a sixtieth flow. The
+  cost is not the flow that is written but the fifty-nine that stay, each one run by hand and rarely
+  read against what it asserts.
 - **Per-flow judgement, with no rule at all.** Weigh each flow on its merits, the way a team does
   when it decides whether a test is worth writing. Rejected because it cannot be pointed at in
   review: two people weigh the same flow differently and neither is wrong, so the set drifts with
