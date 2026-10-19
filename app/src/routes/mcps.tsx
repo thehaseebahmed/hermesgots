@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { ArrowLeftIcon, ChevronRightIcon, PlusIcon, ServerIcon, Trash2Icon } from "lucide-react"
+import {
+  ArrowLeftIcon,
+  CheckIcon,
+  ChevronRightIcon,
+  CopyIcon,
+  KeyRoundIcon,
+  PlusIcon,
+  ServerIcon,
+  Trash2Icon,
+} from "lucide-react"
 import { Navigate, useParams } from "react-router"
 import { toast } from "sonner"
 
@@ -21,9 +30,12 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { listProfiles } from "@/lib/db"
+import { MCP_WORK_MS } from "@/lib/freshness"
 import { collectedValues, fieldValue, missingValues, searchCatalogue } from "@/lib/mcp-catalogue"
+import { offersAccess } from "@/lib/mcp-access"
 import {
   useMcpCatalogue,
   useMcpCatalogueEntry,
@@ -32,7 +44,8 @@ import {
   MCP_STATE_WORDS,
   type McpServerConfig,
 } from "@/lib/mcps"
-import type { McpCatalogueEntry, McpServer, McpState } from "@/lib/hermes"
+import type { McpAccess, McpCatalogueEntry, McpServer, McpState } from "@/lib/hermes"
+import { useWide } from "@/lib/media"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 
@@ -71,12 +84,18 @@ export function McpsPage() {
   const { up } = useNav()
   const profiles = useLiveQuery(listProfiles, [])
   const profile = profiles?.find((p) => p.id === botId)
-  const { list, write, removable, catalogue, add } = useMcpFeatureAnswers(profile)
-  const { servers, setEnabled, remove, install } = useMcpServers(profile, list === "yes")
+  const { list, write, removable, catalogue, add, access } = useMcpFeatureAnswers(profile)
+  const { servers, setEnabled, remove, install, grant, deliver, reload } = useMcpServers(
+    profile,
+    list === "yes",
+  )
   // The name of the server a removal is being confirmed for, and whether that removal is on its way.
   const [removing, setRemoving] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [browsing, setBrowsing] = useState(false)
+  // The server whose Server access sheet is open, by name, so the sheet follows the row's own read.
+  const [granting, setGranting] = useState<string | null>(null)
+  const grantingServer = servers?.find((server) => server.name === granting)
   const profileId = profile?.id
   // Android's back does what the header's button does: it returns to the Bot.
   const back = useCallback(
@@ -132,8 +151,10 @@ export function McpsPage() {
               server={server}
               writable={write === "yes"}
               removable={removable === "yes"}
+              grantable={offersAccess(access === "yes", server.access)}
               onToggle={setEnabled}
               onRemove={() => setRemoving(server.name)}
+              onGrant={() => setGranting(server.name)}
             />
           ))}
         </Group>
@@ -163,6 +184,20 @@ export function McpsPage() {
         server={profile}
         install={install}
       />
+
+      {/* The flow is the Host's: the sheet starts it, shows the URL to open in a browser, and takes
+          the address that browser ended on when it ran on this phone instead. It closes when the
+          row's own read says the access landed. */}
+      {grantingServer && (
+        <ServerAccessSheet
+          server={grantingServer}
+          open
+          onOpenChange={(next) => !next && setGranting(null)}
+          grant={grant}
+          deliver={deliver}
+          reload={reload}
+        />
+      )}
 
       <AlertDialog
         open={removing !== null}
@@ -197,33 +232,64 @@ export function McpsPage() {
  * switch and removal its Host advertises. Each control follows its own feature, so a Host that can
  * switch a server but not remove one offers the switch alone. The switch follows the server's own
  * on/off flag rather than the state word, which folds several of the Host's states into "on".
+ *
+ * Grant access is the one control a waiting or failing OAuth server offers: a labelled button where
+ * there is room, and a key icon on a phone, where a row already carries a badge, a switch and a
+ * removal. It follows the Host's own `access`, so the screen never decides for itself which server's
+ * Server access can be started.
  */
 function ServerRow({
   server,
   writable,
   removable,
+  grantable,
   onToggle,
   onRemove,
+  onGrant,
 }: {
   server: McpServer
   writable: boolean
   removable: boolean
+  grantable: boolean
   onToggle: (name: string, enabled: boolean) => Promise<void>
   onRemove: () => void
+  onGrant: () => void
 }) {
   const [saving, setSaving] = useState(false)
+  const wide = useWide()
   // A server a Hermes plugin provides is read-only, and so is every row of a Host that can't write,
   // so neither a switch nor a removal is offered where one could only come back refused.
   const editable = server.source === "config" && writable
   const droppable = editable && removable
+  const state = <Badge variant={STATE_TONES[server.state]}>{MCP_STATE_WORDS[server.state]}</Badge>
+  // The key button costs a row ~44px it doesn't have beside the badge on a phone, so there the state
+  // drops under the name rather than squeezing the name to a letter.
+  const badgeUnderName = !wide && grantable
   return (
     <div className={rowClass} data-mcp={server.name}>
       <ServerIcon className="size-5 shrink-0 text-muted-foreground" />
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-base">{server.name}</span>
         {server.reason && <span className="text-sm text-destructive">{server.reason}</span>}
+        {badgeUnderName && <span className="mt-1 self-start">{state}</span>}
       </span>
-      <Badge variant={STATE_TONES[server.state]}>{MCP_STATE_WORDS[server.state]}</Badge>
+      {!badgeUnderName && state}
+      {grantable && (
+        <Button
+          variant={wide ? "outline" : "ghost"}
+          size={wide ? "sm" : "icon-lg"}
+          className={
+            wide
+              ? "h-11 shrink-0 rounded-full"
+              : "size-11 shrink-0 rounded-full text-muted-foreground"
+          }
+          onClick={onGrant}
+          aria-label={`Grant access to ${server.name}`}
+        >
+          <KeyRoundIcon />
+          {wide && "Grant access"}
+        </Button>
+      )}
       {editable && (
         <Switch
           aria-label={server.name}
@@ -253,6 +319,220 @@ function ServerRow({
         </Button>
       )}
     </div>
+  )
+}
+
+/**
+ * Server access for one server: the Host starts the flow, this sheet shows the URL it hands back,
+ * and the user finishes it in a browser. The browser is usually on the host — the flow's callback
+ * binds the host's loopback — so opening it on this phone leaves a connection-refused page whose
+ * address still carries the authorization code; pasting that address back sends it to the Host over
+ * the connection the app already has, and the Host exchanges the code. Nothing here grants anything
+ * on its own, and nothing about the flow is kept on the device: reopening the sheet asks the Host
+ * again, which answers the URL of the flow it is still running.
+ *
+ * The sheet waits for the row's own read to say on, then closes itself; the Host stops waiting for
+ * the callback at its configured timeout, which is what the expiry ends the wait with.
+ */
+function ServerAccessSheet({
+  server,
+  open,
+  onOpenChange,
+  grant,
+  deliver,
+  reload,
+}: {
+  server: McpServer
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  grant: (name: string) => Promise<McpAccess>
+  deliver: (name: string, url: string) => Promise<void>
+  reload: () => Promise<void>
+}) {
+  const [flow, setFlow] = useState<McpAccess | undefined>(undefined)
+  const [starting, setStarting] = useState(false)
+  const [failed, setFailed] = useState<string | undefined>(undefined)
+  const [expired, setExpired] = useState(false)
+  const [pasted, setPasted] = useState("")
+  const [sending, setSending] = useState(false)
+  const [copied, setCopied] = useState(false)
+  // Bumped by Try again: each start (and each retry) is one attempt at the flow.
+  const [attempt, setAttempt] = useState(0)
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    setFlow(undefined)
+    setFailed(undefined)
+    setExpired(false)
+    setPasted("")
+    setStarting(true)
+    void (async () => {
+      try {
+        const answer = await grant(server.name)
+        if (cancelled) return
+        // The stored access still works: nothing to open. The row is read once more before the sheet
+        // closes, since a failed row's own read is not the one the screen's poll is following.
+        if (!answer.url) {
+          await reload()
+          onOpenChange(false)
+          return
+        }
+        setFlow(answer)
+      } catch (error) {
+        if (!cancelled)
+          setFailed(error instanceof Error ? error.message : "Server access couldn't be started.")
+      } finally {
+        if (!cancelled) setStarting(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // `onOpenChange` is the parent's close, stable for the life of one open sheet.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, attempt, server.name, grant, reload])
+
+  // The Host stops waiting at its own timeout; the sheet stops with it rather than waiting forever.
+  useEffect(() => {
+    if (!open || !flow?.url || expired) return
+    const timer = window.setTimeout(() => setExpired(true), Math.max(1, flow.expires) * 1000)
+    return () => window.clearTimeout(timer)
+  }, [open, flow, expired])
+
+  // While the sheet is open on a running flow the row is read again at the screen's own work pace:
+  // the screen's poll follows a connecting or waiting server, and a *failed* row a flow is running
+  // for is neither, so without this the wait would never see the access land on that row.
+  useEffect(() => {
+    if (!open || !flow) return
+    const timer = window.setInterval(() => void reload(), MCP_WORK_MS)
+    return () => window.clearInterval(timer)
+  }, [open, flow, reload])
+
+  // The row's own read is the answer: once it says on, the access landed and the sheet is done.
+  useEffect(() => {
+    if (!open || !flow || server.state !== "on") return
+    onOpenChange(false)
+    toast.success("Access granted.")
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, flow, server.state])
+
+  async function copy() {
+    if (!flow?.url) return
+    try {
+      await navigator.clipboard.writeText(flow.url)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    } catch {
+      toast.error("Couldn't copy that.")
+    }
+  }
+
+  async function send() {
+    const address = pasted.trim()
+    if (!address) return
+    setSending(true)
+    try {
+      await deliver(server.name, address)
+      setPasted("")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "That address couldn't be used.")
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <Popup open={open} onOpenChange={onOpenChange}>
+      <PopupContent>
+        <PopupHeader>
+          <PopupTitle>Server access</PopupTitle>
+        </PopupHeader>
+        <div className="flex flex-col gap-4 px-4 pb-6">
+          {starting ? (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Spinner />
+              Starting…
+            </p>
+          ) : failed ? (
+            <>
+              <p className="text-sm text-destructive">{failed}</p>
+              <Button
+                variant="outline"
+                className="h-11 rounded-full"
+                onClick={() => setAttempt((count) => count + 1)}
+              >
+                Try again
+              </Button>
+            </>
+          ) : flow?.url ? (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Open it on the host, or on this phone and paste the address it ends on.
+              </p>
+              <div className="flex items-center gap-2">
+                <Input
+                  readOnly
+                  value={flow.url}
+                  aria-label="The address to open"
+                  className="h-11 min-w-0 flex-1 font-mono text-sm"
+                  onFocus={(event) => event.currentTarget.select()}
+                />
+                <Button
+                  variant="outline"
+                  size="icon-lg"
+                  className="size-11 shrink-0 rounded-full"
+                  onClick={() => void copy()}
+                  aria-label={copied ? "Copied" : "Copy address"}
+                >
+                  {copied ? <CheckIcon /> : <CopyIcon />}
+                </Button>
+              </div>
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="mcp-access-callback">Address it ended on</FieldLabel>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="mcp-access-callback"
+                      value={pasted}
+                      onChange={(event) => setPasted(event.target.value)}
+                      placeholder="http://127.0.0.1:…/callback?code=…"
+                      className="h-11 min-w-0 flex-1 font-mono text-sm"
+                      disabled={expired || sending}
+                    />
+                    <Button
+                      className="h-11 shrink-0 rounded-full"
+                      disabled={!pasted.trim() || sending || expired}
+                      onClick={() => void send()}
+                    >
+                      {sending && <Spinner />}
+                      Send
+                    </Button>
+                  </div>
+                </Field>
+              </FieldGroup>
+              {expired ? (
+                <div className="flex flex-col gap-2">
+                  <p className="text-sm text-muted-foreground">That took too long.</p>
+                  <Button
+                    variant="outline"
+                    className="h-11 rounded-full"
+                    onClick={() => setAttempt((count) => count + 1)}
+                  >
+                    Try again
+                  </Button>
+                </div>
+              ) : (
+                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Spinner />
+                  Waiting for the host…
+                </p>
+              )}
+            </>
+          ) : null}
+        </div>
+      </PopupContent>
+    </Popup>
   )
 }
 

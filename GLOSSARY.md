@@ -88,7 +88,7 @@ The MCP servers Hermes offers to add, as the host knows them.
 _Avoid_: store, marketplace, directory, library
 
 **Server access**:
-The permission an MCP server needs from the service it talks to. It is given in a browser on the bot's host, never in Gots.
+The permission an MCP server needs from the service it talks to. Gots starts the flow; the browser finishes it, and the host holds the result.
 _Avoid_: authorization, OAuth, sign in, connect
 
 **Model pick**:

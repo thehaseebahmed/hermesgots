@@ -36,7 +36,7 @@ app() {
   gate node --experimental-strip-types --test scripts/test-identity-session.mjs
   gate node --experimental-strip-types --test scripts/test-model-changes.mjs
   gate node --experimental-strip-types --test scripts/test-slash.mjs scripts/test-skills-cache.mjs
-  gate node --experimental-strip-types --test scripts/test-mcp-catalogue.mjs
+  gate node --experimental-strip-types --test scripts/test-mcp-catalogue.mjs scripts/test-mcp-access.mjs
   gate pnpm build
 }
 

@@ -90,7 +90,9 @@ so no control is offered whose every tap could only fail.
 
 from __future__ import annotations
 
+import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from urllib.parse import parse_qs, urlparse
 
 # Hermes's runtime status words (``tools.mcp_tool_discovery.get_mcp_status``) in Gots' words.
 # Anything else — ``connected``, ``configured``, ``lazy``, or a word a newer Hermes adds — is on.
@@ -98,6 +100,13 @@ STATES = {"disabled": "off", "connecting": "connecting", "failed": "failed"}
 
 # What a host without those built-ins answers with: the route's 501 and the feature gate's reason.
 UNAVAILABLE = "This Hermes version can't read MCP servers from here."
+UNAVAILABLE_ACCESS = "This Hermes version can't start Server access from here."
+
+# The flows this plugin started, by (profile, server), so a second tap reopens the same URL instead
+# of minting a new one: Hermes's own start cancels the older attempt and binds a new port, which would
+# kill a URL the user may already be pasting into a browser.
+_flows: Dict[Tuple[str, str], Any] = {}
+_flows_lock = threading.Lock()
 
 
 class McpError(Exception):
@@ -387,6 +396,154 @@ def addable() -> Optional[str]:
     return None
 
 
+def accessible() -> Optional[str]:
+    """Why this host's Server access can't be started from here, or None when it can.
+
+    Starting one is a different set of built-ins again — Hermes's non-blocking card start, which is
+    newer than the read and the writers — so a host that lists its servers but predates that start
+    offers no Grant access rather than a button whose every tap is a 501.
+    """
+    try:
+        _hermes_access()
+    except McpError as error:
+        return str(error)
+    return None
+
+
+def start_access(profile: Optional[str], name: str) -> Dict[str, Any]:
+    """Start (or resume) a Server access flow for ``name``, answering the URL to open and its life.
+
+    Hermes's own start binds a one-shot 127.0.0.1 receiver on this host and hands back the provider's
+    URL, so the browser that finishes it has to be one that can reach this machine — on the host
+    itself, or on a phone whose callback is pasted back through ``deliver_access``. The flow is held
+    per (profile, server) so a second tap answers the same URL: Hermes's start cancels the older
+    attempt and binds a new port, which would invalidate a URL already being pasted into a browser.
+    ``expires`` is the server's own callback window, in seconds, so the app can stop waiting.
+
+    The URL is ``None`` when the access already stored for the server still works: there is nothing
+    to open, and the row's next read is what says so.
+
+    Only a server this bot's own configuration declares — a URL and ``auth: oauth`` — is started for.
+    A row's *state* is deliberately not a gate here: a stored access that still works answers
+    ``url: None`` rather than an error, and that path reads ``on``, so refusing anything but
+    ``needs_access``/``failed`` would refuse the recovery this route exists for. The app offers the
+    action only where ``_grantable`` says so, which is the same rule the row carries.
+    """
+    hermes = _hermes_access()
+    with hermes["scope"](profile):
+        servers, owners = hermes["sources"](hermes["servers"]())
+        cfg = servers.get(name)
+        if not isinstance(cfg, dict):
+            raise McpError(f"No MCP server named {name!r} on this bot.", 400)
+        if owners.get(name):
+            raise McpError(f"{name} is provided by a Hermes plugin, so it can't be changed.", 400)
+        if cfg.get("auth") != "oauth" or not cfg.get("url"):
+            raise McpError(f"{name} doesn't use Server access.", 400)
+        key = (profile or "", name)
+        held = _held(key)
+        if held is not None:
+            return {"name": name, "url": held.auth_url, "expires": _expiry(cfg)}
+        try:
+            attempt = hermes["start"](name)
+        except TimeoutError as error:
+            raise McpError("This bot's host took too long to start Server access.", 504) from error
+        except Exception as error:  # Hermes's own refusals are sentences for the user
+            raise McpError(str(error) or "Server access couldn't be started.", 400) from error
+        if not attempt.auth_url:
+            # The stored access still works: nothing to open, and the row's read will say on.
+            return {"name": name, "url": None, "expires": 0}
+        with _flows_lock:
+            _flows[key] = attempt
+        return {"name": name, "url": attempt.auth_url, "expires": _expiry(cfg)}
+
+
+def deliver_access(profile: Optional[str], name: str, url: str) -> Dict[str, Any]:
+    """Hand a browser's redirect back to the running flow, after checking it is that flow's own.
+
+    The URL is the address the browser ended on — on the host, or on a phone that could not reach
+    the host's loopback. Only the flow's own redirect is accepted, and the flow itself enforces the
+    ``state`` (constant-time) and refuses a second delivery, so a pasted address can't land in a
+    different flow or grant the same code twice. The authorization code is exchanged on this host and
+    is never kept here or on the device.
+    """
+    key = (profile or "", name)
+    held = _held(key)
+    if held is None:
+        raise McpError(f"No Server access is running for {name}. Start it again from its row.", 400)
+    redirect = getattr(held.flow, "redirect_uri", "") or ""
+    if not _names_redirect(url, redirect):
+        raise McpError("That address isn't the one this Server access ends on.", 400)
+    query = parse_qs(urlparse(url).query)
+    try:
+        held.flow.deliver_callback(
+            code=(query.get("code") or [None])[0],
+            state=(query.get("state") or [None])[0],
+            error=(query.get("error") or [None])[0],
+            iss=(query.get("iss") or [None])[0],
+        )
+    except ValueError as error:
+        raise McpError(str(error) or "This Server access can't take that answer.", 400) from error
+    return {"name": name, "delivered": True}
+
+
+def _hermes_access() -> Dict[str, Any]:
+    """Hermes's own non-blocking card start, imported at call time like every other verb's."""
+    try:
+        from hermes_cli.mcp_config import _get_mcp_servers
+        from hermes_cli.web_server_profiles import _config_profile_scope
+        from tui_gateway.mcp_rpc_helpers import server_configs_with_sources
+        from tools.connectors.mcp_oauth import start
+    except ImportError as error:
+        raise McpError(UNAVAILABLE_ACCESS, 501) from error
+    return {
+        "servers": _get_mcp_servers,
+        "sources": server_configs_with_sources,
+        "scope": _config_profile_scope,
+        "start": start,
+    }
+
+
+def _held(key: Tuple[str, str]) -> Any:
+    """The flow this plugin started for ``key``, if it is still running; a finished one is dropped.
+
+    Every lookup also drops every *other* finished attempt, so an abandoned flow can't keep its
+    attempt (and the loopback receiver bound with it) for the process's life: the cache holds only
+    flows that are still waiting for a callback. An attempt that can't be polled is treated as
+    finished — the cost of being wrong is one tap on Try again, against leaking a receiver.
+    """
+    with _flows_lock:
+        for other in list(_flows):
+            attempt = _flows[other]
+            try:
+                finished = attempt.poll().get("status") != "pending"
+            except Exception:
+                finished = True
+            if finished:
+                _flows.pop(other, None)
+        return _flows.get(key)
+
+
+def _expiry(cfg: Dict[str, Any]) -> int:
+    """How long, in seconds, a started flow waits for its callback: the server's own ``oauth.timeout``."""
+    oauth = cfg.get("oauth") if isinstance(cfg.get("oauth"), dict) else {}
+    try:
+        return max(1, int(float(oauth.get("timeout", 300))))
+    except (TypeError, ValueError):
+        return 300
+
+
+def _names_redirect(url: str, redirect: str) -> bool:
+    """Whether a pasted address is the redirect one flow waits for: same loopback host, port, path."""
+    pasted, expected = urlparse(url), urlparse(redirect)
+    if pasted.scheme != "http" or expected.scheme != "http":
+        return False
+    if (pasted.hostname or "") != (expected.hostname or ""):
+        return False
+    if pasted.port != expected.port or not expected.port:
+        return False
+    return (pasted.path or "/").rstrip("/") == (expected.path or "/").rstrip("/")
+
+
 # Every feature this module answers for, with the check that says why a host can't offer it: one row
 # per control, because each needs its own built-ins (see each check above). ``info`` advertises
 # exactly the features whose check passes, so a feature is declared here once rather than named by
@@ -397,6 +554,7 @@ FEATURES: Tuple[Tuple[str, Callable[[], Optional[str]]], ...] = (
     ("mcps_remove", removable),
     ("mcps_catalogue", browsable),
     ("mcps_add", addable),
+    ("mcps_access", accessible),
 )
 
 
@@ -688,7 +846,20 @@ def _server(name: str, cfg: Any, owner: Optional[str], status: Any, tokens_prese
         "enabled": _enabled(cfg),
         "source": "plugin" if owner else "config",
         "reason": _reason(state, status),
+        "access": _grantable(cfg, owner, state),
     }
+
+
+def _grantable(cfg: Dict[str, Any], owner: Optional[str], state: str) -> bool:
+    """Whether the row offers Grant access: an OAuth server of this profile, waiting or failing.
+
+    A server with no stored access reads ``needs_access``; one whose stored access was revoked or
+    expired reads ``failed``, and a fresh flow is the only way back short of removing and re-adding
+    it. A server a Hermes plugin provides, a stdio server and an off one are never offered it.
+    """
+    if owner or cfg.get("auth") != "oauth" or not cfg.get("url"):
+        return False
+    return state in ("needs_access", "failed")
 
 
 def _enabled(cfg: Dict[str, Any]) -> bool:

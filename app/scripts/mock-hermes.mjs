@@ -345,28 +345,37 @@ const RESEARCH_WRITERS = process.env.MOCK_RESEARCH_WRITERS !== "off"
 // MOCK_MCP=off is a Hermes whose plugin can't offer them at all: no route and no `mcps` feature.
 const MCPS = process.env.MOCK_MCP !== "off"
 const MCP_SERVERS = [
-  { name: "github", state: "on", enabled: true, source: "config", reason: null },
-  { name: "postgres", state: "off", enabled: false, source: "config", reason: null },
-  { name: "linear", state: "connecting", enabled: true, source: "config", reason: null },
+  { name: "github", state: "on", enabled: true, source: "config", reason: null, access: false },
+  { name: "postgres", state: "off", enabled: false, source: "config", reason: null, access: false },
+  { name: "linear", state: "connecting", enabled: true, source: "config", reason: null, access: false },
   {
     name: "sentry",
     state: "failed",
     enabled: true,
     source: "config",
     reason: "Connection refused: nothing is listening on localhost:3100.",
+    access: true,
   },
-  { name: "notion", state: "needs_access", enabled: true, source: "config", reason: null },
-  { name: "filesystem", state: "plugin", enabled: true, source: "plugin", reason: null },
+  { name: "notion", state: "needs_access", enabled: true, source: "config", reason: null, access: true },
+  { name: "filesystem", state: "plugin", enabled: true, source: "plugin", reason: null, access: false },
 ]
 // The servers a flow has removed and the ones it has added, held apart from the definition above so
 // the rest of the suite still finds every one of them: an add and a removal are the changes here
 // that aren't put back by the flow that made them, so both are cleared through POST /__mock/mcp.
 const mcpRemoved = new Set()
 const mcpAdded = new Map()
-const mcpRows = () => [
-  ...MCP_SERVERS.filter((server) => !mcpRemoved.has(server.name)),
-  ...mcpAdded.values(),
-]
+// The Server access flows this mock has started, by server, and the servers whose flow has landed:
+// a started flow answers the same URL and code until the pasted callback delivers it, then the row
+// reads on — the shape the plugin holds in memory and the Host's token store.
+const mcpAccessFlows = new Map()
+const mcpGranted = new Set()
+const mcpRows = () =>
+  [
+    ...MCP_SERVERS.filter((server) => !mcpRemoved.has(server.name)),
+    ...mcpAdded.values(),
+  ].map((server) =>
+    mcpGranted.has(server.name) ? { ...server, state: "on", access: false, reason: null } : server,
+  )
 // The values a bot's profile environment holds, by name: what an add writes for the values an entry
 // declares secret, and what the entry read reports as **set** — never the value itself. One is held
 // from the start, so a form for an entry that declares it shows that it is set rather than a field.
@@ -1583,7 +1592,7 @@ http
       return json(res, 200, {
         name: "memento",
         version: PLUGIN_VERSION,
-        features: ["cron_runs", "session_label", "chats", "draft_text", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "goal", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "skills", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : []), ...(MCPS ? ["mcps", "mcps_write", "mcps_remove", "mcps_catalogue", "mcps_add"] : [])],
+        features: ["cron_runs", "session_label", "chats", "draft_text", "context", "todos", "projects", "projects_async", "project_repos", "project_usage", "github", "sessions", "runs", "prs", "plans", "clarify", "attachments", "media", "profile_routes", "pr_tool", "close", "merge_resolve", "goal", ...(EVENTS ? ["events"] : []), "push", "host_model", "fallbacks", "skills", "queue", "dictation", ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : []), ...(MCPS ? ["mcps", "mcps_write", "mcps_remove", "mcps_catalogue", "mcps_add", "mcps_access"] : [])],
         clarify: true,
         hooks: true,
         goal:
@@ -1641,6 +1650,71 @@ http
         return json(res, 400, { error: { message: "Body must be {\"name\": \"<entry>\"}." } })
       }
       return mcpInstall(res, name, values && typeof values === "object" ? values : {})
+    }
+    // Starting Server access for one of them, the way the plugin's own start does: a flow is minted
+    // with a loopback redirect, and a second tap answers the same URL instead of invalidating the
+    // one a user may already be pasting into a browser. A server that doesn't use access, or isn't
+    // there, answers the plugin's own refusal.
+    const mcpAccess = url.pathname.match(/^\/api\/plugins\/memento\/mcp\/([^/]+)\/access$/)
+    if (PLUGIN && MCPS && !profile && mcpAccess && req.method === "POST") {
+      const name = decodeURIComponent(mcpAccess[1])
+      const server = mcpRows().find((row) => row.name === name)
+      if (!server) {
+        return json(res, 400, { error: { message: `No MCP server named '${name}' on this bot.` } })
+      }
+      if (!server.access) {
+        return json(res, 400, { error: { message: `${name} doesn't use Server access.` } })
+      }
+      const held = mcpAccessFlows.get(name)
+      if (held) return json(res, 200, { object: { access: { name, url: held.url, expires: held.expires } } })
+      const flow = {
+        url: `https://${name}.example/authorize?state=st-${name}`,
+        state: `st-${name}`,
+        redirect: "http://127.0.0.1:54321/callback",
+        expires: 300,
+      }
+      mcpAccessFlows.set(name, flow)
+      return json(res, 200, { object: { access: { name, url: flow.url, expires: flow.expires } } })
+    }
+    // The address a browser ended on, handed back when that browser was the phone rather than the
+    // host: it must name the running flow's own redirect and state, and one delivery grants the
+    // server, after which its row reads on. A paste with no flow, or for another flow, is refused
+    // with the plugin's own sentence.
+    const mcpCallback = url.pathname.match(
+      /^\/api\/plugins\/memento\/mcp\/([^/]+)\/access\/callback$/,
+    )
+    if (PLUGIN && MCPS && !profile && mcpCallback && req.method === "POST") {
+      const name = decodeURIComponent(mcpCallback[1])
+      const { url: pasted } = await readBody(req)
+      const flow = mcpAccessFlows.get(name)
+      if (!flow) {
+        return json(res, 400, {
+          error: { message: `No Server access is running for ${name}. Start it again from its row.` },
+        })
+      }
+      let found = null
+      try {
+        found = new URL(String(pasted ?? ""))
+      } catch {
+        found = null
+      }
+      if (
+        !found ||
+        found.protocol !== "http:" ||
+        found.hostname !== "127.0.0.1" ||
+        found.port !== "54321" ||
+        found.pathname !== "/callback"
+      ) {
+        return json(res, 400, {
+          error: { message: "That address isn't the one this Server access ends on." },
+        })
+      }
+      if (found.searchParams.get("state") !== flow.state) {
+        return json(res, 400, { error: { message: "OAuth callback state mismatch" } })
+      }
+      mcpAccessFlows.delete(name)
+      mcpGranted.add(name)
+      return json(res, 200, { object: { access: { name, delivered: true } } })
     }
     // Flipping one of those servers on or off. The write lands on the row the app renders back, and
     // the mock's own list follows it so a later read agrees. A server a Hermes plugin provides can't
@@ -2154,6 +2228,8 @@ http
       mcpAdded.clear()
       mcpEnv.clear()
       mcpEnv.set("SLACK_SIGNING_SECRET", "already-found-once")
+      mcpAccessFlows.clear()
+      mcpGranted.clear()
       return json(res, 200, { object: { servers: mcpRows() } })
     }
     if (url.pathname === "/__mock/dictation" && req.method === "GET") {

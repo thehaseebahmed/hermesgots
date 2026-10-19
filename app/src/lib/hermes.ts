@@ -16,6 +16,14 @@ import type { Doc } from "@/lib/merge"
 import type { ModelUsage } from "@/lib/pricing"
 import { isNative } from "@/lib/native"
 import type { CronSchedule } from "@/lib/schedule"
+import {
+  parseMcpAccess,
+  readMcpAccessOffer,
+  type McpAccess,
+  type McpAccessOffer,
+} from "@/lib/mcp-access"
+
+export type { McpAccess, McpAccessOffer }
 
 /**
  * Client for the Hermes Agent API server (OpenAI-compatible, default port 8642).
@@ -373,6 +381,8 @@ export interface McpServer {
   source: "config" | "plugin"
   /** The Host's own failure text, on a failed one. */
   reason?: string
+  /** Whether the Host can start Server access for this row, and so offers Grant access. */
+  access: McpAccessOffer
 }
 
 const MCP_STATES = new Set<string>(["on", "off", "connecting", "failed", "needs_access", "plugin"])
@@ -390,6 +400,7 @@ function parseMcpServerRow(raw: unknown): McpServer | undefined {
     enabled: typeof row.enabled === "boolean" ? row.enabled : state !== "off",
     source: row.source === "plugin" ? "plugin" : "config",
     ...(typeof row.reason === "string" && row.reason ? { reason: row.reason } : {}),
+    access: readMcpAccessOffer(row),
   }
 }
 
@@ -464,6 +475,48 @@ export async function removeMcpServer(
     signal,
   })
   return parseMcpServers(await response.json())
+}
+
+/**
+ * Starts (or resumes) Server access for one of the bot's MCP servers on its Host (the Gots plugin's
+ * `POST /mcp/<name>/access`). The Host binds a loopback receiver and answers the provider's URL; a
+ * second start while that flow runs answers the same URL. A start that fails before a URL comes back
+ * as the Host's own sentence, thrown for the screen to show.
+ */
+export async function startMcpAccess(
+  config: HermesConfig,
+  name: string,
+  signal?: AbortSignal,
+): Promise<McpAccess> {
+  const response = await request(
+    `${pluginRoot(config.baseUrl)}/mcp/${encodeURIComponent(name)}/access`,
+    {
+      method: "POST",
+      headers: headers(config),
+      signal,
+    },
+  )
+  return parseMcpAccess(await response.json())
+}
+
+/**
+ * Hands the address a browser ended on back to the running flow (the Gots plugin's
+ * `POST /mcp/<name>/access/callback`): the host checks it is that flow's own redirect and gives it
+ * to the flow, which exchanges the code and lands the access. Used when the browser was on this
+ * phone rather than the host, where the loopback redirect could not connect.
+ */
+export async function deliverMcpAccess(
+  config: HermesConfig,
+  name: string,
+  url: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  await request(`${pluginRoot(config.baseUrl)}/mcp/${encodeURIComponent(name)}/access/callback`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ url }),
+    signal,
+  })
 }
 
 /** One entry of Hermes's Catalogue, as the Gots plugin's read reports it. */

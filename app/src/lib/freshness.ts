@@ -11,6 +11,12 @@ export const READ_TIMEOUT_MS = 15_000
 /** A write the host hasn't answered by now is given up on as well: a screen waiting on it (the bot
  * editor's fallback rows grey out with a save) has to come back, answer or not. */
 export const WRITE_TIMEOUT_MS = 15_000
+
+/**
+ * A Server access start: the Host discovers the provider, registers a client and waits for the
+ * authorization URL, which Hermes gives up to 30 s to produce before it answers.
+ */
+export const MCP_ACCESS_MS = 40_000
 /** A plugin that lacks a route (an older one) is left alone this long before it's asked again. */
 export const MISSING_ROUTE_MS = 5 * 60_000
 
