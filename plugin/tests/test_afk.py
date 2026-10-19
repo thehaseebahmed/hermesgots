@@ -18,7 +18,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any, Dict, List
 from unittest.mock import patch
 
-from plugin import afk, chats, github, projects, prompt_builder, sessions
+from plugin import afk, chats, github, outbox, projects, prompt_builder, sessions
 from plugin.afk import (
     ARCHIVED,
     NO_GITHUB,
@@ -633,7 +633,27 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(posted["path"], "/v1/runs")
         self.assertEqual(posted["body"]["session_id"], self.ensured[0][0])
         self.assertNotIn("model", posted["body"], "no model picked: the host's own runs")
-        self.assertEqual(posted["authorization"], "Bearer host-key")
+
+    def test_a_key_in_the_homes_own_env_is_the_one_the_run_is_posted_with(self) -> None:
+        """Not the process's key: the sweep runs for every home the gateway serves."""
+        self.home.joinpath(".env").write_text("API_SERVER_KEY=home-key\n")
+        self.start()
+        self.assertEqual(self.posted[0]["authorization"], "Bearer home-key")
+
+    def test_a_home_with_no_key_leaves_its_resolution_to_outbox(self) -> None:
+        self.start()
+        self.assertIsNone(
+            self.posted[0]["authorization"],
+            "outbox knows the profile's key: a home's own .env is all this adds",
+        )
+
+    def test_a_run_that_cannot_start_publishes_nothing(self) -> None:
+        outbox.post.side_effect = outbox.StartError("No API key for this bot.", True)
+        self.start()
+        self.assertEqual(len(self.ensured), 1, "the session was made")
+        self.assertEqual(
+            self.chats(), {}, "a record the app would open with no run behind it is worse than none"
+        )
 
     def test_a_session_that_cannot_be_made_starts_no_run(self) -> None:
         with patch("plugin.sessions.ensure", side_effect=sessions.WorkspaceError("No such project.")):

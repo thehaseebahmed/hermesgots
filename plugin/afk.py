@@ -38,7 +38,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from . import chats, github, prompt_builder, tasks
+from . import chats, github, prompt_builder, sessions, tasks
 from .store import connect, db_path
 
 logger = logging.getLogger(__name__)
@@ -193,7 +193,7 @@ def sweep(
 
 def new_session_id() -> str:
     """A session id Gots's own hooks label and the app opens: its minted chats' prefix, AFK's own."""
-    return f"memento-afk-{uuid.uuid4().hex[:12]}"
+    return f"{sessions.MEMENTO_ID_PREFIX}afk-{uuid.uuid4().hex[:12]}"
 
 
 def title(task: Dict[str, Any]) -> str:
@@ -203,9 +203,8 @@ def title(task: Dict[str, Any]) -> str:
 
 def first_line(task: Dict[str, Any]) -> str:
     """The run's input: one line naming the issue and where it is, never its text (ADR 0011)."""
-    repo, number = task.get("repo"), task.get("number")
-    url = task.get("url") or (f"https://github.com/{repo}/issues/{number}" if repo else "")
-    return f"Implement Issue #{number}" + (f" ({url})" if url else "")
+    url = tasks.issue_url(task)
+    return f"Implement Issue #{task.get('number')}" + (f" ({url})" if url else "")
 
 
 def run_body(record: Dict[str, Any], task: Dict[str, Any]) -> Dict[str, Any]:
@@ -248,17 +247,20 @@ def publish(
 async def start(
     adapter: Any, hermes_home: Path, project_id: str, task: Dict[str, Any]
 ) -> None:
-    """Works a claimed task in a session of its own: its worktree, its chat record, its run.
+    """Works a claimed task in a session of its own: its worktree, its run, its chat record.
 
     The task is already claimed by the sweep, and it's named to the run rather than read: the agent
     fetches the issue itself, so the claim stays the fast path and the brief is never a stale copy of
-    what the tracker says. A session that can't be made starts nothing — the claim stays held, and
-    its own ticket (#270) is what gives it back, so the same task is never worked twice.
+    what the tracker says. The record is written only once the run is under way: a session the app
+    shows with no run behind it is worse than one it never hears about. A start that fails leaves
+    the claim held, and its own ticket (#270) is what gives it back, so the same task is never
+    worked twice.
     """
-    from . import link, outbox, sessions
+    from . import link, outbox
 
     profile = link.profile_name(hermes_home)
     session_id = new_session_id()
+    issue = f"{task.get('repo')}#{task.get('number')}"
     try:
         record = await asyncio.to_thread(
             sessions.ensure,
@@ -270,59 +272,38 @@ async def start(
             "auto",
         )
     except Exception:
-        logger.warning(
-            "memento: AFK couldn't make a session for %s#%s",
-            task.get("repo"),
-            task.get("number"),
-            exc_info=True,
-        )
+        logger.warning("memento: AFK couldn't make a session for %s", issue, exc_info=True)
         return
     sessions.apply_cwd(session_id, record["path"])
-    await asyncio.to_thread(publish, hermes_home, session_id, project_id, task)
     try:
         started = await outbox.post(
             adapter,
             profile,
             "/v1/runs",
             run_body(record, task),
-            authorization=_authorization(adapter, profile),
+            authorization=_authorization(hermes_home),
         )
     except outbox.StartError as error:
-        logger.warning(
-            "memento: AFK couldn't start the session for %s#%s: %s",
-            task.get("repo"),
-            task.get("number"),
-            error,
-        )
+        logger.warning("memento: AFK couldn't start the session for %s: %s", issue, error)
         return
+    await asyncio.to_thread(publish, hermes_home, session_id, project_id, task)
     logger.info(
-        "memento: AFK is working %s#%s in %s (run %s)",
-        task.get("repo"),
-        task.get("number"),
-        session_id,
-        started.get("run_id"),
+        "memento: AFK is working %s in %s (run %s)", issue, session_id, started.get("run_id")
     )
 
 
-def _authorization(adapter: Any, profile: Optional[str]) -> str:
-    """The key the run is posted with: the profile's own, as the app sends it, else the adapter's.
+def _authorization(hermes_home: Path) -> Optional[str]:
+    """The key this home's runs are posted with, or None to let ``outbox`` resolve its own.
 
-    The API server's key is read through Hermes's credential helper, never ``os.environ``: a plugin
-    in a process serving several profiles must resolve the one the home belongs to.
+    Read from the home's own ``.env``, the same read ``link.record`` publishes a bot's key from,
+    rather than through Hermes's credential helper: AFK runs from the gateway's loop, where no
+    request's profile scope is set, so the helper would answer the launch profile's key for every
+    home a multiplexed process serves.
     """
-    from . import outbox
+    from . import link
 
-    key = ""
-    try:
-        from agent.credential_pool import get_env_prefer_dotenv
-
-        key = str(get_env_prefer_dotenv("API_SERVER_KEY") or "").strip()
-    except Exception:
-        key = ""
-    if not key:
-        # The key this plugin has seen that profile's app ask with, else the process's own.
-        key = outbox._key(adapter, profile)
-    return f"Bearer {key}" if key else ""
+    key = link.env_value(hermes_home, "API_SERVER_KEY")
+    return f"Bearer {key}" if key else None
 
 
 def enabled_projects(hermes_home: Path) -> List[str]:
@@ -343,12 +324,10 @@ def sweep_all(hermes_home: Path) -> List[Tuple[str, Dict[str, Any]]]:
     Answers what each project just claimed, so the caller can start those sessions; a project that
     claimed nothing isn't in the list.
     """
-    from . import sessions
-
-    start: List[Tuple[str, Dict[str, Any]]] = []
+    claimed: List[Tuple[str, Dict[str, Any]]] = []
     left_on = enabled_projects(hermes_home)
     if not left_on:
-        return start
+        return claimed
     # One read of the project list, not one per project: a sweep only needs their folders.
     projects = sessions.projects(hermes_home / "projects.db")
     for project_id in left_on:
@@ -357,7 +336,7 @@ def sweep_all(hermes_home: Path) -> List[Tuple[str, Dict[str, Any]]]:
             # A row whose project is gone.
             continue
         try:
-            claimed = sweep(
+            task = sweep(
                 hermes_home,
                 project_id,
                 project.folders,
@@ -366,9 +345,9 @@ def sweep_all(hermes_home: Path) -> List[Tuple[str, Dict[str, Any]]]:
         except Exception:
             logger.warning("memento: couldn't sweep AFK's project %s", project_id, exc_info=True)
             continue
-        if isinstance(claimed, dict):
-            start.append((project_id, claimed))
-    return start
+        if task is not None:
+            claimed.append((project_id, task))
+    return claimed
 
 
 async def sweep_homes(adapter: Any) -> None:
@@ -386,7 +365,7 @@ async def sweep_homes(adapter: Any) -> None:
         except Exception:
             logger.warning("memento: AFK couldn't sweep the home at %s", one, exc_info=True)
             continue
-        for project_id, task in claimed if isinstance(claimed, list) else []:
+        for project_id, task in claimed:
             try:
                 await start(adapter, one, project_id, task)
             except Exception:
@@ -429,8 +408,6 @@ def after_run(session_id: Any = None, **_kwargs: Any) -> None:
     sweep for every chat would read GitHub for nothing.
     """
     try:
-        from . import sessions
-
         path, home = sessions._paths()
         if sessions.record_for(path, home, str(session_id or "")):
             wake()
