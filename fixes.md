@@ -2,8 +2,11 @@
 
 A cleanup review of `feat(projects): list a project's ready tasks in AFK's pop-up` (four parallel
 reviewers: reuse, quality, efficiency, altitude) turned up changes worth making that are either
-wider than this branch or a decision the read should not settle on its own. All but the two below
-are applied here; those two change what a read asks for rather than how it is written.
+wider than this branch or a decision the read should not settle on its own. All but one is applied
+here. The pass also found that the read stopped at a repository's first page of ready tasks; that
+one is fixed on this branch rather than left as an entry, because a silent slice is a wrong answer
+rather than a decision to wait on — the read now follows GitHub's `Link` header page by page, with a
+cap that only stops a link pointing back at a page already read. The entry below is what remains.
 
 Everything else the review found is applied on this branch: the read reuses `repos._repo_of` for a
 project's repositories instead of parsing a checkout path a second time; a claimed task's blockers
@@ -21,26 +24,7 @@ guard clauses rather than a ternary chain.
 
 ## Careful
 
-### 1. The read stops at a repository's first page of ready tasks
-
-`plugin/tasks.py::_candidates` asks one question per repository — the open issues carrying
-`ready-for-agent`, oldest first, `per_page=100` — and does not follow GitHub's `Link: rel="next"`.
-The cap is deliberate (the comment says the oldest page is the one that matters, since that is the
-order AFK works in), but a repository holding more than a hundred open ready tasks answers the
-oldest hundred and nothing says the rest exist.
-
-- Cost: the newest tasks on a busy repository are invisible to AFK, in the screen whose whole job is
-  to say what can be worked next. Nothing else is wrong with the answer: a blocker pointing at a
-  task beyond the page is still read by number, so the frontier is correct about the tasks it lists.
-- Suggested fix: follow the `Link` header up to a small page cap of its own, or read the count first
-  and say when the list is a slice — the app has room for a line under the header.
-- Why it is not applied here: it changes the request shape (a loop with its own cap, a header parse
-  and a state to be honest about), and whether a project should stop at a hundred is a decision
-  about AFK's cost per open rather than a cleanup of this read. No repository in the tracker is
-  close to the cap today, so the fix wants that decision first and a flow that seeds more than a
-  page after it.
-
-### 2. A feature answer is kept for the whole session
+### 1. A feature answer is kept for the whole session
 
 `app/src/lib/features.ts` remembers each connection's answer and `readFeatures` returns early once
 it has one, so a plugin upgraded while the app is open keeps its old feature list until the page is
@@ -62,7 +46,7 @@ but does not refresh an answer.
 
 Found by the `/simplify-code` pass on this branch. It was a cleanup review, not a bug hunt —
 correctness was out of scope except where a changed read could be wrong, which the tests pin — and
-neither entry blocks the pull request.
+the entry does not block the pull request.
 
 ---
 

@@ -18,12 +18,17 @@ from .repos import _repo_of
 
 READY_LABEL = "ready-for-agent"
 CLAIM_LABEL = "gots-got-it"
-# A repository's ready tasks are read oldest first, which is the order AFK works them in, so the
-# oldest page is the one that matters when a repository has more open tasks than this.
-MAX_PER_REPO = 100
+# GitHub answers a list a page at a time and this is the largest page it offers; the read follows
+# every page it is offered, so a repository's newest ready tasks aren't lost behind its oldest.
+PAGE_SIZE = 100
+# A cap on how far that following goes, not a limit on what a project has: it is here so a `Link`
+# header that points back at a page already read can't keep the read going. Fifty pages is more
+# ready tasks than one repository has open at once in practice.
+MAX_PAGES = 50
 BLOCKED_BY_RE = re.compile(r"^\s*(?:[-*]\s*)?blocked\s+by:?\s*(.+)$", re.IGNORECASE | re.MULTILINE)
 NUMBER_RE = re.compile(r"#(\d+)")
 REPOSITORY_URL_RE = re.compile(r"/repos/([^/]+/[^/]+)$")
+LINK_NEXT_RE = re.compile(r'<([^>]+)>\s*;\s*rel="next"')
 
 
 def parse_blocked_by(body: Any) -> List[int]:
@@ -99,8 +104,8 @@ def empty() -> Dict[str, Any]:
 def read(hermes_home: Path, folders: Iterable[Any]) -> Dict[str, Any]:
     """The project's tasks as GitHub holds them, split by `frontier`.
 
-    Each repository the project's checkouts point at is asked once for its open ready tasks — one
-    request per repository, since only those can be in the frontier — and each candidate's blockers
+    Each repository the project's checkouts point at is asked for its open ready tasks — a request
+    per page GitHub offers, since only those can be in the frontier — and each candidate's blockers
     after that: only the ones GitHub says are open, and never a claimed task's, so a task with none
     costs nothing. A project with no GitHub repository has no tasks to read, and no request goes
     out.
@@ -132,18 +137,40 @@ def _repos(folders: Iterable[Any]) -> List[str]:
     return repos
 
 
-def _candidates(repo: str, auth: str) -> List[Any]:
-    """A repository's open tasks: the open issues carrying the ready mark, oldest first.
+def next_page(link: Any) -> Optional[str]:
+    """The path a `Link` header's next page names, as this module's requests take one, or nothing.
 
-    GitHub's issues endpoint answers pull requests too, and those are dropped by the caller — a
-    pull request is never a task.
+    GitHub answers an absolute ``https://api.github.com/…`` URL; every request here is built from a
+    path, so the API's own prefix comes off, and a header naming any other host is ignored.
     """
-    rows = github._get(
+    match = LINK_NEXT_RE.search(link) if isinstance(link, str) else None
+    if not match or not match.group(1).startswith(github.API):
+        return None
+    return match.group(1)[len(github.API) :] or None
+
+
+def _candidates(repo: str, auth: str) -> List[Any]:
+    """A repository's open tasks: every open issue carrying the ready mark, oldest first.
+
+    GitHub answers a list a page at a time, so the read follows its `Link` header rather than
+    stopping at the first hundred: a repository with more ready tasks than that would otherwise
+    lose its newest ones, which are the ones AFK has waited longest to reach. Pull requests come
+    back from this endpoint too, and the caller drops them — a pull request is never a task.
+    """
+    rows: List[Any] = []
+    path = (
         f"/repos/{repo}/issues?state=open&labels={READY_LABEL}"
-        f"&sort=created&direction=asc&per_page={MAX_PER_REPO}",
-        auth,
+        f"&sort=created&direction=asc&per_page={PAGE_SIZE}"
     )
-    return rows if isinstance(rows, list) else []
+    for _ in range(MAX_PAGES):
+        page, link = github._page(path, auth)
+        if isinstance(page, list):
+            rows.extend(page)
+        following = next_page(link)
+        if not following or following == path:
+            break
+        path = following
+    return rows
 
 
 def _task(

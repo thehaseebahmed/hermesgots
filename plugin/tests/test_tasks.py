@@ -16,7 +16,14 @@ from typing import Any, Dict, Iterable, List, Optional
 from unittest.mock import patch
 
 from plugin import github, tasks
-from plugin.tasks import CLAIM_LABEL, READY_LABEL, frontier, parse_blocked_by, read
+from plugin.tasks import (
+    CLAIM_LABEL,
+    READY_LABEL,
+    frontier,
+    next_page,
+    parse_blocked_by,
+    read,
+)
 
 
 def task(
@@ -132,6 +139,27 @@ class BlockedByLineTests(unittest.TestCase):
         self.assertEqual(parse_blocked_by("Blocked by: #12\nBlocked by: #12"), [12])
 
 
+class NextPageTests(unittest.TestCase):
+    """GitHub's `Link` header, which is how the read knows a list goes on."""
+
+    def test_a_next_link_names_its_path(self) -> None:
+        link = (
+            f'<{github.API}/repositories/1/issues?page=2>; rel="next", '
+            f'<{github.API}/repositories/1/issues?page=9>; rel="last"'
+        )
+        self.assertEqual(next_page(link), "/repositories/1/issues?page=2")
+
+    def test_no_header_is_no_next_page(self) -> None:
+        self.assertIsNone(next_page(""))
+        self.assertIsNone(next_page(None))
+
+    def test_a_header_naming_only_a_previous_page_is_no_next_page(self) -> None:
+        self.assertIsNone(next_page(f'<{github.API}/repositories/1/issues?page=1>; rel="prev"'))
+
+    def test_a_link_to_another_host_is_not_followed(self) -> None:
+        self.assertIsNone(next_page('<https://example.com/repositories/1/issues?page=2>; rel="next"'))
+
+
 class ReadTests(unittest.TestCase):
     """The read against the plugin's HTTP stub — no GitHub, no host."""
 
@@ -150,8 +178,12 @@ class ReadTests(unittest.TestCase):
             one.start()
             self.addCleanup(one.stop)
 
-    def serve(self, answers: Dict[str, Any]) -> None:
-        """``github._get`` answering each path prefix with what the test holds, counting reads."""
+    def serve(self, answers: Dict[str, Any], *, links: Optional[Dict[str, str]] = None) -> None:
+        """``github._get`` answering each path prefix with what the test holds, counting reads.
+
+        A list read goes through ``github._page``, which carries GitHub's `Link` header beside the
+        body, so that one answers the pair; ``links`` gives the header a path should come back with.
+        """
 
         def get(path: str, auth: Any) -> Any:
             self.paths.append(path)
@@ -162,9 +194,13 @@ class ReadTests(unittest.TestCase):
                     return answer
             raise AssertionError(f"unexpected read: {path}")
 
-        patcher = patch.object(github, "_get", get)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        def page(path: str, auth: Any) -> Any:
+            return get(path, auth), (links or {}).get(path, "")
+
+        for name, answer in (("_get", get), ("_page", page)):
+            patcher = patch.object(github, name, answer)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def issue(
         self,
@@ -207,6 +243,31 @@ class ReadTests(unittest.TestCase):
         self.assertEqual(len(self.paths), 1)
         self.assertIn(f"labels={READY_LABEL}", self.paths[0])
         self.assertIn("state=open", self.paths[0])
+
+    def test_a_repository_pages_until_github_offers_no_more(self) -> None:
+        first = (
+            f"/repos/mock-user/memento/issues?state=open&labels={READY_LABEL}"
+            "&sort=created&direction=asc&per_page=100"
+        )
+        second = f"{first}&page=2"
+        self.serve(
+            # The narrower prefix first: a later page answers its own rows.
+            {second: [self.issue(266)], first: [self.issue(265)]},
+            links={first: f'<{github.API}{second}>; rel="next"'},
+        )
+        found = read(Path(self.home.name), self.folders)
+        self.assertEqual([row["number"] for row in found["ready"]], [265, 266])
+        self.assertEqual(self.paths, [first, second])
+
+    def test_a_link_pointing_back_at_the_page_read_is_not_followed(self) -> None:
+        first = (
+            f"/repos/mock-user/memento/issues?state=open&labels={READY_LABEL}"
+            "&sort=created&direction=asc&per_page=100"
+        )
+        self.serve({first: [self.issue(265)]}, links={first: f'<{github.API}{first}>; rel="next"'})
+        found = read(Path(self.home.name), self.folders)
+        self.assertEqual([row["number"] for row in found["ready"]], [265])
+        self.assertEqual(self.paths, [first])
 
     def test_a_pull_request_is_never_a_task(self) -> None:
         self.serve({"/repos/mock-user/memento/issues?": [self.issue(9, pull_request=True)]})
