@@ -724,7 +724,10 @@ const projectTasks = (project) => {
 
 /** Why a project can't be left to work, as the plugin's `afk.reason` answers it, or null. */
 function afkReason(project) {
-  if (!project.folders.some((folder) => folder.repo)) return "This project has no repository."
+  // An archived project is put away, so it isn't asked about anything (plugin's `afk.reason`).
+  if (project.archived) return "This project is archived."
+  // A checkout that isn't a git repo with a GitHub origin is no repository, as `tasks.repos_of` reads it.
+  if (!project.folders.some((folder) => folder.git && folder.repo)) return "This project has no repository."
   return GITHUB ? null : "No GitHub account on the server."
 }
 
@@ -2009,6 +2012,8 @@ http
       if (!found) return json(res, 404, { error: { message: "No such project." } })
       if (found.status === "cloning")
         return json(res, 409, { error: { message: "The project is still being created." } })
+      // A project whose clone failed has nothing checked out, as the library and usage routes say too.
+      if (found.status === "failed") return json(res, 404, { error: { message: "No such project." } })
       const reason = afkReason(found)
       if (req.method === "POST") {
         const { on } = await readBody(req)
@@ -2109,6 +2114,8 @@ http
       }
       if (projectRoute[2] === "/retry") {
         if (found.status !== "failed") return json(res, 404, { error: { message: "No failed project to retry." } })
+        // The retry makes the project again under a new id, so the old one's switch is forgotten.
+        afkProjects.delete(found.id)
         for (const folder of found.folders) folder.status = "queued"
         found.status = "cloning"
         found.error = null
@@ -2118,6 +2125,8 @@ http
       if (projectRoute[2]) {
         clearTimeout(cloning.get(found.id))
         cloning.delete(found.id)
+        // Deleting a project forgets its switch, as the plugin's `projects.remove` does.
+        afkProjects.delete(found.id)
         all.splice(all.indexOf(found), 1)
         return json(res, 200, { object: "memento.project", removed: true })
       }

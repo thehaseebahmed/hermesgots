@@ -61,7 +61,13 @@ const run = async ({ page, profileId, shot, until }) => {
         })
       : route.continue(),
   )
+  // The frontier's refusal lands after the reason it repeats, so wait for it before counting — the
+  // wait is armed first, since the request goes out as soon as the sheet opens.
+  const refusedTasks = page.waitForResponse(
+    (response) => response.url().endsWith("/tasks") && response.status() === 409,
+  )
   await openAfk()
+  await refusedTasks
   await page.getByText(NO_GITHUB, { exact: true }).waitFor({ timeout: 15_000 })
   assert.equal(
     await page.getByText(NO_GITHUB, { exact: true }).count(),
@@ -101,6 +107,35 @@ const run = async ({ page, profileId, shot, until }) => {
   await shot("no-switch")
   await page.unroute("**/api/plugins/memento/info")
 
+  // A project already left to work keeps its switch when its reason comes back: turning it off is
+  // still the user's to do, so the reason sits under the switch rather than in place of it.
+  await page.route("**/api/plugins/memento/projects/*/afk", (route) =>
+    route.request().method() === "GET"
+      ? route.fulfill({
+          status: 200,
+          headers: { "content-type": "application/json", "access-control-allow-origin": "*" },
+          body: JSON.stringify({ object: "memento.afk", on: true, reason: NO_GITHUB }),
+        })
+      : route.continue(),
+  )
+  await page.getByRole("button", { name: "Close" }).click()
+  await page.unroute("**/api/plugins/memento/info")
+  await openAfk()
+  await page.getByRole("switch", { name: "Work on its own" }).waitFor({ timeout: 15_000 })
+  assert.equal(
+    await page.getByRole("switch", { name: "Work on its own" }).getAttribute("aria-checked"),
+    "true",
+    "a project left on keeps its switch",
+  )
+  assert.equal(
+    await page.getByText(NO_GITHUB, { exact: true }).count(),
+    1,
+    "and says why under it",
+  )
+  await page.waitForTimeout(450)
+  await shot("on-with-reason")
+  await page.unroute("**/api/plugins/memento/projects/*/afk")
+
   // The one 409 this flow provokes on purpose is the frontier's refusal; the browser logs it as a
   // failed resource, which is the assertion above passing rather than the app misbehaving.
   const refused = errors.filter((text) => /Failed to load resource.*409/.test(text))
@@ -122,5 +157,5 @@ for (const width of [390, 1024]) {
   }
 }
 pass(
-  "AFK's pop-up says why it can't offer the switch — no GitHub account, said once, and a plugin too old to switch it — at 390 and 1024px, light and dark",
+  "AFK's pop-up says why it can't offer the switch — no GitHub account, said once, a project left on keeping its switch with the reason under it, and a plugin too old to switch it — at 390 and 1024px, light and dark",
 )

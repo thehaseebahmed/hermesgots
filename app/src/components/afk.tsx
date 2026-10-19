@@ -2,8 +2,9 @@
  * AFK: a project's switch for working its own tasks, and the tasks it would work — the frontier,
  * what's ready oldest first, what somebody has already claimed, and what an open task still blocks.
  * The switch is the host's setting for the project, so it reads back the same on every device, and a
- * project that can't be left to work says why in its place. Both exist only where the plugin
- * advertises the route, so a Bot on an older plugin offers neither.
+ * project that can't be left to work says why in its place. The frontier is there where the plugin
+ * advertises `afk`, the switch where it advertises `afk_switch`: a Bot on an older plugin offers
+ * either or both, according to what it answers.
  */
 import { useCallback, useState, type ReactNode } from "react"
 import { toast } from "sonner"

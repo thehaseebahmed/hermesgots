@@ -324,7 +324,15 @@ export function ProjectPage() {
       )}
 
       {ready && afk && server && (
-        <AfkPopup open={afkOpen} onOpenChange={setAfkOpen} config={server} projectId={projectId} />
+        // Keyed by project: the sheet holds that project's reading, so another project's must never
+        // stand in for it — not for a frame, and not as a write.
+        <AfkPopup
+          key={projectId}
+          open={afkOpen}
+          onOpenChange={setAfkOpen}
+          config={server}
+          projectId={projectId}
+        />
       )}
 
       <AlertDialog open={deleting} onOpenChange={setDeleting}>

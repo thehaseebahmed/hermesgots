@@ -1,10 +1,10 @@
 """``$HERMES_HOME/memento/memento.db``: the chat list (``chats.py``), context use (``context.py``) and
 the models each chat's calls ran on (``model_changes.py``), project sessions (``sessions.py``),
 projects still cloning (``clones.py``), repos being added to or removed from a project (``repos.py``),
-pinned projects (``projects.py``), merged pull requests (``merges.py``) and recent changes for the
-app's live stream (``events.py``), devices' push subscriptions (``push.py``) and messages waiting
-for a session's run (``outbox.py``) and research missions with their evidence ledgers
-(``research.py``)."""
+pinned projects (``projects.py``), merged pull requests (``merges.py``), a project's AFK switch
+(``afk.py``) and recent changes for the app's live stream (``events.py``), devices' push
+subscriptions (``push.py``) and messages waiting for a session's run (``outbox.py``) and research
+missions with their evidence ledgers (``research.py``)."""
 
 from __future__ import annotations
 

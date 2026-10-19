@@ -2,13 +2,14 @@
 
 The switch answers one question — is this project left to work its own tasks — and it lives in the
 plugin's store rather than on the device that flipped it, because the sweep that works those tasks
-runs on the host with the app closed. So the state is read back from the host, per project, and a
+will run on the host with the app closed. So the state is read back from the host, per project, and a
 project's switch never touches another's.
 
 A project that can't be left to work says why instead of offering a switch: it has no GitHub
-repository to read tasks from, or the host has no GitHub account to read or claim one with. The
-reason is the host's own answer rather than the app's guess, because the host is what would do the
-work — and turning a project on is refused with that reason, so nothing is ever left half on.
+repository to read tasks from, the host has no GitHub account to read or claim one with, or the
+project has been put away. The reason is the host's own answer rather than the app's guess, because
+the host is what would do the work — and turning a project on is refused with that reason, so nothing
+is ever left half on.
 """
 
 from __future__ import annotations
@@ -22,28 +23,43 @@ from .store import connect, db_path
 
 NO_REPOSITORY = "This project has no repository."
 NO_GITHUB = "No GitHub account on the server."
+# The same words the plugin already refuses an archived project a turn with (sessions._blocked).
+ARCHIVED = "This project is archived."
 
 
-def reason(hermes_home: Path, folders: Iterable[Any]) -> Optional[str]:
+def reason(
+    hermes_home: Path, folders: Iterable[Any], archived: bool = False
+) -> Optional[str]:
     """Why this project can't be left to work, or None when it can.
 
-    A project whose checkouts point at no GitHub repository has no tasks to read at all, so it isn't
-    asked about the account; one with a repository needs the host's account to read the tracker and
-    to claim a task on it.
+    A project put away is never worked, so it is neither asked about its repositories nor the
+    account. One whose checkouts point at no GitHub repository has no tasks to read at all; one with
+    a repository needs the host's account to read the tracker and to claim a task on it.
     """
+    if archived:
+        return ARCHIVED
     if not tasks.repos_of(folders):
         return NO_REPOSITORY
     auth, _ = github.token(hermes_home)
     return None if auth else NO_GITHUB
 
 
-def state(hermes_home: Path, project_id: str, folders: Iterable[Any]) -> Dict[str, Any]:
+def state(
+    hermes_home: Path, project_id: str, folders: Iterable[Any], archived: bool = False
+) -> Dict[str, Any]:
     """The project's switch as the app reads it: whether it's on, and why it can't be."""
-    return {"on": is_on(hermes_home, project_id), "reason": reason(hermes_home, folders)}
+    return {
+        "on": is_on(hermes_home, project_id),
+        "reason": reason(hermes_home, folders, archived),
+    }
 
 
 def set_on(
-    hermes_home: Path, project_id: str, folders: Iterable[Any], on: bool
+    hermes_home: Path,
+    project_id: str,
+    folders: Iterable[Any],
+    on: bool,
+    archived: bool = False,
 ) -> Dict[str, Any]:
     """Turns the project's AFK on or off, answering its state after the write.
 
@@ -51,7 +67,7 @@ def set_on(
     message: the app shows that where the switch would be, and nothing is written, so a switch shown
     as on is always one the host can act on.
     """
-    why = reason(hermes_home, folders)
+    why = reason(hermes_home, folders, archived)
     if on and why is not None:
         raise ValueError(why)
     _write(hermes_home, project_id, on)
@@ -59,7 +75,7 @@ def set_on(
 
 
 def turn_off(hermes_home: Path, project_id: str) -> None:
-    """Turns a project's AFK off: what archiving a project does to it, and deleting it too."""
+    """Turns a project's AFK off: what archiving a project does to it (deleting one forgets it)."""
     _write(hermes_home, project_id, False)
 
 

@@ -18,7 +18,7 @@ from typing import Any, List
 from unittest.mock import patch
 
 from plugin import github, projects
-from plugin.afk import NO_GITHUB, NO_REPOSITORY, is_on, set_on, state
+from plugin.afk import ARCHIVED, NO_GITHUB, NO_REPOSITORY, is_on, set_on, state
 
 
 def folder(path: str) -> SimpleNamespace:
@@ -173,6 +173,31 @@ class SwitchTests(unittest.TestCase):
         projects.update(self.home, "p1", None, None, archived=True)
         self.assertEqual(stub.archived, ["p1"])
         self.assertFalse(is_on(self.home, "p1"))
+
+    def test_editing_a_project_leaves_its_switch_alone(self) -> None:
+        self.stub_projects()
+        set_on(self.home, "p1", self.folders(), True)
+        projects.update(self.home, "p1", "A new name", "And a description")
+        self.assertTrue(is_on(self.home, "p1"), "renaming a project doesn't put it away")
+        projects.update(self.home, "p1", None, None, archived=False)
+        self.assertTrue(is_on(self.home, "p1"), "restoring one that wasn't archived leaves it be")
+
+    def test_an_archived_project_says_why(self) -> None:
+        with patch.object(github, "token") as token:
+            self.assertEqual(
+                state(self.home, "p1", self.folders(), archived=True),
+                {"on": False, "reason": ARCHIVED},
+            )
+        # Put away before its repositories or the account are looked at: neither can matter.
+        token.assert_not_called()
+
+    def test_an_archived_project_cannot_be_turned_on(self) -> None:
+        with self.assertRaises(ValueError) as raised:
+            set_on(self.home, "p1", self.folders(), True, archived=True)
+        self.assertEqual(str(raised.exception), ARCHIVED)
+        self.assertFalse(is_on(self.home, "p1"))
+        # Turning it off is always the user's to do, and this is the state it should be in anyway.
+        self.assertEqual(set_on(self.home, "p1", self.folders(), False, archived=True)["on"], False)
 
     def test_deleting_a_project_forgets_its_switch(self) -> None:
         self.stub_projects()

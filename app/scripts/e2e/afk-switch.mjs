@@ -45,6 +45,12 @@ const run = async ({ page, profileId, shot, until }) => {
       15_000,
       `the switch to read ${state}`,
     )
+  // Every read of the setting the app made, so "a reload reads it back" is a read of the host's and
+  // not a setting this device happened to remember.
+  const afkReads = []
+  page.on("request", (request) => {
+    if (request.method() === "GET" && request.url().endsWith("/afk")) afkReads.push(request.url())
+  })
   // The sheet slides in on a phone and a drawer on a tablet: let it settle before a shot.
   const snap = async (name) => {
     await page.waitForTimeout(450)
@@ -58,8 +64,8 @@ const run = async ({ page, profileId, shot, until }) => {
   await snap("off")
   await control().click()
   await reads("true")
-  assert.equal(await control().getAttribute("aria-checked"), "true", "the switch is on")
   await snap("on")
+  const askedFirst = afkReads.length
 
   // The setting is the project's, kept on the host: a reload reads it back, and off is its write.
   await openAfk()
@@ -69,9 +75,9 @@ const run = async ({ page, profileId, shot, until }) => {
     "true",
     "a reload reads the setting back from the host",
   )
+  assert.ok(afkReads.length > askedFirst, "the reload asked the host again rather than the device")
   await control().click()
   await reads("false")
-  assert.equal(await control().getAttribute("aria-checked"), "false", "the switch is off")
   await snap("turned-off")
 
   assert.deepEqual(errors, [], `no console error (${errors.join("; ")})`)
