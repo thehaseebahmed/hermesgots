@@ -6,6 +6,7 @@ import {
   ArrowLeftIcon,
   ChevronUpIcon,
   EllipsisIcon,
+  MoonStarIcon,
   PencilIcon,
   PinIcon,
   PinOffIcon,
@@ -16,6 +17,7 @@ import { toast } from "sonner"
 
 import { HOST_WORK_MS, SAFETY_MS } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
+import { AfkPopup, AFK_FEATURE } from "@/components/afk"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { PR_GROUPS } from "@/components/chat/pr-look"
 import { PrRow } from "@/components/chat/pr-pill"
@@ -53,6 +55,7 @@ import {
   type Conversation,
   type PullRequestRef,
 } from "@/lib/db"
+import { usePluginFeatureOn } from "@/lib/features"
 import { useChanges, useLive } from "@/lib/live"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
@@ -86,12 +89,15 @@ export function ProjectPage() {
   const project = fetched ?? (passed?.id === projectId ? passed : undefined)
   useRememberOpened("projects", project ? `${profileId}/${projectId}` : undefined)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [afkOpen, setAfkOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [busy, setBusy] = useState(false)
   const [tab, setTab] = useState("library")
   const [reads, setReads] = useState(0)
   const reload = () => setReads((n) => n + 1)
   const streaming = useLive(profile)
+  // AFK's own row exists only where the Bot's plugin can read a project's tasks.
+  const afk = usePluginFeatureOn(server, AFK_FEATURE)
   const projectChanges = useChanges("projects", profile)
   const changing = project?.folders.some((f) => f.status === "cloning" || f.status === "removing")
 
@@ -197,6 +203,12 @@ export function ProjectPage() {
                   <PencilIcon />
                   Edit
                 </DropdownMenuItem>
+                {afk && (
+                  <DropdownMenuItem className="min-h-11" onClick={() => setAfkOpen(true)}>
+                    <MoonStarIcon />
+                    AFK
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem
                   className="min-h-11"
                   onClick={() =>
@@ -309,6 +321,10 @@ export function ProjectPage() {
           project={project}
           onChanged={reload}
         />
+      )}
+
+      {ready && afk && server && (
+        <AfkPopup open={afkOpen} onOpenChange={setAfkOpen} config={server} projectId={projectId} />
       )}
 
       <AlertDialog open={deleting} onOpenChange={setDeleting}>
