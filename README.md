@@ -62,18 +62,19 @@ Follow the first-run setup wizard, enter your Host API URL (e.g. `http://localho
 
 ---
 
-## Architecture & API Integration
+## How it fits together
 
-Gots connects directly to Hermes's OpenAI-compatible API and plugin endpoints:
+![How Gots fits together: your phone or tablet runs the Gots app, which talks to your own computer or server where Hermes Agent and the Gots plugin run, and optionally to a sync server that keeps an encrypted copy.](docs/architecture.svg)
 
-| Feature | Endpoint / Mechanism | Description |
-| --- | --- | --- |
-| **Streaming Chat** | `POST /v1/chat/completions` | Streams SSE frames, parsing `hermes.tool.progress`, `hermes.status`, and `approval.request`. |
-| **Session Isolation** | `X-Hermes-Session-Id` header | Mints a unique `memento-<uuid>` per chat so the Host isolates conversations. |
-| **Tool Approvals** | `POST /v1/runs/{completion_id}/approval` | Resolves sensitive action approval prompts. |
-| **Routines (Cron)** | `GET /api/jobs`, `POST /api/jobs/{id}/*` | Controls cron jobs; historical execution logs fetched via `GET /api/plugins/memento/cron/runs`. |
-| **AFK & Projects** | `GET /api/plugins/memento/projects/*` | Manages multi-repo project sessions, task frontiers, and background execution. |
-| **Live Sync** | `GET /api/plugins/memento/events` | Real-time SSE stream for instant updates across devices. |
+There are three pieces, and only the first two really matter day to day.
+
+**The app** is what you hold. It's a website you can install on your phone or tablet (and the same thing packaged as an Android app). It holds your chats, your bots and your settings on the device itself, so it opens fast and works from wherever you are.
+
+**The Host** is your own computer or server, running [Hermes Agent](https://github.com/NousResearch/hermes-agent) with the [Gots plugin](plugin/README.md) installed. This is where your bots actually live and do their work, and where your files, sessions and history stay. The app is just the window onto it — nothing is copied anywhere else. The plugin is what lets the app see your bot's routines, projects and media.
+
+**The sync server** is optional and only useful if you use more than one device (say a phone and a tablet). It's a small web service, and it does two things: it signs you in with GitHub, and it keeps a copy of your bot list and settings so a new device can pick them up. Everything it stores is encrypted on your device before it leaves, and the key never goes with it — so the server holds scrambled data it cannot read. Your messages and your bots' work never touch it at all; those stay on your Host.
+
+Skip the sync server entirely and Gots still works. You just add your bots by hand on each device.
 
 ---
 

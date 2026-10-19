@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 600" width="1040" height="600" role="img" aria-labelledby="diagram-title diagram-desc">
+  <title id="diagram-title">How Gots fits together</title>
+  <desc id="diagram-desc">Your phone or tablet runs the Gots app. It talks to your own computer or server, where Hermes Agent and the Gots plugin run. If you use more than one device, an optional sync server keeps an encrypted copy.</desc>
+
+  <defs>
+    <marker id="arrow-blue-end" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrow-blue-start" viewBox="0 0 10 10" refX="0" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M 10 0 L 0 5 L 10 10 z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrow-violet-end" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7c3aed"/>
+    </marker>
+    <marker id="arrow-violet-start" viewBox="0 0 10 10" refX="0" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M 10 0 L 0 5 L 10 10 z" fill="#7c3aed"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1040" height="600" fill="#ffffff"/>
+
+  <text x="50" y="44" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="21" font-weight="700" fill="#0f172a">How Gots fits together</text>
+
+  <!-- The two links, drawn behind the cards -->
+  <line x1="360" y1="170" x2="680" y2="170" stroke="#2563eb" stroke-width="2" marker-start="url(#arrow-blue-start)" marker-end="url(#arrow-blue-end)"/>
+  <text x="520" y="138" text-anchor="middle" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" fill="#334155">You chat with your bots,</text>
+  <text x="520" y="156" text-anchor="middle" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" fill="#334155">and they get to work</text>
+
+  <line x1="205" y1="270" x2="205" y2="380" stroke="#7c3aed" stroke-width="2" stroke-dasharray="6 5" marker-start="url(#arrow-violet-start)" marker-end="url(#arrow-violet-end)"/>
+  <text x="228" y="312" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" fill="#334155">Sign in, and your bots</text>
+  <text x="228" y="330" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" fill="#334155">follow you between devices</text>
+
+  <!-- Card A: the app -->
+  <rect x="50" y="70" width="310" height="200" rx="14" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="76" y="112" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#0f172a">Your phone or tablet</text>
+  <text x="76" y="134" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12" fill="#475569">The Gots app</text>
+  <line x1="76" y1="152" x2="334" y2="152" stroke="#bfdbfe" stroke-width="1"/>
+  <circle cx="80" cy="177" r="2.4" fill="#2563eb"/>
+  <text x="92" y="181" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" fill="#334155">Chat with your bots</text>
+  <circle cx="80" cy="204" r="2.4" fill="#2563eb"/>
+  <text x="92" y="208" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" fill="#334155">Approve what they do, or say no</text>
+  <circle cx="80" cy="231" r="2.4" fill="#2563eb"/>
+  <text x="92" y="235" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" fill="#334155">Your chats stay on the device</text>
+
+  <!-- Card B: the host -->
+  <rect x="680" y="70" width="310" height="200" rx="14" fill="#ecfdf5" stroke="#059669" stroke-width="1.5"/>
+  <text x="706" y="112" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#0f172a">Your computer or server</text>
+  <text x="706" y="134" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12" fill="#475569">Hermes Agent + the Gots plugin</text>
+  <line x1="706" y1="152" x2="964" y2="152" stroke="#a7f3d0" stroke-width="1"/>
+  <circle cx="710" cy="177" r="2.4" fill="#059669"/>
+  <text x="722" y="181" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" fill="#334155">Where your bots really run</text>
+  <circle cx="710" cy="204" r="2.4" fill="#059669"/>
+  <text x="722" y="208" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" fill="#334155">The plugin keeps the app in step</text>
+  <circle cx="710" cy="231" r="2.4" fill="#059669"/>
+  <text x="722" y="235" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" fill="#334155">Your files and history live here</text>
+
+  <!-- Card C: sync -->
+  <rect x="50" y="380" width="310" height="180" rx="14" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="76" y="422" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#0f172a">Gots' sync server</text>
+  <text x="76" y="444" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="12" fill="#475569">Optional — for more than one device</text>
+  <line x1="76" y1="462" x2="334" y2="462" stroke="#ddd6fe" stroke-width="1"/>
+  <circle cx="80" cy="487" r="2.4" fill="#7c3aed"/>
+  <text x="92" y="491" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" fill="#334155">Signs you in with GitHub</text>
+  <circle cx="80" cy="514" r="2.4" fill="#7c3aed"/>
+  <text x="92" y="518" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" fill="#334155">Keeps a scrambled copy of your bots</text>
+  <circle cx="80" cy="541" r="2.4" fill="#7c3aed"/>
+  <text x="92" y="545" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="11.5" fill="#334155">Can't read any of it</text>
+</svg>
