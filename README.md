@@ -64,7 +64,7 @@ Follow the first-run setup wizard, enter your Host API URL (e.g. `http://localho
 
 ## How it fits together
 
-![How Gots fits together: your phone or tablet runs the Gots app, which talks to your own computer or server where Hermes Agent and the Gots plugin run, and optionally to a sync server that keeps an encrypted copy.](docs/architecture.svg)
+![Gots deployment diagram: a device node (your phone or tablet) running the Gots app, a node (your computer or server) running Hermes Agent and the Gots plugin, and an optional node (Gots' sync server) offering sign-in and an encrypted store. The app chats with and controls the Host, and signs in and syncs through the sync server, which only ever holds encrypted data.](docs/deployment.svg)
 
 There are three pieces, and only the first two really matter day to day.
 
