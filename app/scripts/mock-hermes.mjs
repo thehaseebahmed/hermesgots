@@ -158,6 +158,9 @@ const afkStalled = new Map()
 // The skills each project's work follows, as the plugin's row keeps them and `afk.skills_from` reads
 // them: `build_skill` and `critique_skills`, written together.
 const afkSkills = new Map()
+// The stage each project's held task is in, as the plugin keeps it on the session's own record
+// (`plugin/pipeline.py`). A claimed task builds until a flow says the sheet should read another.
+const afkStages = new Map()
 const skillName = (value) => (typeof value === "string" && value.trim() ? value.trim() : null)
 const skillNames = (values) => [...new Set(values.map(skillName).filter(Boolean))]
 // What the media route serves for chart.png: navy sky, teal ground, a sun.
@@ -1038,6 +1041,11 @@ function afkSession(project) {
 function afkSweep(project) {
   if (afkSwept.has(project.id)) return
   afkSwept.add(project.id)
+  // The stage is the claimed task's own record (`pipeline.start` with the skills the project had
+  // when it claimed it), so it is fixed here and a later change to the pickers leaves it alone.
+  const skills = afkSkills.get(project.id)
+  if (skills?.critique_skills.length) afkStages.set(project.id, "build")
+  else afkStages.delete(project.id)
   afkSession(project)
 }
 
@@ -1054,6 +1062,9 @@ function afkAnswer(project, reason) {
     // read rather than in the POST's answer.
     task: afkSwept.has(project.id) ? afkTask(project) : null,
     refusal: null,
+    // The stage its session's record holds, null for a task claimed with no critique skill: one
+    // run, which ships, and no stage to name.
+    stage: afkSwept.has(project.id) ? (afkStages.get(project.id) ?? null) : null,
     ...skills,
   }
 }
@@ -3730,9 +3741,20 @@ http
     // waiting with that reason, the way a failed run or a restart leaves it — and { reset: true }
     // clears every project's, which a flow that repeats needs since the mock keeps its state.
     if (url.pathname === "/__mock/afk" && req.method === "POST") {
-      const { project_id: projectId, reason = "The run failed.", reset = false } = await readBody(req)
-      if (reset) afkStalled.clear()
-      else afkStalled.set(projectId, reason)
+      const {
+        project_id: projectId,
+        reason = "The run failed.",
+        stage = null,
+        reset = false,
+      } = await readBody(req)
+      if (reset) {
+        afkStalled.clear()
+        afkStages.clear()
+      } else {
+        afkStalled.set(projectId, reason)
+        // Dev only: the stage the sheet's Working row names for the task that project holds.
+        if (stage) afkStages.set(projectId, stage)
+      }
       return json(res, 200, { ok: true })
     }
     if (url.pathname === "/__mock/mcp" && req.method === "POST") {

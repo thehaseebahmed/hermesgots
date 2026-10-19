@@ -181,6 +181,11 @@ const FLOWS = {
     about:
       "A stalled AFK session waits where the user finds it: the sidebar's Waiting for input and Code's Waiting on you, with the host's reason under it",
   },
+  "afk-stage": {
+    script: "e2e/afk-stage.mjs",
+    about:
+      "AFK's pop-up names the stage its held task is in — Building, at the gate, Critiquing — and none for a project with no critique skill",
+  },
   "mcps-gate": {
     script: "e2e/mcps-gate.mjs",
     about:

@@ -2491,10 +2491,16 @@ export async function getProjectTasks(
 }
 
 /**
+ * The stage a staged AFK task is in, on its session's own record (`plugin/pipeline.py`). A project
+ * with no critique skill has none: its task is one run, which ships.
+ */
+export type ProjectStage = "build" | "gate" | "critique" | "done"
+
+/**
  * A project's AFK switch: whether it is left to work its own tasks, and why it can't be. The
  * setting is the host's, so it is the same on every device the project is opened from. Needs
- * plugin 0.50, 0.51 for the task it holds and the last refusal, and 0.56 for the skills its work
- * follows.
+ * plugin 0.50, 0.51 for the task it holds and the last refusal, 0.56 for the skills its work
+ * follows and 0.58 for the stage a staged task is in.
  */
 export interface ProjectAfk {
   on: boolean
@@ -2508,6 +2514,8 @@ export interface ProjectAfk {
   buildSkill: string | null
   /** The bot's skills the project picked for its critique, in the order it picked them. */
   critiqueSkills: string[]
+  /** The stage the task it holds is in, while it is a staged one; null for one run, or none held. */
+  stage: ProjectStage | null
 }
 
 function skillNames(value: unknown): string[] {
@@ -2515,6 +2523,12 @@ function skillNames(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((name): name is string => typeof name === "string")
     : []
+}
+
+function stageName(value: unknown): ProjectStage | null {
+  return value === "build" || value === "gate" || value === "critique" || value === "done"
+    ? value
+    : null
 }
 
 function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
@@ -2532,6 +2546,8 @@ function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
     refusal: str(body.refusal) || null,
     buildSkill: str(body.build_skill) || null,
     critiqueSkills: skillNames(body.critique_skills),
+    // A plugin from before the stages answers none: that task is one run, which is what it does.
+    stage: stageName(body.stage),
   }
 }
 
