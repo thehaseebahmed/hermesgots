@@ -574,9 +574,43 @@ class ReleaseTests(AfkSessionTests):
         self.merged(discardedAt=int(time.time() * 1000))
         self.sweep()
         self.assertEqual(
+            [write for write in self.writes if write[0] == "POST"],
+            [],
+            "the sweep that gave the task back claims nothing",
+        )
+        self.assertIsNone(
+            self.shown()["task"],
+            "the user closed the session to be rid of it, so it isn't handed out the moment they "
+            "walk away",
+        )
+        self.sweep()
+        self.assertEqual(
             self.shown()["task"]["number"],
             265,
-            "the task is back in the frontier, so the oldest one ready is taken again",
+            "the task is back in the frontier, so the next sweep takes the oldest one ready",
+        )
+
+    def test_a_hold_from_before_the_session_column_is_given_back(self) -> None:
+        """The row a v25→v26 upgrade leaves: a task claimed, and no session named to work it."""
+        afk._update(self.home, "p1", session_id=None)
+        self.aged(afk.STALL_SECONDS + 1)
+        self.sweep()
+        self.assertEqual(len(self.released()), 2, "nothing can be working a task no session names")
+        self.assertIsNone(self.shown()["task"], "and it is back in the frontier, not stuck forever")
+
+    def test_a_task_a_person_also_holds_is_left_to_them(self) -> None:
+        self.issues = [issue_row(265, assignees=("someone-else",))]
+        self.merged(discardedAt=int(time.time() * 1000))
+        self.sweep()
+        self.assertEqual(
+            self.released()[1][2],
+            {"assignees": ["mock-user"]},
+            "only the host's own assignment goes: an issue a person holds stays theirs",
+        )
+        self.sweep()
+        self.assertIsNone(
+            self.shown()["task"],
+            "and the person still holding it keeps the task out of the frontier, so AFK leaves it",
         )
 
     def test_a_resolved_session_gives_its_task_back_too(self) -> None:
@@ -667,6 +701,12 @@ class RunEndTests(AfkSessionTests):
         self.assertIsNone(self.shown()["task"], "the hold is what one task at a time is, so it goes")
         self.assertEqual(self.writes, [], "its claim stays: the task is in review on GitHub")
         wake.assert_called_once()
+
+    def test_a_run_that_reported_failure_alongside_completion_is_a_failure(self) -> None:
+        """Hermes can carry more than one flag, and a failure outranks the turn having finished."""
+        self.ended(completed=True, failed=True)
+        self.assertEqual(self.shown()["task"]["number"], 265, "the claim and the hold both stay")
+        self.assertEqual(afk.stalled(self.home)[self.SESSION]["reason"], afk.FAILED_RUN)
 
     def test_a_failed_run_keeps_the_claim_and_the_session(self) -> None:
         self.ended(completed=False, failed=True)

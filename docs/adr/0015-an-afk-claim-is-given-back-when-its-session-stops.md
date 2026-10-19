@@ -48,5 +48,10 @@ why the clock is restarted when the start is done rather than left at the claim.
   can adopt the session it was working rather than start a second one on the same task.
 - Releasing is best-effort on GitHub: a refusal is recorded for the sheet and the hold is dropped
   anyway, since nothing on the host is working the task either way.
+- A sweep that gives a task back claims nothing in the same pass: the task the user walked away from
+  waits for the next sweep rather than being handed out again the moment they closed its session.
+- A hold naming no session — a row claimed before the column existed, or a start killed between the
+  claim and its session — is given back once it is older than `STALL_SECONDS`, because nothing on the
+  host can be working it.
 - The user's Discard or Resolve on an AFK session is a decision about the task, not only the session:
   the claim comes off and the task returns to the frontier, where the next sweep may take it again.

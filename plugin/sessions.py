@@ -28,7 +28,7 @@ import time
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Set, Tuple
+from typing import Any, Callable, Dict, NamedTuple, Optional, Set, Tuple
 
 from . import approvals, events, push
 from .store import connect
@@ -1085,6 +1085,27 @@ def after_llm(**kwargs: Any) -> None:
         logger.debug("memento: post_llm_call failed", exc_info=True)
 
 
+class Outcome(NamedTuple):
+    """What an ``on_session_end`` payload says happened to a turn.
+
+    Hermes can carry more than one of its flags, and they outrank each other: an interruption is not
+    a failure, and neither is the turn having finished, so a turn is read in that order — the reading
+    a push is sent on and a held task is settled by, kept in one place so the two can't drift.
+    """
+
+    interrupted: bool
+    failed: bool
+    finished: bool
+
+
+def outcome(**kwargs: Any) -> Outcome:
+    """Reads an ``on_session_end`` payload into an :class:`Outcome`."""
+    interrupted = bool(kwargs.get("interrupted"))
+    failed = bool(kwargs.get("failed")) and not interrupted
+    finished = bool(kwargs.get("completed")) and not (failed or interrupted)
+    return Outcome(interrupted=interrupted, failed=failed, finished=finished)
+
+
 def after_run(**kwargs: Any) -> None:
     """The ``on_session_end`` hook: a finished plan-mode turn leaves a plan waiting for the user."""
     try:
@@ -1092,7 +1113,7 @@ def after_run(**kwargs: Any) -> None:
         record = path.exists() and record_for(path, home, kwargs.get("session_id") or "")
         if not record:
             return
-        if record["mode"] == "plan" and kwargs.get("completed") and not kwargs.get("interrupted"):
+        if record["mode"] == "plan" and outcome(**kwargs).finished:
             set_plan_pending(path, record["session_id"], True)
         db = getattr(adapter, "_session_db", None)
         if db is not None:

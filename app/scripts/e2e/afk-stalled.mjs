@@ -7,6 +7,13 @@ import { afkOn, app, assert, flow, makeProject, mock, pass } from "./lib.mjs"
 const TITLE = "#265 The frontier is read from GitHub and listed"
 const REASON = "The run failed."
 
+const say = (body) =>
+  fetch(`${mock}/__mock/afk`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+
 const run = (wide) => async ({ page, profileId, shot, until }) => {
   const errors = []
   page.on("pageerror", (error) => errors.push(error.message))
@@ -15,11 +22,7 @@ const run = (wide) => async ({ page, profileId, shot, until }) => {
   })
   const projectId = await makeProject(until, "AFK stalled")
   // The mock remembers which claims stalled between passes; this pass wants only its own.
-  await fetch(`${mock}/__mock/afk`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ reset: true }),
-  })
+  await say({ reset: true })
   const screen = `${app}/projects/${profileId}/${projectId}`
 
   await afkOn(page, screen, until)
@@ -32,11 +35,7 @@ const run = (wide) => async ({ page, profileId, shot, until }) => {
     20_000,
     "AFK to claim its task",
   )
-  await fetch(`${mock}/__mock/afk`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ project_id: projectId, reason: REASON }),
-  })
+  await say({ project_id: projectId, reason: REASON })
 
   await page.goto(`${app}/code`)
   const group = page.getByRole("region", { name: "Waiting on you" })

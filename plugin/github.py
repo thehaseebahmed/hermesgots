@@ -249,13 +249,12 @@ def _unlabel(repo: str, number: int, label: str, auth: Optional[str]) -> None:
 
 
 def _take_label(repo: str, number: int, label: str, auth: Optional[str]) -> None:
+    """Takes the claim label off an issue; the refusal is the caller's to record."""
     path = f"/repos/{repo}/issues/{number}/labels/{urllib.parse.quote(label, safe='')}"
     _request(path, auth, "DELETE")
 
 
-def release_claim(
-    repo: str, number: int, label: str, auth: Optional[str], account: Optional[str] = None
-) -> None:
+def release_claim(repo: str, number: int, label: str, auth: Optional[str]) -> None:
     """Gives a claimed task back to the frontier: the mark off, and the host's assignment with it.
 
     Both halves matter, because a task is out of the frontier while it carries *either* — the rule
@@ -264,8 +263,7 @@ def release_claim(
     also holds stays theirs. Raises GitHub's refusal, which the caller records for the sheet.
     """
     _take_label(repo, number, label, auth)
-    who = account or login(auth)
-    _request(f"/repos/{repo}/issues/{number}/assignees", auth, "DELETE", {"assignees": [who]})
+    _request(f"/repos/{repo}/issues/{number}/assignees", auth, "DELETE", {"assignees": [login(auth)]})
 
 
 def _ensure_label(repo: str, label: str, auth: Optional[str]) -> None:
