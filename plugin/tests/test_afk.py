@@ -10,6 +10,8 @@ Run: python3 -m unittest plugin.tests.test_afk -v
 from __future__ import annotations
 
 import asyncio
+import json
+import sqlite3
 import sys
 import time
 import unittest
@@ -28,6 +30,8 @@ from plugin.afk import (
     read,
     release,
     set_on,
+    set_skills,
+    skills_from,
     sweep,
     sweep_all,
 )
@@ -110,14 +114,14 @@ class SwitchTests(unittest.TestCase):
         return stub
 
     def test_a_project_that_can_be_left_to_work_starts_off(self) -> None:
-        self.assertEqual(read(self.home, "p1", self.folders()), {"on": False, "reason": None, "task": None, "refusal": None})
+        self.assertEqual(read(self.home, "p1", self.folders()), {"on": False, "reason": None, "task": None, "refusal": None, "build_skill": None, "critique_skills": []})
         self.assertFalse(read(self.home, "p1", self.folders())["on"])
 
     def test_turning_it_on_is_read_back_from_the_host(self) -> None:
         self.assertEqual(set_on(self.home, "p1", self.folders(), True)["on"], True)
         self.assertTrue(read(self.home, "p1", self.folders())["on"])
         # A fresh read — the app's own, from another device — is the host's answer, not the device's.
-        self.assertEqual(read(self.home, "p1", self.folders()), {"on": True, "reason": None, "task": None, "refusal": None})
+        self.assertEqual(read(self.home, "p1", self.folders()), {"on": True, "reason": None, "task": None, "refusal": None, "build_skill": None, "critique_skills": []})
 
     def test_turning_it_off_again(self) -> None:
         set_on(self.home, "p1", self.folders(), True)
@@ -136,7 +140,7 @@ class SwitchTests(unittest.TestCase):
         plain.mkdir()
         self.assertEqual(
             read(self.home, "p1", self.folders(str(plain))),
-            {"on": False, "reason": NO_REPOSITORY, "task": None, "refusal": None},
+            {"on": False, "reason": NO_REPOSITORY, "task": None, "refusal": None, "build_skill": None, "critique_skills": []},
         )
 
     def test_a_project_with_no_repository_cannot_be_turned_on(self) -> None:
@@ -150,7 +154,7 @@ class SwitchTests(unittest.TestCase):
     def test_a_host_without_github_says_why(self) -> None:
         with patch.object(github, "token", return_value=(None, None)):
             self.assertEqual(
-                read(self.home, "p1", self.folders()), {"on": False, "reason": NO_GITHUB, "task": None, "refusal": None}
+                read(self.home, "p1", self.folders()), {"on": False, "reason": NO_GITHUB, "task": None, "refusal": None, "build_skill": None, "critique_skills": []}
             )
             with self.assertRaises(Refused) as raised:
                 set_on(self.home, "p1", self.folders(), True)
@@ -181,12 +185,12 @@ class SwitchTests(unittest.TestCase):
         set_on(self.home, "p1", self.folders(), True)
         self.assertEqual(
             read(self.home, "p1", self.folders(), archived=True),
-            {"on": False, "reason": ARCHIVED, "task": None, "refusal": None},
+            {"on": False, "reason": ARCHIVED, "task": None, "refusal": None, "build_skill": None, "critique_skills": []},
         )
         self.assertFalse(read(self.home, "p1", self.folders())["on"], "the row is written off, not only masked")
         self.assertEqual(
             read(self.home, "p1", self.folders()),
-            {"on": False, "reason": None, "task": None, "refusal": None},
+            {"on": False, "reason": None, "task": None, "refusal": None, "build_skill": None, "critique_skills": []},
             "restoring it starts off",
         )
 
@@ -195,7 +199,7 @@ class SwitchTests(unittest.TestCase):
         with patch.object(github, "token", return_value=(None, None)):
             # Still on — the switch is the user's to turn off — but the host now says why it can't work.
             self.assertEqual(
-                read(self.home, "p1", self.folders()), {"on": True, "reason": NO_GITHUB, "task": None, "refusal": None}
+                read(self.home, "p1", self.folders()), {"on": True, "reason": NO_GITHUB, "task": None, "refusal": None, "build_skill": None, "critique_skills": []}
             )
 
     def test_archiving_a_project_turns_its_switch_off(self) -> None:
@@ -217,7 +221,7 @@ class SwitchTests(unittest.TestCase):
         with patch.object(github, "token") as token:
             self.assertEqual(
                 read(self.home, "p1", self.folders(), archived=True),
-                {"on": False, "reason": ARCHIVED, "task": None, "refusal": None},
+                {"on": False, "reason": ARCHIVED, "task": None, "refusal": None, "build_skill": None, "critique_skills": []},
             )
         # Put away before its repositories or the account are looked at: neither can matter.
         token.assert_not_called()
@@ -252,6 +256,109 @@ class SwitchTests(unittest.TestCase):
             # The record is gone either way: a switch left behind is a row nothing reads, and the
             # caller must not be told a delete that happened was a failure.
             self.assertTrue(projects.remove(self.home, "p1"))
+
+
+class SkillChoiceTests(unittest.TestCase):
+    """The skills a project's AFK work follows, as the project's own choice kept on the host.
+
+    The pickers list the profile's live skills from the plugin's skills route, but what the row
+    stores is just the names: a skill that disappears afterwards is the sweep's refusal to make
+    (#323), not a write the host quietly rewrites.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = Path(self.tmp.name)
+        self.checkout = self.home / "checkout"
+        (self.checkout / ".git").mkdir(parents=True)
+        for one in (
+            patch.object(github, "token", return_value=("token", "env")),
+            patch.object(github, "origin_repo", return_value="mock-user/memento"),
+        ):
+            one.start()
+            self.addCleanup(one.stop)
+
+    def folders(self) -> List[Any]:
+        return [folder(str(self.checkout))]
+
+    def test_a_project_starts_with_nothing_chosen(self) -> None:
+        found = read(self.home, "p1", self.folders())
+        self.assertIsNone(found["build_skill"])
+        self.assertEqual(found["critique_skills"], [])
+
+    def test_the_choice_is_read_back_from_the_host(self) -> None:
+        set_skills(self.home, "p1", "writing-for-agents", ["code-review", "grill-me"])
+        # A read is the app's own — another device, or this one after a reload: the host's answer.
+        found = read(self.home, "p1", self.folders())
+        self.assertEqual(found["build_skill"], "writing-for-agents")
+        self.assertEqual(found["critique_skills"], ["code-review", "grill-me"])
+
+    def test_the_choice_is_in_the_store_not_in_memory(self) -> None:
+        set_skills(self.home, "p1", "writing-for-agents", ["code-review"])
+        # A restarted host is a process that never saw the write: the row on disk is all there is.
+        conn = sqlite3.connect(db_path(self.home))
+        try:
+            row = conn.execute(
+                "SELECT build_skill, critique_skills FROM project_afk WHERE project_id = ?", ("p1",)
+            ).fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(row, ("writing-for-agents", json.dumps(["code-review"])))
+
+    def test_either_can_be_cleared_back_to_nothing(self) -> None:
+        set_skills(self.home, "p1", "writing-for-agents", ["code-review"])
+        set_skills(self.home, "p1", None, [])
+        found = read(self.home, "p1", self.folders())
+        self.assertIsNone(found["build_skill"])
+        self.assertEqual(found["critique_skills"], [])
+
+    def test_one_projects_choice_leaves_anothers_alone(self) -> None:
+        set_skills(self.home, "p1", "writing-for-agents", ["code-review"])
+        set_skills(self.home, "p2", "tdd", ["grill-me"])
+        self.assertEqual(read(self.home, "p1", self.folders())["build_skill"], "writing-for-agents")
+        self.assertEqual(read(self.home, "p2", self.folders())["critique_skills"], ["grill-me"])
+
+    def test_the_switch_leaves_the_choice_alone(self) -> None:
+        set_skills(self.home, "p1", "writing-for-agents", ["code-review"])
+        set_on(self.home, "p1", self.folders(), True)
+        set_on(self.home, "p1", self.folders(), False)
+        found = read(self.home, "p1", self.folders())
+        self.assertEqual(found["build_skill"], "writing-for-agents")
+        self.assertEqual(found["critique_skills"], ["code-review"])
+
+    def test_choosing_a_skill_on_a_project_never_turned_on_keeps_its_switch_off(self) -> None:
+        # The pickers sit under the switch, which a project that was never left to work has no row
+        # for yet: choosing one creates the row without turning anything on.
+        set_skills(self.home, "p1", "writing-for-agents", [])
+        self.assertFalse(read(self.home, "p1", self.folders())["on"])
+
+    def test_names_are_trimmed_and_kept_once_in_the_order_given(self) -> None:
+        set_skills(self.home, "p1", "  writing-for-agents ", ["code-review ", "code-review", " code-review"])
+        found = read(self.home, "p1", self.folders())
+        self.assertEqual(found["build_skill"], "writing-for-agents")
+        self.assertEqual(found["critique_skills"], ["code-review"])
+
+    def test_a_skills_write_names_both_fields(self) -> None:
+        # One write, both fields: the sheet has the two pickers in front of it, and a write that
+        # named one would leave the other's meaning to a guess.
+        for body in ({}, {"build_skill": "writing-for-agents"}, {"critique_skills": []}):
+            with self.subTest(body=body):
+                with self.assertRaises(ValueError):
+                    skills_from(body)
+
+    def test_a_skills_write_refuses_what_is_not_a_skill_name(self) -> None:
+        for body in (
+            {"build_skill": 3, "critique_skills": []},
+            {"build_skill": "tdd", "critique_skills": "code-review"},
+            {"build_skill": "tdd", "critique_skills": [2]},
+        ):
+            with self.subTest(body=body):
+                with self.assertRaises(ValueError):
+                    skills_from(body)
+
+    def test_a_skills_write_reads_a_cleared_choice(self) -> None:
+        self.assertEqual(skills_from({"build_skill": None, "critique_skills": []}), (None, []))
 
 
 class ClaimStubTests(unittest.TestCase):

@@ -26,6 +26,11 @@ repository to read tasks from, the host has no GitHub account to read or claim o
 project has been put away. The reason is the host's own answer rather than the app's guess, because
 the host is what would do the work — and turning a project on is refused with that reason, so nothing
 is ever left half on.
+
+The skills its work follows are the project's too: one to build by and the ones to critique, kept on
+the same row as the switch (`set_skills`) and read back with it, so the sweep has them on the host
+with the app closed. The list they are picked from is the profile's live skills
+(`skill_catalog.read`); nothing here decides what a chosen skill does to a run.
 """
 
 from __future__ import annotations
@@ -133,20 +138,85 @@ def forget(hermes_home: Path, project_id: str) -> None:
 def read(
     hermes_home: Path, project_id: str, folders: Iterable[Any], archived: bool = False
 ) -> Dict[str, Any]:
-    """Everything the app's sheet shows: the switch and its reason, the task held, the last refusal.
+    """Everything the app's sheet shows: the switch and its reason, the task held, the last refusal,
+    and the skills this project's work follows.
 
     An archived project is turned off here if anything had left it on, and reads off whatever
     happens: it was put away, so its switch isn't a setting anything acts on. Writing it off rather
     than only masking it is what keeps a restore from resuming work no one asked for — a project
     archived where this plugin didn't do it (Hermes's own dashboard or CLI) still has its old row.
     """
-    found = _row(hermes_home, project_id) or {"on": False, "task": None, "refusal": None}
+    found = _row(hermes_home, project_id) or {
+        "on": False,
+        "task": None,
+        "refusal": None,
+        "build_skill": None,
+        "critique_skills": [],
+    }
     why = reason(hermes_home, folders, archived)
     on = found["on"]
     if on and why == ARCHIVED:
         turn_off(hermes_home, project_id)
         on = False
-    return {"on": on, "reason": why, "task": found["task"], "refusal": found["refusal"]}
+    return {
+        "on": on,
+        "reason": why,
+        "task": found["task"],
+        "refusal": found["refusal"],
+        "build_skill": found["build_skill"],
+        "critique_skills": found["critique_skills"],
+    }
+
+
+def skills_from(body: Dict[str, Any]) -> Tuple[Optional[str], List[str]]:
+    """The skills a write names, read from its body, or ``ValueError`` saying what's wrong.
+
+    Both fields or neither: the sheet writes the two pickers together, so a body naming one leaves
+    the other's meaning to a guess. The names are the profile's as the pickers read them; whether
+    they are still skills is the sweep's question, not this write's, so a name the profile has since
+    lost is kept as the project's choice and refused where a task would be claimed (#323).
+    """
+    if "build_skill" not in body or "critique_skills" not in body:
+        raise ValueError("A skills write names build_skill and critique_skills.")
+    build_skill = body["build_skill"]
+    if build_skill is not None and not isinstance(build_skill, str):
+        raise ValueError("build_skill must be a skill's name or null.")
+    critique_skills = body["critique_skills"]
+    if not isinstance(critique_skills, list) or not all(
+        isinstance(name, str) for name in critique_skills
+    ):
+        raise ValueError("critique_skills must be a list of skill names.")
+    return build_skill, critique_skills
+
+
+def set_skills(
+    hermes_home: Path,
+    project_id: str,
+    build_skill: Optional[str],
+    critique_skills: Iterable[str],
+) -> None:
+    """Keeps the skills this project's AFK work follows: one to build by, and the ones to critique.
+
+    Written on the project's own row, beside the switch and not on the device that picked them: the
+    sweep reads them on the host with the app closed, and they belong to that project alone. A
+    project with no row yet gets one with its switch off — the pickers sit under the switch, not
+    behind it, so choosing a skill is no reason to start working anything. Turning the switch on or
+    off writes its own columns only, so a choice outlives both.
+    """
+    names = _names(critique_skills)
+    conn = connect(db_path(hermes_home))
+    try:
+        conn.execute(
+            """INSERT INTO project_afk (project_id, enabled, at, build_skill, critique_skills)
+               VALUES (?, 0, ?, ?, ?)
+               ON CONFLICT(project_id) DO UPDATE SET
+                   build_skill = excluded.build_skill,
+                   critique_skills = excluded.critique_skills,
+                   at = excluded.at""",
+            (project_id, int(time.time()), _name(build_skill), json.dumps(names)),
+        )
+    finally:
+        conn.close()
 
 
 def release(
@@ -675,13 +745,14 @@ def _forget_refusal(hermes_home: Path, project_id: str, found: Dict[str, Any]) -
 
 def _row(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
     """The project's AFK row, read once: its switch, the task it holds, its last refusal, the session
-    working that task, why it stalled and since when it was claimed.
+    working that task, why it stalled, since when it was claimed, and the skills its work follows.
     """
     conn = connect(db_path(hermes_home))
     try:
         row = conn.execute(
-            """SELECT enabled, task, refusal, session_id, stalled, claimed_at FROM project_afk
-               WHERE project_id = ?""",
+            """SELECT enabled, task, refusal, session_id, stalled, claimed_at,
+                      build_skill, critique_skills
+               FROM project_afk WHERE project_id = ?""",
             (project_id,),
         ).fetchone()
     finally:
@@ -695,7 +766,42 @@ def _row(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
         "session_id": row[3] if isinstance(row[3], str) and row[3] else None,
         "stalled": row[4] if isinstance(row[4], str) and row[4] else None,
         "claimed_at": int(row[5]) if isinstance(row[5], (int, float)) else None,
+        "build_skill": _name(row[6]),
+        "critique_skills": _names(_list(row[7])),
     }
+
+
+def _name(value: Any) -> Optional[str]:
+    """A skill's name as the pickers write it, or None: a blank name is no choice at all."""
+    if not isinstance(value, str):
+        return None
+    return value.strip() or None
+
+
+def _names(values: Iterable[Any]) -> List[str]:
+    """The names a choice holds, trimmed, without blanks and each once, in the order they were given.
+
+    Order is the user's: the critique's delegates follow the skills in the order the row holds them,
+    so a set would hand that back in an order nobody picked.
+    """
+    found: List[str] = []
+    for value in values:
+        name = _name(value)
+        if name is not None and name not in found:
+            found.append(name)
+    return found
+
+
+def _list(value: Any) -> List[Any]:
+    """The JSON list a column holds, or none: a row written before the column, or by hand, reads as
+    no choice rather than failing the sheet."""
+    if not isinstance(value, str) or not value:
+        return []
+    try:
+        found = json.loads(value)
+    except ValueError:
+        return []
+    return found if isinstance(found, list) else []
 
 
 class Hold(NamedTuple):
@@ -760,7 +866,9 @@ def _update(hermes_home: Path, project_id: str, **fields: Any) -> None:
 def _write(hermes_home: Path, project_id: str, on: bool) -> None:
     conn = connect(db_path(hermes_home))
     try:
-        # The switch's own columns only: the task it holds and the last refusal are the sweep's.
+        # The switch's own columns only: the task it holds and the last refusal are the sweep's, and
+        # the skills its work follows are the pickers' (`set_skills`) — turning it on or off leaves
+        # both alone.
         conn.execute(
             """INSERT INTO project_afk (project_id, enabled, at) VALUES (?, ?, ?)
                ON CONFLICT(project_id) DO UPDATE SET enabled = excluded.enabled, at = excluded.at""",

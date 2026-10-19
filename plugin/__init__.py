@@ -277,6 +277,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # setting on the host (afk.py). Advertised apart from the read, so a plugin that
                     # can list a project's tasks but never switch AFK on offers no switch at all.
                     "afk_switch",
+                    # And whether it can hold the skills that work follows — one to build by and the
+                    # ones to critique, written beside the switch. Advertised apart from the switch,
+                    # so an older plugin keeps the pop-up it has, with no pickers in it.
+                    "afk_skills",
                     "clarify",
                     "todo_tool",
                     "agents",
@@ -997,25 +1001,49 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         project_id = request.match_info["project_id"]
         if clones.is_pending_id(project_id):
             return _error(web, "The project is still being created.", 409)
-        body = await json_body(request)
-        on = body.get("on") if body else None
-        if not isinstance(on, bool):
+        body = await json_body(request) or {}
+        named = {"on", "build_skill", "critique_skills"} & set(body)
+        if not named:
+            return _error(web, "on, build_skill or critique_skills is needed.", 400)
+        on = body.get("on")
+        if "on" in named and not isinstance(on, bool):
             return _error(web, "on must be true or false.", 400)
+        # One write names the switch or the skills; the skills' own body is checked before anything
+        # is read or written, so a refusal leaves the row as it was.
+        skills = None
+        if named - {"on"}:
+            try:
+                skills = afk.skills_from(body)
+            except ValueError as why:
+                return _error(web, str(why), 400)
         project, refused = await resolve_project(project_id)
         if refused is not None:
             return refused
-        try:
+        if skills is not None:
+            # Before the switch's own write, which wakes the sweep: a task claimed on the way has to
+            # be worked by the skills the user just chose.
+            await asyncio.to_thread(afk.set_skills, hermes_home(), project_id, *skills)
+        if "on" in named:
+            try:
+                found = await asyncio.to_thread(
+                    afk.set_on,
+                    hermes_home(),
+                    project_id,
+                    project.folders,
+                    on,
+                    bool(getattr(project, "archived", False)),
+                )
+            except afk.Refused as why:
+                # The project can't be left to work: its reason is the answer, and nothing is written.
+                return _error(web, str(why), 409)
+        else:
             found = await asyncio.to_thread(
-                afk.set_on,
+                afk.read,
                 hermes_home(),
                 project_id,
                 project.folders,
-                on,
                 bool(getattr(project, "archived", False)),
             )
-        except afk.Refused as why:
-            # The project can't be left to work: its reason is the answer, and nothing is written.
-            return _error(web, str(why), 409)
         return web.json_response({"object": "memento.afk", "project_id": project_id, **found})
 
     async def session_db():
