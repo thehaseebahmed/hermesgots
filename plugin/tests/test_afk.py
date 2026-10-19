@@ -16,7 +16,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import ModuleType, SimpleNamespace
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from unittest.mock import patch
 
 from plugin import afk, chats, github, outbox, projects, prompt_builder, sessions
@@ -557,13 +557,21 @@ class AfkSessionTests(ClaimStubTests):
 class ReleaseTests(AfkSessionTests):
     """Giving a claim back: the session the user closed, and the task returning to the frontier."""
 
-    def test_discarding_the_session_takes_the_mark_off(self) -> None:
+    def test_discarding_the_session_takes_the_mark_and_the_assignment_off(self) -> None:
         self.merged(discardedAt=int(time.time() * 1000))
         self.sweep()
         self.assertEqual(
             self.released(),
-            [("DELETE", "/repos/mock-user/memento/issues/265/labels/gots-got-it", None)],
-            "the claim is the mark, and taking it off is what puts the task back in the frontier",
+            [
+                ("DELETE", "/repos/mock-user/memento/issues/265/labels/gots-got-it", None),
+                (
+                    "DELETE",
+                    "/repos/mock-user/memento/issues/265/assignees",
+                    {"assignees": ["mock-user"]},
+                ),
+            ],
+            "both marks go: a task with either one is out of the frontier, so the mark alone "
+            "would leave it claimed for good",
         )
 
     def test_the_released_task_is_one_the_sweep_can_take_again(self) -> None:
@@ -578,12 +586,12 @@ class ReleaseTests(AfkSessionTests):
     def test_a_resolved_session_gives_its_task_back_too(self) -> None:
         self.merged(resolvedAt=int(time.time() * 1000))
         self.sweep()
-        self.assertEqual(len(self.released()), 1, "the user is done with the session's work")
+        self.assertEqual(len(self.released()), 2, "the user is done with the session's work")
 
     def test_a_deleted_session_gives_its_task_back_too(self) -> None:
         self.deleted()
         self.sweep()
-        self.assertEqual(len(self.released()), 1)
+        self.assertEqual(len(self.released()), 2)
 
     def test_a_session_nobody_closed_keeps_its_claim(self) -> None:
         self.sweep()
@@ -594,9 +602,32 @@ class ReleaseTests(AfkSessionTests):
         """The route the app's Discard calls: the task comes off the session's own record."""
         record = sessions.read(db_path(self.home), self.SESSION)
         self.assertTrue(afk.release_session(self.home, record))
-        self.assertEqual(len(self.released()), 1)
+        self.assertEqual(len(self.released()), 2)
         self.assertIsNone(self.shown()["task"], "the project is free for the next task")
         self.assertIsNone(afk._row(self.home, "p1")["session_id"])
+
+    def test_closing_an_older_session_leaves_the_task_the_project_holds_now(self) -> None:
+        """A session closed after its run finished names a task the row has already let go of."""
+        record = sessions.read(db_path(self.home), self.SESSION)
+        afk._free(self.home, "p1")
+        later = {**self.task, "number": 266, "title": "Task 266"}
+        afk._hold(self.home, "p1", later)
+        afk._adopt(self.home, "p1", "memento-afk-s2")
+        self.writes.clear()
+
+        self.assertTrue(afk.release_session(self.home, record))
+        self.assertEqual(
+            afk._row(self.home, "p1")["task"], later, "the hold the project has now is not that one"
+        )
+        self.assertEqual(afk._row(self.home, "p1")["session_id"], "memento-afk-s2")
+        self.assertEqual(
+            [write[1] for write in self.released()],
+            [
+                "/repos/mock-user/memento/issues/265/labels/gots-got-it",
+                "/repos/mock-user/memento/issues/265/assignees",
+            ],
+            "only the closed session's own task comes off GitHub",
+        )
 
     def test_a_session_started_by_hand_releases_nothing(self) -> None:
         self.assertFalse(
@@ -615,13 +646,24 @@ class ReleaseTests(AfkSessionTests):
         self.assertIsNone(shown["task"], "nothing on the host works the task either way")
         self.assertEqual(shown["refusal"], "Resource not accessible by personal access token")
 
+    def test_a_closed_session_is_given_back_with_the_switch_off(self) -> None:
+        """The switch decides whether a new task is taken, not whether a held one goes back."""
+        self.merged(discardedAt=int(time.time() * 1000))
+        set_on(self.home, "p1", self.folders(), False)
+        project = SimpleNamespace(folders=self.folders(), archived=False)
+        with patch.object(sessions, "projects", return_value={"p1": project}):
+            sweep_all(self.home)
+        self.assertEqual(len(self.released()), 2, "the hold is settled whatever the switch says")
+        self.assertIsNone(self.shown()["task"])
+        self.assertIsNone(self.shown()["reason"], "and nothing new is claimed for it")
+
 
 class RunEndTests(AfkSessionTests):
-    """What a run's end does to the task: a finished one lets go, a failed one is left alone."""
+    """What a run's end does to the task: a finished one lets go, a stopped one is left alone."""
 
-    def ended(self, **kwargs: Any) -> None:
+    def ended(self, session_id: Optional[str] = None, **kwargs: Any) -> None:
         with patch("plugin.sessions._paths", return_value=(db_path(self.home), self.home)):
-            afk.after_run(session_id=self.SESSION, **kwargs)
+            afk.after_run(session_id=session_id or self.SESSION, **kwargs)
 
     def test_a_finished_run_hands_the_project_the_next_task(self) -> None:
         with patch.object(afk, "wake") as wake:
@@ -651,6 +693,12 @@ class RunEndTests(AfkSessionTests):
         self.ended(completed=False, interrupted=True)
         self.assertEqual(afk.stalled(self.home)[self.SESSION]["reason"], afk.INTERRUPTED_RUN)
 
+    def test_a_run_that_stopped_without_failing_is_not_called_a_failure(self) -> None:
+        """A turn that ends without finishing — a limit reached, an empty answer — is not an error."""
+        self.ended(completed=False)
+        self.assertEqual(self.shown()["task"], self.task, "the claim is still AFK's")
+        self.assertEqual(afk.stalled(self.home)[self.SESSION]["reason"], afk.DEFAULT_STALL)
+
     def test_a_run_of_a_session_afk_does_not_hold_leaves_the_hold_alone(self) -> None:
         repos = [
             {
@@ -661,9 +709,8 @@ class RunEndTests(AfkSessionTests):
             }
         ]
         sessions._upsert(db_path(self.home), "memento-hand-made", "p1", repos, "auto", None)
-        with patch("plugin.sessions._paths", return_value=(db_path(self.home), self.home)):
-            with patch.object(afk, "wake") as wake:
-                afk.after_run(session_id="memento-hand-made", completed=True)
+        with patch.object(afk, "wake") as wake:
+            self.ended(session_id="memento-hand-made", completed=True)
         self.assertEqual(self.shown()["task"], self.task)
         wake.assert_called_once()
 

@@ -3,7 +3,7 @@
 // with the host's own reason under it, the way the plugin reports a stalled claim. The mock says a
 // project's claim stalled on request, so the whole thing is covered without GitHub. Phone and desktop,
 // light and dark, with no console error.
-import { app, assert, flow, makeProject, mock, openAfk, pass } from "./lib.mjs"
+import { afkOn, app, assert, flow, makeProject, mock, pass } from "./lib.mjs"
 
 const TITLE = "#265 The frontier is read from GitHub and listed"
 const REASON = "The run failed."
@@ -22,16 +22,8 @@ const run = (wide) => async ({ page, profileId, shot, until }) => {
     body: JSON.stringify({ reset: true }),
   })
   const screen = `${app}/projects/${profileId}/${projectId}`
-  const control = () => page.getByRole("switch", { name: "Work on its own" })
 
-  await openAfk(page, screen)
-  await control().waitFor({ timeout: 15_000 })
-  await control().click()
-  await until(
-    async () => (await control().getAttribute("aria-checked")) === "true",
-    15_000,
-    "the switch to read on",
-  )
+  await afkOn(page, screen, until)
 
   // The sweep claimed the task and published its session; then its run ended without finishing.
   await until(

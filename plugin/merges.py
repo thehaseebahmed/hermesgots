@@ -55,9 +55,7 @@ def open_sessions(
     ``only`` names the ones to look at."""
     for chat_id, entry in chats.read(path).items():
         value = entry.get("value")
-        if entry.get("deleted") or not isinstance(value, dict) or not value.get("projectId"):
-            continue
-        if value.get("resolvedAt") or value.get("discardedAt"):
+        if not isinstance(value, dict) or not value.get("projectId") or chats.closed(entry):
             continue
         session_id = value.get("hermesSessionId")
         if not isinstance(session_id, str) or (only is not None and session_id not in only):

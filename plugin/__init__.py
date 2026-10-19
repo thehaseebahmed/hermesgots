@@ -1159,7 +1159,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # An AFK session the user closes gives its task back: the claim comes off GitHub before the
         # record naming the task is removed with the session, and before a failed close can lose it.
         try:
-            await asyncio.to_thread(afk.release_session, home, record)
+            if await asyncio.to_thread(afk.release_session, home, record):
+                # Nothing is left to work the task, so the sweep is asked to look for the next one.
+                afk.wake()
         except Exception:
             logger.warning("memento: couldn't release a closed session's task", exc_info=True)
         # Before the branches go: a tree whose commits are only on its remote branch can still go.
@@ -1190,18 +1192,17 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except Exception:
             logger.debug("memento: reading waiting sessions failed", exc_info=True)
             waiting = {}
-        try:
-            # A goal paused or blocked by the judge waits on the user too, and outranks its own note:
-            # a question the run asked is what the turn is doing right now.
-            waiting = {**await asyncio.to_thread(goal.waiting, home), **waiting}
-        except Exception:
-            logger.debug("memento: reading waiting goals failed", exc_info=True)
-        try:
-            # An AFK session nothing is working waits on the user too — its run failed, or a restart
-            # adopted it — and says why; a live run of one is working it, so it never lands here.
-            waiting = {**await asyncio.to_thread(afk.stalled, home, live), **waiting}
-        except Exception:
-            logger.debug("memento: reading stalled AFK sessions failed", exc_info=True)
+        # Every host-side reason a session waits on the user, lowest precedence first: a live run's
+        # own wait (a question, an approval, a plan) is what the turn is doing right now, so it
+        # outranks the host's note that nothing is working a session any more.
+        for name, read, args in (
+            ("stalled AFK sessions", afk.stalled, (home, live)),
+            ("waiting goals", goal.waiting, (home,)),
+        ):
+            try:
+                waiting = {**await asyncio.to_thread(read, *args), **waiting}
+            except Exception:
+                logger.debug("memento: reading %s failed", name, exc_info=True)
         return web.json_response(
             {"object": "memento.runs", "sessions": live, "run_ids": run_ids, "waiting": waiting}
         )

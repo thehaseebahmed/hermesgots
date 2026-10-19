@@ -6,6 +6,10 @@ taking the claim off would put the issue back in the frontier for the next sweep
 When the user closes the session — discarded, resolved, or deleted — the claim comes off, because the
 user has said that work is over. A start that never gets its run away gives the claim back too.
 
+Giving a claim back is the whole of it, which is both marks: Gots's label *and* its own assignment.
+A task is out of the frontier while it carries either, so taking only the label off would leave the
+task in a state no sweep can take — released in name and claimed in fact.
+
 The hold is the host's own row (`project_afk`), so it has to survive things the run doesn't: the
 process restarting, the user closing the session from another device, the plugin being reloaded. That
 is why the session's id is written on the row before the run is posted, why the reason a run stopped
@@ -16,9 +20,11 @@ A claim nothing is working is the state worth reporting. The session keeps its t
 worktrees and its claim, and the project records why nothing is running it; `runs/live` then carries
 that session as `{ kind: "stalled", reason }` beside the questions and approvals it already reports,
 so the sidebar's Waiting for input and Code's Waiting on you name it with the host's own words. A
-failed run says "The run failed." at once; a session a restart adopted says so once the claim has had
-`STALL_SECONDS` to become one, since a start still making its worktrees looks the same as a stall
-from outside.
+failed run says "The run failed." at once; a run that stopped without failing — a turn that ended, a
+limit reached — says `DEFAULT_STALL` rather than calling itself a failure, since the host would be
+inventing a reason. A session a restart adopted says so once the claim has had `STALL_SECONDS` to
+become one, since a start still making its worktrees looks the same as a stall from outside; that is
+why the clock is restarted when the start is done rather than left at the claim.
 
 ## Considered options
 
@@ -33,7 +39,8 @@ from outside.
 - **A new waiting kind only in the app.** Rejected: a phone with the app closed has no idea a claim
   stalled, and the plugin is what holds the claim. The host reports it, and the app renders it.
 - **Giving the claim back when AFK is switched off.** Not this decision: turning the switch off stops
-  future sweeps; what happens to a claim already held is the switch's own question.
+  future sweeps from taking a new task. A hold already taken is still settled — the switch is not what
+  decides that a claim comes back — so a project switched off mid-run is swept for its hold alone.
 
 ## Consequences
 

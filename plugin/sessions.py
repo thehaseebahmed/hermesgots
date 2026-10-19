@@ -902,7 +902,7 @@ def waiting(
     for session_id, record in records.items():
         if record["plan_pending"]:
             found.setdefault(session_id, {"kind": "plan"})
-    names = _project_names(hermes_home) if any(s in records for s in found) else {}
+    names = project_names(hermes_home) if any(s in records for s in found) else {}
     for session_id, reason in found.items():
         record = records.get(session_id)
         if record and names.get(record["project_id"]):
@@ -910,7 +910,8 @@ def waiting(
     return found
 
 
-def _project_names(hermes_home: Path) -> Dict[str, str]:
+def project_names(hermes_home: Path) -> Dict[str, str]:
+    """Every project's name by its id: what a waiting session is labelled with in the app's list."""
     projects_db = hermes_home / "projects.db"
     try:
         from hermes_cli import projects_db as pdb

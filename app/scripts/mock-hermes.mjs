@@ -3712,12 +3712,7 @@ http
       for (const [projectId, why] of afkStalled) {
         const session = `memento-afk-${projectId}`
         if (!projectSessions.has(session) || sessions[session]) continue
-        const name = mockProjects().find((p) => p.id === projectId)?.name
-        waiting[session] = {
-          kind: "stalled",
-          reason: why,
-          ...(name ? { project: name } : {}),
-        }
+        waiting[session] = { kind: "stalled", reason: why }
       }
       for (const [id, reason] of Object.entries(waiting)) {
         const record = projectSessions.get(id)
@@ -3727,14 +3722,11 @@ http
       return json(res, 200, { object: "memento.runs", sessions, run_ids, waiting })
     }
     // Dev only: POST { project_id, reason } makes the project's claimed task stalled — its session
-    // waiting with that reason, the way a failed run or a restart leaves it. POST { project_id, off:
-    // true } puts it back to working, and { reset: true } clears every project's, which a flow that
-    // repeats needs since the mock keeps its state between passes.
+    // waiting with that reason, the way a failed run or a restart leaves it — and { reset: true }
+    // clears every project's, which a flow that repeats needs since the mock keeps its state.
     if (url.pathname === "/__mock/afk" && req.method === "POST") {
-      const { project_id: projectId, reason = "The run failed.", off = false, reset = false } =
-        await readBody(req)
+      const { project_id: projectId, reason = "The run failed.", reset = false } = await readBody(req)
       if (reset) afkStalled.clear()
-      else if (off) afkStalled.delete(projectId)
       else afkStalled.set(projectId, reason)
       return json(res, 200, { ok: true })
     }
