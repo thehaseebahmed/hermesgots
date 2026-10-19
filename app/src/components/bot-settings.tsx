@@ -1,13 +1,24 @@
 import { useCallback, useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { EyeIcon, EyeOffIcon, PlugZapIcon, Trash2Icon } from "lucide-react"
-import { useNavigate } from "react-router"
+import {
+  ChevronRightIcon,
+  EyeIcon,
+  EyeOffIcon,
+  FolderIcon,
+  PlugZapIcon,
+  Trash2Icon,
+} from "lucide-react"
+import { Link, useNavigate } from "react-router"
 import { toast } from "sonner"
 
 import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BOTS } from "@/components/bots"
-import { DefaultModelSetting, FallbackModelsSetting } from "@/components/chat/model-picker"
+import {
+  DefaultModelSetting,
+  DelegationModelSetting,
+  FallbackModelsSetting,
+} from "@/components/chat/model-picker"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -51,12 +62,19 @@ import { connectionKey } from "@/lib/connection"
 import { formatRelative } from "@/lib/format"
 import { botTabOf, botTabPath, type BotTab } from "@/lib/bot-tabs"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
-import { checkHealth, getPluginVersion, listModels } from "@/lib/hermes"
+import {
+  checkHealth,
+  getPluginVersion,
+  listModels,
+  listProjects,
+  type HermesProject,
+} from "@/lib/hermes"
 import { useMcpFeatureAnswers } from "@/lib/mcps"
 import { setDefaultModel } from "@/lib/model-info"
 import { syncContextWindow } from "@/lib/models"
 import { setBotMuted } from "@/lib/push"
 import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
+import { noteFailure } from "@/lib/report"
 import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { MIN_PLUGIN_VERSION, pluginOutdated } from "@/lib/version"
@@ -173,13 +191,64 @@ function RemoveBot({ profile, onDeleted }: { profile: Profile; onDeleted?: () =>
 }
 
 /**
+ * The bot's projects as links to each one, beneath its model settings: the project whose AFK
+ * switch the user is thinking about is one tap away. A project still being made, or one put away,
+ * isn't openable work, so it isn't offered.
+ */
+function ProjectLinks({ profile }: { profile: Profile }) {
+  const [projects, setProjects] = useState<HermesProject[]>([])
+  const { baseUrl, apiKey } = profile
+  useEffect(() => {
+    if (!baseUrl) return
+    let cancelled = false
+    void listProjects({ baseUrl, apiKey }, AbortSignal.timeout(READ_TIMEOUT_MS))
+      .then((all) => {
+        if (cancelled) return
+        setProjects(all.filter((project) => project.status === "ready" && !project.archived))
+      })
+      .catch((error: unknown) => {
+        // The links are a shortcut, not a setting: a bot whose host can't list them still works.
+        noteFailure("Reading the bot's projects", error)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [baseUrl, apiKey])
+  if (!projects.length) return null
+
+  return (
+    <Field aria-labelledby="projects-label">
+      <FieldLabel id="projects-label">Projects</FieldLabel>
+      <div className="flex flex-col gap-2">
+        {projects.map((project) => (
+          <Link
+            key={project.id}
+            to={`/projects/${profile.id}/${project.id}`}
+            state={{ project }}
+            className="flex min-h-11 items-center gap-2 rounded-4xl border border-border bg-input/30 px-4 py-2 text-sm font-medium transition-colors outline-none hover:bg-input/50 focus-visible:ring-3 focus-visible:ring-ring/50"
+          >
+            <FolderIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <span className="truncate">{project.name}</span>
+            <ChevronRightIcon
+              className="ml-auto size-4 shrink-0 text-muted-foreground"
+              aria-hidden
+            />
+          </Link>
+        ))}
+      </div>
+    </Field>
+  )
+}
+
+/**
  * A bot's settings, in three tabs of its own screen — General, Models and MCP — with the tab held in
  * the URL, so each is a history entry of its own and back walks the way it was opened.
  *
  * General is what the bot is and how it is reached, the model it answers with is on Models with the
- * default and the fallbacks it falls back to, and MCP is its servers. The MCP tab exists only where
- * the bot's plugin advertises that it can list them, so a bot on an older plugin has two tabs and a
- * URL into a third lands on General rather than on a screen that can't draw.
+ * default and the fallbacks it falls back to, the second-opinion model its delegated tasks run on,
+ * and links to its projects, and MCP is its servers. The MCP tab exists only where the bot's plugin
+ * advertises that it can list them, so a bot on an older plugin has two tabs and a URL into a third
+ * lands on General rather than on a screen that can't draw.
  *
  * A linked bot's address and key come from its host and aren't shown; a bot added by hand before
  * linking keeps its own.
@@ -506,6 +575,8 @@ export function BotEditor({
             </Field>
           )}
           <FallbackModelsSetting profile={profile} />
+          <DelegationModelSetting profile={profile} />
+          <ProjectLinks profile={profile} />
         </FieldGroup>
       </TabsContent>
 

@@ -1006,6 +1006,45 @@ function fallbackList(value: unknown): Fallback[] {
   return entries
 }
 
+/**
+ * The model a bot's delegated tasks run on, from its host's `delegation` section (Hermes's own
+ * `delegation.model`); `null` when a child inherits the bot's own model. Newer plugin only; a host
+ * without the route answers 404.
+ */
+export async function getDelegationModel(
+  config: HermesConfig,
+  signal?: AbortSignal,
+): Promise<ModelChoice | null> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/delegation`, {
+    headers: headers(config),
+    signal,
+  })
+  return delegationPick((await response.json())?.delegation)
+}
+
+/** Makes `pick` the model the bot's delegated tasks run on; `null` clears it, so a child inherits
+ * the bot's own. Answers with what the host holds, and throws with its reason when it refuses. */
+export async function setDelegationModel(
+  config: HermesConfig,
+  pick: ModelChoice | null,
+  signal?: AbortSignal,
+): Promise<ModelChoice | null> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/delegation`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ delegation: pick }),
+    signal,
+  })
+  return delegationPick((await response.json())?.delegation)
+}
+
+/** A `delegation` answer as a pick, or null for one the host doesn't hold (or can't be read). */
+function delegationPick(value: unknown): ModelChoice | null {
+  const { provider, model } = (value ?? {}) as { provider?: unknown; model?: unknown }
+  if (typeof provider !== "string" || typeof model !== "string") return null
+  return provider && model ? { provider, model } : null
+}
+
 export async function checkHealth(config: HermesConfig) {
   const response = await request(`${serverRoot(config.baseUrl)}/health`, {
     headers: headers(config),
@@ -1535,9 +1574,13 @@ function toProject(raw: unknown): HermesProject | null {
 }
 
 /** The profile's Hermes Projects. A 404 (or a CORS-blocked one) means no plugin, or an older one. */
-export async function listProjects(config: HermesConfig): Promise<HermesProject[]> {
+export async function listProjects(
+  config: HermesConfig,
+  signal?: AbortSignal,
+): Promise<HermesProject[]> {
   const response = await request(`${pluginRoot(config.baseUrl)}/projects`, {
     headers: headers(config),
+    signal,
   })
   const body = await response.json()
   const projects: unknown[] = Array.isArray(body?.projects) ? body.projects : []

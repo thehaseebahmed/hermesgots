@@ -28,6 +28,7 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/in
 import { Spinner } from "@/components/ui/spinner"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { rememberModel, type ModelChoice, type Profile } from "@/lib/db"
+import { useDelegationModel } from "@/lib/delegation"
 import { MAX_FALLBACKS, withFallback } from "@/lib/fallback-list"
 import { useFallbackModels } from "@/lib/fallbacks"
 import { formatTokens } from "@/lib/format"
@@ -639,6 +640,64 @@ export function DefaultModelSetting({
         </PopupContent>
       </Popup>
     </>
+  )
+}
+
+/**
+ * A bot's second-opinion model, in its settings: the model every task it delegates runs on, which
+ * is its host's own delegation model. A host whose plugin can't record one shows no field at all,
+ * and a write on its way greys the field out until the host's answer lands.
+ */
+export function DelegationModelSetting({ profile }: { profile: Profile }) {
+  const [open, setOpen] = useState(false)
+  const field = useRef<HTMLButtonElement>(null)
+  const { pick, supported, saving, save } = useDelegationModel(profile)
+  const info = useModelInfo(profile)
+  const providers = info?.providers ?? []
+  if (!supported) return null
+  // The bot's own model, which is what a task that inherits runs on.
+  const own = profile.modelChoice ?? hostChoice(info) ?? profile.hostModel
+
+  const write = (next: ModelChoice | undefined) => {
+    void save(next).catch((error: unknown) => {
+      toast.error(error instanceof Error ? error.message : String(error))
+    })
+  }
+
+  return (
+    <Field aria-labelledby="delegation-model-label" aria-busy={saving || undefined}>
+      <div className="flex items-center gap-2">
+        <FieldLabel id="delegation-model-label">Second opinion</FieldLabel>
+        {saving && <Spinner className="size-3.5" />}
+      </div>
+      <Button
+        ref={field}
+        id="delegation-model"
+        type="button"
+        variant="outline"
+        className="h-11 w-full justify-between gap-2 font-normal"
+        disabled={!providers.length || saving}
+        onClick={() => setOpen(true)}
+      >
+        <span className="truncate">{pick ? fullModel(pick) : "Same as the bot"}</span>
+        <ChevronDownIcon className="shrink-0 text-muted-foreground" />
+      </Button>
+      <Popup open={open} onOpenChange={setOpen} anchor={field}>
+        <PopupContent initialFocus={false} fixedHeight={PICKER_HEIGHT}>
+          <ModelPicker
+            providers={providers}
+            fallback={{ label: "Same as the bot", model: own?.model }}
+            recent={profile.recentModels}
+            choice={pick}
+            onChoose={(next) => {
+              write(next)
+              if (next) void rememberModel(profile.id, next)
+              setOpen(false)
+            }}
+          />
+        </PopupContent>
+      </Popup>
+    </Field>
   )
 }
 
