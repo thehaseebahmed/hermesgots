@@ -18,7 +18,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any, Dict, List
 from unittest.mock import patch
 
-from plugin import afk, chats, github, projects, sessions
+from plugin import afk, chats, github, projects, prompt_builder, sessions
 from plugin.afk import (
     ARCHIVED,
     NO_GITHUB,
@@ -501,108 +501,6 @@ class ClaimTests(unittest.TestCase):
         self.assertEqual(wake.call_count, 1, "turning it off has nothing to wake for")
 
 
-class DetailTests(unittest.TestCase):
-    """The task's own text: its body and its comments, as the run's instructions carry them."""
-
-    def setUp(self) -> None:
-        self.tmp = TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.home = Path(self.tmp.name)
-        self.pages: List[Any] = []
-        self.comments: List[Any] = []
-        self.links: List[str] = []
-        self._patches = [
-            patch.object(github, "token", return_value=("token", "env")),
-            patch.object(github, "_get", self.answer_get),
-            patch.object(github, "_page", self.answer_page),
-        ]
-        for one in self._patches:
-            one.start()
-            self.addCleanup(one.stop)
-
-    def answer_get(self, path: str, auth: Any) -> Any:
-        if path == "/repos/mock-user/memento/issues/265":
-            return {"number": 265, "title": "Task 265", "body": "Read the frontier first."}
-        raise AssertionError(f"unexpected read: {path}")
-
-    def answer_page(self, path: str, auth: Any) -> Any:
-        if not path.startswith("/repos/mock-user/memento/issues/265/comments"):
-            raise AssertionError(f"unexpected page: {path}")
-        return self.comments, self.links.pop(0) if self.links else ""
-
-    def test_the_body_and_every_comment_are_read(self) -> None:
-        self.comments = [
-            {"user": {"login": "mock-user"}, "body": "Start with the rule, not the read."},
-            {"user": {"login": "someone"}, "body": "Blocked by #264 until it lands."},
-        ]
-        found = afk.detail(self.home, "mock-user/memento", 265)
-        self.assertEqual(found["body"], "Read the frontier first.")
-        self.assertEqual(
-            found["comments"],
-            [
-                {"author": "mock-user", "body": "Start with the rule, not the read."},
-                {"author": "someone", "body": "Blocked by #264 until it lands."},
-            ],
-        )
-
-    def test_every_page_of_comments_is_read(self) -> None:
-        self.comments = [{"user": {"login": "mock-user"}, "body": "One."}]
-        self.links = [
-            f'<{github.API}/repos/mock-user/memento/issues/265/comments?page=2>; rel="next"'
-        ]
-        found = afk.detail(self.home, "mock-user/memento", 265)
-        self.assertEqual([row["body"] for row in found["comments"]], ["One.", "One."])
-
-    def test_a_host_without_an_account_says_why(self) -> None:
-        with patch.object(github, "token", return_value=(None, "none")):
-            with self.assertRaises(github.GitHubError) as raised:
-                afk.detail(self.home, "mock-user/memento", 265)
-        self.assertEqual(str(raised.exception), NO_GITHUB)
-
-
-class BriefTests(unittest.TestCase):
-    """What the run is told: the task as instructions, and no place to ask."""
-
-    task = {
-        "repo": "mock-user/memento",
-        "number": 265,
-        "title": "The frontier is read from GitHub and listed",
-        "url": "https://github.com/mock-user/memento/issues/265",
-        "created_at": "2026-10-01T00:00:00Z",
-    }
-
-    def test_the_brief_carries_the_task_and_its_comments(self) -> None:
-        text = afk.brief(
-            self.task,
-            {
-                "body": "Read the frontier first.",
-                "comments": [{"author": "someone", "body": "Blocked by #264 until it lands."}],
-            },
-        )
-        self.assertIn("mock-user/memento#265", text)
-        self.assertIn(self.task["title"], text)
-        self.assertIn("Read the frontier first.", text)
-        self.assertIn("Blocked by #264 until it lands.", text)
-        self.assertIn("someone", text)
-
-    def test_the_brief_tells_it_not_to_ask_and_to_get_a_second_opinion(self) -> None:
-        text = afk.brief(self.task, {"body": "", "comments": []})
-        self.assertIn("Do not ask", text)
-        self.assertIn("decide", text)
-        self.assertIn("delegate_task", text)
-        self.assertIn("draft pull request", text)
-
-    def test_a_task_with_no_body_or_comments_still_says_what_it_is(self) -> None:
-        text = afk.brief(self.task, {"body": "", "comments": []})
-        self.assertIn("mock-user/memento#265", text)
-        self.assertNotIn("Comments:", text)
-
-    def test_a_task_too_long_for_one_run_is_cut(self) -> None:
-        text = afk.brief(self.task, {"body": "x" * 200_000, "comments": []})
-        self.assertLessEqual(len(text), afk.MAX_BRIEF + 200)
-        self.assertIn("cut here", text)
-
-
 class SessionTests(unittest.TestCase):
     """A claimed task worked in a session of its own: the record it publishes and the run it starts.
 
@@ -665,16 +563,8 @@ class SessionTests(unittest.TestCase):
     def adapter(self) -> SimpleNamespace:
         return SimpleNamespace(_host="127.0.0.1", _port=8642, _api_key="host-key")
 
-    def start(self, detail: Any = None) -> None:
-        asyncio.run(
-            afk.start(
-                self.adapter(),
-                self.home,
-                "p1",
-                self.task,
-                detail if detail is not None else {"body": "Read the frontier first.", "comments": []},
-            )
-        )
+    def start(self) -> None:
+        asyncio.run(afk.start(self.adapter(), self.home, "p1", self.task))
 
     def chats(self) -> Dict[str, Any]:
         return chats.read(db_path(self.home))
@@ -706,34 +596,36 @@ class SessionTests(unittest.TestCase):
         )
         self.assertGreaterEqual(entry["at"], value["updatedAt"], "the change clock is the record's")
 
-    def test_the_run_starts_with_one_short_line_naming_the_task(self) -> None:
+    def test_the_run_starts_with_one_line_naming_the_issue_and_where_it_is(self) -> None:
         self.start()
         self.assertEqual(len(self.posted), 1)
         body = self.posted[0]["body"]
         message = body["input"][0]
         self.assertEqual(message["role"], "user")
-        self.assertIn("#265", message["content"])
-        self.assertIn(self.task["title"], message["content"])
-        self.assertNotIn("\n", message["content"], "the transcript opens with a line, not a brief")
-        self.assertNotIn("Read the frontier first.", message["content"])
-
-    def test_the_task_arrives_as_instructions_beside_the_sessions_own_prompt(self) -> None:
-        self.start(
-            {
-                "body": "Read the frontier first.",
-                "comments": [{"author": "someone", "body": "Start with the rule."}],
-            }
+        self.assertEqual(
+            message["content"],
+            "Implement Issue #265 (https://github.com/mock-user/memento/issues/265)",
+            "the input is the issue and its url, not its text",
         )
+
+    def test_the_instructions_are_the_afk_prompt_and_carry_no_task_text(self) -> None:
+        self.start()
         instructions = self.posted[0]["body"]["instructions"]
-        self.assertIn("Read the frontier first.", instructions)
-        self.assertIn("Start with the rule.", instructions)
-        self.assertIn("Do not ask", instructions)
+        record = {**self.record, "session_id": self.ensured[0][0], "project_id": "p1", "mode": "auto"}
+        self.assertEqual(
+            instructions,
+            prompt_builder.afk_prompt(record, self.task),
+            "one module owns every word the agent is told",
+        )
+        self.assertIn("Never ask the user anything", instructions)
         self.assertIn("delegate_task", instructions)
+        self.assertIn("gh issue view", instructions, "it fetches the issue itself")
         self.assertIn(
             "You are working in a git worktree of mock-user/memento",
             instructions,
             "the session's own prompt is kept, so its worktree and pull request lines still hold",
         )
+        self.assertNotIn("Read the frontier first.", instructions, "the issue's text isn't copied in")
 
     def test_the_run_is_the_sessions_own_and_starts_on_the_hosts_answer(self) -> None:
         self.start()

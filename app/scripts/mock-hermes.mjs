@@ -1019,13 +1019,15 @@ function afkTask(project) {
 /**
  * The session the sweep starts for the task it claimed, as the plugin publishes it: its workspace
  * (its own worktree and branch, mode auto), its own chat record (`afk`, auto, its title, newer
- * updated than created — the Code list hides the rest) and the transcript's first row, which is one
- * short line naming the task rather than the brief.
+ * updated than created — the Code list hides the rest) and the transcript's first row, which names
+ * the issue and where it is rather than quoting it.
  */
 function afkSession(project) {
   const held = afkTask(project)
   const session = `memento-afk-${project.id}`
-  const line = `#${held.number} ${held.title}`
+  const title = `#${held.number} ${held.title}`
+  // The run's input, as the plugin sends it: the issue and its url, never its text.
+  const input = `Implement Issue #${held.number} (${held.url})`
   const now = Date.now()
   const slug = `afk-${held.number}`
   const gitFolders = project.folders.filter((f) => f.git)
@@ -1049,14 +1051,14 @@ function afkSession(project) {
       files_dir: `${repos[0].repo_root}/files/${slug}`,
       plan_file: null,
     })
-  chatTitles.set(session, line)
+  chatTitles.set(session, title)
   transcripts.set(session, [
-    { id: ++lastRowId, session_id: session, timestamp: now / 1000, role: "user", content: line },
+    { id: ++lastRowId, session_id: session, timestamp: now / 1000, role: "user", content: input },
   ])
   pluginChats.set(session, {
     at: now + 1,
     value: {
-      title: line,
+      title,
       hermesSessionId: session,
       createdAt: now,
       updatedAt: now + 1,

@@ -15,8 +15,11 @@ The task it takes is worked in a session of its own, made the way the app's work
 one (`sessions.ensure`: its own worktree, branch and row, in Auto), and the chat record that makes
 that session appear and open in the app is written here (ADR 0013) — the Code list hides a session
 nothing was sent in, and the app has no conversation for one it didn't make. The run then starts
-from this plugin: the task's body and comments and the unattended lines are its instructions, its
-input is one line naming the task, and it carries no model so the host's own runs.
+from this plugin: `prompt_builder.afk_prompt` is its instructions — how to work an issue that was
+planned before the user left, with nobody to ask — and its input is one line naming the issue and
+where it is. Its own text is deliberately not copied into either: the agent fetches the issue, so
+the brief can't go stale and the prompt is the same tokens every turn. It carries no model, so the
+host's own runs.
 
 A project that can't be left to work says why instead of offering a switch: it has no GitHub
 repository to read tasks from, the host has no GitHub account to read or claim one with, or the
@@ -50,19 +53,6 @@ ARCHIVED = "This project is archived."
 SWEEP_SECONDS = 180
 # What a held task keeps: enough to show it, and to name the session that works it.
 HELD = ("repo", "number", "title", "url", "created_at")
-
-# The brief's unattended lines (ADR 0011): nobody is there to answer, so the session is told to
-# settle the question itself and to get a second opinion before it spends the user's authority.
-UNATTENDED = (
-    "You are working this task while the user is away. Do not ask the user anything: decide it "
-    "yourself and record the decision where the work shows why — in the pull request or the code. "
-    "If you are not sure, get a second opinion by delegating with delegate_task, and weigh its "
-    "answer before you act on it. When the work is done, leave a draft pull request."
-)
-# A task's own text can be longer than one run should carry; the brief says where it stopped rather
-# than spending the whole context on one issue's comments.
-MAX_BRIEF = 60_000
-CUT_HERE = "\n\n[The task is longer than one run's brief; it is cut here.]"
 
 _loop: Optional[asyncio.AbstractEventLoop] = None
 _event: Optional["asyncio.Event"] = None
@@ -212,70 +202,21 @@ def title(task: Dict[str, Any]) -> str:
 
 
 def first_line(task: Dict[str, Any]) -> str:
-    """The run's input: one short line naming the task, never the brief (ADR 0011)."""
-    return title(task)
+    """The run's input: one line naming the issue and where it is, never its text (ADR 0011)."""
+    repo, number = task.get("repo"), task.get("number")
+    url = task.get("url") or (f"https://github.com/{repo}/issues/{number}" if repo else "")
+    return f"Implement Issue #{number}" + (f" ({url})" if url else "")
 
 
-def detail(hermes_home: Path, repo: str, number: Any) -> Dict[str, Any]:
-    """The task's own text — its body and every comment, oldest first — for the run's instructions."""
-    auth, _ = github.token(hermes_home)
-    if not auth:
-        raise github.GitHubError(NO_GITHUB, 409)
-    issue = github._get(f"/repos/{repo}/issues/{number}", auth)
-    comments: List[Dict[str, Any]] = []
-    # The comments come a page at a time, like the frontier's read, so a long thread isn't cut at the
-    # first hundred and a task whose decision was made late is still worked on what it says.
-    path = f"/repos/{repo}/issues/{number}/comments?per_page={tasks.PAGE_SIZE}"
-    for _ in range(tasks.MAX_PAGES):
-        page, link = github._page(path, auth)
-        for row in page if isinstance(page, list) else []:
-            if not isinstance(row, dict):
-                continue
-            author = row.get("user") if isinstance(row.get("user"), dict) else {}
-            comments.append(
-                {
-                    "author": author.get("login") or "someone",
-                    "body": row.get("body") if isinstance(row.get("body"), str) else "",
-                }
-            )
-        following = tasks.next_page(link)
-        if not following or following == path:
-            break
-        path = following
-    return {
-        "body": issue.get("body") if isinstance(issue, dict) and isinstance(issue.get("body"), str) else "",
-        "comments": comments,
-    }
+def run_body(record: Dict[str, Any], task: Dict[str, Any]) -> Dict[str, Any]:
+    """The ``POST /v1/runs`` request: how to work a planned issue, and the issue's name as the input.
 
-
-def brief(task: Dict[str, Any], found: Optional[Dict[str, Any]]) -> str:
-    """What the run is told: the task's body and comments under the unattended lines.
-
-    Fixed lines first and the task's own text last, so the prompt cache holds for the session's
-    turns: the same opening is the same tokens every time.
+    The prompt is all `prompt_builder`'s — one module holds every word the agent is told — and the
+    issue's own text is left out of both: the agent reads it from GitHub.
     """
-    found = found or {}
-    lines = [UNATTENDED, "", f"The task is {task.get('repo')}#{task.get('number')}: {task.get('title') or ''}"]
-    body = (found.get("body") or "").strip()
-    if body:
-        lines += ["", body]
-    comments = [row for row in found.get("comments") or [] if (row.get("body") or "").strip()]
-    if comments:
-        lines += ["", "The task's comments, oldest first:"]
-        for row in comments:
-            lines += ["", f"--- @{row.get('author') or 'someone'}", (row.get("body") or "").strip()]
-    text = "\n".join(lines)
-    return text if len(text) <= MAX_BRIEF else text[:MAX_BRIEF] + CUT_HERE
-
-
-def run_body(
-    record: Dict[str, Any], task: Dict[str, Any], found: Optional[Dict[str, Any]]
-) -> Dict[str, Any]:
-    """The ``POST /v1/runs`` request: the session's own prompt and the brief as instructions."""
-    parts = [prompt_builder.session_prompt(record), brief(task, found)]
     return {
         "session_id": record["session_id"],
-        "instructions": "\n".join(part for part in parts if part),
+        "instructions": prompt_builder.afk_prompt(record, task),
         "input": [{"role": "user", "content": first_line(task)}],
     }
 
@@ -305,18 +246,14 @@ def publish(
 
 
 async def start(
-    adapter: Any,
-    hermes_home: Path,
-    project_id: str,
-    task: Dict[str, Any],
-    found: Optional[Dict[str, Any]] = None,
+    adapter: Any, hermes_home: Path, project_id: str, task: Dict[str, Any]
 ) -> None:
     """Works a claimed task in a session of its own: its worktree, its chat record, its run.
 
-    The task is already claimed by the sweep. Its own text is read from GitHub here rather than at
-    claim time, so the claim stays the fast path and the brief carries what the issue says now. A
-    session that can't be made starts nothing — the claim stays held, and its own ticket (#270) is
-    what gives it back, so the same task is never worked twice.
+    The task is already claimed by the sweep, and it's named to the run rather than read: the agent
+    fetches the issue itself, so the claim stays the fast path and the brief is never a stale copy of
+    what the tracker says. A session that can't be made starts nothing — the claim stays held, and
+    its own ticket (#270) is what gives it back, so the same task is never worked twice.
     """
     from . import link, outbox, sessions
 
@@ -342,20 +279,12 @@ async def start(
         return
     sessions.apply_cwd(session_id, record["path"])
     await asyncio.to_thread(publish, hermes_home, session_id, project_id, task)
-    if found is None:
-        try:
-            found = await asyncio.to_thread(detail, hermes_home, task["repo"], task["number"])
-        except github.GitHubError as error:
-            # The task's title is still enough to start it; its comments are what's missing, and the
-            # next read of the tracker will say why.
-            logger.warning("memento: AFK couldn't read %s#%s: %s", task.get("repo"), task.get("number"), error)
-            found = {}
     try:
         started = await outbox.post(
             adapter,
             profile,
             "/v1/runs",
-            run_body(record, task, found),
+            run_body(record, task),
             authorization=_authorization(adapter, profile),
         )
     except outbox.StartError as error:
