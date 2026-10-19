@@ -1,6 +1,5 @@
-// Run with Vite on APP_URL and an isolated mock on MOCK_URL (MOCK_DICTATION=off on OFF_MOCK_URL).
-// Requires Playwright; Chromium's fake microphone stands in for a real one, and for the pieces cut
-// at pauses it plays a made-up voice that stops for a moment twice.
+// Chromium's fake microphone stands in for a real one; the long recording plays a made-up voice
+// that stops for a moment twice, so the cut at a pause is what those blocks test.
 import assert from "node:assert/strict"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -12,10 +11,11 @@ const mock = process.env.MOCK_URL ?? "http://localhost:18642"
 const offMock = process.env.OFF_MOCK_URL
 const shots = process.env.SHOTS_DIR
 const SENTENCE = "Let's ship the dictation feature today."
+// Long enough for the stop a dead recorder never sends (STOP_MS) plus the state to render.
+const FAILED_MS = 2500
 const fakeMic = ["--no-sandbox", "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"]
 const browser = await chromium.launch({ headless: true, args: fakeMic })
 
-/** 7s of a buzzing, syllable-shaped voice, 1.5s of quiet, 7s more, 1.5s, 4s, then quiet. */
 function speech() {
   const rate = 48000
   const parts = [[0.5, 0], [7, 1], [1.5, 0], [7, 1], [1.5, 0], [4, 1], [3, 0]]
@@ -55,8 +55,39 @@ function speech() {
 
 const clips = async () => (await (await fetch(`${mock}/__mock/dictation`)).json()).clips
 
-async function open(server, viewport, colorScheme = "light", on = browser, touch = false) {
+const PHONE = { width: 390, height: 844 }
+
+/** Every recorder errors 1.2 s into its stretch, as an encoder that dies mid-take does. */
+const recorderErrors = () => {
+  const Recorder = window.MediaRecorder
+  window.MediaRecorder = class extends Recorder {
+    start(...args) {
+      super.start(...args)
+      window.setTimeout(() => this.dispatchEvent(new Event("error")), 1200)
+    }
+  }
+}
+
+/** Keeps the take's stream on the page, so a test can end its track as the device would. */
+const exposeMic = () => {
+  const getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices)
+  navigator.mediaDevices.getUserMedia = async (...args) => {
+    const stream = await getUserMedia(...args)
+    window.__mic = stream
+    return stream
+  }
+}
+
+/** Retries a kept recording and the host's sentence lands in the composer. */
+async function retried(page) {
+  await page.getByRole("button", { name: "Retry" }).click()
+  await page.getByRole("button", { name: "Voice", exact: true }).waitFor()
+  assert.equal(await page.getByRole("textbox").last().inputValue(), SENTENCE)
+}
+
+async function open(server, viewport, colorScheme = "light", on = browser, touch = false, init) {
   const context = await on.newContext({ viewport, colorScheme, hasTouch: touch, isMobile: touch })
+  if (init) await context.addInitScript(init)
   await context.grantPermissions(["microphone"], { origin: app })
   const page = await context.newPage()
   await page.goto(app)
@@ -81,7 +112,6 @@ try {
     const composer = page.getByRole("textbox").last()
     const mic = page.getByRole("button", { name: "Voice", exact: true })
 
-    // Tap to toggle: the bar records until Stop, then the host's text lands at the cursor.
     await composer.fill("Note:")
     await mic.click()
     await page.getByRole("button", { name: "Stop" }).waitFor()
@@ -98,7 +128,6 @@ try {
     assert.equal(await composer.inputValue(), `Note: ${SENTENCE}`)
     await shot(page, `${label}-3-inserted`)
 
-    // Hold to talk: letting go finishes.
     await composer.fill("")
     const box = await mic.boundingBox()
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
@@ -112,7 +141,6 @@ try {
     )
     assert.equal(await composer.inputValue(), SENTENCE)
 
-    // Cancel drops the clip without asking the host.
     await mic.click()
     await page.getByRole("button", { name: "Cancel" }).click()
     await mic.waitFor()
@@ -121,16 +149,14 @@ try {
 
   // A recording left by a reload comes back with Retry.
   {
-    const page = await open(mock, { width: 390, height: 844 })
+    const page = await open(mock, PHONE)
     await page.getByRole("button", { name: "Voice", exact: true }).click()
     await page.getByRole("button", { name: "Stop" }).waitFor()
     await page.waitForTimeout(3500)
     await page.reload()
     await page.getByText("hasn't been transcribed yet").waitFor()
     await shot(page, "phone-light-6-kept")
-    await page.getByRole("button", { name: "Retry" }).click()
-    await page.getByRole("button", { name: "Voice", exact: true }).waitFor()
-    assert.equal(await page.getByRole("textbox").last().inputValue(), SENTENCE)
+    await retried(page)
     await page.reload()
     await page.getByRole("button", { name: "Voice", exact: true }).waitFor()
     await page.close()
@@ -142,7 +168,7 @@ try {
       headless: true,
       args: [...fakeMic, `--use-file-for-fake-audio-capture=${speech()}`],
     })
-    const page = await open(mock, { width: 390, height: 844 }, "light", talker)
+    const page = await open(mock, PHONE, "light", talker)
     const before = (await clips()).length
     await page.getByRole("button", { name: "Voice", exact: true }).click()
     await page.getByRole("button", { name: "Stop" }).waitFor()
@@ -158,9 +184,54 @@ try {
     await talker.close()
   }
 
+  // A recorder that errors while live is a failure the user can retry, never a bar stuck transcribing.
+  {
+    const page = await open(mock, PHONE, "light", browser, false, recorderErrors)
+    const mic = page.getByRole("button", { name: "Voice", exact: true })
+    const before = (await clips()).length
+    await mic.click()
+    await page.getByRole("button", { name: "Stop" }).waitFor()
+    await page.getByRole("button", { name: "Retry" }).waitFor({ timeout: FAILED_MS })
+    assert.equal(await page.getByText("Transcribing…").count(), 0, "no transcribing that never ends")
+    await page.getByText("The recording stopped.").waitFor()
+    await shot(page, "phone-light-9-recorder-failed")
+
+    await retried(page)
+    assert.equal((await clips()).length, before + 1, "one phrase reached the host")
+
+    await mic.click()
+    await page.getByRole("button", { name: "Retry" }).waitFor({ timeout: FAILED_MS })
+    await page.getByRole("button", { name: "Discard" }).click()
+    await mic.waitFor()
+    assert.equal((await clips()).length, before + 1, "Discard sent nothing")
+    assert.equal(await page.getByRole("textbox").last().inputValue(), SENTENCE)
+    assert.equal(
+      await page.evaluate(async () => (await import("/src/lib/db.ts")).db.dictations.count()),
+      0,
+      "Discard kept nothing on the device",
+    )
+    await page.close()
+  }
+
+  // A track the device ends under the app — another app takes the microphone, permission is
+  // revoked — fails the same way, and Retry sends what was already recorded.
+  {
+    const page = await open(mock, PHONE, "light", browser, false, exposeMic)
+    await page.getByRole("button", { name: "Voice", exact: true }).click()
+    await page.getByRole("button", { name: "Stop" }).waitFor()
+    await page.waitForTimeout(1500)
+    await page.evaluate(() => window.__mic.getAudioTracks()[0].dispatchEvent(new Event("ended")))
+    await page.getByRole("button", { name: "Retry" }).waitFor({ timeout: FAILED_MS })
+    assert.equal(await page.getByText("Transcribing…").count(), 0, "no transcribing that never ends")
+    await page.getByText("The microphone is in use by another app.").waitFor()
+    await shot(page, "phone-light-10-track-ended")
+    await retried(page)
+    await page.close()
+  }
+
   // A tap on a phone keeps recording: its click must not land on the bar that took the mic's place.
   {
-    const page = await open(mock, { width: 390, height: 844 }, "light", browser, true)
+    const page = await open(mock, PHONE, "light", browser, true)
     const mic = page.getByRole("button", { name: "Voice", exact: true })
     const box = await mic.boundingBox()
     await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2)
