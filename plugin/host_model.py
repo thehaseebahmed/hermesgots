@@ -15,11 +15,11 @@ gateway re-reads the chain from the profile's file for the next agent it builds,
 already open adopts the edit. The legacy single ``fallback_model`` key is dropped on a write, as
 ``hermes fallback`` does, so the chain has one source of truth.
 
-A bot's second-opinion model is the host's own delegation model — Hermes's ``delegation.model`` and
+A bot's subagent model is the host's own delegation model — Hermes's ``delegation.model`` and
 ``delegation.provider``, which every ``delegate_task`` child runs on. Nothing set there means a
 child inherits the bot's own model, which is how the app's picker reads an empty answer. The app
-writes it as a pick the way it writes a fallback: Hermes checks it, and only those two keys of the
-section move, so a budget, a concurrency or a hand-written endpoint stays.
+writes it as a pick the way it writes a fallback: Hermes checks it, and the section is written in
+one pass, so a budget, a concurrency or a hand-written endpoint stays while the two keys move.
 """
 
 from __future__ import annotations
@@ -37,8 +37,17 @@ FALLBACK_KEY = "fallback_providers"
 LEGACY_FALLBACK_KEY = "fallback_model"
 # Where Hermes's delegated tasks get their model, in the ``delegation`` section. Unset means a child
 # inherits the bot's own model, which is the picker's own default.
-DELEGATION_PROVIDER_KEY = "delegation.provider"
-DELEGATION_MODEL_KEY = "delegation.model"
+DELEGATION_SECTION = "delegation"
+DELEGATION_PROVIDER = "provider"
+DELEGATION_MODEL = "model"
+DELEGATION_NAMES = (DELEGATION_PROVIDER, DELEGATION_MODEL)
+# What a section holds besides those two: its budget, its concurrency, and an endpoint a user wrote
+# by hand. Hermes reads a ``base_url`` as the provider being ``custom``, so an endpoint written for
+# one provider would outlive a pick that names another.
+ENDPOINT_KEYS = ("base_url", "api_key", "api_mode")
+# Hermes's own default provider, for a file that names none.
+DEFAULT_PROVIDER = "openrouter"
+
 
 
 def clean(body: Any) -> tuple[str, str]:
@@ -64,11 +73,14 @@ def clean_fallbacks(body: Any) -> List[Dict[str, str]]:
 
 def clean_delegation(body: Any) -> Optional[Dict[str, str]]:
     """``{"provider", "model"}`` from a ``{"delegation": {...}}`` body, or None for a body that
-    clears it — ``{"delegation": null}``, or no key at all — so every delegated task inherits the
-    bot's own model. ValueError names what an entry is missing."""
+    clears it — ``{"delegation": null}`` — so every delegated task inherits the bot's own model.
+    ValueError names what an entry is missing, or that the key itself is absent: a body that says
+    nothing about the delegation model is a client bug, not a request to clear what the bot has."""
     if not isinstance(body, dict):
         raise ValueError("Body must be a JSON object")
-    value = body.get("delegation")
+    if "delegation" not in body:
+        raise ValueError("Body needs a delegation key: an object, or null to clear it")
+    value = body["delegation"]
     if value is None:
         return None
     if not isinstance(value, dict):
@@ -116,7 +128,7 @@ def _switch(cfg: Dict[str, Any], provider: str, model: str) -> Any:
     current = cfg.get("model") if isinstance(cfg.get("model"), dict) else {}
     result = switch_model(
         raw_input=model,
-        current_provider=current.get("provider") or "openrouter",
+        current_provider=current.get("provider") or DEFAULT_PROVIDER,
         current_model=current.get("default") or "",
         current_base_url=current.get("base_url") or "",
         is_global=True,
@@ -184,24 +196,38 @@ def set_delegation(config_path: Path, pick: Optional[Dict[str, str]]) -> Optiona
     """Make ``pick`` the model the profile's delegated tasks run on in ``config_path``; with None,
     clear it so a child inherits the bot's own model. A pick the profile doesn't already hold is
     checked by Hermes the way the main model is, and a refusal is a ValueError carrying its reason.
-    Only the section's two keys move, so its other settings and the rest of the file stay."""
+
+    The section is written in one pass: two writes could leave the new model beside the old
+    provider, and a failure between them would leave it there. What else the section holds — a
+    budget, a concurrency, an endpoint — is carried over as it was, except that a pick naming
+    another provider drops the endpoint written for the old one, since Hermes reads a ``base_url``
+    as the provider being ``custom``.
+    """
     from gateway.run import _load_gateway_config
     from utils import atomic_roundtrip_yaml_update
 
     cfg = _load_gateway_config(config_path=config_path) or {}
+    section = _section_of(cfg)
     if pick is None:
-        # ``None`` removes each key: a bot that inherits keeps nothing behind it, and a section left
-        # with a budget or an endpoint is still a section it uses.
-        atomic_roundtrip_yaml_update(config_path, DELEGATION_MODEL_KEY, None)
-        atomic_roundtrip_yaml_update(config_path, DELEGATION_PROVIDER_KEY, None)
+        rest = {key: value for key, value in section.items() if key not in DELEGATION_NAMES}
+        if rest == section:
+            # Nothing of the two is there to clear: a bot that already inherits keeps its file.
+            return None
+        # ``None`` removes the section when those keys were all it held; one left with a budget is
+        # still a section the bot uses.
+        atomic_roundtrip_yaml_update(config_path, DELEGATION_SECTION, rest or None)
         return None
-    kept = _delegation_of(cfg)
-    if kept == pick:
-        return kept
+    stored = _named(section)
+    if stored["provider"] and stored["model"] and stored == pick:
+        # Hermes resolved it when it went in, so there is nothing left to check — and checking it
+        # again would spend a live provider probe on a pick that hasn't moved.
+        return stored
     routed = _switch(cfg, pick["provider"], pick["model"])
     resolved = {"provider": routed.target_provider, "model": routed.new_model}
-    atomic_roundtrip_yaml_update(config_path, DELEGATION_PROVIDER_KEY, resolved["provider"])
-    atomic_roundtrip_yaml_update(config_path, DELEGATION_MODEL_KEY, resolved["model"])
+    kept = {key: value for key, value in section.items() if key not in DELEGATION_NAMES}
+    if str(section.get(DELEGATION_PROVIDER) or "").strip() != resolved["provider"]:
+        kept = {key: value for key, value in kept.items() if key not in ENDPOINT_KEYS}
+    atomic_roundtrip_yaml_update(config_path, DELEGATION_SECTION, {**kept, **resolved})
     return resolved
 
 
@@ -215,21 +241,25 @@ def read_delegation(config_path: Path) -> Optional[Dict[str, str]]:
 
 
 def _delegation_of(cfg: Dict[str, Any]) -> Optional[Dict[str, str]]:
-    """The section's pick, as the bot's settings name it. A model on its own is a child running
-    that model where the bot's own credentials point (Hermes's rule), so it comes back under the
-    main model's provider; nothing set at all is None."""
-    section = cfg.get("delegation")
-    if not isinstance(section, dict):
-        return None
-    model = str(section.get("model") or "").strip()
-    if not model:
+    """The section's pick, as the bot's settings name it. Hermes fills a half-written section from
+    the bot's own route — a model alone runs where the bot's credentials point, a provider alone
+    runs the bot's model there — so each key falls back on the main model, and a section that names
+    neither is None."""
+    written = _named(_section_of(cfg))
+    if not written["provider"] and not written["model"]:
         return None
     main = cfg.get("model") if isinstance(cfg.get("model"), dict) else {}
-    provider = str(section.get("provider") or "").strip()
+    provider = written["provider"]
     if not provider or provider == "auto":
-        # Hermes's own default for the main model when the file names no provider.
-        provider = str(main.get("provider") or "openrouter").strip()
-    return {"provider": provider, "model": model} if provider else None
+        provider = str(main.get("provider") or "").strip() or DEFAULT_PROVIDER
+    model = written["model"] or str(main.get("default") or "").strip()
+    return {"provider": provider, "model": model} if model else None
+
+
+def _section_of(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """The ``delegation`` section as the file writes it, or an empty one."""
+    section = cfg.get(DELEGATION_SECTION)
+    return section if isinstance(section, dict) else {}
 
 
 def _chain_of(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:

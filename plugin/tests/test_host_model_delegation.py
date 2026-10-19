@@ -9,73 +9,11 @@ Run: python3 -m unittest plugin.tests.test_host_model_delegation -v
 
 from __future__ import annotations
 
-import sys
-import types
 import unittest
 from pathlib import Path
-from unittest import mock
 
 from plugin import host_model
-
-
-class Result:
-    def __init__(self, success, model="", provider="", error=""):
-        self.success = success
-        self.new_model = model
-        self.target_provider = provider
-        self.error_message = error
-
-
-def hermes(config, results=(), others=None):
-    """Stand-ins for the Hermes modules the delegation paths import, recording every write.
-
-    ``config`` is this bot's config.yaml; ``others`` maps a further path to another bot's, so a test
-    can show a write stays in its own bot's file. ``results`` are the answers ``switch_model`` gives
-    in order. The fake writer applies its key the way Hermes's own writer does (a dotted key goes
-    into its section), which is what makes a write readable back, and records the call.
-    """
-    calls = {"switch": [], "write": []}
-    answers = list(results)
-    homes = dict(others or {})
-
-    def switch_model(**kwargs):
-        calls["switch"].append(kwargs)
-        return (
-            answers.pop(0)
-            if answers
-            else Result(True, kwargs["raw_input"], kwargs["explicit_provider"])
-        )
-
-    def load(config_path=None):
-        return homes.get(config_path, config)
-
-    def atomic_roundtrip_yaml_update(path, key, value):
-        calls["write"].append((path, key, value))
-        target = homes.get(path, config)
-        if "." in key:
-            section, name = key.split(".", 1)
-            target = target.setdefault(section, {})
-        else:
-            name = key
-        if value is None:
-            target.pop(name, None)
-        else:
-            target[name] = value
-
-    run = types.ModuleType("gateway.run")
-    run._load_gateway_config = load
-    switch = types.ModuleType("hermes_cli.model_switch")
-    switch.switch_model = switch_model
-    utils = types.ModuleType("utils")
-    utils.atomic_roundtrip_yaml_update = atomic_roundtrip_yaml_update
-    modules = {
-        "gateway": types.ModuleType("gateway"),
-        "gateway.run": run,
-        "hermes_cli": types.ModuleType("hermes_cli"),
-        "hermes_cli.model_switch": switch,
-        "utils": utils,
-    }
-    return mock.patch.dict(sys.modules, modules), calls, config
+from plugin.tests._host import Result, hermes
 
 
 class CleanDelegationTest(unittest.TestCase):
@@ -88,8 +26,14 @@ class CleanDelegationTest(unittest.TestCase):
         )
 
     def test_nothing_is_the_bots_own_model(self) -> None:
-        self.assertIsNone(host_model.clean_delegation({}))
         self.assertIsNone(host_model.clean_delegation({"delegation": None}))
+
+    def test_a_body_that_says_nothing_is_a_client_bug(self) -> None:
+        # The route reads a missing key as a client bug, not as a request to clear a bot's model:
+        # a typo in a field name must not quietly put every task back on the bot's own.
+        for body in ({}, {"delegationModel": {"provider": "a", "model": "b"}}):
+            with self.assertRaisesRegex(ValueError, "needs a delegation key"):
+                host_model.clean_delegation(body)
 
     def test_a_bad_pick_names_what_is_missing(self) -> None:
         for body in (None, [], "openrouter/x"):
@@ -120,13 +64,16 @@ class SetDelegationTest(unittest.TestCase):
                 self.path, {"provider": "deepseek", "model": "deepseek-v4-pro"}
             )
         self.assertEqual(saved, {"provider": "deepseek", "model": "deepseek-v4-pro"})
-        # Hermes's own keys, the section's own place: a single key at a time, so the rest of the
-        # file — and the rest of the section — stays put.
+        # Hermes's own keys, written in the section in one pass: a model under another provider's
+        # endpoint is a route Hermes never meant, and the rest of the file stays put.
         self.assertEqual(
             calls["write"],
             [
-                (self.path, "delegation.provider", "deepseek"),
-                (self.path, "delegation.model", "deepseek-v4-pro"),
+                (
+                    self.path,
+                    "delegation",
+                    {"provider": "deepseek", "model": "deepseek-v4-pro"},
+                )
             ],
         )
         self.assertEqual(calls["switch"][0]["current_model"], "old")
@@ -155,15 +102,66 @@ class SetDelegationTest(unittest.TestCase):
         )
         with patch:
             self.assertIsNone(host_model.set_delegation(self.path, None))
-        self.assertEqual(
-            calls["write"],
-            [
-                (self.path, "delegation.model", None),
-                (self.path, "delegation.provider", None),
-            ],
-        )
+        # One pass, and the budget the section carries goes with it: it is still a section.
+        self.assertEqual(calls["write"], [(self.path, "delegation", {"max_iterations": 60})])
         self.assertEqual(config["delegation"], {"max_iterations": 60})
         self.assertEqual(calls["switch"], [])
+
+    def test_clearing_a_section_with_nothing_to_clear_writes_nothing(self) -> None:
+        for delegation in ({"max_iterations": 60}, {}):
+            patch, calls, config = hermes(self.config(delegation=delegation))
+            with patch:
+                self.assertIsNone(host_model.set_delegation(self.path, None))
+            self.assertEqual(calls["write"], [])
+            self.assertEqual(config["delegation"], delegation)
+
+    def test_clearing_the_last_keys_drops_the_section(self) -> None:
+        patch, calls, _ = hermes(self.config(delegation={"provider": "a", "model": "b"}))
+        with patch:
+            host_model.set_delegation(self.path, None)
+        self.assertEqual(calls["write"], [(self.path, "delegation", None)])
+
+    def test_another_provider_drops_the_endpoint_written_for_the_old_one(self) -> None:
+        # Hermes reads a ``base_url`` as the provider being ``custom``, so leaving one behind would
+        # make the field's answer a lie about where a child runs.
+        patch, _, config = hermes(
+            self.config(
+                delegation={
+                    "provider": "relay",
+                    "model": "gpt-5",
+                    "base_url": "https://relay.example/v1",
+                    "api_key": "sk-x",
+                    "max_iterations": 60,
+                }
+            )
+        )
+        with patch:
+            host_model.set_delegation(self.path, {"provider": "deepseek", "model": "c/d"})
+        self.assertEqual(
+            config["delegation"],
+            {"max_iterations": 60, "provider": "deepseek", "model": "c/d"},
+        )
+
+    def test_the_same_provider_keeps_its_endpoint(self) -> None:
+        patch, _, config = hermes(
+            self.config(
+                delegation={
+                    "provider": "relay",
+                    "model": "gpt-5",
+                    "base_url": "https://relay.example/v1",
+                }
+            )
+        )
+        with patch:
+            host_model.set_delegation(self.path, {"provider": "relay", "model": "gpt-5-mini"})
+        self.assertEqual(
+            config["delegation"],
+            {
+                "provider": "relay",
+                "model": "gpt-5-mini",
+                "base_url": "https://relay.example/v1",
+            },
+        )
 
     def test_a_refused_pick_writes_nothing(self) -> None:
         patch, calls, _ = hermes(
@@ -263,13 +261,27 @@ class ReadDelegationTest(unittest.TestCase):
             {},
             {"model": {"default": "old", "provider": "openrouter"}},
             {"delegation": {}},
-            {"delegation": {"provider": "deepseek"}},
             {"delegation": {"model": ""}},
             {"delegation": "auto"},
         ):
             patch, _, _ = hermes(config)
             with patch:
                 self.assertIsNone(host_model.read_delegation(self.path))
+
+    def test_a_provider_on_its_own_runs_the_bots_model_there(self) -> None:
+        # Hermes pins the provider and keeps the bot's model on it, so the field mustn't claim the
+        # bot inherits.
+        patch, _, _ = hermes(
+            {
+                "model": {"default": "old", "provider": "openrouter"},
+                "delegation": {"provider": "deepseek"},
+            }
+        )
+        with patch:
+            self.assertEqual(
+                host_model.read_delegation(self.path),
+                {"provider": "deepseek", "model": "old"},
+            )
 
     def test_a_write_touches_one_bot_only(self) -> None:
         theirs = {"model": {"provider": "openrouter"}}

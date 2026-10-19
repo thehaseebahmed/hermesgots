@@ -111,3 +111,14 @@ export function fullModel({ provider, model }: { provider?: string; model: strin
 export function hostChoice(info: ModelInfo | null | undefined): ModelChoice | undefined {
   return info?.model ? { provider: info.provider ?? "", model: info.model } : undefined
 }
+
+/**
+ * The bot's own model: the pick the user made, the model its host answers with, or the one it is
+ * remembered by until the host says otherwise.
+ */
+export function botModel(
+  profile: Pick<Profile, "modelChoice" | "hostModel">,
+  info: ModelInfo | null | undefined,
+): ModelChoice | undefined {
+  return profile.modelChoice ?? hostChoice(info) ?? profile.hostModel
+}

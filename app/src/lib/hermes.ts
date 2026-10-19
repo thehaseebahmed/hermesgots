@@ -976,7 +976,7 @@ export async function getFallbackModels(
     headers: headers(config),
     signal,
   })
-  return fallbackList((await response.json())?.fallbacks)
+  return picks((await response.json())?.fallbacks)
 }
 
 /** Makes `fallbacks` the bot's chain on its host, in order; an empty list clears it. Answers with
@@ -992,19 +992,23 @@ export async function setFallbackModels(
     body: JSON.stringify({ fallbacks }),
     signal,
   })
-  return fallbackList((await response.json())?.fallbacks)
+  return picks((await response.json())?.fallbacks)
 }
 
-/** Whatever part of a `fallbacks` answer is a usable pick, in order. */
-function fallbackList(value: unknown): Fallback[] {
+/** Whatever part of a host's answer names a model, in order: both keys, and neither empty. */
+function picks(value: unknown): ModelChoice[] {
   if (!Array.isArray(value)) return []
-  const entries: Fallback[] = []
+  const named: ModelChoice[] = []
   for (const entry of value) {
     const { provider, model } = (entry ?? {}) as { provider?: unknown; model?: unknown }
-    if (typeof provider === "string" && typeof model === "string") entries.push({ provider, model })
+    if (typeof provider === "string" && typeof model === "string" && provider && model)
+      named.push({ provider: provider.trim(), model: model.trim() })
   }
-  return entries
+  return named
 }
+
+/** The one pick a `delegation` answer names, or null for one the host doesn't hold. */
+const pickOf = (value: unknown) => picks([value])[0] ?? null
 
 /**
  * The model a bot's delegated tasks run on, from its host's `delegation` section (Hermes's own
@@ -1019,7 +1023,7 @@ export async function getDelegationModel(
     headers: headers(config),
     signal,
   })
-  return delegationPick((await response.json())?.delegation)
+  return pickOf((await response.json())?.delegation)
 }
 
 /** Makes `pick` the model the bot's delegated tasks run on; `null` clears it, so a child inherits
@@ -1035,14 +1039,7 @@ export async function setDelegationModel(
     body: JSON.stringify({ delegation: pick }),
     signal,
   })
-  return delegationPick((await response.json())?.delegation)
-}
-
-/** A `delegation` answer as a pick, or null for one the host doesn't hold (or can't be read). */
-function delegationPick(value: unknown): ModelChoice | null {
-  const { provider, model } = (value ?? {}) as { provider?: unknown; model?: unknown }
-  if (typeof provider !== "string" || typeof model !== "string") return null
-  return provider && model ? { provider, model } : null
+  return pickOf((await response.json())?.delegation)
 }
 
 export async function checkHealth(config: HermesConfig) {

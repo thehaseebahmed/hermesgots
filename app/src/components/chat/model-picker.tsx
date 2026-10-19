@@ -32,8 +32,8 @@ import { useDelegationModel } from "@/lib/delegation"
 import { MAX_FALLBACKS, withFallback } from "@/lib/fallback-list"
 import { useFallbackModels } from "@/lib/fallbacks"
 import { formatTokens } from "@/lib/format"
-import type { Fallback, ModelProvider } from "@/lib/hermes"
-import { fullModel, hostChoice, shortModel, useModelInfo } from "@/lib/model-info"
+import type { ModelProvider } from "@/lib/hermes"
+import { botModel, fullModel, hostChoice, shortModel, useModelInfo } from "@/lib/model-info"
 import { MAX_COST_TIER, modelFacts, useModelCatalog, type Catalog } from "@/lib/models"
 import { overallScoreOf, useOverallRankings, type RankingsPayload } from "@/lib/rankings"
 import { cn } from "@/lib/utils"
@@ -586,6 +586,16 @@ export function ModelMenu({
 // How long a just-saved default stays on show while the host's model is read again.
 const SETTLE_MS = 4000
 
+/**
+ * A write to the host, said in the field's own place when the host refuses it: the control goes back
+ * to the value the host still holds, and the reason is on screen.
+ */
+function reportWrite(write: Promise<unknown>) {
+  void write.catch((error: unknown) => {
+    toast.error(error instanceof Error ? error.message : String(error))
+  })
+}
+
 /** A bot's default model, in its settings: what its chats run on unless they pick another. */
 export function DefaultModelSetting({
   profile,
@@ -600,11 +610,10 @@ export function DefaultModelSetting({
   const [saving, setSaving] = useState<ModelChoice>()
   const info = useModelInfo(profile)
   const providers = info?.providers ?? []
-  const host = hostChoice(info)
   const hostModel = profile.hostModel
   // Until the host answers, the model it last had, greyed out: it's remembered, not a live answer.
   const loading = info === undefined && !saving
-  const current = saving ?? profile.modelChoice ?? host ?? hostModel
+  const current = saving ?? botModel(profile, info)
   const stale = Boolean(hostModel) && current === hostModel
   return (
     <>
@@ -656,13 +665,7 @@ export function DelegationModelSetting({ profile }: { profile: Profile }) {
   const providers = info?.providers ?? []
   if (!supported) return null
   // The bot's own model, which is what a task that inherits runs on.
-  const own = profile.modelChoice ?? hostChoice(info) ?? profile.hostModel
-
-  const write = (next: ModelChoice | undefined) => {
-    void save(next).catch((error: unknown) => {
-      toast.error(error instanceof Error ? error.message : String(error))
-    })
-  }
+  const own = botModel(profile, info)
 
   return (
     <Field aria-labelledby="delegation-model-label" aria-busy={saving || undefined}>
@@ -691,7 +694,7 @@ export function DelegationModelSetting({ profile }: { profile: Profile }) {
             recent={profile.recentModels}
             choice={pick}
             onChoose={(next) => {
-              write(next)
+              reportWrite(save(next))
               if (next) void rememberModel(profile.id, next)
               setOpen(false)
             }}
@@ -719,11 +722,6 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
   // A row's picker needs the host's model list, and a write on its way blocks every pick regardless.
   const cannotEdit = !providers.length || saving
 
-  const write = (next: Fallback[]) => {
-    void save(next).catch((error: unknown) => {
-      toast.error(error instanceof Error ? error.message : String(error))
-    })
-  }
   const chosen = open === undefined ? undefined : list[open]
 
   return (
@@ -756,7 +754,7 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
               className="size-11 shrink-0"
               aria-label={`Remove fallback ${index + 1}`}
               disabled={saving}
-              onClick={() => write(withFallback(list, index, undefined))}
+              onClick={() => reportWrite(save(withFallback(list, index, undefined)))}
             >
               <XIcon />
             </Button>
@@ -793,7 +791,7 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
               // Picking None on a row drops that fallback; on the add row it is nothing to add, so
               // nothing is written either.
               if (open !== undefined && (next !== undefined || open < list.length)) {
-                write(withFallback(list, open, next))
+                reportWrite(save(withFallback(list, open, next)))
               }
               if (next) void rememberModel(profile.id, next)
               setOpen(undefined)
