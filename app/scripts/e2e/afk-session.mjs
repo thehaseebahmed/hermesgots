@@ -28,6 +28,7 @@ const run = async ({ page, profileId, shot, until }) => {
   )
 
   await page.goto(`${app}/code`)
+  // Code lists newest first, so the first row titled after the task is this pass's session.
   const row = page.locator("a", { hasText: TITLE }).first()
   await row.waitFor({ timeout: 15_000 })
   assert.equal(

@@ -194,7 +194,7 @@ def new_session_id() -> str:
     return f"{sessions.MEMENTO_ID_PREFIX}afk-{uuid.uuid4().hex[:12]}"
 
 
-def title(task: Dict[str, Any]) -> str:
+def session_title(task: Dict[str, Any]) -> str:
     return f"#{task.get('number')} {task.get('title') or ''}".strip()
 
 
@@ -223,7 +223,7 @@ def publish(
     """
     now = int(time.time() * 1000)
     value = {
-        "title": title(task),
+        "title": session_title(task),
         "hermesSessionId": session_id,
         "createdAt": now,
         "updatedAt": now + 1,
@@ -277,7 +277,17 @@ async def start(
     except outbox.StartError as error:
         logger.warning("memento: AFK couldn't start the session for %s: %s", issue, error)
         return
-    await asyncio.to_thread(publish, hermes_home, session_id, project_id, task)
+    try:
+        await asyncio.to_thread(publish, hermes_home, session_id, project_id, task)
+    except Exception:
+        # The run is going and nothing else can show it: name the session, which is all a reader of
+        # the log has to find it with.
+        logger.error(
+            "memento: AFK started %s in %s but couldn't publish it to the app",
+            issue,
+            session_id,
+            exc_info=True,
+        )
     logger.info(
         "memento: AFK is working %s in %s (run %s)", issue, session_id, started.get("run_id")
     )

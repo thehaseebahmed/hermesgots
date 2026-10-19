@@ -747,7 +747,8 @@ const PENDING_CHECK_S = 12
 
 /** Project sessions as the plugin's memento.db holds them, by Hermes session id. */
 const projectSessions = new Map()
-// The plugin's pull request instruction (prompt_builder._PR_INSTRUCTIONS), word for word.
+// The plugin's pull request instruction (prompt_builder._pr_instructions(unattended=False)), word
+// for word.
 // test_library.py matches this line word for word, so it stays one line.
 // prettier-ignore
 const PR_INSTRUCTIONS = "When the work is done and you've checked it, ship it yourself with the pull_request tool and action 'ship': it commits what's left, pushes this branch and opens a draft pull request, or pushes to the one open. Don't ask first, and don't use git push or gh for it. Write the description from the repo's pull request template when it has one (named below), else with Summary, Changes and How to test sections. The pull request stays a draft. Pass force: true only after a rebase or amend. action 'update' changes the open pull request's title or body, and 'status' reports without writing. Merging and closing are the user's decision: the tool refuses them, so ask the user with clarify instead."

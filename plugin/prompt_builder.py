@@ -39,7 +39,7 @@ How to test the whole change end to end: commands, what to look at, expected res
 ## Risks and assumptions
 What could go wrong, and each decision you made without the user: what you chose and why. Nothing here is left for the user to decide."""
 # Added whenever a session has worktrees. Fixed text, so the prompt cache holds.
-_PR_INSTRUCTIONS = (
+_PR_RULES = (
     "When the work is done and you've checked it, ship it yourself with the pull_request tool and "
     "action 'ship': it commits what's left, pushes this branch and opens a draft pull request, or "
     "pushes to the one open. Don't ask first, and don't use git push or gh for it. Write the "
@@ -55,7 +55,7 @@ _MERGE_READY = (
     "leave it a draft."
 )
 
-# The same condition as _PR_INSTRUCTIONS: only code sessions get it.
+# The same condition as _PR_RULES: only code sessions get it.
 _DONE_INSTRUCTIONS = (
     "Two things the run's prompt emphasises once the work is done: don't share the pull request url "
     "or the commit message in your reply — the pull_request result and the session's pull "
@@ -88,19 +88,19 @@ The workflow:
 2. Plan. Your todo list is the plan: what changes, in what order, each checkpoint leaving the repo building and worth committing. Keep the change as small as the issue allows and add nothing it didn't ask for.
 3. Implement. Write the test first where the repo has tests, and follow the repo's own conventions — its AGENTS.md, its lint and format settings, the commands its README documents. Commit in checkpoints, in Conventional Commits.
 4. Verify. Run the repo's own gates before you ship — typecheck, lint, tests, build, whatever it documents — and fix what you broke. A suite you didn't run isn't passing.
-5. Ship. The pull request tool, action 'ship', as described above: one draft pull request whose body says what changed, how you verified it and which issue it implements, with `Closes #<number>` once the work is complete.
+5. Ship. The pull request tool, action 'ship', as described above: one draft pull request whose body says what changed, how you verified it and which issue it implements, with `Closes #{issue}` once the work is complete.
 6. Report. A short closing reply: what landed, what you checked, what's left.
 
 The rules:
 - Never ask the user anything, and never leave a plan waiting for approval: there is nobody to answer or tap it. Decide, and record the decision where the work shows why.
 - When a decision isn't yours to guess, get a second opinion with delegate_task, weigh the answer, then decide. Record what you chose in the pull request or the code.
 - If you can't finish, don't force it: leave the tree consistent and say where it stopped and what blocks it — in the pull request body if you opened one, else in your reply. Never leave a half-done change unexplained.
-- Don't close the issue or merge anything yourself: merging the pull request is the user's decision, and `Closes #<number>` is how the issue closes with it.
+- Don't close the issue or merge anything yourself: merging the pull request is the user's decision, and `Closes #{issue}` is how the issue closes with it.
 - No TODOs, commented-out code, debug prints or secrets in what you commit. Never push to the default branch, and keep all work inside the worktree."""
 
 
 def _pr_instructions(unattended: bool) -> str:
-    return _PR_INSTRUCTIONS + (_MERGE_READY if unattended else _MERGE_ASK)
+    return _PR_RULES + (_MERGE_READY if unattended else _MERGE_ASK)
 
 
 def session_prompt(record: Dict[str, Any], unattended: bool = False) -> str:
@@ -129,7 +129,11 @@ def afk_prompt(record: Dict[str, Any], task: Dict[str, Any]) -> str:
     The issue's text isn't quoted here — the agent fetches it, and the line naming it is all that
     has to be fixed per task, so the prompt cache still holds across the session's turns.
     """
-    lines = [_afk_task_line(task), session_prompt(record, unattended=True), _AFK_INSTRUCTIONS]
+    lines = [
+        _afk_task_line(task),
+        session_prompt(record, unattended=True),
+        _AFK_INSTRUCTIONS.format(issue=task.get("number")),
+    ]
     return "\n\n".join(line for line in lines if line)
 
 

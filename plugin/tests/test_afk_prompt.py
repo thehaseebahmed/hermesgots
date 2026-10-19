@@ -61,7 +61,7 @@ class AfkPromptTests(unittest.TestCase):
         text = self.text()
         self.assertIn("action 'ship'", text)
         self.assertIn("draft pull request", text)
-        self.assertIn("Closes #<number>", text)
+        self.assertIn("Closes #265", text, "the brief names the issue it closes")
         self.assertIn("Don't close the issue or merge anything yourself", text)
 
     def test_it_has_nobody_to_ask_and_a_second_opinion_to_take(self) -> None:
