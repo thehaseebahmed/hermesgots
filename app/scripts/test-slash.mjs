@@ -176,6 +176,8 @@ test("a picked skill at the front leaves the rest of the message where it was", 
 })
 
 test("the slash menu offers no goal command", () => {
-  assert.deepEqual(names(LOCAL_COMMANDS), ["new", "settings"])
+  // Typed in full, with the caret on the word, the menu offers no command to run: it goes to the
+  // agent as a message.
+  assert.deepEqual(names(rankSlashItems(items, tokenAt("/goal fix the tests", 5))), [])
   assert.equal(localCommand("/goal fix the tests"), null)
 })

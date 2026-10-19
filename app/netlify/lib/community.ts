@@ -17,7 +17,7 @@ import { sha256 } from "./registry.ts"
 
 export const MODES = ["plan", "auto", "accept_edits", "chat"] as const
 export type Mode = (typeof MODES)[number]
-/** Modes the app no longer has, counted as the one that took their place. */
+/** Modes the app no longer has, folded into `auto` so a historic row still adds up. */
 const LEGACY_MODES: Record<string, Mode> = { theseus: "auto", goal: "auto" }
 
 /** A reported mode as the board counts it, or null for one it doesn't know. */

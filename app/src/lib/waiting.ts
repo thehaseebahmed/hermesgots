@@ -25,7 +25,9 @@ export function reasonText(reason: WaitingReason) {
     return command ? `Approve ${command}` : "Needs approval to run a command"
   }
   if (reason.kind === "stalled") return reason.reason
-  return "Plan ready for review"
+  if (reason.kind === "plan") return "Plan ready for review"
+  // A kind this build doesn't know yet still means the session wants the user, not a plan.
+  return "Needs you"
 }
 
 type Found = LiveRuns["waiting"]
