@@ -87,17 +87,19 @@ CATEGORIES = (
     "code_run_done",
     "code_pr_checks",
     "code_pr_merged",
+    "code_afk_pr",
     "code_setup_failed",
     "routine_failed",
     "research_input",
     "research_done",
     "research_failed",
-    "code_afk_pr",
 )
 # What a device that never said which it wants gets: what pushed before there were more.
 LEGACY_CATEGORIES = ("chat_input", "code_input")
 # Kinds that are about a chat's session, so that chat can be muted.
-SESSION_KINDS = ("approval", "question", "plan", "run_done", "run_failed", "pr_checks", "pr_merged")
+SESSION_KINDS = (
+    "approval", "question", "plan", "run_done", "run_failed", "pr_checks", "pr_merged", "afk_pr"
+)
 INPUT_KINDS = ("approval", "question", "plan")
 
 

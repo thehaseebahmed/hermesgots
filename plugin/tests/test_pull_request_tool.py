@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from plugin import ship
+from plugin.store import db_path
 
 
 def _record(tmp):
@@ -186,7 +187,7 @@ TASK = {
 
 
 class AfkTaskTests(_Base):
-    def _ship(self, task=None, body=None, repo_root=None):
+    def _ship(self, task=None, repo_root=None):
         sent = []
 
         def request(path, auth, method="GET", data=None):
@@ -194,6 +195,7 @@ class AfkTaskTests(_Base):
             return {"number": 7, "html_url": "https://github.com/o/r/pull/7", "state": "open", "draft": True}
 
         record = _record(self.tmp)
+        record["task"] = task
         if repo_root:
             record["repos"][0] = {**record["repos"][0], "repo_root": repo_root}
         with (
@@ -206,11 +208,10 @@ class AfkTaskTests(_Base):
             patch("plugin.github.token", return_value=("tok", "u")),
             patch("plugin.github.origin_repo", return_value=repo_root or "o/r"),
             patch("plugin.github._request", side_effect=request),
-            patch("plugin.afk.task_for_session", return_value=task),
             patch("plugin.push.notify") as notify,
         ):
             lock.return_value.acquire.return_value = True
-            ship.ship(Path(self.tmp), "s1", record, "msg", "T", body, True, False)
+            ship.ship(Path(self.tmp), "s1", record, "msg", "T", None, True, False)
         created = [call for call in sent if call[0].endswith("/pulls") and call[1] == "POST"]
         return (created[0][2] if created else None), notify
 
@@ -232,7 +233,7 @@ class AfkTaskTests(_Base):
         notify.assert_called_once()
         args, _ = notify.call_args
         self.assertEqual(args[:2], ("afk_pr", "s1"))
-        self.assertEqual(args[2], Path(self.tmp) / "memento" / "memento.db")
+        self.assertEqual(args[2], db_path(Path(self.tmp)))
 
     def test_another_repositorys_pull_request_is_not_the_tasks_news(self):
         _, notify = self._ship(task=TASK, repo_root="o/other")
@@ -246,16 +247,31 @@ class AfkTaskTests(_Base):
 class AfkUpdateTests(_Base):
     def test_updating_the_body_keeps_the_task_reference(self):
         pr = {"number": 7, "state": "open", "title": "old", "url": "u"}
+        record = _record(self.tmp)
+        record["task"] = TASK
         with (
             patch("plugin.github.token", return_value=("tok", "u")),
             patch("plugin.github.origin_repo", return_value="o/r"),
             patch("plugin.github.pull_request", return_value=pr),
             patch("plugin.github.update_pull_request", return_value=pr) as upd,
             patch("plugin.github.forget_pull_request"),
-            patch("plugin.afk.task_for_session", return_value=TASK),
         ):
-            ship.update(Path(self.tmp), _record(self.tmp), "new", "Body.")
+            ship.update(Path(self.tmp), record, "new", "Body.")
         self.assertIn("Closes #265", upd.call_args.args[3])
+
+    def test_updating_a_body_that_already_names_the_task_does_not_say_it_twice(self):
+        pr = {"number": 7, "state": "open", "title": "old", "url": "u"}
+        record = _record(self.tmp)
+        record["task"] = TASK
+        with (
+            patch("plugin.github.token", return_value=("tok", "u")),
+            patch("plugin.github.origin_repo", return_value="o/r"),
+            patch("plugin.github.pull_request", return_value=pr),
+            patch("plugin.github.update_pull_request", return_value=pr) as upd,
+            patch("plugin.github.forget_pull_request"),
+        ):
+            ship.update(Path(self.tmp), record, None, "Body.\n\nCloses #265")
+        self.assertEqual(upd.call_args.args[3].count("Closes #265"), 1)
 
 
 class UpdateTests(_Base):

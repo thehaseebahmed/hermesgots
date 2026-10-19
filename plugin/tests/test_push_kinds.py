@@ -45,6 +45,7 @@ class Categories(unittest.TestCase):
         self.assertEqual(push.category_of("afk_pr"), "code_afk_pr")
         self.assertEqual(push.category_of("afk_pr", project=True), "code_afk_pr")
         self.assertIn("code_afk_pr", push.CATEGORIES)
+        self.assertIn("afk_pr", push.SESSION_KINDS, "it names the session it is about")
 
     def test_a_kind_belongs_to_the_feature_of_its_session(self):
         self.assertEqual(push.category_of("question"), "chat_input")

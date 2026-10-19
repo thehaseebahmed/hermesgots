@@ -14,7 +14,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import afk, github, projects, push, tools_common
+from . import github, projects, push, tools_common
 from .sessions import PR_FOOTER, WorkspaceError, _git
 from .store import db_path
 
@@ -208,11 +208,18 @@ def _body(
     if not body:
         log = _git(tree, "log", "--reverse", "--format=- %s", f"origin/{base}..HEAD") if base else None
         body = log.stdout.strip() if log is not None and log.returncode == 0 else ""
-    if reference:
-        body = f"{body}\n\n{reference}" if body.strip() else reference
+    body = _referenced(body, reference)
     if PR_FOOTER in body:
         return body
     return f"{body}\n\n{PR_FOOTER}" if body else PR_FOOTER
+
+
+def _referenced(body: str, reference: Optional[str]) -> str:
+    if not reference or reference in body:
+        return body
+    if PR_FOOTER in body:
+        return body.replace(PR_FOOTER, f"{reference}\n\n{PR_FOOTER}", 1)
+    return f"{body}\n\n{reference}" if body.strip() else reference
 
 
 def _closes(task: Optional[Dict[str, Any]], repo_name: Optional[str]) -> Optional[str]:
@@ -299,7 +306,7 @@ def ship(
         states = {state["name"]: state for state in status(record)}
         if not message and any(state["changed"] for state in states.values()):
             raise ValueError("A commit message is required.")
-        task = afk.task_for_session(hermes_home, session_id)
+        task = record.get("task")
         results = []
         for repo in record["repos"]:
             state = states.get(repo["name"])
@@ -344,7 +351,7 @@ def update(
     auth, _ = github.token(hermes_home)
     if not auth:
         raise ShipError("No GitHub account on the server.", 409)
-    task = afk.task_for_session(hermes_home, str(record.get("session_id") or ""))
+    task = record.get("task")
     results = []
     for repo in record["repos"]:
         name = github.origin_repo(repo["repo_root"])
@@ -360,7 +367,7 @@ def update(
                 name,
                 pr["number"],
                 title,
-                f"{body}\n\n{reference}" if body and reference else body,
+                _referenced(body, reference) if body else body,
                 auth,
             )
             github.forget_pull_request(repo["repo_root"], repo["branch"])

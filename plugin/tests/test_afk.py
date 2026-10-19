@@ -549,6 +549,9 @@ class SessionTests(unittest.TestCase):
 
     def ensure(self, path: Any, home: Any, session_id: str, project_id: Any, task: Any, mode: Any) -> dict:
         self.ensured.append((session_id, project_id, task, mode))
+        sessions._upsert(
+            path, session_id, str(project_id), self.record["repos"], mode, self.record["files_dir"]
+        )
         return {**self.record, "session_id": session_id, "project_id": project_id, "mode": mode}
 
     async def post(self, adapter: Any, profile: Any, path: str, body: dict, **kwargs: Any) -> dict:
@@ -591,22 +594,23 @@ class SessionTests(unittest.TestCase):
         )
         self.assertGreaterEqual(entry["at"], value["updatedAt"], "the change clock is the record's")
 
-    def test_the_project_row_names_the_session_working_its_task(self) -> None:
+    def test_the_session_names_the_task_it_works(self) -> None:
         self.start()
         session_id = self.ensured[0][0]
+        record = sessions.read(db_path(self.home), session_id)
         self.assertEqual(
-            afk.task_for_session(self.home, session_id),
+            record["task"],
             self.task,
-            "the host keeps which session works which task, for the pull request that closes it",
+            "the session keeps the task, for the pull request that closes it",
         )
-        self.assertIsNone(afk.task_for_session(self.home, "memento-afk-not-this-one"))
+        self.assertIsNone(sessions.read(db_path(self.home), "memento-afk-not-this-one"))
 
-    def test_a_run_that_never_started_names_no_session(self) -> None:
+    def test_a_run_that_never_started_names_no_task(self) -> None:
         outbox.post.side_effect = outbox.StartError("No API key for this bot.", True)
         self.start()
         self.assertIsNone(
-            afk.task_for_session(self.home, self.ensured[0][0]),
-            "a session nothing was sent in is not the one working the task",
+            sessions.read(db_path(self.home), self.ensured[0][0])["task"],
+            "a session nothing was sent in names no task",
         )
 
     def test_the_run_starts_with_one_line_naming_the_issue_and_where_it_is(self) -> None:

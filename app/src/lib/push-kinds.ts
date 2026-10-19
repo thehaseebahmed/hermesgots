@@ -17,12 +17,12 @@ export type PushCategory =
   | "code_run_done"
   | "code_pr_checks"
   | "code_pr_merged"
+  | "code_afk_pr"
   | "code_setup_failed"
   | "routine_failed"
   | "research_input"
   | "research_done"
   | "research_failed"
-  | "code_afk_pr"
 
 export interface PushCategoryInfo {
   id: PushCategory
@@ -75,6 +75,13 @@ export const PUSH_CATEGORIES: PushCategoryInfo[] = [
     importance: 2,
   },
   {
+    id: "code_afk_pr",
+    feature: "code",
+    title: "A task's pull request is ready to review",
+    on: true,
+    importance: 3,
+  },
+  {
     id: "code_setup_failed",
     feature: "code",
     title: "Project setup failed",
@@ -91,13 +98,6 @@ export const PUSH_CATEGORIES: PushCategoryInfo[] = [
   },
   { id: "research_done", feature: "research", title: "Mission ready", on: true, importance: 3 },
   { id: "research_failed", feature: "research", title: "Mission failed", on: true, importance: 3 },
-  {
-    id: "code_afk_pr",
-    feature: "code",
-    title: "A task's pull request is ready to review",
-    on: true,
-    importance: 3,
-  },
 ]
 
 export type PushPrefs = Partial<Record<string, boolean>>

@@ -33,7 +33,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import sqlite3
 import time
 import uuid
 from pathlib import Path
@@ -199,23 +198,6 @@ def session_title(task: Dict[str, Any]) -> str:
     return f"#{task.get('number')} {task.get('title') or ''}".strip()
 
 
-def task_for_session(hermes_home: Path, session_id: str) -> Optional[Dict[str, Any]]:
-    """The task a session of AFK's was started for, or None when the session isn't working one."""
-    if not session_id:
-        return None
-    try:
-        conn = connect(db_path(hermes_home))
-        try:
-            row = conn.execute(
-                "SELECT task FROM project_afk WHERE session_id = ?", (session_id,)
-            ).fetchone()
-        finally:
-            conn.close()
-    except sqlite3.Error:
-        return None
-    return _task(row[0]) if row else None
-
-
 def run_body(record: Dict[str, Any], task: Dict[str, Any]) -> Dict[str, Any]:
     """The ``POST /v1/runs`` request: how to work a planned issue, and the issue's name as the input.
 
@@ -239,7 +221,7 @@ def publish(
     for it. It is written once, here: the chat list is last-write-wins, so a title the user edits, a
     mode they change or a resolve they make afterwards has to win.
     """
-    _update(hermes_home, project_id, session_id=session_id)
+    sessions.set_task(db_path(hermes_home), session_id, task)
     now = int(time.time() * 1000)
     value = {
         "title": session_title(task),
@@ -443,7 +425,6 @@ def _hold(hermes_home: Path, project_id: str, task: Dict[str, Any]) -> None:
         project_id,
         task=json.dumps(row),
         claimed_at=int(time.time()),
-        session_id=None,
         refusal=None,
         refused_at=None,
     )
