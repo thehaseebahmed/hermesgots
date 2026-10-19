@@ -30,6 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { connectionKey } from "@/lib/connection"
@@ -324,83 +325,92 @@ function AfkSkills({
   const critique = afk.critiqueSkills
   const names = skills.map((skill) => skill.name)
   return (
-    <div className="flex flex-col gap-1" data-afk-skills>
-      <div className="flex min-h-11 items-center justify-between gap-3 px-1">
-        <span className="text-base">Build</span>
-        <Select
-          value={afk.buildSkill}
-          items={[
-            { value: null, label: "None" },
-            ...names.map((name) => ({ value: name, label: name })),
-          ]}
-          onValueChange={(value) => onChoose(typeof value === "string" ? value : null, critique)}
-        >
-          <SelectTrigger aria-label="Build skill" className="h-11 max-w-52" disabled={saving}>
-            {/* The stored name shows even when the profile has lost it: the row names the project's
-                choice rather than reading as nothing chosen. */}
-            <SelectValue>
-              {(value) => (typeof value === "string" && value ? value : "None")}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={null}>None</SelectItem>
-            {names.map((name) => (
-              <SelectItem key={name} value={name}>
-                {name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="flex min-h-11 items-center justify-between gap-3 px-1">
-        <span className="text-base">Critique</span>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                type="button"
-                variant="secondary"
-                aria-label="Critique skills"
-                className="h-auto min-h-11 max-w-52 gap-2 rounded-4xl py-2 pr-2.5 pl-3 font-normal"
-                disabled={saving || (names.length === 0 && critique.length === 0)}
-              />
-            }
+    <div className="flex flex-col gap-2" data-afk-skills>
+      <h3 className="px-1 pb-1 text-sm text-muted-foreground">Skills</h3>
+      <div className="flex flex-col gap-1">
+        <div className="flex min-h-11 items-center justify-between gap-3 px-1">
+          <span className="text-base">Build</span>
+          <Select
+            value={afk.buildSkill}
+            items={[
+              { value: null, label: "None" },
+              ...names.map((name) => ({ value: name, label: name })),
+            ]}
+            onValueChange={(value) => onChoose(typeof value === "string" ? value : null, critique)}
           >
-            <span className="truncate">{critique.length > 0 ? critique.join(", ") : "None"}</span>
-            <ChevronDownIcon className="shrink-0 text-muted-foreground" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="max-h-80 min-w-52 overflow-y-auto">
-            {names.map((name) => {
-              const picked = critique.includes(name)
-              return (
-                <DropdownMenuCheckboxItem
-                  key={name}
-                  checked={picked}
-                  // The menu stays open for the next lens: picking the critique is picking several.
-                  closeOnClick={false}
-                  className="min-h-11"
-                  onCheckedChange={(checked) =>
-                    onChoose(
-                      afk.buildSkill,
-                      checked ? [...critique, name] : critique.filter((one) => one !== name),
-                    )
-                  }
-                >
+            <SelectTrigger aria-label="Build skill" className="h-11 w-52" disabled={saving}>
+              {/* The stored name shows even when the profile has lost it: the row names the project's
+                choice rather than reading as nothing chosen. */}
+              <SelectValue>
+                {(value) => (typeof value === "string" && value ? value : "None")}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={null}>None</SelectItem>
+              {names.map((name) => (
+                <SelectItem key={name} value={name}>
                   {name}
-                </DropdownMenuCheckboxItem>
-              )
-            })}
-            {critique.length > 0 && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem className="min-h-11" onClick={() => onChoose(afk.buildSkill, [])}>
-                  Clear
-                </DropdownMenuItem>
-              </>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex min-h-11 items-center justify-between gap-3 px-1">
+          <span className="text-base">Critique</span>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="secondary"
+                  aria-label="Critique skills"
+                  className="h-auto min-h-11 w-52 justify-between gap-2 rounded-4xl py-2 pr-2.5 pl-3 font-normal"
+                  disabled={saving || (names.length === 0 && critique.length === 0)}
+                />
+              }
+            >
+              <span className="min-w-0 truncate">
+                {critique.length > 0 ? critique.join(", ") : "None"}
+              </span>
+              <ChevronDownIcon className="shrink-0 text-muted-foreground" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="max-h-80 min-w-52 overflow-y-auto">
+              {names.map((name) => {
+                const picked = critique.includes(name)
+                return (
+                  <DropdownMenuCheckboxItem
+                    key={name}
+                    checked={picked}
+                    // The menu stays open for the next lens: picking the critique is picking several.
+                    closeOnClick={false}
+                    className="min-h-11"
+                    onCheckedChange={(checked) =>
+                      onChoose(
+                        afk.buildSkill,
+                        checked ? [...critique, name] : critique.filter((one) => one !== name),
+                      )
+                    }
+                  >
+                    {name}
+                  </DropdownMenuCheckboxItem>
+                )
+              })}
+              {critique.length > 0 && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="min-h-11"
+                    onClick={() => onChoose(afk.buildSkill, [])}
+                  >
+                    Clear
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
+      <Separator />
     </div>
   )
 }
