@@ -83,7 +83,8 @@ const FLOWS = {
   "compressed-live": {
     script: "e2e/compressed-live.mjs",
     about:
-      "A chat compressed mid-run on the device that sent the turn keeps streaming to its end, and finishes after a reload too",
+      "A chat compressed mid-run on the device that sent the turn keeps streaming to its end, finishes after a reload, and comes down on Stop",
+    alsoPolling: true,
   },
   "plan-mode": {
     script: "e2e/plan-mode.mjs",

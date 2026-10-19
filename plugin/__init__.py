@@ -655,7 +655,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         session_id = request.match_info["session_id"]
         # On the loop thread, like store_path: the profile scope isn't visible inside to_thread.
         home = hermes_home()
-        live, _ = await asyncio.to_thread(sessions.live_runs, adapter, home=home)
+        live, _ = await asyncio.to_thread(sessions.live_runs, adapter, None, home)
         found = await asyncio.to_thread(delegation.children, home, session_id, set(live))
         # Never a 404 for an unknown session: the app reads a 404 as a missing plugin.
         return web.json_response({"object": "memento.agents", "session_id": session_id, "agents": found})
@@ -1173,11 +1173,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         owned = owned_runs(request)
         # On the loop thread: the profile scope isn't visible inside to_thread.
         home = hermes_home()
-        known: Dict[str, str] = {}
-        live, run_ids = await asyncio.to_thread(sessions.live_runs, adapter, owned, home, known)
+        roots: Dict[str, str] = {}
+        live, run_ids = await asyncio.to_thread(
+            sessions.live_runs, adapter, owned=owned, home=home, roots=roots
+        )
         try:
             waiting = await asyncio.to_thread(
-                sessions.waiting, adapter, store_path(), home, owned, known
+                sessions.waiting, adapter, store_path(), home, owned=owned, roots=roots
             )
         except Exception:
             logger.debug("memento: reading waiting sessions failed", exc_info=True)

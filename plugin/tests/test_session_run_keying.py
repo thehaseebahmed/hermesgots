@@ -77,8 +77,6 @@ def compression_chain(*ids: str) -> List[Dict[str, Any]]:
 class TempHome(unittest.TestCase):
     def setUp(self) -> None:
         self.home = temp_hermes_home(self)
-        # The walk warns once per process; each case starts unheard.
-        sessions._walk_failed = False
 
 
 class FakeAdapter:
@@ -110,9 +108,10 @@ class ChatSessionTest(TempHome):
         )
         self.assertEqual(sessions.chat_session(self.home, "kid"), "kid")
 
-    def test_a_marker_naming_another_row_is_inherited_not_a_fork(self) -> None:
-        # A continuation carries its parent's model_config verbatim, so a marker for a row that
-        # isn't this parent says nothing about this hop (Hermes's _non_continuation_child_sql).
+    def test_a_marker_on_any_row_stops_the_walk(self) -> None:
+        # Hermes's own step refuses a child carrying a marker at all, even one naming a row that
+        # isn't this parent (a continuation inherits model_config verbatim). Stopping keeps the id
+        # where Hermes keeps it; walking on would report another conversation's run as the chat's.
         store(
             self.home,
             [
@@ -120,7 +119,7 @@ class ChatSessionTest(TempHome):
                 session("tip", "root", model_config={"_delegate_from": "elsewhere"}),
             ],
         )
-        self.assertEqual(sessions.chat_session(self.home, "tip"), "root")
+        self.assertEqual(sessions.chat_session(self.home, "tip"), "tip")
 
     def test_a_tool_session_keeps_its_own_id(self) -> None:
         store(
@@ -144,25 +143,25 @@ class ChatSessionTest(TempHome):
 
     def test_the_memo_answers_every_id_the_walk_passed(self) -> None:
         store(self.home, compression_chain("root", "c1", "tip"))
-        known: Dict[str, str] = {}
-        self.assertEqual(sessions.chat_session(self.home, "tip", known), "root")
-        self.assertEqual(known, {"root": "root", "c1": "root", "tip": "root"})
+        roots: Dict[str, str] = {}
+        self.assertEqual(sessions.chat_session(self.home, "tip", roots), "root")
+        self.assertEqual(roots, {"root": "root", "c1": "root", "tip": "root"})
         # A second run of the same chat answers from the memo, without the store.
-        self.assertEqual(sessions.chat_session(MISSING, "c1", known), "root")
+        self.assertEqual(sessions.chat_session(MISSING, "c1", roots), "root")
 
 
 class LiveRunsTest(TempHome):
     def test_keys_a_run_on_the_compression_tip_under_the_root(self) -> None:
         store(self.home, compression_chain("root", "tip"))
         adapter = FakeAdapter({"r1": {"status": "running", "session_id": "tip"}})
-        live, run_ids = sessions.live_runs(adapter, home=self.home)
+        live, run_ids = sessions.live_runs(adapter, None, self.home)
         self.assertEqual(live, {"root": "running"})
         self.assertEqual(run_ids, {"root": "r1"})
 
     def test_without_a_store_it_keeps_the_tips_own_id(self) -> None:
-        # Back-compat: a caller with no home gets today's tip keying, never a crash.
+        # A profile with no state.db yet: the tip's id, never a crash.
         adapter = FakeAdapter({"r1": {"status": "running", "session_id": "tip"}})
-        live, run_ids = sessions.live_runs(adapter)
+        live, run_ids = sessions.live_runs(adapter, None, MISSING)
         self.assertEqual(live, {"tip": "running"})
         self.assertEqual(run_ids, {"tip": "r1"})
 
@@ -175,7 +174,7 @@ class LiveRunsTest(TempHome):
                 "r2": {"status": "waiting_for_approval", "session_id": "root"},
             }
         )
-        live, run_ids = sessions.live_runs(adapter, home=self.home)
+        live, run_ids = sessions.live_runs(adapter, None, self.home)
         self.assertEqual(live, {"root": "waiting_for_approval"})
         self.assertEqual(run_ids, {"root": "r2"})
 
@@ -222,9 +221,9 @@ class WaitingTest(TempHome):
                 },
             }
         )
-        known: Dict[str, str] = {}
-        sessions.live_runs(adapter, home=self.home, known=known)
-        found = sessions.waiting(adapter, MISSING, MISSING, known=known)
+        roots: Dict[str, str] = {}
+        sessions.live_runs(adapter, None, self.home, roots)
+        found = sessions.waiting(adapter, MISSING, MISSING, roots=roots)
         self.assertEqual(found, {"root": {"kind": "approval", "command": "npm test"}})
 
 
