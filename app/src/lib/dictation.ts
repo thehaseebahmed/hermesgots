@@ -129,7 +129,8 @@ interface Segment {
   heard: boolean
   skip?: boolean
   stopped: Promise<void>
-  /** Turns what the recorder flushed into a piece, once, however the segment ends. */
+  watch?: number
+  /** Turns what the recorder flushed into a phrase, once: a stop, an error and the timeout land here. */
   close: () => void
 }
 
@@ -140,12 +141,9 @@ interface Recording {
   startedAt: number
   stoppedAt?: number
   measured: boolean
-  /** Whether the recorder has sent any audio at all; a take that hasn't is a dead one. */
-  sent: boolean
   audio?: AudioContext
   timer?: number
   cap?: number
-  watch?: number
 }
 
 interface Session {
@@ -155,8 +153,10 @@ interface Session {
   upload: AbortController | null
   draining: Promise<boolean> | null
   error: unknown
-  /** Why the take itself died (the recorder errored, the track ended): Retry still sends its pieces. */
+  /** Why the take itself died (the recorder errored, the track ended): Retry still sends its phrases. */
   failure: Error | null
+  /** The recorders still closing after the take died; a retry waits for them. */
+  stopping: Promise<void> | null
   /** Cancelled or done: nothing more is kept. */
   closed: boolean
   saving: Promise<unknown>
@@ -171,6 +171,7 @@ const newSession = (key: string | undefined, pieces: DictationPiece[] = []): Ses
   draining: null,
   error: null,
   failure: null,
+  stopping: null,
   closed: false,
   saving: Promise.resolve(),
 })
@@ -206,6 +207,13 @@ function save(session: Session, now = false) {
     .catch(() => undefined)
 }
 
+/** A take that ended stops transcribing: whatever is in flight is dropped. */
+function stopUpload(current: Session) {
+  const upload = current.upload
+  current.upload = null
+  upload?.abort()
+}
+
 function forget(session: Session) {
   session.closed = true
   window.clearTimeout(session.saveTimer)
@@ -215,20 +223,18 @@ function forget(session: Session) {
 
 function release(recording: Recording) {
   window.clearInterval(recording.timer)
-  window.clearTimeout(recording.watch)
   window.clearTimeout(recording.cap)
   recording.stream.getTracks().forEach((track) => track.stop())
   void recording.audio?.close().catch(() => {})
   recording.timer = undefined
-  recording.watch = undefined
   recording.audio = undefined
 }
 
-/** Stops the recorders and lets the mic go; resolves once the last piece is in. */
-function end(recording: Recording) {
+/** Stops the recorders and lets the mic go; resolves once the last phrase is in. */
+async function end(recording: Recording) {
   const stopping = stopSegments(recording)
   release(recording)
-  return stopping
+  await stopping
 }
 
 function stopSegments(recording: Recording) {
@@ -272,6 +278,17 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
   }, [])
 
   /** Sends each piece still without text, in order, each after the text before it. */
+  const showFailure = useCallback((failure: unknown) => {
+    setError(
+      failure instanceof DOMException && failure.name === "AbortError"
+        ? "The bot took too long to transcribe."
+        : failure instanceof Error
+          ? failure.message
+          : "Couldn't transcribe the recording.",
+    )
+    setStatus("failed")
+  }, [])
+
   const drain = useCallback((current: Session) => {
     const run = async () => {
       for (;;) {
@@ -307,21 +324,19 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
     return current.draining
   }, [])
 
-  /** Ends a take whose recorder died, keeping the pieces already cut so Retry can send them. */
-  const fail = useCallback((current: Session, recording: Recording, message: string) => {
-    if (session.current !== current || current.recording !== recording) return
-    current.failure = new Error(message)
-    current.recording = null
-    current.upload?.abort()
-    current.upload = null
-    const stopping = end(recording)
-    setLevels(null)
-    void stopping.then(() => {
-      if (session.current !== current) return
-      setError(message)
-      setStatus("failed")
-    })
-  }, [])
+  /** Ends a take whose recorder died, keeping the phrases already cut so Retry can send them. */
+  const fail = useCallback(
+    (current: Session, recording: Recording, message: string) => {
+      if (session.current !== current || current.recording !== recording || current.stopping) return
+      current.failure = new Error(message)
+      current.recording = null
+      current.stopping = end(recording)
+      stopUpload(current)
+      setLevels(null)
+      showFailure(current.failure)
+    },
+    [showFailure],
+  )
 
   const openSegment = useCallback(
     (current: Session, recording: Recording) => {
@@ -335,6 +350,7 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
       const close = () => {
         if (closed) return
         closed = true
+        window.clearTimeout(segment.watch)
         recording.segments = recording.segments.filter((open) => open !== segment)
         if (segment.chunks.length && !segment.skip) {
           const type = recorder.mimeType || recording.mimeType || "audio/webm"
@@ -355,7 +371,7 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
       }
       recorder.ondataavailable = (event) => {
         if (!event.data.size) return
-        recording.sent = true
+        window.clearTimeout(segment.watch)
         segment.chunks.push(event.data)
         save(current)
       }
@@ -366,6 +382,10 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
       }
       recording.segments.push(segment)
       recorder.start(1000)
+      // A recorder that has sent nothing by now is dead, not quiet: silence still encodes.
+      segment.watch = window.setTimeout(() => {
+        if (!segment.chunks.length) fail(current, recording, SILENT)
+      }, SILENT_MS)
       return segment
     },
     [drain, fail],
@@ -457,7 +477,6 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
       segments: [],
       startedAt: Date.now(),
       measured: false,
-      sent: false,
     }
     current.recording = recording
     monitor(current, recording)
@@ -466,11 +485,6 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
     stream
       .getAudioTracks()
       .forEach((track) => track.addEventListener("ended", () => fail(current, recording, TAKEN)))
-    // A recorder still "recording" that has sent no audio by now isn't a quiet room: it's dead, and
-    // nothing else tells the app so.
-    recording.watch = window.setTimeout(() => {
-      if (session.current === current && !recording.sent) fail(current, recording, SILENT)
-    }, SILENT_MS)
     setStartedAt(recording.startedAt)
     // Past the cap the recording stops growing; Stop or Send still turns it into text.
     recording.cap = window.setTimeout(() => {
@@ -485,6 +499,7 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
       setStatus("transcribing")
       setLevels(null)
       setError(null)
+      if (current.stopping) await current.stopping
       const done = await drain(current)
       if (session.current !== current) return null
       if (done) {
@@ -493,20 +508,12 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
         showIdle()
         return joinText(...current.pieces.map((piece) => piece.text ?? ""))
       }
-      const failure = current.error ?? current.failure
-      setError(
-        failure instanceof DOMException && failure.name === "AbortError"
-          ? "The bot took too long to transcribe."
-          : failure instanceof Error
-            ? failure.message
-            : "Couldn't transcribe the recording.",
-      )
-      setStatus("failed")
+      showFailure(current.error ?? current.failure)
       // The host may have lost faster-whisper since; ask again so the mic hides if so.
       void readDictationInfo(latest.current.config, true)
       return null
     },
-    [drain, showIdle],
+    [drain, showFailure, showIdle],
   )
 
   const cancel = useCallback(() => {
@@ -514,8 +521,7 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
     session.current = null
     if (current) {
       forget(current)
-      current.upload?.abort()
-      current.upload = null
+      stopUpload(current)
       if (current.recording) void end(current.recording)
     }
     showIdle()
@@ -538,6 +544,7 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
     const last = recording.segments.at(-1)
     if (last && current.pieces.length && Date.now() - last.startedAt < MIN_MS) last.skip = true
     const stopping = end(recording)
+    current.stopping = stopping
     await stopping
     if (session.current !== current) return null
     current.recording = null
