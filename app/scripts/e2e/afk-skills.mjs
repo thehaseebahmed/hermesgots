@@ -2,8 +2,7 @@
 // both listed from the bot's own skills — only what its host can run now — and kept on the host, so a
 // reload reads the same choice back and another project has its own. Either clears back to nothing.
 // A plugin that predates the pickers shows the pop-up it has, its switch still working — a flow of
-// its own, since each browser here loads the app a few times and no more. Phone and tablet, light and
-// dark, with no console error.
+// its own, since each browser here loads the app a few times and no more.
 import { app, assert, flow, makeProject, mock, openAfk, pass } from "./lib.mjs"
 
 const BUILD = "plan"
@@ -11,7 +10,6 @@ const CRITIQUE = ["github-pr-workflow", "log-triage"]
 // The mock's profile holds these three, so a picker listing anything else is not the bot's own list.
 const OFFERED = ["github-pr-workflow", "log-triage", "plan"]
 
-/** The pickers, and the helpers both flows read and drive them with. */
 function pickers(page, until) {
   const build = () => page.getByRole("combobox", { name: "Build skill" })
   const critique = () => page.getByRole("button", { name: "Critique skills" })
@@ -37,7 +35,6 @@ function pickers(page, until) {
   }
 }
 
-/** Both pickers, the choice kept on the host, and each clearing back to nothing. */
 const choosing = async ({ page, profileId, shot, until }) => {
   const errors = []
   page.on("pageerror", (error) => errors.push(error.message))
@@ -58,7 +55,6 @@ const choosing = async ({ page, profileId, shot, until }) => {
     await shot(name)
   }
 
-  // Both pickers sit under the switch, and both start at nothing.
   await openAfk(page, screen)
   await build().waitFor({ timeout: 15_000 })
   await critique().waitFor({ timeout: 15_000 })
@@ -66,7 +62,6 @@ const choosing = async ({ page, profileId, shot, until }) => {
   assert.equal((await critique().innerText()).trim(), "None", "nothing is chosen to critique")
   await snap("empty")
 
-  // Only the bot's own skills are offered, by name.
   await openBuild()
   await snap("build-menu")
   const offered = await page
@@ -102,9 +97,7 @@ const choosing = async ({ page, profileId, shot, until }) => {
   assert.equal(neighbour.build_skill, null, "another project builds by nothing")
   assert.deepEqual(neighbour.critique_skills, [], "and critiques by nothing")
 
-  // The shape the route keeps, which the pickers write: one write names either the switch or the
-  // skills, and the skills are written together. Posted straight at the host, since the app never
-  // builds such a body.
+  // Posted straight at the host, since the app never builds either body.
   for (const [body, why] of [
     [{ critique_skills: [] }, "a body naming one of the two"],
     [{ on: true, build_skill: null, critique_skills: [] }, "a body naming both"],
@@ -137,7 +130,6 @@ const choosing = async ({ page, profileId, shot, until }) => {
   assert.deepEqual(errors, [], `no console error (${errors.join("; ")})`)
 }
 
-/** A plugin that predates the pickers keeps the pop-up it has, and its switch still works. */
 const olderPlugin = async ({ page, profileId, shot, until }) => {
   const errors = []
   page.on("pageerror", (error) => errors.push(error.message))

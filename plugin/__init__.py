@@ -1013,7 +1013,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         on = body.get("on")
         if switch and not isinstance(on, bool):
             return _error(web, "on must be true or false.", 400)
-        # Checked before anything is read or written, so a refusal leaves the row as it was.
         skills = None
         if choosing:
             try:

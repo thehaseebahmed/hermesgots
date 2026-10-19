@@ -27,10 +27,6 @@ project has been put away. The reason is the host's own answer rather than the a
 the host is what would do the work — and turning a project on is refused with that reason, so nothing
 is ever left half on.
 
-The skills its work follows are the project's too: one to build by and the ones to critique, kept on
-the same row as the switch (`set_skills`) and read back with it, so the sweep has them on the host
-with the app closed. The list they are picked from is the profile's live skills
-(`skill_catalog.read`); nothing here decides what a chosen skill does to a run.
 """
 
 from __future__ import annotations
@@ -168,17 +164,14 @@ def read(
     }
 
 
-# The two fields a skills write names, written together and read together.
 SKILL_FIELDS = ("build_skill", "critique_skills")
 
 
 def skills_from(body: Dict[str, Any]) -> Tuple[Optional[str], List[str]]:
-    """The skills a write names, read from its body, or ``ValueError`` saying what's wrong.
+    """The skills a write names, or ``ValueError`` saying what's wrong.
 
     Both fields or neither: the sheet writes the two pickers together, so a body naming one leaves
-    the other's meaning to a guess. The names are the profile's as the pickers read them; whether
-    they are still skills is the sweep's question, not this write's, so a name the profile has since
-    lost is kept as the project's choice and refused where a task would be claimed (#323).
+    the other's meaning to a guess.
     """
     if any(field not in body for field in SKILL_FIELDS):
         raise ValueError("A skills write names build_skill and critique_skills.")
@@ -199,13 +192,10 @@ def set_skills(
     build_skill: Optional[str],
     critique_skills: Iterable[str],
 ) -> None:
-    """Keeps the skills this project's AFK work follows: one to build by, and the ones to critique.
+    """Keeps the skills this project's AFK work follows, on the project's row beside the switch.
 
-    Written on the project's own row, beside the switch and not on the device that picked them: the
-    sweep reads them on the host with the app closed, and they belong to that project alone. A
-    project with no row yet gets one with its switch off — the pickers sit under the switch, not
-    behind it, so choosing a skill is no reason to start working anything. Turning the switch on or
-    off writes its own columns only, so a choice outlives both.
+    A project with no row yet gets one with its switch off: the pickers sit under the switch, not
+    behind it, so choosing a skill is no reason to start working anything.
     """
     _upsert(
         hermes_home,
@@ -741,9 +731,7 @@ def _forget_refusal(hermes_home: Path, project_id: str, found: Dict[str, Any]) -
 
 
 def _row(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
-    """The project's AFK row, read once: its switch, the task it holds, its last refusal, the session
-    working that task, why it stalled, since when it was claimed, and the skills its work follows.
-    """
+    """The project's AFK row, read once: its switch, the task it holds and what is working it."""
     conn = connect(db_path(hermes_home))
     try:
         row = conn.execute(
@@ -769,18 +757,13 @@ def _row(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
 
 
 def _name(value: Any) -> Optional[str]:
-    """A skill's name as the pickers write it, or None: a blank name is no choice at all."""
     if not isinstance(value, str):
         return None
     return value.strip() or None
 
 
 def _names(values: Iterable[Any]) -> List[str]:
-    """The names a choice holds, trimmed, without blanks and each once, in the order they were given.
-
-    Order is the user's: the critique's delegates follow the skills in the order the row holds them,
-    so a set would hand that back in an order nobody picked.
-    """
+    """The names a choice holds, each once, in the order the user picked them."""
     found: List[str] = []
     for value in values:
         name = _name(value)
@@ -802,8 +785,6 @@ def _column(value: Any, kind: type) -> Any:
 
 
 def _list(value: Any) -> List[Any]:
-    """The JSON list a column holds, or none: a row written before the column, or by hand, reads as
-    no choice rather than failing the sheet."""
     return _column(value, list) or []
 
 
@@ -845,11 +826,11 @@ def _task(value: Any) -> Optional[Dict[str, Any]]:
 
 
 def _upsert(hermes_home: Path, project_id: str, **fields: Any) -> None:
-    """Writes the named columns of the project's AFK row, making the row where the project has none.
+    """Writes the named columns of the project's row, making the row where the project has none.
 
-    One statement for both writers, so a column is never added to the insert and forgotten in the
-    update: a fresh row starts with the switch off, since every writer that isn't the switch leaves
-    `enabled` and every other column to the row's own defaults, and only the named columns are set.
+    One statement for every writer, so a column is never added to an insert and forgotten in an
+    update. Nothing a caller doesn't name is touched, so the switch and the skills leave each other
+    alone; a fresh row starts switched off.
     """
     row = {"enabled": 0, **fields}
     columns = ", ".join(row)
@@ -883,6 +864,4 @@ def _update(hermes_home: Path, project_id: str, **fields: Any) -> None:
 
 
 def _write(hermes_home: Path, project_id: str, on: bool) -> None:
-    # The switch's own columns only: the task it holds and the last refusal are the sweep's, and the
-    # skills its work follows are the pickers' (`set_skills`) — turning it on or off leaves both alone.
     _upsert(hermes_home, project_id, enabled=1 if on else 0, at=int(time.time()))

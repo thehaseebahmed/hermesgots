@@ -1,13 +1,10 @@
 /**
- * AFK: a project's switch for working its own tasks, the skills that work follows, and the tasks it
- * would work — the frontier, what's ready oldest first, what somebody has already claimed, and what
- * an open task still blocks.
+ * AFK: a project's switch for working its own tasks, and the tasks it would work — the frontier,
+ * what's ready oldest first, what somebody has already claimed, and what an open task still blocks.
  * The switch is the host's setting for the project, so it reads back the same on every device. It is
  * always shown: a project that can't be left to work (or a Bot on a plugin too old to switch one) has
- * it off and disabled, with the reason underneath. Under it sit the two skill pickers — one for the
- * Build, one or more for the Critique — where the plugin advertises `afk_skills`, both listing the
- * bot's own live skills. The frontier is there where the plugin advertises `afk`, the switch where it
- * advertises `afk_switch`.
+ * it off and disabled, with the reason underneath. The frontier is there where the plugin advertises
+ * `afk`, the switch where it advertises `afk_switch`.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { ChevronDownIcon } from "lucide-react"
@@ -177,8 +174,7 @@ export function AfkPopup({
     return () => controller.abort()
   }, [held, listed, read])
 
-  // Every write to the project's AFK setting shows the host's answer: a write it refused never reads
-  // back as done, and one failure wording covers the switch and the pickers alike.
+  // Every write shows the host's answer: a write it refused never reads back as done.
   const save = async (write: () => Promise<ProjectAfk>) => {
     setSaving(true)
     try {
@@ -190,8 +186,6 @@ export function AfkPopup({
     }
   }
   const turn = (on: boolean) => save(() => setProjectAfk(config, projectId, on))
-  // Both pickers are written together, since only one of them changes and the other has to keep
-  // what it had.
   const choose = (buildSkill: string | null, critiqueSkills: string[]) =>
     save(() => setProjectAfkSkills(config, projectId, buildSkill, critiqueSkills))
 
@@ -211,8 +205,8 @@ export function AfkPopup({
             saving={saving}
             onToggle={(on) => void turn(on)}
           />
-          {/* Under the switch, because it is the same setting: what the work does when it is left
-              to run. A choice is the project's even with nothing left to work. */}
+          {/* Under the switch: the same setting, and a choice is the project's even with nothing
+              left to work. */}
           {withSkills === "yes" && afk && !afkError && (
             <AfkSkills
               afk={afk}
@@ -238,15 +232,12 @@ export function AfkPopup({
   )
 }
 
-/** A skill choice as the two pickers hold it: the row the host keeps for the project. */
 type Choice = Pick<ProjectAfk, "buildSkill" | "critiqueSkills">
 
-/** Whether two lists of names are the same pick, in the same order. */
 function sameNames(one: string[], other: string[]) {
   return one.length === other.length && one.every((name, index) => name === other[index])
 }
 
-/** A setting's row: its label on the left, its control on the right, on one 44px line. */
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex min-h-11 items-center justify-between gap-3 px-1">
@@ -312,14 +303,9 @@ function AfkSwitch({
 }
 
 /**
- * The skills this project's AFK work follows: the one that governs how a task is built, and the ones
- * its critique follows. Both lists are the bot's own live skills, read the way the composer's `/`
- * menu reads them, and the choice is the project's — kept on its host, so a reload, another device
- * and a restarted host read the same one back. Either is left at None by default: nothing chosen
- * works the way AFK always has.
- *
- * A name the profile has since lost stays on the row and shows here, so the project says what it
- * holds; the pickers still offer only what the bot can run now, and Clear takes the lost one away.
+ * The skills this project's work follows, kept on its host with the switch. A name the profile has
+ * since lost still shows on the row, so the project says what it holds; the menus offer only what the
+ * bot can run now.
  */
 function AfkSkills({
   afk,

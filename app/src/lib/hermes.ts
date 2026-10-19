@@ -2504,19 +2504,16 @@ export interface ProjectAfk {
   task: ProjectIssue | null
   /** Why GitHub last refused the sweep. The switch stays on, so this is not `reason`. */
   refusal: string | null
-  /** The one of the bot's skills that governs how AFK builds a task here, when the project picked
-   * one. */
+  /** The bot's skill the project picked to build by, when it picked one. */
   buildSkill: string | null
-  /** The bot's skills the critique of a task follows, in the order the project picked them. */
+  /** The bot's skills the project picked for its critique, in the order it picked them. */
   critiqueSkills: string[]
 }
 
-/** A skill's name as the pickers write it, or null: a blank name is no choice at all. */
 function skillName(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null
 }
 
-/** The skill names in a list the host sent, each once, in its order. */
 function skillNames(value: unknown): string[] {
   const names = Array.isArray(value) ? value.map(skillName) : []
   return [...new Set(names.filter((name): name is string => name !== null))]
@@ -2557,7 +2554,6 @@ export async function getProjectAfk(
   return parseAfk((await response.json()) as Record<string, unknown> | null)
 }
 
-/** Writes one of the project's AFK settings, answering the setting the host now holds. */
 async function writeAfk(
   config: HermesConfig,
   projectId: string,

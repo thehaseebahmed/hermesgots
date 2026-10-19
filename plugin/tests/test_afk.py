@@ -259,12 +259,7 @@ class SwitchTests(unittest.TestCase):
 
 
 class SkillChoiceTests(unittest.TestCase):
-    """The skills a project's AFK work follows, as the project's own choice kept on the host.
-
-    The pickers list the profile's live skills from the plugin's skills route, but what the row
-    stores is just the names: a skill that disappears afterwards is the sweep's refusal to make
-    (#323), not a write the host quietly rewrites.
-    """
+    """The skills a project's AFK work follows: the project's own choice, kept on the host."""
 
     def setUp(self) -> None:
         self.tmp = TemporaryDirectory()
@@ -289,14 +284,12 @@ class SkillChoiceTests(unittest.TestCase):
 
     def test_the_choice_is_read_back_from_the_host(self) -> None:
         set_skills(self.home, "p1", "writing-for-agents", ["code-review", "grill-me"])
-        # A read is the app's own — another device, or this one after a reload: the host's answer.
         found = read(self.home, "p1", self.folders())
         self.assertEqual(found["build_skill"], "writing-for-agents")
         self.assertEqual(found["critique_skills"], ["code-review", "grill-me"])
 
     def test_the_choice_is_in_the_store_not_in_memory(self) -> None:
         set_skills(self.home, "p1", "writing-for-agents", ["code-review"])
-        # A restarted host is a process that never saw the write: the row on disk is all there is.
         conn = sqlite3.connect(db_path(self.home))
         try:
             row = conn.execute(
@@ -328,8 +321,7 @@ class SkillChoiceTests(unittest.TestCase):
         self.assertEqual(found["critique_skills"], ["code-review"])
 
     def test_choosing_a_skill_leaves_a_project_already_working_on(self) -> None:
-        # The row's other columns are not this write's: a project already left to work stays on when
-        # its skills change, and the sweep's task and refusal are untouched.
+        # The row's other columns are not this write's.
         set_on(self.home, "p1", self.folders(), True)
         set_skills(self.home, "p1", "writing-for-agents", ["code-review"])
         found = read(self.home, "p1", self.folders())
@@ -349,8 +341,6 @@ class SkillChoiceTests(unittest.TestCase):
         self.assertEqual(found["critique_skills"], ["code-review"])
 
     def test_a_skills_write_names_both_fields(self) -> None:
-        # One write, both fields: the sheet has the two pickers in front of it, and a write that
-        # named one would leave the other's meaning to a guess.
         for body in ({}, {"build_skill": "writing-for-agents"}, {"critique_skills": []}):
             with self.subTest(body=body):
                 with self.assertRaises(ValueError):
