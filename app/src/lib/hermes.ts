@@ -391,6 +391,29 @@ export interface McpServer {
   tools?: number
 }
 
+/** The rows a plugin answer wraps (`{"object": {"servers": [...]}}`), or nothing it doesn't carry. */
+function wrapped(value: unknown, key: string): unknown {
+  return (value as Record<string, Record<string, unknown>> | null)?.object?.[key]
+}
+
+/** The rows of one answer or list, each read once, dropping any Gots has no name for. */
+function namedRows<T extends { name: string }>(
+  rows: unknown,
+  read: (raw: unknown) => T | undefined,
+): T[] {
+  if (!Array.isArray(rows)) return []
+  return rows.flatMap((row) => {
+    const found = read(row)
+    return found === undefined ? [] : [found]
+  })
+}
+
+/** One path on the bot's plugin under `/mcp`, every segment escaped (`/mcp/<name>/tools`). */
+function mcpPath(config: HermesConfig, ...segments: string[]): string {
+  const rest = segments.map((segment) => `/${encodeURIComponent(segment)}`).join("")
+  return `${pluginRoot(config.baseUrl)}/mcp${rest}`
+}
+
 const MCP_STATES = new Set<string>(["on", "off", "connecting", "failed", "needs_access", "plugin"])
 
 /** One row as the plugin reports it, or nothing for one Gots has no name or word for. */
@@ -416,14 +439,12 @@ function parseMcpServerRow(raw: unknown): McpServer | undefined {
  * lists: a row with no name, or a state Gots has no word for, is dropped, and so is an empty reason.
  */
 export function parseMcpServers(value: unknown): McpServer[] {
-  const rows = (value as { object?: { servers?: unknown } } | null)?.object?.servers
-  if (!Array.isArray(rows)) return []
-  return rows.map(parseMcpServerRow).filter((server): server is McpServer => server !== undefined)
+  return namedRows(wrapped(value, "servers"), parseMcpServerRow)
 }
 
 /** Reads the plugin's `mcp` write answer (`{"object": {"server": {...}}}`) into the one server. */
 export function parseMcpServer(value: unknown): McpServer | undefined {
-  return parseMcpServerRow((value as { object?: { server?: unknown } } | null)?.object?.server)
+  return parseMcpServerRow(wrapped(value, "server"))
 }
 
 /** The MCP servers the bot's Hermes profile has, read from the Gots plugin. */
@@ -431,7 +452,7 @@ export async function listMcpServers(
   config: HermesConfig,
   signal?: AbortSignal,
 ): Promise<McpServer[]> {
-  const response = await request(`${pluginRoot(config.baseUrl)}/mcp`, {
+  const response = await request(mcpPath(config), {
     headers: headers(config),
     signal,
   })
@@ -450,15 +471,12 @@ export async function setMcpServerEnabled(
   enabled: boolean,
   signal?: AbortSignal,
 ): Promise<McpServer> {
-  const response = await request(
-    `${pluginRoot(config.baseUrl)}/mcp/${encodeURIComponent(name)}/enabled`,
-    {
-      method: "POST",
-      headers: headers(config),
-      body: JSON.stringify({ enabled }),
-      signal,
-    },
-  )
+  const response = await request(mcpPath(config, name, "enabled"), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ enabled }),
+    signal,
+  })
   const server = parseMcpServer(await response.json())
   if (!server) throw new HermesError("The host answered without the server.")
   return server
@@ -476,7 +494,7 @@ export async function removeMcpServer(
   name: string,
   signal?: AbortSignal,
 ): Promise<McpServer[]> {
-  const response = await request(`${pluginRoot(config.baseUrl)}/mcp/${encodeURIComponent(name)}`, {
+  const response = await request(mcpPath(config, name), {
     method: "DELETE",
     headers: headers(config),
     signal,
@@ -495,14 +513,11 @@ export async function startMcpAccess(
   name: string,
   signal?: AbortSignal,
 ): Promise<McpAccess> {
-  const response = await request(
-    `${pluginRoot(config.baseUrl)}/mcp/${encodeURIComponent(name)}/access`,
-    {
-      method: "POST",
-      headers: headers(config),
-      signal,
-    },
-  )
+  const response = await request(mcpPath(config, name, "access"), {
+    method: "POST",
+    headers: headers(config),
+    signal,
+  })
   return parseMcpAccess(await response.json())
 }
 
@@ -518,7 +533,7 @@ export async function deliverMcpAccess(
   url: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  await request(`${pluginRoot(config.baseUrl)}/mcp/${encodeURIComponent(name)}/access/callback`, {
+  await request(mcpPath(config, name, "access", "callback"), {
     method: "POST",
     headers: headers(config),
     body: JSON.stringify({ url }),
@@ -557,11 +572,7 @@ function parseMcpCatalogueEntry(raw: unknown): McpCatalogueEntry | undefined {
  * Catalogue lists: an entry with no name is dropped, and so is anything that isn't an entry at all.
  */
 export function parseMcpCatalogue(value: unknown): McpCatalogueEntry[] {
-  const rows = (value as { object?: { entries?: unknown } } | null)?.object?.entries
-  if (!Array.isArray(rows)) return []
-  return rows
-    .map(parseMcpCatalogueEntry)
-    .filter((entry): entry is McpCatalogueEntry => entry !== undefined)
+  return namedRows(wrapped(value, "entries"), parseMcpCatalogueEntry)
 }
 
 /**
@@ -573,7 +584,7 @@ export async function listMcpCatalogue(
   config: HermesConfig,
   signal?: AbortSignal,
 ): Promise<McpCatalogueEntry[]> {
-  const response = await request(`${pluginRoot(config.baseUrl)}/mcp/catalogue`, {
+  const response = await request(mcpPath(config, "catalogue"), {
     headers: headers(config),
     signal,
   })
@@ -628,15 +639,10 @@ function parseMcpCatalogueValue(raw: unknown): McpCatalogueValue | undefined {
  * field the user might skip.
  */
 export function parseMcpCatalogueEntryDetail(value: unknown): McpCatalogueEntryDetail | undefined {
-  const raw = (value as { object?: { entry?: Record<string, unknown> } } | null)?.object?.entry
+  const raw = wrapped(value, "entry") as Record<string, unknown> | undefined
   const entry = parseMcpCatalogueEntry(raw)
   if (!entry) return undefined
-  const values = Array.isArray(raw?.values)
-    ? raw.values
-        .map(parseMcpCatalogueValue)
-        .filter((row): row is McpCatalogueValue => row !== undefined)
-    : []
-  return { ...entry, values }
+  return { ...entry, values: namedRows(raw?.values, parseMcpCatalogueValue) }
 }
 
 /**
@@ -650,10 +656,10 @@ export async function getMcpCatalogueEntry(
   name: string,
   signal?: AbortSignal,
 ): Promise<McpCatalogueEntryDetail | undefined> {
-  const response = await request(
-    `${pluginRoot(config.baseUrl)}/mcp/catalogue/${encodeURIComponent(name)}`,
-    { headers: headers(config), signal },
-  )
+  const response = await request(mcpPath(config, "catalogue", name), {
+    headers: headers(config),
+    signal,
+  })
   return parseMcpCatalogueEntryDetail(await response.json())
 }
 
@@ -671,7 +677,7 @@ export async function installMcpServer(
   values: Record<string, string>,
   signal?: AbortSignal,
 ): Promise<McpServer[]> {
-  const response = await request(`${pluginRoot(config.baseUrl)}/mcp/install`, {
+  const response = await request(mcpPath(config, "install"), {
     method: "POST",
     headers: headers(config),
     body: JSON.stringify({ name, values }),
@@ -742,7 +748,7 @@ function parseMcpServerValue(raw: unknown): McpServerValue | undefined {
 
 /** One server's block as the plugin reports it, or nothing for a row Gots can't draw. */
 export function parseMcpServerDetail(value: unknown): McpServerDetail | undefined {
-  const raw = (value as { object?: { server?: Record<string, unknown> } } | null)?.object?.server
+  const raw = wrapped(value, "server") as Record<string, unknown> | undefined
   if (typeof raw?.name !== "string" || !raw.name) return undefined
   const transport = raw.transport === "stdio" ? "stdio" : "http"
   const auth = raw.auth === "header" || raw.auth === "oauth" ? raw.auth : "none"
@@ -755,26 +761,22 @@ export function parseMcpServerDetail(value: unknown): McpServerDetail | undefine
     args: Array.isArray(raw.args) ? raw.args.filter((a): a is string => typeof a === "string") : [],
     auth,
     editable: raw.editable === true,
-    values: Array.isArray(raw.values)
-      ? raw.values
-          .map(parseMcpServerValue)
-          .filter((row): row is McpServerValue => row !== undefined)
-      : [],
+    values: namedRows(raw.values, parseMcpServerValue),
   }
 }
 
 /** One server's tools as the plugin reports them, dropping a tool Gots has no name for. */
 export function parseMcpTools(value: unknown): McpTools {
-  const raw = (value as { object?: { tools?: Record<string, unknown> } } | null)?.object?.tools
-  const rows = Array.isArray(raw?.tools) ? raw.tools : []
+  const raw = wrapped(value, "tools") as Record<string, unknown> | undefined
   return {
     cached: raw?.cached === true,
-    tools: rows.flatMap((tool): McpTool[] => {
+    tools: namedRows(raw?.tools, (tool) => {
       const row = tool as Record<string, unknown> | null
-      if (typeof row?.name !== "string" || !row.name) return []
-      return [
-        { name: row.name, description: typeof row.description === "string" ? row.description : "" },
-      ]
+      if (typeof row?.name !== "string" || !row.name) return undefined
+      return {
+        name: row.name,
+        description: typeof row.description === "string" ? row.description : "",
+      }
     }),
   }
 }
@@ -789,10 +791,7 @@ export async function getMcpServer(
   name: string,
   signal?: AbortSignal,
 ): Promise<McpServerDetail | undefined> {
-  const response = await request(`${pluginRoot(config.baseUrl)}/mcp/${encodeURIComponent(name)}`, {
-    headers: headers(config),
-    signal,
-  })
+  const response = await request(mcpPath(config, name), { headers: headers(config), signal })
   return parseMcpServerDetail(await response.json())
 }
 
@@ -808,15 +807,12 @@ export async function saveMcpServer(
   edit: McpServerEdit,
   signal?: AbortSignal,
 ): Promise<McpServer[]> {
-  const response = await request(
-    `${pluginRoot(config.baseUrl)}/mcp/${encodeURIComponent(name)}/config`,
-    {
-      method: "POST",
-      headers: headers(config),
-      body: JSON.stringify(edit),
-      signal,
-    },
-  )
+  const response = await request(mcpPath(config, name, "config"), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify(edit),
+    signal,
+  })
   return parseMcpServers(await response.json())
 }
 
@@ -831,7 +827,7 @@ export async function addCustomMcpServer(
   server: McpCustomServer,
   signal?: AbortSignal,
 ): Promise<McpServer[]> {
-  const response = await request(`${pluginRoot(config.baseUrl)}/mcp/custom`, {
+  const response = await request(mcpPath(config, "custom"), {
     method: "POST",
     headers: headers(config),
     body: JSON.stringify(server),
@@ -850,11 +846,7 @@ export async function listMcpServerTools(
   name: string,
   signal?: AbortSignal,
 ): Promise<McpTools> {
-  const response = await request(
-    `${pluginRoot(config.baseUrl)}/mcp/${encodeURIComponent(name)}/tools`,
-    { headers: headers(config), signal },
-  )
-  return parseMcpTools(await response.json())
+  return readMcpTools(config, name, "GET", signal)
 }
 
 /**
@@ -867,10 +859,21 @@ export async function probeMcpServerTools(
   name: string,
   signal?: AbortSignal,
 ): Promise<McpTools> {
-  const response = await request(
-    `${pluginRoot(config.baseUrl)}/mcp/${encodeURIComponent(name)}/tools`,
-    { method: "POST", headers: headers(config), signal },
-  )
+  return readMcpTools(config, name, "POST", signal)
+}
+
+/** One server's tools, read from Hermes's schema cache (GET) or by the probe (POST). */
+async function readMcpTools(
+  config: HermesConfig,
+  name: string,
+  method: "GET" | "POST",
+  signal?: AbortSignal,
+): Promise<McpTools> {
+  const response = await request(mcpPath(config, name, "tools"), {
+    method,
+    headers: headers(config),
+    signal,
+  })
   return parseMcpTools(await response.json())
 }
 

@@ -28,6 +28,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
+import { Segmented } from "@/components/segmented"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { Profile } from "@/lib/db"
 import { offersAccess } from "@/lib/mcp-access"
@@ -59,6 +60,7 @@ import type {
   McpServer,
   McpServerDetail,
   McpServerEdit,
+  McpServerValue,
 } from "@/lib/hermes"
 import { cn } from "@/lib/utils"
 
@@ -262,39 +264,6 @@ export function McpsTab({ profile }: { profile: Profile }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
-  )
-}
-
-/** A row of buttons where one of a few values is active, each a full-height touch target. */
-function Segmented<T extends string>({
-  value,
-  options,
-  onChange,
-  label,
-  disabled,
-}: {
-  value: T
-  options: { value: T; label: string }[]
-  onChange: (value: T) => void
-  label: string
-  disabled?: boolean
-}) {
-  return (
-    <div role="group" aria-label={label} className="flex gap-2">
-      {options.map((option) => (
-        <Button
-          key={option.value}
-          type="button"
-          variant={value === option.value ? "default" : "outline"}
-          className="h-11 flex-1 rounded-full"
-          aria-pressed={value === option.value}
-          disabled={disabled}
-          onClick={() => onChange(option.value)}
-        >
-          {option.label}
-        </Button>
-      ))}
     </div>
   )
 }
@@ -519,6 +488,213 @@ function ServerSheet({
  * alone sends nothing. Everything is drafted in this component's own state and written by one Save —
  * a config write and a reconcile per keystroke would be a rewrite per character.
  */
+/** A server's transport and the fields it needs, shared by its Config tab and the custom form.
+ *
+ * Both edit the same block — an address or a command, an authentication kind and the token, the
+ * arguments — so one component keeps the two forms from drifting apart, and the id prefix is the
+ * only thing that differs (`mcp-config` and `mcp-custom` are what the flows find their fields by).
+ */
+function ServerFields({
+  id,
+  draft,
+  onChange,
+  editable = true,
+  tokenSet = false,
+}: {
+  id: string
+  draft: ConfigDraft
+  onChange: (draft: ConfigDraft) => void
+  editable?: boolean
+  tokenSet?: boolean
+}) {
+  const field = "h-11 font-mono text-sm"
+
+  return (
+    <FieldGroup>
+      <Field>
+        <FieldLabel>Transport</FieldLabel>
+        <Segmented
+          size="lg"
+          label="Transport"
+          value={draft.transport}
+          disabled={!editable}
+          options={[
+            { id: "http", label: "HTTP" },
+            { id: "stdio", label: "stdio" },
+          ]}
+          onChange={(transport) => onChange({ ...draft, transport })}
+        />
+      </Field>
+
+      {draft.transport === "http" ? (
+        <>
+          <Field>
+            <FieldLabel htmlFor={`${id}-url`}>Address</FieldLabel>
+            <Input
+              id={`${id}-url`}
+              className={field}
+              inputMode="url"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder="https://example.com/mcp"
+              value={draft.url}
+              disabled={!editable}
+              onChange={(event) => onChange({ ...draft, url: event.target.value })}
+            />
+          </Field>
+          <Field>
+            <FieldLabel>Authentication</FieldLabel>
+            <Segmented
+              size="lg"
+              label="Authentication"
+              value={draft.auth}
+              disabled={!editable}
+              options={[
+                { id: "none", label: "None" },
+                { id: "header", label: "Header" },
+                { id: "oauth", label: "OAuth" },
+              ]}
+              onChange={(auth) => onChange({ ...draft, auth })}
+            />
+          </Field>
+          {draft.auth === "header" && (
+            <Field>
+              <FieldLabel htmlFor={`${id}-token`}>Token</FieldLabel>
+              <Input
+                id={`${id}-token`}
+                className={field}
+                type="password"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder={tokenSet ? SET_PLACEHOLDER : undefined}
+                value={draft.token}
+                disabled={!editable}
+                onChange={(event) => onChange({ ...draft, token: event.target.value })}
+              />
+            </Field>
+          )}
+        </>
+      ) : (
+        <>
+          <Field>
+            <FieldLabel htmlFor={`${id}-command`}>Command</FieldLabel>
+            <Input
+              id={`${id}-command`}
+              className={field}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder="npx"
+              value={draft.command}
+              disabled={!editable}
+              onChange={(event) => onChange({ ...draft, command: event.target.value })}
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`${id}-args`}>Arguments</FieldLabel>
+            <Input
+              id={`${id}-args`}
+              className={field}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder="-y @modelcontextprotocol/server-github"
+              value={draft.args}
+              disabled={!editable}
+              onChange={(event) => onChange({ ...draft, args: event.target.value })}
+            />
+          </Field>
+        </>
+      )}
+    </FieldGroup>
+  )
+}
+
+/** The environment values under their heading, with Add a value beneath them.
+ *
+ * A row is its environment name and nothing else: the name a block holds is the row's title, and a
+ * row the form is adding types its own above the value. Neither form describes a value — the block
+ * carries no prose — and a value the bot holds is never sent back, so its field stands empty with
+ * Set as the placeholder.
+ */
+function ValueSection({
+  id,
+  rows,
+  known,
+  editable = true,
+  onChange,
+}: {
+  id: string
+  rows: ValueDraft[]
+  known: McpServerValue[]
+  editable?: boolean
+  onChange: (rows: ValueDraft[]) => void
+}) {
+  const update = (index: number, patch: Partial<ValueDraft>) =>
+    onChange(rows.map((row, at) => (at === index ? { ...row, ...patch } : row)))
+  const held = (name: string) => Boolean(known.find((value) => value.name === name)?.set)
+
+  return (
+    <section className="flex flex-col gap-2" data-mcp-section="values">
+      <h2 className="text-sm leading-snug font-medium">Environment variables</h2>
+      {rows.length > 0 && (
+        <FieldGroup>
+          {rows.map((row, index) => (
+            <Field key={`${row.name}-${index}`} data-value={row.name}>
+              {row.named ? (
+                <Input
+                  id={`${id}-value-name-${index}`}
+                  aria-label="Name"
+                  className="h-11 font-mono text-sm"
+                  autoComplete="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  placeholder="NAME"
+                  value={row.name}
+                  disabled={!editable}
+                  onChange={(event) => update(index, { name: event.target.value })}
+                />
+              ) : (
+                <FieldLabel
+                  htmlFor={`${id}-value-${index}`}
+                  className="text-sm font-medium text-muted-foreground"
+                >
+                  {row.name}
+                </FieldLabel>
+              )}
+              <Input
+                id={`${id}-value-${index}`}
+                className="h-11"
+                type="password"
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder={held(row.name) ? SET_PLACEHOLDER : undefined}
+                value={row.value}
+                disabled={!editable}
+                onChange={(event) => update(index, { value: event.target.value })}
+              />
+            </Field>
+          ))}
+        </FieldGroup>
+      )}
+      {editable && (
+        <Button
+          type="button"
+          variant="outline"
+          className="h-11 rounded-full"
+          onClick={() => onChange([...rows, { name: "", value: "", named: true }])}
+        >
+          <PlusIcon data-icon="inline-start" />
+          Add a value
+        </Button>
+      )}
+    </section>
+  )
+}
+
 function ConfigTab({
   profile,
   server,
@@ -582,178 +758,22 @@ function ConfigTab({
 
   return (
     <div className="flex flex-col gap-4 px-4 py-4">
-      <FieldGroup>
-        <Field>
-          <FieldLabel>Transport</FieldLabel>
-          <Segmented
-            label="Transport"
-            value={draft.transport}
-            disabled={!editable}
-            options={[
-              { value: "http", label: "HTTP" },
-              { value: "stdio", label: "stdio" },
-            ]}
-            onChange={(transport) => setDraft({ ...draft, transport })}
-          />
-        </Field>
-
-        {draft.transport === "http" ? (
-          <>
-            <Field>
-              <FieldLabel htmlFor="mcp-config-url">Address</FieldLabel>
-              <Input
-                id="mcp-config-url"
-                className="h-11 font-mono text-sm"
-                inputMode="url"
-                autoCapitalize="off"
-                autoCorrect="off"
-                spellCheck={false}
-                placeholder="https://example.com/mcp"
-                value={draft.url}
-                disabled={!editable}
-                onChange={(event) => setDraft({ ...draft, url: event.target.value })}
-              />
-            </Field>
-            <Field>
-              <FieldLabel>Authentication</FieldLabel>
-              <Segmented
-                label="Authentication"
-                value={draft.auth}
-                disabled={!editable}
-                options={[
-                  { value: "none", label: "None" },
-                  { value: "header", label: "Header" },
-                  { value: "oauth", label: "OAuth" },
-                ]}
-                onChange={(auth) => setDraft({ ...draft, auth })}
-              />
-            </Field>
-            {draft.auth === "header" && (
-              <Field>
-                <FieldLabel htmlFor="mcp-config-token">Token</FieldLabel>
-                <Input
-                  id="mcp-config-token"
-                  className="h-11 font-mono text-sm"
-                  type="password"
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder={detail.auth === "header" ? SET_PLACEHOLDER : undefined}
-                  value={draft.token}
-                  disabled={!editable}
-                  onChange={(event) => setDraft({ ...draft, token: event.target.value })}
-                />
-              </Field>
-            )}
-          </>
-        ) : (
-          <>
-            <Field>
-              <FieldLabel htmlFor="mcp-config-command">Command</FieldLabel>
-              <Input
-                id="mcp-config-command"
-                className="h-11 font-mono text-sm"
-                autoCapitalize="off"
-                autoCorrect="off"
-                spellCheck={false}
-                placeholder="npx"
-                value={draft.command}
-                disabled={!editable}
-                onChange={(event) => setDraft({ ...draft, command: event.target.value })}
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="mcp-config-args">Arguments</FieldLabel>
-              <Input
-                id="mcp-config-args"
-                className="h-11 font-mono text-sm"
-                autoCapitalize="off"
-                autoCorrect="off"
-                spellCheck={false}
-                placeholder="-y @modelcontextprotocol/server-github"
-                value={draft.args}
-                disabled={!editable}
-                onChange={(event) => setDraft({ ...draft, args: event.target.value })}
-              />
-            </Field>
-          </>
-        )}
-      </FieldGroup>
+      <ServerFields
+        id="mcp-config"
+        draft={draft}
+        onChange={setDraft}
+        editable={editable}
+        tokenSet={detail.auth === "header"}
+      />
 
       {(rows.length > 0 || editable) && (
-        <section className="flex flex-col gap-2" data-mcp-section="values">
-          <h2 className="text-sm leading-snug font-medium">Environment variables</h2>
-          {rows.length > 0 && (
-            <FieldGroup>
-              {rows.map((row, index) => {
-                const known = detail.values.find((value) => value.name === row.name)
-                // The name is the whole of a row the block holds — nothing describes a value here,
-                // so there is no second line — while a row the form added types its own.
-                return (
-                  <Field key={`${row.name}-${index}`} data-value={row.name}>
-                    {row.named ? (
-                      <Input
-                        aria-label="Name"
-                        className="h-11 font-mono text-sm"
-                        autoComplete="off"
-                        autoCapitalize="off"
-                        spellCheck={false}
-                        placeholder="NAME"
-                        value={row.name}
-                        disabled={!editable}
-                        onChange={(event) =>
-                          setRows((current) =>
-                            current.map((item, at) =>
-                              at === index ? { ...item, name: event.target.value } : item,
-                            ),
-                          )
-                        }
-                      />
-                    ) : (
-                      <FieldLabel
-                        htmlFor={`mcp-config-value-${index}`}
-                        className="text-sm font-medium text-muted-foreground"
-                      >
-                        {row.name || known?.name}
-                      </FieldLabel>
-                    )}
-                    <Input
-                      id={`mcp-config-value-${index}`}
-                      className="h-11"
-                      type="password"
-                      autoComplete="off"
-                      autoCapitalize="off"
-                      autoCorrect="off"
-                      spellCheck={false}
-                      placeholder={known?.set ? SET_PLACEHOLDER : undefined}
-                      value={row.value}
-                      disabled={!editable}
-                      onChange={(event) =>
-                        setRows((current) =>
-                          current.map((item, at) =>
-                            at === index ? { ...item, value: event.target.value } : item,
-                          ),
-                        )
-                      }
-                    />
-                  </Field>
-                )
-              })}
-            </FieldGroup>
-          )}
-          {editable && (
-            <Button
-              type="button"
-              variant="outline"
-              className="h-11 rounded-full"
-              onClick={() =>
-                setRows((current) => [...current, { name: "", value: "", named: true }])
-              }
-            >
-              <PlusIcon data-icon="inline-start" />
-              Add a value
-            </Button>
-          )}
-        </section>
+        <ValueSection
+          id="mcp-config"
+          rows={rows}
+          known={detail.values}
+          editable={editable}
+          onChange={setRows}
+        />
       )}
 
       {editable && (
@@ -1160,151 +1180,12 @@ function CustomServerSheet({
                 onChange={(event) => setName(event.target.value)}
               />
             </Field>
-            <Field>
-              <FieldLabel>Transport</FieldLabel>
-              <Segmented
-                label="Transport"
-                value={draft.transport}
-                options={[
-                  { value: "http", label: "HTTP" },
-                  { value: "stdio", label: "stdio" },
-                ]}
-                onChange={(transport) => setDraft({ ...draft, transport })}
-              />
-            </Field>
-
-            {draft.transport === "http" ? (
-              <>
-                <Field>
-                  <FieldLabel htmlFor="mcp-custom-url">Address</FieldLabel>
-                  <Input
-                    id="mcp-custom-url"
-                    className="h-11 font-mono text-sm"
-                    inputMode="url"
-                    autoCapitalize="off"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    placeholder="https://example.com/mcp"
-                    value={draft.url}
-                    onChange={(event) => setDraft({ ...draft, url: event.target.value })}
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel>Authentication</FieldLabel>
-                  <Segmented
-                    label="Authentication"
-                    value={draft.auth}
-                    options={[
-                      { value: "none", label: "None" },
-                      { value: "header", label: "Header" },
-                      { value: "oauth", label: "OAuth" },
-                    ]}
-                    onChange={(auth) => setDraft({ ...draft, auth })}
-                  />
-                </Field>
-                {draft.auth === "header" && (
-                  <Field>
-                    <FieldLabel htmlFor="mcp-custom-token">Token</FieldLabel>
-                    <Input
-                      id="mcp-custom-token"
-                      className="h-11 font-mono text-sm"
-                      type="password"
-                      autoComplete="off"
-                      spellCheck={false}
-                      value={draft.token}
-                      onChange={(event) => setDraft({ ...draft, token: event.target.value })}
-                    />
-                  </Field>
-                )}
-              </>
-            ) : (
-              <>
-                <Field>
-                  <FieldLabel htmlFor="mcp-custom-command">Command</FieldLabel>
-                  <Input
-                    id="mcp-custom-command"
-                    className="h-11 font-mono text-sm"
-                    autoCapitalize="off"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    placeholder="npx"
-                    value={draft.command}
-                    onChange={(event) => setDraft({ ...draft, command: event.target.value })}
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="mcp-custom-args">Arguments</FieldLabel>
-                  <Input
-                    id="mcp-custom-args"
-                    className="h-11 font-mono text-sm"
-                    autoCapitalize="off"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    placeholder="-y @modelcontextprotocol/server-github"
-                    value={draft.args}
-                    onChange={(event) => setDraft({ ...draft, args: event.target.value })}
-                  />
-                </Field>
-              </>
-            )}
           </FieldGroup>
 
+          <ServerFields id="mcp-custom" draft={draft} onChange={setDraft} />
+
           {draft.transport === "stdio" && (
-            <section className="flex flex-col gap-2" data-mcp-section="values">
-              <h2 className="text-sm leading-snug font-medium">Environment variables</h2>
-              {rows.length > 0 && (
-                <FieldGroup>
-                  {rows.map((row, index) => (
-                    <Field key={index} data-value={row.name}>
-                      <div className="flex items-center gap-2">
-                        <Input
-                          id={`mcp-custom-value-name-${index}`}
-                          aria-label="Name"
-                          className="h-11 min-w-0 flex-1 font-mono text-sm"
-                          autoComplete="off"
-                          autoCapitalize="off"
-                          spellCheck={false}
-                          placeholder="TOKEN"
-                          value={row.name}
-                          onChange={(event) =>
-                            setRows((current) =>
-                              current.map((item, at) =>
-                                at === index ? { ...item, name: event.target.value } : item,
-                              ),
-                            )
-                          }
-                        />
-                        <Input
-                          id={`mcp-custom-value-${index}`}
-                          aria-label="Value"
-                          className="h-11 min-w-0 flex-1"
-                          type="password"
-                          autoComplete="off"
-                          spellCheck={false}
-                          value={row.value}
-                          onChange={(event) =>
-                            setRows((current) =>
-                              current.map((item, at) =>
-                                at === index ? { ...item, value: event.target.value } : item,
-                              ),
-                            )
-                          }
-                        />
-                      </div>
-                    </Field>
-                  ))}
-                </FieldGroup>
-              )}
-              <Button
-                type="button"
-                variant="outline"
-                className="h-11 rounded-full"
-                onClick={() => setRows((current) => [...current, { name: "", value: "" }])}
-              >
-                <PlusIcon data-icon="inline-start" />
-                Add a value
-              </Button>
-            </section>
+            <ValueSection id="mcp-custom" rows={rows} known={[]} onChange={setRows} />
           )}
 
           <Button

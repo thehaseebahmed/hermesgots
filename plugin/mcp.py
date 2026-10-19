@@ -90,6 +90,7 @@ so no control is offered whose every tap could only fail.
 
 from __future__ import annotations
 
+import importlib
 import re
 import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -118,159 +119,150 @@ class McpError(Exception):
         self.status = status
 
 
+# Where Hermes's own MCP built-ins live, by the name this module asks for them. One row per flow's
+# set: the sets nest, because a flow that writes answers with what it reads, and a host can have the
+# readers without the writers — which is why they are apart rather than one list. A key that names a
+# scope says which scope that flow's work runs inside: the read scope for a read, the config write
+# scope for anything that lands in the profile's config.
+_READ: Dict[str, Tuple[str, str]] = {
+    "scope": ("hermes_cli.web_server_profiles", "_config_profile_scope"),
+    "servers": ("hermes_cli.mcp_config", "_get_mcp_servers"),
+    "sources": ("tui_gateway.mcp_rpc_helpers", "server_configs_with_sources"),
+    "status": ("tools.mcp_tool_discovery", "get_mcp_status"),
+    "tokens_present": ("hermes_cli.mcp_config", "_oauth_tokens_present"),
+}
+
+# The switch's set: the read scope becomes the config write scope, and the reconcile makes a change
+# live for the bot's next turn.
+_WRITE: Dict[str, Tuple[str, str]] = {
+    **_READ,
+    "scope": ("hermes_cli.web_routers._common", "config_write_scope"),
+    "load": ("hermes_cli.config", "load_config"),
+    "save": ("hermes_cli.config", "save_config"),
+    "reconcile": ("tools.mcp_tool_discovery", "reconcile_mcp_servers_with_config"),
+}
+
+# A removal is the way ``hermes mcp remove`` takes one away: the writers, the catalogue's uninstall
+# (the config entry and the directory Hermes cloned) and the process-wide OAuth manager.
+_REMOVE: Dict[str, Tuple[str, str]] = {
+    **_WRITE,
+    "uninstall": ("hermes_cli.mcp_catalog", "uninstall_entry"),
+    "oauth": ("tools.mcp_oauth_manager", "get_manager"),
+}
+
+_CATALOGUE: Dict[str, Tuple[str, str]] = {
+    "scope": ("hermes_cli.web_server_profiles", "_config_profile_scope"),
+    "list": ("hermes_cli.mcp_catalog", "list_catalog"),
+    "installed": ("hermes_cli.mcp_catalog", "installed_servers"),
+}
+
+# Adding an entry: the writes that land it, the adding half of the catalogue — its entry read, the
+# block Hermes builds from a manifest (never ``install_entry``, which owns a terminal's prompts,
+# probe and curses checklist), the inlining that turns a non-secret value into the value the
+# manifest's ``${NAME}`` refs stand for — the validator whose own sentence the app shows, and the
+# profile's environment read and write with Hermes's guard on the names it persists.
+_INSTALL: Dict[str, Tuple[str, str]] = {
+    **_WRITE,
+    "read_scope": ("hermes_cli.web_server_profiles", "_config_profile_scope"),
+    "write_scope": ("hermes_cli.web_routers._common", "config_write_scope"),
+    "installed": ("hermes_cli.mcp_catalog", "installed_servers"),
+    "entry": ("hermes_cli.mcp_catalog", "get_entry"),
+    "card": ("hermes_cli.mcp_catalog", "card_install_config"),
+    "catalog_error": ("hermes_cli.mcp_catalog", "CatalogError"),
+    "inline": ("hermes_cli.mcp_catalog", "_inline_non_secret_value"),
+    "save_server": ("hermes_cli.mcp_config", "_save_mcp_server"),
+    "validate": ("hermes_cli.mcp_security", "validate_mcp_server_entry"),
+    "get_env": ("hermes_cli.config", "get_env_value"),
+    "save_env": ("hermes_cli.config", "save_env_value"),
+    "check_name": ("hermes_cli.config", "validate_env_var_name_for_write"),
+}
+
+# One server's block: the writers, the validator, the environment writer and its name guard — and
+# the catalogue is deliberately not among them, since a server typed in by hand has no entry.
+_CONFIGURE: Dict[str, Tuple[str, str]] = {
+    **_WRITE,
+    "read_scope": ("hermes_cli.web_server_profiles", "_config_profile_scope"),
+    "write_scope": ("hermes_cli.web_routers._common", "config_write_scope"),
+    "save_server": ("hermes_cli.mcp_config", "_save_mcp_server"),
+    "validate": ("hermes_cli.mcp_security", "validate_mcp_server_entry"),
+    "get_env": ("hermes_cli.config", "get_env_value"),
+    "save_env": ("hermes_cli.config", "save_env_value"),
+    "check_name": ("hermes_cli.config", "validate_env_var_name_for_write"),
+    "bearer": ("hermes_cli.mcp_config", "_save_bearer_auth_token"),
+}
+
+# The Tools tab: Hermes's schema cache, which connects nothing, and the probe a tap asks for.
+_TOOLS: Dict[str, Tuple[str, str]] = {
+    **_READ,
+    "read_scope": ("hermes_cli.web_server_profiles", "_config_profile_scope"),
+    "fingerprint": ("tools.mcp_schema_cache", "config_fingerprint"),
+    "cached": ("tools.mcp_schema_cache", "get_cached_entry"),
+    "from_cache": ("tools.mcp_schema_cache", "tools_from_cache_entry"),
+    "probe": ("hermes_cli.mcp_config", "_probe_single_server"),
+    "redact": ("hermes_cli.mcp_config", "redact_mcp_probe_text"),
+}
+
+# Server access: Hermes's non-blocking card start, which is newer than the read and the writers.
+_ACCESS: Dict[str, Tuple[str, str]] = {
+    "scope": ("hermes_cli.web_server_profiles", "_config_profile_scope"),
+    "servers": ("hermes_cli.mcp_config", "_get_mcp_servers"),
+    "sources": ("tui_gateway.mcp_rpc_helpers", "server_configs_with_sources"),
+    "start": ("tools.connectors.mcp_oauth", "start"),
+}
+
+
+def _load(needs: Dict[str, Tuple[str, str]], message: str = UNAVAILABLE) -> Dict[str, Any]:
+    """Hermes's own built-ins, imported at call time: a plugin loads before the CLI does.
+
+    A host whose Hermes has moved or dropped any of them raises ``McpError`` with a 501 carrying
+    ``message`` — what its route answers with, and what the feature gate tells the app.
+    """
+    found: Dict[str, Any] = {}
+    for key, (module, attribute) in needs.items():
+        try:
+            found[key] = getattr(importlib.import_module(module), attribute)
+        except (ImportError, AttributeError) as error:
+            raise McpError(message, 501) from error
+    return found
+
+
 def _hermes() -> Dict[str, Any]:
-    """Hermes's own MCP readers, imported at call time: a plugin loads before the CLI does."""
-    try:
-        from hermes_cli.mcp_config import _get_mcp_servers, _oauth_tokens_present
-        from hermes_cli.web_server_profiles import _config_profile_scope
-        from tools.mcp_tool_discovery import get_mcp_status
-        from tui_gateway.mcp_rpc_helpers import server_configs_with_sources
-    except ImportError as error:
-        raise McpError(UNAVAILABLE, 501) from error
-    return {
-        "scope": _config_profile_scope,
-        "servers": _get_mcp_servers,
-        "sources": server_configs_with_sources,
-        "status": get_mcp_status,
-        "tokens_present": _oauth_tokens_present,
-    }
+    """Hermes's own MCP readers (see ``_READ``)."""
+    return _load(_READ)
 
 
 def _hermes_write() -> Dict[str, Any]:
-    """Hermes's own MCP writers beside the readers, imported at call time.
-
-    An import of the config read and write, the config write scope (the read scope plus Hermes's
-    config-mutation lock) and the reconcile that makes a change live. They are imported separately
-    from ``_hermes``'s readers, so a host that can list servers but lacks the writers still lists
-    them; a host missing any of these raises ``McpError`` with a 501, and the app advertises no
-    switch on it.
-    """
-    try:
-        from hermes_cli.config import load_config, save_config
-        from hermes_cli.mcp_config import _get_mcp_servers, _oauth_tokens_present
-        from hermes_cli.web_routers._common import config_write_scope
-        from tools.mcp_tool_discovery import get_mcp_status, reconcile_mcp_servers_with_config
-        from tui_gateway.mcp_rpc_helpers import server_configs_with_sources
-    except ImportError as error:
-        raise McpError(UNAVAILABLE, 501) from error
-    return {
-        "scope": config_write_scope,
-        "servers": _get_mcp_servers,
-        "sources": server_configs_with_sources,
-        "status": get_mcp_status,
-        "tokens_present": _oauth_tokens_present,
-        "load": load_config,
-        "save": save_config,
-        "reconcile": reconcile_mcp_servers_with_config,
-    }
+    """The readers plus Hermes's config read and write, its write scope and the reconcile."""
+    return _load(_WRITE)
 
 
 def _hermes_remove() -> Dict[str, Any]:
-    """The writers plus the two calls a removal needs beside them, imported at call time.
-
-    A removal takes a server away the way ``hermes mcp remove`` does, so it needs two more of
-    Hermes's own: the catalogue's uninstall, which drops the configuration entry and the directory
-    Hermes cloned for it, and the process-wide OAuth manager, which drops the server's stored Server
-    access. Both are older than the writers, but a host can have the writers without them, so they
-    are their own set and ``removable`` advertises it apart from the switch.
-    """
-    hermes = _hermes_write()
-    try:
-        from hermes_cli.mcp_catalog import uninstall_entry
-        from tools.mcp_oauth_manager import get_manager
-    except ImportError as error:
-        raise McpError(UNAVAILABLE, 501) from error
-    return {**hermes, "uninstall": uninstall_entry, "oauth": get_manager}
+    """The writers plus the calls a removal needs (see ``_REMOVE``)."""
+    return _load(_REMOVE)
 
 
 def _hermes_catalogue() -> Dict[str, Any]:
-    """Hermes's own Catalogue, imported at call time: a plugin loads before the CLI does.
-
-    The entries Hermes offers (``list_catalog``) and its own read of the profile's servers
-    (``installed_servers``), a config read and so inside the profile's read scope. Nothing here
-    writes, installs or probes anything, so a missing one is a 501 rather than a failure: the app
-    then offers no Add action on that Host.
-    """
-    try:
-        from hermes_cli.mcp_catalog import installed_servers, list_catalog
-        from hermes_cli.web_server_profiles import _config_profile_scope
-    except ImportError as error:
-        raise McpError(UNAVAILABLE, 501) from error
-    return {
-        "scope": _config_profile_scope,
-        "list": list_catalog,
-        "installed": installed_servers,
-    }
+    """Hermes's own Catalogue and its read of the profile's servers (see ``_CATALOGUE``)."""
+    return _load(_CATALOGUE)
 
 
 def _hermes_install() -> Dict[str, Any]:
-    """Everything adding a Catalogue entry needs, imported at call time.
+    """Everything adding a Catalogue entry needs (see ``_INSTALL``)."""
+    return _load(_INSTALL)
 
-    The write's own set (``_hermes_write``: the config read and write, Hermes's config write scope
-    and the reconcile) plus the adding half of the Catalogue: its entry read (``get_entry``), the
-    block Hermes builds for one from its manifest (``card_install_config``, never ``install_entry``,
-    which owns a terminal's prompts, probe and curses checklist), the inlining that turns a
-    non-secret value the user gave into the value the manifest's ``${NAME}`` refs stand for
-    (``_inline_non_secret_value``), the write that refuses a suspicious configuration
-    (``_save_mcp_server``) and the validator behind that refusal
-    (``hermes_cli.mcp_security.validate_mcp_server_entry``, the one whose own sentence the app
-    shows), the profile's environment read and write for the values an entry declares secret
-    (``get_env_value``/``save_env_value``) and Hermes's own guard on what may be persisted through
-    that writer (``validate_env_var_name_for_write``).
 
-    Missing any of them is a 501, and ``addable`` is that same check for the ``info`` payload's gate
-    — its own set, because a host can list a bot's servers, switch one and browse the Catalogue
-    without being able to add one from it. The two scopes are named apart: an entry read and the
-    mark of whether the bot has it run inside the profile's own read scope, and the add itself,
-    everything it writes and its reconcile inside Hermes's config write scope.
-    """
-    hermes = _hermes_write()
-    catalogue = _hermes_catalogue()
+def _gate(needs: Dict[str, Tuple[str, str]], message: str = UNAVAILABLE) -> Optional[str]:
+    """Why a host can't offer a flow, or None when it can: whether its built-ins are all there."""
     try:
-        from hermes_cli.config import (
-            get_env_value,
-            save_env_value,
-            validate_env_var_name_for_write,
-        )
-        from hermes_cli.mcp_catalog import (
-            CatalogError,
-            _inline_non_secret_value,
-            card_install_config,
-            get_entry,
-        )
-        from hermes_cli.mcp_config import _save_mcp_server
-        from hermes_cli.mcp_security import validate_mcp_server_entry
-    except ImportError as error:
-        raise McpError(UNAVAILABLE, 501) from error
-    return {
-        # The read-side helpers the answer after an add is shaped with (see ``_all_rows``).
-        "servers": hermes["servers"],
-        "sources": hermes["sources"],
-        "status": hermes["status"],
-        "tokens_present": hermes["tokens_present"],
-        "reconcile": hermes["reconcile"],
-        "read_scope": catalogue["scope"],
-        "write_scope": hermes["scope"],
-        "installed": catalogue["installed"],
-        "entry": get_entry,
-        "card": card_install_config,
-        "catalog_error": CatalogError,
-        "inline": _inline_non_secret_value,
-        "save_server": _save_mcp_server,
-        "validate": validate_mcp_server_entry,
-        "get_env": get_env_value,
-        "save_env": save_env_value,
-        "check_name": validate_env_var_name_for_write,
-    }
+        _load(needs, message)
+    except McpError as error:
+        return str(error)
+    return None
 
 
 def available() -> Optional[str]:
     """Why this host's MCP servers can't be read from here, or None when they can."""
-    try:
-        _hermes()
-    except McpError as error:
-        return str(error)
-    return None
+    return _gate(_READ)
 
 
 def writable() -> Optional[str]:
@@ -281,11 +273,7 @@ def writable() -> Optional[str]:
     routes, where the cached status read is newer. ``info`` advertises this as its own feature, so a
     host that can list servers but not switch one offers no switch.
     """
-    try:
-        _hermes_write()
-    except McpError as error:
-        return str(error)
-    return None
+    return _gate(_WRITE)
 
 
 def removable() -> Optional[str]:
@@ -297,11 +285,7 @@ def removable() -> Optional[str]:
     its own feature too, so a bot whose plugin predates the removal offers no removal rather than one
     whose every tap is a 404.
     """
-    try:
-        _hermes_remove()
-    except McpError as error:
-        return str(error)
-    return None
+    return _gate(_REMOVE)
 
 
 def read(profile: Optional[str]) -> List[Dict[str, Any]]:
@@ -374,11 +358,7 @@ def browsable() -> Optional[str]:
     advertises this as its own feature, so that host's Bot gets no Add action rather than one whose
     every tap is a 501.
     """
-    try:
-        _hermes_catalogue()
-    except McpError as error:
-        return str(error)
-    return None
+    return _gate(_CATALOGUE)
 
 
 def addable() -> Optional[str]:
@@ -390,11 +370,7 @@ def addable() -> Optional[str]:
     browse the Catalogue with the catalogue's own built-ins alone. ``info`` advertises this as its
     own feature, so that host's Bot gets no Add action rather than one whose every tap is a 501.
     """
-    try:
-        _hermes_install()
-    except McpError as error:
-        return str(error)
-    return None
+    return _gate(_INSTALL)
 
 
 def accessible() -> Optional[str]:
@@ -404,11 +380,7 @@ def accessible() -> Optional[str]:
     newer than the read and the writers — so a host that lists its servers but predates that start
     offers no Grant access rather than a button whose every tap is a 501.
     """
-    try:
-        _hermes_access()
-    except McpError as error:
-        return str(error)
-    return None
+    return _gate(_ACCESS, UNAVAILABLE_ACCESS)
 
 
 def configurable() -> Optional[str]:
@@ -420,11 +392,7 @@ def configurable() -> Optional[str]:
     advertises it as its own feature, so a host without these offers no Config tab rather than one
     whose save could only fail.
     """
-    try:
-        _hermes_configure()
-    except McpError as error:
-        return str(error)
-    return None
+    return _gate(_CONFIGURE)
 
 
 def tool_readable() -> Optional[str]:
@@ -434,11 +402,7 @@ def tool_readable() -> Optional[str]:
     switch and edit servers without the schema cache — so the Tools tab has its own gate, and a host
     without it offers no Tools tab.
     """
-    try:
-        _hermes_tools()
-    except McpError as error:
-        return str(error)
-    return None
+    return _gate(_TOOLS)
 
 
 def detail(profile: Optional[str], name: str) -> Dict[str, Any]:
@@ -582,78 +546,13 @@ def probe_tools(profile: Optional[str], name: str) -> Dict[str, Any]:
 
 
 def _hermes_configure() -> Dict[str, Any]:
-    """The writers plus what reading and saving one server's block needs, imported at call time.
-
-    The catalogue is deliberately outside this set: a server typed in by hand has no entry, so a host
-    whose catalogue module moved still edits one. Its entry read is looked for separately, only to
-    carry the prompts a manifest writes for the values it declares — a screen without it shows the
-    environment names alone rather than losing Config.
-    """
-    readers = _hermes()
-    hermes = _hermes_write()
-    try:
-        from hermes_cli.config import (
-            get_env_value,
-            save_env_value,
-            validate_env_var_name_for_write,
-        )
-        from hermes_cli.mcp_config import _save_bearer_auth_token, _save_mcp_server
-        from hermes_cli.mcp_security import validate_mcp_server_entry
-    except ImportError as error:
-        raise McpError(UNAVAILABLE, 501) from error
-    return {
-        **hermes,
-        "read_scope": readers["scope"],
-        "write_scope": hermes["scope"],
-        "save_server": _save_mcp_server,
-        "validate": validate_mcp_server_entry,
-        "get_env": get_env_value,
-        "save_env": save_env_value,
-        "check_name": validate_env_var_name_for_write,
-        "bearer": _save_bearer_auth_token,
-        "entry": _entry_reader(),
-    }
-
-
-def _entry_reader() -> Callable[[str], Any]:
-    """Hermes's own one-entry read where this host has it, else one that answers nothing.
-
-    A value row's prompt comes from the entry a server's name matches; a host with no catalogue
-    answers None for every name, and the rows still list the environment names the block holds.
-    """
-    try:
-        from hermes_cli.mcp_catalog import get_entry
-    except ImportError:
-        return lambda _name: None
-    return get_entry
+    """The writers plus what one server's block needs (see ``_CONFIGURE``)."""
+    return _load(_CONFIGURE)
 
 
 def _hermes_tools() -> Dict[str, Any]:
-    """The readers plus Hermes's schema cache and its one-server probe, imported at call time.
-
-    Both are newer than the writers — a host can list, switch and edit servers without them — so the
-    Tools tab is advertised apart, and the probe is reached only by the tap that asks for it.
-    """
-    hermes = _hermes()
-    try:
-        from hermes_cli.mcp_config import _probe_single_server, redact_mcp_probe_text
-        from tools.mcp_schema_cache import (
-            config_fingerprint,
-            get_cached_entry,
-            tools_from_cache_entry,
-        )
-    except ImportError as error:
-        raise McpError(UNAVAILABLE, 501) from error
-    return {
-        **hermes,
-        "read_scope": hermes["scope"],
-        "fingerprint": config_fingerprint,
-        "cached": get_cached_entry,
-        "from_cache": tools_from_cache_entry,
-        "probe": _probe_single_server,
-        "redact": redact_mcp_probe_text,
-    }
-
+    """The readers plus the schema cache and the one-server probe (see ``_TOOLS``)."""
+    return _load(_TOOLS)
 
 # A value's content, when the block holds a reference rather than the value itself.
 _REFERENCE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
@@ -916,21 +815,8 @@ def deliver_access(profile: Optional[str], name: str, url: str) -> Dict[str, Any
 
 
 def _hermes_access() -> Dict[str, Any]:
-    """Hermes's own non-blocking card start, imported at call time like every other verb's."""
-    try:
-        from hermes_cli.mcp_config import _get_mcp_servers
-        from hermes_cli.web_server_profiles import _config_profile_scope
-        from tui_gateway.mcp_rpc_helpers import server_configs_with_sources
-        from tools.connectors.mcp_oauth import start
-    except ImportError as error:
-        raise McpError(UNAVAILABLE_ACCESS, 501) from error
-    return {
-        "servers": _get_mcp_servers,
-        "sources": server_configs_with_sources,
-        "scope": _config_profile_scope,
-        "start": start,
-    }
-
+    """Hermes's non-blocking card start, which is newer than the read (see ``_ACCESS``)."""
+    return _load(_ACCESS, UNAVAILABLE_ACCESS)
 
 def _held(key: Tuple[str, str]) -> Any:
     """The flow this plugin started for ``key``, if it is still running; a finished one is dropped.

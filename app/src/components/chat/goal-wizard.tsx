@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
+import { Segmented } from "@/components/segmented"
 import { type HermesConfig } from "@/lib/hermes"
 import {
   composeGoal,
@@ -82,39 +83,6 @@ function Field({
       {hint && <span className="-mt-1 text-sm text-muted-foreground">{hint}</span>}
       {children}
     </label>
-  )
-}
-
-/** A row of choices, the app's segmented control in miniature. */
-function Segmented<T extends string | number>({
-  label,
-  options,
-  value,
-  onChange,
-}: {
-  label: string
-  options: { id: T; label: string }[]
-  value: T
-  onChange: (value: T) => void
-}) {
-  return (
-    <div className="flex gap-1 rounded-full bg-muted p-1" role="radiogroup" aria-label={label}>
-      {options.map((option) => (
-        <button
-          key={String(option.id)}
-          type="button"
-          role="radio"
-          aria-checked={value === option.id}
-          onClick={() => onChange(option.id)}
-          className={cn(
-            "flex min-h-9 flex-1 items-center justify-center rounded-full px-3 text-sm font-medium text-muted-foreground transition-colors",
-            value === option.id && "bg-background text-foreground shadow-sm",
-          )}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
   )
 }
 
@@ -356,6 +324,7 @@ export function GoalWizard({
                   Reviewers look at the work in subagents of their own before it's called done.
                 </span>
                 <Segmented
+                  size="sm"
                   label="Reviewers"
                   options={REVIEWER_COUNTS.map((n) => ({
                     id: n,
@@ -367,6 +336,7 @@ export function GoalWizard({
                 {spec.reviewers > 0 && (
                   <>
                     <Segmented
+                      size="sm"
                       label="What they look at"
                       options={REVIEW_KINDS.map(({ id, label }) => ({ id, label }))}
                       value={spec.reviewKind}

@@ -405,52 +405,47 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "This Hermes version can't list skills from here.", 501)
         return web.json_response({"object": "list", "data": skills})
 
-    def mcp_read(call: Any, key: str) -> Any:
-        """A read of Hermes's own MCP machinery: the guard, this bot's profile, the answer's key.
+    def mcp_route(
+        call: Any,
+        key: str,
+        *,
+        named: bool = True,
+        unavailable: str = mcp.UNAVAILABLE,
+        body: Optional[Any] = None,
+    ) -> Any:
+        """A route into Hermes's own MCP machinery: the guard, this bot's profile, one call, one key.
 
-        The reads share this shape — and the 501 for a host whose Hermes has moved the built-in the
-        call needs — so each route declares only its call and the key its answer carries. The call
-        runs inside ``profile``'s scope and connects nothing; see mcp.py.
+        Every MCP route has this shape — the signed-in check, the profile that makes the call land
+        on this bot and no other, the 400 a body reader raises, the 501 for a host whose Hermes has
+        moved the built-in the call needs, and the answer wrapped under one key — so each declares
+        only its call, its key and what it needs from the request. The call runs on the loop
+        thread inside ``profile``'s scope, where the worker re-enters it; see mcp.py.
         """
 
         async def handler(request: "web.Request") -> "web.Response":
             denied = unauthorized(request)
             if denied is not None:
                 return denied
+            args: List[Any] = [request_profile()]
+            if named:
+                args.append(request.match_info["name"])
+            if body is not None:
+                try:
+                    args.extend(body(await json_body(request)))
+                except ValueError as error:
+                    return _error(web, str(error), 400)
             try:
-                rows = await asyncio.to_thread(call, request_profile())
+                answer = await asyncio.to_thread(call, *args)
             except mcp.McpError as error:
                 return _error(web, str(error), error.status)
             except ImportError:
-                return _error(web, mcp.UNAVAILABLE, 501)
-            return web.json_response({"object": {key: rows}})
+                return _error(web, unavailable, 501)
+            return web.json_response({"object": {key: answer}})
 
         return handler
 
-    list_mcp_servers = mcp_read(mcp.read, "servers")
-    list_mcp_catalogue = mcp_read(mcp.catalogue, "entries")
-
-    async def get_mcp_catalogue_entry(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        # One entry of Hermes's Catalogue with the values it declares, read inside this bot's
-        # profile scope: what the form that adds it is built from. Nothing is written; a host
-        # without the adding built-ins is a 501, never a 500. See mcp.py.
-        name = request.match_info["name"]
-        try:
-            entry = await asyncio.to_thread(mcp.entry, request_profile(), name)
-        except mcp.McpError as error:
-            return _error(web, str(error), error.status)
-        except ImportError:
-            return _error(web, mcp.UNAVAILABLE, 501)
-        return web.json_response({"object": {"entry": entry}})
-
-    async def install_mcp_server(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        body = await json_body(request)
+    def install_body(body: Any) -> Any:
+        """The entry's name and the values it declares, as the form that adds it sends them."""
         values = body.get("values") if body is not None else None
         if values is None:
             values = {}
@@ -463,181 +458,71 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 isinstance(key, str) and isinstance(value, str) for key, value in values.items()
             )
         ):
-            return _error(web, 'Body must be {"name": "<entry>", "values": {"NAME": "value"}}', 400)
-        # The add runs Hermes's own catalogue machinery and config write — and its environment
-        # writer for the values the entry declares secret — inside this bot's profile scope, then
-        # its reconcile, so the server is live for this bot's next turn and no other bot's config is
-        # touched; a host without those built-ins is a 501, never a 500. See mcp.py.
-        try:
-            servers = await asyncio.to_thread(mcp.install, request_profile(), body["name"], values)
-        except mcp.McpError as error:
-            return _error(web, str(error), error.status)
-        except ImportError:
-            return _error(web, mcp.UNAVAILABLE, 501)
-        return web.json_response({"object": {"servers": servers}})
+            raise ValueError('Body must be {"name": "<entry>", "values": {"NAME": "value"}}')
+        return body["name"], values
 
-    async def set_mcp_server_enabled(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        body = await json_body(request)
-        if body is None or not isinstance(body.get("enabled"), bool):
-            return _error(web, 'Body must be {"enabled": true} or {"enabled": false}', 400)
-        # The write runs Hermes's own config read and write and its reconcile inside this bot's
-        # profile scope, so it lands on the right bot and is live for its next turn; a host without
-        # those built-ins is a 501, never a 500. See mcp.py.
-        profile = request_profile()
-        name = request.match_info["name"]
-        try:
-            server = await asyncio.to_thread(mcp.set_enabled, profile, name, body["enabled"])
-        except mcp.McpError as error:
-            return _error(web, str(error), error.status)
-        except ImportError:
-            return _error(web, mcp.UNAVAILABLE, 501)
-        return web.json_response({"object": {"server": server}})
-
-    async def remove_mcp_server(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        # The removal runs Hermes's own catalogue uninstall and OAuth manager, and its reconcile,
-        # inside this bot's profile scope, so it lands on the right bot and the next turn can't use
-        # the server; a host without those built-ins is a 501, never a 500. See mcp.py.
-        profile = request_profile()
-        name = request.match_info["name"]
-        try:
-            servers = await asyncio.to_thread(mcp.remove, profile, name)
-        except mcp.McpError as error:
-            return _error(web, str(error), error.status)
-        except ImportError:
-            return _error(web, mcp.UNAVAILABLE, 501)
-        return web.json_response({"object": {"servers": servers}})
-
-    async def start_mcp_access(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        # Hermes's own non-blocking start runs inside this bot's profile scope, binding its callback
-        # receiver on this host; the flow is held so a second tap answers the same URL. A host
-        # without that built-in is a 501, never a 500. See mcp.py.
-        profile = request_profile()
-        name = request.match_info["name"]
-        try:
-            flow = await asyncio.to_thread(mcp.start_access, profile, name)
-        except mcp.McpError as error:
-            return _error(web, str(error), error.status)
-        except ImportError:
-            return _error(web, mcp.UNAVAILABLE_ACCESS, 501)
-        return web.json_response({"object": {"access": flow}})
-
-    async def deliver_mcp_access(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        body = await json_body(request)
-        if body is None or not isinstance(body.get("url"), str) or not body["url"]:
-            return _error(web, 'Body must be {"url": "<the address the browser ended on>"}', 400)
-        # The pasted redirect is checked against the running flow's own and handed to it, which
-        # enforces state and single use; the code is exchanged on this host. See mcp.py.
-        profile = request_profile()
-        name = request.match_info["name"]
-        try:
-            delivered = await asyncio.to_thread(mcp.deliver_access, profile, name, body["url"])
-        except mcp.McpError as error:
-            return _error(web, str(error), error.status)
-        except ImportError:
-            return _error(web, mcp.UNAVAILABLE_ACCESS, 501)
-        return web.json_response({"object": {"access": delivered}})
-
-    async def get_mcp_server(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        # One of the bot's servers as its Config tab is built from it: the transport and arguments,
-        # and one row per environment name with the prompt its Catalogue entry writes — never a
-        # value the bot holds, only whether it holds one. Nothing is connected or written, and a
-        # host without those built-ins is a 501. See mcp.py.
-        profile = request_profile()
-        name = request.match_info["name"]
-        try:
-            found = await asyncio.to_thread(mcp.detail, profile, name)
-        except mcp.McpError as error:
-            return _error(web, str(error), error.status)
-        except ImportError:
-            return _error(web, mcp.UNAVAILABLE, 501)
-        return web.json_response({"object": {"server": found}})
-
-    async def save_mcp_server(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        body = await json_body(request)
-        if body is None:
-            return _error(web, 'Body must describe the server\'s configuration: {"transport": ...}', 400)
-        # The save rewrites the profile's own block through Hermes's validator and writer, and its
-        # reconcile, all inside this bot's profile scope; a server a Hermes plugin provides is
-        # refused there, and a host without those built-ins is a 501. See mcp.py.
-        profile = request_profile()
-        name = request.match_info["name"]
-        try:
-            servers = await asyncio.to_thread(mcp.edit, profile, name, body)
-        except mcp.McpError as error:
-            return _error(web, str(error), error.status)
-        except ImportError:
-            return _error(web, mcp.UNAVAILABLE, 501)
-        return web.json_response({"object": {"servers": servers}})
-
-    async def add_custom_mcp_server(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        body = await json_body(request)
+    def custom_body(body: Any) -> Any:
+        """A server the Catalogue doesn't offer, written the way an add from it is."""
         if body is None or not isinstance(body.get("name"), str) or not body["name"]:
-            return _error(web, 'Body must be {"name": "<server>", "url": ... } or {..., "command": ...}', 400)
-        # A server the Catalogue doesn't offer, written the way an add from the Catalogue is — the
-        # validator, Hermes's own writer, the environment writer for its values, the reconcile — all
-        # inside this bot's profile scope. A host without those built-ins is a 501. See mcp.py.
-        try:
-            servers = await asyncio.to_thread(mcp.custom, request_profile(), body)
-        except mcp.McpError as error:
-            return _error(web, str(error), error.status)
-        except ImportError:
-            return _error(web, mcp.UNAVAILABLE, 501)
-        return web.json_response({"object": {"servers": servers}})
+            raise ValueError(
+                'Body must be {"name": "<server>", "url": ... } or {..., "command": ...}'
+            )
+        return (body,)
 
-    async def read_mcp_tools(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        # Hermes's own schema cache, which is what a registration wrote: no server is connected, so
-        # opening a server's Tools tab cannot spawn one. Empty with `cached` false for a server that
-        # has never connected; the probe below is the tap that asks the server itself. See mcp.py.
-        profile = request_profile()
-        name = request.match_info["name"]
-        try:
-            found = await asyncio.to_thread(mcp.tools, profile, name)
-        except mcp.McpError as error:
-            return _error(web, str(error), error.status)
-        except ImportError:
-            return _error(web, mcp.UNAVAILABLE, 501)
-        return web.json_response({"object": {"tools": found}})
+    def server_body(body: Any) -> Any:
+        """The block a save rewrites, whole: the transport, the arguments and the values."""
+        if body is None:
+            raise ValueError(
+                'Body must describe the server\'s configuration: {"transport": ...}'
+            )
+        return (body,)
 
-    async def probe_mcp_tools(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        # The one read that reaches the server: Hermes's own single-server probe connects it, lists
-        # what it offers and disconnects, without registering anything. Only a tap asks for it, which
-        # is why it is a POST — and a host without that built-in is a 501. See mcp.py.
-        profile = request_profile()
-        name = request.match_info["name"]
-        try:
-            found = await asyncio.to_thread(mcp.probe_tools, profile, name)
-        except mcp.McpError as error:
-            return _error(web, str(error), error.status)
-        except ImportError:
-            return _error(web, mcp.UNAVAILABLE, 501)
-        return web.json_response({"object": {"tools": found}})
+    def enabled_body(body: Any) -> Any:
+        """The switch's new position, which is all a toggle says."""
+        if body is None or not isinstance(body.get("enabled"), bool):
+            raise ValueError('Body must be {"enabled": true} or {"enabled": false}')
+        return (body["enabled"],)
+
+    def access_body(body: Any) -> Any:
+        """The address the browser ended on, pasted back from the phone that followed the flow."""
+        if body is None or not isinstance(body.get("url"), str) or not body["url"]:
+            raise ValueError('Body must be {"url": "<the address the browser ended on>"}')
+        return (body["url"],)
+
+    # The bot's servers and Hermes's Catalogue: what the tab's rows are built from. Neither connects
+    # anything nor writes.
+    list_mcp_servers = mcp_route(mcp.read, "servers", named=False)
+    list_mcp_catalogue = mcp_route(mcp.catalogue, "entries", named=False)
+
+    # One entry of the Catalogue with the values it declares: what the form that adds it is built
+    # from. Nothing is written.
+    get_mcp_catalogue_entry = mcp_route(mcp.entry, "entry")
+
+    # An add runs Hermes's own catalogue machinery and config write — and its environment writer for
+    # the values the entry declares secret — then its reconcile, so the server is live for this
+    # bot's next turn and no other bot's config is touched.
+    install_mcp_server = mcp_route(mcp.install, "servers", named=False, body=install_body)
+    add_custom_mcp_server = mcp_route(mcp.custom, "servers", named=False, body=custom_body)
+
+    # A toggle, a removal, a save and the Server access flow all write this bot's own config through
+    # Hermes's writer and reconcile; a server a Hermes plugin provides is refused there.
+    set_mcp_server_enabled = mcp_route(mcp.set_enabled, "server", body=enabled_body)
+    remove_mcp_server = mcp_route(mcp.remove, "servers")
+    save_mcp_server = mcp_route(mcp.edit, "servers", body=server_body)
+    start_mcp_access = mcp_route(mcp.start_access, "access", unavailable=mcp.UNAVAILABLE_ACCESS)
+    deliver_mcp_access = mcp_route(
+        mcp.deliver_access,
+        "access",
+        unavailable=mcp.UNAVAILABLE_ACCESS,
+        body=access_body,
+    )
+
+    # Config's block and Tools' cache: reads of what a registration wrote, connecting nothing, so
+    # opening a server's sheet cannot spawn it. Only the probe reaches the server — one connect,
+    # list and disconnect — which is why it is the tap's POST.
+    get_mcp_server = mcp_route(mcp.detail, "server")
+    read_mcp_tools = mcp_route(mcp.tools, "tools")
+    probe_mcp_tools = mcp_route(mcp.probe_tools, "tools")
 
     async def set_fallbacks(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)

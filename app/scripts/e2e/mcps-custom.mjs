@@ -102,7 +102,7 @@ const run = async ({ page, profileId, shot, until }) => {
     // argv, so the quoted path with a space in it is one argument; the value goes under the name it
     // was typed with, which is the name its entry in the bot's environment carries.
     const TOKEN = "acme-not-a-real-token"
-    await page.getByRole("button", { name: "stdio", exact: true }).click()
+    await page.getByRole("radio", { name: "stdio", exact: true }).click()
     await nameField().fill("local")
     await page.locator("#mcp-custom-command").fill("npx")
     await page.locator("#mcp-custom-args").fill('-y "/srv/my servers/mcp"')
