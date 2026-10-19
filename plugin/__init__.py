@@ -291,6 +291,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "sync_delegation",
                     "host_model",
                     "fallbacks",
+                    # The model the profile's delegated tasks run on, the host's own
+                    # `delegation.model` (host_model.py); a plugin without it shows no picker.
+                    "delegation_model",
                     "queue",
                     "dictation",
                     "usage",
@@ -545,6 +548,49 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except ImportError:
             return _error(web, "This Hermes version can't switch models from here.", 501)
         return web.json_response({"object": "memento.fallbacks", "fallbacks": fallbacks})
+
+    async def get_delegation(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        config_path = host_config_path()
+        scope = profile_scope()
+
+        def run() -> Optional[Dict[str, str]]:
+            with scope():
+                return host_model.read_delegation(config_path)
+
+        try:
+            pick = await asyncio.to_thread(run)
+        except ImportError:
+            return _error(web, "This Hermes version can't read models from here.", 501)
+        return web.json_response({"object": "memento.delegation", "delegation": pick})
+
+    async def set_delegation(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            pick = host_model.clean_delegation(await json_body(request))
+        except ValueError as error:
+            return _error(web, str(error), 400)
+
+        # Both on the loop thread, where the request's profile scope is visible: the worker
+        # re-enters it, so the pick is checked against this profile's credentials.
+        config_path = host_config_path()
+        scope = profile_scope()
+
+        def run() -> Optional[Dict[str, str]]:
+            with scope():
+                return host_model.set_delegation(config_path, pick)
+
+        try:
+            saved = await asyncio.to_thread(run)
+        except ValueError as error:
+            return _error(web, str(error), 400)
+        except ImportError:
+            return _error(web, "This Hermes version can't switch models from here.", 501)
+        return web.json_response({"object": "memento.delegation", "delegation": saved})
 
     def profile_scope():
         # The API server's own per-profile scope (home and secrets) for the request being served, or
@@ -1270,6 +1316,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/projects/{{project_id}}/afk", post_project_afk)
     app.router.add_post(f"{PREFIX}/model", set_host_model)
     app.router.add_get(f"{PREFIX}/fallbacks", get_fallbacks)
+    app.router.add_get(f"{PREFIX}/delegation", get_delegation)
     app.router.add_get(f"{PREFIX}/skills", list_skills)
     app.router.add_get(f"{PREFIX}/mcp", list_mcp_servers)
     app.router.add_get(f"{PREFIX}/mcp/catalogue", list_mcp_catalogue)
@@ -1287,6 +1334,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/mcp/{{name}}", get_mcp_server)
     app.router.add_delete(f"{PREFIX}/mcp/{{name}}", remove_mcp_server)
     app.router.add_post(f"{PREFIX}/fallbacks", set_fallbacks)
+    app.router.add_post(f"{PREFIX}/delegation", set_delegation)
     app.router.add_get(f"{PREFIX}/github", github_status)
     app.router.add_get(f"{PREFIX}/github/repos", github_repos)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/label", label_session)

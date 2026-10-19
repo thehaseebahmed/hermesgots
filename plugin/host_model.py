@@ -14,6 +14,12 @@ so Hermes tries them, in order, on every surface of the profile when a model req
 gateway re-reads the chain from the profile's file for the next agent it builds, and a chat that is
 already open adopts the edit. The legacy single ``fallback_model`` key is dropped on a write, as
 ``hermes fallback`` does, so the chain has one source of truth.
+
+A bot's second-opinion model is the host's own delegation model — Hermes's ``delegation.model`` and
+``delegation.provider``, which every ``delegate_task`` child runs on. Nothing set there means a
+child inherits the bot's own model, which is how the app's picker reads an empty answer. The app
+writes it as a pick the way it writes a fallback: Hermes checks it, and only those two keys of the
+section move, so a budget, a concurrency or a hand-written endpoint stays.
 """
 
 from __future__ import annotations
@@ -29,6 +35,10 @@ FALLBACK_KEY = "fallback_providers"
 # The chain's older single-entry spelling. Hermes still reads it, so a write drops it: one source of
 # truth, as ``hermes fallback`` keeps.
 LEGACY_FALLBACK_KEY = "fallback_model"
+# Where Hermes's delegated tasks get their model, in the ``delegation`` section. Unset means a child
+# inherits the bot's own model, which is the picker's own default.
+DELEGATION_PROVIDER_KEY = "delegation.provider"
+DELEGATION_MODEL_KEY = "delegation.model"
 
 
 def clean(body: Any) -> tuple[str, str]:
@@ -50,6 +60,21 @@ def clean_fallbacks(body: Any) -> List[Dict[str, str]]:
     if not isinstance(entries, list):
         raise ValueError("fallbacks must be a list")
     return [_entry(entry, number) for number, entry in enumerate(entries, start=1)]
+
+
+def clean_delegation(body: Any) -> Optional[Dict[str, str]]:
+    """``{"provider", "model"}`` from a ``{"delegation": {...}}`` body, or None for a body that
+    clears it — ``{"delegation": null}``, or no key at all — so every delegated task inherits the
+    bot's own model. ValueError names what an entry is missing."""
+    if not isinstance(body, dict):
+        raise ValueError("Body must be a JSON object")
+    value = body.get("delegation")
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("delegation must be an object")
+    provider, model = _pair(value, "Delegation needs a provider", "Delegation needs a model")
+    return {"provider": provider, "model": model}
 
 
 def _entry(value: Any, number: int) -> Dict[str, str]:
@@ -153,6 +178,57 @@ def read_fallbacks(config_path: Path) -> List[Dict[str, str]]:
 
     named = [_named(one) for one in _chain_of(_load_gateway_config(config_path=config_path) or {})]
     return [one for one in named if one["provider"] and one["model"]]
+
+
+def set_delegation(config_path: Path, pick: Optional[Dict[str, str]]) -> Optional[Dict[str, str]]:
+    """Make ``pick`` the model the profile's delegated tasks run on in ``config_path``; with None,
+    clear it so a child inherits the bot's own model. A pick the profile doesn't already hold is
+    checked by Hermes the way the main model is, and a refusal is a ValueError carrying its reason.
+    Only the section's two keys move, so its other settings and the rest of the file stay."""
+    from gateway.run import _load_gateway_config
+    from utils import atomic_roundtrip_yaml_update
+
+    cfg = _load_gateway_config(config_path=config_path) or {}
+    if pick is None:
+        # ``None`` removes each key: a bot that inherits keeps nothing behind it, and a section left
+        # with a budget or an endpoint is still a section it uses.
+        atomic_roundtrip_yaml_update(config_path, DELEGATION_MODEL_KEY, None)
+        atomic_roundtrip_yaml_update(config_path, DELEGATION_PROVIDER_KEY, None)
+        return None
+    kept = _delegation_of(cfg)
+    if kept == pick:
+        return kept
+    routed = _switch(cfg, pick["provider"], pick["model"])
+    resolved = {"provider": routed.target_provider, "model": routed.new_model}
+    atomic_roundtrip_yaml_update(config_path, DELEGATION_PROVIDER_KEY, resolved["provider"])
+    atomic_roundtrip_yaml_update(config_path, DELEGATION_MODEL_KEY, resolved["model"])
+    return resolved
+
+
+def read_delegation(config_path: Path) -> Optional[Dict[str, str]]:
+    """The model the profile's delegated tasks run on, as the bot's settings read it back, or None
+    when they inherit the bot's own. Provider and model only, so an endpoint or a credential a
+    hand-written section carries never reaches the app."""
+    from gateway.run import _load_gateway_config
+
+    return _delegation_of(_load_gateway_config(config_path=config_path) or {})
+
+
+def _delegation_of(cfg: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    """The section's pick, as the bot's settings name it. A model on its own is a child running
+    that model where the bot's own credentials point (Hermes's rule), so it comes back under the
+    main model's provider; nothing set at all is None."""
+    section = cfg.get("delegation")
+    if not isinstance(section, dict):
+        return None
+    model = str(section.get("model") or "").strip()
+    if not model:
+        return None
+    main = cfg.get("model") if isinstance(cfg.get("model"), dict) else {}
+    provider = str(section.get("provider") or "").strip()
+    if not provider or provider == "auto":
+        provider = str(main.get("provider") or "").strip()
+    return {"provider": provider, "model": model} if provider else None
 
 
 def _chain_of(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
