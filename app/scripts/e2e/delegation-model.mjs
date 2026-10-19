@@ -1,6 +1,5 @@
 // A bot's second-opinion model: its settings screen records it as the host's delegation model,
-// greys the field out while the write is on its way, clears it back to the bot's own model, and
-// links each of the bot's projects beside it.
+// greys the field out while the write is on its way, and clears it back to the bot's own model.
 import { app, assert, flow, mock, pass } from "./lib.mjs"
 
 await flow("delegation-model", async ({ page, profileId, until, shot, held }) => {
@@ -74,14 +73,7 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
   assert.equal(writes.length, 2, "the clear is a write of its own")
   await shot("cleared")
 
-  // The bot's projects are beside it as links, one tap from the switch the user is thinking about.
-  const link = page.getByRole("link", { name: "Gots" })
-  assert.equal(await link.getAttribute("href"), `/projects/${profileId}/p_1a2b3c4d`)
-  await page.getByRole("link", { name: "Maze" }).waitFor()
-  await shot("projects")
-
-  // A host whose plugin can't record a delegation model shows no field at all — and its projects
-  // are still one tap away.
+  // A host whose plugin can't record a delegation model shows no field at all.
   await page.route("**/api/plugins/memento/info", async (route) => {
     const info = await (await route.fetch()).json()
     await route.fulfill({
@@ -89,15 +81,10 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
     })
   })
   await page.reload()
-  await page.getByRole("link", { name: "Gots" }).waitFor({ timeout: 15_000 })
-  assert.equal(await page.locator("#delegation-model").count(), 0, "no picker without the feature")
+  await page.getByRole("group", { name: "Fallback models" }).waitFor({ timeout: 15_000 })
+  assert.equal(await opener.count(), 0, "no picker without the feature")
   assert.equal(await field.count(), 0, "and no field around it")
   await shot("no-picker")
-  await page.unroute("**/api/plugins/memento/info")
-  await page.reload()
-  await opener.waitFor({ timeout: 15_000 })
 
-  await page.getByRole("link", { name: "Gots" }).click()
-  await page.waitForURL(`**/projects/${profileId}/p_1a2b3c4d`)
-  pass("the host recorded the second-opinion model, cleared it, and the projects open from here")
+  pass("the host recorded the second-opinion model, cleared it, and offered no field without it")
 })

@@ -1574,13 +1574,9 @@ function toProject(raw: unknown): HermesProject | null {
 }
 
 /** The profile's Hermes Projects. A 404 (or a CORS-blocked one) means no plugin, or an older one. */
-export async function listProjects(
-  config: HermesConfig,
-  signal?: AbortSignal,
-): Promise<HermesProject[]> {
+export async function listProjects(config: HermesConfig): Promise<HermesProject[]> {
   const response = await request(`${pluginRoot(config.baseUrl)}/projects`, {
     headers: headers(config),
-    signal,
   })
   const body = await response.json()
   const projects: unknown[] = Array.isArray(body?.projects) ? body.projects : []
