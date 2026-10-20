@@ -2,7 +2,7 @@ import unittest
 from typing import Any, Dict
 
 from plugin import pipeline, prompt_builder
-from plugin.tests._helpers import staged as staged_record
+from plugin.tests._helpers import placed, preset, staged as staged_record
 
 TASK: Dict[str, Any] = {
     "repo": "mock-user/memento",
@@ -118,7 +118,7 @@ class BuildStageTests(unittest.TestCase):
 
     def test_it_names_the_skill_the_build_follows(self) -> None:
         text = self.text()
-        self.assertIn('built by your skill "plan"', text)
+        self.assertIn('follows your skill "plan"', text)
         self.assertIn('skill_view(name="plan")', text)
         self.assertIn("A skill governs method only", text, "no skill unlocks the gate")
 
@@ -137,20 +137,22 @@ class BuildStageTests(unittest.TestCase):
         self.assertIn("/trees/afk-265", text)
 
 
-class CritiquePromptTests(unittest.TestCase):
-    """What the critique run is told: the work it reviews, by the skills chosen, and that it ships."""
+class StagePromptTests(unittest.TestCase):
+    """What a stage's run is told, in the words of the stage it is in: its name, its skills in order,
+    and what the round before it failed on."""
 
-    RECORD = {
+    REVIEW = {
         **RECORD,
         "pipeline": staged_record(pipeline.CRITIQUE, steps=("code-review", "log-triage")),
     }
 
-    def text(self, base: str = "main") -> str:
-        return prompt_builder.critique_prompt(self.RECORD, TASK, base)
+    def text(self, pipeline_record=None, base: str = "main") -> str:
+        record = dict(self.REVIEW, pipeline=pipeline_record or self.REVIEW["pipeline"])
+        return prompt_builder.stage_prompt(record, TASK, base)
 
     def test_it_reviews_what_the_build_did(self) -> None:
         text = self.text()
-        self.assertIn("Critique stage", text)
+        self.assertIn("Review stage", text)
         self.assertIn("reviewing the build of mock-user/memento#265", text)
         self.assertIn(TASK["url"], text, "the issue is where the reviewer reads the spec")
         self.assertIn("/trees/afk-265", text)
@@ -159,71 +161,20 @@ class CritiquePromptTests(unittest.TestCase):
         self.assertIn("The work is against the base branch main.", self.text())
         self.assertNotIn(
             "The work is against the base branch",
-            prompt_builder.critique_prompt(self.RECORD, TASK, None),
+            self.text(base=None),
             "an unknown base is left out rather than guessed",
         )
 
-    def test_it_delegates_one_reviewer_per_skill(self) -> None:
+    def test_a_stage_that_does_not_ship_is_not_told_the_base(self) -> None:
+        build = staged_record(pipeline.BUILD)
+        self.assertNotIn("base branch", self.text(build), "only the review opens the pull request")
+
+    def test_it_applies_its_skills_in_order_rather_than_delegating_them(self) -> None:
         text = self.text()
-        self.assertIn('"code-review"', text)
-        self.assertIn('"log-triage"', text)
-        self.assertIn("delegate_task", text)
-        self.assertIn("one reviewer per skill", text)
-
-    def test_one_skill_asks_for_one_reviewer(self) -> None:
-        record = {**RECORD, "pipeline": staged_record(pipeline.CRITIQUE, build=None)}
-        text = prompt_builder.critique_prompt(record, TASK, "main")
-        self.assertIn("The critique skill, with the brief its reviewer is handed", text)
-        self.assertIn("one reviewer per skill", text)
-
-    def test_each_reviewer_is_briefed_with_its_skill_the_issue_the_base_and_the_worktree(
-        self,
-    ) -> None:
-        briefs = prompt_builder.critique_briefs(self.RECORD, TASK, "main")
-        self.assertEqual(len(briefs), 2, "a skill each, so two lenses rather than one review")
-        for name, brief in zip(("code-review", "log-triage"), briefs):
-            self.assertIn(f'"{name}"', brief, "the reviewer knows which lens it is")
-            self.assertIn(f'skill_view(name="{name}")', brief, "and loads that skill itself")
-            self.assertIn(f"mock-user/memento#265 ({TASK['url']})", brief)
-            self.assertIn("base main", brief, "the branch the pull request is against")
-            self.assertIn("/trees/afk-265", brief, "the worktree the review reads")
-            self.assertIn("You report rather than implement", brief, "it speaks to the reviewer")
-            self.assertIn("change nothing, commit nothing and ship nothing", brief)
-            self.assertNotIn("'ship'", brief, "a reviewer never ships")
-        self.assertNotEqual(briefs[0], briefs[1], "one brief each, not one brief twice")
-
-    def test_the_prompt_hands_over_every_brief(self) -> None:
-        text = self.text()
-        for brief in prompt_builder.critique_briefs(self.RECORD, TASK, "main"):
-            self.assertIn(brief, text)
-
-    def test_a_brief_without_a_base_leaves_it_out(self) -> None:
-        for brief in prompt_builder.critique_briefs(self.RECORD, TASK, None):
-            self.assertNotIn("base ", brief, "an unknown base is left out rather than guessed")
-            self.assertIn("/trees/afk-265", brief)
-
-    def test_a_multi_repo_brief_names_every_worktree(self) -> None:
-        record = {
-            **RECORD,
-            "repos": [
-                *RECORD["repos"],
-                {
-                    "name": "mock-user/api",
-                    "repo_root": "/api",
-                    "path": "/trees/api-265",
-                    "branch": "hermes/afk-265",
-                },
-            ],
-        }
-        for brief in prompt_builder.critique_briefs(record, TASK, "main"):
-            self.assertIn("/trees/afk-265 and /trees/api-265", brief)
-
-    def test_a_skill_that_prescribes_its_own_arrangement_gets_it(self) -> None:
-        text = self.text()
-        self.assertIn("prescribes its own arrangement", text)
-        self.assertIn("wins over its brief", text)
-        self.assertIn("rather than wrapping it in a single reviewer", text)
-        self.assertIn("reports rather than implements all the same", text)
+        self.assertIn('"code-review", "log-triage"', text, "the stage's steps, in the order it has them")
+        self.assertIn("Load each with skill_view", text)
+        self.assertNotIn("delegate_task", text, "a stage's steps are lenses in one run (ADR 0020)")
+        self.assertNotIn("one reviewer per skill", text)
 
     def test_a_skill_shapes_method_only(self) -> None:
         text = self.text()
@@ -233,12 +184,9 @@ class CritiquePromptTests(unittest.TestCase):
         self.assertIn("shipped last", text)
 
     def test_the_guard_is_the_same_one_the_build_is_given(self) -> None:
-        build = prompt_builder.afk_prompt(
-            {**RECORD, "pipeline": staged_record()}, TASK
-        )
-        self.assertIn(prompt_builder._SKILL_SCOPE, build, "one guard, both stages")
+        build = prompt_builder.afk_prompt({**RECORD, "pipeline": staged_record()}, TASK)
+        self.assertIn(prompt_builder._SKILL_SCOPE, build, "one guard, every stage")
         self.assertIn(prompt_builder._SKILL_SCOPE, self.text())
-        self.assertEqual(self.text().count("governs method only"), 1, "stated once, not twice")
 
     def test_it_fixes_once_and_ships_last(self) -> None:
         text = self.text()
@@ -246,14 +194,56 @@ class CritiquePromptTests(unittest.TestCase):
         self.assertIn("there is no second review", text, "the user's read is the next pass")
         self.assertIn("action 'ship'", text)
         self.assertIn("The pull request stays a draft", text)
-        self.assertIn("what the critique found and what changed", text)
+        self.assertIn("what the review found and what changed", text)
         self.assertIn("Leave the Closes line to the tool", text)
 
-    def test_its_input_names_what_it_reviews(self) -> None:
+    def test_its_input_names_the_stage_and_the_issue(self) -> None:
         self.assertEqual(
-            prompt_builder.critique_input(TASK),
-            f"Critique the build of #265 ({TASK['url']})",
+            prompt_builder.stage_input(TASK, "Review"),
+            f"Review #265 ({TASK['url']})",
         )
+        self.assertEqual(
+            prompt_builder.stage_input(TASK, None),
+            f"Continue #265 ({TASK['url']})",
+            "a task past its last stage still names the issue",
+        )
+
+    def test_a_summary_stage_wraps_up_and_ships_nothing(self) -> None:
+        summary = staged_record(pipeline.CRITIQUE)
+        summary["stage"] = len(summary["stages"]) - 1 if len(summary["stages"]) > 3 else 3
+        record = prompt_builder.stage_prompt(
+            {**RECORD, "pipeline": self.summary()}, TASK, "main"
+        )
+        self.assertIn("Summary stage", record)
+        self.assertIn("wrapping up", record)
+        self.assertIn("write the wrap-up", record)
+        self.assertIn("Don't ship", record)
+
+    def summary(self):
+        """The preset's record, in its Summary stage, with a skill so its run exists."""
+        record = pipeline.start(preset("preset:staged"))
+        record["stage"] = 3
+        record["stages"][3]["steps"] = ["weekly-review"]
+        record["stages"][3]["rounds"] = [pipeline.new_round()]
+        return pipeline.read(record)
+
+    def test_one_run_implements_gates_and_ships_in_the_same_run(self) -> None:
+        once = pipeline.start(preset("preset:one-run"))
+        text = prompt_builder.stage_prompt({**RECORD, "pipeline": once}, TASK)
+        self.assertIn("worked in one run", text)
+        self.assertIn("afk_gate", text)
+        self.assertIn("action 'ship'", text)
+        self.assertNotIn("The shipping step above is not yours", text)
+
+    def test_a_loops_next_round_is_told_the_command_that_failed(self) -> None:
+        failing = placed(preset("preset:loop"), 0, gate={"commands": [{"command": "pnpm test", "code": 1}]})
+        record = pipeline.moved(failing, pipeline.advance(failing, worktree=[{"changed": 0, "ahead": 1}]))
+        text = prompt_builder.stage_prompt({**RECORD, "pipeline": record}, TASK)
+        self.assertIn("The round before this one failed its gate: pnpm test exited 1.", text)
+        self.assertIn("run the gate again", text)
+
+    def test_a_first_round_is_told_nothing_failed(self) -> None:
+        self.assertNotIn("The round before this one", self.text(staged_record()))
 
 
 if __name__ == "__main__":

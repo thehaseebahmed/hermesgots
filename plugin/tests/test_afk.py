@@ -47,7 +47,7 @@ from plugin.afk import (
 )
 from plugin.store import connect, db_path
 from plugin.tasks import CLAIM_LABEL, READY_LABEL
-from plugin.tests._helpers import issue_row, staged as staged_record, stub_projects_db
+from plugin.tests._helpers import issue_row, placed, preset, staged as staged_record, stub_projects_db
 
 
 def folder(path: str) -> SimpleNamespace:
@@ -1356,7 +1356,7 @@ class WakeTests(unittest.TestCase):
 
 
 class StagedRunTests(AfkSessionTests):
-    """A staged task's run end: the gate's verdict, the critique it starts, and where it stalls."""
+    """A staged task's run end: the gate's verdict, the stage it starts, and where it stalls."""
 
     CLEAN = [{"name": "mock-user/memento", "changed": 0, "ahead": 2}]
 
@@ -1380,34 +1380,35 @@ class StagedRunTests(AfkSessionTests):
     SHIPPED = {"number": 265}
 
     def ended(self, tree: Any = None, shipped: Any = SHIPPED, **kwargs: Any) -> Any:
-        """The run's end, with the worktree the host measured and GitHub's answer about the pull request."""
+        """The run's end, with the worktree the host measured and GitHub's pull request answer."""
         answer = (
             patch("plugin.github.pull_request", side_effect=shipped)
             if isinstance(shipped, Exception)
             else patch("plugin.github.pull_request", return_value=shipped)
         )
         with patch.object(afk.ship, "status", return_value=self.CLEAN if tree is None else tree):
-            with patch.object(afk, "_critique") as critique:
+            with patch.object(afk, "_start_stage") as started:
                 with answer:
                     with patch("plugin.sessions._paths", return_value=(db_path(self.home), self.home)):
                         afk.after_run(session_id=self.SESSION, **kwargs)
-        return critique
+        return started
 
-    def test_a_build_that_passed_its_gate_is_critiqued_on_its_own_session(self) -> None:
+    def test_a_build_that_passed_its_gate_starts_its_next_stage_on_the_same_session(self) -> None:
         self.gated(0, 0)
-        critique = self.ended(completed=True)
-        critique.assert_called_once()
-        home, record = critique.call_args[0]
+        started = self.ended(completed=True)
+        started.assert_called_once()
+        home, record = started.call_args[0]
         self.assertEqual(home, self.home)
         self.assertEqual(record["session_id"], self.SESSION, "the same session, not another")
+        self.assertEqual(pipeline.kind(record["pipeline"]), pipeline.CRITIQUE)
         self.assertEqual(pipeline.kind(self.pipeline()), pipeline.CRITIQUE)
         self.assertEqual(self.shown()["task"], self.task, "the claim stays: the task isn't finished")
         self.assertEqual(self.writes, [], "nothing is written to GitHub between the stages")
 
     def test_a_gate_command_that_failed_stalls_the_task_with_the_command_named(self) -> None:
         self.gated(0, 2)
-        critique = self.ended(completed=True)
-        critique.assert_not_called()
+        started = self.ended(completed=True)
+        started.assert_not_called()
         self.assertEqual(
             afk.stalled(self.home)[self.SESSION]["reason"],
             "The gate failed: step-1 exited 2.",
@@ -1418,24 +1419,24 @@ class StagedRunTests(AfkSessionTests):
 
     def test_a_build_that_never_ran_the_gate_stalls(self) -> None:
         self.stage()
-        critique = self.ended(completed=True)
-        critique.assert_not_called()
+        started = self.ended(completed=True)
+        started.assert_not_called()
         self.assertEqual(afk.stalled(self.home)[self.SESSION]["reason"], pipeline.NO_GATE)
 
     def test_a_tree_left_uncommitted_stalls(self) -> None:
         self.gated(0)
-        critique = self.ended(completed=True, tree=[{"changed": 2, "ahead": 0}])
-        critique.assert_not_called()
+        started = self.ended(completed=True, tree=[{"changed": 2, "ahead": 0}])
+        started.assert_not_called()
         self.assertEqual(afk.stalled(self.home)[self.SESSION]["reason"], pipeline.UNCOMMITTED)
 
     def test_a_build_that_left_no_commits_stalls(self) -> None:
         self.gated(0)
         # The session's worktree doesn't exist here, which is what no readable tree looks like too.
-        critique = self.ended(completed=True, tree=[])
-        critique.assert_not_called()
+        started = self.ended(completed=True, tree=[])
+        started.assert_not_called()
         self.assertEqual(afk.stalled(self.home)[self.SESSION]["reason"], pipeline.NO_COMMITS)
 
-    def test_a_critique_that_finished_lets_go_of_the_task(self) -> None:
+    def test_a_review_that_finished_lets_go_of_the_task(self) -> None:
         self.stage(pipeline.CRITIQUE)
         with patch.object(afk, "wake") as wake:
             self.ended(completed=True)
@@ -1444,39 +1445,40 @@ class StagedRunTests(AfkSessionTests):
         self.assertEqual(pipeline.kind(self.pipeline()), pipeline.DONE, "and the record says how it ended")
         wake.assert_called_once()
 
-    def test_a_stage_this_build_cannot_run_stalls_rather_than_frees_the_task(self) -> None:
+    def test_a_workflow_whose_next_stage_is_a_build_starts_that_one(self) -> None:
         record = pipeline.start(
             {
                 "id": "wf-two-runs",
-                "name": "Build · Test · Review",
+                "name": "Build · Test · Polish · Review",
                 "stages": [
                     {"name": "Build", "steps": ["plan"]},
-                    {"name": "Test", "steps": ["code-review"]},
+                    {"name": "Test", "steps": [], "check": workflows.GATE},
+                    {"name": "Polish", "steps": ["code-review"]},
                     {"name": "Review", "steps": [], "ships": True},
                 ],
             }
         )
         gated = pipeline.gated(record, [{"command": "true", "code": 0}])
         sessions.set_pipeline(db_path(self.home), self.SESSION, gated)
-        critique = self.ended(completed=True)
-        critique.assert_not_called()
-        self.assertEqual(pipeline.kind(self.pipeline()), pipeline.BUILD, "the next stage is a build")
-        self.assertEqual(pipeline.reason(self.pipeline()), afk.NOT_YET)
+        started = self.ended(completed=True)
+        started.assert_called_once()
+        moved = started.call_args[0][1]["pipeline"]
+        self.assertEqual(pipeline.stage_name(moved), "Polish", "the workflow's own next stage")
         self.assertEqual(self.shown()["task"], self.task, "the claim stays with it")
 
-    def test_a_critique_that_ended_without_a_pull_request_stalls(self) -> None:
+    def test_a_review_that_ended_without_a_pull_request_stalls(self) -> None:
         self.stage(pipeline.CRITIQUE)
         with patch.object(afk, "wake"):
             self.ended(completed=True, shipped=None)
         self.assertEqual(
             afk.stalled(self.home)[self.SESSION]["reason"],
             afk.NO_PULL_REQUEST,
-            "a critique that never opened one reviewed nothing the user can see",
+            "a review that never opened one reviewed nothing the user can see",
         )
         self.assertEqual(self.shown()["task"], self.task, "so its claim is kept with it")
         self.assertEqual(pipeline.reason(self.pipeline()), afk.NO_PULL_REQUEST)
 
-    def test_a_github_that_cannot_be_asked_does_not_stall_a_finished_critique(self) -> None:
+    def test_a_github_that_cannot_be_asked_does_not_stall_a_finished_review(self) -> None:
         self.stage(pipeline.CRITIQUE)
         with patch.object(afk, "wake"):
             self.ended(completed=True, shipped=github.GitHubError("offline"))
@@ -1484,13 +1486,13 @@ class StagedRunTests(AfkSessionTests):
 
     def test_a_build_that_failed_keeps_its_stage_and_its_claim(self) -> None:
         self.stage()
-        critique = self.ended(completed=False, failed=True)
-        critique.assert_not_called()
+        started = self.ended(completed=False, failed=True)
+        started.assert_not_called()
         self.assertEqual(pipeline.kind(self.pipeline()), pipeline.BUILD, "it stopped where it was building")
         self.assertEqual(afk.stalled(self.home)[self.SESSION]["reason"], afk.FAILED_RUN)
         self.assertEqual(self.shown()["task"], self.task)
 
-    def test_a_critique_that_failed_stalls_with_its_stage_kept(self) -> None:
+    def test_a_review_that_failed_stalls_with_its_stage_kept(self) -> None:
         self.stage(pipeline.CRITIQUE)
         self.ended(completed=False, interrupted=True)
         self.assertEqual(pipeline.kind(self.pipeline()), pipeline.CRITIQUE)
@@ -1498,8 +1500,8 @@ class StagedRunTests(AfkSessionTests):
 
     def test_a_project_with_no_critique_skill_runs_and_ships_as_before(self) -> None:
         sessions.set_pipeline(db_path(self.home), self.SESSION, None)
-        critique = self.ended(completed=True)
-        critique.assert_not_called()
+        started = self.ended(completed=True)
+        started.assert_not_called()
         self.assertIsNone(self.shown()["task"], "one finished run is still the whole task")
         self.assertIsNone(self.pipeline())
 
@@ -1521,6 +1523,139 @@ class StagedRunTests(AfkSessionTests):
             pipeline.DONE,
             "a finished task still says how it got there",
         )
+
+
+class StagedFlowTests(AfkSessionTests):
+    """A task run through its workflow, one run's end at a time.
+
+    The runs are a fake API — each stage's request is kept and answered — and GitHub and the worktree
+    are fakes too, so what happens between the runs is the host's own record and nothing else.
+    """
+
+    CLEAN = [{"name": "mock-user/memento", "changed": 0, "ahead": 2}]
+    LOOP = preset("preset:loop")
+    BROKEN = [{"command": "pnpm test", "code": 1}]
+    PASSING = [{"command": "pnpm test", "code": 0}]
+    SHIPPED = {"number": 265}
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.posted: List[dict] = []
+
+    def start(self, workflow: Optional[dict] = None) -> dict:
+        record = pipeline.start(workflow or self.LOOP)
+        sessions.set_pipeline(db_path(self.home), self.SESSION, record)
+        return record
+
+    def gated(self, commands: List[dict]) -> dict:
+        """The stage's own run answering its gate, as the tool records it."""
+        record = pipeline.read(sessions.read(db_path(self.home), self.SESSION)["pipeline"])
+        staged = pipeline.gated(record, commands)
+        sessions.set_pipeline(db_path(self.home), self.SESSION, staged)
+        return staged
+
+    def ended(self, completed: bool = True, shipped: Any = SHIPPED) -> None:
+        """The run of the stage the task is in ending, and whatever it starts posted by the fake API."""
+
+        async def post(adapter: Any, profile: Any, path: str, body: dict, **kwargs: Any) -> dict:
+            self.posted.append(body)
+            return {"run_id": f"run-{len(self.posted)}"}
+
+        def schedule(coroutine: Any, loop: Any) -> None:
+            asyncio.run(coroutine)
+
+        with (
+            patch.object(afk.ship, "status", return_value=self.CLEAN),
+            patch("plugin.outbox.post", side_effect=post),
+            patch.object(afk.asyncio, "run_coroutine_threadsafe", side_effect=schedule),
+            patch.object(afk, "_loop", object()),
+            patch.object(afk, "base_branch", return_value="main"),
+            patch("plugin.github.pull_request", return_value=shipped),
+            patch("plugin.sessions._paths", return_value=(db_path(self.home), self.home)),
+        ):
+            afk.after_run(session_id=self.SESSION, completed=completed)
+
+    def pipeline(self) -> Optional[dict]:
+        return pipeline.read(sessions.read(db_path(self.home), self.SESSION)["pipeline"])
+
+    def test_a_failing_gate_repeats_the_build_told_what_failed_then_the_review_ships(self) -> None:
+        self.start()
+        # The build's first round runs, and the gate it named fails.
+        self.gated(self.BROKEN)
+        self.ended()
+        self.assertEqual(len(self.posted), 1, "the loop posts its next round, and nothing else")
+        self.assertEqual(pipeline.stage_name(self.pipeline()), "Build")
+        self.assertEqual(self.pipeline()["round"], 2)
+        self.assertIn(
+            "pnpm test exited 1",
+            self.posted[0]["instructions"],
+            "round two is told the command that failed and its exit code",
+        )
+        # Its second round fixes it, and the gate passes.
+        self.gated(self.PASSING)
+        self.ended()
+        self.assertEqual(len(self.posted), 2, "the review is the next stage to run")
+        self.assertEqual(pipeline.stage_name(self.pipeline()), "Review")
+        self.assertEqual(
+            self.posted[1]["input"][0]["content"],
+            "Review #265 (https://github.com/mock-user/memento/issues/265)",
+        )
+        self.assertNotIn("The round before this one failed", self.posted[1]["instructions"])
+        # The review ships, and the workflow's empty Summary has nothing to run.
+        self.ended()
+        self.assertIsNone(self.shown()["task"], "the task is in review: the hold goes")
+        self.assertEqual(pipeline.kind(self.pipeline()), pipeline.DONE)
+        self.assertEqual(len(self.posted), 2, "the checkpoint and the empty Summary posted nothing")
+
+    def test_a_checkpoint_posts_no_run_whatever_the_stage_before_it_did(self) -> None:
+        self.start()
+        self.gated(self.PASSING)
+        self.ended()
+        self.assertEqual(len(self.posted), 1)
+        self.assertEqual(
+            pipeline.stage_name(self.pipeline()),
+            "Review",
+            "the host answered the checkpoint from the build's own gate, and the next stage runs",
+        )
+
+    def test_a_loop_past_its_cap_stalls_naming_the_command_and_starts_nothing(self) -> None:
+        self.start()
+        for _ in range(3):
+            self.gated(self.BROKEN)
+            self.ended()
+        self.assertEqual(len(self.posted), 2, "three rounds ran, two of them posted here")
+        self.assertEqual(
+            afk.stalled(self.home)[self.SESSION]["reason"],
+            "The loop ran out of rounds (3) and the gate still failed: pnpm test exited 1.",
+        )
+        self.assertEqual(self.shown()["task"], self.task, "the claim is kept, as a failed gate keeps it")
+        self.assertEqual(pipeline.kind(self.pipeline()), pipeline.GATE, "nothing after it starts")
+
+    def test_a_summary_with_a_skill_posts_a_run_and_an_empty_one_does_not(self) -> None:
+        for steps, expected in ((["weekly-review"], 1), ([], 0)):
+            with self.subTest(steps=steps):
+                record = placed(preset("preset:staged"), 2)
+                record["stages"][3]["steps"] = list(steps)
+                sessions.set_pipeline(db_path(self.home), self.SESSION, record)
+                self.posted.clear()
+                self.ended()
+                self.assertEqual(len(self.posted), expected)
+                if steps:
+                    self.assertEqual(
+                        self.posted[0]["input"][0]["content"],
+                        "Summary #265 (https://github.com/mock-user/memento/issues/265)",
+                    )
+                    self.assertIn("wrap-up", self.posted[0]["instructions"])
+
+    def test_a_summary_that_finished_ends_the_task(self) -> None:
+        record = placed(preset("preset:staged"), 3)
+        record["stages"][3]["steps"] = ["weekly-review"]
+        sessions.set_pipeline(db_path(self.home), self.SESSION, record)
+        with patch.object(afk, "wake") as wake:
+            self.ended()
+        self.assertIsNone(self.shown()["task"])
+        self.assertEqual(pipeline.kind(self.pipeline()), pipeline.DONE)
+        wake.assert_called_once()
 
 
 class StagedSweepTests(ClaimStubTests):
@@ -1600,8 +1735,8 @@ class StagedSweepTests(ClaimStubTests):
         self.assertEqual(self.shown()["refusal"], afk.MISSING_SKILL.format(name="code-review"))
 
 
-class CritiqueRunTests(unittest.TestCase):
-    """The second run a staged task's gate starts: the same session, told what to review."""
+class StageRunTests(unittest.TestCase):
+    """A stage's run: the same session, briefed for the stage the task has moved to."""
 
     def setUp(self) -> None:
         self.tmp = TemporaryDirectory()
@@ -1615,7 +1750,7 @@ class CritiqueRunTests(unittest.TestCase):
         }
         staged = staged_record(pipeline.CRITIQUE, steps=("code-review", "log-triage"))
         self.record = {
-            "session_id": "memento-afk-critique",
+            "session_id": "memento-afk-review",
             "project_id": "p1",
             "mode": "auto",
             "path": "/trees/afk-265",
@@ -1623,7 +1758,7 @@ class CritiqueRunTests(unittest.TestCase):
             "repo_root": "/checkout",
             "files_dir": "/checkout/files/afk-265",
             "plan_pending": False,
-            "pipeline": {**staged, "stage": pipeline.CRITIQUE},
+            "pipeline": staged,
             "repos": [
                 {
                     "name": "mock-user/memento",
@@ -1648,50 +1783,42 @@ class CritiqueRunTests(unittest.TestCase):
     def adapter(self) -> SimpleNamespace:
         return SimpleNamespace(_host="127.0.0.1", _port=8642, _api_key="host-key")
 
-    def run_critique(self) -> dict:
-        asyncio.run(afk.critique(self.adapter(), self.home, self.record, self.task))
-        self.assertEqual(len(self.posted), 1, "one run, not one per skill")
+    def run_stage(self) -> dict:
+        asyncio.run(afk.work_stage(self.adapter(), self.home, self.record, self.task))
+        self.assertEqual(len(self.posted), 1, "one run per stage, not one per skill")
         return self.posted[0]["body"]
 
-    def test_it_posts_a_second_run_on_the_same_session(self) -> None:
-        body = self.run_critique()
+    def test_it_posts_the_stages_run_on_the_same_session(self) -> None:
+        body = self.run_stage()
         self.assertEqual(body["session_id"], self.record["session_id"])
         self.assertEqual(self.posted[0]["path"], "/v1/runs")
         self.assertNotIn("model", body, "the host's own model runs it")
 
-    def test_its_input_is_one_line_naming_what_it_reviews(self) -> None:
-        body = self.run_critique()
+    def test_its_input_is_one_line_naming_the_stage_and_the_issue(self) -> None:
+        body = self.run_stage()
         self.assertEqual(
             body["input"],
-            [{"role": "user", "content": "Critique the build of #265 (https://github.com/mock-user/memento/issues/265)"}],
+            [{"role": "user", "content": "Review #265 (https://github.com/mock-user/memento/issues/265)"}],
         )
 
-    def test_its_instructions_name_the_task_the_base_and_the_skills(self) -> None:
-        text = self.run_critique()["instructions"]
+    def test_its_instructions_name_the_task_the_base_and_the_skills_in_order(self) -> None:
+        text = self.run_stage()["instructions"]
         self.assertIn("mock-user/memento#265", text)
-        self.assertIn("main", text, "the branch the pull request is against")
-        self.assertIn("code-review", text)
-        self.assertIn("log-triage", text)
-        self.assertIn("Critique stage", text)
+        self.assertIn("base branch main", text, "the branch the pull request is against")
+        self.assertIn('"code-review", "log-triage"', text, "the stage's steps, in the order it applies them")
+        self.assertIn("Review stage", text)
         self.assertIn("/trees/afk-265", text, "the worktree the review reads")
+        self.assertIn("action 'ship'", text, "the shipping stage opens the draft")
+        self.assertNotIn("delegate_task", text, "a stage's steps are lenses in one run, not delegates")
 
-    def test_its_delegate_briefs_carry_the_issue_and_the_worktree(self) -> None:
-        text = self.run_critique()["instructions"]
-        for name in ("code-review", "log-triage"):
-            self.assertIn(f'skill_view(name="{name}")', text, "one brief per critique skill")
-        self.assertIn("https://github.com/mock-user/memento/issues/265", text)
-        self.assertIn("base main", text, "the branch the pull request is against")
-        self.assertIn("You report rather than implement", text, "a reviewer doesn't fix the work")
-        self.assertIn("delegate_task", text)
-
-    def test_a_critique_that_cannot_start_stalls_the_task(self) -> None:
+    def test_a_stage_that_cannot_start_stalls_the_task(self) -> None:
         outbox.post.side_effect = outbox.StartError("No API key for this bot.", True)
         with (
             patch.object(afk, "holding_project", return_value="p1"),
             patch.object(afk, "_stall") as stall,
         ):
-            asyncio.run(afk.critique(self.adapter(), self.home, self.record, self.task))
-        stall.assert_called_once_with(self.home, "p1", afk.CRITIQUE_FAILED)
+            asyncio.run(afk.work_stage(self.adapter(), self.home, self.record, self.task))
+        stall.assert_called_once_with(self.home, "p1", afk.STAGE_FAILED.format(name="Review"))
 
     def test_the_hook_starts_it_on_the_loop_that_owns_the_runs(self) -> None:
         loop = SimpleNamespace()
@@ -1700,11 +1827,11 @@ class CritiqueRunTests(unittest.TestCase):
             patch.object(afk, "_loop", loop),
             patch.object(afk.asyncio, "run_coroutine_threadsafe") as schedule,
         ):
-            afk._critique(self.home, self.record)
+            afk._start_stage(self.home, self.record)
         schedule.assert_called_once()
         coroutine, where = schedule.call_args[0]
         self.assertIs(where, loop, "the loop that owns the runs is the one asked to post it")
-        self.assertEqual(coroutine.cr_code.co_name, "critique", "and it is the critique's run")
+        self.assertEqual(coroutine.cr_code.co_name, "work_stage", "and it is the stage's run")
         coroutine.close()  # the loop would await it; nothing here does
 
     def test_a_host_with_no_loop_stalls_instead_of_dropping_the_task(self) -> None:
@@ -1713,9 +1840,9 @@ class CritiqueRunTests(unittest.TestCase):
             patch.object(afk, "_loop", None),
             patch.object(afk, "_stall") as stall,
         ):
-            afk._critique(self.home, self.record)
+            afk._start_stage(self.home, self.record)
         self.assertEqual(self.posted, [], "nothing is posted off the loop")
-        stall.assert_called_once_with(self.home, "p1", afk.CRITIQUE_FAILED)
+        stall.assert_called_once_with(self.home, "p1", afk.STAGE_FAILED.format(name="Review"))
 
 
 if __name__ == "__main__":

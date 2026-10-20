@@ -54,10 +54,9 @@ MISSING_SKILL = (
     'The skill "{name}" isn\'t one this bot has any more, so no task is claimed. '
     "Pick another in the project's AFK pop-up."
 )
-CRITIQUE_FAILED = "The critique couldn't start."
-NO_PULL_REQUEST = "The critique ended without opening a pull request."
-# A workflow moved the task to a stage this build can't start a run for yet.
-NOT_YET = "The task reached a stage this build can't run yet."
+NO_PULL_REQUEST = "The stage that opens the pull request ended without one."
+# A stage of the workflow couldn't be started: nothing is working the task from here.
+STAGE_FAILED = 'The "{name}" stage couldn\'t start.'
 
 # How often a project left on is swept for work. A GitHub refusal ends that sweep and the next one
 # waits for its turn rather than asking again at once.
@@ -449,16 +448,27 @@ def run_body(record: Dict[str, Any], task: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def critique_body(record: Dict[str, Any], task: Dict[str, Any]) -> Dict[str, Any]:
-    """The second run's request: the same session, reviewing the build and opening the pull request.
+def stage_body(record: Dict[str, Any], task: Dict[str, Any]) -> Dict[str, Any]:
+    """The next run's request: the same session, briefed for the stage the task is in now.
 
-    The base branch is read from the worktree's own origin, so the critique hands it to its
-    delegates rather than each of them guessing which branch the change is against.
+    Every stage is one run of that session — the transcript is the work's own account of itself —
+    and the brief names the stage, its skills in order and, for a loop's next round, the command the
+    round before failed on. Only the shipping stage is told the base branch, because only its run
+    opens the pull request; the review hands it to whatever reads the diff.
     """
+    staged = pipeline.read(record.get("pipeline"))
+    ships = pipeline.ships(staged)
     return {
         "session_id": record["session_id"],
-        "instructions": prompt_builder.critique_prompt(record, task, base_branch(record)),
-        "input": [{"role": "user", "content": prompt_builder.critique_input(task)}],
+        "instructions": prompt_builder.stage_prompt(
+            record, task, base_branch(record) if ships else None
+        ),
+        "input": [
+            {
+                "role": "user",
+                "content": prompt_builder.stage_input(task, pipeline.stage_name(staged)),
+            }
+        ],
     }
 
 
@@ -714,9 +724,9 @@ def after_run(
     0015). Only a session AFK is holding is its own: every other project session just wakes the
     sweep, and a chat's turn says nothing about any work.
 
-    A staged task's run end is its stage's business instead (ADR 0018): a build that finished is
-    judged by its gate, which either starts the critique on the same session or stalls the task
-    where it stands, and a critique that finished is the end of the pipeline.
+    A staged task's run end is its stage's business instead (ADR 0018, ADR 0020): the stage's
+    checkpoint and the worktree decide whether it moves on, repeats a loop or stalls, and the stage
+    it moves to is posted on the same session as its own run.
     """
     try:
         path, home = sessions._paths()
@@ -749,12 +759,13 @@ def _stage_end(
     staged: Dict[str, Any],
     stopped: sessions.Outcome,
 ) -> None:
-    """Settles a staged task whose run just ended: the gate's verdict, then the critique or a stall.
+    """Settles a staged task whose run just ended: its gate's verdict, then the stage that follows.
 
-    The worktree is measured only for a build whose gate already passed: a gate that failed stalls
-    the task in the stage it stopped in, and nothing about the tree can change that. The stage is
-    written before anything is started, so a critique that can't be posted leaves a record that says
-    where the task stands.
+    A run of a stage that posts nothing never reaches here — a checkpoint is judged by the host from
+    the run before it, and an inert stage by nothing at all. The worktree is measured only for a
+    stage whose gate already passed: a gate that failed stalls the task in the stage it stopped in,
+    and nothing about the tree can change that. The stage is written before anything is started, so
+    a run that can't be posted leaves a record that says where the task stands.
     """
     worktree: Iterable[Dict[str, Any]] = ()
     in_gate = stopped.finished and pipeline.measured(staged)
@@ -768,72 +779,81 @@ def _stage_end(
     if step.stall:
         _stall(hermes_home, project_id, step.stall)
         return
-    if step.stage not in (pipeline.CRITIQUE, pipeline.DONE):
-        sessions.set_pipeline(path, record["session_id"], pipeline.failed(moved, NOT_YET))
-        _stall(hermes_home, project_id, NOT_YET)
+    if pipeline.ships(staged):
+        # The stage that just ended is the one that opens the pull request, so the draft is what
+        # says it did: a review that ended without one reviewed nothing the user can see.
+        unshipped = _unshipped(hermes_home, record)
+        if unshipped is not None:
+            sessions.set_pipeline(path, record["session_id"], pipeline.failed(moved, unshipped))
+            _stall(hermes_home, project_id, unshipped)
+            return
+    if not pipeline.posts_now(moved):
+        # Nothing is left to run: the task's work is in review, so the hold goes and the sweep looks
+        # for the project's next task.
+        _free(hermes_home, project_id)
+        wake()
         return
-    if step.stage == pipeline.CRITIQUE:
-        # The critique is the same session's next run: the hold keeps the task, and the stall
-        # clock starts again so the moment between the two runs isn't read as nothing working it.
-        _adopt(hermes_home, project_id, record["session_id"])
-        # The record as the task stands now, not as the build left it: the critique's prompt reads
-        # the stage off it, and handing it the build's would tell the reviewer it is building.
-        _critique(hermes_home, {**record, "pipeline": moved})
-        return
-    # The critique's own end: the pull request is what it was for, so a run that ended without one
-    # stalls the task rather than reporting it reviewed.
-    unshipped = _unshipped(hermes_home, record) if pipeline.ships(staged) else None
-    if unshipped is not None:
-        sessions.set_pipeline(path, record["session_id"], pipeline.failed(moved, unshipped))
-        _stall(hermes_home, project_id, unshipped)
-        return
-    _free(hermes_home, project_id)
-    wake()
+    # The next stage is the same session's next run: the hold keeps the task, and the stall clock
+    # starts again so the moment between two runs isn't read as nothing working it.
+    _adopt(hermes_home, project_id, record["session_id"])
+    # The record as the task stands now, not as the run that ended left it: the next brief reads the
+    # stage off it, and handing it the stage behind would brief the run for work already done.
+    _start_stage(hermes_home, {**record, "pipeline": moved})
 
 
-def _critique(hermes_home: Path, record: Dict[str, Any]) -> None:
-    """Starts the critique run on the task's own session, on the loop that owns the runs.
+def _start_stage(hermes_home: Path, record: Dict[str, Any]) -> None:
+    """Starts the run for the stage a task has moved to, on the loop that owns the runs.
 
-    The hook runs in Hermes's own thread, so the run is posted there rather than awaited here. A
-    run that can't be started stalls the task instead: nothing is reviewing it, and the claim is
-    what the user finds it by.
+    The hook runs in Hermes's own thread, so the run is posted there rather than awaited here. A run
+    that can't be started stalls the task instead: nothing is working its next stage, and the claim
+    is what the user finds it by.
     """
     project_id = str(record.get("project_id") or "")
     held = _row(hermes_home, project_id) if project_id else None
     task = (held or {}).get("task")
     loop = _loop
+    name = pipeline.stage_name(pipeline.read(record.get("pipeline"))) or ""
     if not isinstance(task, dict) or loop is None:
         logger.warning(
-            "memento: AFK can't start the critique of %s (no task held or no loop)",
+            "memento: AFK can't start the \"%s\" stage of %s (no task held or no loop)",
+            name,
             record.get("session_id"),
         )
         if project_id:
-            _stall(hermes_home, project_id, CRITIQUE_FAILED)
+            _stall(hermes_home, project_id, STAGE_FAILED.format(name=name))
         return
-    asyncio.run_coroutine_threadsafe(critique(sessions.adapter, hermes_home, record, task), loop)
+    asyncio.run_coroutine_threadsafe(
+        work_stage(sessions.adapter, hermes_home, record, task), loop
+    )
 
 
-async def critique(adapter: Any, hermes_home: Path, record: Dict[str, Any], task: Dict[str, Any]) -> None:
-    """Posts the second run on the session: the build reviewed, and the pull request opened last."""
+async def work_stage(
+    adapter: Any, hermes_home: Path, record: Dict[str, Any], task: Dict[str, Any]
+) -> None:
+    """Posts one stage's run on the session, briefed for the stage the task is in."""
     issue = f"{task.get('repo')}#{task.get('number')}"
+    name = pipeline.stage_name(pipeline.read(record.get("pipeline"))) or ""
     try:
-        started = await _post(adapter, hermes_home, critique_body(record, task))
+        started = await _post(adapter, hermes_home, stage_body(record, task))
     except Exception as error:
-        logger.warning("memento: AFK couldn't start the critique for %s: %s", issue, error)
+        logger.warning(
+            "memento: AFK couldn't start %s's \"%s\" stage for %s: %s", issue, name, record["session_id"], error
+        )
         project_id = str(record.get("project_id") or "")
         if project_id and holding_project(hermes_home, record["session_id"]) == project_id:
-            _stall(hermes_home, project_id, CRITIQUE_FAILED)
+            _stall(hermes_home, project_id, STAGE_FAILED.format(name=name))
         return
     logger.info(
-        "memento: AFK is critiquing %s in %s (run %s)",
+        "memento: AFK is working %s's \"%s\" stage in %s (run %s)",
         issue,
+        name,
         record["session_id"],
         started.get("run_id"),
     )
 
 
 def _unshipped(hermes_home: Path, record: Dict[str, Any]) -> Optional[str]:
-    """Why a finished critique left no pull request, or None when one of its repos has one.
+    """Why a finished shipping stage left no pull request, or None when one of its repos has one.
 
     A GitHub that can't be asked says nothing rather than stalling the task over a failed lookup.
     """

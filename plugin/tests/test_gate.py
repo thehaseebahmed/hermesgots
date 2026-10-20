@@ -138,10 +138,11 @@ class GateTests(unittest.TestCase):
         answer = self.call({"commands": ["true"]})
         self.assertIn("isn't a staged task", answer["error"])
 
-    def test_a_critique_cannot_be_gated_again(self) -> None:
+    def test_a_review_cannot_be_gated_again(self) -> None:
         self.staged(stage=pipeline.CRITIQUE)
         answer = self.call({"commands": ["true"]})
-        self.assertIn("past the gate", answer["error"])
+        self.assertIn('"Review"', answer["error"], "the refusal names the stage it is in")
+        self.assertIn("no gate to run", answer["error"])
 
     def test_a_build_can_gate_again_after_fixing_what_the_gate_named(self) -> None:
         self.staged()

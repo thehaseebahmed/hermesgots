@@ -39,7 +39,8 @@ SCHEMA = {
         "then call this once with everything the repo checks itself with (its tests, typecheck, "
         "lint, build), then end the run. A project of more than one repo names the repo each "
         "command runs in. The run stops at the first command that fails. Don't ship: the pull "
-        "request is the critique stage's. A gate that fails stalls the task with the command "
+        "request belongs to the workflow's shipping stage. A gate that fails stalls the task with "
+        "the command "
         "named, and a call naming no command is refused."
     ),
     "parameters": {
@@ -146,9 +147,13 @@ def _unknown(asked: List[Dict[str, str]], trees: Dict[str, str]) -> List[str]:
     return sorted({one["repo"] for one in asked if one.get("repo") and one["repo"] not in trees})
 
 
-def _past_gate(stage: str) -> str:
-    """Why a session that is past its gate has none to run."""
-    return f"This session is at its {stage} stage, which is past the gate: it has one to run only while it is building or waiting at it."
+def _past_gate(record: Dict[str, Any]) -> str:
+    """Why a stage that can't be gated has none to run, naming the stage it is in."""
+    return (
+        f'This session is in its "{pipeline.stage_name(record) or ""}" stage of a staged task, '
+        "which has no gate to run: a gate belongs to the stages before the one that ships, and to a "
+        "one-run workflow's own stage before it ships."
+    )
 
 
 def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any) -> str:
@@ -176,7 +181,7 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
             }
         )
     if not pipeline.gating(staged):
-        return json.dumps({"error": _past_gate(pipeline.kind(staged) or "")})
+        return json.dumps({"error": _past_gate(staged)})
     tree = record.get("path")
     if not tree or not os.path.isdir(tree):
         return json.dumps({"error": "This session's worktree is gone."})

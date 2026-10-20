@@ -7,17 +7,19 @@ editing or deleting a library entry cannot rewrite what a finished task says it 
 own record, not the project's hold, which is released when a run ends, still says how the task got
 there (ADR 0018).
 
-Until the engine reads this shape itself, the step a task is in is read off the snapshot's position
-(`kind`): a stage before the shipping one builds, one whose check is the gate and which names no
-steps of its own is the gate step,
-shipping stage is the review, and anything after it has shipped. That is what the gate tool, the
-pull request tool and the prompts name it by, so a task's record can change shape without the tools
-changing what they say.
+The machine here is the host's, and it reads the snapshot rather than a fixed list of steps
+(ADR 0020): a stage with steps posts one run of the task's session, a stage with a check and no steps
+is a checkpoint the host answers from the run before it, and a stage with neither is passed over
+without a run. A run's end is judged by its checkpoint and the worktree, a failed checkpoint inside a
+loop sends the task back for another round up to the loop's cap, and only the shipping stage may open
+the pull request. What the tools name a task by — ``build``, ``gate``, ``critique``, ``done`` — is
+still read off a stage's position (``kind``), so a record can change shape without the tools changing
+what they say.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, NamedTuple, Optional, Sequence
+from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 from . import workflows
 from .workflows import GATE, names, shipping, text
@@ -40,9 +42,12 @@ STATES = (CURRENT, FINISHED, FAILED, TODO)
 # Why a build that finished still can't be reviewed. The gate's own answer decides the first two;
 # the rest is what a gate can't see from the commands alone.
 NO_GATE = "The build ended without running the gate."
-FAILED_GATE = "The gate failed: {command} exited {code}."
+FAILED_GATE = "The gate failed: {failed}."
 UNCOMMITTED = "The build left uncommitted changes in the worktree."
 NO_COMMITS = "The build left no commits in the worktree."
+# A loop whose rounds are spent: the checkpoint is still failing, so the task waits for the user with
+# the command that failed named, rather than repeating itself for ever.
+LOOP_EXHAUSTED = "The loop ran out of rounds ({cap}) and the gate still failed: {failed}."
 
 
 class Step(NamedTuple):
@@ -53,16 +58,20 @@ class Step(NamedTuple):
     answers itself — so a workflow of any length hands over to its own next stage rather than to a
     step's name. It is ``None`` for a step that isn't a move (a stall, or a caller's own guess), and
     then the move is worked out from ``stage``.
+
+    ``retry`` is a loop's next round: the failure the checkpoint gave, which that round's brief is
+    told, so a build that repeats knows the command it has to fix.
     """
 
     stage: str
     stall: Optional[str]
     index: Optional[int] = None
+    retry: Optional[str] = None
 
 
 def new_round() -> Dict[str, Any]:
     """One round of a stage as it starts: the run working it, what it ran, its gate and findings."""
-    return {"run_id": None, "commands": [], "gate": None, "findings": [], "stop": None}
+    return {"run_id": None, "commands": [], "gate": None, "findings": [], "stop": None, "retry": None}
 
 
 def start(workflow: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +171,7 @@ def _round(value: Any) -> Optional[Dict[str, Any]]:
         "gate": value.get("gate") if isinstance(value.get("gate"), dict) else None,
         "findings": [one for one in value.get("findings") or [] if isinstance(one, dict)],
         "stop": text(value.get("stop")),
+        "retry": text(value.get("retry")),
     }
 
 
@@ -258,7 +268,11 @@ def kind(record: Optional[Dict[str, Any]]) -> Optional[str]:
 
 
 def _kinds(stages: Sequence[Dict[str, Any]]) -> List[str]:
-    """Every stage's step, in order: what each of them is judged as."""
+    """Every stage's step, in order: what each of them is judged as.
+
+    A stage before the shipping one builds, one whose check is the gate and which names no steps of
+    its own is the gate step, the shipping stage is the review, and anything after it has shipped.
+    """
     ship = shipping(list(stages))
     found: List[str] = []
     for index, stage in enumerate(stages):
@@ -294,29 +308,31 @@ def gating(record: Optional[Dict[str, Any]]) -> bool:
         return False
     if kind(record) in (BUILD, GATE_CHECK):
         return True
-    return _single_stage(record) and gate_of(record) is None
+    return single_stage(record) and gate_of(record) is None
 
 
 def measured(record: Optional[Dict[str, Any]]) -> bool:
     """Whether a run of this stage is judged at its end by its gate and the worktree.
 
-    A build and the gate stage that follows it are; so is One run's single stage, which gates itself
-    before it ships.
-    A review is not: its run ended when it shipped, and the pull request is what judges it.
+    Every stage before the shipping one is — that is where the build is checked — and so is One
+    run's single stage, which gates itself before it ships. The shipping stage's own run is not, nor
+    is any stage after it: a review ended when it shipped, and the pull request is what judges it, and
+    a wrap-up has nothing to be gated for.
     """
     if not record:
         return False
-    return kind(record) in (BUILD, GATE_CHECK) or _single_stage(record)
+    return kind(record) in (BUILD, GATE_CHECK) or single_stage(record)
 
 
-def _single_stage(record: Dict[str, Any]) -> bool:
+def single_stage(record: Dict[str, Any]) -> bool:
     """Whether the task's whole workflow is the one stage it is in, and that stage ships.
 
     One run is that workflow: nothing before its stage to build and nothing after it to review, so
     its run is judged at its own end. It is read from the stages rather than from the workflow's
-    name, since a workflow of one shipping stage is the same shape however it was made.
+    name, since a workflow of one shipping stage is the same shape however it was made — and a
+    shipping stage with a stage after it is not one run, since that stage would never run.
     """
-    return ships(record) and record["stage"] == 0
+    return ships(record) and record["stage"] == 0 and len(record["stages"]) == 1
 
 
 def for_app(record: Any) -> Optional[Dict[str, Any]]:
@@ -339,6 +355,50 @@ def for_app(record: Any) -> Optional[Dict[str, Any]]:
     }
 
 
+def posts(stages: Sequence[Dict[str, Any]], index: int) -> bool:
+    """Whether the stage at ``index`` posts a run of the task's session.
+
+    A checkpoint posts none: its check is the host's to answer, from the run before it (ADR 0020).
+    A stage after the shipping one posts one only when it names steps — a wrap-up with no skill has
+    nothing to do, so the task passes over it. Every stage up to and including the shipping one posts
+    one, steps or no steps, because its built-in brief is what makes a preset work on a fresh project:
+    a build with no skill still implements, and a review with no skill still reviews and ships.
+    """
+    if not 0 <= index < len(stages):
+        return False
+    step = _kinds(stages)[index]
+    if step == GATE_CHECK:
+        return False
+    if step == DONE:
+        return bool(stages[index].get("steps"))
+    return True
+
+
+def posts_now(record: Optional[Dict[str, Any]]) -> bool:
+    """Whether the stage a task is in posts a run, which is what the sweep and the hook start."""
+    if not record:
+        return False
+    return posts(record["stages"], record["stage"])
+
+
+def stage_name(record: Optional[Dict[str, Any]]) -> Optional[str]:
+    """The name of the stage a task is in, or ``None`` once it is past its workflow's last one."""
+    entry = _entry_of(record)
+    return entry["name"] if entry else None
+
+
+def shipping_name(record: Optional[Dict[str, Any]]) -> Optional[str]:
+    """The name of the stage that may open the pull request, or ``None`` for a record without one."""
+    stages = (record or {}).get("stages") or []
+    index = shipping(list(stages))
+    return stages[index]["name"] if index is not None else None
+
+
+def retry(record: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Why the round before this one failed, as a loop's next round is told it, or ``None``."""
+    return (_current(_entry_of(record)) or {}).get("retry") or None
+
+
 def advance(
     record: Optional[Dict[str, Any]],
     stopped: Optional[str] = None,
@@ -352,24 +412,92 @@ def advance(
     have exited zero, no worktree may hold uncommitted changes and at least one has to hold commits
     beyond its base — else the task stalls at the gate with the failure named, which is the whole
     point of the host running the commands rather than taking the run's word.
+
+    A checkpoint that failed inside a loop sends the task back to the stage the loop starts at, as
+    another round told what failed, until the loop's cap is spent: then it stalls naming the command,
+    and nothing after the loop starts. A run whose stage nothing measures — the shipping stage's, or
+    one after it — has finished, and hands over to the next stage that posts a run.
     """
-    if record is None or kind(record) == DONE:
+    if record is None or record["stage"] >= len(record["stages"]):
         return Step(DONE, None)
     if stopped:
         return Step(kind(record), stopped)
     if not measured(record):
-        return Step(DONE, None)
-    step = _after_build(record, list(worktree))
-    if _single_stage(record):
+        return _forward(record)
+    why = gate_verdict(record)
+    if why is not None:
+        again = _round_again(record, why)
+        if again is not None:
+            return again
+    return _after(record, why, list(worktree))
+
+
+def _after(record: Dict[str, Any], why: Optional[str], worktree: List[Dict[str, Any]]) -> Step:
+    """Where a measured stage's finished run goes, once its checkpoint and its tree are read."""
+    if why is None:
+        if any(one.get("changed") for one in worktree):
+            why = UNCOMMITTED
+        elif not any(one.get("ahead") for one in worktree):
+            why = NO_COMMITS
+    if why is not None:
+        return Step(GATE_CHECK, why)
+    if single_stage(record):
         # One run: its only stage implements, gates itself and ships, so a run that gated and left
         # its commits behind is finished rather than waiting on a review of itself.
-        return Step(DONE, step.stall)
-    if step.stall:
-        return step
+        return Step(DONE, None)
+    return _forward(record)
+
+
+def _forward(record: Dict[str, Any]) -> Step:
+    """The next stage of the workflow that posts a run, or the task's own end."""
     following = _next_stage(record)
     if following >= len(record["stages"]):
         return Step(DONE, None)
     return Step(kind({**record, "stage": following}), None, following)
+
+
+def _round_again(record: Dict[str, Any], why: str) -> Optional[Step]:
+    """The loop's answer to a failed checkpoint: its next round, its last one, or no loop at all.
+
+    ``None`` is a checkpoint no loop covers, which is a stall the caller works out from ``why``. The
+    rounds a loop has had are the rounds of the stage its span starts at, so a cap of three is three
+    runs of that stage however many stages the span holds.
+    """
+    found = _loop_for(record)
+    if found is None:
+        return None
+    start, cap = found
+    if not posts(record["stages"], start):
+        # A loop whose span starts at a checkpoint has nothing of its own to repeat.
+        return None
+    if len(record["stages"][start]["rounds"]) >= cap:
+        failed = failing_command(record) or why
+        return Step(GATE_CHECK, LOOP_EXHAUSTED.format(cap=cap, failed=failed))
+    return Step(
+        kind({**record, "stage": start}), None, start, retry=failing_command(record) or why
+    )
+
+
+def _loop_for(record: Dict[str, Any]) -> Optional[Tuple[int, int]]:
+    """The loop a stage's failed checkpoint belongs to: the stage its span starts at, and its cap.
+
+    The nearest loop at or after the stage the task is in, whose span reaches back to it — so a
+    workflow with a loop around its build and test, and a second one around its review, each read
+    their own.
+    """
+    index = record["stage"]
+    for at in range(index, len(record["stages"])):
+        loop = record["stages"][at].get("loop") or {}
+        start = _index_of_name(record["stages"], loop.get("from"))
+        cap = loop.get("cap")
+        if start is None or start > index or not isinstance(cap, int) or cap < 1:
+            continue
+        return start, cap
+    return None
+
+
+def _index_of_name(stages: Sequence[Dict[str, Any]], name: Any) -> Optional[int]:
+    return next((index for index, stage in enumerate(stages) if stage.get("name") == name), None)
 
 
 def moved(record: Dict[str, Any], step: Step) -> Dict[str, Any]:
@@ -377,6 +505,8 @@ def moved(record: Dict[str, Any], step: Step) -> Dict[str, Any]:
     stages = _copy(record["stages"])
     out = {**record, "stages": stages}
     index = record["stage"]
+    if step.retry is not None:
+        return _again(out, step)
     if index < len(stages):
         entry = stages[index]
         entry["state"] = FAILED if step.stall else FINISHED
@@ -386,13 +516,12 @@ def moved(record: Dict[str, Any], step: Step) -> Dict[str, Any]:
     target = step.index if step.index is not None else _index_of_kind(stages, step.stage, index)
     if target == index:
         return out
-    if target >= len(stages):
-        return {**out, "stage": target}
-    # Every stage the task passed over is done: a gate stage has no run of its own — the host's gate
-    # answers it — so a task that moves from its build to its review leaves it finished, not to come.
+    # Every stage the task passed over is done: a checkpoint has been answered by the host from the
+    # run before it, and a stage with nothing to do has nothing left for it to do.
     for passed in range(index + 1, min(target, len(stages))):
         stages[passed]["state"] = FINISHED
-        stages[passed]["rounds"] = stages[passed]["rounds"] or [new_round()]
+    if target >= len(stages):
+        return {**out, "stage": target}
     following = stages[target]
     if following["rounds"]:
         # A loop's second pass: the stage keeps the round it ran before, and this one goes beside it.
@@ -401,6 +530,27 @@ def moved(record: Dict[str, Any], step: Step) -> Dict[str, Any]:
         following["rounds"] = [new_round()]
     following["state"] = CURRENT
     return {**out, "stage": target, "round": len(following["rounds"])}
+
+
+def _again(record: Dict[str, Any], step: Step) -> Dict[str, Any]:
+    """The record a loop's next round starts with: its span's first stage goes again.
+
+    The failure the checkpoint gave is written on the round it starts rather than on the stage as a
+    stop, because the task is still going: a build repeating itself after a failed test is work, not
+    a wait for the user. Every stage the span passed over goes back to what is still to come, and
+    keeps the rounds it ran — they are what the task says it did.
+    """
+    stages = record["stages"]
+    index = record["stage"]
+    target = step.index if step.index is not None else index
+    target = len(stages) - 1 if target >= len(stages) else max(target, 0)
+    entry = stages[target]
+    entry["rounds"].append({**new_round(), "retry": step.retry})
+    entry["state"] = CURRENT
+    for passed in range(target + 1, min(index + 1, len(stages))):
+        if stages[passed]["rounds"]:
+            stages[passed]["state"] = TODO
+    return {**record, "stage": target, "round": len(entry["rounds"])}
 
 
 def _copy(stages: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -416,17 +566,16 @@ def _copy(stages: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def _next_stage(record: Dict[str, Any]) -> Optional[int]:
-    """The stage a finished run hands over to: the next one that runs.
+    """The stage a finished run hands over to: the next one that posts a run.
 
-    A stage whose check the host answers posts no run of its own — the run before it ends by calling
-    the gate — so the task passes it and lands on the stage after it. A workflow whose stages have
-    all run answers the stage past its last one, which is ``done``.
+    A checkpoint posts nothing — the host answers it from the run before it — and a stage with
+    nothing to do has nothing to start, so the task passes both and lands on the stage after them. A
+    workflow whose stages have all run answers the stage past its last one, which is ``done``.
     """
-    kinds = _kinds(record["stages"])
-    for index in range(record["stage"] + 1, len(kinds)):
-        if kinds[index] != GATE_CHECK:
+    for index in range(record["stage"] + 1, len(record["stages"])):
+        if posts(record["stages"], index):
             return index
-    return len(kinds)
+    return len(record["stages"])
 
 
 def _index_of_kind(stages: Sequence[Dict[str, Any]], wanted: str, start: int) -> int:
@@ -486,10 +635,30 @@ def gate_verdict(record: Optional[Dict[str, Any]]) -> Optional[str]:
     broken = next((one for one in commands if one.get("code") != 0), None)
     if broken is None:
         return None
+    return FAILED_GATE.format(failed=failing_command(record) or broken.get("command") or "")
+
+
+def failing_command(record: Optional[Dict[str, Any]]) -> Optional[str]:
+    """The command a failed gate broke on, as a sentence names it: ``pnpm test exited 1``.
+
+    Its repo is part of its name where it ran in one of several, since the same line in two repos is
+    two different commands. ``None`` when the gate's answer holds no command to name.
+    """
+    answer = gate_of(record) or {}
+    broken = next(
+        (
+            one
+            for one in answer.get("commands") or []
+            if isinstance(one, dict) and one.get("code") != 0
+        ),
+        None,
+    )
+    if broken is None:
+        return None
     named = broken.get("command") or ""
     if broken.get("repo"):
         named = f"{broken['repo']}: {named}"
-    return FAILED_GATE.format(command=named, code=broken.get("code"))
+    return f"{named} exited {broken.get('code')}"
 
 
 def reason(record: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -537,6 +706,11 @@ def critique_skills(record: Optional[Dict[str, Any]]) -> List[str]:
     return list(stages[ship].get("steps") or []) if ship is not None else []
 
 
+def stage_steps(record: Optional[Dict[str, Any]]) -> List[str]:
+    """The skills the stage a task is in applies, in the order it applies them."""
+    return list((_entry_of(record) or {}).get("steps") or [])
+
+
 def steps_of(record: Optional[Dict[str, Any]]) -> List[str]:
     """Every skill a staged task applies, each once, in the order its workflow applies them."""
     return workflows.steps_of((record or {}).get("stages") or [])
@@ -554,14 +728,3 @@ def _current(entry: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """The round a stage is on now: its last one, or ``None`` for a stage nothing has run."""
     rounds = (entry or {}).get("rounds") or []
     return rounds[-1] if rounds else None
-
-
-def _after_build(record: Dict[str, Any], worktree: List[Dict[str, Any]]) -> Step:
-    why = gate_verdict(record)
-    if why is not None:
-        return Step(GATE_CHECK, why)
-    if any(one.get("changed") for one in worktree):
-        return Step(GATE_CHECK, UNCOMMITTED)
-    if not any(one.get("ahead") for one in worktree):
-        return Step(GATE_CHECK, NO_COMMITS)
-    return Step(CRITIQUE, None, _next_stage(record))

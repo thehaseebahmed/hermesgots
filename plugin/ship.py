@@ -466,22 +466,35 @@ LEGACY_SCHEMA = {
 }
 
 
-def _staged_refusal(stage: str) -> str:
-    """Why a task still in its gate can't ship, in the words that stage needs.
+def _staged_refusal(record: Dict[str, Any]) -> str:
+    """Why a run that isn't its workflow's shipping stage can't open the pull request.
 
-    A build is told what to do next — run the gate — and a task waiting at its gate is told there is
-    nothing left for it, since a gate that already answered would refuse another try.
+    Every other stage is named — the ones before the shipping stage and the ones after it — because
+    the rule is the workflow's, not the three stages AFK used to have: a build ends at the gate the
+    host runs, and a wrap-up runs when the draft is already open (ADR 0020).
     """
-    if stage == pipeline.GATE:
+    name = pipeline.stage_name(record)
+    ship = pipeline.shipping_name(record) or ""
+    if name is None:
         return (
-            "This session is at its gate stage, and its gate has answered: the critique that follows "
-            "opens the pull request. End this run, and don't call pull_request with 'ship' again."
+            "This task's workflow has finished, and its work is in the pull request it opened. "
+            "Don't call pull_request with 'ship' again."
         )
+    if pipeline.kind(record) == pipeline.DONE:
+        return (
+            f'This session is in its "{name}" stage of a staged task, which runs after the stage '
+            f'that ships: "{ship}" has already opened the pull request, so there is nothing left '
+            f"for this stage to open. Change nothing and end this run, and don't call pull_request "
+            f"with 'ship' again."
+        )
+    gate = (
+        " Call afk_gate with the commands the work is checked by, then end this run."
+        if pipeline.gating(record)
+        else " End this run."
+    )
     return (
-        "This session is in its build stage of a staged task, so it can't ship yet: a build ends at "
-        "the gate the host runs, and the critique stage that follows opens the pull request. Call "
-        "afk_gate with the commands it is checked by, end this run, and don't call pull_request with "
-        "'ship' again."
+        f'This session is in its "{name}" stage of a staged task, so it can\'t ship: "{ship}" is '
+        f"the stage that opens the pull request.{gate} Don't call pull_request with 'ship' again."
     )
 
 
@@ -513,8 +526,8 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
         return json.dumps({"error": "This session has no worktree to ship."})
     if action == "ship":
         staged = pipeline.read(record.get("pipeline"))
-        if pipeline.gating(staged) and not pipeline.ships(staged):
-            return json.dumps({"error": _staged_refusal(pipeline.kind(staged) or "")})
+        if staged is not None and not pipeline.ships(staged):
+            return json.dumps({"error": _staged_refusal(staged)})
     try:
         if action == "status":
             return json.dumps({"results": status(record)})
