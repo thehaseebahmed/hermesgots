@@ -84,6 +84,12 @@
 // plugin/dictation.py with faster-whisper; MOCK_DICTATION=off reports it unavailable (the mic hides)
 // and MOCK_DICTATION=fail answers every clip with an error. GET /__mock/dictation lists the clips it
 // was sent (size, type, hint and the text before each), for the regression script.
+// GET /api/plugins/memento/workflows lists the workflow library (presets first, read-only), POST
+// adds one, POST to its id rewrites one of the account's own — forking a preset into a copy — and DELETE takes
+// one away; each answers the whole list. A project names the workflow its work runs under through
+// POST projects/{id}/afk { workflow_id }, and its answer carries that workflow and the name of the
+// stage its task is in. `pipeline?` below takes the new snapshot shape too — one entry per stage,
+// each with its rounds — which is how a flow puts a staged task on a second round.
 // POST /__mock/afk { project_id, stage?, reason?, pipeline?, pr?, reset? } is the dev handle on AFK's
 // own records: it stalls the project's held task at a stage, and writes the pipeline on the session
 // that task is worked in — the stage the pill reads, the gate's answer, a pull request a finished
@@ -133,6 +139,7 @@ const lastCalls = new Map()
 const modelChanges = new Map()
 const transcripts = new Map()
 let lastRowId = 0
+let lastWorkflowId = 0
 // Context compression rotates a chat to a child session (Hermes's sessions.parent_session_id): a
 // turn addressed to the old id runs on the live tip and is keyed there in runs/live, while a
 // transcript read of the old id still returns the whole lineage (resolve_resume_session_id +
@@ -143,7 +150,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
   "Access-Control-Allow-Headers":
     "Authorization, Content-Type, Idempotency-Key, X-Hermes-Session-Id",
 }
@@ -165,6 +172,59 @@ const afkSkills = new Map()
 // The stage each project's held task is in, as the plugin keeps it on the session's own record
 // (`plugin/pipeline.py`). A claimed task builds until a flow says the sheet should read another.
 const afkStages = new Map()
+const afkWorkflow = new Map()
+// The library, seeded from the plugin's presets on first read (`workflows.PRESETS`): presets are
+// read-only, and a write through the routes adds or rewrites one of the account's own rows.
+let workflowRows = []
+let seeded = false
+const PRESET_WORKFLOWS = [
+  {
+    id: "preset:one-run",
+    name: "One run",
+    preset: true,
+    at: 1,
+    stages: [{ name: "Build", steps: [], check: null, loop: null, ships: true }],
+  },
+  {
+    id: "preset:staged",
+    name: "Build · Test · Review · Summary",
+    preset: true,
+    at: 2,
+    stages: [
+      { name: "Build", steps: [], check: null, loop: null, ships: false },
+      { name: "Test", steps: [], check: "gate", loop: null, ships: false },
+      { name: "Review", steps: [], check: null, loop: null, ships: true },
+      { name: "Summary", steps: [], check: null, loop: null, ships: false },
+    ],
+  },
+  {
+    id: "preset:loop",
+    name: "Build ⇄ Test · Review · Summary",
+    preset: true,
+    at: 3,
+    stages: [
+      { name: "Build", steps: [], check: null, loop: null, ships: false },
+      { name: "Test", steps: [], check: "gate", loop: { from: "Build", cap: 3 }, ships: false },
+      { name: "Review", steps: [], check: null, loop: null, ships: true },
+      { name: "Summary", steps: [], check: null, loop: null, ships: false },
+    ],
+  },
+]
+const DEFAULT_WORKFLOW = "preset:staged"
+function workflows() {
+  if (!seeded) {
+    seeded = true
+    workflowRows = PRESET_WORKFLOWS.map((entry) => ({
+      ...entry,
+      stages: entry.stages.map((stage) => ({ ...stage })),
+    }))
+  }
+  return workflowRows
+}
+function workflowOf(projectId) {
+  const id = afkWorkflow.get(projectId) ?? DEFAULT_WORKFLOW
+  return workflows().find((entry) => entry.id === id) ?? workflows()[0]
+}
 const skillName = (value) => (typeof value === "string" && value.trim() ? value.trim() : null)
 const skillNames = (values) => [...new Set(values.map(skillName).filter(Boolean))]
 // What the media route serves for chart.png: navy sky, teal ground, a sun.
@@ -1079,17 +1139,41 @@ function afkSweep(project) {
   afkSwept.add(project.id)
   const skills = afkSkills.get(project.id)
   const staged = pipelineRecord(skills)
-  setAfkStage(project.id, staged?.stage)
+  setAfkStage(project.id, afkStageOf(staged))
   afkSession(project)
   // The stage is recorded on the session the claim made, before its build run is posted.
   const record = projectSessions.get(afkSessionId(project.id))
   if (record) record.pipeline = staged
 }
 
+/** The step a record's position is, as `plugin/pipeline.py`'s `kinds` reads it: what a stage is judged as. */
+function afkStageOf(record) {
+  if (!record) return null
+  if (!Array.isArray(record.stages)) return record.stage ?? null
+  const stages = record.stages
+  const at = record.stage ?? 0
+  if (at >= stages.length) return "done"
+  const ship = stages.findLastIndex((one) => one.ships)
+  if (ship === -1) return "build"
+  if (at === ship) return "critique"
+  if (at > ship) return "done"
+  return stages[at].check && !stages[at].steps?.length ? "gate" : "build"
+}
+
+function afkStageName(record) {
+  if (!record) return null
+  if (Array.isArray(record.stages)) return record.stages[record.stage]?.name ?? null
+  // A record from before workflows names the three steps it meant, as the plugin's upgrade does.
+  return { build: "Build", gate: "Test", critique: "Review" }[record.stage] ?? null
+}
+
 /** AFK's answer for a project: its switch, the task it holds, and its last refusal (none mocked). */
 function afkAnswer(project, reason) {
   const on = afkProjects.has(project.id)
   const skills = afkSkills.get(project.id) ?? { build_skill: null, critique_skills: [] }
+  const record = afkSwept.has(project.id)
+    ? (projectSessions.get(afkSessionId(project.id))?.pipeline ?? null)
+    : null
   return {
     object: "memento.afk",
     project_id: project.id,
@@ -1102,6 +1186,8 @@ function afkAnswer(project, reason) {
     // The stage its session's record holds, null for a task claimed with no critique skill: one
     // run, which ships, and no stage to name.
     stage: afkSwept.has(project.id) ? (afkStages.get(project.id) ?? null) : null,
+    stage_name: afkStageName(record),
+    workflow: workflowOf(project.id),
     ...skills,
   }
 }
@@ -2671,6 +2757,7 @@ http
           "afk",
           "afk_switch",
           "afk_skills",
+          "afk_workflows",
           "afk_pipeline",
           ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : []),
           ...(MCPS
@@ -2711,6 +2798,66 @@ http
       (await handleResearch(req, res, url.pathname, { json, readBody, noteEvent }))
     )
       return
+    // The workflow library: presets first and read-only, the account's own rows rewritten in place.
+    // A write answers the whole list, which is what the sheet draws; an update of a preset forks it
+    // into a copy (`workflows.save`), since a preset's body belongs to the plugin's version.
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/workflows") {
+      if (req.method === "GET")
+        return json(res, 200, { object: "memento.workflows", workflows: workflows() })
+      if (req.method === "POST") {
+        const body = await readBody(req)
+        const name = skillName(body.name)
+        if (!name) return json(res, 400, { error: { message: "A workflow needs a name." } })
+        if (!Array.isArray(body.stages) || !body.stages.length)
+          return json(res, 400, { error: { message: "A workflow needs at least one stage." } })
+        const entry = {
+          id: `wf-${++lastWorkflowId}`,
+          name,
+          preset: false,
+          at: Date.now(),
+          stages: body.stages,
+        }
+        workflows().push(entry)
+        noteEvent("workflows")
+        return json(res, 200, { object: "memento.workflows", workflows: workflows() })
+      }
+      return json(res, 405, { error: { message: "That method isn't routed." } })
+    }
+    const workflowRoute = /^\/api\/plugins\/memento\/workflows\/([^/]+)$/.exec(url.pathname)
+    if (PLUGIN && !profile && workflowRoute) {
+      const id = decodeURIComponent(workflowRoute[1])
+      const found = workflows().find((entry) => entry.id === id)
+      if (!found) return json(res, 404, { error: { message: "No such workflow." } })
+      if (req.method === "POST") {
+        const body = await readBody(req)
+        const name = skillName(body.name)
+        if (!name) return json(res, 400, { error: { message: "A workflow needs a name." } })
+        const stages = Array.isArray(body.stages) ? body.stages : found.stages
+        // A preset is the plugin's own row: saving it makes a copy, and the copy is the account's.
+        if (found.preset) {
+          const copy = { id: `wf-${++lastWorkflowId}`, name, preset: false, at: Date.now(), stages }
+          workflows().push(copy)
+          for (const [projectId, chosen] of afkWorkflow)
+            if (chosen === found.id) afkWorkflow.set(projectId, copy.id)
+        } else {
+          found.name = name
+          found.stages = stages
+          found.at = Date.now()
+        }
+        noteEvent("workflows")
+        return json(res, 200, { object: "memento.workflows", workflows: workflows() })
+      }
+      if (req.method === "DELETE") {
+        if (found.preset)
+          return json(res, 400, { error: { message: "A preset can't be deleted." } })
+        workflowRows = workflows().filter((entry) => entry.id !== id)
+        for (const [projectId, chosen] of afkWorkflow)
+          if (chosen === id) afkWorkflow.delete(projectId)
+        noteEvent("workflows")
+        return json(res, 200, { object: "memento.workflows", workflows: workflows() })
+      }
+      return json(res, 405, { error: { message: "That method isn't routed." } })
+    }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/skills") {
       return json(res, 200, {
         object: "list",
@@ -3244,13 +3391,16 @@ http
         const body = await readBody(req)
         const switching = "on" in body
         const choosing = "build_skill" in body || "critique_skills" in body
-        if (!switching && !choosing)
+        const picking = "workflow_id" in body
+        if (!switching && !choosing && !picking)
           return json(res, 400, {
-            error: { message: "on, build_skill or critique_skills is needed." },
+            error: { message: "on, workflow_id, build_skill or critique_skills is needed." },
           })
-        if (switching && choosing)
+        // One write, one shape: the switch wakes the sweep, so a body naming two could write one and
+        // be refused, leaving half of it written (`afk.write_from`).
+        if ([switching, choosing, picking].filter(Boolean).length > 1)
           return json(res, 400, {
-            error: { message: "A write names either on or the skills, not both." },
+            error: { message: "A write names either on or the skills, or a workflow, not both." },
           })
         if (switching && typeof body.on !== "boolean")
           return json(res, 400, { error: { message: "on must be true or false." } })
@@ -3274,6 +3424,16 @@ http
             build_skill: skillName(body.build_skill),
             critique_skills: skillNames(body.critique_skills),
           })
+        }
+        if (picking) {
+          const id = skillName(body.workflow_id)
+          if (!id)
+            return json(res, 400, { error: { message: "workflow_id must be a workflow's id." } })
+          if (!workflows().some((entry) => entry.id === id))
+            return json(res, 400, {
+              error: { message: `There is no workflow "${id}" in this bot's library.` },
+            })
+          afkWorkflow.set(found.id, id)
         }
         if (switching) {
           if (body.on && reason) return json(res, 409, { error: { message: reason } })
@@ -3805,7 +3965,7 @@ http
         const record = project && projectSessions.get(afkSessionId(project.id))
         if (record && pipeline !== undefined) {
           record.pipeline = pipeline
-          setAfkStage(projectId, pipeline?.stage)
+          setAfkStage(projectId, afkStageOf(pipeline))
         }
         if (record && pr) {
           const repo = repoOf(project)

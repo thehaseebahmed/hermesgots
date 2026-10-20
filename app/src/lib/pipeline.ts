@@ -1,26 +1,32 @@
 /**
- * A staged AFK task's stages — Build, Gate, Critique — as the session's own record holds them
- * (`plugin/pipeline.py`), the rule that turns that record into the three bars a session's pipeline
- * pill draws and the sheet under it explains, and the stage vocabulary AFK's pop-up names it by.
- * Pure: the record in, the steps out, so it is tested with no host and no browser.
+ * A staged AFK task's pipeline — the workflow as it stood when the task started, the stage it is in,
+ * and what each stage did — read into what a session's pipeline pill draws above the composer and
+ * what the sheet under it explains.
  *
- * The record outlives the hold, which is released when a run ends, so a finished task still says
- * how it got here (ADR 0018). A session that never ran a pipeline holds none, and the pill is not
- * there at all.
+ * The record is the task's own snapshot (`plugin/pipeline.py`, ADR 0021): the workflow's name, the
+ * stage the task is on, the round, and one entry per stage holding that stage's name, steps, check,
+ * loop and shipping mark beside its state and its rounds — each round the run that worked it, the
+ * commands it ran, the gate's answer, the findings its review reported and why it stopped. A record
+ * written before workflows were staged is upgraded by the host into the three-stage snapshot it
+ * meant, so a task that finished before them still draws its stages; a record from a host that
+ * predates the snapshot is read here as the three steps it named.
+ *
+ * Pure: the record in, the rows out, so it is tested with no host and no browser.
  */
+
+import { skillNames, stageBody } from "./workflow.ts"
 
 /** The feature a Host advertises when it can stage a task: the pill is drawn only there. */
 export const AFK_PIPELINE_FEATURE = "afk_pipeline"
 
-/** Every stage a staged task runs in, in order, and the one it ends in (`pipeline.STAGES`). */
+/** The three steps a record from before workflows named, in order, and the stage it ended in. */
 export const AFK_STAGES = ["build", "gate", "critique", "done"] as const
 
 export type AfkStage = (typeof AFK_STAGES)[number]
 
-/** The three steps a task works through; `done` is where they leave it, not a fourth step. */
+/** The three steps a legacy record works through; `done` is where they leave it, not a fourth. */
 const STEPS = ["build", "gate", "critique"] as const
 
-/** One command the build named for its gate, and the exit code the host read. */
 export interface PipelineCommand {
   command: string
   /** The repo the command runs in, where the project is more than one. */
@@ -28,106 +34,271 @@ export interface PipelineCommand {
   code: number | null
 }
 
-export interface SessionPipeline {
-  stage: AfkStage
-  /** The skill the project picked to build by, when it picked one. */
-  buildSkill: string | null
-  /** The skills the critique runs one reviewer per, in the order the project picked them. */
-  critiqueSkills: string[]
-  /** The gate's answer: every command the build named, with what it exited. */
-  commands: PipelineCommand[]
-  /** Why the pipeline stopped where it did, in the host's words; null while it is going. */
-  reason: string | null
+export interface PipelineFinding {
+  title: string
+  detail: string | null
 }
 
-/** How a step reads: finished, failing, the one the task is in now, or still to come. */
+/** What one skill's review reported, an empty list included: nothing found is an answer too. */
+export interface SkillFindings {
+  skill: string
+  findings: PipelineFinding[]
+}
+
+export interface PipelineRound {
+  runId: string | null
+  /** The commands the run itself executed, in the order it ran them. */
+  commands: PipelineCommand[]
+  /** The gate's answer, with each command's exit code; empty until the gate has run. */
+  gate: PipelineCommand[]
+  findings: SkillFindings[]
+  /** Why the stage stopped here, in the host's words, or null when it hasn't. */
+  stop: string | null
+  /** The failure a loop's next round was told to fix. */
+  retry: string | null
+}
+
+/** How a stage reads: finished, failing, the one the task is in now, or still to come. */
 export type StepState = "pass" | "fail" | "current" | "next"
 
-export interface PipelineStep {
-  name: (typeof STEPS)[number]
+export interface PipelineStage {
+  /** What a row is keyed and marked by: the step a legacy record names, or the stage's own name. */
+  key: string
+  /** The stage's own name, in the workflow's words. */
+  name: string
+  /** The step the host judges this stage as, for a record that names one rather than a workflow. */
+  kind: AfkStage | null
   state: StepState
+  steps: string[]
+  /** The host's own check: `gate` where the stage is answered by the commands the build named. */
+  check: string | null
+  loop: { from: string; cap: number } | null
+  /** Whether this is the stage that may open the pull request. */
+  ships: boolean
+  rounds: PipelineRound[]
+}
+
+export interface SessionPipeline {
+  /** The workflow's name as the task snapshotted it; null for a record from before workflows. */
+  workflow: string | null
+  /** The stage the task is in, counting from 0; `stages.length` once every stage has run. */
+  stage: number
+  /** The round a loop is on, counting from one. */
+  round: number
+  /** Why the host stopped the task in the stage it is in, when it did. */
+  reason: string | null
+  stages: PipelineStage[]
 }
 
 function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null
 }
 
-/**
- * The names a list holds, each once, in its own order — `pipeline.names`, which is also how the
- * AFK read takes the skills a project picked. A bare string is no list of skills: read one
- * character at a time it would name eleven of them.
- */
-export function skillNames(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  const names = value
-    .filter((name): name is string => typeof name === "string")
-    .map((name) => text(name))
-    .filter((name): name is string => name !== null)
-  return [...new Set(names)]
+function count(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? Math.floor(value) : null
 }
 
-/** A stage as the host wrote it, or null for one this build of the app doesn't know. */
+/** A step as a record from before workflows named it, or null for one this build doesn't know. */
 export function parseStage(value: unknown): AfkStage | null {
   return (AFK_STAGES as readonly unknown[]).includes(value) ? (value as AfkStage) : null
 }
 
+/** The host's state words (`pipeline.STATES`), for the one meaning a place can't give a stage. */
+const FAILED = "failed"
+
 function commands(value: unknown): PipelineCommand[] {
-  const gate = value as { commands?: unknown } | null
-  const found = Array.isArray(gate?.commands) ? gate.commands : []
-  return found
+  const rows = Array.isArray(value) ? value : []
+  return rows
     .filter((one): one is Record<string, unknown> => Boolean(one) && typeof one === "object")
     .map((one) => ({
       command: text(one.command) ?? "",
       repo: text(one.repo),
-      code: typeof one.code === "number" ? one.code : null,
+      code: count(one.code),
     }))
     .filter((one) => one.command)
 }
 
-/**
- * A session's pipeline as the record holds it, or null when it holds none — a row written before
- * the column, a hand edit, or a session that was never staged.
- */
-export function parsePipeline(raw: unknown): SessionPipeline | null {
-  if (!raw || typeof raw !== "object") return null
-  const record = raw as Record<string, unknown>
-  const stage = parseStage(record.stage)
-  if (!stage) return null
+/** The commands a round's gate answered, out of the `{ commands: [...] }` the host stores. */
+function gateCommands(value: unknown): PipelineCommand[] {
+  const gate = value as { commands?: unknown } | null
+  return commands(gate?.commands)
+}
+
+function findings(value: unknown): SkillFindings[] {
+  const rows = Array.isArray(value) ? value : []
+  return rows.flatMap((one) => {
+    const row = one as Record<string, unknown> | null
+    const skill = text(row?.skill)
+    if (!row || !skill) return []
+    const reported = Array.isArray(row.findings) ? row.findings : []
+    return [
+      {
+        skill,
+        findings: reported.flatMap((item): PipelineFinding[] => {
+          if (typeof item === "string") return [{ title: item, detail: null }]
+          const found = item as Record<string, unknown> | null
+          const title = text(found?.title)
+          return title ? [{ title, detail: text(found?.detail) }] : []
+        }),
+      },
+    ]
+  })
+}
+
+function rounds(value: unknown): PipelineRound[] {
+  const rows = Array.isArray(value) ? value : []
+  return rows.flatMap((one): PipelineRound[] => {
+    const row = one as Record<string, unknown> | null
+    if (!row || typeof row !== "object") return []
+    return [
+      {
+        runId: text(row.run_id),
+        commands: commands(row.commands),
+        gate: gateCommands(row.gate),
+        findings: findings(row.findings),
+        stop: text(row.stop),
+        retry: text(row.retry),
+      },
+    ]
+  })
+}
+
+function stageEntry(value: unknown): ReadStage | null {
+  const body = stageBody(value)
+  if (!body) return null
+  const row = value as Record<string, unknown>
   return {
-    stage,
-    buildSkill: text(record.build_skill),
-    critiqueSkills: skillNames(record.critique_skills),
-    commands: commands(record.gate),
-    // A stopped run keeps the stage it stopped in and a finished one has nothing to stop
-    // (`pipeline.advance` answers `done` with no stall), so a reason left beside `done` is a
-    // leftover this reading drops rather than a stop it draws.
-    reason: stage === "done" ? null : text(record.reason),
+    key: body.name,
+    ...body,
+    kind: null,
+    failed: text(row.state) === FAILED,
+    rounds: rounds(row.rounds),
+  }
+}
+
+/** A stage as the record holds it, before its place in the run decides what state it is in. */
+type ReadStage = Omit<PipelineStage, "state"> & { failed: boolean }
+
+function clamp(value: number, least: number, most: number) {
+  return Math.min(Math.max(value, least), most)
+}
+
+function stopAt(stage: ReadStage | undefined): string | null {
+  if (!stage?.failed) return null
+  for (let index = stage.rounds.length - 1; index >= 0; index -= 1) {
+    const stop = stage.rounds[index].stop
+    if (stop) return stop
+  }
+  return null
+}
+
+function place(index: number, at: number, stopped: boolean): StepState {
+  if (index < at) return "pass"
+  if (index > at) return "next"
+  return stopped ? "fail" : "current"
+}
+
+/**
+ * The snapshot a host writes (`pipeline.start`): the stages, their states and their rounds. A
+ * stage's state is its place in the run — the task has passed the ones before it, it is in the one
+ * it is on, and the rest are still to come — and the stage it is on is failing where the host said
+ * it failed. Deriving it rather than trusting the record keeps a hand edit from drawing a stage the
+ * task has left as one it is still in.
+ */
+function snapshot(record: Record<string, unknown>): SessionPipeline | null {
+  const raw = (Array.isArray(record.stages) ? record.stages : []) as unknown[]
+  const read = raw.flatMap((one) => {
+    const found = stageEntry(one)
+    return found ? [found] : []
+  })
+  if (!read.length) return null
+  const at = clamp(count(record.stage) ?? 0, 0, read.length)
+  const reason = stopAt(read[at])
+  const stages = read.map((one, index) => ({
+    ...one,
+    state: place(index, at, reason !== null || Boolean(read[at]?.failed)),
+  }))
+  const workflow = record.workflow as Record<string, unknown> | null
+  return {
+    workflow: text(workflow?.name),
+    stage: at,
+    round: Math.max(count(record.round) ?? 1, 1),
+    reason,
+    stages,
   }
 }
 
 /**
- * The three steps as the pill draws them: everything before the stage the task is in has passed,
- * that one is lit — or failing, where the host recorded why it stopped — and the rest are still to
- * come. `done` is past all three, so a finished pipeline has passed every step.
+ * The three steps a record from before workflows named, as the pipeline it was: the build with the
+ * skill it built by, the gate, and the review with the skills it reviewed by, shipping on the
+ * review. Its stage is a name rather than a position, and the stage it stopped in carries why.
  */
-export function pipelineSteps(pipeline: SessionPipeline): PipelineStep[] {
-  const at = AFK_STAGES.indexOf(pipeline.stage)
-  const stalled = pipeline.reason !== null
-  return STEPS.map((name, index) => {
-    if (index < at) return { name, state: "pass" }
-    if (index > at) return { name, state: "next" }
-    return { name, state: stalled ? "fail" : "current" }
+function legacy(
+  record: Record<string, unknown>,
+  step: AfkStage,
+  reason: string | null,
+): SessionPipeline {
+  const at = AFK_STAGES.indexOf(step)
+  const gate = gateCommands(record.gate)
+  const build = text(record.build_skill)
+  const skills: Record<(typeof STEPS)[number], string[]> = {
+    build: build ? [build] : [],
+    gate: [],
+    critique: skillNames(record.critique_skills),
+  }
+  const stages = STEPS.map((kind, index): PipelineStage => {
+    const state = place(index, at, reason !== null)
+    return {
+      key: kind,
+      name: STEP_WORDS[kind],
+      kind,
+      state,
+      steps: skills[kind],
+      check: kind === "gate" ? "gate" : null,
+      loop: null,
+      ships: kind === "critique",
+      rounds:
+        state === "next"
+          ? []
+          : [
+              {
+                runId: null,
+                commands: [],
+                gate: kind === "gate" ? gate : [],
+                findings: [],
+                stop: index === at ? reason : null,
+                retry: null,
+              },
+            ],
+    }
   })
+  return { workflow: null, stage: at, round: 1, reason, stages }
 }
 
-/** A step in words, as the pill's own label and the sheet's rows say it. */
-export const STEP_WORDS: Record<PipelineStep["name"], string> = {
+/**
+ * A session's pipeline as the record holds it, or null when it holds none — a row written before
+ * the snapshot, a hand edit, or a session that was never staged.
+ */
+export function parsePipeline(raw: unknown): SessionPipeline | null {
+  if (!raw || typeof raw !== "object") return null
+  const record = raw as Record<string, unknown>
+  if (Array.isArray(record.stages)) return snapshot(record)
+  const step = parseStage(record.stage)
+  if (!step) return null
+  // A stopped run keeps the stage it stopped in and a finished one has nothing to stop
+  // (`pipeline.advance` answers `done` with no stall), so a reason left beside `done` is a
+  // leftover this reading drops rather than a stop it draws.
+  return legacy(record, step, step === "done" ? null : text(record.reason))
+}
+
+/** A step in words, as a record from before workflows named it. */
+export const STEP_WORDS: Record<(typeof STEPS)[number], string> = {
   build: "Build",
   gate: "Gate",
   critique: "Critique",
 }
 
-/** Each stage in words, where a screen names the stage a task is in rather than marking it. */
+/** Each of those steps in the words a screen names the stage a task is in by. */
 export const STAGE_WORDS: Record<AfkStage, string> = {
   build: "Building",
   gate: "Gate check",
@@ -136,17 +307,29 @@ export const STAGE_WORDS: Record<AfkStage, string> = {
 }
 
 /**
- * Which of the three stages a task has reached, counting from one — the stage it is in, and the last
- * of them all for a pipeline that finished, since every stage of that one is behind it.
+ * Which stage a task has reached, counting from one — the stage it is in, and the last of them all
+ * for a pipeline that finished, since every stage of that one is behind it.
  */
 export function stageNumber(pipeline: SessionPipeline): number {
-  return Math.min(Math.max(AFK_STAGES.indexOf(pipeline.stage), 0) + 1, STEPS.length)
+  return Math.min(pipeline.stage + 1, Math.max(pipeline.stages.length, 1))
 }
 
-/** The stage a task is in, in words — or that the host stopped it where it was. */
+/**
+ * The stage a task is in, in words: the workflow's own name for it, or that the host stopped it
+ * where it was. A task past its last stage has shipped.
+ */
 export function stageWord(pipeline: SessionPipeline): string {
   if (pipeline.reason !== null) return "Stalled"
-  return STAGE_WORDS[pipeline.stage]
+  const stage = pipeline.stages[pipeline.stage]
+  if (!stage) return STAGE_WORDS.done
+  return stage.kind ? STAGE_WORDS[stage.kind] : stage.name
+}
+
+/** The round a stage is on, as its row says it: `Round 2 of 3` where the loop names a cap. */
+export function stageRound(stage: PipelineStage): string | null {
+  const round = stage.rounds.length
+  if (round < 2) return null
+  return stage.loop ? `Round ${round} of ${stage.loop.cap}` : `Round ${round}`
 }
 
 /**
@@ -157,34 +340,52 @@ export function commandName(one: PipelineCommand): string {
   return one.repo ? `${one.repo}: ${one.command}` : one.command
 }
 
-/** One thing a step ran: what it was, and what came of it where the host records that. */
 export interface StepRun {
   name: string
-  /** The gate's own answer. A skill's outcome isn't recorded yet, so it has none. */
+  /** The gate's own answer. A skill's outcome isn't recorded, so it has none. */
   end?: string
   failed?: boolean
 }
 
-/**
- * What a step ran, in the order the record keeps it. A step still to come ran nothing — the skills
- * are chosen for it, not executed — so it lists none, and the row says so instead.
- */
-export function stepRuns(
-  pipeline: SessionPipeline,
-  step: PipelineStep,
-  prLabel?: string,
-): StepRun[] {
-  if (step.state === "next") return []
-  if (step.name === "build") return pipeline.buildSkill ? [{ name: pipeline.buildSkill }] : []
-  if (step.name === "critique") {
-    const skills: StepRun[] = pipeline.critiqueSkills.map((name) => ({ name }))
-    // A critique that shipped is the step that opened the pull request.
-    if (step.state === "pass" && prLabel) skills.push({ name: prLabel })
-    return skills
-  }
-  return pipeline.commands.map((one) => ({
+/** The gate's answer to one command, as its line reads: the code it exited, or that none was read. */
+function gateRun(one: PipelineCommand): StepRun {
+  return {
     name: commandName(one),
     end: one.code === null ? "not read" : `exit ${one.code}`,
     failed: one.code !== null && one.code !== 0,
-  }))
+  }
+}
+
+/**
+ * What a stage ran, in the order the record keeps it: the skills it was told to apply, then the
+ * commands its own run executed, then the gate's answer with each command's exit code. A stage
+ * still to come ran nothing — its skills are chosen for it, not executed — so it lists none, and
+ * the row says so instead.
+ */
+export function stepRuns(stage: PipelineStage, prLabel?: string): StepRun[] {
+  if (stage.state === "next") return []
+  const entries: StepRun[] = stage.steps.map((name) => ({ name }))
+  for (const round of stage.rounds) {
+    entries.push(...round.commands.map((one) => ({ name: commandName(one) })))
+    entries.push(...round.gate.map(gateRun))
+  }
+  // A critique that shipped is the step that opened the pull request.
+  if (stage.ships && stage.state === "pass" && prLabel) entries.push({ name: prLabel })
+  return entries
+}
+
+/**
+ * What each skill's review reported, counted across the stage's rounds: a skill that raised
+ * nothing keeps its empty list, so the row can say `0` rather than nothing at all.
+ */
+export function stageFindings(stage: PipelineStage): SkillFindings[] {
+  const bySkill = new Map<string, SkillFindings>()
+  for (const round of stage.rounds) {
+    for (const report of round.findings) {
+      const kept = bySkill.get(report.skill) ?? { skill: report.skill, findings: [] }
+      kept.findings.push(...report.findings)
+      bySkill.set(report.skill, kept)
+    }
+  }
+  return [...bySkill.values()]
 }

@@ -302,6 +302,7 @@ def afk_row(
     refusal: Optional[str] = None,
     workflow: Any = None,
     stage: Optional[str] = None,
+    stage_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """The answer `read` gives for a project holding nothing and having picked nothing.
 
@@ -314,6 +315,7 @@ def afk_row(
         "refusal": refusal,
         "workflow": default_workflow() if workflow is None else workflow,
         "stage": stage,
+        "stage_name": stage_name,
     }
 
 

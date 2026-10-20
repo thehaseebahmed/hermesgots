@@ -1,12 +1,13 @@
-// AFK's pop-up names the stage a staged task is in — Building, Gate check, Critiquing — read from
+// AFK's pop-up names the stage a staged task is in — the stage's own name from the task's snapshot,
+// Build, Test and Review on the default workflow — read from
 // the host on its own poll, so the sheet says how far the work got without opening its session. A
 // project with no critique skill is one run, and its task has no stage to name. The mock's claimed
 // task is staged, and a flow moves it between the stages the way the host's pipeline does.
 import { afkOn, app, assert, flow, makeProject, mock, openAfk, pass, say } from "./lib.mjs"
 
 const STAGES = [
-  ["gate", "Gate check"],
-  ["critique", "Critiquing"],
+  ["gate", "Test"],
+  ["critique", "Review"],
 ]
 
 const choose = (projectId, critique) =>
@@ -38,13 +39,13 @@ const run = async ({ page, profileId, shot, until }) => {
   const rowText = () => working.locator("a[data-task]").textContent()
   const leads = async (label) =>
     new RegExp(`^#\\d+${label}: `).test(await rowText())
-  await working.getByText("Building").waitFor({ timeout: 20_000 })
+  await working.getByText("Build").waitFor({ timeout: 20_000 })
   assert.equal(
     await working.getAttribute("data-stage"),
     "build",
     "the Working row says the task is building",
   )
-  assert.ok(await leads("Building"), "the task's title is prefixed with Building:")
+  assert.ok(await leads("Build"), "the task's title is prefixed with Build:")
   await page.waitForTimeout(450)
   await shot("building")
 
@@ -63,13 +64,13 @@ const run = async ({ page, profileId, shot, until }) => {
   assert.equal((await choose(projectId, [])).status, 200, "the critique is cleared")
   await openAfk(page, screen)
   await control.waitFor({ timeout: 15_000 })
-  await working.getByText("Critiquing").waitFor({ timeout: 20_000 })
+  await working.getByText("Review").waitFor({ timeout: 20_000 })
   assert.equal(
     await working.getAttribute("data-stage"),
     "critique",
     "a task already claimed keeps the stage it was claimed in",
   )
-  assert.ok(await leads("Critiquing"), "and its title still says so")
+  assert.ok(await leads("Review"), "and its title still says so")
   await page.waitForTimeout(450)
   await shot("stage-kept")
 
@@ -86,5 +87,5 @@ for (const width of [390, 1024]) {
   }
 }
 pass(
-  "AFK's pop-up names the stage its held task is in — Building, Gate check, Critiquing — as the host moves it on, and keeps it when the pickers change under a claimed task, at 390 and 1024px, light and dark",
+  "AFK's pop-up names the stage its held task is in, by the stage's own name from the task's snapshot — Build, Test, Review on the default workflow — as the host moves it on, and keeps it when the pickers change under a claimed task, at 390 and 1024px, light and dark",
 )

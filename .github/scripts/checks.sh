@@ -36,8 +36,12 @@ app() {
   gate node --experimental-strip-types --test scripts/test-identity-session.mjs
   gate node --experimental-strip-types --test scripts/test-model-changes.mjs
   gate node --experimental-strip-types --test scripts/test-slash.mjs scripts/test-skills-cache.mjs
-  gate node --experimental-strip-types --test scripts/test-pipeline.mjs
+  gate node --experimental-strip-types --test scripts/test-pipeline.mjs scripts/test-workflow.mjs
   gate node --experimental-strip-types --test scripts/test-mcp-catalogue.mjs scripts/test-mcp-access.mjs
+  # The component tier: a screen rendered over a seeded device database, with the HTTP boundary
+  # faked. Each file is its own process, since what a connection's plugin answered is remembered
+  # for the page. ADR 0019 keeps geometry out of these: no layout, so nothing here measures.
+  gate node --test --import ./scripts/component-hooks.mjs scripts/test-afk-workflows.tsx scripts/test-afk-workflows-old-plugin.tsx scripts/test-pipeline-sheet.tsx
   gate pnpm build
 }
 

@@ -11,6 +11,8 @@ import { ChevronDownIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { WorkflowEditor } from "@/components/workflow-editor"
+import { WorkflowSheet } from "@/components/workflow-sheet"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -35,10 +37,15 @@ import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { usePluginFeature, type PluginFeatureAnswer } from "@/lib/features"
 import { AFK_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import {
+  createWorkflow,
+  deleteWorkflow,
   getProjectAfk,
   getProjectTasks,
+  listWorkflows,
   setProjectAfk,
   setProjectAfkSkills,
+  setProjectAfkWorkflow,
+  updateWorkflow,
   type HermesConfig,
   type ProjectAfk,
   type ProjectIssue,
@@ -50,6 +57,7 @@ import { STAGE_WORDS, type AfkStage } from "@/lib/pipeline"
 import { usePoll } from "@/lib/poll"
 import { noteFailure } from "@/lib/report"
 import { useSkills } from "@/lib/skills"
+import { workflowShape, type Workflow, type WorkflowEntry } from "@/lib/workflow"
 
 /** The feature the plugin advertises when it can read a project's tasks. */
 export const AFK_FEATURE = "afk"
@@ -59,6 +67,8 @@ export const AFK_SWITCH_FEATURE = "afk_switch"
 
 /** And the one it advertises when it can keep the skills a project's work follows. */
 export const AFK_SKILLS_FEATURE = "afk_skills"
+
+export const AFK_WORKFLOWS_FEATURE = "afk_workflows"
 
 /**
  * What a staged task's stage reads as in the Working row: the stage itself is the host's, and a
@@ -92,12 +102,20 @@ export function AfkPopup({
   const [afk, setAfk] = useState<ProjectAfk>()
   const [afkError, setAfkError] = useState<string>()
   const [saving, setSaving] = useState(false)
+  // The workflow library, read when a sheet needs it: the picker and the editor share one list, so a
+  // save in either shows at once.
+  const [library, setLibrary] = useState<WorkflowEntry[]>()
+  const [libraryError, setLibraryError] = useState<string>()
+  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [editing, setEditing] = useState<WorkflowEntry | "new" | null>(null)
+  const [savingWorkflow, setSavingWorkflow] = useState(false)
   const key = connectionKey(config)
   const switchable = usePluginFeature(config, AFK_SWITCH_FEATURE)
   const withSkills = usePluginFeature(config, AFK_SKILLS_FEATURE)
+  const withWorkflows = usePluginFeature(config, AFK_WORKFLOWS_FEATURE)
   // The pickers' list is the bot's own skills, read the way the composer's `/` menu reads them: only
   // what this profile can run now. Asked only where the host can hold a choice at all.
-  const skills = useSkills(config, open && withSkills === "yes")
+  const skills = useSkills(config, open && (withSkills === "yes" || withWorkflows === "yes"))
 
   const read = useCallback(
     (signal: AbortSignal) => {
@@ -157,6 +175,31 @@ export function AfkPopup({
     },
     [config, key, projectId],
   )
+  const readLibrary = useCallback(
+    (signal: AbortSignal) => {
+      void listWorkflows(config, AbortSignal.any([signal, AbortSignal.timeout(READ_TIMEOUT_MS)]))
+        .then((next) => {
+          if (signal.aborted) return
+          setLibraryError(undefined)
+          setLibrary(next)
+        })
+        .catch((failure: unknown) => {
+          if (signal.aborted) return
+          setLibraryError(
+            failure instanceof Error ? failure.message : "Couldn't read the workflows.",
+          )
+          noteFailure("Reading the workflows", failure)
+        })
+    },
+    [config],
+  )
+  // Read while a sheet that draws it is open, and again when one opens: a workflow saved on another
+  // device shows the next time the sheet is looked at.
+  usePoll(readLibrary, false, [key], {
+    active: open && withWorkflows === "yes" && (libraryOpen || editing !== null),
+    onShow: false,
+  })
+
   // The switch's own read, only where the plugin has it: a Host that can't answer is never asked.
   // While the project is off nothing here can change but the user's own write, so there is no timer;
   // once it's on the sheet keeps reading at AFK_MS, because turning it on wakes a sweep on the host
@@ -199,6 +242,35 @@ export function AfkPopup({
   const choose = (buildSkill: string | null, critiqueSkills: string[]) =>
     save(() => setProjectAfkSkills(config, projectId, buildSkill, critiqueSkills))
 
+  const pickWorkflow = async (picked: WorkflowEntry) => {
+    setSavingWorkflow(true)
+    try {
+      setAfk(await setProjectAfkWorkflow(config, projectId, picked.id))
+      setLibraryOpen(false)
+    } catch (failure) {
+      toast.error(failure instanceof Error ? failure.message : "Couldn't choose that workflow.")
+    } finally {
+      setSavingWorkflow(false)
+    }
+  }
+  // Both writes answer the library as the host holds it, so the sheet draws the row it wrote —
+  // including the copy a preset's save forked.
+  const writeWorkflow = async (body: Workflow, id: string | null) => {
+    const next = id ? await updateWorkflow(config, id, body) : await createWorkflow(config, body)
+    setLibrary(next)
+    setLibraryError(undefined)
+  }
+  const removeWorkflow = async (entry: WorkflowEntry) => {
+    try {
+      setLibrary(await deleteWorkflow(config, entry.id))
+      setEditing(null)
+      // The project may have run under it: the host answers what it holds now.
+      setAfk(await getProjectAfk(config, projectId))
+    } catch (failure) {
+      toast.error(failure instanceof Error ? failure.message : "Couldn't delete that workflow.")
+    }
+  }
+
   const manyRepos = (tasks?.repos.length ?? 0) > 1
 
   return (
@@ -215,8 +287,9 @@ export function AfkPopup({
             saving={saving}
             onToggle={(on) => void turn(on)}
           />
-          {/* Under the switch: the same setting, and a choice is the project's even with nothing
-              left to work. */}
+          {withWorkflows === "yes" && afk && !afkError && (
+            <WorkflowRow workflow={afk.workflow} onOpen={() => setLibraryOpen(true)} />
+          )}
           {withSkills === "yes" && afk && !afkError && (
             <AfkSkills
               afk={afk}
@@ -231,6 +304,7 @@ export function AfkPopup({
             <Working
               task={afk.task}
               stage={afk.stage}
+              stageName={afk.stageName}
               refusal={afk.refusal}
               manyRepos={manyRepos}
             />
@@ -244,6 +318,39 @@ export function AfkPopup({
             manyRepos={manyRepos}
           />
         </div>
+        {withWorkflows === "yes" && (
+          <>
+            <WorkflowSheet
+              open={libraryOpen}
+              onOpenChange={setLibraryOpen}
+              entries={library}
+              error={libraryError}
+              chosenId={afk?.workflow?.id}
+              saving={savingWorkflow}
+              onPick={(entry) => void pickWorkflow(entry)}
+              onEdit={(entry) => {
+                setLibraryOpen(false)
+                setEditing(entry)
+              }}
+              onNew={() => {
+                setLibraryOpen(false)
+                setEditing("new")
+              }}
+            />
+            <WorkflowEditor
+              // Keyed by what it edits: opening on another workflow starts a fresh draft, and
+              // reopening one starts from the row as the host holds it.
+              key={editing === null ? "closed" : editing === "new" ? "new" : editing.id}
+              open={editing !== null}
+              onOpenChange={(next) => !next && setEditing(null)}
+              entry={editing === "new" ? null : editing}
+              skills={skills.status === "ok" ? skills.skills : []}
+              skillsLoading={skills.status === "loading"}
+              onSave={writeWorkflow}
+              onDelete={removeWorkflow}
+            />
+          </>
+        )}
       </PopupContent>
     </Popup>
   )
@@ -314,6 +421,35 @@ function AfkSwitch({
             {reason}
           </p>
         )
+      )}
+    </div>
+  )
+}
+
+/**
+ * The workflow this project's work runs under, and its shape under its name: the row opens the
+ * library, where picking one is one write. A project nothing has chosen for runs the host's default,
+ * which it names here rather than leaving the row blank.
+ */
+function WorkflowRow({ workflow, onOpen }: { workflow: WorkflowEntry | null; onOpen: () => void }) {
+  return (
+    <div className="flex flex-col gap-1" data-afk-workflow>
+      <Row label="Workflow">
+        <Button
+          type="button"
+          variant="secondary"
+          aria-label="Workflow"
+          className="h-auto min-h-11 max-w-[60%] justify-between gap-2 rounded-4xl py-2 pr-2.5 pl-3 font-normal"
+          onClick={onOpen}
+        >
+          <span className="min-w-0 truncate">{workflow?.name ?? "Default"}</span>
+          <ChevronDownIcon className="shrink-0 text-muted-foreground" />
+        </Button>
+      </Row>
+      {workflow && (
+        <p className="truncate px-1 text-sm text-muted-foreground">
+          {workflowShape(workflow.stages)}
+        </p>
       )}
     </div>
   )
@@ -481,16 +617,19 @@ function AfkSkills({
 function Working({
   task,
   stage,
+  stageName,
   refusal,
   manyRepos,
 }: {
   task: ProjectIssue | null | undefined
   stage: AfkStage | null | undefined
+  /** The stage's own name from the task's snapshot, so a workflow's words show rather than ours. */
+  stageName: string | null | undefined
   refusal: string | null | undefined
   manyRepos: boolean
 }) {
   if (!task && !refusal) return null
-  const label = stage ? STAGE_LABELS[stage] : null
+  const label = stageName ?? (stage ? STAGE_LABELS[stage] : null)
   return (
     <div className="flex flex-col gap-3">
       {refusal && (
@@ -499,7 +638,7 @@ function Working({
         </p>
       )}
       {task && (
-        <section aria-label="Working" data-working data-stage={label ? stage : undefined}>
+        <section aria-label="Working" data-working data-stage={stage ?? undefined}>
           <h3 className="px-1 pb-1 text-sm text-muted-foreground">Working</h3>
           <TaskLink task={task} label={label} note={manyRepos ? task.repo : undefined} />
         </section>
