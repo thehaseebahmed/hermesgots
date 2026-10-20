@@ -134,16 +134,15 @@ _SUMMARY_STAGE = """This task's work is a draft pull request already, and you ar
 
 
 class StageWords(NamedTuple):
-    """A step's own words: what its run is doing, its brief, and where its skills are applied."""
+    """A step's own words: what its run is doing, and the brief standing in for its skills."""
 
     doing: str
     brief: str
-    use: str = "follow it for how that part of the work is done"
 
 
 _WORDS = {
     pipeline.BUILD: StageWords("implementing", _BUILD_STAGE),
-    pipeline.CRITIQUE: StageWords("reviewing the build of", _REVIEW_STAGE, "apply it to the diff"),
+    pipeline.CRITIQUE: StageWords("reviewing the build of", _REVIEW_STAGE),
     pipeline.DONE: StageWords("wrapping up", _SUMMARY_STAGE),
 }
 
@@ -213,7 +212,7 @@ def stage_prompt(
         session_prompt(record, unattended=True),
         _AFK_INSTRUCTIONS.format(issue=task.get("number")) if kind == pipeline.BUILD else "",
         _base_line(base) if base and ships else "",
-        _steps_line(pipeline.stage_steps(staged), _words(kind).use),
+        _steps_line(pipeline.stage_steps(staged), ships),
         _SKILL_SCOPE,
         _retry_line(pipeline.retry(staged)),
         _brief(staged),
@@ -246,10 +245,14 @@ def _brief(record: Optional[Dict[str, Any]]) -> str:
     return _words(pipeline.kind(record)).brief.format(name=name)
 
 
-def _steps_line(steps: List[str], use: str) -> str:
-    """The skills the stage applies, in order, named once each rather than quoted."""
+def _steps_line(steps: List[str], ships: bool) -> str:
+    """The skills the stage applies, in order, named once each rather than quoted, and where: the
+    stage that ships reads the diff, so there each one is applied to that, and every other stage is
+    told how that part of the work it goes on to write is done.
+    """
     if not steps:
         return ""
+    use = "apply it to the diff" if ships else "follow it for how that part of the work is done"
     if len(steps) == 1:
         name = steps[0]
         return (

@@ -176,15 +176,14 @@ class StagePromptTests(unittest.TestCase):
         self.assertEqual(text.count("log-triage"), 1)
         self.assertIn("Load each with skill_view", text)
         self.assertIn("apply it to the diff", text, "the review's work is the diff, so its skills go on that")
-        self.assertNotIn("delegate", text.lower(), "no delegation instruction at all")
         self.assertNotIn("one reviewer per skill", text)
         self.assertNotIn("reviewer", text.lower(), "the per-skill reviewer briefs are gone")
 
     def test_a_skill_that_asks_for_reviewers_is_not_contradicted(self) -> None:
-        text = self.text()
+        text = self.text().lower()
+        for child in ("delegate", "spawn", "subagent"):
+            self.assertNotIn(child, text, "the brief neither asks for children nor forbids them")
         self.assertIn("governs method only", text, "the skill's own words decide how it is done")
-        for forbidding in ("don't spawn", "do not spawn", "no subagents", "nothing may be delegated"):
-            self.assertNotIn(forbidding, text.lower())
 
     def test_a_stage_with_no_skills_still_states_the_fixed_points(self) -> None:
         record = staged_record(pipeline.CRITIQUE, steps=())
