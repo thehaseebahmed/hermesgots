@@ -82,9 +82,7 @@ export function WorkflowEditor({
   // open starts from the row it names rather than from the last thing typed into it.
   const [name, setName] = useState(entry?.name ?? "")
   const [stages, setStages] = useState<WorkflowStage[]>(() =>
-    entry
-      ? entry.stages.map((stage) => ({ ...stage }))
-      : withShipping([blankStage("Build")]),
+    entry ? entry.stages.map((stage) => ({ ...stage })) : withShipping([blankStage("Build")]),
   )
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -106,8 +104,7 @@ export function WorkflowEditor({
 
   const remove = (index: number) => setStages((held) => held.filter((_, at) => at !== index))
 
-  const add = () =>
-    setStages((held) => [...held, blankStage(`Stage ${held.length + 1}`)])
+  const add = () => setStages((held) => [...held, blankStage(`Stage ${held.length + 1}`)])
 
   const picked = (names: string[]) => {
     if (!picking) return
@@ -325,7 +322,9 @@ export function WorkflowEditor({
                 <AlertDialogContent>
                   <AlertDialogHeader>
                     <AlertDialogTitle>Delete this workflow?</AlertDialogTitle>
-                    <AlertDialogDescription>{entry.name} is removed from the library.</AlertDialogDescription>
+                    <AlertDialogDescription>
+                      {entry.name} is removed from the library.
+                    </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
                     <AlertDialogCancel render={<Button type="button" variant="ghost" />}>
@@ -353,7 +352,9 @@ export function WorkflowEditor({
         <SkillSheet
           open={picking !== null}
           onOpenChange={(next) => !next && setPicking(null)}
-          title={picking?.step ? `Change ${picking.step}` : `Steps for ${stage?.name ?? "the stage"}`}
+          title={
+            picking?.step ? `Change ${picking.step}` : `Steps for ${stage?.name ?? "the stage"}`
+          }
           skills={skills}
           loading={skillsLoading}
           multiple={picking?.step === undefined}

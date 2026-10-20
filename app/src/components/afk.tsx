@@ -436,13 +436,7 @@ function AfkSwitch({
  * library, where picking one is one write. A project nothing has chosen for runs the host's default,
  * which it names here rather than leaving the row blank.
  */
-function WorkflowRow({
-  workflow,
-  onOpen,
-}: {
-  workflow: WorkflowEntry | null
-  onOpen: () => void
-}) {
+function WorkflowRow({ workflow, onOpen }: { workflow: WorkflowEntry | null; onOpen: () => void }) {
   return (
     <div className="flex flex-col gap-1" data-afk-workflow>
       <Row label="Workflow">

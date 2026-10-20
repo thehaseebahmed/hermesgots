@@ -70,9 +70,7 @@ export function SkillSheet({
       onOpenChange(false)
       return
     }
-    setDraft((held) =>
-      held.includes(name) ? held.filter((one) => one !== name) : [...held, name],
-    )
+    setDraft((held) => (held.includes(name) ? held.filter((one) => one !== name) : [...held, name]))
   }
 
   return (
