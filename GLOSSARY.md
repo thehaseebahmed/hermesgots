@@ -140,7 +140,7 @@ A task that has to be closed before another one can start.
 _Avoid_: dependency, prerequisite, upstream
 
 **Stalled**:
-An AFK session nothing is working any more: its run failed, was interrupted, or stopped without finishing, or the host restarted while it worked and adopted it rather than starting it again. It keeps its task, its claim and its transcript, and waits for the user beside the questions and approvals waiting sessions are shown with.
+An AFK session nothing is working any more: its run failed, was interrupted by the user, or stopped without finishing. It keeps its task, its claim and its transcript, and waits for the user beside the questions and approvals waiting sessions are shown with. A run the host lost rather than one the user stopped is not a stall: the host resumes it once.
 _Avoid_: stuck, broken, paused, aborted
 
 **Frontier**:
@@ -152,7 +152,7 @@ Taking a task so nothing else picks it up. A claimed task is out of the frontier
 _Avoid_: assign, lock, pickup
 
 **Hold**:
-The task a project's AFK switch claimed and the session working it: the host's own record, one per project, which is why a project takes no second task while one is held. It lasts as long as the run; a finished run lets go of the hold and leaves the claim, and a session the user closes gives both back.
+The task a project's AFK switch claimed and the session working it: the host's own record, one per project, which is why a project takes no second task while one is held. It lasts as long as the task's workflow runs; a finished task lets go of the hold and leaves the claim, and a session the user closes gives both back.
 _Avoid_: lock, lease, slot
 
 **Workflow**:
@@ -166,6 +166,14 @@ _Avoid_: template, default, built-in
 **Stage**:
 One unit of a workflow's work, named by the workflow: one run of the session, made of the steps it applies, or a checkpoint the host answers itself.
 _Avoid_: phase, step, node
+
+**Run**:
+One turn a task's session spends on one stage, posted by the host and named by its own id. A stage ends only when its run ends, and no other turn on that session can end it.
+_Avoid_: turn, attempt, job, execution
+
+**Round**:
+One go at a stage: its run, the commands that run executed, its findings and why it stopped. A stage takes more than one round only when something asks for it — a loop's retry, a rewind, or the host resuming a run it lost.
+_Avoid_: attempt, try, iteration, pass
 
 **Step**:
 One of the bot's skills that a stage's run applies, in the order the workflow lists them. A stage with no steps runs its built-in brief instead.
@@ -184,8 +192,16 @@ The one stage of a workflow whose run may open the task's draft pull request. Ev
 _Avoid_: ship stage, release stage, PR stage
 
 **Pipeline**:
-A task's own run through its workflow: the workflow as it stood when the task started, the stage and round it is on, and what each stage ran and found. What the session's pill and the sheet behind it read.
+A task's own passage through its workflow: the workflow as it stood when the task started, the stage and round it is on, and one row per round saying what it ran and what it found. What the session's pill and the sheet behind it read.
 _Avoid_: workflow, run chain, progress
+
+**Rewind**:
+The agent sending a task back to a stage it has already run, as a new round of it, with the reason it gives. The host posts that stage's run, and the stages it left keep what they ran.
+_Avoid_: restart, rollback, reset, go back
+
+**Pending rewind**:
+A rewind the agent has asked for that the record holds until the run which asked for it ends — the moment the stage moves, so no record ever names a stage a differently-briefed run is working.
+_Avoid_: queued rewind, scheduled rewind
 
 **Build**:
 The default preset's first stage: where a task's work is written, and the stage that ends at the gate rather than at a pull request.
