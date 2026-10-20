@@ -22,6 +22,7 @@ from plugin.tasks import (
     READY_LABEL,
     groups,
     next_page,
+    next_ready,
     parse_blocked_by,
     read,
 )
@@ -209,6 +210,50 @@ class ReadTests(unittest.TestCase):
         self.assertEqual(len(self.paths), 1)
         self.assertIn(f"labels={READY_LABEL}", self.paths[0])
         self.assertIn("state=open", self.paths[0])
+
+    def test_the_frontier_read_carries_no_bodies(self) -> None:
+        self.serve(
+            {
+                "/repos/mock-user/memento/issues?": [
+                    issue_row(265, body="Describe it."),
+                    issue_row(266, body="Claimed.", labels=(READY_LABEL, CLAIM_LABEL)),
+                    issue_row(267, body="Blocked.", created="2026-10-03T00:00:00Z", summary=1),
+                ],
+                "/repos/mock-user/memento/issues/267/dependencies/blocked_by": [issue_row(265)],
+            }
+        )
+        found = read(Path(self.home.name), self.folders)
+        self.assertEqual(
+            [len(found[group]) for group in ("ready", "claimed", "blocked")],
+            [1, 1, 1],
+            "one row in each group, so no group is left holding the shape by accident",
+        )
+        for group in ("ready", "claimed", "blocked"):
+            for row in found[group]:
+                self.assertNotIn(
+                    "body", row, "the sheet shows where the tasks are, not what they say"
+                )
+
+    def test_the_sweeps_read_carries_the_body_of_the_one_it_claims(self) -> None:
+        body = "## What to build\n\nThe first run opens with the issue.\n\n- verbatim\n"
+        self.serve(
+            {"/repos/mock-user/memento/issues?": [issue_row(265, body=body), issue_row(266, body="x")]}
+        )
+        task = next_ready(Path(self.home.name), self.folders)
+        self.assertEqual((task["number"], task["body"]), (265, body))
+        self.assertEqual(len(self.paths), 1, "the body comes with the list, not from a second read")
+
+    def test_the_sweeps_read_of_an_empty_frontier_is_none(self) -> None:
+        self.serve({"/repos/mock-user/memento/issues?": []})
+        self.assertIsNone(next_ready(Path(self.home.name), self.folders))
+
+    def test_an_issue_with_no_body_is_an_empty_one(self) -> None:
+        self.serve({"/repos/mock-user/memento/issues?": [issue_row(265, body=None)]})
+        self.assertEqual(next_ready(Path(self.home.name), self.folders)["body"], "")
+
+    def test_a_web_edited_body_reads_with_unix_line_endings(self) -> None:
+        self.serve({"/repos/mock-user/memento/issues?": [issue_row(265, body="a\r\n\r\nb\rc")]})
+        self.assertEqual(next_ready(Path(self.home.name), self.folders)["body"], "a\n\nb\nc")
 
     def test_a_repository_pages_until_github_offers_no_more(self) -> None:
         first = (

@@ -80,9 +80,8 @@ def groups(tasks: Iterable[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
         row = {key: task.get(key) for key in SHOWN}
         row["title"] = row["title"] or ""
         row["assignees"] = list(row["assignees"] or [])
-        # Every row carries its blockers, empty for the ones that have none: one shape leaves.
-        row["blockers"] = []
         if _claimed(labels, row["assignees"]):
+            row["blockers"] = []
             claimed.append(row)
             continue
         row["blockers"] = [
@@ -90,6 +89,11 @@ def groups(tasks: Iterable[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
         ]
         (blocked if row["blockers"] else ready).append(row)
     return {"ready": ready, "claimed": claimed, "blocked": blocked}
+
+
+def _body(text: Any) -> str:
+    """An issue's body as the run reads it: GitHub's web editor saves CRLF, the run's text is LF."""
+    return text.replace("\r\n", "\n").replace("\r", "\n") if isinstance(text, str) else ""
 
 
 def _claimed(labels: Iterable[Any], assignees: Iterable[Any]) -> bool:
@@ -118,20 +122,42 @@ def read(hermes_home: Path, folders: Iterable[Any]) -> Dict[str, Any]:
     costs nothing. A project with no GitHub repository has no tasks to read, and no request goes
     out.
     """
+    repos, found = _gather(hermes_home, folders)
+    return {"repos": repos, **groups(found)} if repos else empty()
+
+
+def next_ready(hermes_home: Path, folders: Iterable[Any]) -> Optional[Dict[str, Any]]:
+    """The oldest task in the frontier with its issue's body, or None when there is none.
+
+    The sweep's read rather than the sheet's: the one task it claims opens its run with the text it
+    was judged by, so that body comes off this read and no second request fetches it, while the
+    other rows' bodies, which nothing uses, are never copied into an answer.
+    """
+    _, found = _gather(hermes_home, folders)
+    ready = groups(found)["ready"]
+    if not ready:
+        return None
+    first = ready[0]
+    task = next(t for t in found if (t["repo"], t["number"]) == (first["repo"], first["number"]))
+    return {**first, "body": task["body"]}
+
+
+def _gather(hermes_home: Path, folders: Iterable[Any]) -> Tuple[List[str], List[Dict[str, Any]]]:
+    """Every candidate task the project's repositories hold, with its blockers, and the repos read."""
     repos = repos_of(folders)
     if not repos:
-        return empty()
+        return [], []
     auth, _ = github.token(hermes_home)
     if not auth:
         raise github.GitHubError("No GitHub account on the server.", 409)
     edges: Dict[Tuple[str, int], List[Dict[str, Any]]] = {}
     looked_up: Dict[Tuple[str, int], Optional[Dict[str, Any]]] = {}
-    tasks: List[Dict[str, Any]] = []
+    found: List[Dict[str, Any]] = []
     for repo in repos:
         for row in _candidates(repo, auth):
             if isinstance(row, dict) and not row.get("pull_request"):
-                tasks.append(_task(repo, row, auth, edges, looked_up))
-    return {"repos": repos, **groups(tasks)}
+                found.append(_task(repo, row, auth, edges, looked_up))
+    return repos, found
 
 
 def repos_of(folders: Iterable[Any]) -> List[str]:
@@ -206,6 +232,7 @@ def _task(
         "number": row.get("number"),
         "title": row.get("title") or "",
         "url": row.get("html_url"),
+        "body": _body(row.get("body")),
         "state": row.get("state") or "open",
         "created_at": row.get("created_at"),
         "labels": labels,
