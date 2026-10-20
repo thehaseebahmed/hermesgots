@@ -1,5 +1,11 @@
-import { HammerIcon, ScanSearchIcon, ShieldCheckIcon } from "lucide-react"
-import type { ComponentType } from "react"
+import { useState, type ComponentType } from "react"
+import {
+  ChevronRightIcon,
+  CircleDotIcon,
+  HammerIcon,
+  ScanSearchIcon,
+  ShieldCheckIcon,
+} from "lucide-react"
 
 import { PILL } from "@/components/chat/pill"
 import { StepRail } from "@/components/chat/step-rail"
@@ -8,25 +14,30 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import {
   pipelineSteps,
+  stageFindings,
   stageNumber,
+  stageRound,
   stageWord,
   stepRuns,
-  STEP_WORDS,
+  type PipelineStage,
   type PipelineStep,
   type SessionPipeline,
+  type SkillFindings,
   type StepRun,
   type StepState,
 } from "@/lib/pipeline"
 import { cn } from "@/lib/utils"
 
-const ICONS: Record<
-  PipelineStep["name"],
-  ComponentType<{ className?: string; strokeWidth?: number }>
-> = {
+type Icon = ComponentType<{ className?: string; strokeWidth?: number }>
+
+/** The mark a step wears: the step it is where the record names one, and the stage's own otherwise. */
+const ICONS: Record<string, Icon> = {
   build: HammerIcon,
   gate: ShieldCheckIcon,
   critique: ScanSearchIcon,
 }
+
+const STAGE_ICON = CircleDotIcon
 
 /** How a step looks everywhere it is drawn, and what its mark means to a reader who can't see its
  * colour. */
@@ -64,15 +75,16 @@ const LOOK: Record<
   },
 }
 
-/** The steps as three bars: the whole run in a glance, and what the pill itself wears. */
+/** The stages as bars, one per stage of the workflow the task ran: the run in a glance, and what
+ * the pill itself wears. */
 function Bars({ steps }: { steps: PipelineStep[] }) {
   return (
     <span className="flex items-center gap-1">
       {steps.map((step) => (
         <span
-          key={step.name}
+          key={step.key}
           className={cn("h-4 w-2 rounded-full", LOOK[step.state].bar)}
-          data-step={step.name}
+          data-step={step.key}
           data-state={step.state}
           aria-hidden
         />
@@ -82,18 +94,24 @@ function Bars({ steps }: { steps: PipelineStep[] }) {
 }
 
 function Mark({ step }: { step: PipelineStep }) {
-  const Icon = ICONS[step.name]
+  const Icon = ICONS[step.key] ?? STAGE_ICON
   return (
-    <span className="flex items-center" data-step={step.name} data-state={step.state} aria-hidden>
+    <span className="flex items-center" data-step={step.key} data-state={step.state} aria-hidden>
       <Icon className={cn("size-4", LOOK[step.state].mark)} strokeWidth={2.25} />
     </span>
   )
 }
 
+/** The stage a task is in as the pill's own attribute: the record's step, or its own name. */
+function stageMark(steps: PipelineStep[], pipeline: SessionPipeline): string {
+  return steps[pipeline.stage]?.key ?? "done"
+}
+
 /**
- * The run as a pill, first in the row above the composer: three bars, the stage in words, and the
- * sheet behind it naming what each step ran. It reads the session's own record, so it stays after
- * the task finishes; the pull request's live state is its own pill's.
+ * The run as a pill, first in the row above the composer: one bar per stage of the workflow the
+ * task ran, the stage in words, and the sheet behind it naming what each stage ran. It reads the
+ * session's own record, so it stays after the task finishes; the pull request's live state is its
+ * own pill's.
  */
 export function PipelinePill({
   pipeline,
@@ -110,8 +128,8 @@ export function PipelinePill({
       variant="secondary"
       className={PILL}
       onClick={onClick}
-      data-pipeline={pipeline.stage}
-      aria-label={`${word}. ${steps.map((step) => `${STEP_WORDS[step.name]} ${LOOK[step.state].spoken}`).join(", ")}.`}
+      data-pipeline={stageMark(steps, pipeline)}
+      aria-label={`${word}. ${steps.map((step) => `${step.name} ${LOOK[step.state].spoken}`).join(", ")}.`}
     >
       <Bars steps={steps} />
       <span className="max-w-40 truncate">{word}</span>
@@ -119,12 +137,12 @@ export function PipelinePill({
   )
 }
 
-/** A step's own lines, laid out the same for the gate's commands and for the skills that ran. */
+/** A stage's own lines, laid out the same for its commands and for the skills that ran. */
 function Lines({ entries }: { entries: StepRun[] }) {
   return (
     <ul className="mt-1.5 flex flex-col gap-1">
-      {entries.map((entry) => (
-        <li key={entry.name} className="flex items-baseline gap-2">
+      {entries.map((entry, index) => (
+        <li key={`${entry.name}:${index}`} className="flex items-baseline gap-2">
           <code className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
             {entry.name}
           </code>
@@ -144,7 +162,117 @@ function Lines({ entries }: { entries: StepRun[] }) {
   )
 }
 
-/** The run in full: each step, what it ran, and why it stopped where it did. */
+/** What one skill's review found, counted beside the skill and opening to what it said. */
+function Findings({ reports }: { reports: SkillFindings[] }) {
+  const [open, setOpen] = useState<string | null>(null)
+  return (
+    <ul className="mt-1.5 flex flex-col gap-1" data-findings>
+      {reports.map((report) => {
+        const shown = open === report.skill
+        const count = report.findings.length
+        return (
+          <li key={report.skill}>
+            <button
+              type="button"
+              aria-expanded={shown}
+              disabled={count === 0}
+              onClick={() => setOpen(shown ? null : report.skill)}
+              className={cn(
+                "flex min-h-11 w-full items-center gap-2 rounded-xl px-1 text-left outline-none",
+                count > 0 && "hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
+              )}
+            >
+              <ChevronRightIcon
+                className={cn(
+                  "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                  shown && "rotate-90",
+                  count === 0 && "invisible",
+                )}
+                aria-hidden
+              />
+              <code className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+                {report.skill}
+              </code>
+              <span
+                className={cn(
+                  "shrink-0 text-xs tabular-nums",
+                  count > 0 ? "text-foreground" : "text-muted-foreground",
+                )}
+              >
+                {count === 1 ? "1 finding" : `${count} findings`}
+              </span>
+            </button>
+            {shown && (
+              <ul className="flex flex-col gap-2 pr-1 pb-2 pl-6">
+                {report.findings.map((finding, index) => (
+                  <li key={`${finding.title}:${index}`} className="flex flex-col gap-0.5">
+                    <span className="text-sm leading-5">{finding.title}</span>
+                    {finding.detail && (
+                      <span className="text-sm leading-5 text-muted-foreground">
+                        {finding.detail}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+/** A stage's row: its mark, its own name, the round a loop is on, and what it ran. */
+function StageRow({
+  step,
+  stage,
+  last,
+  prLabel,
+}: {
+  step: PipelineStep
+  stage: PipelineStage
+  last: boolean
+  prLabel?: string
+}) {
+  const entries = stepRuns(stage, prLabel)
+  const reports = stageFindings(stage)
+  const round = stageRound(stage)
+  return (
+    <li className="flex gap-3" data-stage={step.key}>
+      <StepRail last={last}>
+        <span
+          className={cn(
+            "flex size-7 items-center justify-center rounded-full",
+            LOOK[step.state].badge,
+          )}
+        >
+          <Mark step={step} />
+        </span>
+      </StepRail>
+      <div className="min-w-0 flex-1 py-2.5">
+        <p className={cn("flex items-baseline gap-2 text-[15px] leading-6", LOOK[step.state].name)}>
+          <span className="min-w-0 truncate">{stage.name}</span>
+          <span className="sr-only">, {LOOK[step.state].spoken}</span>
+          {round && (
+            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{round}</span>
+          )}
+        </p>
+        {entries.length ? (
+          <Lines entries={entries} />
+        ) : (
+          <p className="text-sm leading-5 text-muted-foreground">
+            {step.state === "next" ? "Not run yet" : "Nothing recorded"}
+          </p>
+        )}
+        {reports.length > 0 && <Findings reports={reports} />}
+      </div>
+    </li>
+  )
+}
+
+/** The run in full: each stage of the workflow, what it ran, what its review found, and why the
+ * host stopped it where it did. */
 export function PipelineSheet({
   open,
   onOpenChange,
@@ -170,36 +298,15 @@ export function PipelineSheet({
           <Separator />
         </div>
         <ol className="flex flex-col px-6 pt-4">
-          {steps.map((step, index) => {
-            const entries = stepRuns(pipeline, step, prLabel)
-            return (
-              <li key={step.name} className="flex gap-3">
-                <StepRail last={index === steps.length - 1}>
-                  <span
-                    className={cn(
-                      "flex size-7 items-center justify-center rounded-full",
-                      LOOK[step.state].badge,
-                    )}
-                  >
-                    <Mark step={step} />
-                  </span>
-                </StepRail>
-                <div className="min-w-0 flex-1 py-2.5">
-                  <p className={cn("text-[15px] leading-6", LOOK[step.state].name)}>
-                    {STEP_WORDS[step.name]}
-                    <span className="sr-only">, {LOOK[step.state].spoken}</span>
-                  </p>
-                  {entries.length ? (
-                    <Lines entries={entries} />
-                  ) : (
-                    <p className="text-sm leading-5 text-muted-foreground">
-                      {step.state === "next" ? "Not run yet" : "Nothing recorded"}
-                    </p>
-                  )}
-                </div>
-              </li>
-            )
-          })}
+          {steps.map((step, index) => (
+            <StageRow
+              key={step.key}
+              step={step}
+              stage={pipeline.stages[index]}
+              last={index === steps.length - 1}
+              prLabel={prLabel}
+            />
+          ))}
         </ol>
         {pipeline.reason && (
           <p className="px-6 pt-3 pb-5 text-sm leading-5 text-destructive">{pipeline.reason}</p>

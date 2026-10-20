@@ -163,6 +163,7 @@ def read(
     if on and why == ARCHIVED:
         turn_off(hermes_home, project_id)
         on = False
+    staged = _held_task_stage(hermes_home, found)
     return {
         "on": on,
         "reason": why,
@@ -170,8 +171,10 @@ def read(
         "refusal": found["refusal"],
         "workflow": _workflow(hermes_home, project_id, found),
         # The stage the task it holds is in, for the sheet's Working row (ADR 0018): None for a
-        # project holding nothing, and for a task that isn't staged.
-        "stage": _held_stage(hermes_home, found),
+        # project holding nothing, and for a task that isn't staged. Its own name comes beside it,
+        # so a workflow's own words — "Migrate", "Verify" — are what the row says.
+        "stage": staged[0],
+        "stage_name": staged[1],
     }
 
 
@@ -202,8 +205,10 @@ def _workflow_for(hermes_home: Path, project_id: str) -> Dict[str, Any]:
     return _workflow(hermes_home, project_id, _row(hermes_home, project_id) or {})
 
 
-def _held_stage(hermes_home: Path, found: Dict[str, Any]) -> Optional[str]:
-    """The stage the task a project holds is in, read off the record of the session working it.
+def _held_task_stage(
+    hermes_home: Path, found: Dict[str, Any]
+) -> Tuple[Optional[str], Optional[str]]:
+    """The step the task a project holds is in, and the stage's own name, off its session's record.
 
     Only while it holds one: the stage outlives the hold on the session's own row — so a finished
     task can still say how it got there — but nothing in the sheet names a task it isn't working,
@@ -212,13 +217,14 @@ def _held_stage(hermes_home: Path, found: Dict[str, Any]) -> Optional[str]:
     """
     session_id = found.get("session_id")
     if not found.get("task") or not session_id:
-        return None
+        return None, None
     try:
         stored = sessions.pipeline_of(db_path(hermes_home), session_id)
     except Exception:
         logger.debug("memento: couldn't read the stage of %s", session_id, exc_info=True)
-        return None
-    return pipeline.stage(pipeline.read(stored))
+        return None, None
+    record = pipeline.read(stored)
+    return pipeline.stage(record), pipeline.stage_name(record)
 
 
 def write_from(body: Dict[str, Any]) -> Tuple[str, Any]:

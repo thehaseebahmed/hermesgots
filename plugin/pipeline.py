@@ -386,23 +386,15 @@ def single_stage(record: Dict[str, Any]) -> bool:
 
 
 def for_app(record: Any) -> Optional[Dict[str, Any]]:
-    """A task's record as the app reads a session's pipeline, or ``None`` when it holds none.
+    """A task's record as the app reads a session's pipeline: the snapshot the task kept.
 
-    The app draws a session's pipeline pill and the sheet under it, and both read the step a task is
-    in, the skills each run was told, the gate's answer and why it stopped (ADR 0018). A workflow's
-    own stages are the task's to keep: this is the view the pill has always been given, whichever
-    shape the snapshot behind it holds.
+    The app draws a session's pill and the sheet under it from the workflow the task ran — one bar
+    per stage, each stage's state, its rounds, the commands it ran and the findings its review
+    reported (ADR 0021). So the field carries the snapshot, cleaned by ``read``, whichever shape the
+    stored record has: a record from before workflows is upgraded into the three stages it meant
+    rather than served as the flat one it was.
     """
-    staged = read(record)
-    if staged is None:
-        return None
-    return {
-        "stage": kind(staged),
-        "build_skill": build_skill(staged),
-        "critique_skills": critique_skills(staged),
-        "gate": gate_of(staged),
-        "reason": reason(staged),
-    }
+    return read(record)
 
 
 def posts(stages: Sequence[Dict[str, Any]], index: int) -> bool:
