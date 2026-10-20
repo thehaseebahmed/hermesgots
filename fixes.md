@@ -1734,3 +1734,39 @@ the run then weighs that edit as something it did.
 - Why it is risky: a predicate that gets the child check wrong either blocks a reviewer's reads or
   blocks the critique session's own fixes, and the second leaves a staged task unable to ship — the
   same stall a failed gate is supposed to produce, but for a reason nobody would look for.
+
+---
+
+## Risky
+
+### 1. A stage's skills are told what to apply to, and only shipping says "the diff"
+
+`_steps_line` (`plugin/prompt_builder.py`) decides where a stage's skills are applied from
+`pipeline.ships`: the stage that ships is told to apply each skill to the diff, and every other stage
+to follow it for how that part of the work is done. The workflow snapshot records which stage ships
+and which skills each stage names, but nothing in it records what a stage's skills are meant to look
+at.
+
+- Cost: a workflow cannot express a stage whose skills read the diff without that stage also being the
+  one that ships — a second review, or a Polish stage a project puts before the review, is told the
+  work is theirs to write — and the one place the distinction lives is a boolean read for another
+  purpose, so the next workflow shape inherits whatever scope the flag implies.
+- Suggested fix: carry where a stage's skills apply in the workflow's own model — a field beside
+  `steps`, `ships` and `check`, defaulting to the build's wording and to the diff for the shipping
+  stage — and have `_steps_line` read that rather than infer it from `ships`.
+- Why it is not applied here: it is a change to the snapshot and to everything that reads one
+  (`pipeline.start`, the library's presets in `workflows.py`, `for_app` and the app's reading of it),
+  while #336 is the prompt's ticket and states the rule ADR 0020 already has — the stage that ships
+  reviews the diff. Widening the model is a workflow-feature task, not a cleanup of this line.
+- Why it is risky: a snapshot written before the field exists has to keep reading as it does now, so
+  every read needs the default to be right, and a wrong one changes what every stage of every
+  workflow is told about its skills.
+
+---
+
+Found by the second `/simplify-code` pass on this branch. Its other findings are declined rather than
+filed, each with the spec as the reason: the fixed-points guard stays stated for every stage,
+including one that names no skill (#336 asks for exactly that), and the guard's placement outside each
+brief follows from ADR 0020 making the brief the stage's behaviour contract rather than a place for
+AFK's invariant.
+

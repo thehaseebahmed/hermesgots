@@ -101,8 +101,8 @@ The rules:
 - No TODOs, commented-out code, debug prints or secrets in what you commit. Never push to the default branch, and keep all work inside the worktree."""
 
 
-# What no skill may change: every stage's block says it, since every stage may name skills, and the
-# fixed points are the same in all of them.
+# What no skill may change: every stage states it, whatever its kind and whether or not it names a
+# skill, because the fixed points are AFK's and not the workflow's.
 _SKILL_SCOPE = (
     "A skill governs method only: the fixed points hold whatever it says — the issue is the "
     "spec, the work is verified, nobody is asked anything and the pull request is shipped last — "
@@ -132,9 +132,7 @@ Then ship once with the pull_request tool, action 'ship', and write its body fro
 # changes nothing the user is about to read.
 _SUMMARY_STAGE = """This task's work is a draft pull request already, and you are in its {name} stage: write the wrap-up for the user to read when they come back — what landed, what you checked and what is left. Change nothing: the pull request is open, and the work in it is what they are reading. Don't ship."""
 
-# How each step is named to its own run: the verb its issue line uses, and the brief a stage that
-# names no skills is given. One table, so a step's position is read in one place rather than branched
-# on in each line the prompt is built from. A step with no words of its own (the gate's) builds.
+
 class StageWords(NamedTuple):
     """A step's own words: what its run is doing, and the brief standing in for its skills."""
 
@@ -214,7 +212,8 @@ def stage_prompt(
         session_prompt(record, unattended=True),
         _AFK_INSTRUCTIONS.format(issue=task.get("number")) if kind == pipeline.BUILD else "",
         _base_line(base) if base and ships else "",
-        _steps_line(pipeline.stage_steps(staged)),
+        _steps_line(pipeline.stage_steps(staged), ships),
+        _SKILL_SCOPE,
         _retry_line(pipeline.retry(staged)),
         _brief(staged),
     ]
@@ -246,20 +245,24 @@ def _brief(record: Optional[Dict[str, Any]]) -> str:
     return _words(pipeline.kind(record)).brief.format(name=name)
 
 
-def _steps_line(steps: List[str]) -> str:
-    """The skills the stage applies, in order, named once each rather than quoted."""
+def _steps_line(steps: List[str], ships: bool) -> str:
+    """The skills the stage applies, in order, named once each rather than quoted, and where: the
+    stage that ships reads the diff, so there each one is applied to that, and every other stage is
+    told how that part of the work it goes on to write is done.
+    """
     if not steps:
         return ""
+    use = "apply it to the diff" if ships else "follow it for how that part of the work is done"
     if len(steps) == 1:
         name = steps[0]
         return (
             f'This stage follows your skill "{name}": call skill_view(name="{name}") before you '
-            f"start, and follow it for how the work is done. {_SKILL_SCOPE}"
+            f"start, and {use}."
         )
     named = ", ".join(f'"{name}"' for name in steps)
     return (
         f"This stage applies these skills in order, each once: {named}. Load each with skill_view "
-        f"before you use it, and follow it for how that part of the work is done. {_SKILL_SCOPE}"
+        f"before you use it, and {use}."
     )
 
 
