@@ -1,5 +1,13 @@
 # The limit notice answers for the account, not for one window
 
+**Amended in part by ADR 0026**: the rule below is the plugin's now, because AFK needs it with the app
+closed — a bot's usage threshold stops its projects picking tasks up. `usage.serialize` also keeps
+core's `scope` on the wire, so a window core marks `model` can be passed over where the account's own
+state is decided; the exception recorded below is closed for that reading, and the composer's notice
+is free to adopt the same answer when a change takes it there. Everything else here stands: a window's
+own percentage is not what the account's state is, the balance rule picks from the balance first, the
+sheet still states every window it is given, and the dismissal is keyed on the window's state.
+
 Gots warns above a chat's composer when a bot's provider account is nearly out of usage, and that warning
 is a claim about the whole account — so one window's percentage cannot decide it. A window with no reset
 time is a balance rather than a period (Ollama Cloud's bought credits, OpenRouter's dollar balance):
