@@ -35,8 +35,11 @@
 // usage. GET projects/{id}/tasks answers the project's ready tasks (the frontier AFK works: ready
 // oldest first, claimed, blocked with the blocker) and 409s when the host has no GitHub account.
 // GET projects/{id}/afk answers AFK's switch and the skills its work follows (`build_skill`,
-// `critique_skills`), kept per project in this process the way the plugin keeps them in its store;
-// POST writes either — `{ on }` for the switch, the two skill names together for the pickers.
+// `critique_skills`), kept per project in this process the way the plugin keeps them in its store,
+// and the Prompt its work is told (the project's own words, or the plugin's default method);
+// POST writes one of them — `{ on }` for the switch, the two skill names together for the pickers,
+// `{ workflow_id }` for a pick, `{ prompt }` for the Prompt, where a pick and a Prompt clear each
+// other.
 // While a repo is being added, a new session's workspace is refused, and a session whose repo
 // was removed is refused with the reason, which the workspace also reports as `blocked`.
 // Chats are titled like Hermes does: a slice of the opener at once, a "model" title a moment later,
@@ -88,8 +91,9 @@
 // adds one, POST to its id rewrites one of the account's own — forking a preset into a copy — and DELETE takes
 // one away; each answers the whole list. A project names the workflow its work runs under through
 // POST projects/{id}/afk { workflow_id }, and its answer carries that workflow and the name of the
-// stage its task is in. `pipeline?` below takes the new snapshot shape too — one entry per stage,
-// each with its rounds — which is how a flow puts a staged task on a second round.
+// stage its task is in; `{ prompt }` writes the Prompt its runs are told instead. `pipeline?` below
+// takes the new snapshot shape too — one entry per stage, each with its rounds — which is how a flow
+// puts a staged task on a second round.
 // POST /__mock/afk { project_id, stage?, reason?, pipeline?, pr?, reset? } is the dev handle on AFK's
 // own records: it stalls the project's held task at a stage, and writes the pipeline on the session
 // that task is worked in — the stage the pill reads, the gate's answer, a pull request a finished
@@ -173,6 +177,11 @@ const afkSkills = new Map()
 // (`plugin/pipeline.py`). A claimed task builds until a flow says the sheet should read another.
 const afkStages = new Map()
 const afkWorkflow = new Map()
+// The Prompt each project's work is told, as the plugin keeps it on the row (`afk.set_prompt`) and
+// serves it as the default where a project wrote none (`prompt_builder.DEFAULT_PROMPT`, shortened
+// here: nothing in the app reads the words).
+const afkPrompts = new Map()
+const MOCK_DEFAULT_PROMPT = "How to work:\n\n- Work in checkpoints."
 // The library, seeded from the plugin's presets on first read (`workflows.PRESETS`): presets are
 // read-only, and a write through the routes adds or rewrites one of the account's own rows.
 let workflowRows = []
@@ -1188,6 +1197,7 @@ function afkAnswer(project, reason) {
     stage: afkSwept.has(project.id) ? (afkStages.get(project.id) ?? null) : null,
     stage_name: afkStageName(record),
     workflow: workflowOf(project.id),
+    prompt: afkPrompts.get(project.id) ?? MOCK_DEFAULT_PROMPT,
     ...skills,
   }
 }
@@ -3392,15 +3402,16 @@ http
         const switching = "on" in body
         const choosing = "build_skill" in body || "critique_skills" in body
         const picking = "workflow_id" in body
-        if (!switching && !choosing && !picking)
+        const prompting = "prompt" in body
+        if (!switching && !choosing && !picking && !prompting)
           return json(res, 400, {
-            error: { message: "on, workflow_id, build_skill or critique_skills is needed." },
+            error: { message: "on, workflow_id, prompt, build_skill or critique_skills is needed." },
           })
         // One write, one shape: the switch wakes the sweep, so a body naming two could write one and
         // be refused, leaving half of it written (`afk.write_from`).
-        if ([switching, choosing, picking].filter(Boolean).length > 1)
+        if ([switching, choosing, picking, prompting].filter(Boolean).length > 1)
           return json(res, 400, {
-            error: { message: "A write names either on or the skills, or a workflow, not both." },
+            error: { message: "A write names either on or the skills, or a workflow, or a prompt." },
           })
         if (switching && typeof body.on !== "boolean")
           return json(res, 400, { error: { message: "on must be true or false." } })
@@ -3425,6 +3436,15 @@ http
             critique_skills: skillNames(body.critique_skills),
           })
         }
+        if (prompting) {
+          if (body.prompt !== null && typeof body.prompt !== "string")
+            return json(res, 400, { error: { message: "prompt must be text." } })
+          const text = typeof body.prompt === "string" ? body.prompt.trim() : ""
+          if (text) afkPrompts.set(found.id, text)
+          else afkPrompts.delete(found.id)
+          // A Prompt and a pick are one choice between them (`afk.set_prompt`).
+          afkWorkflow.delete(found.id)
+        }
         if (picking) {
           const id = skillName(body.workflow_id)
           if (!id)
@@ -3434,6 +3454,8 @@ http
               error: { message: `There is no workflow "${id}" in this bot's library.` },
             })
           afkWorkflow.set(found.id, id)
+          // ...and the other way round (`afk.set_workflow`).
+          afkPrompts.delete(found.id)
         }
         if (switching) {
           if (body.on && reason) return json(res, 409, { error: { message: reason } })
