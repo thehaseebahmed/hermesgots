@@ -462,6 +462,122 @@ class GateTests(unittest.TestCase):
         self.assertIsNone(pipeline.gate_of(pipeline.read(record)))
 
 
+class RecordOfWhatRanTests(unittest.TestCase):
+    """What a stage's run executed and what its review found, as the details sheet reads them."""
+
+    def ran(self, record: Dict[str, Any], *lines: str) -> Dict[str, Any]:
+        for line in lines:
+            record = pipeline.ran(record, line)
+        return record
+
+    def test_a_stage_keeps_every_command_its_run_executed_in_order(self) -> None:
+        record = self.ran(staged(BUILD), "pnpm lint", "pnpm typecheck", "pnpm test")
+        self.assertEqual(
+            [one["command"] for one in pipeline.stage_commands(record)],
+            ["pnpm lint", "pnpm typecheck", "pnpm test"],
+        )
+
+    def test_what_a_stage_ran_is_capped_to_its_most_recent(self) -> None:
+        record = self.ran(staged(BUILD), *[f"step-{index}" for index in range(pipeline.COMMAND_CAP + 3)])
+        found = pipeline.stage_commands(record)
+        self.assertEqual(len(found), pipeline.COMMAND_CAP)
+        self.assertEqual(found[0]["command"], "step-3")
+
+    def test_the_gates_commands_carry_the_code_the_host_read_and_the_rest_do_not(self) -> None:
+        record = self.ran(staged(BUILD), "pnpm lint", "pnpm test")
+        record = pipeline.gated(
+            record,
+            [
+                {"command": "pnpm lint", "code": 0},
+                {"command": "pnpm test", "code": 1},
+            ],
+        )
+        found = pipeline.stage_commands(record)
+        self.assertEqual(
+            [(one["command"], one["code"], one["checked"]) for one in found],
+            [("pnpm lint", 0, True), ("pnpm test", 1, True)],
+            "the run's own lines are the ones the host checked, and they carry its codes",
+        )
+
+    def test_a_gate_command_the_run_never_executed_is_listed_too(self) -> None:
+        record = pipeline.gated(staged(BUILD), [{"command": "pnpm test", "code": 0}])
+        self.assertEqual(
+            pipeline.stage_commands(record),
+            [{"command": "pnpm test", "repo": None, "code": 0, "checked": True, "round": 1}],
+        )
+
+    def test_a_command_before_the_gate_is_not_marked_checked(self) -> None:
+        record = self.ran(staged(BUILD), "pnpm lint", "pnpm test")
+        record = pipeline.gated(record, [{"command": "pnpm test", "code": 0}])
+        found = pipeline.stage_commands(record)
+        self.assertEqual(
+            [(one["command"], one["checked"]) for one in found],
+            [("pnpm lint", False), ("pnpm test", True)],
+        )
+
+    def test_a_repo_in_the_gates_answer_names_the_matching_command(self) -> None:
+        record = pipeline.gated(
+            staged(BUILD), [{"command": "pnpm test", "repo": "o/api", "code": 1}]
+        )
+        self.assertEqual(
+            pipeline.stage_commands(record)[0]["repo"], "o/api", "the sheet says where the host ran it"
+        )
+
+    def test_each_rounds_commands_are_marked_with_their_round(self) -> None:
+        record = staged(BUILD)
+        record = self.ran(record, "pnpm test")
+        record["stages"][0]["rounds"].append(pipeline.new_round())
+        record["round"] = 2
+        record = self.ran(record, "pnpm test --fixed")
+        self.assertEqual(
+            [(one["command"], one["round"]) for one in pipeline.stage_commands(record)],
+            [("pnpm test", 1), ("pnpm test --fixed", 2)],
+            "a loop's second attempt reads as its own",
+        )
+
+    def test_each_review_skill_is_counted_including_the_one_that_found_nothing(self) -> None:
+        record = pipeline.reported(staged(CRITIQUE), "code-review", ["a", "b", "c"])
+        record = pipeline.reported(record, "log-triage", [])
+        self.assertEqual(
+            [(one["skill"], len(one["findings"])) for one in pipeline.stage_findings(record)],
+            [("code-review", 3), ("log-triage", 0)],
+        )
+
+    def test_what_a_run_did_is_still_there_when_it_stalls(self) -> None:
+        record = self.ran(staged(CRITIQUE), "pnpm test")
+        record = pipeline.reported(record, "code-review", ["a leak", "a dead branch"])
+        stalled = pipeline.moved(record, pipeline.advance(record, stopped="The run stopped."))
+        self.assertEqual(pipeline.reason(stalled), "The run stopped.")
+        self.assertEqual([one["command"] for one in pipeline.stage_commands(stalled)], ["pnpm test"])
+        self.assertEqual(len(pipeline.stage_findings(stalled)[0]["findings"]), 2)
+
+    def test_a_stage_a_task_has_not_reached_ran_nothing(self) -> None:
+        record = self.ran(staged(BUILD), "pnpm test")
+        self.assertEqual(pipeline.stage_commands(record, 2), [])
+        self.assertEqual(pipeline.stage_findings(record, 2), [])
+
+    def test_a_write_does_not_edit_the_record_it_was_given(self) -> None:
+        record = self.ran(staged(BUILD), "pnpm test")
+        pipeline.reported(record, "code-review", ["a"])
+        self.assertEqual(len(pipeline.stage_findings(record)), 0, "the caller's record is its own")
+        self.assertEqual(len(pipeline.stage_commands(record)), 1)
+
+    def test_a_hand_edit_reads_without_throwing(self) -> None:
+        record = staged(BUILD)
+        record["stages"][0]["rounds"][0]["commands"] = ["pnpm test", None, {"command": ""}]
+        record["stages"][0]["rounds"][0]["findings"] = ["code-review", {"skill": ""}, {"skill": "x"}]
+        found = pipeline.read(record)
+        self.assertEqual(pipeline.stage_commands(found), [])
+        self.assertEqual(pipeline.stage_findings(found), [{"skill": "x", "findings": []}])
+
+    def test_a_finished_task_has_no_stage_in_hand_to_record_on(self) -> None:
+        record = staged(DONE)
+        self.assertEqual(pipeline.ran(record, "pnpm test")["stages"], record["stages"])
+        self.assertEqual(
+            pipeline.reported(record, "code-review", ["a"])["stages"], record["stages"]
+        )
+
+
 class ReadTests(unittest.TestCase):
     def test_a_snapshot_reads_back_as_it_was_written(self) -> None:
         record = pipeline.gated(staged(BUILD), gate(0))
