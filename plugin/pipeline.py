@@ -707,14 +707,15 @@ def failed(record: Dict[str, Any], why: str) -> Dict[str, Any]:
     return {**record, "stages": stages}
 
 
-def ran(record: Dict[str, Any], line: str, repo: Optional[str] = None) -> Dict[str, Any]:
+def ran(record: Dict[str, Any], line: str) -> Dict[str, Any]:
     """The record once the stage in hand has run one more shell command, the line only.
 
     The run's own commands are what the sheet lists beside the gate's: a run that linted, typechecked
-    and tested in its own shell says so, whichever one the host later checked. Only the most recent
-    ``COMMAND_CAP`` of a stage's are kept, across its rounds, since a loop's third round would
-    otherwise carry every earlier one; a line longer than ``COMMAND_CHARS`` is cut, because a
-    heredoc is not a record.
+    and tested in its own shell says so, whichever one the host later checked. Only the line is kept —
+    no exit code, no output, no repo, since this is what the run asked for rather than what the host
+    read back. Only the most recent ``COMMAND_CAP`` of a stage's are kept, across its rounds, since a
+    loop's third round would otherwise carry every earlier one; a line longer than ``COMMAND_CHARS``
+    is cut, because a heredoc is not a record.
     """
     if not record or not isinstance(line, str) or not line.strip():
         return record
@@ -725,9 +726,7 @@ def ran(record: Dict[str, Any], line: str, repo: Optional[str] = None) -> Dict[s
     current = _current(stages[index])
     if current is None:
         return record
-    current["commands"].append(
-        {"command": line.strip()[:COMMAND_CHARS], "repo": text(repo), "code": None}
-    )
+    current["commands"].append({"command": line.strip()[:COMMAND_CHARS]})
     _trimmed(stages[index])
     return {**record, "stages": stages}
 
@@ -824,14 +823,9 @@ def _twin(
 ) -> Optional[int]:
     """The gate's answer to a command the run executed itself, where the gate ran the same line."""
     for at, answer in enumerate(checked):
-        if at in matched or answer.get("command") != one.get("command"):
-            continue
-        # A gate command naming a repo is that repo's own: the same line in another one is another
-        # command, where the run's own record knows which repo it was in.
-        if answer.get("repo") and one.get("repo") and answer["repo"] != one["repo"]:
-            continue
-        matched.add(at)
-        return at
+        if at not in matched and answer.get("command") == one.get("command"):
+            matched.add(at)
+            return at
     return None
 
 

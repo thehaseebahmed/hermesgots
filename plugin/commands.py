@@ -18,8 +18,8 @@ from . import pipeline, sessions
 
 logger = logging.getLogger(__name__)
 
-# The tool whose calls are shell commands, and the argument its command line arrives in. Gots's
-# sessions run on the API server, so a command reaches the host as this tool call and no other.
+# Gots's sessions run on the API server, so a command reaches the host as this tool call and no
+# other, its line in this argument.
 TOOL = "terminal"
 ARGUMENT = "command"
 
@@ -51,6 +51,5 @@ def _before_tool(kwargs: dict) -> None:
         return
     staged = pipeline.read(record.get("pipeline"))
     if staged is None:
-        # Not an AFK session: only a staged task has a stage to record a command against.
         return
     sessions.set_pipeline(path, record["session_id"], pipeline.ran(staged, line))

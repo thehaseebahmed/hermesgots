@@ -87,7 +87,6 @@ class CommandTests(unittest.TestCase):
 
     def test_the_cap_is_a_stages_own_across_its_rounds(self) -> None:
         record = self.staged()
-        # A loop's second round is the same stage again: its commands are capped with the first's.
         record["stages"][0]["rounds"].append(pipeline.new_round())
         record["round"] = 2
         sessions.set_pipeline(db_path(self.home), SESSION, record)
@@ -115,7 +114,6 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(pipeline.stage_commands(self.read()), [])
 
     def test_a_session_that_is_not_afk_records_nothing(self) -> None:
-        # A code session without a pipeline: no stage to record a command against.
         self.run_command("pnpm test")
         self.assertIsNone(self.read())
 
