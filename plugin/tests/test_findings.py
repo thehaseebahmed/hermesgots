@@ -12,7 +12,7 @@ import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 from unittest.mock import patch
 
 from plugin import findings, pipeline, sessions
