@@ -385,7 +385,7 @@ class StageTests(_Base):
         answer = self._call({"action": "ship", "commit_message": "m"}, record=self.staged(pipeline.DONE))
         self.assertIn("workflow has finished", answer["error"])
 
-    def test_a_critique_ships(self) -> None:
+    def test_the_shipping_stage_ships(self) -> None:
         with patch("plugin.ship.ship", return_value=[]) as shipped:
             answer = self._call(
                 {"action": "ship", "commit_message": "m"}, record=self.staged(pipeline.CRITIQUE)

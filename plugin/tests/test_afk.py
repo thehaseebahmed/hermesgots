@@ -1393,6 +1393,17 @@ class StagedRunTests(AfkSessionTests):
                         afk.after_run(session_id=self.SESSION, **kwargs)
         return started
 
+    def test_one_run_gates_itself_and_is_let_go_when_it_has_shipped(self) -> None:
+        """One run's only stage is judged at its own end: it ships, and there is no stage after it."""
+        record = pipeline.start(preset("preset:one-run"))
+        sessions.set_pipeline(
+            db_path(self.home), self.SESSION, pipeline.gated(record, [{"command": "true", "code": 0}])
+        )
+        started = self.ended(completed=True)
+        started.assert_not_called()
+        self.assertIsNone(self.shown()["task"], "the workflow is over, so the hold goes")
+        self.assertEqual(pipeline.kind(self.pipeline()), pipeline.DONE)
+
     def test_a_build_that_passed_its_gate_starts_its_next_stage_on_the_same_session(self) -> None:
         self.gated(0, 0)
         started = self.ended(completed=True)
@@ -1498,7 +1509,7 @@ class StagedRunTests(AfkSessionTests):
         self.assertEqual(pipeline.kind(self.pipeline()), pipeline.CRITIQUE)
         self.assertEqual(afk.stalled(self.home)[self.SESSION]["reason"], afk.INTERRUPTED_RUN)
 
-    def test_a_project_with_no_critique_skill_runs_and_ships_as_before(self) -> None:
+    def test_a_workflow_that_names_no_skills_runs_and_ships_as_before(self) -> None:
         sessions.set_pipeline(db_path(self.home), self.SESSION, None)
         started = self.ended(completed=True)
         started.assert_not_called()
@@ -1606,6 +1617,28 @@ class StagedFlowTests(AfkSessionTests):
         self.assertIsNone(self.shown()["task"], "the task is in review: the hold goes")
         self.assertEqual(pipeline.kind(self.pipeline()), pipeline.DONE)
         self.assertEqual(len(self.posted), 2, "the checkpoint and the empty Summary posted nothing")
+
+    def test_the_flow_ends_in_a_summary_run_when_that_stage_names_a_skill(self) -> None:
+        """The chain's tail: the review ships the draft, then the wrap-up runs on the same session."""
+        workflow = preset("preset:loop")
+        workflow["stages"][3]["steps"] = ["weekly-review"]
+        self.start(workflow)
+        self.gated(self.PASSING)
+        self.ended()
+        self.assertEqual(pipeline.stage_name(self.pipeline()), "Review")
+        self.ended()
+        self.assertEqual(len(self.posted), 2, "the review posted nothing: its stage was already running")
+        self.assertEqual(pipeline.stage_name(self.pipeline()), "Summary")
+        self.assertEqual(
+            self.posted[1]["input"][0]["content"],
+            "Summary #265 (https://github.com/mock-user/memento/issues/265)",
+        )
+        self.assertIn("wrap-up", self.posted[1]["instructions"])
+        self.assertIn("weekly-review", self.posted[1]["instructions"], "the stage's own skill is named")
+        # The summary ends the workflow, and the task it held is let go.
+        self.ended()
+        self.assertIsNone(self.shown()["task"])
+        self.assertEqual(len(self.posted), 2, "nothing runs after the last stage")
 
     def test_a_checkpoint_posts_no_run_whatever_the_stage_before_it_did(self) -> None:
         self.start()
