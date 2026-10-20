@@ -15,11 +15,12 @@ The task it takes is worked in a session of its own, made the way the app's work
 one (`sessions.ensure`: its own worktree, branch and row, in Auto), and the chat record that makes
 that session appear and open in the app is written here (ADR 0013) — the Code list hides a session
 nothing was sent in, and the app has no conversation for one it didn't make. The run then starts
-from this plugin: `prompt_builder.afk_prompt` is its instructions — how to work an issue that was
-planned before the user left, with nobody to ask — and its input is one line naming the issue and
-where it is. Its own text is deliberately not copied into either: the agent fetches the issue, so
-the brief can't go stale and the prompt is the same tokens every turn. It carries no model, so the
-host's own runs.
+from this plugin: `prompt_builder.afk_prompt` is its instructions — AFK's fixed points, then the
+project's Prompt, which is how its work is carried out and is read off the project's own row here so
+a task claimed with the app closed is still told it (ADR 0027) — and its input is one line naming the
+issue and where it is. The issue's own text is deliberately not copied into either: the agent
+fetches it, so the brief can't go stale and the prompt is the same tokens every turn. It carries no
+model, so the host's own runs.
 
 A project that can't be left to work says why instead of offering a switch: it has no GitHub
 repository to read tasks from, the host has no GitHub account to read or claim one with, or the
@@ -143,7 +144,7 @@ def read(
     hermes_home: Path, project_id: str, folders: Iterable[Any], archived: bool = False
 ) -> Dict[str, Any]:
     """Everything the app's sheet shows: the switch and its reason, the task held, the last refusal,
-    and the workflow this project's work runs under.
+    the workflow this project's work runs under, and the Prompt its runs are told.
 
     An archived project is turned off here if anything had left it on, and reads off whatever
     happens: it was put away, so its switch isn't a setting anything acts on. Writing it off rather
@@ -157,6 +158,7 @@ def read(
         "build_skill": None,
         "critique_skills": [],
         "workflow_id": None,
+        "prompt": None,
     }
     why = reason(hermes_home, folders, archived)
     on = found["on"]
@@ -170,6 +172,9 @@ def read(
         "task": found["task"],
         "refusal": found["refusal"],
         "workflow": _workflow(hermes_home, project_id, found),
+        # Empty and unset are the same thing — the bot's default method — so the app is handed the
+        # words a run would read rather than a blank field.
+        "prompt": found["prompt"] or prompt_builder.DEFAULT_PROMPT,
         # The stage the task it holds is in, for the sheet's Working row (ADR 0018): None for a
         # project holding nothing, and for a task that isn't staged. Its own name comes beside it,
         # so a workflow's own words — "Migrate", "Verify" — are what the row says.
@@ -233,39 +238,71 @@ def _held_task_stage(hermes_home: Path, found: Dict[str, Any]) -> HeldStage:
 
 
 def write_from(body: Dict[str, Any]) -> Tuple[str, Any]:
-    """What a write names — ``"on"`` with its flag, or ``"workflow"`` with an id — or ValueError.
+    """What a write names — ``"on"`` with its flag, ``"workflow"`` with an id, or ``"prompt"`` with
+    its text (None for one cleared) — or ValueError.
 
-    One write, one shape: the switch wakes the sweep, so a body naming both could write the pick and
-    then be refused, leaving half of it written.
+    One write, one shape: two fields in one body could write one of them and then be refused, leaving
+    half of it written.
     """
-    switch = "on" in body
-    choosing = "workflow_id" in body
-    if switch and choosing:
-        raise ValueError("A write names either on or workflow_id, not both.")
-    if switch:
+    named = [key for key in ("on", "workflow_id", "prompt") if key in body]
+    if len(named) > 1:
+        raise ValueError("A write names one of on, workflow_id or prompt.")
+    if "on" in body:
         on = body["on"]
         if not isinstance(on, bool):
             raise ValueError("on must be true or false.")
         return "on", on
-    if choosing:
+    if "workflow_id" in body:
         workflow_id = body["workflow_id"]
         if not isinstance(workflow_id, str) or not workflow_id.strip():
             raise ValueError("workflow_id must be a workflow's id.")
         return "workflow", workflow_id.strip()
-    raise ValueError("on or workflow_id is needed.")
+    if "prompt" in body:
+        return "prompt", prompt_text(body["prompt"])
+    raise ValueError("on, workflow_id or prompt is needed.")
+
+
+def prompt_text(value: Any) -> Optional[str]:
+    """A Prompt as the row holds it: trimmed, and None for what isn't one.
+
+    Empty and unset are the same thing — the bot's default method — so a blank Prompt clears the
+    column instead of storing words a run would read as the user's.
+    """
+    if value is not None and not isinstance(value, str):
+        raise ValueError("prompt must be text.")
+    return pipeline.text(value)
+
+
+def set_prompt(hermes_home: Path, project_id: str, prompt: Optional[str]) -> None:
+    """Writes the project's Prompt, clearing any workflow pick in the same write.
+
+    A project is never both: a Prompt is one run's method and a workflow is the stages its work runs
+    through. The skill columns a row from before the picker carries go with the pick: they are what
+    ``_workflow`` migrates a project with no pick from, so leaving them would put the old workflow
+    back as soon as the Prompt was cleared, and empty has to mean the default.
+    """
+    _upsert(
+        hermes_home,
+        project_id,
+        prompt=prompt,
+        workflow_id=None,
+        build_skill=None,
+        critique_skills=None,
+        at=int(time.time()),
+    )
 
 
 def set_workflow(hermes_home: Path, project_id: str, workflow_id: str) -> None:
-    """Points this project's AFK work at a workflow in its bot's library.
+    """Points this project's AFK work at a workflow in its bot's library, clearing any Prompt it held.
 
     The id has to be one the library holds: a project naming nothing would silently run the default
-    preset, and the user would have picked a workflow that isn't what works. A project with no row
-    yet gets one with its switch off — the row sits under the switch, not behind it — so choosing a
-    workflow is no reason to start working anything.
+    preset, and the user would have picked a workflow that isn't what works. A Prompt and a pick are
+    one choice between them, so picking one drops the Prompt in the same write: a project holding both
+    would show words no run reads.
     """
     if workflows.get(hermes_home, workflow_id) is None:
         raise ValueError(f'There is no workflow "{workflow_id}" in this bot\'s library.')
-    _upsert(hermes_home, project_id, workflow_id=workflow_id, at=int(time.time()))
+    _upsert(hermes_home, project_id, workflow_id=workflow_id, prompt=None, at=int(time.time()))
 
 
 def release(
@@ -446,14 +483,14 @@ def session_title(task: Dict[str, Any]) -> str:
     return f"#{task.get('number')} {task.get('title') or ''}".strip()
 
 
-def run_body(record: Dict[str, Any], task: Dict[str, Any]) -> Dict[str, Any]:
+def run_body(record: Dict[str, Any], task: Dict[str, Any], prompt: Optional[str]) -> Dict[str, Any]:
     """The ``POST /v1/runs`` request: how to work a planned issue, and the issue's name as the input.
 
-    The prompt is all `prompt_builder`'s — one module holds every word the agent is told — and the
-    issue's own text is left out of both: the agent reads it from GitHub.
+    The prompt is all `prompt_builder`'s — one module holds every word the agent is told. The issue's
+    own text is out of both: the agent reads it from GitHub.
     """
     return _request(
-        record, prompt_builder.afk_prompt(record, task), prompt_builder.afk_input(task)
+        record, prompt_builder.afk_prompt(record, task, prompt), prompt_builder.afk_input(task)
     )
 
 
@@ -492,18 +529,28 @@ def base_branch(record: Dict[str, Any]) -> Optional[str]:
     return projects._base_branch(primary) if primary else None
 
 
+class Start(NamedTuple):
+    """What a start copies off the project's row: the task's workflow snapshot, and its Prompt."""
+
+    snapshot: Optional[Dict[str, Any]]
+    prompt: Optional[str]
+
+
 def _begin(
     hermes_home: Path, path: Path, project_id: str, session_id: str
-) -> Optional[Dict[str, Any]]:
-    """Writes the snapshot a staged task starts with, answering it as the run's record carries it.
+) -> Start:
+    """Writes the snapshot a staged task starts with, and answers the Prompt beside it.
 
     The project's workflow as it stands now, copied onto the task: editing or deleting the library
     entry afterwards cannot rewrite what this task ran. Written before the run is posted, so the
-    build's own instructions already know where they end.
+    build's own instructions already know where they end. The Prompt comes off the same read of the
+    row — the sweep works a task with the app closed, so the Prompt written last night is the one the
+    run reads, with nothing the app sent in between.
     """
-    staged = pipeline.start(_workflow_for(hermes_home, project_id))
+    found = _row(hermes_home, project_id) or {}
+    staged = pipeline.start(_workflow(hermes_home, project_id, found))
     sessions.set_pipeline(path, session_id, staged)
-    return staged
+    return Start(staged, found.get("prompt"))
 
 
 def publish(
@@ -562,11 +609,11 @@ async def start(
     try:
         await asyncio.to_thread(_adopt, hermes_home, project_id, session_id)
         sessions.apply_cwd(session_id, record["path"])
-        staged = await asyncio.to_thread(
+        began = await asyncio.to_thread(
             _begin, hermes_home, db_path(hermes_home), project_id, session_id
         )
-        record = {**record, "pipeline": staged}
-        started = await _post(adapter, hermes_home, run_body(record, task))
+        record = {**record, "pipeline": began.snapshot}
+        started = await _post(adapter, hermes_home, run_body(record, task, began.prompt))
     except Exception as error:
         logger.warning("memento: AFK couldn't start the session for %s: %s", issue, error)
         await asyncio.to_thread(release, hermes_home, project_id)
@@ -893,8 +940,8 @@ def _missing_skill(
 
     Its workflow's steps are the choices worth judging: a preset names none, so a project working
     under one claims as it always did, and a workflow naming a skill the profile has lost claims
-    nothing until the user picks otherwise (ADR 0018). ``_workflow_for`` is what the task itself
-    will be snapshotted from, so this and the task can't disagree.
+    nothing until the user picks otherwise (ADR 0018). It is built from the same row a task's snapshot
+    is (``_workflow``), so this and the task can't disagree.
     """
     staged = pipeline.start(_workflow_for(hermes_home, project_id))
     known = set(skills)
@@ -1040,7 +1087,7 @@ def _row(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
     try:
         row = conn.execute(
             """SELECT enabled, task, refusal, session_id, stalled, claimed_at,
-                      build_skill, critique_skills, workflow_id
+                      build_skill, critique_skills, workflow_id, prompt
                FROM project_afk WHERE project_id = ?""",
             (project_id,),
         ).fetchone()
@@ -1060,6 +1107,7 @@ def _row(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
         "build_skill": pipeline.text(row[6]),
         "critique_skills": pipeline.names(_column(row[7], list)),
         "workflow_id": row[8] if isinstance(row[8], str) and row[8] else None,
+        "prompt": pipeline.text(row[9]),
     }
 
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 29
+SCHEMA_VERSION = 30
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -316,6 +316,10 @@ def connect(path: Path) -> sqlite3.Connection:
             # picked none, which runs the default preset (workflows.py). The two skill columns above
             # are read once, to migrate such a project into the workflow they described.
             ("workflow_id", "TEXT"),
+            # v30: the Prompt the project's AFK work is told — how it is carried out, in the user's
+            # own words, beside AFK's fixed brief. Empty is the bot's default method, so nothing has
+            # to be stored for a project nobody has edited (prompt_builder.py).
+            ("prompt", "TEXT"),
         ):
             if column not in afk_columns:
                 conn.execute(f"ALTER TABLE project_afk ADD COLUMN {column} {kind}")

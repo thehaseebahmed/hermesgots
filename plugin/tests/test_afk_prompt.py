@@ -50,28 +50,79 @@ class AfkPromptTests(unittest.TestCase):
         self.assertIn("Implement it — don't re-open the plan", text)
         self.assertIn("one issue", text, "it doesn't go looking for more work")
 
-    def test_it_asks_for_the_work_in_the_order_it_has_to_happen(self) -> None:
+    def test_the_brief_is_the_fixed_points_rather_than_a_method(self) -> None:
         text = self.text()
-        for step in ("Read.", "Plan.", "Implement.", "Verify.", "Ship.", "Report."):
+        for step in ("The workflow:", "1. Read.", "2. Plan.", "3. Implement.", "4. Verify."):
+            self.assertNotIn(step, text, "the six-step method is the prompt's now, not the brief's")
+        for point in (
+            "the issue is the spec",
+            "Never ask the user anything",
+            "the pull request ships last",
+            "Nothing is merged or closed by you",
+            "secrets",
+            "leave the tree consistent",
+        ):
+            self.assertIn(point, text, f"the brief keeps {point!r}, whatever a prompt says")
+
+    def test_the_fixed_points_hold_whatever_a_skill_or_a_prompt_says(self) -> None:
+        self.assertIn(
+            "A skill or a Prompt governs method only",
+            self.text(),
+            "the sentence that puts the brief above both",
+        )
+
+    def test_the_default_method_is_served_by_the_host(self) -> None:
+        text = self.text()
+        self.assertIn(prompt_builder.DEFAULT_PROMPT, text, "a project that wrote none is still told it")
+        for part in (
+            "checkpoints",
+            "fails before the code that passes it",
+            "the repo's own gates",
+            "Read your own diff",
+            "`simplify-code` and `requesting-code-review`",
+            "summary",
+        ):
+            self.assertIn(part, text)
+
+    def test_the_brief_is_told_before_the_prompt(self) -> None:
+        text = self.text()
+        self.assertLess(
+            text.index("The rules:"), text.index("How to work:"), "the fixed points come first"
+        )
+
+    def test_a_projects_prompt_is_told_in_place_of_the_default(self) -> None:
+        text = prompt_builder.afk_prompt(RECORD, TASK, "Squash every checkpoint into one commit.")
+        self.assertIn("Squash every checkpoint into one commit.", text)
+        self.assertNotIn(prompt_builder.DEFAULT_PROMPT, text, "an empty Prompt means the default")
+        self.assertLess(text.index("The rules:"), text.index("Squash every checkpoint"))
+
+    def test_a_staged_task_is_briefed_for_its_stage_and_told_no_prompt(self) -> None:
+        staged = {**RECORD, "pipeline": staged_record(pipeline.BUILD)}
+        text = prompt_builder.afk_prompt(staged, TASK, "Squash every checkpoint into one commit.")
+        self.assertNotIn("Squash every checkpoint", text, "a workflow is what its work runs by")
+        self.assertEqual(
+            text, prompt_builder.afk_prompt(staged, TASK), "the stage's brief is as it was"
+        )
+        self.assertEqual(
+            text.count("governs method only"),
+            1,
+            "a stage is told the skill's scope, not both it and the Prompt's",
+        )
+        self.assertIn("This task is worked in stages", text)
+
+    def test_a_staged_build_keeps_the_method_the_prompt_took_from_the_brief(self) -> None:
+        # The Prompt carries the method for a run that isn't staged; a stage has no Prompt, so its
+        # brief keeps the six steps it had, and the build stage's "shipping step above" still has one.
+        text = prompt_builder.afk_prompt({**RECORD, "pipeline": staged_record(pipeline.BUILD)}, TASK)
+        for step in ("1. Read.", "2. Plan.", "3. Implement.", "4. Verify.", "5. Ship.", "6. Report."):
             self.assertIn(step, text)
-        self.assertIn("test first", text)
-        self.assertIn("Conventional Commits", text)
-        self.assertIn("A suite you didn't run isn't passing", text)
+        self.assertIn("which issue it implements, `#265`", text)
+        self.assertIn("delegate_task", text, "the second opinion is still offered")
+        self.assertNotIn(prompt_builder.DEFAULT_PROMPT, text)
 
-    def test_it_ships_a_draft_pull_request_and_leaves_the_closing_line_to_the_tool(self) -> None:
-        text = self.text()
-        self.assertIn("action 'ship'", text)
-        self.assertIn("draft pull request", text)
-        self.assertIn("#265", text, "the brief names the issue it implements")
-        self.assertIn("Don't write the `Closes` line yourself", text)
-        self.assertIn("Don't close the issue or merge anything yourself", text)
-
-    def test_it_has_nobody_to_ask_and_a_second_opinion_to_take(self) -> None:
-        text = self.text()
-        self.assertIn("Never ask the user anything", text)
-        self.assertIn("never leave a plan waiting for approval", text)
-        self.assertIn("delegate_task", text)
-        self.assertIn("decide", text)
+    def test_a_run_that_is_not_staged_is_not_told_the_six_steps(self) -> None:
+        text = prompt_builder.afk_prompt(RECORD, TASK)
+        self.assertNotIn("1. Read.", text, "its method is the Prompt")
 
     def test_it_says_what_to_do_when_the_work_cannot_be_finished(self) -> None:
         text = self.text()
