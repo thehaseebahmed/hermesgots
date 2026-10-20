@@ -155,29 +155,61 @@ _Avoid_: assign, lock, pickup
 The task a project's AFK switch claimed and the session working it: the host's own record, one per project, which is why a project takes no second task while one is held. It lasts as long as the run; a finished run lets go of the hold and leaves the claim, and a session the user closes gives both back.
 _Avoid_: lock, lease, slot
 
+**Workflow**:
+The named sequence of stages a project's AFK tasks are worked by, picked from the bot's own library.
+_Avoid_: pipeline, flow, template, playbook
+
+**Preset**:
+A workflow the bot ships with: read-only, and forking into a copy of the bot's own the moment it is edited.
+_Avoid_: template, default, built-in
+
+**Stage**:
+One unit of a workflow's work, named by the workflow: one run of the session, made of the steps it applies, or a checkpoint the host answers itself.
+_Avoid_: phase, step, node
+
+**Step**:
+One of the bot's skills that a stage's run applies, in the order the workflow lists them. A stage with no steps runs its built-in brief instead.
+_Avoid_: skill, action, task
+
+**Checkpoint**:
+A stage with no steps whose answer the host works out itself, so it costs no run: today the gate's exit codes, and the condition a loop repeats on.
+_Avoid_: gate stage, verification step, approval
+
+**Loop**:
+A marked span of a workflow that repeats while the checkpoint ending it fails, up to the cap the workflow sets, and then stalls the task naming the failure.
+_Avoid_: retry, iteration, cycle, until-loop
+
+**Shipping stage**:
+The one stage of a workflow whose run may open the task's draft pull request. Every other stage's run is refused it.
+_Avoid_: ship stage, release stage, PR stage
+
 **Pipeline**:
-The stages an AFK task runs through — Build, Gate, Critique — sequenced by the host, which is what lets the work be checked between them. A project runs one only when it has picked a critique skill.
-_Avoid_: workflow, stage machine, chain, assembly line
+A task's own run through its workflow: the workflow as it stood when the task started, the stage and round it is on, and what each stage ran and found. What the session's pill and the sheet behind it read.
+_Avoid_: workflow, run chain, progress
 
 **Build**:
-The stage where an AFK task's work is written: the session's first run, shaped by the project's build skill when it has one. It ends at the gate and never by shipping.
+The default preset's first stage: where a task's work is written, and the stage that ends at the gate rather than at a pull request.
 _Avoid_: implementation stage, implement, coding, development
 
-**Build skill**:
-The one of the profile's skills a project picks to govern how its Build is done. It shapes the method and never AFK's fixed points.
-_Avoid_: implementation skill, coding skill, builder
-
 **Gate**:
-The stage between a task's Build and its Critique: the host runs the repo's gates the build named and passes only a run that ended, a clean committed tree and every command at zero. A task that fails it stalls rather than being critiqued.
+The commands a build names to be checked by, which the host runs in the worktree and reads the exit codes of. A task that fails its gate stalls rather than being reviewed.
 _Avoid_: checkpoint, approval, quality gate, verification step
 
-**Critique**:
-The stage where a task's build is reviewed: one delegate per critique skill the project picked, unless a skill prescribes its own arrangement, and the session fixes what it accepts in one pass. "In review" is what the task is afterwards, waiting on the user.
-_Avoid_: code review, review stage, self-review, PR review
+**Test**:
+The default preset's checkpoint: it passes only a build whose gate call was made, every command exited zero, the tree is committed and the branch is ahead of its base.
+_Avoid_: gate stage, verify stage, CI
 
-**Critique skill**:
-One of the profile's skills a project picks to review a task's build. A project may pick several, each its own lens.
-_Avoid_: review skill, code-review skill
+**Review**:
+The default preset's stage where a task's build is reviewed by the skills the workflow lists, and which opens the draft pull request. The session reviews in its own run; no reviewer is spawned unless a skill asks for one.
+_Avoid_: critique, code review, review stage, self-review, PR review
+
+**Summary**:
+The default preset's last stage: the wrap-up read when the user is back. It runs nothing until a skill is put in it, and it never writes to the pull request.
+_Avoid_: report, closing, digest, recap
+
+**Findings**:
+What a review step reported to the host: a count against the skill that raised it, shown on the pipeline's Review row.
+_Avoid_: issues, comments, results
 
 **In review**:
 A task whose pull request is open and waiting on the user.
