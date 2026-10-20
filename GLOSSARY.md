@@ -124,8 +124,12 @@ The model a bot's delegated tasks run on, set in its settings and held on its ho
 _Avoid_: second opinion, delegation model, child model
 
 **AFK**:
-A project being worked without its user present. On, Gots claims its ready tasks and works up to its pick count at a time, and stops picking up while the bot's account is over its usage threshold, until the switch is turned off.
+A project being worked without its user present. On, Gots claims its ready tasks and works up to its pick count at a time, and stops picking up while the bot's account is over its usage threshold, until the switch is turned off. A task runs one run on the project's **prompt**, unless the project has picked a **workflow**.
 _Avoid_: autopilot, unattended mode, auto mode, yolo
+
+**Prompt**:
+How a project's AFK work is carried out, told to the run beside AFK's fixed rules: the words the user writes for it. It lives on the host with the project, starts as the bot's default method, and an empty one means that default again.
+_Avoid_: instructions, system prompt, template, playbook
 
 **Ready task**:
 A task the user has marked for an agent to work, by the tracker's `ready-for-agent` mark.
@@ -172,7 +176,7 @@ The usage window that answers whether a bot's account can still run: a balance w
 _Avoid_: tightest window, worst window, primary window
 
 **Workflow**:
-The named sequence of stages a project's AFK tasks are worked by, picked from the bot's own library.
+The named sequence of stages a project's AFK tasks are worked by, picked from the bot's own library. A project that has picked nothing runs one run on its prompt instead, and the library is offered only where the app's developer setting offers it.
 _Avoid_: pipeline, flow, template, playbook
 
 **Preset**:
@@ -184,7 +188,7 @@ One unit of a workflow's work, named by the workflow: one run of the session, ma
 _Avoid_: phase, step, node
 
 **Run**:
-One turn a task's session spends on one stage, posted by the host and named by its own id. A stage ends only when its run ends, and no other turn on that session can end it.
+One turn a task's session spends on one stage — or on the task's whole work, when it has picked no workflow — posted by the host and named by its own id. A stage ends only when its run ends, and no other turn on that session can end it.
 _Avoid_: turn, attempt, job, execution
 
 **Round**:
