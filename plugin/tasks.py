@@ -80,9 +80,8 @@ def groups(tasks: Iterable[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
         row = {key: task.get(key) for key in SHOWN}
         row["title"] = row["title"] or ""
         row["assignees"] = list(row["assignees"] or [])
-        # Every row carries its blockers, empty for the ones that have none.
-        row["blockers"] = []
         if _claimed(labels, row["assignees"]):
+            row["blockers"] = []
             claimed.append(row)
             continue
         row["blockers"] = [
