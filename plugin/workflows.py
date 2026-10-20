@@ -41,9 +41,7 @@ MAX_CAP = 10
 GATE = "gate"
 CHECKS = (GATE,)
 
-# The preset a project that named nothing reads as. One prompt run is the shape its work has, so the
-# picker has something true to show rather than a workflow nothing is running; picking a workflow is
-# what puts a project back on stages (ADR 0027), and a project on a pick keeps its own.
+# The workflow a project that named nothing reads as (ADR 0027).
 DEFAULT_ID = "preset:one-run"
 # The name a copy of a preset takes when the write names none.
 COPY = "{name} (copy)"
