@@ -2,17 +2,10 @@
 // the user will find it: Code's Waiting on you, and from 1280px the sidebar's Waiting for input, each
 // with the host's own reason under it, the way the plugin reports a stalled claim. The mock says a
 // project's claim stalled on request, so the whole thing is covered without GitHub.
-import { afkOn, app, assert, flow, makeProject, mock, pass } from "./lib.mjs"
+import { afkOn, app, assert, flow, makeProject, mock, pass, say } from "./lib.mjs"
 
 const TITLE = "#265 The frontier is read from GitHub and listed"
 const REASON = "The run failed."
-
-const say = (body) =>
-  fetch(`${mock}/__mock/afk`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  })
 
 const run = (wide) => async ({ page, profileId, shot, until }) => {
   const errors = []

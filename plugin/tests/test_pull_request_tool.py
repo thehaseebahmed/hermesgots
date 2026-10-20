@@ -356,13 +356,13 @@ class StageTests(_Base):
 
     def test_a_build_cannot_ship(self) -> None:
         answer = self._call({"action": "ship", "commit_message": "m"}, record=self.staged(pipeline.BUILD))
-        self.assertIn("Build stage", answer["error"], "the refusal names the stage")
+        self.assertIn("build stage", answer["error"], "the refusal names the stage")
         self.assertIn("afk_gate", answer["error"])
         self.assertIn("critique stage", answer["error"])
 
     def test_a_task_at_its_gate_cannot_ship_either(self) -> None:
         answer = self._call({"action": "ship", "commit_message": "m"}, record=self.staged(pipeline.GATE))
-        self.assertIn("Gate stage", answer["error"])
+        self.assertIn("gate stage", answer["error"])
 
     def test_a_critique_ships(self) -> None:
         with patch("plugin.ship.ship", return_value=[]) as shipped:

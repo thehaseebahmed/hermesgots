@@ -2494,7 +2494,9 @@ export async function getProjectTasks(
  * The stage a staged AFK task is in, on its session's own record (`plugin/pipeline.py`). A project
  * with no critique skill has none: its task is one run, which ships.
  */
-export type ProjectStage = "build" | "gate" | "critique" | "done"
+const PROJECT_STAGES = ["build", "gate", "critique", "done"] as const
+
+export type ProjectStage = (typeof PROJECT_STAGES)[number]
 
 /**
  * A project's AFK switch: whether it is left to work its own tasks, and why it can't be. The
@@ -2526,9 +2528,7 @@ function skillNames(value: unknown): string[] {
 }
 
 function stageName(value: unknown): ProjectStage | null {
-  return value === "build" || value === "gate" || value === "critique" || value === "done"
-    ? value
-    : null
+  return (PROJECT_STAGES as readonly unknown[]).includes(value) ? (value as ProjectStage) : null
 }
 
 function parseAfk(body: Record<string, unknown> | null): ProjectAfk {

@@ -2,19 +2,12 @@
 // the host on its own poll, so the sheet says how far the work got without opening its session. A
 // project with no critique skill is one run, and its task has no stage to name. The mock's claimed
 // task is staged, and a flow moves it between the stages the way the host's pipeline does.
-import { afkOn, app, assert, flow, makeProject, mock, openAfk, pass } from "./lib.mjs"
+import { afkOn, app, assert, flow, makeProject, mock, openAfk, pass, say } from "./lib.mjs"
 
 const STAGES = [
   ["gate", "Gate check"],
   ["critique", "Critiquing"],
 ]
-
-const say = (body) =>
-  fetch(`${mock}/__mock/afk`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  })
 
 const choose = (projectId, critique) =>
   fetch(`${mock}/api/plugins/memento/projects/${projectId}/afk`, {

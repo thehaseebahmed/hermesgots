@@ -44,14 +44,12 @@ def start(build_skill: Any, critique_skills: Iterable[Any]) -> Optional[Dict[str
     A build skill alone doesn't: the pipeline exists to make a critique safe, so with nothing
     chosen to critique, AFK is one run that ships, exactly as it was before.
     """
-    build = _text(build_skill)
-    skills = [name for name in (_text(one) for one in _names(critique_skills)) if name]
-    skills = list(dict.fromkeys(skills))
+    skills = names(critique_skills)
     if not skills:
         return None
     return {
         "stage": BUILD,
-        "build_skill": build,
+        "build_skill": text(build_skill),
         "critique_skills": skills,
         "gate": None,
         "reason": None,
@@ -69,20 +67,26 @@ def read(value: Any) -> Optional[Dict[str, Any]]:
     gate = value.get("gate")
     return {
         "stage": value["stage"],
-        "build_skill": _text(value.get("build_skill")),
-        "critique_skills": [
-            name
-            for name in (_text(one) for one in _names(value.get("critique_skills")))
-            if name
-        ],
+        "build_skill": text(value.get("build_skill")),
+        "critique_skills": names(value.get("critique_skills")),
         "gate": gate if isinstance(gate, dict) else None,
-        "reason": _text(value.get("reason")),
+        "reason": text(value.get("reason")),
     }
 
 
 def stage(record: Optional[Dict[str, Any]]) -> Optional[str]:
     """The stage a staged task is in, or ``None`` when its session isn't staged."""
     return record["stage"] if record else None
+
+
+def building(record: Optional[Dict[str, Any]]) -> bool:
+    """Whether a staged task is still building, so its gate is still ahead of it.
+
+    The gate belongs to the build's own work and is called once: a second call would answer a
+    question the host has already answered, and the failure that stalled the task would be
+    overwritten by whatever the run tried next.
+    """
+    return stage(record) == BUILD
 
 
 def blocks_ship(record: Optional[Dict[str, Any]]) -> bool:
@@ -129,18 +133,29 @@ def gated(record: Dict[str, Any], commands: Sequence[Dict[str, Any]]) -> Dict[st
     return {**record, "stage": GATE, "gate": {"commands": list(commands)}}
 
 
-def _after_build(record: Dict[str, Any], worktree: List[Dict[str, Any]]) -> Step:
-    answer = record.get("gate") or {}
+def gate_verdict(record: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Why a build's gate doesn't pass, or ``None`` when it ran and every command exited zero.
+
+    The one reading of the gate's answer, so the tool and the rule that starts the critique can't
+    disagree about whether a task is clear to go on.
+    """
+    answer = (record or {}).get("gate") or {}
     commands = [one for one in answer.get("commands") or [] if isinstance(one, dict)]
     if not commands:
-        return Step(GATE, None, NO_GATE)
+        return NO_GATE
     failed = next((one for one in commands if one.get("code") != 0), None)
-    if failed is not None:
-        return Step(
-            GATE,
-            None,
-            FAILED_GATE.format(command=failed.get("command") or "", code=failed.get("code")),
-        )
+    if failed is None:
+        return None
+    named = failed.get("command") or ""
+    if failed.get("repo"):
+        named = f"{failed['repo']}: {named}"
+    return FAILED_GATE.format(command=named, code=failed.get("code"))
+
+
+def _after_build(record: Dict[str, Any], worktree: List[Dict[str, Any]]) -> Step:
+    why = gate_verdict(record)
+    if why is not None:
+        return Step(GATE, None, why)
     if any(one.get("changed") for one in worktree):
         return Step(GATE, None, UNCOMMITTED)
     if not any(one.get("ahead") for one in worktree):
@@ -148,14 +163,15 @@ def _after_build(record: Dict[str, Any], worktree: List[Dict[str, Any]]) -> Step
     return Step(CRITIQUE, CRITIQUE, None)
 
 
-def _text(value: Any) -> Optional[str]:
+def text(value: Any) -> Optional[str]:
+    """One name as the record holds it: trimmed, and nothing for what isn't text."""
     if not isinstance(value, str):
         return None
     return value.strip() or None
 
 
-def _names(value: Any) -> List[Any]:
-    """The entries of a stored list or a caller's sequence, and none from anything else.
+def names(value: Any) -> List[str]:
+    """The names a list or a caller's sequence holds, each once, in its own order.
 
     A hand edit that leaves a bare string where the list goes would otherwise be read one character
     at a time — eleven skills named by ``code-review`` — so text is no names, and neither is a value
@@ -164,6 +180,7 @@ def _names(value: Any) -> List[Any]:
     if isinstance(value, (str, bytes)):
         return []
     try:
-        return list(value)
+        found = list(value)
     except TypeError:
         return []
+    return list(dict.fromkeys(name for name in (text(one) for one in found) if name))

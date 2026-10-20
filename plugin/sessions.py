@@ -175,29 +175,45 @@ def read(path: Path, session_id: str) -> Optional[Dict[str, Any]]:
 
 def set_task(path: Path, session_id: str, task: Dict[str, Any]) -> None:
     """Records the issue AFK started this session for, so its pull request closes it."""
-    conn = connect(path)
-    try:
-        cursor = conn.execute(
-            "UPDATE project_sessions SET task = ? WHERE session_id = ?",
-            (json.dumps(task, separators=(",", ":")), session_id),
-        )
-        if cursor.rowcount == 0:
-            logger.warning("memento: no session row for %s to name task #%s on", session_id, task.get("number"))
-    finally:
-        conn.close()
+    _set_json(path, session_id, "task", task, "name the task on")
 
 
 def set_pipeline(path: Path, session_id: str, pipeline: Optional[Dict[str, Any]]) -> None:
     """Records the stage a staged task is in, so the pop-up can name it and a finished task can
     still say how it got there (``pipeline.py``). ``None`` clears it."""
+    _set_json(path, session_id, "pipeline", pipeline, "record a stage on")
+
+
+def pipeline_of(path: Path, session_id: str) -> Any:
+    """The pipeline column alone, for a poll that only asks which stage a task is in.
+
+    Decoded here, not by ``read``: a five-second poll for a stage has no use for the rest of the row.
+    """
+    conn = connect(path)
+    try:
+        row = conn.execute(
+            "SELECT pipeline FROM project_sessions WHERE session_id = ?", (session_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row or not isinstance(row[0], str) or not row[0]:
+        return None
+    try:
+        return json.loads(row[0])
+    except ValueError:
+        return None
+
+
+def _set_json(path: Path, session_id: str, column: str, value: Any, missing: str) -> None:
+    """Writes one JSON column on a session's row, warning when there is no row to write it on."""
     conn = connect(path)
     try:
         cursor = conn.execute(
-            "UPDATE project_sessions SET pipeline = ? WHERE session_id = ?",
-            (json.dumps(pipeline, separators=(",", ":")) if pipeline else None, session_id),
+            f"UPDATE project_sessions SET {column} = ? WHERE session_id = ?",
+            (json.dumps(value, separators=(",", ":")) if value else None, session_id),
         )
         if cursor.rowcount == 0:
-            logger.warning("memento: no session row for %s to record a stage on", session_id)
+            logger.warning(f"memento: no session row for %s to {missing}", session_id)
     finally:
         conn.close()
 

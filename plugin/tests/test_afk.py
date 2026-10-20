@@ -440,8 +440,8 @@ class ClaimStubTests(unittest.TestCase):
     def on(self) -> None:
         set_on(self.home, "p1", self.folders(), True)
 
-    def sweep(self) -> None:
-        sweep(self.home, "p1", self.folders())
+    def sweep(self, skills: Any = None) -> None:
+        sweep(self.home, "p1", self.folders(), skills=skills)
 
     def shown(self) -> dict:
         """What the sheet reads after a sweep: the switch, the task held and the last refusal."""
@@ -1157,9 +1157,9 @@ class SessionTests(unittest.TestCase):
                 patch.object(github, "_request", lambda *args, **kwargs: {}),
             ):
                 set_on(home, "p1", [folder(str(checkout))], True)
-                self.assertEqual(sweep(home, "p1", [folder(str(checkout))])["number"], 265)
+                self.assertEqual(sweep(home, "p1", [folder(str(checkout))], skills=None)["number"], 265)
                 self.assertIsNone(
-                    sweep(home, "p1", [folder(str(checkout))]),
+                    sweep(home, "p1", [folder(str(checkout))], skills=None),
                     "a project holding one is asked for nothing further",
                 )
 

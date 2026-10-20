@@ -7,7 +7,7 @@ the agent is told without tracing the session bookkeeping.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from . import pipeline, tasks
 
@@ -104,7 +104,7 @@ The rules:
 # skills are named in one line beside it rather than quoted.
 _BUILD_STAGE = """This task is worked in stages, and you are in its Build stage. Step 5 above is not yours: don't ship. Build the change, verify it, and leave the pull request to the critique that follows.
 
-When the work is committed and the repo's gates pass for you, call the afk_gate tool with the commands you mean to be checked by — one list, each command as one shell line: whatever the repo documents as its own gates, and the tests it has. Then end the run. The host runs them in the worktree, reads their exit codes and decides; the pull_request tool refuses 'ship' from this stage, so trying only wastes a turn. Nothing is critiqued that never reached the gate, and a gate that fails — a command exiting non-zero, a tree left uncommitted, no commits beyond the base — stalls the task for the user to look at, naming the command that failed. Your last reply says what you built, what you checked and what the gate answered."""
+When the work is committed and the repo's gates pass for you, call the afk_gate tool with the commands you mean to be checked by — one list, each command as one shell line: whatever the repo documents as its own gates, and the tests it has. A project of more than one repo names the repo beside each command instead of a plain line, since each repo checks itself and the host runs it there. Then end the run. The host runs them in the worktree, reads their exit codes and decides; the pull_request tool refuses 'ship' from this stage, so trying only wastes a turn. Nothing is critiqued that never reached the gate, and a gate that fails — a command exiting non-zero, a tree left uncommitted, no commits beyond the base — stalls the task for the user to look at, naming the command that failed. Your last reply says what you built, what you checked and what the gate answered."""
 
 # A staged task's second run, on the same session: the build review and the pull request, in one
 # pass. Fixed text, so the prompt cache holds across its turns.
@@ -222,27 +222,28 @@ def _base_line(base: Optional[str]) -> str:
     return f"The work is against the base branch {base}."
 
 
-def _critique_task_line(task: Dict[str, Any]) -> str:
+def _issue_ref(task: Dict[str, Any]) -> Tuple[str, str, str]:
+    """The issue as a prompt names it: ``repo#number``, where to open it, and how to read it."""
     repo, number = task.get("repo"), task.get("number")
     url = tasks.issue_url(task)
-    where = f" ({url})" if url else ""
     read = f"gh issue view {number} --repo {repo} --comments" if repo else "the API"
+    return f"{repo}#{number}", f" ({url})" if url else "", read
+
+
+def _critique_task_line(task: Dict[str, Any]) -> str:
+    where, url, read = _issue_ref(task)
     return (
-        f"You are reviewing the build of {repo}#{number}{where} for the user, while they are "
-        f"away. Their issue's own text isn't repeated here: read it with `{read}` (or the API), "
-        f"since it is what the change is judged against."
+        f"You are reviewing the build of {where}{url} for the user, while they are away. Their "
+        f"issue's own text isn't repeated here: read it with `{read}` (or the API), since it is "
+        f"what the change is judged against."
     )
 
 
 def _afk_task_line(task: Dict[str, Any]) -> str:
-    repo, number = task.get("repo"), task.get("number")
-    url = tasks.issue_url(task)
-    where = f" ({url})" if url else ""
-    read = f"gh issue view {number} --repo {repo} --comments" if repo else "the API"
+    where, url, read = _issue_ref(task)
     return (
-        f"You are implementing {repo}#{number}{where} for the user, while they are away. "
-        f"Their issue's own text isn't repeated here: read it with `{read}` (or the API) and work "
-        f"from that."
+        f"You are implementing {where}{url} for the user, while they are away. Their issue's own "
+        f"text isn't repeated here: read it with `{read}` (or the API) and work from that."
     )
 
 

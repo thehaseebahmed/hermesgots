@@ -56,6 +56,33 @@ class GateTests(unittest.TestCase):
         sessions.set_pipeline(db_path(self.home), SESSION, {**record, "stage": stage})
         return record
 
+    def two_repos(self) -> Path:
+        """A second worktree in the same session, as a project of more than one repo has."""
+        other = self.home / "trees" / "afk-265-api"
+        other.mkdir(parents=True, exist_ok=True)
+        sessions._upsert(
+            db_path(self.home),
+            SESSION,
+            "p1",
+            [
+                {
+                    "name": "mock-user/memento",
+                    "repo_root": str(self.home / "checkout"),
+                    "path": str(self.tree),
+                    "branch": "hermes/afk-265",
+                },
+                {
+                    "name": "mock-user/memento-api",
+                    "repo_root": str(self.home / "checkout-api"),
+                    "path": str(other),
+                    "branch": "hermes/afk-265",
+                },
+            ],
+            "auto",
+            None,
+        )
+        return other
+
     def read(self) -> Optional[Dict[str, Any]]:
         return sessions.read(db_path(self.home), SESSION)
 
@@ -111,7 +138,49 @@ class GateTests(unittest.TestCase):
     def test_a_critique_cannot_be_gated_again(self) -> None:
         self.staged(stage=pipeline.CRITIQUE)
         answer = self.call({"commands": ["true"]})
-        self.assertIn("Critique stage", answer["error"])
+        self.assertIn("past its gate", answer["error"])
+
+    def test_a_second_call_cannot_overwrite_the_failure_the_task_stalls_on(self) -> None:
+        self.staged()
+        self.call({"commands": ["false"]})
+        answer = self.call({"commands": ["true"]})
+        self.assertIn("already run its gate", answer["error"])
+        self.assertEqual(
+            pipeline.read(self.read()["pipeline"])["gate"]["commands"],
+            [{"command": "false", "code": 1}],
+            "the first answer is the one the host judged the build by",
+        )
+
+    def test_it_stops_at_the_first_command_that_fails(self) -> None:
+        self.staged()
+        answer = self.call({"commands": ["false", "sleep 10"]})
+        self.assertEqual(answer["results"], [{"command": "false", "code": 1}])
+        self.assertFalse(answer["passed"])
+
+    def test_a_command_that_names_a_repo_runs_in_that_repos_worktree(self) -> None:
+        other = self.two_repos()
+        self.staged()
+        self.call({"commands": [{"repo": "mock-user/memento-api", "command": "pwd > where-i-ran"}]})
+        self.assertEqual(
+            (other / "where-i-ran").read_text().strip(),
+            str(other),
+            "a project of more than one repo gates each repo's own work",
+        )
+        self.assertEqual(
+            pipeline.read(self.read()["pipeline"])["gate"]["commands"],
+            [{"command": "pwd > where-i-ran", "repo": "mock-user/memento-api", "code": 0}],
+        )
+
+    def test_a_repo_this_session_has_not_got_is_refused_before_anything_runs(self) -> None:
+        self.two_repos()
+        self.staged()
+        answer = self.call({"commands": [{"repo": "mock-user/nope", "command": "true"}]})
+        self.assertIn("no repo named mock-user/nope", answer["error"])
+        self.assertEqual(
+            pipeline.read(self.read()["pipeline"])["stage"],
+            pipeline.BUILD,
+            "a refused call runs nothing and records nothing",
+        )
 
     def test_a_finished_pipeline_has_no_gate_either(self) -> None:
         self.staged(stage=pipeline.DONE)

@@ -498,7 +498,7 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
             return json.dumps(
                 {
                     "error": (
-                        f"This session is in its {staged['stage'].capitalize()} stage of a staged "
+                        f"This session is in the {staged['stage']} stage of a staged "
                         "task, so it can't ship yet: a build ends at the gate the host runs, and "
                         "the critique stage that follows opens the pull request. Run the gate with "
                         "afk_gate, end this run, and don't call pull_request with 'ship' again."

@@ -331,6 +331,14 @@ export async function openAfk(page, screen) {
   await page.getByRole("menuitem", { name: "AFK" }).click()
 }
 
+/** Says something to the mock's AFK switch, the way the plugin's own write would. */
+export const say = (body) =>
+  fetch(`${mock}/__mock/afk`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+
 /** Leaves a project to work on its own: the AFK pop-up opened, the switch turned on and read back. */
 export async function afkOn(page, screen, until) {
   await openAfk(page, screen)
