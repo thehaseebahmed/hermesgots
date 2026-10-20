@@ -675,6 +675,16 @@ class ClaimTests(ClaimStubTests):
             ],
         )
 
+    def test_the_issue_it_claims_opens_its_run(self) -> None:
+        body = "## What to build\n\nOldest first.\n\n- one\n- two"
+        self.on()
+        self.issues = [issue_row(265, body=body)]
+        claimed = sweep(self.home, "p1", self.folders(), skills=None)
+        self.assertEqual(claimed["body"], body, "the task the sweep answers carries the issue's text")
+        self.assertNotIn(
+            "body", self.shown()["task"], "the row it holds is the sheet's, and the sheet shows none"
+        )
+
     def test_the_claim_mark_is_created_when_the_repository_has_none(self) -> None:
         self.on()
         self.label_exists = False
@@ -1132,6 +1142,7 @@ class SessionTests(unittest.TestCase):
             "title": "The frontier is read from GitHub and listed",
             "url": "https://github.com/mock-user/memento/issues/265",
             "created_at": "2026-10-01T00:00:00Z",
+            "body": "Read the frontier first.\n\n- oldest first",
         }
         self.ensured: List[tuple] = []
         self.posted: List[dict] = []
@@ -1224,8 +1235,11 @@ class SessionTests(unittest.TestCase):
         record = sessions.read(db_path(self.home), session_id)
         self.assertEqual(
             record["task"],
-            self.task,
+            {key: self.task[key] for key in afk.HELD},
             "the session keeps the task, for the pull request that closes it",
+        )
+        self.assertNotIn(
+            "body", record["task"], "the issue's text is the run's, and no row of the host's keeps it"
         )
         self.assertIsNone(sessions.read(db_path(self.home), "memento-afk-not-this-one"))
 
@@ -1237,7 +1251,7 @@ class SessionTests(unittest.TestCase):
             "a session nothing was sent in names no task",
         )
 
-    def test_the_run_starts_with_one_line_naming_the_issue_and_where_it_is(self) -> None:
+    def test_the_run_opens_with_the_issue_it_works(self) -> None:
         self.start()
         self.assertEqual(len(self.posted), 1)
         body = self.posted[0]["body"]
@@ -1245,8 +1259,14 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(message["role"], "user")
         self.assertEqual(
             message["content"],
-            "Implement Issue #265 (https://github.com/mock-user/memento/issues/265)",
-            "the input is the issue and its url, not its text",
+            "Title: The frontier is read from GitHub and listed\n"
+            "Description:\n"
+            "Read the frontier first.\n"
+            "\n"
+            "- oldest first\n"
+            "\n"
+            "[Issue #265](https://github.com/mock-user/memento/issues/265)",
+            "the input is the issue itself, its body verbatim and its link",
         )
 
     def test_the_instructions_are_the_afk_prompt_and_carry_no_task_text(self) -> None:

@@ -189,7 +189,7 @@ def issue_row(
     title: Optional[str] = None,
     created: str = "2026-10-01T00:00:00Z",
     state: str = "open",
-    body: str = "",
+    body: Optional[str] = "",
     labels: Iterable[str] = (READY_LABEL,),
     assignees: Iterable[str] = (),
     summary: Optional[int] = 0,

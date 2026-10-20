@@ -210,6 +210,25 @@ class ReadTests(unittest.TestCase):
         self.assertIn(f"labels={READY_LABEL}", self.paths[0])
         self.assertIn("state=open", self.paths[0])
 
+    def test_the_frontier_read_carries_no_bodies(self) -> None:
+        self.serve({"/repos/mock-user/memento/issues?": [issue_row(265, body="Describe it.")]})
+        found = read(Path(self.home.name), self.folders)
+        self.assertNotIn(
+            "body", found["ready"][0], "the sheet shows where the tasks are, not what they say"
+        )
+
+    def test_the_sweeps_read_carries_the_body_it_claims_with(self) -> None:
+        body = "## What to build\n\nThe first run opens with the issue.\n\n- verbatim\n"
+        self.serve({"/repos/mock-user/memento/issues?": [issue_row(265, body=body)]})
+        found = read(Path(self.home.name), self.folders, bodies=True)
+        self.assertEqual(found["ready"][0]["body"], body)
+        self.assertEqual(len(self.paths), 1, "the body comes with the list, not from a second read")
+
+    def test_an_issue_with_no_body_is_an_empty_one(self) -> None:
+        self.serve({"/repos/mock-user/memento/issues?": [issue_row(265, body=None)]})
+        found = read(Path(self.home.name), self.folders, bodies=True)
+        self.assertEqual(found["ready"][0]["body"], "", "a body nothing wrote still reads as no text")
+
     def test_a_repository_pages_until_github_offers_no_more(self) -> None:
         first = (
             f"/repos/mock-user/memento/issues?state=open&labels={READY_LABEL}"

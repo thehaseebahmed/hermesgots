@@ -61,12 +61,18 @@ def issue_url(task: Dict[str, Any]) -> str:
     return f"https://github.com/{repo}/issues/{task.get('number')}" if repo else ""
 
 
-def groups(tasks: Iterable[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+def groups(
+    tasks: Iterable[Dict[str, Any]], *, bodies: bool = False
+) -> Dict[str, List[Dict[str, Any]]]:
     """The project's tasks grouped the way AFK reads them: ready, claimed and blocked.
 
     Only an open task carrying the ready mark is one of AFK's at all; it's out of the frontier when
     it carries Gots's claim mark or an assignee — someone has it — and blocked while any of its
     blockers is still open, those named on the row. What's left is the frontier, oldest first.
+
+    ``bodies`` keeps each issue's body on its row, for the sweep that claims one and opens its run
+    with it; the sheet's own read leaves them off, since it shows where the tasks are and not what
+    they say.
     """
     ready: List[Dict[str, Any]] = []
     claimed: List[Dict[str, Any]] = []
@@ -78,9 +84,11 @@ def groups(tasks: Iterable[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
         if READY_LABEL not in labels:
             continue
         row = {key: task.get(key) for key in SHOWN}
+        if bodies:
+            row["body"] = task.get("body") or ""
         row["title"] = row["title"] or ""
         row["assignees"] = list(row["assignees"] or [])
-        # Every row carries its blockers, empty for the ones that have none: one shape leaves.
+        # Every row carries its blockers, empty for the ones that have none.
         row["blockers"] = []
         if _claimed(labels, row["assignees"]):
             claimed.append(row)
@@ -109,7 +117,7 @@ def empty() -> Dict[str, Any]:
     return {"repos": [], "ready": [], "claimed": [], "blocked": []}
 
 
-def read(hermes_home: Path, folders: Iterable[Any]) -> Dict[str, Any]:
+def read(hermes_home: Path, folders: Iterable[Any], *, bodies: bool = False) -> Dict[str, Any]:
     """The project's tasks as GitHub holds them, grouped by `groups`.
 
     Each repository the project's checkouts point at is asked for its open ready tasks — a request
@@ -117,6 +125,9 @@ def read(hermes_home: Path, folders: Iterable[Any]) -> Dict[str, Any]:
     after that: only the ones GitHub says are open, and never a claimed task's, so a task with none
     costs nothing. A project with no GitHub repository has no tasks to read, and no request goes
     out.
+
+    ``bodies`` is the sweep's read rather than the sheet's: every row carries its issue's body, so
+    the task it claims opens its run with the text it was judged by, and no second request reads it.
     """
     repos = repos_of(folders)
     if not repos:
@@ -131,7 +142,7 @@ def read(hermes_home: Path, folders: Iterable[Any]) -> Dict[str, Any]:
         for row in _candidates(repo, auth):
             if isinstance(row, dict) and not row.get("pull_request"):
                 tasks.append(_task(repo, row, auth, edges, looked_up))
-    return {"repos": repos, **groups(tasks)}
+    return {"repos": repos, **groups(tasks, bodies=bodies)}
 
 
 def repos_of(folders: Iterable[Any]) -> List[str]:
@@ -206,6 +217,7 @@ def _task(
         "number": row.get("number"),
         "title": row.get("title") or "",
         "url": row.get("html_url"),
+        "body": row.get("body") if isinstance(row.get("body"), str) else "",
         "state": row.get("state") or "open",
         "created_at": row.get("created_at"),
         "labels": labels,

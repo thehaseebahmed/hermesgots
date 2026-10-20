@@ -17,10 +17,11 @@ that session appear and open in the app is written here (ADR 0013) — the Code 
 nothing was sent in, and the app has no conversation for one it didn't make. The run then starts
 from this plugin: `prompt_builder.afk_prompt` is its instructions — AFK's fixed points, then the
 project's Prompt, which is how its work is carried out and is read off the project's own row here so
-a task claimed with the app closed is still told it (ADR 0027) — and its input is one line naming the
-issue and where it is. The issue's own text is deliberately not copied into either: the agent
-fetches it, so the brief can't go stale and the prompt is the same tokens every turn. It carries no
-model, so the host's own runs.
+a task claimed with the app closed is still told it (ADR 0027) — and its input is the issue itself,
+its title, its description verbatim and the link, so what the change is judged against is in front of
+the agent rather than something it fetches. The title and description ride in the input and not the
+instructions, so the prompt is the same tokens every turn. It carries no model, so the host's own
+runs.
 
 A project that can't be left to work says why instead of offering a switch: it has no GitHub
 repository to read tasks from, the host has no GitHub account to read or claim one with, or the
@@ -415,8 +416,9 @@ def sweep(
 ) -> Optional[Dict[str, Any]]:
     """Claims the oldest ready task for a project left to work, if it isn't holding one.
 
-    Answers the task it just claimed, so the caller starts the session that works it without a
-    second read, and None when it claimed nothing. One task at a time per project, and a hold is
+    Answers the task it just claimed — carrying the issue's body, which the run that starts it opens
+    with — so the caller starts the session that works it without a second read, and None when it
+    claimed nothing. One task at a time per project, and a hold is
     settled whether or not the project is still switched on, because the claim is on GitHub either
     way and the switch is only what decides whether a *new* task is taken. A project holding a task
     claims nothing in this pass, even when it has just given one back: the task the user closed its
@@ -453,7 +455,7 @@ def sweep(
             return None
     auth, _ = github.token(hermes_home)
     try:
-        answers = tasks.read(hermes_home, folders)
+        answers = tasks.read(hermes_home, folders, bodies=True)
     except github.GitHubError as error:
         _refuse(hermes_home, project_id, str(error))
         return None
@@ -484,10 +486,11 @@ def session_title(task: Dict[str, Any]) -> str:
 
 
 def run_body(record: Dict[str, Any], task: Dict[str, Any], prompt: Optional[str]) -> Dict[str, Any]:
-    """The ``POST /v1/runs`` request: how to work a planned issue, and the issue's name as the input.
+    """The ``POST /v1/runs`` request: how to work a planned issue, and the issue itself as the input.
 
-    The prompt is all `prompt_builder`'s — one module holds every word the agent is told. The issue's
-    own text is out of both: the agent reads it from GitHub.
+    The prompt is all `prompt_builder`'s — one module holds every word the agent is told — and the
+    issue's own title, description and link open the run, so what the work is judged against is in
+    front of the agent rather than something it goes and fetches (ADR 0027).
     """
     return _request(
         record, prompt_builder.afk_prompt(record, task, prompt), prompt_builder.afk_input(task)
@@ -563,7 +566,7 @@ def publish(
     for it. It is written once, here: the chat list is last-write-wins, so a title the user edits, a
     mode they change or a resolve they make afterwards has to win.
     """
-    sessions.set_task(db_path(hermes_home), session_id, task)
+    sessions.set_task(db_path(hermes_home), session_id, _held_fields(task))
     now = int(time.time() * 1000)
     value = {
         "title": session_title(task),
@@ -583,9 +586,9 @@ async def start(
 ) -> None:
     """Works a claimed task in a session of its own: its worktree, its run, its chat record.
 
-    The task is already claimed by the sweep, and it's named to the run rather than read: the agent
-    fetches the issue itself, so the claim stays the fast path and the brief is never a stale copy of
-    what the tracker says. The record is written only once the run is under way: a session the app
+    The task is already claimed by the sweep, and it carries the issue's own text from that claim:
+    the run opens with the issue as the claim read it, and the tracker stays the source for anything
+    written since. The record is written only once the run is under way: a session the app
     shows with no run behind it is worse than one it never hears about. A start that never gets its
     run away gives the claim back (ADR 0015): nothing began the work, so the task returns to the
     frontier instead of sitting claimed with no session to show for it.
@@ -980,13 +983,21 @@ def _stopped(outcome: sessions.Outcome) -> str:
     return FAILED_RUN if outcome.failed else DEFAULT_STALL
 
 
+def _held_fields(task: Dict[str, Any]) -> Dict[str, Any]:
+    """The task as the host keeps it — the sheet's fields, and what a pull request closes it by.
+
+    The issue's body is the run's, and stays out of both records: the hold and the session row are
+    read on every hook and answered to the app, and neither shows what the task says.
+    """
+    return {key: task.get(key) for key in HELD}
+
+
 def _hold(hermes_home: Path, project_id: str, task: Dict[str, Any]) -> None:
     """Records the task AFK holds, and clears any refusal: the sweep just succeeded."""
-    row = {key: task.get(key) for key in HELD}
     _update(
         hermes_home,
         project_id,
-        task=json.dumps(row),
+        task=json.dumps(_held_fields(task)),
         claimed_at=int(time.time()),
         refusal=None,
         refused_at=None,
