@@ -124,7 +124,7 @@ The model a bot's delegated tasks run on, set in its settings and held on its ho
 _Avoid_: second opinion, delegation model, child model
 
 **AFK**:
-A project being worked without its user present. On, Gots claims its ready tasks and works them one at a time until the switch is turned off.
+A project being worked without its user present. On, Gots claims its ready tasks and works up to its pick count at a time, and stops picking up while the bot's account is over its usage threshold, until the switch is turned off.
 _Avoid_: autopilot, unattended mode, auto mode, yolo
 
 **Ready task**:
@@ -152,8 +152,24 @@ Taking a task so nothing else picks it up. A claimed task is out of the frontier
 _Avoid_: assign, lock, pickup
 
 **Hold**:
-The task a project's AFK switch claimed and the session working it: the host's own record, one per project, which is why a project takes no second task while one is held. It lasts as long as the task's workflow runs; a finished task lets go of the hold and leaves the claim, and a session the user closes gives both back.
+One of the tasks a project's AFK switch has claimed, with the session working it: the host's own record, one row per task in flight, kept until the task's work is in review. A finished task lets go of its hold and leaves the claim, and a session the user closes gives both back.
 _Avoid_: lock, lease, slot
+
+**Pick count**:
+How many tasks a project's AFK will hold at once, from one to five, set in its AFK pop-up.
+_Avoid_: concurrency, parallelism, workers, slots
+
+**Refusal**:
+Why a project's sweep claimed nothing, in the host's own words: GitHub's answer, a skill the workflow names that its bot no longer has, or the account being over its usage threshold.
+_Avoid_: error, failure, block
+
+**Usage threshold**:
+The share of the bot's account usage at which AFK stops picking tasks up, one number for the bot and off until it is set.
+_Avoid_: cap, quota, budget, limit
+
+**Deciding window**:
+The usage window that answers whether a bot's account can still run: a balance with room left is capacity, and otherwise the window with the least left.
+_Avoid_: tightest window, worst window, primary window
 
 **Workflow**:
 The named sequence of stages a project's AFK tasks are worked by, picked from the bot's own library.
