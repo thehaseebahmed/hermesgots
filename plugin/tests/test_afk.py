@@ -286,14 +286,7 @@ class SwitchTests(unittest.TestCase):
 
 def default_workflow() -> Dict[str, Any]:
     """The default preset as the AFK read answers it: what a project that picked nothing runs."""
-    _, name, stages = next(one for one in workflows.PRESETS if one[0] == workflows.DEFAULT_ID)
-    return {
-        "id": workflows.DEFAULT_ID,
-        "name": name,
-        "preset": True,
-        "at": ANY,
-        "stages": stages,
-    }
+    return {**workflows.one_run(), "at": ANY}
 
 
 def set_skill_columns(

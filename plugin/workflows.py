@@ -362,8 +362,8 @@ def _body(value: Any) -> Dict[str, Any]:
     return read_body(value) or {"name": "", "stages": []}
 
 
-def get(hermes_home: Path, workflow_id: str) -> Optional[Dict[str, Any]]:
-    """One workflow, or ``None`` when the library holds no such id.
+def get(hermes_home: Path, workflow_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    """One workflow, or ``None`` when the library holds no such id — nor where none is named.
 
     Its own row rather than the whole library: the app's editor asks for one, and so does a write
     that checks an id before it stores it.
@@ -391,22 +391,13 @@ def _row(hermes_home: Path, workflow_id: str) -> Optional[Dict[str, Any]]:
     }
 
 
-def named(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
-    """The workflow a project picks, or ``None`` where it picks none or the library has lost it."""
-    workflow_id = _named(hermes_home, project_id)
-    return get(hermes_home, workflow_id) if workflow_id else None
-
-
 def pick(hermes_home: Path, project_id: str) -> Dict[str, Any]:
-    """The workflow a project's AFK work runs under: its own pick, or the One run preset.
+    """The workflow a project's AFK work runs under: its own pick, or One run where it has none.
 
-    A project that named nothing works in one prompt run, so One run is what it reads as: the picker
-    has something true to show, and picking a workflow is what puts the project back on stages
-    (ADR 0027). A project naming a workflow the library no longer holds reads the same way — a
-    deleted workflow can't be what the next task stalls on, and its delete was refused where a
-    project still named it.
+    A pick the library no longer holds reads the same way: a deleted workflow can't be what the next
+    task stalls on, and its delete was refused where a project still named it.
     """
-    return named(hermes_home, project_id) or one_run()
+    return get(hermes_home, _named(hermes_home, project_id)) or one_run()
 
 
 def one_run() -> Dict[str, Any]:
