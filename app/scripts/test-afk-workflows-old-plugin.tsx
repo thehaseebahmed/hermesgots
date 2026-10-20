@@ -5,18 +5,10 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
-import { act } from "react"
-import { createRoot } from "react-dom/client"
 
-import { AfkPopup } from "@/components/afk"
+import { json, mountAfk } from "./component-kit.tsx"
 
 const config = { baseUrl: "http://hermes.test/v1", apiKey: "test-key" }
-
-const json = (body: unknown) =>
-  new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { "content-type": "application/json" },
-  })
 
 globalThis.fetch = (async (input: RequestInfo | URL) => {
   const url = new URL(String(input))
@@ -41,23 +33,10 @@ globalThis.fetch = (async (input: RequestInfo | URL) => {
 }) as unknown as typeof fetch
 
 test("a bot without afk_workflows shows the pop-up it always showed", async () => {
-  const container = document.createElement("div")
-  document.body.append(container)
-  const root = createRoot(container)
-  try {
-    await act(async () =>
-      root.render(<AfkPopup open onOpenChange={() => {}} config={config} projectId="project-1" />),
-    )
-    for (let quiet = 0; quiet < 4; quiet += 1)
-      await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 0))
-      })
+  await mountAfk(config, "project-1", async () => {
     // Boolean, not the node: a failing assertion must not print a whole DOM tree.
     assert.equal(Boolean(document.querySelector("[data-afk-workflow]")), false, "no Workflow row")
     assert.equal(Boolean(document.querySelector("[data-afk-skills]")), true, "the pickers it had")
     assert.match(document.body.textContent ?? "", /Build/, "the build skill's row")
-  } finally {
-    await act(async () => root.unmount())
-    container.remove()
-  }
+  })
 })

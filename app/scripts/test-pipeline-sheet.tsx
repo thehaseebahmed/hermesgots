@@ -78,7 +78,15 @@ const snapshot = {
         },
       ],
     },
-    { name: "Summary", steps: [], check: null, loop: null, ships: false, state: "todo", rounds: [] },
+    {
+      name: "Summary",
+      steps: [],
+      check: null,
+      loop: null,
+      ships: false,
+      state: "todo",
+      rounds: [],
+    },
   ],
 }
 

@@ -85,7 +85,7 @@
 // and MOCK_DICTATION=fail answers every clip with an error. GET /__mock/dictation lists the clips it
 // was sent (size, type, hint and the text before each), for the regression script.
 // GET /api/plugins/memento/workflows lists the workflow library (presets first, read-only), POST
-// adds one, PATCH rewrites one of the account's own — forking a preset into a copy — and DELETE takes
+// adds one, POST to its id rewrites one of the account's own — forking a preset into a copy — and DELETE takes
 // one away; each answers the whole list. A project names the workflow its work runs under through
 // POST projects/{id}/afk { workflow_id }, and its answer carries that workflow and the name of the
 // stage its task is in. `pipeline?` below takes the new snapshot shape too — one entry per stage,
@@ -150,7 +150,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
   "Access-Control-Allow-Headers":
     "Authorization, Content-Type, Idempotency-Key, X-Hermes-Session-Id",
 }
@@ -1139,11 +1139,25 @@ function afkSweep(project) {
   afkSwept.add(project.id)
   const skills = afkSkills.get(project.id)
   const staged = pipelineRecord(skills)
-  setAfkStage(project.id, staged?.stage)
+  setAfkStage(project.id, afkStageOf(staged))
   afkSession(project)
   // The stage is recorded on the session the claim made, before its build run is posted.
   const record = projectSessions.get(afkSessionId(project.id))
   if (record) record.pipeline = staged
+}
+
+/** The step a record's position is, as `plugin/pipeline.py`'s `kinds` reads it: what a stage is judged as. */
+function afkStageOf(record) {
+  if (!record) return null
+  if (!Array.isArray(record.stages)) return record.stage ?? null
+  const stages = record.stages
+  const at = record.stage ?? 0
+  if (at >= stages.length) return "done"
+  const ship = stages.findLastIndex((one) => one.ships)
+  if (ship === -1) return "build"
+  if (at === ship) return "critique"
+  if (at > ship) return "done"
+  return stages[at].check && !stages[at].steps?.length ? "gate" : "build"
 }
 
 function afkStageName(record) {
@@ -2814,7 +2828,7 @@ http
       const id = decodeURIComponent(workflowRoute[1])
       const found = workflows().find((entry) => entry.id === id)
       if (!found) return json(res, 404, { error: { message: "No such workflow." } })
-      if (req.method === "PATCH") {
+      if (req.method === "POST") {
         const body = await readBody(req)
         const name = skillName(body.name)
         if (!name) return json(res, 400, { error: { message: "A workflow needs a name." } })
@@ -3413,7 +3427,8 @@ http
         }
         if (picking) {
           const id = skillName(body.workflow_id)
-          if (!id) return json(res, 400, { error: { message: "workflow_id must be a workflow's id." } })
+          if (!id)
+            return json(res, 400, { error: { message: "workflow_id must be a workflow's id." } })
           if (!workflows().some((entry) => entry.id === id))
             return json(res, 400, {
               error: { message: `There is no workflow "${id}" in this bot's library.` },
@@ -3950,7 +3965,7 @@ http
         const record = project && projectSessions.get(afkSessionId(project.id))
         if (record && pipeline !== undefined) {
           record.pipeline = pipeline
-          setAfkStage(projectId, pipeline?.stage)
+          setAfkStage(projectId, afkStageOf(pipeline))
         }
         if (record && pr) {
           const repo = repoOf(project)

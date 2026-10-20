@@ -5,7 +5,6 @@ import {
   commandName,
   parsePipeline,
   parseStage,
-  pipelineSteps,
   stageFindings,
   stageNumber,
   stageRound,
@@ -57,7 +56,7 @@ const legacy = (extra = {}) => ({
   ...extra,
 })
 
-const states = (pipeline) => pipelineSteps(pipeline).map((step) => `${step.key}:${step.state}`)
+const states = (pipeline) => pipeline.stages.map((step) => `${step.key}:${step.state}`)
 const at = (pipeline, key) => pipeline.stages.find((one) => one.key === key)
 
 test("a session with no pipeline record has no pipeline", () => {
@@ -127,12 +126,7 @@ test("a stage the host stopped fails in place, and the sheet carries the host's 
       ],
     }),
   )
-  assert.deepEqual(states(stalled), [
-    "Build:pass",
-    "Test:fail",
-    "Review:next",
-    "Summary:next",
-  ])
+  assert.deepEqual(states(stalled), ["Build:pass", "Test:fail", "Review:next", "Summary:next"])
   assert.equal(stalled.reason, "The gate failed: pnpm test exited 1.")
   assert.equal(stageWord(stalled), "Stalled")
   assert.equal(stageNumber(stalled), 2)
@@ -206,7 +200,12 @@ test("each stage lists what it ran: its skills, its own commands, then the gate'
             }),
           ],
         }),
-        stage("Review", { steps: ["code-review"], ships: true, state: "current", rounds: [round()] }),
+        stage("Review", {
+          steps: ["code-review"],
+          ships: true,
+          state: "current",
+          rounds: [round()],
+        }),
       ],
     }),
   )

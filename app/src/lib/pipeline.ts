@@ -14,6 +14,8 @@
  * Pure: the record in, the rows out, so it is tested with no host and no browser.
  */
 
+import { skillNames, stageBody } from "./workflow.ts"
+
 /** The feature a Host advertises when it can stage a task: the pill is drawn only there. */
 export const AFK_PIPELINE_FEATURE = "afk_pipeline"
 
@@ -88,32 +90,12 @@ export interface SessionPipeline {
   stages: PipelineStage[]
 }
 
-export interface PipelineStep {
-  key: string
-  name: string
-  state: StepState
-}
-
 function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null
 }
 
 function count(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? Math.floor(value) : null
-}
-
-/**
- * The names a list holds, each once, in its own order — `pipeline.names`, which is also how the
- * AFK read takes the skills a project picked. A bare string is no list of skills: read one
- * character at a time it would name eleven of them.
- */
-export function skillNames(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  const names = value
-    .filter((name): name is string => typeof name === "string")
-    .map((name) => text(name))
-    .filter((name): name is string => name !== null)
-  return [...new Set(names)]
 }
 
 /** A step as a record from before workflows named it, or null for one this build doesn't know. */
@@ -182,22 +164,14 @@ function rounds(value: unknown): PipelineRound[] {
 }
 
 function stageEntry(value: unknown): ReadStage | null {
-  const row = value as Record<string, unknown> | null
-  const name = text(row?.name)
-  if (!row || !name) return null
-  const loop = row.loop as Record<string, unknown> | null
-  const from = text(loop?.from)
-  const cap = count(loop?.cap)
-  const check = text(row.check)
+  const body = stageBody(value)
+  if (!body) return null
+  const row = value as Record<string, unknown>
   return {
-    key: name,
-    name,
+    key: body.name,
+    ...body,
     kind: null,
     failed: text(row.state) === FAILED,
-    steps: skillNames(row.steps),
-    check: check === "gate" ? check : null,
-    loop: from && cap !== null && cap >= 1 ? { from, cap } : null,
-    ships: Boolean(row.ships),
     rounds: rounds(row.rounds),
   }
 }
@@ -315,10 +289,6 @@ export function parsePipeline(raw: unknown): SessionPipeline | null {
   // (`pipeline.advance` answers `done` with no stall), so a reason left beside `done` is a
   // leftover this reading drops rather than a stop it draws.
   return legacy(record, step, step === "done" ? null : text(record.reason))
-}
-
-export function pipelineSteps(pipeline: SessionPipeline): PipelineStep[] {
-  return pipeline.stages.map(({ key, name, state }) => ({ key, name, state }))
 }
 
 /** A step in words, as a record from before workflows named it. */

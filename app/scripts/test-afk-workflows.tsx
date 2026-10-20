@@ -5,12 +5,19 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
-import { act } from "react"
-import { createRoot } from "react-dom/client"
 
-import { AfkPopup } from "@/components/afk"
 import { connectionKey } from "@/lib/connection"
 import { db } from "@/lib/db"
+import {
+  click,
+  find,
+  findAll,
+  findText,
+  json,
+  mountAfk,
+  text,
+  type,
+} from "./component-kit.tsx"
 
 const config = { baseUrl: "http://hermes.test/v1", apiKey: "test-key" }
 const project = "project-1"
@@ -25,9 +32,16 @@ const presetStages = [
 type Call = { method: string; path: string; body: Record<string, unknown> | null }
 
 function host({
-  features = ["afk", "afk_switch", "afk_skills", "afk_workflows", "afk_pipeline"],
+  features = ["afk", "afk_switch", "afk_workflows", "afk_pipeline"],
   workflow = "preset:staged",
-}: { features?: string[]; workflow?: string } = {}) {
+  stage = "build",
+  stageName = "Build",
+}: {
+  features?: string[]
+  workflow?: string
+  stage?: string | null
+  stageName?: string | null
+} = {}) {
   const library: Record<string, unknown>[] = [
     { id: "preset:one-run", name: "One run", preset: true, at: 1, stages: [presetStages[0]] },
     {
@@ -49,15 +63,10 @@ function host({
     refusal: null,
     build_skill: null,
     critique_skills: [],
-    stage: "build",
-    stage_name: "Build",
+    stage,
+    stage_name: stageName,
     workflow: library.find((entry) => entry.id === chosen),
   })
-  const json = (body: unknown, status = 200) =>
-    new Response(JSON.stringify(body), {
-      status,
-      headers: { "content-type": "application/json" },
-    })
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input))
     const method = (init?.method ?? "GET").toUpperCase()
@@ -96,56 +105,7 @@ function host({
   return { calls, fetch, library }
 }
 
-async function settle() {
-  for (let quiet = 0; quiet < 4; quiet += 1)
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
-}
-
-/**
- * The pop-up on a phone's screen, torn down after the test: a pop-up left mounted keeps its polls
- * running, and a run of the file would carry one test's timers into the next.
- */
-async function screen(body: () => Promise<void>) {
-  const container = document.createElement("div")
-  document.body.append(container)
-  const root = createRoot(container)
-  try {
-    await act(async () =>
-      root.render(<AfkPopup open onOpenChange={() => {}} config={config} projectId={project} />),
-    )
-    await settle()
-    await body()
-  } finally {
-    await act(async () => root.unmount())
-    container.remove()
-  }
-}
-
-const click = async (element: Element | null) => {
-  assert.ok(element, "the control is on screen")
-  await act(async () => {
-    element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
-  })
-  await settle()
-}
-
-const type = async (element: Element | null, value: string) => {
-  assert.ok(element, "the field is on screen")
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
-  await act(async () => {
-    setter?.call(element, value)
-    element.dispatchEvent(new Event("input", { bubbles: true }))
-  })
-  await settle()
-}
-
-const text = () => document.body.textContent ?? ""
-const find = (selector: string) => document.querySelector(selector)
-const findAll = (selector: string) => [...document.querySelectorAll(selector)]
-const findText = (selector: string, label: string) =>
-  findAll(selector).find((one) => one.textContent?.includes(label)) ?? null
+const screen = (body: () => Promise<void>) => mountAfk(config, project, body)
 
 test("the pop-up names the workflow the project's work runs under", async () => {
   globalThis.fetch = host().fetch as unknown as typeof fetch
@@ -158,13 +118,26 @@ test("the pop-up names the workflow the project's work runs under", async () => 
   })
 })
 
+test("the Working row names the stage the task's snapshot says", async () => {
+  globalThis.fetch = host({ stageName: "Migrate" }).fetch as unknown as typeof fetch
+  await screen(async () => {
+    const row = find("[data-working]")
+    assert.match(row?.textContent ?? "", /Migrate/, "a workflow's own word for its stage")
+    assert.equal(row?.getAttribute("data-stage"), "build", "the step the stage is judged as")
+  })
+})
+
 test("the library lists presets first, and picking one is one write", async () => {
   const fake = host()
   globalThis.fetch = fake.fetch as unknown as typeof fetch
   await screen(async () => {
     await click(find("[data-afk-workflow] button"))
     const rows = findAll("[data-workflow]").map((row) => row.getAttribute("data-workflow"))
-    assert.deepEqual(rows, ["preset:one-run", "preset:staged"], "presets first, as the host lists them")
+    assert.deepEqual(
+      rows,
+      ["preset:one-run", "preset:staged"],
+      "presets first, as the host lists them",
+    )
     assert.match(text(), /Preset/, "and marked read-only")
     assert.equal(
       Boolean(find('[data-workflow="preset:staged"] [aria-current="true"]')),
@@ -250,9 +223,13 @@ test("the editor says what the host would refuse, before it asks", async () => {
     await click(findText("button", "Add stage"))
     await type(findAll('input[aria-label^="Stage"]')[1], "Build")
     await click(findText("button", "Create"))
-    assert.match(find('[role="alert"]')?.textContent ?? "", /Two stages can't both be called "Build"/)
+    assert.match(
+      find('[role="alert"]')?.textContent ?? "",
+      /Two stages can't both be called "Build"/,
+    )
     assert.equal(
-      fake.calls.filter((call) => call.method === "POST" && call.path.endsWith("/workflows")).length,
+      fake.calls.filter((call) => call.method === "POST" && call.path.endsWith("/workflows"))
+        .length,
       0,
       "nothing reached the host",
     )

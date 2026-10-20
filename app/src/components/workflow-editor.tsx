@@ -136,7 +136,9 @@ export function WorkflowEditor({
     <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent>
         <PopupHeader className="pb-2">
-          <PopupTitle>{entry ? "Edit workflow" : "New workflow"}</PopupTitle>
+          <PopupTitle>
+            {entry ? (entry.preset ? "Copy workflow" : "Edit workflow") : "New workflow"}
+          </PopupTitle>
         </PopupHeader>
         <div className="flex min-h-0 flex-col gap-4 px-4 pb-4 sm:px-6">
           <Input
@@ -302,7 +304,7 @@ export function WorkflowEditor({
             </p>
           )}
           <div className="flex items-center justify-between gap-2 pt-1">
-            {entry && !entry.preset ? (
+            {entry && !entry.preset && (
               <AlertDialog>
                 <AlertDialogTrigger
                   render={<Button type="button" variant="ghost" disabled={saving} />}
@@ -329,10 +331,6 @@ export function WorkflowEditor({
                   </AlertDialogFooter>
                 </AlertDialogContent>
               </AlertDialog>
-            ) : (
-              <span className="px-1 text-sm text-muted-foreground">
-                {entry ? "Saving makes a copy." : ""}
-              </span>
             )}
             <Button type="button" className="h-11" disabled={saving} onClick={() => void submit()}>
               {entry && !entry.preset ? "Save" : "Create"}

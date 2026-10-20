@@ -10,8 +10,6 @@
  * that ships — and the library entry's tolerant read, for a body a hand edit or an older plugin
  */
 
-import { skillNames } from "./pipeline.ts"
-
 export const MAX_STAGES = 12
 export const MIN_CAP = 1
 export const MAX_CAP = 10
@@ -54,6 +52,20 @@ function whole(value: unknown): number | null {
 }
 
 /**
+ * The names a list holds, each once, in its own order — `workflows.names`, which is also how a
+ * snapshot and the AFK read take the skills a stage applies. A bare string is no list of skills:
+ * read one character at a time it would name eleven of them.
+ */
+export function skillNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const names = value
+    .filter((name): name is string => typeof name === "string")
+    .map((name) => text(name))
+    .filter((name): name is string => name !== null)
+  return [...new Set(names)]
+}
+
+/**
  * A stage's steps as the editor keeps them: each once, alphabetical, so the screen and the run
  * agree on the order whatever order they were picked in.
  */
@@ -78,8 +90,12 @@ export function withShipping(stages: WorkflowStage[]): WorkflowStage[] {
   return stages.map((stage, index) => ({ ...stage, ships: index === ships }))
 }
 
-/** One stage of a workflow body, read as far as it is sound — a hand edit or an older row. */
-function readStage(value: unknown): WorkflowStage | null {
+/**
+ * One stage as a body holds it — a workflow's row, or a run's snapshot, which carry the same stage
+ * — read as far as it is sound, or null for one with no name (a hand edit or an older row). A loop
+ * needs both the stage it starts at and a cap of at least one round, as the host's `normalise` asks.
+ */
+export function stageBody(value: unknown): WorkflowStage | null {
   const row = record(value)
   const name = text(row?.name)
   if (!row || !name) return null
@@ -90,14 +106,14 @@ function readStage(value: unknown): WorkflowStage | null {
     name,
     steps: skillNames(row.steps),
     check: text(row.check) === GATE ? GATE : null,
-    loop: from && cap !== null ? { from, cap } : null,
+    loop: from && cap !== null && cap >= MIN_CAP ? { from, cap } : null,
     ships: Boolean(row.ships),
   }
 }
 
 export function readStages(value: unknown): WorkflowStage[] {
   return (Array.isArray(value) ? value : []).flatMap((one) => {
-    const found = readStage(one)
+    const found = stageBody(one)
     return found ? [found] : []
   })
 }

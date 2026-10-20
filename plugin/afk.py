@@ -173,8 +173,8 @@ def read(
         # The stage the task it holds is in, for the sheet's Working row (ADR 0018): None for a
         # project holding nothing, and for a task that isn't staged. Its own name comes beside it,
         # so a workflow's own words — "Migrate", "Verify" — are what the row says.
-        "stage": staged[0],
-        "stage_name": staged[1],
+        "stage": staged.step,
+        "stage_name": staged.name,
     }
 
 
@@ -205,9 +205,14 @@ def _workflow_for(hermes_home: Path, project_id: str) -> Dict[str, Any]:
     return _workflow(hermes_home, project_id, _row(hermes_home, project_id) or {})
 
 
-def _held_task_stage(
-    hermes_home: Path, found: Dict[str, Any]
-) -> Tuple[Optional[str], Optional[str]]:
+class HeldStage(NamedTuple):
+    """The step a held task is in, and the stage's own name: what a sheet's Working row says."""
+
+    step: Optional[str]
+    name: Optional[str]
+
+
+def _held_task_stage(hermes_home: Path, found: Dict[str, Any]) -> HeldStage:
     """The step the task a project holds is in, and the stage's own name, off its session's record.
 
     Only while it holds one: the stage outlives the hold on the session's own row — so a finished
@@ -217,14 +222,14 @@ def _held_task_stage(
     """
     session_id = found.get("session_id")
     if not found.get("task") or not session_id:
-        return None, None
+        return HeldStage(None, None)
     try:
         stored = sessions.pipeline_of(db_path(hermes_home), session_id)
     except Exception:
         logger.debug("memento: couldn't read the stage of %s", session_id, exc_info=True)
-        return None, None
+        return HeldStage(None, None)
     record = pipeline.read(stored)
-    return pipeline.stage(record), pipeline.stage_name(record)
+    return HeldStage(pipeline.stage(record), pipeline.stage_name(record))
 
 
 def write_from(body: Dict[str, Any]) -> Tuple[str, Any]:

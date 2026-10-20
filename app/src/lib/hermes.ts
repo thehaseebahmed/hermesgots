@@ -17,13 +17,13 @@ import type { ModelUsage } from "@/lib/pricing"
 import {
   parsePipeline,
   parseStage,
-  skillNames,
   type AfkStage,
   type SessionPipeline,
 } from "@/lib/pipeline"
 import {
   parseWorkflowEntry,
   parseWorkflowLibrary,
+  skillNames,
   type Workflow,
   type WorkflowEntry,
 } from "@/lib/workflow"
@@ -2644,7 +2644,7 @@ export async function listWorkflows(
  */
 async function writeWorkflow(
   config: HermesConfig,
-  method: "POST" | "PATCH" | "DELETE",
+  method: "POST" | "DELETE",
   rest: string,
   body?: Record<string, unknown>,
 ): Promise<WorkflowEntry[]> {
@@ -2667,7 +2667,7 @@ export function updateWorkflow(
   id: string,
   workflow: Workflow,
 ): Promise<WorkflowEntry[]> {
-  return writeWorkflow(config, "PATCH", `/${encodeURIComponent(id)}`, { ...workflow })
+  return writeWorkflow(config, "POST", `/${encodeURIComponent(id)}`, { ...workflow })
 }
 
 export function deleteWorkflow(config: HermesConfig, id: string): Promise<WorkflowEntry[]> {

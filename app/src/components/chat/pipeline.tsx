@@ -13,14 +13,12 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import {
-  pipelineSteps,
   stageFindings,
   stageNumber,
   stageRound,
   stageWord,
   stepRuns,
   type PipelineStage,
-  type PipelineStep,
   type SessionPipeline,
   type SkillFindings,
   type StepRun,
@@ -74,7 +72,7 @@ const LOOK: Record<
   },
 }
 
-function Bars({ steps }: { steps: PipelineStep[] }) {
+function Bars({ steps }: { steps: PipelineStage[] }) {
   return (
     <span className="flex items-center gap-1">
       {steps.map((step) => (
@@ -90,7 +88,7 @@ function Bars({ steps }: { steps: PipelineStep[] }) {
   )
 }
 
-function Mark({ step }: { step: PipelineStep }) {
+function Mark({ step }: { step: PipelineStage }) {
   const Icon = ICONS[step.key] ?? STAGE_ICON
   return (
     <span className="flex items-center" data-step={step.key} data-state={step.state} aria-hidden>
@@ -100,7 +98,7 @@ function Mark({ step }: { step: PipelineStep }) {
 }
 
 /** The stage a task is in as the pill's own attribute: the record's step, or its own name. */
-function stageMark(steps: PipelineStep[], pipeline: SessionPipeline): string {
+function stageMark(steps: PipelineStage[], pipeline: SessionPipeline): string {
   return steps[pipeline.stage]?.key ?? "done"
 }
 
@@ -117,7 +115,7 @@ export function PipelinePill({
   pipeline: SessionPipeline
   onClick: () => void
 }) {
-  const steps = pipelineSteps(pipeline)
+  const steps = pipeline.stages
   const word = stageWord(pipeline)
   return (
     <Button
@@ -219,12 +217,10 @@ function Findings({ reports }: { reports: SkillFindings[] }) {
 }
 
 function StageRow({
-  step,
   stage,
   last,
   prLabel,
 }: {
-  step: PipelineStep
   stage: PipelineStage
   last: boolean
   prLabel?: string
@@ -233,21 +229,23 @@ function StageRow({
   const reports = stageFindings(stage)
   const round = stageRound(stage)
   return (
-    <li className="flex gap-3" data-stage={step.key}>
+    <li className="flex gap-3" data-stage={stage.key}>
       <StepRail last={last}>
         <span
           className={cn(
             "flex size-7 items-center justify-center rounded-full",
-            LOOK[step.state].badge,
+            LOOK[stage.state].badge,
           )}
         >
-          <Mark step={step} />
+          <Mark step={stage} />
         </span>
       </StepRail>
       <div className="min-w-0 flex-1 py-2.5">
-        <p className={cn("flex items-baseline gap-2 text-[15px] leading-6", LOOK[step.state].name)}>
+        <p
+          className={cn("flex items-baseline gap-2 text-[15px] leading-6", LOOK[stage.state].name)}
+        >
           <span className="min-w-0 truncate">{stage.name}</span>
-          <span className="sr-only">, {LOOK[step.state].spoken}</span>
+          <span className="sr-only">, {LOOK[stage.state].spoken}</span>
           {round && (
             <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{round}</span>
           )}
@@ -256,7 +254,7 @@ function StageRow({
           <Lines entries={entries} />
         ) : (
           <p className="text-sm leading-5 text-muted-foreground">
-            {step.state === "next" ? "Not run yet" : "Nothing recorded"}
+            {stage.state === "next" ? "Not run yet" : "Nothing recorded"}
           </p>
         )}
         {reports.length > 0 && <Findings reports={reports} />}
@@ -277,7 +275,7 @@ export function PipelineSheet({
   /** The pull request a finished pipeline opened, as the session's pill names it. */
   prLabel?: string
 }) {
-  const steps = pipelineSteps(pipeline)
+  const steps = pipeline.stages
   return (
     <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent>
@@ -293,8 +291,7 @@ export function PipelineSheet({
           {steps.map((step, index) => (
             <StageRow
               key={step.key}
-              step={step}
-              stage={pipeline.stages[index]}
+              stage={step}
               last={index === steps.length - 1}
               prLabel={prLabel}
             />
