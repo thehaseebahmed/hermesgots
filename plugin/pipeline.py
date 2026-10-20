@@ -30,11 +30,10 @@ NO_COMMITS = "The build left no commits in the worktree."
 
 
 class Step(NamedTuple):
-    """Where a staged task goes when a run of it ends: the stage it is in now, the run to start
-    next (``None`` when nothing more runs), and why it stalled instead (``None`` when it didn't)."""
+    """Where a staged task goes when a run of it ends: the stage it is in now, and why it stalled
+    instead (``None`` when it didn't). Reaching the critique is what starts it."""
 
     stage: str
-    next: Optional[str]
     stall: Optional[str]
 
 
@@ -79,22 +78,13 @@ def stage(record: Optional[Dict[str, Any]]) -> Optional[str]:
     return record["stage"] if record else None
 
 
-def building(record: Optional[Dict[str, Any]]) -> bool:
-    """Whether a staged task is still building, so its gate is still ahead of it.
+def gating(record: Optional[Dict[str, Any]]) -> bool:
+    """Whether a staged task is still in its gate: building, or waiting at it until its run ends.
 
-    The gate belongs to the build's own work and is called once: a second call would answer a
-    question the host has already answered, and the failure that stalled the task would be
-    overwritten by whatever the run tried next.
-    """
-    return stage(record) == BUILD
-
-
-def blocks_ship(record: Optional[Dict[str, Any]]) -> bool:
-    """Whether this session is still building, so nothing may ship from it yet.
-
-    The gate is part of the build's own work — the commands run while the build run is going —
-    so a task waiting at its gate can't ship either. Shipping is the critique's act, and the
-    build's own only for a project that chose no critique skill at all (no pipeline, no block).
+    The gate is part of the build's own work — the commands run while the build run is going — and
+    it may be called more than once, since a build that fixes what the gate named is exactly what a
+    failing gate is for. Shipping is the critique's, and the build's own only for a project that
+    chose no critique skill at all (no pipeline, no gate to be in).
     """
     return stage(record) in (BUILD, GATE)
 
@@ -115,12 +105,12 @@ def advance(
     A critique that finished ships, so the pipeline is done.
     """
     if record is None or record["stage"] == DONE:
-        return Step(DONE, None, None)
+        return Step(DONE, None)
     if stopped:
-        return Step(record["stage"], None, stopped)
-    if record["stage"] in (BUILD, GATE):
-        return _after_build(record, list(worktree))
-    return Step(DONE, None, None)
+        return Step(record["stage"], stopped)
+    if not gating(record):
+        return Step(DONE, None)
+    return _after_build(record, list(worktree))
 
 
 def moved(record: Dict[str, Any], step: Step) -> Dict[str, Any]:
@@ -155,12 +145,12 @@ def gate_verdict(record: Optional[Dict[str, Any]]) -> Optional[str]:
 def _after_build(record: Dict[str, Any], worktree: List[Dict[str, Any]]) -> Step:
     why = gate_verdict(record)
     if why is not None:
-        return Step(GATE, None, why)
+        return Step(GATE, why)
     if any(one.get("changed") for one in worktree):
-        return Step(GATE, None, UNCOMMITTED)
+        return Step(GATE, UNCOMMITTED)
     if not any(one.get("ahead") for one in worktree):
-        return Step(GATE, None, NO_COMMITS)
-    return Step(CRITIQUE, CRITIQUE, None)
+        return Step(GATE, NO_COMMITS)
+    return Step(CRITIQUE, None)
 
 
 def text(value: Any) -> Optional[str]:

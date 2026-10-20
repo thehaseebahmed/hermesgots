@@ -175,13 +175,13 @@ def read(path: Path, session_id: str) -> Optional[Dict[str, Any]]:
 
 def set_task(path: Path, session_id: str, task: Dict[str, Any]) -> None:
     """Records the issue AFK started this session for, so its pull request closes it."""
-    _set_json(path, session_id, "task", task, "name the task on")
+    _set_json(path, session_id, "task", task)
 
 
 def set_pipeline(path: Path, session_id: str, pipeline: Optional[Dict[str, Any]]) -> None:
     """Records the stage a staged task is in, so the pop-up can name it and a finished task can
     still say how it got there (``pipeline.py``). ``None`` clears it."""
-    _set_json(path, session_id, "pipeline", pipeline, "record a stage on")
+    _set_json(path, session_id, "pipeline", pipeline)
 
 
 def pipeline_of(path: Path, session_id: str) -> Any:
@@ -199,7 +199,7 @@ def pipeline_of(path: Path, session_id: str) -> Any:
     return _json(row[0], None) if row else None
 
 
-def _set_json(path: Path, session_id: str, column: str, value: Any, missing: str) -> None:
+def _set_json(path: Path, session_id: str, column: str, value: Any) -> None:
     """Writes one JSON column on a session's row, warning when there is no row to write it on."""
     conn = connect(path)
     try:
@@ -208,7 +208,7 @@ def _set_json(path: Path, session_id: str, column: str, value: Any, missing: str
             (json.dumps(value, separators=(",", ":")) if value else None, session_id),
         )
         if cursor.rowcount == 0:
-            logger.warning(f"memento: no session row for %s to {missing}", session_id)
+            logger.warning("memento: no session row for %s to write its %s on", session_id, column)
     finally:
         conn.close()
 

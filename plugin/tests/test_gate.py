@@ -138,17 +138,18 @@ class GateTests(unittest.TestCase):
     def test_a_critique_cannot_be_gated_again(self) -> None:
         self.staged(stage=pipeline.CRITIQUE)
         answer = self.call({"commands": ["true"]})
-        self.assertIn("past its gate", answer["error"])
+        self.assertIn("past the gate", answer["error"])
 
-    def test_a_second_call_cannot_overwrite_the_failure_the_task_stalls_on(self) -> None:
+    def test_a_build_can_gate_again_after_fixing_what_the_gate_named(self) -> None:
         self.staged()
         self.call({"commands": ["false"]})
         answer = self.call({"commands": ["true"]})
-        self.assertIn("already run its gate", answer["error"])
+        self.assertEqual(answer["results"], [{"command": "true", "code": 0}], "the second answer runs")
+        self.assertTrue(answer["passed"])
         self.assertEqual(
             pipeline.read(self.read()["pipeline"])["gate"]["commands"],
-            [{"command": "false", "code": 1}],
-            "the first answer is the one the host judged the build by",
+            [{"command": "true", "code": 0}],
+            "the last answer is the one the host judges the build by",
         )
 
     def test_it_stops_at_the_first_command_that_fails(self) -> None:

@@ -4,8 +4,8 @@ The build can't be trusted to say it verified anything, so it names the commands
 checked by and this tool runs them, in the session's worktree, under a timeout, answering with each
 one's exit code. The answer is kept on the session's pipeline record, and it is what `afk.after_run`
 judges the finished build by — with the worktree's own state, which no command can vouch for
-(ADR 0018). A call naming no command is refused, and so is a second one: the gate is asked once,
-while the build is building, and a run that tries again after a failure has already had its answer.
+(ADR 0018). A call naming no command is refused, and so is one from a task that is past its gate;
+a build that fixes what the gate named calls it again, since that is what a failing gate is for.
 
 """
 
@@ -26,7 +26,8 @@ TOOL = "afk_gate"
 # What one gate command may take: a repo's own suite can be slow, and a command that hangs must
 # still answer, since the run is waiting on it.
 GATE_TIMEOUT_S = 600
-# What `timeout(1)` answers with, so a hung command reads as a failure like any other.
+# What a timeout is reported as — the code `timeout(1)` uses — so a hung command reads as a
+# failure like any other rather than as a wait.
 TIMED_OUT = 124
 
 
@@ -146,13 +147,8 @@ def _unknown(asked: List[Dict[str, str]], trees: Dict[str, str]) -> List[str]:
 
 
 def _past_gate(stage: str) -> str:
-    """Why a session that isn't building has no gate to run."""
-    if stage == pipeline.GATE:
-        return (
-            "This session has already run its gate, and the host has its answer: a second call "
-            "would overwrite the failure this task is stalled on. End the run."
-        )
-    return "This session is past its gate: only a build that hasn't been gated has one to run."
+    """Why a session that is past its gate has none to run."""
+    return f"This session is at its {stage} stage, which is past the gate: it has one to run only while it is building or waiting at it."
 
 
 def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any) -> str:
@@ -179,7 +175,7 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
                 )
             }
         )
-    if not pipeline.building(staged):
+    if not pipeline.gating(staged):
         return json.dumps({"error": _past_gate(staged["stage"])})
     tree = record.get("path")
     if not tree or not os.path.isdir(tree):

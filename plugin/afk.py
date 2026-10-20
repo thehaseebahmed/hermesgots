@@ -52,9 +52,10 @@ ARCHIVED = "This project is archived."
 # A skill the project picked that its bot no longer has: the sweep records it and claims nothing.
 MISSING_SKILL = (
     'The skill "{name}" isn\'t one this bot has any more, so no task is claimed. '
-    "Pick another in AFK's settings."
+    "Pick another in the project's AFK pop-up."
 )
 CRITIQUE_FAILED = "The critique couldn't start."
+NO_PULL_REQUEST = "The critique ended without opening a pull request."
 
 # How often a project left on is swept for work. A GitHub refusal ends that sweep and the next one
 # waits for its turn rather than asking again at once.
@@ -754,8 +755,8 @@ def _stage_end(
     where the task stands.
     """
     worktree: Iterable[Dict[str, Any]] = ()
-    pre_gate = stopped.finished and pipeline.blocks_ship(staged)
-    if pre_gate and pipeline.gate_verdict(staged) is None:
+    in_gate = stopped.finished and pipeline.gating(staged)
+    if in_gate and pipeline.gate_verdict(staged) is None:
         worktree = ship.status(record)
     step = pipeline.advance(
         staged, stopped=None if stopped.finished else _stopped(stopped), worktree=worktree
@@ -765,13 +766,20 @@ def _stage_end(
     if step.stall:
         _stall(hermes_home, project_id, step.stall)
         return
-    if step.next == pipeline.CRITIQUE:
+    if step.stage == pipeline.CRITIQUE and not step.stall:
         # The critique is the same session's next run: the hold keeps the task, and the stall
         # clock starts again so the moment between the two runs isn't read as nothing working it.
         _adopt(hermes_home, project_id, record["session_id"])
         # The record as the task stands now, not as the build left it: the critique's prompt reads
         # the stage off it, and handing it the build's would tell the reviewer it is building.
         _critique(hermes_home, {**record, "pipeline": moved})
+        return
+    # The critique's own end: the pull request is what it was for, so a run that ended without one
+    # stalls the task rather than reporting it reviewed.
+    unshipped = _unshipped(hermes_home, record) if staged["stage"] == pipeline.CRITIQUE else None
+    if unshipped is not None:
+        sessions.set_pipeline(path, record["session_id"], {**moved, "reason": unshipped})
+        _stall(hermes_home, project_id, unshipped)
         return
     _free(hermes_home, project_id)
     wake()
@@ -816,6 +824,28 @@ async def critique(adapter: Any, hermes_home: Path, record: Dict[str, Any], task
         record["session_id"],
         started.get("run_id"),
     )
+
+
+def _unshipped(hermes_home: Path, record: Dict[str, Any]) -> Optional[str]:
+    """Why a finished critique left no pull request, or None when one of its repos has one.
+
+    A GitHub that can't be asked says nothing rather than stalling the task over a failed lookup.
+    """
+    from . import github
+
+    try:
+        for repo in record.get("repos") or []:
+            found = github.pull_request(
+                hermes_home, repo.get("repo_root") or "", repo.get("branch") or "", checks=False
+            )
+            if found:
+                return None
+    except Exception:
+        logger.debug(
+            "memento: couldn't ask GitHub whether %s shipped", record.get("session_id"), exc_info=True
+        )
+        return None
+    return NO_PULL_REQUEST
 
 
 def _missing_skill(found: Dict[str, Any], skills: Iterable[str]) -> Optional[str]:

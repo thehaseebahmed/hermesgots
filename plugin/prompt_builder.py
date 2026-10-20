@@ -7,7 +7,7 @@ the agent is told without tracing the session bookkeeping.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional
 
 from . import pipeline, tasks
 
@@ -179,14 +179,12 @@ def critique_prompt(
 
 def afk_input(task: Dict[str, Any]) -> str:
     """The run's input: one line naming the issue and where it is, never its text (ADR 0011)."""
-    url = tasks.issue_url(task)
-    return f"Implement Issue #{task.get('number')}" + (f" ({url})" if url else "")
+    return f"Implement Issue #{task.get('number')}" + _opened(tasks.issue_url(task))
 
 
 def critique_input(task: Dict[str, Any]) -> str:
     """The critique run's input: one line naming what it reviews, never its text."""
-    url = tasks.issue_url(task)
-    return f"Critique the build of #{task.get('number')}" + (f" ({url})" if url else "")
+    return f"Critique the build of #{task.get('number')}" + _opened(tasks.issue_url(task))
 
 
 def _build_skill_line(skill: Optional[str]) -> str:
@@ -222,12 +220,23 @@ def _base_line(base: Optional[str]) -> str:
     return f"The work is against the base branch {base}."
 
 
-def _issue_ref(task: Dict[str, Any]) -> Tuple[str, str, str]:
-    """The issue as a prompt names it: ``repo#number``, where to open it, and how to read it."""
+class IssueRef(NamedTuple):
+    """An issue as a prompt names it: ``repo#number``, where to open it, and how to read it."""
+
+    where: str
+    url: str
+    read: str
+
+
+def _opened(url: Optional[str]) -> str:
+    """The issue's url in parentheses, for a prompt that names the issue beside it."""
+    return f" ({url})" if url else ""
+
+
+def _issue_ref(task: Dict[str, Any]) -> IssueRef:
     repo, number = task.get("repo"), task.get("number")
-    url = tasks.issue_url(task)
     read = f"gh issue view {number} --repo {repo} --comments" if repo else "the API"
-    return f"{repo}#{number}", f" ({url})" if url else "", read
+    return IssueRef(f"{repo}#{number}", _opened(tasks.issue_url(task)), read)
 
 
 def _critique_task_line(task: Dict[str, Any]) -> str:

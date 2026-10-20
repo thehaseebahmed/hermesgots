@@ -1331,12 +1331,20 @@ class StagedRunTests(AfkSessionTests):
     def pipeline(self) -> Optional[dict]:
         return pipeline.read(sessions.read(db_path(self.home), self.SESSION)["pipeline"])
 
-    def ended(self, tree: Any = None, **kwargs: Any) -> Any:
-        """The run's end, with the worktree's state the host would have measured."""
+    SHIPPED = {"number": 265}
+
+    def ended(self, tree: Any = None, shipped: Any = SHIPPED, **kwargs: Any) -> Any:
+        """The run's end, with the worktree the host measured and GitHub's answer about the pull request."""
+        answer = (
+            patch("plugin.github.pull_request", side_effect=shipped)
+            if isinstance(shipped, Exception)
+            else patch("plugin.github.pull_request", return_value=shipped)
+        )
         with patch.object(afk.ship, "status", return_value=self.CLEAN if tree is None else tree):
             with patch.object(afk, "_critique") as critique:
-                with patch("plugin.sessions._paths", return_value=(db_path(self.home), self.home)):
-                    afk.after_run(session_id=self.SESSION, **kwargs)
+                with answer:
+                    with patch("plugin.sessions._paths", return_value=(db_path(self.home), self.home)):
+                        afk.after_run(session_id=self.SESSION, **kwargs)
         return critique
 
     def test_a_build_that_passed_its_gate_is_critiqued_on_its_own_session(self) -> None:
@@ -1389,6 +1397,24 @@ class StagedRunTests(AfkSessionTests):
         self.assertEqual(self.writes, [], "its claim stays on GitHub")
         self.assertEqual(self.pipeline()["stage"], pipeline.DONE, "and the record says how it ended")
         wake.assert_called_once()
+
+    def test_a_critique_that_ended_without_a_pull_request_stalls(self) -> None:
+        self.stage(**{"stage": pipeline.CRITIQUE})
+        with patch.object(afk, "wake"):
+            self.ended(completed=True, shipped=None)
+        self.assertEqual(
+            afk.stalled(self.home)[self.SESSION]["reason"],
+            afk.NO_PULL_REQUEST,
+            "a critique that never opened one reviewed nothing the user can see",
+        )
+        self.assertEqual(self.shown()["task"], self.task, "so its claim is kept with it")
+        self.assertEqual(self.pipeline()["reason"], afk.NO_PULL_REQUEST)
+
+    def test_a_github_that_cannot_be_asked_does_not_stall_a_finished_critique(self) -> None:
+        self.stage(**{"stage": pipeline.CRITIQUE})
+        with patch.object(afk, "wake"):
+            self.ended(completed=True, shipped=github.GitHubError("offline"))
+        self.assertIsNone(self.shown()["task"], "the run finished: nothing is stalled over a lookup")
 
     def test_a_build_that_failed_keeps_its_stage_and_its_claim(self) -> None:
         self.stage()

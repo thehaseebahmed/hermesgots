@@ -466,6 +466,25 @@ LEGACY_SCHEMA = {
 }
 
 
+def _staged_refusal(stage: str) -> str:
+    """Why a task still in its gate can't ship, in the words that stage needs.
+
+    A build is told what to do next — run the gate — and a task waiting at its gate is told there is
+    nothing left for it, since a gate that already answered would refuse another try.
+    """
+    if stage == pipeline.GATE:
+        return (
+            "This session is at its gate stage, and its gate has answered: the critique that follows "
+            "opens the pull request. End this run, and don't call pull_request with 'ship' again."
+        )
+    return (
+        "This session is in its build stage of a staged task, so it can't ship yet: a build ends at "
+        "the gate the host runs, and the critique stage that follows opens the pull request. Call "
+        "afk_gate with the commands it is checked by, end this run, and don't call pull_request with "
+        "'ship' again."
+    )
+
+
 def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any) -> str:
     """The tool: ships the session the call belongs to (its task id is Gots's session id)."""
     from . import sessions
@@ -494,17 +513,8 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
         return json.dumps({"error": "This session has no worktree to ship."})
     if action == "ship":
         staged = pipeline.read(record.get("pipeline"))
-        if pipeline.blocks_ship(staged):
-            return json.dumps(
-                {
-                    "error": (
-                        f"This session is in the {staged['stage']} stage of a staged "
-                        "task, so it can't ship yet: a build ends at the gate the host runs, and "
-                        "the critique stage that follows opens the pull request. Run the gate with "
-                        "afk_gate, end this run, and don't call pull_request with 'ship' again."
-                    )
-                }
-            )
+        if pipeline.gating(staged):
+            return json.dumps({"error": _staged_refusal(staged["stage"])})
     try:
         if action == "status":
             return json.dumps({"results": status(record)})

@@ -47,7 +47,7 @@ class ReadTests(unittest.TestCase):
     def test_a_row_without_a_pipeline_is_not_staged(self) -> None:
         for value in (None, "", [], {}, {"stage": "testing"}, {"critique_skills": ["x"]}):
             self.assertIsNone(pipeline.read(value))
-        self.assertFalse(pipeline.blocks_ship(pipeline.read(None)))
+        self.assertFalse(pipeline.gating(pipeline.read(None)))
 
     def test_a_record_reads_back_with_its_gate(self) -> None:
         record = pipeline.start(None, ["x"])
@@ -72,15 +72,15 @@ class ReadTests(unittest.TestCase):
 class ShipTests(unittest.TestCase):
     def test_a_build_cannot_ship_and_the_gate_still_belongs_to_it(self) -> None:
         record = pipeline.start(None, ["x"])
-        self.assertTrue(pipeline.blocks_ship(record))
-        self.assertTrue(pipeline.blocks_ship(pipeline.gated(record, gate(0))))
+        self.assertTrue(pipeline.gating(record))
+        self.assertTrue(pipeline.gating(pipeline.gated(record, gate(0))))
 
     def test_a_critique_ships(self) -> None:
         record = {**pipeline.start(None, ["x"]), "stage": CRITIQUE}
-        self.assertFalse(pipeline.blocks_ship(record))
+        self.assertFalse(pipeline.gating(record))
 
     def test_a_session_that_is_not_staged_ships_as_it_always_did(self) -> None:
-        self.assertFalse(pipeline.blocks_ship(None))
+        self.assertFalse(pipeline.gating(None))
 
 
 class BuildTests(unittest.TestCase):
@@ -92,30 +92,29 @@ class BuildTests(unittest.TestCase):
 
     def test_a_build_that_passed_its_gate_is_critiqued(self) -> None:
         step = self.step(pipeline.gated(self.record, gate(0)), worktree=tree())
-        self.assertEqual(step.next, CRITIQUE, "the critique run comes next")
+        self.assertEqual(step.stage, CRITIQUE, "reaching the critique is what starts it")
         self.assertEqual(step.stage, CRITIQUE, "and the task is recorded as being in it")
         self.assertIsNone(step.stall)
 
     def test_a_build_that_never_ran_the_gate_stalls(self) -> None:
         step = self.step(worktree=tree())
         self.assertEqual(step.stall, pipeline.NO_GATE)
-        self.assertIsNone(step.next, "nothing is critiqued that was never gated")
+        self.assertEqual(step.stage, GATE, "nothing is critiqued that was never gated")
         self.assertEqual(step.stage, GATE, "the task is at the gate it never passed")
 
     def test_the_failing_command_is_named(self) -> None:
         step = self.step(pipeline.gated(self.record, gate(0, 2)), worktree=tree())
         self.assertEqual(step.stall, "The gate failed: step-1 exited 2.")
-        self.assertIsNone(step.next)
 
     def test_the_tree_has_to_be_committed(self) -> None:
         step = self.step(pipeline.gated(self.record, gate(0)), worktree=tree(changed=3))
         self.assertEqual(step.stall, pipeline.UNCOMMITTED)
-        self.assertIsNone(step.next)
+        self.assertEqual(step.stage, GATE)
 
     def test_there_have_to_be_commits_beyond_the_base(self) -> None:
         step = self.step(pipeline.gated(self.record, gate(0)), worktree=tree(ahead=0))
         self.assertEqual(step.stall, pipeline.NO_COMMITS)
-        self.assertIsNone(step.next)
+        self.assertEqual(step.stage, GATE)
 
     def test_a_greened_tree_with_nothing_committed_stalls_rather_than_shipping_emptily(self) -> None:
         step = self.step(pipeline.gated(self.record, gate(0)), worktree=())
@@ -130,7 +129,6 @@ class BuildTests(unittest.TestCase):
         step = self.step(self.record, stopped="The run failed.", worktree=tree())
         self.assertEqual(step.stage, BUILD, "the build is where it stopped")
         self.assertEqual(step.stall, "The run failed.")
-        self.assertIsNone(step.next)
 
     def test_a_run_that_stopped_at_the_gate_keeps_the_gate(self) -> None:
         record = pipeline.gated(self.record, gate(0))
@@ -141,7 +139,7 @@ class BuildTests(unittest.TestCase):
     def test_a_build_that_was_gated_and_then_fell_over_is_not_critiqued(self) -> None:
         record = pipeline.gated(self.record, gate(0))
         step = self.step(record, stopped="The run failed.", worktree=tree())
-        self.assertIsNone(step.next)
+        self.assertEqual(step.stage, GATE)
 
 
 class CritiqueTests(unittest.TestCase):
@@ -149,20 +147,17 @@ class CritiqueTests(unittest.TestCase):
         record = {**pipeline.start(None, ["code-review"]), "stage": CRITIQUE}
         step = pipeline.advance(record)
         self.assertEqual(step.stage, DONE)
-        self.assertIsNone(step.next, "one pass: the user's read of the pull request is the next one")
         self.assertIsNone(step.stall)
 
     def test_a_finished_pipeline_stays_finished(self) -> None:
         record = {**pipeline.start(None, ["code-review"]), "stage": DONE}
         self.assertEqual(pipeline.advance(record).stage, DONE)
-        self.assertIsNone(pipeline.advance(record).next)
 
     def test_a_critique_that_failed_stalls(self) -> None:
         record = {**pipeline.start(None, ["code-review"]), "stage": CRITIQUE}
         step = pipeline.advance(record, stopped="The run failed.")
         self.assertEqual(step.stall, "The run failed.")
         self.assertEqual(step.stage, CRITIQUE)
-        self.assertIsNone(step.next)
 
 
 class MoveTests(unittest.TestCase):
