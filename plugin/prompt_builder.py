@@ -132,11 +132,7 @@ Then ship once with the pull_request tool, action 'ship', and write its body fro
 # changes nothing the user is about to read.
 _SUMMARY_STAGE = """This task's work is a draft pull request already, and you are in its {name} stage: write the wrap-up for the user to read when they come back — what landed, what you checked and what is left. Change nothing: the pull request is open, and the work in it is what they are reading. Don't ship."""
 
-# How each step is named to its own run: the verb its issue line uses, the brief a stage that names
-# no skills is given, and what the skills it does name are applied to. One table, so a step's words
-# are read in one place rather than branched on in each line the prompt is built from. A step with
-# no words of its own (the gate's) builds, and a step applies its skills the way a build does unless
-# it says otherwise: the shipping stage is the one that reads the diff.
+
 class StageWords(NamedTuple):
     """A step's own words: what its run is doing, its brief, and where its skills are applied."""
 
@@ -251,8 +247,7 @@ def _brief(record: Optional[Dict[str, Any]]) -> str:
 
 
 def _steps_line(steps: List[str], use: str) -> str:
-    """The skills the stage applies, in order, named once each rather than quoted, and where they
-    are applied: ``use`` is the stage's own words for that."""
+    """The skills the stage applies, in order, named once each rather than quoted."""
     if not steps:
         return ""
     if len(steps) == 1:
