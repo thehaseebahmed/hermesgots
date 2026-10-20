@@ -184,7 +184,7 @@ const FLOWS = {
   "afk-stage": {
     script: "e2e/afk-stage.mjs",
     about:
-      "AFK's pop-up names the stage its held task is in — Building, at the gate, Critiquing — and none for a project with no critique skill",
+      "AFK's pop-up names the stage its held task is in — Building, Gate check, Critiquing — and none for a project with no critique skill",
   },
   "mcps-gate": {
     script: "e2e/mcps-gate.mjs",

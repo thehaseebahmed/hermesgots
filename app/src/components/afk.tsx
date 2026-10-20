@@ -66,7 +66,7 @@ export const AFK_SKILLS_FEATURE = "afk_skills"
  */
 const STAGE_LABELS: Record<ProjectStage, string | null> = {
   build: "Building",
-  gate: "At the gate",
+  gate: "Gate check",
   critique: "Critiquing",
   done: null,
 }

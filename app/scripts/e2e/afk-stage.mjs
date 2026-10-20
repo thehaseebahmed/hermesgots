@@ -1,11 +1,11 @@
-// AFK's pop-up names the stage a staged task is in — Building, at the gate, Critiquing — read from
+// AFK's pop-up names the stage a staged task is in — Building, Gate check, Critiquing — read from
 // the host on its own poll, so the sheet says how far the work got without opening its session. A
 // project with no critique skill is one run, and its task has no stage to name. The mock's claimed
 // task is staged, and a flow moves it between the stages the way the host's pipeline does.
 import { afkOn, app, assert, flow, makeProject, mock, openAfk, pass } from "./lib.mjs"
 
 const STAGES = [
-  ["gate", "At the gate"],
+  ["gate", "Gate check"],
   ["critique", "Critiquing"],
 ]
 
@@ -87,5 +87,5 @@ for (const width of [390, 1024]) {
   }
 }
 pass(
-  "AFK's pop-up names the stage its held task is in — Building, at the gate, Critiquing — as the host moves it on, and keeps it when the pickers change under a claimed task, at 390 and 1024px, light and dark",
+  "AFK's pop-up names the stage its held task is in — Building, Gate check, Critiquing — as the host moves it on, and keeps it when the pickers change under a claimed task, at 390 and 1024px, light and dark",
 )
