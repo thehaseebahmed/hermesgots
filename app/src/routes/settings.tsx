@@ -719,15 +719,11 @@ function SwitchRow({
     >
       <Icon className="size-5 shrink-0 text-muted-foreground" />
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className={cn("truncate text-base", variant === "header" && "font-semibold")}>
-          {experimental ? (
-            <span className="flex items-center gap-2">
-              {title}
-              <ExperimentalBadge />
-            </span>
-          ) : (
-            title
-          )}
+        <span className="flex min-w-0 items-center gap-2">
+          <span className={cn("truncate text-base", variant === "header" && "font-semibold")}>
+            {title}
+          </span>
+          {experimental && <ExperimentalBadge />}
         </span>
         {subtitle && <span className="line-clamp-2 text-sm text-muted-foreground">{subtitle}</span>}
       </span>
