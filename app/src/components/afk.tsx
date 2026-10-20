@@ -583,9 +583,7 @@ function TaskLink({
       className="flex min-h-11 flex-col justify-center gap-0.5 rounded-2xl px-3 py-2 outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
     >
       <span className="flex min-w-0 items-start gap-2">
-        <span className="shrink-0 pt-0.5 font-mono text-xs text-muted-foreground">
-          #{task.number}
-        </span>
+        <span className="shrink-0 font-mono text-base text-muted-foreground">#{task.number}</span>
         <span className="min-w-0 flex-1 text-base leading-snug break-words">
           {label && <span className="text-muted-foreground">{`${label}: `}</span>}
           {task.title}
