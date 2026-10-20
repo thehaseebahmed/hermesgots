@@ -3,17 +3,17 @@
 A review that found five things and one that found nothing look the same in a transcript, and the
 user's next read is the pull request: this tool is how a run says what its review skills reported,
 so the details sheet can count a skill's findings — ``0`` included — beside the commands the stage
-ran. The stage's current round holds them (``pipeline.reported``), capped, so a finished task still
-says what the review found without anyone reading the turn back. A call naming no findings list is
-refused, since an empty list is a report and a missing one is a typo; a session that isn't staged has
-no stage to report against and is refused too.
+ran. The stage's current round holds them (``pipeline.reported``, which also shapes each entry and
+caps them), so a finished task still says what the review found without anyone reading the turn back.
+A call naming no findings list is refused, since an empty list is a report and a missing one is a
+typo; a session that isn't staged has no stage to report against and is refused too.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from . import pipeline, sessions, tools_common
 
@@ -64,37 +64,14 @@ SCHEMA = {
 }
 
 
-def _found(raw: Any) -> Optional[List[Dict[str, Any]]]:
-    """The findings a call reports, each a title and the detail it gave, or None for not a list.
-
-    A bare string is a finding with no detail — what a review has to say about a small thing — and an
-    entry with no title is dropped rather than kept as a blank row.
-    """
-    if not isinstance(raw, list):
-        return None
-    found: List[Dict[str, Any]] = []
-    for one in raw:
-        if isinstance(one, str) and one.strip():
-            found.append({"title": one.strip()})
-        elif isinstance(one, dict) and isinstance(one.get("title"), str) and one["title"].strip():
-            detail = one.get("detail")
-            found.append(
-                {
-                    "title": one["title"].strip(),
-                    **({"detail": detail.strip()} if isinstance(detail, str) and detail.strip() else {}),
-                }
-            )
-    return found
-
-
 def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any) -> str:
     """The tool: keeps one skill's report on the stage the run is in, and answers what it kept."""
     args = args if isinstance(args, dict) else {}
     skill = args.get("skill")
     if not isinstance(skill, str) or not skill.strip():
         return json.dumps({"error": "skill is required: name the review skill these findings came from."})
-    found = _found(args.get("findings"))
-    if found is None:
+    found = args.get("findings")
+    if not isinstance(found, list):
         return json.dumps(
             {
                 "error": (

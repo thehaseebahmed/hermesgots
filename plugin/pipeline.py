@@ -737,9 +737,12 @@ def _trimmed(entry: Dict[str, Any]) -> None:
     rounds = entry.get("rounds") or []
     held = sum(len(one.get("commands") or []) for one in rounds)
     for one in rounds:
-        while held > COMMAND_CAP and one.get("commands"):
-            one["commands"].pop(0)
-            held -= 1
+        if held <= COMMAND_CAP:
+            return
+        commands = one.get("commands") or []
+        dropped = min(len(commands), held - COMMAND_CAP)
+        one["commands"] = commands[dropped:]
+        held -= dropped
 
 
 def reported(record: Dict[str, Any], skill: str, findings: Sequence[Any]) -> Dict[str, Any]:
@@ -795,28 +798,25 @@ def stage_commands(
         for one in round_.get("commands") or []:
             at = _twin(one, checked, matched)
             answer = checked[at] if at is not None else {}
-            found.append(
-                {
-                    "command": one.get("command") or "",
-                    "repo": one.get("repo") or answer.get("repo"),
-                    "code": answer.get("code"),
-                    "checked": at is not None,
-                    "round": number,
-                }
-            )
+            found.append(_row(one, answer, at is not None, number))
         for at, answer in enumerate(checked):
             if at in matched or not isinstance(answer.get("command"), str):
                 continue
-            found.append(
-                {
-                    "command": answer.get("command") or "",
-                    "repo": answer.get("repo"),
-                    "code": answer.get("code"),
-                    "checked": True,
-                    "round": number,
-                }
-            )
+            found.append(_row(answer, answer, True, number))
     return found
+
+
+def _row(
+    one: Dict[str, Any], answer: Dict[str, Any], checked: bool, number: int
+) -> Dict[str, Any]:
+    """One line a stage ran, as the sheet reads it: what ran, where, and what the host read from it."""
+    return {
+        "command": one.get("command") or "",
+        "repo": one.get("repo") or answer.get("repo"),
+        "code": answer.get("code"),
+        "checked": checked,
+        "round": number,
+    }
 
 
 def _twin(
