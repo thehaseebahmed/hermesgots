@@ -181,7 +181,7 @@ class FirstMessageTests(unittest.TestCase):
             "the title, an empty description and the link",
         )
 
-    def test_a_task_read_before_the_body_was_kept_reads_the_same(self) -> None:
+    def test_a_row_with_no_body_key_still_reads_as_the_block(self) -> None:
         task = {key: value for key, value in TASK.items() if key != "body"}
         self.assertEqual(prompt_builder.afk_input(task), prompt_builder.afk_input({**TASK, "body": ""}))
 

@@ -212,11 +212,27 @@ class ReadTests(unittest.TestCase):
         self.assertIn("state=open", self.paths[0])
 
     def test_the_frontier_read_carries_no_bodies(self) -> None:
-        self.serve({"/repos/mock-user/memento/issues?": [issue_row(265, body="Describe it.")]})
-        found = read(Path(self.home.name), self.folders)
-        self.assertNotIn(
-            "body", found["ready"][0], "the sheet shows where the tasks are, not what they say"
+        self.serve(
+            {
+                "/repos/mock-user/memento/issues?": [
+                    issue_row(265, body="Describe it."),
+                    issue_row(266, body="Claimed.", labels=(READY_LABEL, CLAIM_LABEL)),
+                    issue_row(267, body="Blocked.", created="2026-10-03T00:00:00Z", summary=1),
+                ],
+                "/repos/mock-user/memento/issues/267/dependencies/blocked_by": [issue_row(265)],
+            }
         )
+        found = read(Path(self.home.name), self.folders)
+        self.assertEqual(
+            [len(found[group]) for group in ("ready", "claimed", "blocked")],
+            [1, 1, 1],
+            "one row in each group, so no group is left holding the shape by accident",
+        )
+        for group in ("ready", "claimed", "blocked"):
+            for row in found[group]:
+                self.assertNotIn(
+                    "body", row, "the sheet shows where the tasks are, not what they say"
+                )
 
     def test_the_sweeps_read_carries_the_body_of_the_one_it_claims(self) -> None:
         body = "## What to build\n\nThe first run opens with the issue.\n\n- verbatim\n"

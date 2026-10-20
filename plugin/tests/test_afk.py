@@ -557,7 +557,21 @@ class PromptTests(AfkHome):
 
     def test_a_stored_prompt_is_what_the_run_is_told(self) -> None:
         set_prompt(self.home, "p1", "Squash every checkpoint into one commit.")
-        record = {
+        body = afk.run_body(
+            self.record(),
+            {"repo": "mock-user/memento", "number": 265},
+            "Squash every checkpoint into one commit.",
+        )
+        self.assertIn("Squash every checkpoint into one commit.", body["instructions"])
+        self.assertNotIn(
+            prompt_builder.DEFAULT_PROMPT,
+            body["instructions"],
+            "the project's own words stand in for the default",
+        )
+
+    def record(self) -> Dict[str, Any]:
+        """A session's record as the run's request reads it."""
+        return {
             "session_id": "memento-afk-s1",
             "project_id": "p1",
             "mode": "auto",
@@ -570,16 +584,44 @@ class PromptTests(AfkHome):
                 }
             ],
         }
-        body = afk.run_body(
-            record,
-            {"repo": "mock-user/memento", "number": 265},
-            "Squash every checkpoint into one commit.",
+
+    def test_a_staged_tasks_first_run_opens_with_the_issue_too(self) -> None:
+        task = {
+            "repo": "mock-user/memento",
+            "number": 265,
+            "title": "It",
+            "url": "https://github.com/mock-user/memento/issues/265",
+            "body": "Read the frontier first.\n",
+        }
+        body = afk.run_body({**self.record(), "pipeline": staged_record(pipeline.BUILD)}, task, None)
+        self.assertEqual(
+            body["input"][0]["content"],
+            prompt_builder.afk_input(task),
+            "a staged task's first run is handed the issue like any other",
         )
-        self.assertIn("Squash every checkpoint into one commit.", body["instructions"])
-        self.assertNotIn(
-            prompt_builder.DEFAULT_PROMPT,
+        self.assertIn(
+            "in the message this session opened with",
             body["instructions"],
-            "the project's own words stand in for the default",
+            "and told so, rather than sent to fetch what it was handed",
+        )
+
+    def test_a_later_stage_run_keeps_its_one_line_input(self) -> None:
+        task = {
+            "repo": "mock-user/memento",
+            "number": 265,
+            "title": "It",
+            "url": "https://github.com/mock-user/memento/issues/265",
+            "body": "Read the frontier first.\n",
+        }
+        body = afk.stage_body({**self.record(), "pipeline": staged_record(pipeline.CRITIQUE)}, task)
+        self.assertNotIn("Description:", body["input"][0]["content"])
+        self.assertNotIn(task["body"], body["input"][0]["content"])
+        self.assertTrue(
+            body["input"][0]["content"].endswith(f"({task['url']})"),
+            "one line naming the stage and the issue, as it always was",
+        )
+        self.assertIn(
+            "isn't repeated here", body["instructions"], "a later run has to read the issue itself"
         )
 
 
