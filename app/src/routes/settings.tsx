@@ -498,7 +498,6 @@ const LIVE_LABELS: Record<LiveStatus, { label: string; detail: string }> = {
   off: { label: "Polling", detail: "No stream open" },
 }
 
-/** The Developer section: unlocked by tapping the version five times, and hidden again from here. */
 export function DeveloperSettings() {
   const bots = useLiveQuery(listProfiles, [])
   const settings = useLiveQuery(getSettings, [])
@@ -700,7 +699,6 @@ function SwitchRow({
   id: string
   icon: LucideIcon
   title: string
-  /** Marks a switch whose feature is still being built, in the one way this section says so. */
   experimental?: boolean
   subtitle?: string
   checked: boolean

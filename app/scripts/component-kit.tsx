@@ -26,19 +26,11 @@ export async function settle() {
     })
 }
 
-/**
- * The device's settings row as a screen reads it: `patch` over the defaults, and nothing left of
- * whatever the test before ran with.
- */
 export async function seedSettings(patch: Partial<Omit<Settings, "id">> = {}) {
   await db.settings.clear()
   await db.settings.put({ ...DEFAULT_SETTINGS, ...patch, id: "settings" })
 }
 
-/**
- * A screen mounted on a phone's document and torn down after the test: a screen left mounted keeps
- * its polls running, and a run of the file would carry one test's timers into the next.
- */
 export async function mount(element: React.ReactNode, body: () => Promise<void>) {
   const container = document.createElement("div")
   document.body.append(container)
@@ -53,7 +45,6 @@ export async function mount(element: React.ReactNode, body: () => Promise<void>)
   }
 }
 
-/** The AFK pop-up open on a phone's screen, torn down after the test. */
 export function mountAfk(
   config: { baseUrl: string; apiKey?: string },
   projectId: string,
@@ -100,11 +91,6 @@ const stage = (name: string, extra: Record<string, unknown> = {}) => ({
   ...extra,
 })
 
-/**
- * A bot whose plugin answers the AFK routes, with every call it took: what it advertises, the
- * library it holds and the stage its task is in are the test's to set. The library is this host's
- * own, so a workflow a test saves stays in that test.
- */
 export function afkHost({
   projectId = "project-1",
   features = ["afk", "afk_switch", "afk_workflows", "afk_pipeline"],

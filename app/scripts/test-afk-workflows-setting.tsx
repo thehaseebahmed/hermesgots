@@ -24,10 +24,8 @@ import {
 const config = { baseUrl: "http://hermes.test/v1", apiKey: "test-key" }
 const project = "project-1"
 
-/** A host that holds the AFK routes, whatever the setting says: the switch is the device's. */
 const host = () => afkHost({ features: ["afk", "afk_switch", "afk_workflows"] })
 
-/** Anything the settings section might say to a host, which it must not: the switch is the device's. */
 function noHost() {
   globalThis.fetch = (async () => {
     throw new Error("the settings section reached a host")

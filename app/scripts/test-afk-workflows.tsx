@@ -2,7 +2,6 @@
  * The AFK pop-up's workflow surfaces, over a seeded device database and a faked HTTP boundary: the
  * row that names the project's workflow, the library sheet with its presets first, and the editor
  * adding a stage and picking a skill through the sheet the composer's menu draws its rows with.
- * Every test here is the Developer setting on; the pop-up with it off has its own file.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -24,18 +23,14 @@ import {
 const config = { baseUrl: "http://hermes.test/v1", apiKey: "test-key" }
 const project = "project-1"
 
-/**
- * Every test here is the Developer setting on: this file is the library as it is offered, and the
- * pop-up's default — off — is `test-afk-workflows-setting.tsx`'s.
- */
-async function screen(body: () => Promise<void>) {
+async function libraryOn(body: () => Promise<void>) {
   await seedSettings({ developer: true, afkWorkflows: true })
   await mountAfk(config, project, body)
 }
 
 test("the pop-up names the workflow the project's work runs under", async () => {
   globalThis.fetch = afkHost().fetch as unknown as typeof fetch
-  await screen(async () => {
+  await libraryOn(async () => {
     assert.equal(
       find("[data-afk-workflow]")?.textContent,
       "WorkflowBuild · Test · Review · SummaryBuild · Test · Review · Summary",
@@ -46,7 +41,7 @@ test("the pop-up names the workflow the project's work runs under", async () => 
 
 test("the Working row names the stage the task's snapshot says", async () => {
   globalThis.fetch = afkHost({ stageName: "Migrate" }).fetch as unknown as typeof fetch
-  await screen(async () => {
+  await libraryOn(async () => {
     const row = find("[data-working]")
     assert.match(row?.textContent ?? "", /Migrate/, "a workflow's own word for its stage")
     assert.equal(row?.getAttribute("data-stage"), "build", "the step the stage is judged as")
@@ -56,7 +51,7 @@ test("the Working row names the stage the task's snapshot says", async () => {
 test("the library lists presets first, and picking one is one write", async () => {
   const fake = afkHost()
   globalThis.fetch = fake.fetch as unknown as typeof fetch
-  await screen(async () => {
+  await libraryOn(async () => {
     await click(find("[data-afk-workflow] button"))
     const rows = findAll("[data-workflow]").map((row) => row.getAttribute("data-workflow"))
     assert.deepEqual(
@@ -90,7 +85,7 @@ test("the editor adds a stage and picks a skill through the shared sheet", async
     id: connectionKey(config),
     skills: [{ name: "code-review", description: "Review a change.", category: "review" }],
   })
-  await screen(async () => {
+  await libraryOn(async () => {
     await click(find("[data-afk-workflow] button"))
     await click(findText("button", "New workflow"))
     assert.match(text(), /New workflow/, "the editor opens on a new workflow")
@@ -142,7 +137,7 @@ test("the editor adds a stage and picks a skill through the shared sheet", async
 test("the editor says what the host would refuse, before it asks", async () => {
   const fake = afkHost()
   globalThis.fetch = fake.fetch as unknown as typeof fetch
-  await screen(async () => {
+  await libraryOn(async () => {
     await click(find("[data-afk-workflow] button"))
     await click(findText("button", "New workflow"))
     await type(find('input[aria-label="Workflow name"]'), "Mine")

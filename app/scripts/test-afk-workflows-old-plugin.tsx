@@ -33,7 +33,6 @@ globalThis.fetch = (async (input: RequestInfo | URL) => {
 }) as unknown as typeof fetch
 
 test("a bot without afk_workflows shows the pop-up it always showed", async () => {
-  // The device offers the library; the host is what can't answer, so the row stays away.
   await seedSettings({ developer: true, afkWorkflows: true })
   await mountAfk(config, "project-1", async () => {
     // Boolean, not the node: a failing assertion must not print a whole DOM tree.

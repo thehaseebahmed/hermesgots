@@ -91,13 +91,7 @@ const GROUPS = [
   { key: "blocked", label: "Blocked" },
 ] as const
 
-/**
- * Whether the workflow library is offered on this device: the Developer switch, which counts only
- * where the host holds the routes, and goes dark with the section it lives in as the bot-threads
- * and meetings switches do. Off, a project on a workflow keeps running it — that is the host's own
- * record, and nothing here changes it.
- */
-function useAfkLibrary(config: HermesConfig) {
+function useLibraryOffered(config: HermesConfig) {
   const held = usePluginFeature(config, AFK_WORKFLOWS_FEATURE)
   return Boolean(
     useLiveQuery(async () => {
@@ -134,10 +128,10 @@ export function AfkPopup({
   const key = connectionKey(config)
   const switchable = usePluginFeature(config, AFK_SWITCH_FEATURE)
   const withSkills = usePluginFeature(config, AFK_SKILLS_FEATURE)
-  const withWorkflows = useAfkLibrary(config)
+  const libraryOffered = useLibraryOffered(config)
   // The pickers' list is the bot's own skills, read the way the composer's `/` menu reads them: only
   // what this profile can run now. Asked only where the host can hold a choice at all.
-  const skills = useSkills(config, open && (withSkills === "yes" || withWorkflows))
+  const skills = useSkills(config, open && (withSkills === "yes" || libraryOffered))
 
   const read = useCallback(
     (signal: AbortSignal) => {
@@ -218,7 +212,7 @@ export function AfkPopup({
   // Read while a sheet that draws it is open, and again when one opens: a workflow saved on another
   // device shows the next time the sheet is looked at.
   usePoll(readLibrary, false, [key], {
-    active: open && withWorkflows && (libraryOpen || editing !== null),
+    active: open && libraryOffered && (libraryOpen || editing !== null),
     onShow: false,
   })
 
@@ -227,10 +221,7 @@ export function AfkPopup({
   // once it's on the sheet keeps reading at AFK_MS, because turning it on wakes a sweep on the host
   // and the task it claims, or why GitHub refused it, lands after the switch's own answer.
   usePoll(readAfk, afk?.on ? AFK_MS : false, [key, projectId], {
-    // Read where a feature wants the row: a host that can hold a skill choice answers it here,
-    // whether or not it can also switch a project on — and a host that holds the workflow library
-    // has to answer, since the Workflow row above is drawn from this answer.
-    active: open && (switchable === "yes" || withSkills === "yes" || withWorkflows),
+    active: open && (switchable === "yes" || withSkills === "yes" || libraryOffered),
     onShow: false,
   })
 
@@ -310,7 +301,7 @@ export function AfkPopup({
             saving={saving}
             onToggle={(on) => void turn(on)}
           />
-          {withWorkflows && afk && !afkError && (
+          {libraryOffered && afk && !afkError && (
             <WorkflowRow workflow={afk.workflow} onOpen={() => setLibraryOpen(true)} />
           )}
           {withSkills === "yes" && afk && !afkError && (
@@ -341,7 +332,7 @@ export function AfkPopup({
             manyRepos={manyRepos}
           />
         </div>
-        {withWorkflows && (
+        {libraryOffered && (
           <>
             <WorkflowSheet
               open={libraryOpen}
