@@ -513,8 +513,8 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
         return json.dumps({"error": "This session has no worktree to ship."})
     if action == "ship":
         staged = pipeline.read(record.get("pipeline"))
-        if pipeline.gating(staged):
-            return json.dumps({"error": _staged_refusal(staged["stage"])})
+        if pipeline.gating(staged) and not pipeline.ships(staged):
+            return json.dumps({"error": _staged_refusal(pipeline.kind(staged) or "")})
     try:
         if action == "status":
             return json.dumps({"results": status(record)})

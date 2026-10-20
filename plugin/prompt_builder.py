@@ -166,7 +166,7 @@ def afk_prompt(record: Dict[str, Any], task: Dict[str, Any]) -> str:
         _afk_task_line(task),
         session_prompt(record, unattended=True),
         _AFK_INSTRUCTIONS.format(issue=task.get("number")),
-        _build_skill_line(staged.get("build_skill") if staged else None),
+        _build_skill_line(pipeline.build_skill(staged)),
         _BUILD_STAGE if staged else "",
     ]
     return "\n\n".join(line for line in lines if line)
@@ -237,8 +237,7 @@ def _build_skill_line(skill: Optional[str]) -> str:
 
 
 def _critique_skills(record: Dict[str, Any]) -> List[str]:
-    staged = pipeline.read(record.get("pipeline")) or {}
-    return staged.get("critique_skills") or []
+    return pipeline.critique_skills(pipeline.read(record.get("pipeline")))
 
 
 def _critique_skills_line(briefs: List[str]) -> str:

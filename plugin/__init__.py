@@ -43,6 +43,7 @@ from . import (
     model_changes,
     merges,
     outbox,
+    pipeline,
     projects,
     prompt_builder,
     repos,
@@ -55,6 +56,7 @@ from . import (
     tasks,
     todos,
     usage,
+    workflows,
 )
 from .store import db_path
 
@@ -280,14 +282,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # setting on the host (afk.py). Advertised apart from the read, so a plugin that
                     # can list a project's tasks but never switch AFK on offers no switch at all.
                     "afk_switch",
-                    # And whether it can hold the skills that work follows — one to build by and the
-                    # ones to critique, written beside the switch. Advertised apart from the switch,
-                    # so an older plugin keeps the pop-up it has, with no pickers in it.
-                    "afk_skills",
-                    # And whether a staged task's stages reach the app: the pipeline pill a session
-                    # carries above its composer, drawn from the record on the session itself
-                    # (pipeline.py). Advertised apart from the pickers, since a session's own record
-                    # says whether it was staged at all.
+                    # An app that predates this one has no picker at all rather than pickers that
+                    # could only write a shape the host no longer takes.
+                    "afk_workflows",
+                    # Still advertised while the app draws a staged session's pipeline, which this
+                    # host answers from the task's workflow snapshot (`pipeline.for_app`): the pill
+                    # is drawn only where a host claims it, so dropping it here would take the
+                    # pipeline out of every app until #338 redraws it by workflow.
                     "afk_pipeline",
                     "clarify",
                     "todo_tool",
@@ -1017,8 +1018,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         project, refused = await resolve_project(project_id)
         if refused is not None:
             return refused
-        if named == "skills":
-            await asyncio.to_thread(afk.set_skills, hermes_home(), project_id, *value)
+        if named == "workflow":
+            try:
+                await asyncio.to_thread(afk.set_workflow, hermes_home(), project_id, value)
+            except ValueError as why:
+                return _error(web, str(why), 400)
             found = await asyncio.to_thread(
                 afk.read,
                 hermes_home(),
@@ -1041,6 +1045,75 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 return _error(web, str(why), 409)
         return web.json_response({"object": "memento.afk", "project_id": project_id, **found})
 
+    async def workflows_response() -> "web.Response":
+        """The library as it stands: what every write to it answers."""
+        found = await asyncio.to_thread(workflows.library, hermes_home())
+        return web.json_response({"object": "memento.workflows", "workflows": found})
+
+    async def list_workflows(request: "web.Request") -> "web.Response":
+        """A bot's workflows: presets first, read-only, each naming its stages."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        return await workflows_response()
+
+    async def read_workflow(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        found = await asyncio.to_thread(
+            workflows.get, hermes_home(), request.match_info["workflow_id"]
+        )
+        if found is None:
+            return _error(web, "No such workflow.", 404)
+        return web.json_response({"object": "memento.workflow", **found})
+
+    async def create_workflow(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        try:
+            await asyncio.to_thread(workflows.create, hermes_home(), body)
+        except ValueError as why:
+            return _error(web, str(why), 400)
+        return await workflows_response()
+
+    async def update_workflow(request: "web.Request") -> "web.Response":
+        """Rewrites a workflow, or forks a preset into a copy: a preset is never written."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        try:
+            found = await asyncio.to_thread(
+                workflows.update, hermes_home(), request.match_info["workflow_id"], body
+            )
+        except ValueError as why:
+            return _error(web, str(why), 400)
+        if found is None:
+            return _error(web, "No such workflow.", 404)
+        return await workflows_response()
+
+    async def remove_workflow(request: "web.Request") -> "web.Response":
+        """Deletes a workflow, refusing one a project works under and naming those projects."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            removed = await asyncio.to_thread(
+                workflows.delete, hermes_home(), request.match_info["workflow_id"]
+            )
+        except workflows.Refused as why:
+            return _error(web, str(why), 409)
+        if not removed:
+            return _error(web, "No such workflow.", 404)
+        return await workflows_response()
+
     async def session_db():
         open_db = getattr(adapter, "_ensure_session_db_async", None)
         return await open_db() if callable(open_db) else None
@@ -1053,6 +1126,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return body if isinstance(body, dict) else None
 
     async def workspace_response(record: Dict[str, Any] | None):
+        if record is not None:
+            # The pill reads a session's pipeline the way it always has — the step the task is in,
+            # the skills each run was told, the gate's answer — whatever shape the task's own
+            # snapshot holds (``pipeline.for_app``, ADR 0018).
+            record = {**record, "pipeline": pipeline.for_app(record.get("pipeline"))}
         return web.json_response(
             {
                 "object": "memento.workspace",
@@ -1335,6 +1413,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/projects/{{project_id}}/tasks", project_tasks)
     app.router.add_get(f"{PREFIX}/projects/{{project_id}}/afk", project_afk)
     app.router.add_post(f"{PREFIX}/projects/{{project_id}}/afk", post_project_afk)
+    app.router.add_get(f"{PREFIX}/workflows", list_workflows)
+    app.router.add_post(f"{PREFIX}/workflows", create_workflow)
+    app.router.add_get(f"{PREFIX}/workflows/{{workflow_id}}", read_workflow)
+    app.router.add_post(f"{PREFIX}/workflows/{{workflow_id}}", update_workflow)
+    app.router.add_delete(f"{PREFIX}/workflows/{{workflow_id}}", remove_workflow)
     app.router.add_post(f"{PREFIX}/model", set_host_model)
     app.router.add_get(f"{PREFIX}/fallbacks", get_fallbacks)
     app.router.add_get(f"{PREFIX}/delegation", get_delegation)

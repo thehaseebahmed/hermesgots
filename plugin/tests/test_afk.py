@@ -19,9 +19,19 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import ModuleType, SimpleNamespace
 from typing import Any, Dict, List, Optional
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
-from plugin import afk, chats, github, outbox, pipeline, projects, prompt_builder, sessions
+from plugin import (
+    afk,
+    chats,
+    github,
+    outbox,
+    pipeline,
+    projects,
+    prompt_builder,
+    sessions,
+    workflows,
+)
 from plugin.afk import (
     ARCHIVED,
     NO_GITHUB,
@@ -30,15 +40,14 @@ from plugin.afk import (
     read,
     release,
     set_on,
-    set_skills,
-    skills_from,
+    set_workflow,
     sweep,
     sweep_all,
     write_from,
 )
-from plugin.store import db_path
+from plugin.store import connect, db_path
 from plugin.tasks import CLAIM_LABEL, READY_LABEL
-from plugin.tests._helpers import issue_row, stub_projects_db
+from plugin.tests._helpers import issue_row, staged as staged_record, stub_projects_db
 
 
 def folder(path: str) -> SimpleNamespace:
@@ -259,13 +268,39 @@ class SwitchTests(unittest.TestCase):
             self.assertTrue(projects.remove(self.home, "p1"))
 
 
+def default_workflow() -> Dict[str, Any]:
+    """The default preset as the AFK read answers it: what a project that picked nothing runs."""
+    _, name, stages = next(one for one in workflows.PRESETS if one[0] == workflows.DEFAULT_ID)
+    return {
+        "id": workflows.DEFAULT_ID,
+        "name": name,
+        "preset": True,
+        "at": ANY,
+        "stages": stages,
+    }
+
+
+def set_skill_columns(
+    home: Path, project_id: str, build: Optional[str], critique: List[str]
+) -> None:
+    """A project's row as a build before the workflow picker wrote it: the two skill columns only."""
+    conn = connect(db_path(home))
+    try:
+        conn.execute(
+            """INSERT INTO project_afk (project_id, enabled, at, build_skill, critique_skills)
+               VALUES (?, 0, ?, ?, ?)""",
+            (project_id, int(time.time()), build, json.dumps(critique)),
+        )
+    finally:
+        conn.close()
+
+
 def afk_row(
     on: bool = False,
     reason: Optional[str] = None,
     task: Any = None,
     refusal: Optional[str] = None,
-    build_skill: Optional[str] = None,
-    critique_skills: Optional[List[str]] = None,
+    workflow: Any = None,
     stage: Optional[str] = None,
 ) -> Dict[str, Any]:
     """The answer `read` gives for a project holding nothing and having picked nothing.
@@ -277,14 +312,13 @@ def afk_row(
         "reason": reason,
         "task": task,
         "refusal": refusal,
-        "build_skill": build_skill,
-        "critique_skills": critique_skills or [],
+        "workflow": default_workflow() if workflow is None else workflow,
         "stage": stage,
     }
 
 
-class SkillChoiceTests(unittest.TestCase):
-    """The skills a project's AFK work follows: the project's own choice, kept on the host."""
+class WorkflowChoiceTests(unittest.TestCase):
+    """The workflow a project's AFK work runs under: its own pick, from the bot's library."""
 
     def setUp(self) -> None:
         self.tmp = TemporaryDirectory()
@@ -302,107 +336,104 @@ class SkillChoiceTests(unittest.TestCase):
     def folders(self) -> List[Any]:
         return [folder(str(self.checkout))]
 
-    def test_a_project_starts_with_nothing_chosen(self) -> None:
-        found = read(self.home, "p1", self.folders())
-        self.assertIsNone(found["build_skill"])
-        self.assertEqual(found["critique_skills"], [])
+    def choose(self, name: str = "Mine", build: Optional[str] = None, steps=()) -> Dict[str, Any]:
+        """A workflow of this bot's own, and the project naming it."""
+        entry = workflows.create(
+            self.home,
+            {"name": name, "stages": workflows.from_skills(build, steps)},
+        )
+        set_workflow(self.home, "p1", entry["id"])
+        return entry
 
-    def test_the_choice_is_read_back_from_the_host(self) -> None:
-        set_skills(self.home, "p1", "writing-for-agents", ["code-review", "grill-me"])
+    def test_a_project_that_picked_nothing_runs_the_default_preset(self) -> None:
         found = read(self.home, "p1", self.folders())
-        self.assertEqual(found["build_skill"], "writing-for-agents")
-        self.assertEqual(found["critique_skills"], ["code-review", "grill-me"])
+        self.assertEqual(found["workflow"]["id"], workflows.DEFAULT_ID)
+        self.assertEqual(
+            [stage["name"] for stage in found["workflow"]["stages"]],
+            ["Build", "Test", "Review", "Summary"],
+        )
 
-    def test_the_choice_is_in_the_store_not_in_memory(self) -> None:
-        set_skills(self.home, "p1", "writing-for-agents", ["code-review"])
+    def test_the_pick_is_read_back_from_the_host(self) -> None:
+        entry = self.choose(build="plan", steps=["code-review"])
+        found = read(self.home, "p1", self.folders())
+        self.assertEqual(found["workflow"]["id"], entry["id"])
+        self.assertEqual(found["workflow"]["name"], "Mine")
+        self.assertEqual(found["workflow"]["stages"][0]["steps"], ["plan"])
+        self.assertEqual(found["workflow"]["stages"][2]["steps"], ["code-review"])
+
+    def test_the_pick_is_in_the_store_not_in_memory(self) -> None:
+        entry = self.choose()
         conn = sqlite3.connect(db_path(self.home))
         try:
             row = conn.execute(
-                "SELECT build_skill, critique_skills FROM project_afk WHERE project_id = ?", ("p1",)
+                "SELECT workflow_id FROM project_afk WHERE project_id = ?", ("p1",)
             ).fetchone()
         finally:
             conn.close()
-        self.assertEqual(row, ("writing-for-agents", json.dumps(["code-review"])))
+        self.assertEqual(row, (entry["id"],))
 
-    def test_either_can_be_cleared_back_to_nothing(self) -> None:
-        set_skills(self.home, "p1", "writing-for-agents", ["code-review"])
-        set_skills(self.home, "p1", None, [])
-        found = read(self.home, "p1", self.folders())
-        self.assertIsNone(found["build_skill"])
-        self.assertEqual(found["critique_skills"], [])
+    def test_one_projects_pick_leaves_anothers_alone(self) -> None:
+        mine = self.choose(name="Mine")
+        theirs = workflows.create(self.home, {"name": "Theirs", "stages": workflows.from_skills(None, [])})
+        set_workflow(self.home, "p2", theirs["id"])
+        self.assertEqual(read(self.home, "p1", self.folders())["workflow"]["id"], mine["id"])
+        self.assertEqual(read(self.home, "p2", self.folders())["workflow"]["id"], theirs["id"])
 
-    def test_one_projects_choice_leaves_anothers_alone(self) -> None:
-        set_skills(self.home, "p1", "writing-for-agents", ["code-review"])
-        set_skills(self.home, "p2", "tdd", ["grill-me"])
-        self.assertEqual(read(self.home, "p1", self.folders())["build_skill"], "writing-for-agents")
-        self.assertEqual(read(self.home, "p2", self.folders())["critique_skills"], ["grill-me"])
-
-    def test_the_switch_leaves_the_choice_alone(self) -> None:
-        set_skills(self.home, "p1", "writing-for-agents", ["code-review"])
+    def test_the_switch_leaves_the_pick_alone(self) -> None:
+        entry = self.choose()
         set_on(self.home, "p1", self.folders(), True)
         set_on(self.home, "p1", self.folders(), False)
         found = read(self.home, "p1", self.folders())
-        self.assertEqual(found["build_skill"], "writing-for-agents")
-        self.assertEqual(found["critique_skills"], ["code-review"])
+        self.assertEqual(found["workflow"]["id"], entry["id"])
 
-    def test_choosing_a_skill_leaves_a_project_already_working_on(self) -> None:
-        # The row's other columns are not this write's.
-        set_on(self.home, "p1", self.folders(), True)
-        set_skills(self.home, "p1", "writing-for-agents", ["code-review"])
-        found = read(self.home, "p1", self.folders())
-        self.assertTrue(found["on"])
-        self.assertEqual(found["build_skill"], "writing-for-agents")
-
-    def test_choosing_a_skill_on_a_project_never_turned_on_keeps_its_switch_off(self) -> None:
-        # The pickers sit under the switch, which a project that was never left to work has no row
-        # for yet: choosing one creates the row without turning anything on.
-        set_skills(self.home, "p1", "writing-for-agents", [])
+    def test_picking_leaves_a_project_never_turned_on_with_its_switch_off(self) -> None:
+        # The row sits under the switch, so choosing a workflow is no reason to start working.
+        self.choose()
         self.assertFalse(read(self.home, "p1", self.folders())["on"])
 
-    def test_names_are_trimmed_and_kept_once_in_the_order_given(self) -> None:
-        set_skills(self.home, "p1", "  writing-for-agents ", ["code-review ", "code-review", " code-review"])
-        found = read(self.home, "p1", self.folders())
-        self.assertEqual(found["build_skill"], "writing-for-agents")
-        self.assertEqual(found["critique_skills"], ["code-review"])
+    def test_a_pick_the_library_does_not_hold_is_refused(self) -> None:
+        with self.assertRaises(ValueError):
+            set_workflow(self.home, "p1", "wf-nowhere")
+        self.assertEqual(
+            read(self.home, "p1", self.folders())["workflow"]["id"],
+            workflows.DEFAULT_ID,
+            "nothing was written, so the project still runs the default preset",
+        )
 
-    def test_a_skills_write_names_both_fields(self) -> None:
-        for body in ({}, {"build_skill": "writing-for-agents"}, {"critique_skills": []}):
-            with self.subTest(body=body):
-                with self.assertRaises(ValueError):
-                    skills_from(body)
-
-    def test_a_skills_write_refuses_what_is_not_a_skill_name(self) -> None:
-        for body in (
-            {"build_skill": 3, "critique_skills": []},
-            {"build_skill": "tdd", "critique_skills": "code-review"},
-            {"build_skill": "tdd", "critique_skills": [2]},
-        ):
-            with self.subTest(body=body):
-                with self.assertRaises(ValueError):
-                    skills_from(body)
-
-    def test_a_write_names_the_switch_or_the_skills(self) -> None:
+    def test_a_write_names_the_switch_or_a_workflow(self) -> None:
         self.assertEqual(write_from({"on": True}), ("on", True))
         self.assertEqual(write_from({"on": False}), ("on", False))
+        self.assertEqual(write_from({"workflow_id": "wf-1"}), ("workflow", "wf-1"))
         self.assertEqual(
-            write_from({"build_skill": "tdd", "critique_skills": ["code-review"]}),
-            ("skills", ("tdd", ["code-review"])),
+            write_from({"workflow_id": "  wf-1  "}), ("workflow", "wf-1"), "the id is trimmed"
         )
 
     def test_a_write_names_one_shape_at_a_time(self) -> None:
         for body in (
             {},
-            {"on": True, "build_skill": None, "critique_skills": []},
+            {"on": True, "workflow_id": "wf-1"},
             {"on": "yes"},
-            {"build_skill": "tdd"},
-            {"critique_skills": []},
+            {"workflow_id": ""},
+            {"workflow_id": 3},
         ):
             with self.subTest(body=body):
                 with self.assertRaises(ValueError):
                     write_from(body)
 
-    def test_a_skills_write_reads_a_cleared_choice(self) -> None:
-        self.assertEqual(skills_from({"build_skill": None, "critique_skills": []}), (None, []))
+    def test_a_project_whose_old_skill_columns_hold_something_is_migrated_once(self) -> None:
+        set_skill_columns(self.home, "p1", "plan", ["code-review"])
+        found = read(self.home, "p1", self.folders())
+        self.assertNotEqual(found["workflow"]["id"], workflows.DEFAULT_ID, "its own workflow")
+        self.assertEqual(
+            [stage["name"] for stage in found["workflow"]["stages"]],
+            ["Build", "Test", "Review"],
+            "the three stages those columns described",
+        )
+        self.assertEqual(found["workflow"]["stages"][0]["steps"], ["plan"])
+        self.assertEqual(found["workflow"]["stages"][2]["steps"], ["code-review"])
+        again = read(self.home, "p1", self.folders())
+        self.assertEqual(again["workflow"], found["workflow"], "written once, then read back")
+        self.assertEqual(len(workflows.library(self.home)), 4, "three presets and the migration")
 
 
 class ClaimStubTests(unittest.TestCase):
@@ -1074,7 +1105,13 @@ class SessionTests(unittest.TestCase):
     def test_the_instructions_are_the_afk_prompt_and_carry_no_task_text(self) -> None:
         self.start()
         instructions = self.posted[0]["body"]["instructions"]
-        record = {**self.record, "session_id": self.ensured[0][0], "project_id": "p1", "mode": "auto"}
+        record = {
+            **self.record,
+            "session_id": self.ensured[0][0],
+            "project_id": "p1",
+            "mode": "auto",
+            "pipeline": sessions.read(db_path(self.home), self.ensured[0][0])["pipeline"],
+        }
         self.assertEqual(
             instructions,
             prompt_builder.afk_prompt(record, self.task),
@@ -1167,28 +1204,37 @@ class SessionTests(unittest.TestCase):
 class StagedStartTests(SessionTests):
     """A claimed task's session says which stage it starts in, written before its run is posted."""
 
-    def test_a_project_with_a_critique_skill_starts_a_staged_build(self) -> None:
-        set_skills(self.home, "p1", "plan", ["code-review"])
+    def choose(self, name: str = "Mine", build: Optional[str] = None, steps=()) -> Dict[str, Any]:
+        """A workflow of this bot's own, and the project naming it."""
+        entry = workflows.create(
+            self.home, {"name": name, "stages": workflows.from_skills(build, steps)}
+        )
+        set_workflow(self.home, "p1", entry["id"])
+        return entry
+
+    def test_a_project_with_a_workflow_starts_a_staged_build(self) -> None:
+        self.choose(build="plan", steps=["code-review"])
         self.start()
         record = sessions.read(db_path(self.home), self.ensured[0][0])
+        staged = pipeline.read(record["pipeline"])
         self.assertEqual(
-            record["pipeline"]["stage"], pipeline.BUILD, "the stage is recorded before the run"
+            pipeline.kind(staged), pipeline.BUILD, "the stage is recorded before the run"
         )
+        self.assertEqual(pipeline.steps_of(staged), ["plan", "code-review"])
         text = self.posted[0]["body"]["instructions"]
         self.assertIn("Build stage", text, "and the build is told where it ends")
         self.assertIn('skill_view(name="plan")', text, "and which skill governs it")
 
-    def test_a_project_with_no_critique_skill_starts_one_run_as_before(self) -> None:
-        set_skills(self.home, "p1", "plan", [])
+    def test_a_project_that_picked_nothing_starts_the_default_preset(self) -> None:
         self.start()
         record = sessions.read(db_path(self.home), self.ensured[0][0])
-        self.assertIsNone(record["pipeline"], "nothing to critique by, so no stage")
+        staged = pipeline.read(record["pipeline"])
+        self.assertIsNotNone(staged, "staging is on by default")
         self.assertEqual(
-            self.posted[0]["body"]["instructions"],
-            prompt_builder.afk_prompt(record, self.task),
-            "and the run is told exactly what one was told before there were stages",
+            [stage["name"] for stage in staged["stages"]],
+            ["Build", "Test", "Review", "Summary"],
         )
-        self.assertNotIn("Build stage", self.posted[0]["body"]["instructions"])
+        self.assertIn("Build stage", self.posted[0]["body"]["instructions"])
 
 
 class SweepAllTests(unittest.TestCase):
@@ -1314,9 +1360,9 @@ class StagedRunTests(AfkSessionTests):
 
     CLEAN = [{"name": "mock-user/memento", "changed": 0, "ahead": 2}]
 
-    def stage(self, build: Optional[str] = "plan", critique=("code-review",), **fields: Any) -> dict:
-        record = pipeline.start(build, list(critique))
-        sessions.set_pipeline(db_path(self.home), self.SESSION, {**record, **fields})
+    def stage(self, kind: str = pipeline.BUILD, critique=("code-review",)) -> dict:
+        record = staged_record(kind, steps=tuple(critique))
+        sessions.set_pipeline(db_path(self.home), self.SESSION, record)
         return record
 
     def gated(self, *codes: int) -> dict:
@@ -1354,7 +1400,7 @@ class StagedRunTests(AfkSessionTests):
         home, record = critique.call_args[0]
         self.assertEqual(home, self.home)
         self.assertEqual(record["session_id"], self.SESSION, "the same session, not another")
-        self.assertEqual(self.pipeline()["stage"], pipeline.CRITIQUE)
+        self.assertEqual(pipeline.kind(self.pipeline()), pipeline.CRITIQUE)
         self.assertEqual(self.shown()["task"], self.task, "the claim stays: the task isn't finished")
         self.assertEqual(self.writes, [], "nothing is written to GitHub between the stages")
 
@@ -1368,7 +1414,7 @@ class StagedRunTests(AfkSessionTests):
             "the user is told what to run themselves",
         )
         self.assertEqual(self.shown()["task"], self.task, "the claim is kept for the user to look at")
-        self.assertEqual(self.pipeline()["stage"], pipeline.GATE, "it is at the gate it failed")
+        self.assertEqual(pipeline.kind(self.pipeline()), pipeline.GATE, "it is at the gate it failed")
 
     def test_a_build_that_never_ran_the_gate_stalls(self) -> None:
         self.stage()
@@ -1390,16 +1436,36 @@ class StagedRunTests(AfkSessionTests):
         self.assertEqual(afk.stalled(self.home)[self.SESSION]["reason"], pipeline.NO_COMMITS)
 
     def test_a_critique_that_finished_lets_go_of_the_task(self) -> None:
-        self.stage(**{"stage": pipeline.CRITIQUE})
+        self.stage(pipeline.CRITIQUE)
         with patch.object(afk, "wake") as wake:
             self.ended(completed=True)
         self.assertIsNone(self.shown()["task"], "the work is in review: the hold is what one task is")
         self.assertEqual(self.writes, [], "its claim stays on GitHub")
-        self.assertEqual(self.pipeline()["stage"], pipeline.DONE, "and the record says how it ended")
+        self.assertEqual(pipeline.kind(self.pipeline()), pipeline.DONE, "and the record says how it ended")
         wake.assert_called_once()
 
+    def test_a_stage_this_build_cannot_run_stalls_rather_than_frees_the_task(self) -> None:
+        record = pipeline.start(
+            {
+                "id": "wf-two-runs",
+                "name": "Build · Test · Review",
+                "stages": [
+                    {"name": "Build", "steps": ["plan"]},
+                    {"name": "Test", "steps": ["code-review"]},
+                    {"name": "Review", "steps": [], "ships": True},
+                ],
+            }
+        )
+        gated = pipeline.gated(record, [{"command": "true", "code": 0}])
+        sessions.set_pipeline(db_path(self.home), self.SESSION, gated)
+        critique = self.ended(completed=True)
+        critique.assert_not_called()
+        self.assertEqual(pipeline.kind(self.pipeline()), pipeline.BUILD, "the next stage is a build")
+        self.assertEqual(pipeline.reason(self.pipeline()), afk.NOT_YET)
+        self.assertEqual(self.shown()["task"], self.task, "the claim stays with it")
+
     def test_a_critique_that_ended_without_a_pull_request_stalls(self) -> None:
-        self.stage(**{"stage": pipeline.CRITIQUE})
+        self.stage(pipeline.CRITIQUE)
         with patch.object(afk, "wake"):
             self.ended(completed=True, shipped=None)
         self.assertEqual(
@@ -1408,10 +1474,10 @@ class StagedRunTests(AfkSessionTests):
             "a critique that never opened one reviewed nothing the user can see",
         )
         self.assertEqual(self.shown()["task"], self.task, "so its claim is kept with it")
-        self.assertEqual(self.pipeline()["reason"], afk.NO_PULL_REQUEST)
+        self.assertEqual(pipeline.reason(self.pipeline()), afk.NO_PULL_REQUEST)
 
     def test_a_github_that_cannot_be_asked_does_not_stall_a_finished_critique(self) -> None:
-        self.stage(**{"stage": pipeline.CRITIQUE})
+        self.stage(pipeline.CRITIQUE)
         with patch.object(afk, "wake"):
             self.ended(completed=True, shipped=github.GitHubError("offline"))
         self.assertIsNone(self.shown()["task"], "the run finished: nothing is stalled over a lookup")
@@ -1420,14 +1486,14 @@ class StagedRunTests(AfkSessionTests):
         self.stage()
         critique = self.ended(completed=False, failed=True)
         critique.assert_not_called()
-        self.assertEqual(self.pipeline()["stage"], pipeline.BUILD, "it stopped where it was building")
+        self.assertEqual(pipeline.kind(self.pipeline()), pipeline.BUILD, "it stopped where it was building")
         self.assertEqual(afk.stalled(self.home)[self.SESSION]["reason"], afk.FAILED_RUN)
         self.assertEqual(self.shown()["task"], self.task)
 
     def test_a_critique_that_failed_stalls_with_its_stage_kept(self) -> None:
-        self.stage(**{"stage": pipeline.CRITIQUE})
+        self.stage(pipeline.CRITIQUE)
         self.ended(completed=False, interrupted=True)
-        self.assertEqual(self.pipeline()["stage"], pipeline.CRITIQUE)
+        self.assertEqual(pipeline.kind(self.pipeline()), pipeline.CRITIQUE)
         self.assertEqual(afk.stalled(self.home)[self.SESSION]["reason"], afk.INTERRUPTED_RUN)
 
     def test_a_project_with_no_critique_skill_runs_and_ships_as_before(self) -> None:
@@ -1438,31 +1504,39 @@ class StagedRunTests(AfkSessionTests):
         self.assertIsNone(self.pipeline())
 
     def test_the_sheet_names_the_stage_the_task_is_in(self) -> None:
-        record = self.stage()
+        self.stage()
         self.assertEqual(self.shown()["stage"], pipeline.BUILD)
-        sessions.set_pipeline(db_path(self.home), self.SESSION, pipeline.gated(record, []))
-        self.assertEqual(self.shown()["stage"], pipeline.GATE)
+        self.stage(pipeline.GATE_CHECK)
+        self.assertEqual(self.shown()["stage"], pipeline.GATE_CHECK, "the gate stage is its own stage")
 
     def test_the_sheet_names_no_stage_for_a_project_holding_nothing(self) -> None:
         afk._free(self.home, "p1")
         self.assertIsNone(self.shown()["stage"])
 
     def test_the_stage_outlives_the_hold_on_the_session(self) -> None:
-        self.stage(**{"stage": pipeline.DONE})
+        self.stage(pipeline.DONE)
         afk._free(self.home, "p1")
         self.assertEqual(
-            self.pipeline()["stage"],
+            pipeline.kind(self.pipeline()),
             pipeline.DONE,
             "a finished task still says how it got there",
         )
 
 
 class StagedSweepTests(ClaimStubTests):
-    """A project whose chosen skill its bot no longer has: a refusal, no claim, the switch on."""
+    """A workflow naming a skill its bot no longer has: a refusal, no claim, the switch on."""
 
-    def test_a_missing_critique_skill_claims_nothing_and_says_why(self) -> None:
+    def choose(self, build: Optional[str] = None, steps=("code-review",)) -> Dict[str, Any]:
+        """A workflow naming those skills, and the project working under it."""
+        entry = workflows.create(
+            self.home, {"name": "Mine", "stages": workflows.from_skills(build, steps)}
+        )
+        set_workflow(self.home, "p1", entry["id"])
+        return entry
+
+    def test_a_missing_review_skill_claims_nothing_and_says_why(self) -> None:
         self.on()
-        set_skills(self.home, "p1", None, ["code-review"])
+        self.choose(steps=["code-review"])
         self.issues = [issue_row(265)]
         self.assertIsNone(
             sweep(self.home, "p1", self.folders(), skills={"log-triage"}),
@@ -1476,42 +1550,47 @@ class StagedSweepTests(ClaimStubTests):
 
     def test_a_missing_build_skill_is_the_same_refusal(self) -> None:
         self.on()
-        set_skills(self.home, "p1", "plan", ["code-review"])
+        self.choose(build="plan", steps=["code-review"])
         self.issues = [issue_row(265)]
         sweep(self.home, "p1", self.folders(), skills={"code-review"})
         self.assertEqual(self.shown()["refusal"], afk.MISSING_SKILL.format(name="plan"))
         self.assertIsNone(self.shown()["task"])
 
-    def test_a_choice_the_bot_has_claims_as_usual(self) -> None:
+    def test_a_workflow_the_bot_can_run_claims_as_usual(self) -> None:
         self.on()
-        set_skills(self.home, "p1", "plan", ["code-review"])
+        self.choose(build="plan", steps=["code-review"])
         self.issues = [issue_row(265)]
         task = sweep(self.home, "p1", self.folders(), skills={"plan", "code-review"})
         self.assertEqual(task["number"], 265)
         self.assertIsNone(self.shown()["refusal"])
 
-    def test_a_missing_build_skill_with_no_critique_skill_claims_as_usual(self) -> None:
+    def test_a_workflow_naming_no_skill_claims_as_usual(self) -> None:
+        # The default preset names nothing, so no skill of the bot's can be missing from it.
         self.on()
-        set_skills(self.home, "p1", "plan", [])
         self.issues = [issue_row(265)]
         task = sweep(self.home, "p1", self.folders(), skills={"code-review"})
-        self.assertEqual(
-            task["number"],
-            265,
-            "a build skill with nothing to critique by shapes nothing, so it can't stop the sweep",
-        )
+        self.assertEqual(task["number"], 265)
         self.assertIsNone(self.shown()["refusal"])
+
+    def test_a_project_whose_old_columns_named_a_skill_judges_that_skill(self) -> None:
+        # The sweep runs with the app closed, so a row from before the picker is migrated here too.
+        set_skill_columns(self.home, "p1", "plan", ["code-review"])
+        self.on()
+        self.issues = [issue_row(265)]
+        sweep(self.home, "p1", self.folders(), skills={"log-triage"})
+        self.assertEqual(self.shown()["refusal"], afk.MISSING_SKILL.format(name="plan"))
+        self.assertIsNone(self.shown()["task"])
 
     def test_a_host_that_cannot_list_its_skills_judges_no_choice(self) -> None:
         self.on()
-        set_skills(self.home, "p1", None, ["code-review"])
+        self.choose(steps=["code-review"])
         self.issues = [issue_row(265)]
         task = sweep(self.home, "p1", self.folders(), skills=None)
         self.assertEqual(task["number"], 265, "a host that can't say isn't a host to refuse by")
 
     def test_the_whole_sweep_reads_the_bots_skills_once(self) -> None:
         self.on()
-        set_skills(self.home, "p1", None, ["code-review"])
+        self.choose(steps=["code-review"])
         self.issues = [issue_row(265)]
         project = SimpleNamespace(folders=self.folders(), archived=False)
         with patch.object(sessions, "projects", return_value={"p1": project}):
@@ -1534,7 +1613,7 @@ class CritiqueRunTests(unittest.TestCase):
             "title": "The frontier is read from GitHub and listed",
             "url": "https://github.com/mock-user/memento/issues/265",
         }
-        staged = pipeline.start("plan", ["code-review", "log-triage"])
+        staged = staged_record(pipeline.CRITIQUE, steps=("code-review", "log-triage"))
         self.record = {
             "session_id": "memento-afk-critique",
             "project_id": "p1",

@@ -176,7 +176,7 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
             }
         )
     if not pipeline.gating(staged):
-        return json.dumps({"error": _past_gate(staged["stage"])})
+        return json.dumps({"error": _past_gate(pipeline.kind(staged) or "")})
     tree = record.get("path")
     if not tree or not os.path.isdir(tree):
         return json.dumps({"error": "This session's worktree is gone."})

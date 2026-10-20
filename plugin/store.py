@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 28
+SCHEMA_VERSION = 29
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -312,8 +312,26 @@ def connect(path: Path) -> sqlite3.Connection:
             ("stalled_at", "INTEGER"),
             ("build_skill", "TEXT"),
             ("critique_skills", "TEXT"),
+            # v29: the workflow the project's AFK work runs under, and nothing for a project that
+            # picked none, which runs the default preset (workflows.py). The two skill columns above
+            # are read once, to migrate such a project into the workflow they described.
+            ("workflow_id", "TEXT"),
         ):
             if column not in afk_columns:
                 conn.execute(f"ALTER TABLE project_afk ADD COLUMN {column} {kind}")
+        # v29: the bot's workflow library — the workflow as JSON, whether it is a preset, the plugin
+        # version that seeded a preset's body, and whether the user deleted it (workflows.py). A
+        # deleted preset keeps its row so seeding doesn't bring back what was taken away.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS workflows (
+                   id TEXT PRIMARY KEY,
+                   name TEXT NOT NULL,
+                   body TEXT NOT NULL,
+                   preset INTEGER NOT NULL DEFAULT 0,
+                   version TEXT,
+                   deleted INTEGER NOT NULL DEFAULT 0,
+                   at INTEGER NOT NULL
+               )"""
+        )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     return conn
