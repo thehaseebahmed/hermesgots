@@ -1,7 +1,6 @@
 /**
  * The AFK Workflows developer setting: off until it is turned on, what a project's pop-up draws
- * either way, and the pipeline record it never touches. Its own file, because what a connection's
- * plugin answered is remembered for the page.
+ * either way, and the pipeline record it never touches.
  */
 import assert from "node:assert/strict"
 import test from "node:test"

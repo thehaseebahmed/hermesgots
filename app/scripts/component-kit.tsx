@@ -31,7 +31,6 @@ export async function seedSettings(patch: Partial<Omit<Settings, "id">> = {}) {
   await db.settings.put({ ...DEFAULT_SETTINGS, ...patch, id: "settings" })
 }
 
-// A mounted root keeps polling: a pop-up left up would hand the next test in the file its timers.
 export async function mount(element: React.ReactNode, body: () => Promise<void>) {
   const container = document.createElement("div")
   document.body.append(container)

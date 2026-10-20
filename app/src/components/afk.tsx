@@ -95,7 +95,6 @@ function useLibraryOffered(config: HermesConfig) {
   const offered = usePluginFeatureOn(config, AFK_WORKFLOWS_FEATURE)
   return Boolean(
     useLiveQuery(async () => {
-      // A host without the routes is never asked what the device holds.
       if (!offered) return false
       const settings = await getSettings()
       return Boolean(settings.developer && settings.afkWorkflows)
@@ -133,13 +132,10 @@ export function AfkPopup({
   // The pickers' list is the bot's own skills, read the way the composer's `/` menu reads them: only
   // what this profile can run now. Asked only where the host can hold a choice at all.
   const skills = useSkills(config, open && (withSkills === "yes" || libraryOffered))
-  // A library the device stops offering puts its sheets away, so turning the switch back on doesn't
-  // reopen the sheet that was abandoned.
-  useEffect(() => {
-    if (libraryOffered) return
+  if (!libraryOffered && (libraryOpen || editing !== null)) {
     setLibraryOpen(false)
     setEditing(null)
-  }, [libraryOffered])
+  }
 
   const read = useCallback(
     (signal: AbortSignal) => {
