@@ -66,7 +66,9 @@ export async function click(element: Element | null) {
 
 export async function type(element: Element | null, value: string) {
   assert.ok(element, "the field is on screen")
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
+  const prototype =
+    element.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+  const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set
   await act(async () => {
     setter?.call(element, value)
     element.dispatchEvent(new Event("input", { bubbles: true }))
@@ -91,18 +93,25 @@ export const workflowStage = (name: string, extra: Record<string, unknown> = {})
   ...extra,
 })
 
+export const DEFAULT_AFK_PROMPT =
+  "# How to work\n\n- Work in checkpoints.\n- Run the repo's own gates."
+
 export function afkHost({
   projectId = "project-1",
-  features = ["afk", "afk_switch", "afk_workflows", "afk_pipeline"],
+  features = ["afk", "afk_switch", "afk_workflows", "afk_pipeline", "afk_prompt"],
   workflow = "preset:staged",
   stage = "build",
   stageName = "Build",
+  prompt = DEFAULT_AFK_PROMPT,
+  promptRefusal = null,
 }: {
   projectId?: string
   features?: string[]
   workflow?: string
   stage?: string | null
   stageName?: string | null
+  prompt?: string
+  promptRefusal?: string | null
 } = {}) {
   const library: Record<string, unknown>[] = [
     {
@@ -126,7 +135,8 @@ export function afkHost({
     },
   ]
   const calls: Call[] = []
-  let chosen = workflow
+  let chosen: string | null = workflow
+  let words = prompt
   const answer = () => ({
     object: "memento.afk",
     project_id: projectId,
@@ -139,6 +149,7 @@ export function afkHost({
     stage,
     stage_name: stageName,
     workflow: library.find((entry) => entry.id === chosen),
+    prompt: words,
   })
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input))
@@ -170,6 +181,12 @@ export function afkHost({
       return json(answer())
     if (url.pathname.endsWith(`/projects/${projectId}/afk`) && method === "POST") {
       if (typeof body?.workflow_id === "string") chosen = body.workflow_id
+      if (typeof body?.prompt === "string") {
+        if (promptRefusal) return json({ error: { message: promptRefusal } }, 400)
+        // A Prompt and a pick are one choice between them, as the plugin writes them.
+        words = body.prompt.trim() || DEFAULT_AFK_PROMPT
+        chosen = null
+      }
       return json(answer())
     }
     if (url.pathname.endsWith(`/projects/${projectId}/tasks`))

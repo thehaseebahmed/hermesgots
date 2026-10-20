@@ -7,13 +7,17 @@
  * `afk`, the switch where it advertises `afk_switch`. The workflow library — the Workflow row, its
  * sheet and the editor — is there only where the plugin also advertises `afk_workflows` and the
  * device's Developer setting offers it; a project on a pick keeps running it either way, because
- * that is the host's record and not this screen's.
+ * that is the host's record and not this screen's. With that library off, a plugin that advertises
+ * `afk_prompt` draws the Prompt row instead: the project's words for how its work is carried out,
+ * opened in its own sheet.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { ChevronDownIcon } from "lucide-react"
+import { ChevronDownIcon, ChevronRightIcon } from "lucide-react"
 import { toast } from "sonner"
 
+import { PromptEditor } from "@/components/afk-prompt"
+import { RowText } from "@/components/settings-chrome"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { WorkflowEditor } from "@/components/workflow-editor"
 import { WorkflowSheet } from "@/components/workflow-sheet"
@@ -48,6 +52,7 @@ import {
   getProjectTasks,
   listWorkflows,
   setProjectAfk,
+  setProjectAfkPrompt,
   setProjectAfkSkills,
   setProjectAfkWorkflow,
   updateWorkflow,
@@ -74,6 +79,9 @@ export const AFK_SWITCH_FEATURE = "afk_switch"
 export const AFK_SKILLS_FEATURE = "afk_skills"
 
 export const AFK_WORKFLOWS_FEATURE = "afk_workflows"
+
+/** And the one it advertises when it holds the Prompt a project's runs are told. */
+export const AFK_PROMPT_FEATURE = "afk_prompt"
 
 /**
  * What a staged task's stage reads as in the Working row: the stage itself is the host's, and a
@@ -125,18 +133,28 @@ export function AfkPopup({
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [editing, setEditing] = useState<WorkflowEntry | "new" | null>(null)
   const [savingWorkflow, setSavingWorkflow] = useState(false)
+  const [promptOpen, setPromptOpen] = useState(false)
   const key = connectionKey(config)
   const switchable = usePluginFeature(config, AFK_SWITCH_FEATURE)
   const withSkills = usePluginFeature(config, AFK_SKILLS_FEATURE)
   const libraryOffered = useLibraryOffered(config)
+  const withPrompt = usePluginFeature(config, AFK_PROMPT_FEATURE)
+  // One row or the other: the library offered is a project running stages, and the Prompt is the
+  // words a project running one run is told instead.
+  const promptOffered = withPrompt === "yes" && !libraryOffered
+  // A Prompt names its own skills in its words, so the build and critique pickers are not drawn beside
+  // it and their list is not read: it is the workflow's own choice.
+  const skillsDrawn = withSkills === "yes" && !promptOffered
   // The pickers' list is the bot's own skills, read the way the composer's `/` menu reads them: only
   // what this profile can run now. Asked only where the host can hold a choice at all.
-  const skills = useSkills(config, open && (withSkills === "yes" || libraryOffered))
-  // The device can turn the switch off from another screen while a sheet is open.
+  const skills = useSkills(config, open && (skillsDrawn || libraryOffered))
+  // The device can turn the switch off from another screen while a sheet is open, or turn the
+  // workflow library on, which takes the Prompt row's place.
   if (!libraryOffered && (libraryOpen || editing !== null)) {
     setLibraryOpen(false)
     setEditing(null)
   }
+  if (!promptOffered && promptOpen) setPromptOpen(false)
 
   const read = useCallback(
     (signal: AbortSignal) => {
@@ -226,7 +244,8 @@ export function AfkPopup({
   // once it's on the sheet keeps reading at AFK_MS, because turning it on wakes a sweep on the host
   // and the task it claims, or why GitHub refused it, lands after the switch's own answer.
   usePoll(readAfk, afk?.on ? AFK_MS : false, [key, projectId], {
-    active: open && (switchable === "yes" || withSkills === "yes" || libraryOffered),
+    active:
+      open && (switchable === "yes" || withSkills === "yes" || libraryOffered || promptOffered),
     onShow: false,
   })
 
@@ -260,6 +279,17 @@ export function AfkPopup({
   const turn = (on: boolean) => save(() => setProjectAfk(config, projectId, on))
   const choose = (buildSkill: string | null, critiqueSkills: string[]) =>
     save(() => setProjectAfkSkills(config, projectId, buildSkill, critiqueSkills))
+  // A refusal is the host's, said here the way the other writes are, and answered to the editor so it
+  // keeps the words typed rather than closing on a fail.
+  const writePrompt = async (prompt: string): Promise<"saved" | "refused"> => {
+    try {
+      setAfk(await setProjectAfkPrompt(config, projectId, prompt))
+      return "saved"
+    } catch (failure) {
+      toast.error(failure instanceof Error ? failure.message : "Couldn't save that Prompt.")
+      return "refused"
+    }
+  }
 
   const pickWorkflow = async (picked: WorkflowEntry) => {
     setSavingWorkflow(true)
@@ -299,17 +329,24 @@ export function AfkPopup({
           <PopupTitle>Away From Keyboard</PopupTitle>
         </PopupHeader>
         <div className="flex flex-col gap-6 px-4 pb-4 sm:px-6">
-          <AfkSwitch
-            answer={switchable}
-            afk={afk}
-            error={afkError}
-            saving={saving}
-            onToggle={(on) => void turn(on)}
-          />
+          {/* The switch and the Prompt it writes for are one list: the row sits under the switch with
+              nothing but its own item padding between them. */}
+          <div className="flex flex-col">
+            <AfkSwitch
+              answer={switchable}
+              afk={afk}
+              error={afkError}
+              saving={saving}
+              onToggle={(on) => void turn(on)}
+            />
+            {promptOffered && afk && !afkError && (
+              <PromptRow prompt={afk.prompt} onOpen={() => setPromptOpen(true)} />
+            )}
+          </div>
           {libraryOffered && afk && !afkError && (
             <WorkflowRow workflow={afk.workflow} onOpen={() => setLibraryOpen(true)} />
           )}
-          {withSkills === "yes" && afk && !afkError && (
+          {skillsDrawn && afk && !afkError && (
             <AfkSkills
               afk={afk}
               skills={skills.status === "ok" ? skills.skills : []}
@@ -370,6 +407,14 @@ export function AfkPopup({
             />
           </>
         )}
+        {promptOffered && (
+          <PromptEditor
+            open={promptOpen}
+            onOpenChange={setPromptOpen}
+            prompt={afk?.prompt ?? ""}
+            onSave={writePrompt}
+          />
+        )}
       </PopupContent>
     </Popup>
   )
@@ -419,7 +464,7 @@ function AfkSwitch({
   const canSwitch = answer === "yes" && Boolean(afk) && !saving && !error && (on || !reason)
   const reading = answer === "yes" && !afk && !error
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1" data-afk-switch>
       <Row label={on ? "Turned on" : "Turned off"}>
         {reading ? (
           <Spinner className="size-4" />
@@ -472,6 +517,38 @@ function WorkflowRow({ workflow, onOpen }: { workflow: WorkflowEntry | null; onO
       )}
     </div>
   )
+}
+
+/**
+ * How this project's work is carried out, as the host answers it: the row opens the editor, where the
+ * words are written. The host answers its default method where the project wrote none, so an
+ * untouched project says what its next run will be told rather than reading as empty.
+ */
+function PromptRow({ prompt, onOpen }: { prompt: string; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      data-afk-prompt
+      aria-label="Prompt"
+      onClick={onOpen}
+      className="flex min-h-11 w-full items-center gap-3 rounded-2xl px-1 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <RowText title="Prompt" subtitle={promptLine(prompt)} />
+      <ChevronRightIcon className="shrink-0 text-muted-foreground" />
+    </button>
+  )
+}
+
+/**
+ * The row's own line for a Prompt: markdown's block marks taken off and its lines run together, since
+ * the row names the instruction rather than drawing it — the editor is where it reads as written.
+ */
+function promptLine(prompt: string) {
+  return prompt
+    .split("\n")
+    .map((line) => line.replace(/^\s*(#{1,6}|[-*+]|\d+\.)\s+/, "").trim())
+    .filter(Boolean)
+    .join(" · ")
 }
 
 /**

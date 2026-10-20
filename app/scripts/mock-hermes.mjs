@@ -179,7 +179,7 @@ const afkStages = new Map()
 const afkWorkflow = new Map()
 // The Prompt each project's work is told, as the plugin keeps it on the row (`afk.set_prompt`) and
 // serves it as the default where a project wrote none (`prompt_builder.DEFAULT_PROMPT`, shortened
-// here: nothing in the app reads the words).
+// here: the app draws what it answers, in the row and in its editor).
 const afkPrompts = new Map()
 const MOCK_DEFAULT_PROMPT = "How to work:\n\n- Work in checkpoints."
 // The library, seeded from the plugin's presets on first read (`workflows.PRESETS`): presets are
@@ -2771,6 +2771,7 @@ http
           "afk_switch",
           "afk_skills",
           "afk_workflows",
+          "afk_prompt",
           "afk_pipeline",
           ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : []),
           ...(MCPS

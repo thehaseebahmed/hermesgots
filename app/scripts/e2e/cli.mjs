@@ -188,6 +188,11 @@ const FLOWS = {
     about:
       "AFK's pop-up names the stage its held task is in, by the stage's own name from the task's snapshot, prefixed to the task's title, and keeps naming it once the pickers change under it",
   },
+  "afk-prompt": {
+    script: "e2e/afk-prompt.mjs",
+    about:
+      "AFK's Prompt row reads the words its runs are told and opens one writing sheet for them — the bottom sheet, or the drawer from a laptop's width — with Done writing them back to the host",
+  },
   "pipeline-pill": {
     script: "e2e/pipeline-pill.mjs",
     about:
