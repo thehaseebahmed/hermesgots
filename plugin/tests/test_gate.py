@@ -18,6 +18,7 @@ from unittest.mock import patch
 
 from plugin import gate, pipeline, sessions
 from plugin.store import db_path
+from plugin.tests._helpers import staged as staged_record
 
 SESSION = "memento-afk-gate"
 
@@ -49,11 +50,11 @@ class GateTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def staged(self, stage: str = pipeline.BUILD, skills=("code-review",)) -> Dict[str, Any]:
-        record = pipeline.start(None, skills)
-        if record is None:
+        if not skills:
             sessions.set_pipeline(db_path(self.home), SESSION, None)
             return {}
-        sessions.set_pipeline(db_path(self.home), SESSION, {**record, "stage": stage})
+        record = staged_record(stage, steps=tuple(skills))
+        sessions.set_pipeline(db_path(self.home), SESSION, record)
         return record
 
     def two_repos(self) -> Path:
@@ -112,12 +113,14 @@ class GateTests(unittest.TestCase):
         answer = self.call({"commands": ["memento-no-such-command"]})
         self.assertNotEqual(answer["results"][0]["code"], 0)
 
-    def test_the_answer_is_kept_on_the_session_and_the_stage_moves_to_the_gate(self) -> None:
+    def test_the_answer_is_kept_on_the_stage_the_build_is_in(self) -> None:
         self.staged()
         self.call({"commands": ["true"]})
         found = pipeline.read(self.read()["pipeline"])
-        self.assertEqual(found["stage"], pipeline.GATE)
-        self.assertEqual(found["gate"]["commands"], [{"command": "true", "code": 0}])
+        self.assertEqual(pipeline.kind(found), pipeline.BUILD, "the build is still building")
+        self.assertEqual(
+            pipeline.gate_of(found)["commands"], [{"command": "true", "code": 0}]
+        )
 
     def test_a_call_naming_no_command_is_refused(self) -> None:
         self.staged()
@@ -125,7 +128,7 @@ class GateTests(unittest.TestCase):
             answer = self.call(args)
             self.assertIn("error", answer, f"{args} is not a gate")
         self.assertEqual(
-            pipeline.read(self.read()["pipeline"])["stage"],
+            pipeline.kind(pipeline.read(self.read()["pipeline"])),
             pipeline.BUILD,
             "a refused call records nothing",
         )
@@ -147,7 +150,7 @@ class GateTests(unittest.TestCase):
         self.assertEqual(answer["results"], [{"command": "true", "code": 0}], "the second answer runs")
         self.assertTrue(answer["passed"])
         self.assertEqual(
-            pipeline.read(self.read()["pipeline"])["gate"]["commands"],
+            pipeline.gate_of(pipeline.read(self.read()["pipeline"]))["commands"],
             [{"command": "true", "code": 0}],
             "the last answer is the one the host judges the build by",
         )
@@ -168,7 +171,7 @@ class GateTests(unittest.TestCase):
             "a project of more than one repo gates each repo's own work",
         )
         self.assertEqual(
-            pipeline.read(self.read()["pipeline"])["gate"]["commands"],
+            pipeline.gate_of(pipeline.read(self.read()["pipeline"]))["commands"],
             [{"command": "pwd > where-i-ran", "repo": "mock-user/memento-api", "code": 0}],
         )
 
@@ -178,7 +181,7 @@ class GateTests(unittest.TestCase):
         answer = self.call({"commands": [{"repo": "mock-user/nope", "command": "true"}]})
         self.assertIn("no repo named mock-user/nope", answer["error"])
         self.assertEqual(
-            pipeline.read(self.read()["pipeline"])["stage"],
+            pipeline.kind(pipeline.read(self.read()["pipeline"])),
             pipeline.BUILD,
             "a refused call runs nothing and records nothing",
         )

@@ -2,6 +2,7 @@ import unittest
 from typing import Any, Dict
 
 from plugin import pipeline, prompt_builder
+from plugin.tests._helpers import staged as staged_record
 
 TASK: Dict[str, Any] = {
     "repo": "mock-user/memento",
@@ -99,7 +100,10 @@ class AfkPromptTests(unittest.TestCase):
 class BuildStageTests(unittest.TestCase):
     """What a staged task's build run is told: it ends at the gate, not at a pull request."""
 
-    RECORD = {**RECORD, "pipeline": pipeline.start("plan", ["code-review", "log-triage"])}
+    RECORD = {
+        **RECORD,
+        "pipeline": staged_record(pipeline.BUILD, steps=("code-review", "log-triage")),
+    }
 
     def text(self, record: Dict[str, Any] = None) -> str:
         return prompt_builder.afk_prompt(record or self.RECORD, TASK)
@@ -119,7 +123,7 @@ class BuildStageTests(unittest.TestCase):
         self.assertIn("A skill governs method only", text, "no skill unlocks the gate")
 
     def test_a_staged_build_with_no_build_skill_names_none(self) -> None:
-        record = {**RECORD, "pipeline": pipeline.start(None, ["code-review"])}
+        record = {**RECORD, "pipeline": staged_record(pipeline.BUILD, build=None)}
         self.assertNotIn("skill_view", self.text(record))
 
     def test_an_unstaged_run_is_told_nothing_about_stages(self) -> None:
@@ -136,7 +140,10 @@ class BuildStageTests(unittest.TestCase):
 class CritiquePromptTests(unittest.TestCase):
     """What the critique run is told: the work it reviews, by the skills chosen, and that it ships."""
 
-    RECORD = {**RECORD, "pipeline": {**pipeline.start("plan", ["code-review", "log-triage"]), "stage": "critique"}}
+    RECORD = {
+        **RECORD,
+        "pipeline": staged_record(pipeline.CRITIQUE, steps=("code-review", "log-triage")),
+    }
 
     def text(self, base: str = "main") -> str:
         return prompt_builder.critique_prompt(self.RECORD, TASK, base)
@@ -164,7 +171,7 @@ class CritiquePromptTests(unittest.TestCase):
         self.assertIn("one reviewer per skill", text)
 
     def test_one_skill_asks_for_one_reviewer(self) -> None:
-        record = {**RECORD, "pipeline": {**pipeline.start(None, ["code-review"]), "stage": "critique"}}
+        record = {**RECORD, "pipeline": staged_record(pipeline.CRITIQUE, build=None)}
         text = prompt_builder.critique_prompt(record, TASK, "main")
         self.assertIn("The critique skill, with the brief its reviewer is handed", text)
         self.assertIn("one reviewer per skill", text)
@@ -227,7 +234,7 @@ class CritiquePromptTests(unittest.TestCase):
 
     def test_the_guard_is_the_same_one_the_build_is_given(self) -> None:
         build = prompt_builder.afk_prompt(
-            {**RECORD, "pipeline": pipeline.start("plan", ["code-review"])}, TASK
+            {**RECORD, "pipeline": staged_record()}, TASK
         )
         self.assertIn(prompt_builder._SKILL_SCOPE, build, "one guard, both stages")
         self.assertIn(prompt_builder._SKILL_SCOPE, self.text())

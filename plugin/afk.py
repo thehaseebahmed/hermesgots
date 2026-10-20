@@ -40,7 +40,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Tuple
 
-from . import chats, github, pipeline, prompt_builder, sessions, ship, tasks
+from . import chats, github, pipeline, prompt_builder, sessions, ship, tasks, workflows
 from .store import connect, db_path
 
 logger = logging.getLogger(__name__)
@@ -56,6 +56,8 @@ MISSING_SKILL = (
 )
 CRITIQUE_FAILED = "The critique couldn't start."
 NO_PULL_REQUEST = "The critique ended without opening a pull request."
+# A workflow moved the task to a stage this build can't start a run for yet.
+NOT_YET = "The task reached a stage this build can't run yet."
 
 # How often a project left on is swept for work. A GitHub refusal ends that sweep and the next one
 # waits for its turn rather than asking again at once.
@@ -142,7 +144,7 @@ def read(
     hermes_home: Path, project_id: str, folders: Iterable[Any], archived: bool = False
 ) -> Dict[str, Any]:
     """Everything the app's sheet shows: the switch and its reason, the task held, the last refusal,
-    and the skills this project's work follows.
+    and the workflow this project's work runs under.
 
     An archived project is turned off here if anything had left it on, and reads off whatever
     happens: it was put away, so its switch isn't a setting anything acts on. Writing it off rather
@@ -155,6 +157,7 @@ def read(
         "refusal": None,
         "build_skill": None,
         "critique_skills": [],
+        "workflow_id": None,
     }
     why = reason(hermes_home, folders, archived)
     on = found["on"]
@@ -166,12 +169,38 @@ def read(
         "reason": why,
         "task": found["task"],
         "refusal": found["refusal"],
-        "build_skill": found["build_skill"],
-        "critique_skills": found["critique_skills"],
+        "workflow": _workflow(hermes_home, project_id, found),
         # The stage the task it holds is in, for the sheet's Working row (ADR 0018): None for a
         # project holding nothing, and for a task that isn't staged.
         "stage": _held_stage(hermes_home, found),
     }
+
+
+def _workflow(hermes_home: Path, project_id: str, found: Dict[str, Any]) -> Dict[str, Any]:
+    """The workflow this project's AFK work runs under.
+
+    Its pick, or the default preset; and for a project whose row predates the picker, the workflow its
+    old build and critique skill columns described — written to the library and named on the row the
+    first time it is read, so what the project does can't change shape under the user on upgrade.
+    """
+    if found.get("workflow_id") is None and (found.get("build_skill") or found.get("critique_skills")):
+        return workflows.migrate(
+            hermes_home,
+            project_id,
+            found.get("build_skill"),
+            found.get("critique_skills") or [],
+        )
+    return workflows.pick(hermes_home, project_id)
+
+
+def _workflow_for(hermes_home: Path, project_id: str) -> Dict[str, Any]:
+    """The workflow this project's next task runs under, migrating an old row's skills on the way.
+
+    Read from the project's own row rather than from the answer the sheet gets, because the sweep
+    runs with the app closed: a project whose row predates the picker is migrated to the workflow its
+    build and critique skill columns described before anything is snapshotted from it.
+    """
+    return _workflow(hermes_home, project_id, _row(hermes_home, project_id) or {})
 
 
 def _held_stage(hermes_home: Path, found: Dict[str, Any]) -> Optional[str]:
@@ -193,66 +222,40 @@ def _held_stage(hermes_home: Path, found: Dict[str, Any]) -> Optional[str]:
     return pipeline.stage(pipeline.read(stored))
 
 
-SKILL_FIELDS = ("build_skill", "critique_skills")
-
-
-def skills_from(body: Dict[str, Any]) -> Tuple[Optional[str], List[str]]:
-    """The skills a write names, or ``ValueError`` saying what's wrong.
-
-    Both fields or neither: the sheet writes the two pickers together, so a body naming one leaves
-    the other's meaning to a guess.
-    """
-    if any(field not in body for field in SKILL_FIELDS):
-        raise ValueError("A skills write names build_skill and critique_skills.")
-    build_skill = body["build_skill"]
-    if build_skill is not None and not isinstance(build_skill, str):
-        raise ValueError("build_skill must be a skill's name or null.")
-    critique_skills = body["critique_skills"]
-    if not isinstance(critique_skills, list) or not all(
-        isinstance(name, str) for name in critique_skills
-    ):
-        raise ValueError("critique_skills must be a list of skill names.")
-    return build_skill, critique_skills
-
-
 def write_from(body: Dict[str, Any]) -> Tuple[str, Any]:
-    """What a write names — ``"on"`` with its flag, or ``"skills"`` with the pair — or ValueError.
+    """What a write names — ``"on"`` with its flag, or ``"workflow"`` with an id — or ValueError.
 
-    One write, one shape: the skills land before the switch wakes the sweep, so a body naming both
-    could write the choice and then be refused, leaving half of it written.
+    One write, one shape: the switch wakes the sweep, so a body naming both could write the pick and
+    then be refused, leaving half of it written.
     """
     switch = "on" in body
-    choosing = any(field in body for field in SKILL_FIELDS)
+    choosing = "workflow_id" in body
     if switch and choosing:
-        raise ValueError("A write names either on or the skills, not both.")
+        raise ValueError("A write names either on or workflow_id, not both.")
     if switch:
         on = body["on"]
         if not isinstance(on, bool):
             raise ValueError("on must be true or false.")
         return "on", on
     if choosing:
-        return "skills", skills_from(body)
-    raise ValueError("on, build_skill or critique_skills is needed.")
+        workflow_id = body["workflow_id"]
+        if not isinstance(workflow_id, str) or not workflow_id.strip():
+            raise ValueError("workflow_id must be a workflow's id.")
+        return "workflow", workflow_id.strip()
+    raise ValueError("on or workflow_id is needed.")
 
 
-def set_skills(
-    hermes_home: Path,
-    project_id: str,
-    build_skill: Optional[str],
-    critique_skills: Iterable[str],
-) -> None:
-    """Keeps the skills this project's AFK work follows, on the project's row beside the switch.
+def set_workflow(hermes_home: Path, project_id: str, workflow_id: str) -> None:
+    """Points this project's AFK work at a workflow in its bot's library.
 
-    A project with no row yet gets one with its switch off: the pickers sit under the switch, not
-    behind it, so choosing a skill is no reason to start working anything.
+    The id has to be one the library holds: a project naming nothing would silently run the default
+    preset, and the user would have picked a workflow that isn't what works. A project with no row
+    yet gets one with its switch off — the row sits under the switch, not behind it — so choosing a
+    workflow is no reason to start working anything.
     """
-    _upsert(
-        hermes_home,
-        project_id,
-        build_skill=pipeline.text(build_skill),
-        critique_skills=json.dumps(pipeline.names(critique_skills)),
-        at=int(time.time()),
-    )
+    if workflows.get(hermes_home, workflow_id) is None:
+        raise ValueError(f'There is no workflow "{workflow_id}" in this bot\'s library.')
+    _upsert(hermes_home, project_id, workflow_id=workflow_id, at=int(time.time()))
 
 
 def release(
@@ -397,7 +400,7 @@ def sweep(
         _forget_refusal(hermes_home, project_id, found)
         return None
     if skills is not None:
-        missing = _missing_skill(found, skills)
+        missing = _missing_skill(hermes_home, project_id, skills)
         if missing is not None:
             _refuse(hermes_home, project_id, MISSING_SKILL.format(name=missing))
             return None
@@ -470,14 +473,13 @@ def base_branch(record: Dict[str, Any]) -> Optional[str]:
 def _begin(
     hermes_home: Path, path: Path, project_id: str, session_id: str
 ) -> Optional[Dict[str, Any]]:
-    """Writes the pipeline a staged task starts with, answering it as the run's record carries it.
+    """Writes the snapshot a staged task starts with, answering it as the run's record carries it.
 
-    None for a project with no critique skill: that task is one run which ships, exactly as it was
-    before there were stages (ADR 0018). Written before the run is posted, so the build's own
-    instructions already know where they end.
+    The project's workflow as it stands now, copied onto the task: editing or deleting the library
+    entry afterwards cannot rewrite what this task ran. Written before the run is posted, so the
+    build's own instructions already know where they end.
     """
-    found = _row(hermes_home, project_id) or {}
-    staged = pipeline.start(found.get("build_skill"), found.get("critique_skills") or [])
+    staged = pipeline.start(_workflow_for(hermes_home, project_id))
     sessions.set_pipeline(path, session_id, staged)
     return staged
 
@@ -622,7 +624,7 @@ def sweep_all(hermes_home: Path) -> List[Tuple[str, Dict[str, Any]]]:
     # And one of the skills this bot can run, for every project's choice: a skill the profile no
     # longer has stops that project's sweep (ADR 0018), and a host that can't list its skills
     # judges nothing. Read only when a project has picked one to judge.
-    skills = _profile_skills(hermes_home) if _any_staged(hermes_home) else None
+    skills = _profile_skills(hermes_home) if workflows.any_steps(hermes_home) else None
     for project_id in due:
         project = projects.get(project_id)
         if project is None:
@@ -755,7 +757,7 @@ def _stage_end(
     where the task stands.
     """
     worktree: Iterable[Dict[str, Any]] = ()
-    in_gate = stopped.finished and pipeline.gating(staged)
+    in_gate = stopped.finished and pipeline.measured(staged)
     if in_gate and pipeline.gate_verdict(staged) is None:
         worktree = ship.status(record)
     step = pipeline.advance(
@@ -766,7 +768,11 @@ def _stage_end(
     if step.stall:
         _stall(hermes_home, project_id, step.stall)
         return
-    if step.stage == pipeline.CRITIQUE and not step.stall:
+    if step.stage not in (pipeline.CRITIQUE, pipeline.DONE):
+        sessions.set_pipeline(path, record["session_id"], pipeline.failed(moved, NOT_YET))
+        _stall(hermes_home, project_id, NOT_YET)
+        return
+    if step.stage == pipeline.CRITIQUE:
         # The critique is the same session's next run: the hold keeps the task, and the stall
         # clock starts again so the moment between the two runs isn't read as nothing working it.
         _adopt(hermes_home, project_id, record["session_id"])
@@ -776,9 +782,9 @@ def _stage_end(
         return
     # The critique's own end: the pull request is what it was for, so a run that ended without one
     # stalls the task rather than reporting it reviewed.
-    unshipped = _unshipped(hermes_home, record) if staged["stage"] == pipeline.CRITIQUE else None
+    unshipped = _unshipped(hermes_home, record) if pipeline.ships(staged) else None
     if unshipped is not None:
-        sessions.set_pipeline(path, record["session_id"], {**moved, "reason": unshipped})
+        sessions.set_pipeline(path, record["session_id"], pipeline.failed(moved, unshipped))
         _stall(hermes_home, project_id, unshipped)
         return
     _free(hermes_home, project_id)
@@ -848,42 +854,19 @@ def _unshipped(hermes_home: Path, record: Dict[str, Any]) -> Optional[str]:
     return NO_PULL_REQUEST
 
 
-def _missing_skill(found: Dict[str, Any], skills: Iterable[str]) -> Optional[str]:
-    """The first skill this project's next task would follow that its bot no longer has, if any.
+def _missing_skill(
+    hermes_home: Path, project_id: str, skills: Iterable[str]
+) -> Optional[str]:
+    """The first skill this project's next task would apply that its bot no longer has, if any.
 
-    Only a staged task follows one: a project with no critique skill runs one task as it always has,
-    which never names a build skill, so refusing there would stop work over a name that changes
-    nothing about it (ADR 0018, and #327 leaves that path untouched). ``pipeline.start`` is what says
-    which skills that task would follow, so this and the task itself can't disagree.
+    Its workflow's steps are the choices worth judging: a preset names none, so a project working
+    under one claims as it always did, and a workflow naming a skill the profile has lost claims
+    nothing until the user picks otherwise (ADR 0018). ``_workflow_for`` is what the task itself
+    will be snapshotted from, so this and the task can't disagree.
     """
-    staged = pipeline.start(found.get("build_skill"), found.get("critique_skills") or [])
-    if staged is None:
-        return None
+    staged = pipeline.start(_workflow_for(hermes_home, project_id))
     known = set(skills)
-    judged = [staged["build_skill"], *staged["critique_skills"]]
-    return next((name for name in judged if name and name not in known), None)
-
-
-def _any_staged(hermes_home: Path) -> bool:
-    """Whether any project has picked a critique skill, so a sweep has choices worth reading.
-
-    Reading the skill catalog walks a directory tree, and a sweep only needs it to judge a choice: a
-    profile with nothing staged anywhere skips the walk on every home, every wake. A store that
-    can't answer reads as yes, since a check that can't run is no reason to stop judging.
-    """
-    try:
-        conn = connect(db_path(hermes_home))
-        try:
-            row = conn.execute(
-                """SELECT 1 FROM project_afk
-                   WHERE critique_skills IS NOT NULL AND critique_skills NOT IN ('', '[]') LIMIT 1"""
-            ).fetchone()
-        finally:
-            conn.close()
-    except Exception:
-        logger.debug("memento: couldn't tell whether anything is staged", exc_info=True)
-        return True
-    return row is not None
+    return next((name for name in pipeline.steps_of(staged) if name not in known), None)
 
 
 def _profile_skills(hermes_home: Path) -> Optional[set]:
@@ -1025,7 +1008,7 @@ def _row(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
     try:
         row = conn.execute(
             """SELECT enabled, task, refusal, session_id, stalled, claimed_at,
-                      build_skill, critique_skills
+                      build_skill, critique_skills, workflow_id
                FROM project_afk WHERE project_id = ?""",
             (project_id,),
         ).fetchone()
@@ -1040,8 +1023,11 @@ def _row(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
         "session_id": row[3] if isinstance(row[3], str) and row[3] else None,
         "stalled": row[4] if isinstance(row[4], str) and row[4] else None,
         "claimed_at": int(row[5]) if isinstance(row[5], (int, float)) else None,
+        # The two skill columns are only read to migrate a row written before the workflow picker;
+        # nothing answers them.
         "build_skill": pipeline.text(row[6]),
         "critique_skills": pipeline.names(_column(row[7], list)),
+        "workflow_id": row[8] if isinstance(row[8], str) and row[8] else None,
     }
 
 

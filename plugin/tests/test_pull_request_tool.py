@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 from plugin import pipeline, ship
 from plugin.store import db_path
+from plugin.tests._helpers import staged as staged_record
 
 
 def _record(tmp):
@@ -352,7 +353,7 @@ class StageTests(_Base):
     """A staged task's build can't ship: the critique stage opens the pull request instead."""
 
     def staged(self, stage: str) -> dict:
-        return {**_record(self.tmp), "pipeline": {**pipeline.start("plan", ["code-review"]), "stage": stage}}
+        return {**_record(self.tmp), "pipeline": staged_record(stage)}
 
     def test_a_build_cannot_ship(self) -> None:
         answer = self._call({"action": "ship", "commit_message": "m"}, record=self.staged(pipeline.BUILD))
