@@ -313,8 +313,8 @@ def connect(path: Path) -> sqlite3.Connection:
             ("build_skill", "TEXT"),
             ("critique_skills", "TEXT"),
             # v29: the workflow the project's AFK work runs under, and nothing for a project that
-            # picked none, which runs the default preset (workflows.py). The two skill columns above
-            # are read once, to migrate such a project into the workflow they described.
+            # picked none, which works one prompt run instead (afk.py, ADR 0027). The two skill
+            # columns above are read once, to migrate such a project into the workflow they described.
             ("workflow_id", "TEXT"),
             # v30: the Prompt the project's AFK work is told — how it is carried out, in the user's
             # own words, beside AFK's fixed brief. Empty is the bot's default method, so nothing has

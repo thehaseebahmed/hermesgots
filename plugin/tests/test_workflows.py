@@ -38,14 +38,12 @@ class LibraryTests(unittest.TestCase):
         )
         self.assertTrue(all(one["preset"] for one in found), "and all of them are presets")
 
-    def test_the_default_preset_is_what_a_project_that_picked_nothing_runs(self) -> None:
+    def test_a_project_that_picked_nothing_reads_one_run(self) -> None:
         found = workflows.pick(self.home, "p1")
         self.assertEqual(found["id"], workflows.DEFAULT_ID)
-        self.assertEqual(
-            [stage["name"] for stage in found["stages"]],
-            ["Build", "Test", "Review", "Summary"],
-            "Build · Test · Review · Summary",
-        )
+        self.assertEqual(found["name"], "One run", "one prompt run is the shape it works in")
+        self.assertEqual([stage["name"] for stage in found["stages"]], ["Build"])
+        self.assertTrue(found["stages"][0]["ships"], "and that run ships the draft itself")
 
     def test_the_preset_shapes_are_the_ones_the_issue_names(self) -> None:
         found = {one["id"]: one for one in workflows.library(self.home)}
@@ -64,13 +62,13 @@ class LibraryTests(unittest.TestCase):
         try:
             conn.execute(
                 "UPDATE workflows SET body = ?, version = '0.0.1' WHERE id = ?",
-                (json.dumps({"name": "Old", "stages": [{"name": "Old", "ships": True}]}), workflows.DEFAULT_ID),
+                (json.dumps({"name": "Old", "stages": [{"name": "Old", "ships": True}]}), "preset:staged"),
             )
         finally:
             conn.close()
         with patch.object(workflows, "_version", return_value="9.9.9"):
             found = workflows.library(self.home)
-        refreshed = next(one for one in found if one["id"] == workflows.DEFAULT_ID)
+        refreshed = next(one for one in found if one["id"] == "preset:staged")
         self.assertEqual(refreshed["name"], "Build · Test · Review · Summary")
         self.assertEqual(len(refreshed["stages"]), 4, "the body is the preset's again")
 
@@ -125,7 +123,7 @@ class ForkTests(unittest.TestCase):
 
     def test_a_fork_that_names_nothing_reads_as_a_copy_of_the_preset(self) -> None:
         found = workflows.update(
-            self.home, workflows.DEFAULT_ID, {"stages": [{"name": "Only", "ships": True}]}
+            self.home, "preset:staged", {"stages": [{"name": "Only", "ships": True}]}
         )
         self.assertEqual(found["name"], "Build · Test · Review · Summary (copy)")
 
@@ -426,10 +424,11 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["workflow"]["name"], "Mine")
         self.assertEqual(snapshot["stages"][2]["steps"], ["code-review"])
 
-    def test_a_task_started_under_a_preset_keeps_the_preset_shape(self) -> None:
+    def test_a_task_started_under_the_one_run_preset_keeps_its_shape(self) -> None:
         snapshot = pipeline.start(workflows.pick(self.home, "p1"))
-        self.assertEqual(len(snapshot["stages"]), 4, "the default preset's own shape")
+        self.assertEqual(len(snapshot["stages"]), 1, "one run is one stage")
         self.assertEqual(snapshot["workflow"]["id"], workflows.DEFAULT_ID)
+        self.assertTrue(snapshot["stages"][0]["ships"], "the only stage ships")
 
 
 if __name__ == "__main__":

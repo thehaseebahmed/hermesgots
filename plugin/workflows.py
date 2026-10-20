@@ -6,8 +6,9 @@ workflow decides what is acceptable — the same rule the app's editor calls bef
 editor and the host can never disagree about what a workflow is.
 
 Three presets ship with the plugin and are seeded on the first read: One run, which is a single stage
-that implements, gates itself and ships; Build · Test · Review · Summary, which is what a project
-with no pick runs; and Build ⇄ Test · Review · Summary, which repeats the build and its test while
+that implements, gates itself and ships, and is what a project that picked no workflow reads as, since
+one prompt run is the shape its work has (ADR 0027); Build · Test · Review · Summary, four runs from
+a build to a wrap-up; and Build ⇄ Test · Review · Summary, which repeats the build and its test while
 the gate fails. A preset is read-only: a write to one forks it into a copy with a new id and the name
 the user gave it, so a preset body is never written and can be corrected in place when the plugin
 version moves.
@@ -40,7 +41,8 @@ MAX_CAP = 10
 GATE = "gate"
 CHECKS = (GATE,)
 
-DEFAULT_ID = "preset:staged"
+# The workflow a project that named nothing reads as (ADR 0027).
+DEFAULT_ID = "preset:one-run"
 # The name a copy of a preset takes when the write names none.
 COPY = "{name} (copy)"
 # The name a workflow migrated from a project's old skill columns takes. It is the shape those
@@ -358,8 +360,8 @@ def _body(value: Any) -> Dict[str, Any]:
     return read_body(value) or {"name": "", "stages": []}
 
 
-def get(hermes_home: Path, workflow_id: str) -> Optional[Dict[str, Any]]:
-    """One workflow, or ``None`` when the library holds no such id.
+def get(hermes_home: Path, workflow_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    """One workflow, or ``None`` when the library holds no such id — nor where none is named.
 
     Its own row rather than the whole library: the app's editor asks for one, and so does a write
     that checks an id before it stores it.
@@ -388,16 +390,22 @@ def _row(hermes_home: Path, workflow_id: str) -> Optional[Dict[str, Any]]:
 
 
 def pick(hermes_home: Path, project_id: str) -> Dict[str, Any]:
-    """The workflow a project's AFK work runs under: its pick, or the default preset.
+    """The workflow a project's AFK work runs under: its own pick, or One run where it has none.
 
-    A project that named nothing runs the default preset, and so does one naming a workflow the
-    library no longer holds: a deleted workflow can't be what the next task stalls on, and its delete
-    was refused where a project still named it.
+    A pick the library no longer holds reads the same way: a deleted workflow can't be what the next
+    task stalls on, and its delete was refused where a project still named it.
     """
-    found = library(hermes_home)
-    named = _named(hermes_home, project_id)
-    chosen = next((one for one in found if one["id"] == named), None) if named else None
-    return chosen or next(one for one in found if one["id"] == DEFAULT_ID) or found[0]
+    return get(hermes_home, _named(hermes_home, project_id)) or one_run()
+
+
+def one_run() -> Dict[str, Any]:
+    """The One run preset as a library entry: the shape a project that named nothing reads as.
+
+    Built from the presets rather than read from a store, so a library the user has edited can't
+    answer a staged shape for a project that runs one run.
+    """
+    workflow_id, name, stages = next(one for one in PRESETS if one[0] == DEFAULT_ID)
+    return _entry(workflow_id, name, {"name": name, "stages": stages}, True, 0)
 
 
 def _named(hermes_home: Path, project_id: str) -> Optional[str]:

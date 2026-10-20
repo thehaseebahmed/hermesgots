@@ -23,6 +23,10 @@ the agent rather than something it fetches. The title and description ride in th
 instructions, so the prompt is the same tokens every turn. It carries no model, so the host's own
 runs.
 
+A project that named no workflow works its task in one run: nothing is snapshotted, so the session
+records no pipeline and its run is the task's whole work. One that named a workflow runs its stages
+instead, under the snapshot of it written as the task starts (`_snapshot`, ADR 0027).
+
 A project that can't be left to work says why instead of offering a switch: it has no GitHub
 repository to read tasks from, the host has no GitHub account to read or claim one with, or the
 project has been put away. The reason is the host's own answer rather than the app's guess, because
@@ -184,31 +188,50 @@ def read(
     }
 
 
-def _workflow(hermes_home: Path, project_id: str, found: Dict[str, Any]) -> Dict[str, Any]:
-    """The workflow this project's AFK work runs under.
+def _legacy(found: Dict[str, Any]) -> bool:
+    """Whether a project's row predates the picker and names its work by its old skill columns."""
+    return found.get("workflow_id") is None and bool(
+        found.get("build_skill") or found.get("critique_skills")
+    )
 
-    Its pick, or the default preset; and for a project whose row predates the picker, the workflow its
-    old build and critique skill columns described — written to the library and named on the row the
-    first time it is read, so what the project does can't change shape under the user on upgrade.
+
+def _chosen(
+    hermes_home: Path, project_id: str, found: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """The workflow this project has picked, or ``None`` where it has none to run.
+
+    Read from the row the caller already holds, so answering a project costs one store open. A row
+    that predates the picker is migrated to the workflow its build and critique skill columns
+    described, and names it, so what the project does can't change shape under the user on upgrade.
+    A pick the library no longer holds is no pick: its delete was refused where a project still named
+    it, so only a hand edit strands one.
     """
-    if found.get("workflow_id") is None and (found.get("build_skill") or found.get("critique_skills")):
+    if _legacy(found):
         return workflows.migrate(
             hermes_home,
             project_id,
             found.get("build_skill"),
             found.get("critique_skills") or [],
         )
-    return workflows.pick(hermes_home, project_id)
+    return workflows.get(hermes_home, found.get("workflow_id"))
 
 
-def _workflow_for(hermes_home: Path, project_id: str) -> Dict[str, Any]:
-    """The workflow this project's next task runs under, migrating an old row's skills on the way.
+def _workflow(hermes_home: Path, project_id: str, found: Dict[str, Any]) -> Dict[str, Any]:
+    """The workflow this project's AFK work reads as: its pick, or One run where it has none."""
+    return _chosen(hermes_home, project_id, found) or workflows.one_run()
 
-    Read from the project's own row rather than from the answer the sheet gets, because the sweep
-    runs with the app closed: a project whose row predates the picker is migrated to the workflow its
-    build and critique skill columns described before anything is snapshotted from it.
+
+def _snapshot(
+    hermes_home: Path, project_id: str, found: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """The pipeline snapshot a task starting now begins under, or ``None`` for one prompt run.
+
+    Only a project on a workflow is staged. A project that named none works one run told its Prompt,
+    and nothing is written: its session records no pipeline, so the app draws no stage and no sheet
+    (ADR 0027).
     """
-    return _workflow(hermes_home, project_id, _row(hermes_home, project_id) or {})
+    chosen = _chosen(hermes_home, project_id, found)
+    return pipeline.start(chosen) if chosen is not None else None
 
 
 class HeldStage(NamedTuple):
@@ -449,7 +472,7 @@ def sweep(
         _forget_refusal(hermes_home, project_id, found)
         return None
     if skills is not None:
-        missing = _missing_skill(hermes_home, project_id, skills)
+        missing = _missing_skill(hermes_home, project_id, found, skills)
         if missing is not None:
             _refuse(hermes_home, project_id, MISSING_SKILL.format(name=missing))
             return None
@@ -530,7 +553,8 @@ def base_branch(record: Dict[str, Any]) -> Optional[str]:
 
 
 class Start(NamedTuple):
-    """What a start copies off the project's row: the task's workflow snapshot, and its Prompt."""
+    """What a start copies off the project's row: the task's workflow snapshot — none for a project
+    that works one prompt run — and its Prompt."""
 
     snapshot: Optional[Dict[str, Any]]
     prompt: Optional[str]
@@ -546,10 +570,15 @@ def _begin(
     build's own instructions already know where they end. The Prompt comes off the same read of the
     row — the sweep works a task with the app closed, so the Prompt written last night is the one the
     run reads, with nothing the app sent in between.
+
+    A project that named no workflow snapshots nothing (ADR 0027). A task already holding its work
+    keeps the snapshot it started under, since the snapshot it runs by lives on its own session's
+    record and not here.
     """
     found = _row(hermes_home, project_id) or {}
-    staged = pipeline.start(_workflow(hermes_home, project_id, found))
-    sessions.set_pipeline(path, session_id, staged)
+    staged = _snapshot(hermes_home, project_id, found)
+    if staged is not None:
+        sessions.set_pipeline(path, session_id, staged)
     return Start(staged, found.get("prompt"))
 
 
@@ -937,16 +966,15 @@ def _unshipped(hermes_home: Path, record: Dict[str, Any]) -> Optional[str]:
 
 
 def _missing_skill(
-    hermes_home: Path, project_id: str, skills: Iterable[str]
+    hermes_home: Path, project_id: str, found: Dict[str, Any], skills: Iterable[str]
 ) -> Optional[str]:
     """The first skill this project's next task would apply that its bot no longer has, if any.
 
-    Its workflow's steps are the choices worth judging: a preset names none, so a project working
-    under one claims as it always did, and a workflow naming a skill the profile has lost claims
-    nothing until the user picks otherwise (ADR 0018). It is built from the same row a task's snapshot
-    is (``_workflow``), so this and the task can't disagree.
+    A workflow naming a skill the profile has lost claims nothing until the user picks otherwise
+    (ADR 0018). The steps judged are the ones the task's own snapshot names (``_snapshot``), so a
+    project working one prompt run names none and this and the task can't disagree.
     """
-    staged = pipeline.start(_workflow_for(hermes_home, project_id))
+    staged = _snapshot(hermes_home, project_id, found)
     known = set(skills)
     return next((name for name in pipeline.steps_of(staged) if name not in known), None)
 
