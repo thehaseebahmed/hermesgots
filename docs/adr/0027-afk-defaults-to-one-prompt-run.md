@@ -75,3 +75,6 @@ project told it to do.
   host is upgraded.
 - The default prompt carries no learnings file: Theseus keeps one because a server holds it, and
   there is no server here. What a run learned lands in the pull request body, beside what it did.
+- Since ADR 0028 the brief and the prompt have a place in a prompt's shape rather than only an order:
+  the brief is the `## Away From Keyboard` section and the project's prompt (or the default) is
+  `## User's Workflow` beneath it, unchanged in wording by either decision.

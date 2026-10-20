@@ -1348,7 +1348,7 @@ class SessionTests(unittest.TestCase):
             "one module owns every word the agent is told",
         )
         self.assertIn("Never ask the user anything", instructions)
-        self.assertIn("the issue is the spec", instructions, "the fixed points are AFK's own")
+        self.assertIn("its text is the spec", instructions, "the fixed points are AFK's own")
         self.assertIn("gh issue view", instructions, "it fetches the issue itself")
         self.assertIn(
             "You are working in a git worktree of mock-user/memento",
