@@ -1,5 +1,11 @@
 # An AFK claim is given back when its session stops
 
+**Superseded in part by ADR 0023**: a restart no longer adopts a session and leaves it waiting. A
+staged task records the run each stage posts, so a run that ended with nobody to settle it is a host
+that died rather than a user who stopped, and the sweep resumes it once. Everything else here stands:
+a claim comes back when the user closes the session, a start that never gets its run away gives it
+back, and a task nothing is working is reported as stalled in the host's own words.
+
 AFK holds one task per project, and a hold lasts exactly as long as the run working it. When a run
 finishes, the project lets go of the task but leaves the claim on GitHub — the work is in review, and
 taking the claim off would put the issue back in the frontier for the next sweep to pick up again.
