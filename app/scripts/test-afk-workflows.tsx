@@ -2,22 +2,14 @@
  * The AFK pop-up's workflow surfaces, over a seeded device database and a faked HTTP boundary: the
  * row that names the project's workflow, the library sheet with its presets first, and the editor
  * adding a stage and picking a skill through the sheet the composer's menu draws its rows with.
+ * Every test here is the Developer setting on; the pop-up with it off has its own file.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
 
 import { connectionKey } from "@/lib/connection"
-import { db } from "@/lib/db"
-import {
-  click,
-  find,
-  findAll,
-  findText,
-  json,
-  mountAfk,
-  text,
-  type,
-} from "./component-kit.tsx"
+import { DEFAULT_SETTINGS, db } from "@/lib/db"
+import { click, find, findAll, findText, json, mountAfk, text, type } from "./component-kit.tsx"
 
 const config = { baseUrl: "http://hermes.test/v1", apiKey: "test-key" }
 const project = "project-1"
@@ -105,7 +97,14 @@ function host({
   return { calls, fetch, library }
 }
 
-const screen = (body: () => Promise<void>) => mountAfk(config, project, body)
+/**
+ * Every test here is the Developer setting on: this file is the library as it is offered, and the
+ * pop-up's default — off — is `test-afk-workflows-setting.tsx`'s.
+ */
+async function screen(body: () => Promise<void>) {
+  await db.settings.put({ ...DEFAULT_SETTINGS, id: "settings", afkWorkflows: true })
+  await mountAfk(config, project, body)
+}
 
 test("the pop-up names the workflow the project's work runs under", async () => {
   globalThis.fetch = host().fetch as unknown as typeof fetch
