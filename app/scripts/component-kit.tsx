@@ -31,6 +31,7 @@ export async function seedSettings(patch: Partial<Omit<Settings, "id">> = {}) {
   await db.settings.put({ ...DEFAULT_SETTINGS, ...patch, id: "settings" })
 }
 
+// A mounted root keeps polling: a pop-up left up would hand the next test in the file its timers.
 export async function mount(element: React.ReactNode, body: () => Promise<void>) {
   const container = document.createElement("div")
   document.body.append(container)
@@ -82,7 +83,7 @@ export const findText = (selector: string, label: string) =>
 
 type Call = { method: string; path: string; body: Record<string, unknown> | null }
 
-const stage = (name: string, extra: Record<string, unknown> = {}) => ({
+export const stage = (name: string, extra: Record<string, unknown> = {}) => ({
   name,
   steps: [],
   check: null,

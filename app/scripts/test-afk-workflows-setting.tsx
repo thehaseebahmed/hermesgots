@@ -6,7 +6,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { PipelinePill } from "@/components/chat/pipeline"
+import { PipelinePill, PipelineSheet } from "@/components/chat/pipeline"
 import { db } from "@/lib/db"
 import { parsePipeline } from "@/lib/pipeline"
 import { DeveloperSettings } from "@/routes/settings"
@@ -18,6 +18,7 @@ import {
   mount,
   mountAfk,
   seedSettings,
+  stage,
   text,
 } from "./component-kit.tsx"
 
@@ -95,31 +96,15 @@ test("the Developer switch is off until it is turned on, and survives a reload",
   })
 })
 
-test("a staged task's pill draws with the workflow library off", async () => {
+test("a staged task's pill and sheet draw with the workflow library off", async () => {
   await seedSettings({ developer: true })
   const pipeline = parsePipeline({
     workflow: { id: "preset:staged", name: "Build · Test" },
     stage: 1,
     round: 1,
     stages: [
-      {
-        name: "Build",
-        steps: [],
-        check: null,
-        loop: null,
-        ships: false,
-        state: "done",
-        rounds: [],
-      },
-      {
-        name: "Test",
-        steps: [],
-        check: "gate",
-        loop: null,
-        ships: false,
-        state: "running",
-        rounds: [],
-      },
+      stage("Build", { state: "done", rounds: [] }),
+      stage("Test", { check: "gate", state: "running", rounds: [] }),
     ],
   })
   assert.ok(pipeline)
@@ -128,6 +113,13 @@ test("a staged task's pill draws with the workflow library off", async () => {
       findAll("[data-pipeline] [data-step]").length,
       2,
       "the record still draws, whichever way the setting is set",
+    )
+  })
+  await mount(<PipelineSheet open onOpenChange={() => {}} pipeline={pipeline} />, async () => {
+    assert.deepEqual(
+      findAll("ol > li").map((row) => row.getAttribute("data-stage")),
+      ["Build", "Test"],
+      "and the sheet under it, rows and all",
     )
   })
 })
