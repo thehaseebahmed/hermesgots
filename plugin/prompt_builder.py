@@ -275,7 +275,8 @@ def stage_prompt(
 def afk_input(task: Dict[str, Any]) -> str:
     """The first run's input: the issue itself — its title, its body verbatim and the link — so what
     the change is judged against is in front of the agent rather than something it goes and fetches
-    (ADR 0027). An issue with no body still reads as the block, with its description empty.
+    (ADR 0027). Verbatim but for its line endings, which `tasks` reads as Unix from GitHub's editor;
+    an issue with no body still reads as the block, with its description empty.
     """
     lines = [f"Title: {task.get('title') or ''}", "Description:"]
     body = task.get("body", "")
@@ -380,9 +381,8 @@ def _opened(url: Optional[str]) -> str:
 
 
 def _issue_link(task: Dict[str, Any]) -> str:
-    """The issue as a Markdown link, or its number alone for a row nothing answered a url for."""
-    number, url = task.get("number"), tasks.issue_url(task)
-    return f"[Issue #{number}]({url})" if url else f"Issue #{number}"
+    """The issue as a Markdown link: what the run is asked to work, and where it is."""
+    return f"[Issue #{task.get('number')}]({tasks.issue_url(task)})"
 
 
 def _issue_ref(task: Dict[str, Any]) -> IssueRef:
