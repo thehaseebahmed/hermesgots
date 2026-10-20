@@ -57,7 +57,6 @@ async function scenario(name, { width, dark, narrow = false }) {
     await rotate.click()
     // Nothing here can unwrap the key, so the dialog asks for the code before anything is written.
     await page.getByText("Enter your current recovery code").waitFor({ timeout: 15_000 })
-    await page.waitForTimeout(500)
     await shot(`${name}-ask`)
     // Which dialog this is, so that the one showing the new code can be checked against it.
     await page.evaluate(() => {

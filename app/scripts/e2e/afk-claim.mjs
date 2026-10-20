@@ -16,11 +16,6 @@ const run = async ({ page, profileId, shot, until }) => {
     if (message.type() === "error") errors.push(message.text())
   })
   const screen = `${app}/projects/${profileId}/${await makeProject(until, "AFK claim")}`
-  // The sheet slides in on a phone and a drawer on a tablet: let it settle before a shot.
-  const snap = async (name) => {
-    await page.waitForTimeout(450)
-    await shot(name)
-  }
 
   // Turning it on is the host's; the task its sweep claims lands on the next read of the sheet.
   const control = await afkOn(page, screen, until)
@@ -30,7 +25,7 @@ const run = async ({ page, profileId, shot, until }) => {
     await working.locator(`[data-task="${HELD}"]`).getByText(HELD_TITLE, { exact: true }).isVisible(),
     "the pop-up names the task AFK is holding",
   )
-  await snap("working")
+  await shot("working")
 
   // A claimed task leaves the frontier: the list is read again once AFK names what it holds.
   await until(
@@ -43,14 +38,14 @@ const run = async ({ page, profileId, shot, until }) => {
     1,
     "the task AFK took is listed as claimed",
   )
-  await snap("frontier")
+  await shot("frontier")
 
   // The claim is the host's, so a reload reads the same task back rather than an empty sheet.
   await openAfk(page, screen)
   await control.waitFor({ timeout: 15_000 })
   assert.equal(await control.getAttribute("aria-checked"), "true", "a reload reads the switch on")
   await working.locator(`[data-task="${HELD}"]`).waitFor({ timeout: 15_000 })
-  await snap("reloaded")
+  await shot("reloaded")
 
   // GitHub refusing leaves the switch on and its reason in the pop-up; nothing turns itself off.
   await page.route("**/api/plugins/memento/projects/*/afk", (route) => {
@@ -77,7 +72,7 @@ const run = async ({ page, profileId, shot, until }) => {
     "a refusal leaves the project left to work",
   )
   assert.equal(await page.locator("[data-working]").count(), 0, "and holds no task to name")
-  await snap("refused")
+  await shot("refused")
   await page.unroute("**/api/plugins/memento/projects/*/afk")
 
   assert.deepEqual(errors, [], `no console error (${errors.join("; ")})`)

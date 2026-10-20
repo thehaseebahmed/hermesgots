@@ -46,7 +46,6 @@ const run = async ({ page, profileId, shot, until }) => {
     "the Working row says the task is building",
   )
   assert.ok(await leads("Build"), "the task's title is prefixed with Build:")
-  await page.waitForTimeout(450)
   await shot("building")
 
   for (const [stage, label] of STAGES) {
@@ -54,7 +53,6 @@ const run = async ({ page, profileId, shot, until }) => {
     await working.getByText(label).waitFor({ timeout: 20_000 })
     assert.equal(await working.getAttribute("data-stage"), stage, `the Working row says ${label}`)
     assert.ok(await leads(label), `the task's title is prefixed with ${label}:`)
-    await page.waitForTimeout(450)
     await shot(stage)
   }
 
@@ -71,7 +69,6 @@ const run = async ({ page, profileId, shot, until }) => {
     "a task already claimed keeps the stage it was claimed in",
   )
   assert.ok(await leads("Review"), "and its title still says so")
-  await page.waitForTimeout(450)
   await shot("stage-kept")
 
   assert.deepEqual(errors, [], `no console error (${errors.join("; ")})`)

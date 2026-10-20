@@ -43,8 +43,6 @@ const run = async ({ page, profileId, shot, until }) => {
     (await messages.getByText(ISSUE_BODY, { exact: true }).count()) > 0,
     "and its description in the issue's own words, not a summary of them",
   )
-  // Let the pane's slide-in finish, so the capture is the screen and not the move to it.
-  await page.waitForTimeout(450)
   await shot("session")
 
   assert.deepEqual(errors, [], `no console error (${errors.join("; ")})`)

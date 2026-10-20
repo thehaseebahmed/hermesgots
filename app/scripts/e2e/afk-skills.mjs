@@ -50,20 +50,16 @@ const choosing = async ({ page, profileId, shot, until }) => {
   page.on("request", (request) => {
     if (request.method() === "GET" && request.url().endsWith("/afk")) afkReads.push(request.url())
   })
-  const snap = async (name) => {
-    await page.waitForTimeout(450)
-    await shot(name)
-  }
 
   await openAfk(page, screen)
   await build().waitFor({ timeout: 15_000 })
   await critique().waitFor({ timeout: 15_000 })
   assert.equal((await build().innerText()).trim(), "None", "nothing is chosen to build by")
   assert.equal((await critique().innerText()).trim(), "None", "nothing is chosen to critique")
-  await snap("empty")
+  await shot("empty")
 
   await openBuild()
-  await snap("build-menu")
+  await shot("build-menu")
   const offered = await page
     .getByRole("option")
     .evaluateAll((nodes) => nodes.map((node) => node.textContent.trim()))
@@ -75,7 +71,7 @@ const choosing = async ({ page, profileId, shot, until }) => {
   await page.getByRole("option", { name: BUILD, exact: true }).click()
   await reads(build, BUILD)
   await openCritique()
-  await snap("critique-menu")
+  await shot("critique-menu")
   const lenses = await page
     .getByRole("menuitemcheckbox")
     .evaluateAll((nodes) => nodes.map((node) => node.textContent.trim()))
@@ -88,7 +84,7 @@ const choosing = async ({ page, profileId, shot, until }) => {
   await page.getByRole("menuitemcheckbox", { name: CRITIQUE[1], exact: true }).click()
   await reads(critique, CRITIQUE.join(", "))
   await closeMenu()
-  await snap("chosen")
+  await shot("chosen")
 
   // The write landed on this project alone: another's AFK row is the one it always was.
   const neighbour = await (
@@ -125,7 +121,7 @@ const choosing = async ({ page, profileId, shot, until }) => {
   await page.getByRole("menuitem", { name: "Clear", exact: true }).click()
   await reads(critique, "None")
   await closeMenu()
-  await snap("cleared")
+  await shot("cleared")
 
   assert.deepEqual(errors, [], `no console error (${errors.join("; ")})`)
 }

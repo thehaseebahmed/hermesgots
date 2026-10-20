@@ -3,7 +3,7 @@
 // started and a question answered, a recording with a marked moment walked through to its recap,
 // an uploaded recording, a transcript file and a pasted one, a failed meeting tried again, and Delete. At phone,
 // tablet (dark) and laptop widths, with no errors in the console.
-import { app, assert, flow, pass } from "./lib.mjs"
+import { app, assert, flow, pass, settled } from "./lib.mjs"
 
 /** A second of silence as a WAV file, so the browser can read its length. */
 function silence() {
@@ -46,12 +46,7 @@ for (const [width, dark] of [
 ]) {
   await flow(
     `meetings-${width}${dark ? "-dark" : ""}`,
-    async ({ page, shot: take }) => {
-      // Screens slide in; let them land before a screenshot.
-      const shot = async (step) => {
-        await page.waitForTimeout(400)
-        return take(step)
-      }
+    async ({ page, shot }) => {
       page.on("pageerror", (error) => errors.push(`${width}: ${error.message}`))
       page.on("console", (message) => {
         if (message.type() === "error") errors.push(`${width}: ${message.text()}`)
@@ -164,7 +159,7 @@ for (const [width, dark] of [
       )
       await page.getByRole("button", { name: "Play", exact: true }).click()
       await page.getByRole("button", { name: "Pause", exact: true }).waitFor({ timeout: 2_000 })
-      await page.waitForTimeout(600)
+      await settled(page)
       assert.ok(await line.isVisible())
       await shot("3-topic")
       await page.getByRole("tab", { name: "Summary" }).click()
@@ -201,7 +196,6 @@ for (const [width, dark] of [
         .getByRole("textbox", { name: "Your notes" })
         .fill("import first\nno speaker names yet")
       await page.getByRole("button", { name: "Done" }).click()
-      await page.waitForTimeout(1_000)
       await shot("5-recording")
       await page.getByRole("button", { name: "Pause" }).click()
       await page.getByText("Paused", { exact: true }).waitFor()

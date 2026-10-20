@@ -4,7 +4,7 @@
 // read for and the guide written again around them, its revisions from the options menu, and a
 // rewrite with another model. At phone, tablet and laptop widths (the mission beside the list from
 // 1280px), with no errors in the console.
-import { app, assert, flow, pass } from "./lib.mjs"
+import { app, assert, flow, pass, settled } from "./lib.mjs"
 
 const errors = []
 for (const width of [390, 1100, 1440]) {
@@ -41,7 +41,8 @@ for (const width of [390, 1100, 1440]) {
       await approve.click()
 
       await page.getByText("Reading sources").first().waitFor({ timeout: 15_000 })
-      await page.waitForTimeout(3000)
+      // The third source in, so the shot shows reading under way rather than its first second.
+      await page.getByText("Layer Normalization").first().waitFor({ timeout: 15_000 })
       await shot("reading")
       const glossary = page.getByRole("button", { name: "Make a glossary" })
       await glossary.waitFor({ timeout: 45_000 })
@@ -62,7 +63,7 @@ for (const width of [390, 1100, 1440]) {
       // The drawer opens on the cited claim, lit up and scrolled into view.
       const cited = page.getByRole("dialog").locator("#claim-c3")
       await cited.getByText("inject some information").waitFor({ timeout: 5_000 })
-      await page.waitForTimeout(500)
+      await settled(page)
       assert.match(await cited.getAttribute("class"), /ring-primary/)
       assert.ok(await cited.isVisible(), "the cited claim is in view")
       await shot("source")
@@ -105,7 +106,6 @@ for (const width of [390, 1100, 1440]) {
       const revisions = page.getByRole("dialog")
       await revisions.getByText("Answers “How is a transformer trained?”, “Why does BERT mask words?”").waitFor({ timeout: 5_000 })
       await revisions.getByText(/^Current · 13 claims/).waitFor()
-      await page.waitForTimeout(500)
       await shot("revisions")
       await revisions.getByRole("button", { name: /First version/ }).click()
       await page.getByText("Revision 1: First version").waitFor({ timeout: 5_000 })
@@ -123,7 +123,6 @@ for (const width of [390, 1100, 1440]) {
       await page.getByRole("button", { name: "Guide", exact: true }).waitFor({ timeout: 45_000 })
       await openRevisions()
       await revisions.getByText("Rewritten with claude-opus-4-1").waitFor({ timeout: 30_000 })
-      await page.waitForTimeout(500)
       await shot("rewritten")
       await page.keyboard.press("Escape")
       pass(`a mission is rewritten with another model at ${width}px`)

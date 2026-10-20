@@ -202,11 +202,9 @@ const run = async ({ page, until, shot }) => {
     true,
     "the pipeline pill is the first in the row",
   )
-  await page.waitForTimeout(450)
   await shot("building")
 
   const building = await opens(page, until, "AFK - Stage 1 of 3", ["plan", "Not run yet"])
-  await page.waitForTimeout(450)
   await shot("sheet-building")
   await page.keyboard.press("Escape")
   await building.waitFor({ state: "hidden", timeout: 10_000 })
@@ -221,7 +219,6 @@ const run = async ({ page, until, shot }) => {
     { build: "pass", gate: "current", critique: "next" },
     "Gate check",
   )
-  await page.waitForTimeout(450)
   await shot("gate")
 
   // Critiquing: the gate passed, so the task is in its second run, and the sheet has its commands.
@@ -234,7 +231,6 @@ const run = async ({ page, until, shot }) => {
     { build: "pass", gate: "pass", critique: "current" },
     "Critiquing",
   )
-  await page.waitForTimeout(450)
   await shot("critique")
 
   const critiquing = await opens(page, until, "AFK - Stage 3 of 3", [
@@ -249,7 +245,6 @@ const run = async ({ page, until, shot }) => {
     1,
     "the sheet carries the gate's own step",
   )
-  await page.waitForTimeout(450)
   await shot("sheet-critiquing")
   await page.keyboard.press("Escape")
   await critiquing.waitFor({ state: "hidden", timeout: 10_000 })
@@ -262,7 +257,6 @@ const run = async ({ page, until, shot }) => {
   await reread(page, id)
   await rereadPrs(page, id)
   await reads(page, until, "done", { build: "pass", gate: "pass", critique: "pass" }, "Shipped")
-  await page.waitForTimeout(450)
   await shot("shipped")
 
   const shipped = await opens(page, until, "AFK - Stage 3 of 3", [
@@ -270,7 +264,6 @@ const run = async ({ page, until, shot }) => {
     "code-review",
     `PR #${PR}`,
   ])
-  await page.waitForTimeout(450)
   await shot("sheet-shipped")
   await page.keyboard.press("Escape")
   await shipped.waitFor({ state: "hidden", timeout: 10_000 })
@@ -280,7 +273,6 @@ const run = async ({ page, until, shot }) => {
   await page.goto(`${app}/c/${id}`)
   await page.locator('[aria-label="Messages"]').waitFor({ timeout: 15_000 })
   await reads(page, until, "done", { build: "pass", gate: "pass", critique: "pass" }, "Shipped")
-  await page.waitForTimeout(450)
   await shot("reloaded")
 
   // A stalled task keeps the stage it reached: its mark is red, the pill says so, and the sheet
@@ -288,11 +280,9 @@ const run = async ({ page, until, shot }) => {
   await staged(projectId, { pipeline: RECORDS.stalled })
   await reread(page, id)
   await reads(page, until, "gate", { build: "pass", gate: "fail", critique: "next" }, "Stalled")
-  await page.waitForTimeout(450)
   await shot("stalled")
 
   const stalled = await opens(page, until, "AFK - Stage 2 of 3", ["pnpm test", "The gate failed"])
-  await page.waitForTimeout(450)
   await shot("sheet-stalled")
   await page.keyboard.press("Escape")
   await stalled.waitFor({ state: "hidden", timeout: 10_000 })

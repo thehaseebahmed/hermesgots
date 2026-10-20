@@ -101,7 +101,8 @@ async function open(server, viewport, colorScheme = "light", on = browser, touch
   return page
 }
 
-const shot = (page, name) => shots && page.screenshot({ path: `${shots}/${name}.png` })
+const shot = (page, name) =>
+  shots && page.screenshot({ path: `${shots}/${name}.png`, animations: "disabled" })
 
 try {
   for (const [label, viewport, scheme] of [
@@ -115,7 +116,6 @@ try {
     await composer.fill("Note:")
     await mic.click()
     await page.getByRole("button", { name: "Stop" }).waitFor()
-    await page.waitForTimeout(1200)
     await shot(page, `${label}-1-recording`)
     await page.getByRole("button", { name: "Stop" }).click()
     await page.getByText("Transcribing…").waitFor()
@@ -152,7 +152,15 @@ try {
     const page = await open(mock, PHONE)
     await page.getByRole("button", { name: "Voice", exact: true }).click()
     await page.getByRole("button", { name: "Stop" }).waitFor()
-    await page.waitForTimeout(3500)
+    // Until the open piece is kept on the device (saved every 2s), which is what a reload must find.
+    for (let kept = false, end = Date.now() + 10_000; !kept; await page.waitForTimeout(100)) {
+      kept = await page.evaluate(async () => {
+        const { db } = await import("/src/lib/db.ts")
+        const rows = await db.dictations.toArray()
+        return rows.some((row) => row.pieces.some((piece) => piece.blob.size > 0))
+      })
+      assert.ok(kept || Date.now() < end, "the recording is kept on the device")
+    }
     await page.reload()
     await page.getByText("hasn't been transcribed yet").waitFor()
     await shot(page, "phone-light-6-kept")
@@ -172,7 +180,11 @@ try {
     const before = (await clips()).length
     await page.getByRole("button", { name: "Voice", exact: true }).click()
     await page.getByRole("button", { name: "Stop" }).waitFor()
-    await page.waitForTimeout(19_000)
+    // Until two pieces have gone, each cut at a pause while the voice carries on.
+    for (const end = Date.now() + 30_000; (await clips()).length - before < 2; ) {
+      assert.ok(Date.now() < end, "two pieces sent while recording")
+      await page.waitForTimeout(250)
+    }
     const sent = (await clips()).slice(before)
     assert.equal(sent.length, 2, "two pieces sent before Stop")
     assert.equal(sent[1].context, SENTENCE, "the second piece carries on from the first")

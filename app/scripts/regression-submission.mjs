@@ -55,8 +55,18 @@ try {
     await Promise.allSettled([p1, p2])
   })
 
-  // Wait for any runs to settle
-  await page.waitForTimeout(3000)
+  // Until the reply is done and nothing waits behind it: a second run would have gone out by then.
+  for (const end = Date.now() + 30_000; Date.now() < end; await page.waitForTimeout(100)) {
+    const settled = await page.evaluate(async () => {
+      const { db } = await import("/src/lib/db.ts")
+      const rows = await db.messages.where("conversationId").equals("overlap-test").toArray()
+      return (
+        rows.some((m) => m.role === "assistant" && m.status === "done") &&
+        !rows.some((m) => m.status === "queued" || m.status === "streaming")
+      )
+    })
+    if (settled) break
+  }
 
   // Only one POST /v1/runs should have been made
   assert.ok(
