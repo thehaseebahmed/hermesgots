@@ -37,8 +37,8 @@ app() {
   # ADR 0019 keeps geometry out of these: no layout, so nothing here measures.
   gate pnpm test:unit
   gate pnpm test:component
-  # `pnpm build` is `tsc -b && vite build`, and `typecheck` above has run that `tsc -b` already: the
-  # tsconfigs emit nothing, so the second pass would only check the same code again.
+  # `pnpm build` is `pnpm typecheck && vite build`, and `typecheck` has run above: the tsconfigs
+  # emit nothing, so a second pass would only check the same code again.
   gate pnpm exec vite build
 }
 

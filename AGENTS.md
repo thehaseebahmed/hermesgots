@@ -30,7 +30,7 @@ pnpm dev:netlify # Netlify CLI dev server (Identity + the sync function; needs a
 pnpm mock        # fake Hermes API on :8642 (say "clean up" to trigger an approval)
 pnpm e2e <flow>  # browser flows against the mock (list, all, shot <path>, up, down)
 pnpm lint        # oxlint
-pnpm typecheck   # tsc -b
+pnpm typecheck   # tsc -b on TypeScript 7 (`typescript-7`); `typescript` stays 6 for editors and tools
 pnpm test        # unit (scripts/test-*.mjs) then component (scripts/test-*.tsx) tests
 pnpm build       # typecheck + production build (also generates the service worker)
 pnpm build:android # native-mode build (no service worker) synced into android/; set VITE_SITE_URL for sync
