@@ -172,9 +172,8 @@ def read(
         "task": found["task"],
         "refusal": found["refusal"],
         "workflow": _workflow(hermes_home, project_id, found),
-        # How this project's work is carried out, in its own words: what its next run is told after
-        # AFK's fixed brief. Empty and unset are the same thing — the bot's default method — so the
-        # app is handed the words a run would actually read rather than a blank field.
+        # Empty and unset are the same thing — the bot's default method — so the app is handed the
+        # words a run would read rather than a blank field.
         "prompt": found["prompt"] or prompt_builder.DEFAULT_PROMPT,
         # The stage the task it holds is in, for the sheet's Working row (ADR 0018): None for a
         # project holding nothing, and for a task that isn't staged. Its own name comes beside it,
@@ -251,8 +250,7 @@ def write_from(body: Dict[str, Any]) -> Tuple[str, Any]:
     its text (None for one cleared) — or ValueError.
 
     One write, one shape: two fields in one body could write one of them and then be refused, leaving
-    half of it written. A Prompt and a pick are one choice between them, so a write naming both is
-    refused here rather than clearing one of them on the way.
+    half of it written.
     """
     named = [key for key in ("on", "workflow_id", "prompt") if key in body]
     if len(named) > 1:
@@ -287,11 +285,9 @@ def set_prompt(hermes_home: Path, project_id: str, prompt: Optional[str]) -> Non
     """Writes the project's Prompt, clearing any workflow pick in the same write.
 
     A project is never both: a Prompt is one run's method and a workflow is the stages its work runs
-    through, and the row's own answer decides which one works the next task. The old skill columns a
-    row from before the picker carries are left alone — the migration that reads them skips a project
-    that holds a Prompt (``_workflow``), so nothing has to be deleted to keep them from coming back.
-    A project with no row yet gets one with its switch off — the row sits under the switch, not behind
-    it — so writing a Prompt is no reason to start working anything.
+    through. The old skill columns a row from before the picker carries are left alone — the migration
+    that reads them skips a project holding a Prompt (``_workflow``) — so nothing has to be deleted to
+    keep them from coming back.
     """
     _upsert(
         hermes_home,
@@ -307,10 +303,8 @@ def set_workflow(hermes_home: Path, project_id: str, workflow_id: str) -> None:
 
     The id has to be one the library holds: a project naming nothing would silently run the default
     preset, and the user would have picked a workflow that isn't what works. A Prompt and a pick are
-    one choice between them, so picking a workflow drops the Prompt in the same write — the other
-    direction of what ``set_prompt`` does, or a project would hold both and its sheet would show words
-    no run reads. A project with no row yet gets one with its switch off — the row sits under the
-    switch, not behind it — so choosing a workflow is no reason to start working anything.
+    one choice between them, so picking one drops the Prompt in the same write: a project holding both
+    would show words no run reads.
     """
     if workflows.get(hermes_home, workflow_id) is None:
         raise ValueError(f'There is no workflow "{workflow_id}" in this bot\'s library.')
@@ -498,10 +492,8 @@ def session_title(task: Dict[str, Any]) -> str:
 def run_body(record: Dict[str, Any], task: Dict[str, Any], prompt: Optional[str]) -> Dict[str, Any]:
     """The ``POST /v1/runs`` request: how to work a planned issue, and the issue's name as the input.
 
-    The prompt is all `prompt_builder`'s — one module holds every word the agent is told — and it is
-    passed in rather than defaulted: this run is the one the project's Prompt exists for, so a caller
-    with nothing to tell it says so, and no caller forgets its way past it. The issue's own text is
-    left out of both: the agent reads it from GitHub.
+    The prompt is all `prompt_builder`'s — one module holds every word the agent is told. The issue's
+    own text is out of both: the agent reads it from GitHub.
     """
     return _request(
         record, prompt_builder.afk_prompt(record, task, prompt), prompt_builder.afk_input(task)
@@ -1121,7 +1113,6 @@ def _row(hermes_home: Path, project_id: str) -> Optional[Dict[str, Any]]:
         "build_skill": pipeline.text(row[6]),
         "critique_skills": pipeline.names(_column(row[7], list)),
         "workflow_id": row[8] if isinstance(row[8], str) and row[8] else None,
-        # The project's Prompt: its own words for how the work is done, and None for the default.
         "prompt": pipeline.text(row[9]),
     }
 

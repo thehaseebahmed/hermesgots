@@ -308,8 +308,7 @@ def afk_row(
 ) -> Dict[str, Any]:
     """The answer `read` gives for a project holding nothing and having picked nothing.
 
-    Spelled once so a column added to the row is one edit here rather than one per test. A prompt of
-    None is the bot's default method, which is what a project nobody has edited is told.
+    Spelled once so a column added to the row is one edit here rather than one per test.
     """
     return {
         "on": on,
@@ -1278,9 +1277,9 @@ class SessionTests(unittest.TestCase):
         self.assertNotIn("Read the frontier first.", instructions, "the issue's text isn't copied in")
 
     def test_the_run_is_told_the_prompt_the_host_holds(self) -> None:
-        # Every task claimed today carries a workflow snapshot, so this proves the handoff: what the
-        # row holds is what the run is built with. `PromptTests` proves the builder puts that value
-        # in the instructions, and that a staged task is told its stage's brief instead.
+        # A claimed task carries a workflow snapshot today, so this proves the handoff — that the
+        # Prompt a run is built with came off the row — rather than the posted body; #353 makes a
+        # project that picked nothing run prompt-mode, which is where the body carries it.
         set_prompt(self.home, "p1", "Squash every checkpoint into one commit.")
         with patch.object(afk, "run_body", wraps=afk.run_body) as built:
             self.start()

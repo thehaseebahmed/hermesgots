@@ -1046,11 +1046,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 elif named == "prompt":
                     await asyncio.to_thread(afk.set_prompt, hermes_home(), project_id, value)
                 else:
-                    # Not a shape this route writes: a refusal, rather than a Prompt nobody wrote.
                     return _error(web, f"{named} isn't a write this route takes.", 400)
             except ValueError as why:
                 return _error(web, str(why), 400)
-            # A pick and a Prompt answer the sheet the same way: the whole row after the write.
             found = await asyncio.to_thread(
                 afk.read,
                 hermes_home(),

@@ -92,26 +92,21 @@ The rules:
 - No TODOs, commented-out code, debug prints or secrets in what you commit. Never push to the default branch, and keep all work inside the worktree.
 - If you can't finish, don't force it: leave the tree consistent and say where it stopped and what blocks it — in the pull request body if you opened one, else in your reply. Never leave a half-done change unexplained."""
 
-# The points no skill and no Prompt may change, stated once: the two scope sentences below quote them,
-# and every run is told one of the two.
+# The points no skill and no Prompt may change: the two scope sentences below quote them.
 _FIXED_POINTS = (
     "the issue is the spec, the work is verified, nobody is asked anything and the pull request is "
     "shipped last"
 )
 
-# The sentence that puts the brief above whatever else a run is told — a skill the stage follows, or
-# the project's Prompt — so neither can undo a fixed point.
 _AFK_SCOPE = (
     f"A skill or a Prompt governs method only: these rules hold whatever either says — {_FIXED_POINTS} "
     "— so neither asks the user anything, merges or closes anything, or leaves the shipping to them."
 )
 
 
-# The method a run is told when its project has written no Prompt of its own (ADR 0027): checkpoints,
-# a check that fails before the code that passes it, the repo's own gates, a read of your own diff,
-# the two review skills once over the whole change, and a summary a person reads. It is the project's
-# to rewrite — the brief above is what no Prompt changes — and it is served by the host so the app and
-# the device hold no copy of it, and a project nobody edited is still told the careful method.
+# The method a run is told when its project has written no Prompt of its own (ADR 0027). It is the
+# project's to rewrite — the brief above is what no Prompt changes — and the host serves it, so the
+# app and the device hold no copy, and a project nobody edited is still told the careful method.
 DEFAULT_PROMPT = """How to work:
 
 - Work in checkpoints. Each one leaves the tree building and is worth committing on its own, in the repo's commit style.
