@@ -2,8 +2,6 @@
  * A bot on a plugin that predates workflows: the AFK pop-up it always showed, with no Workflow row
  * and the skill pickers it has. Its own file, because the features a connection answered are
  * remembered for the page, and this one's answer is the one without `afk_workflows`.
- *
- * `node --test --import ./scripts/component-hooks.mjs scripts/test-afk-workflows-old-plugin.tsx`
  */
 import assert from "node:assert/strict"
 import test from "node:test"

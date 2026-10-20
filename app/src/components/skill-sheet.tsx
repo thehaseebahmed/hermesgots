@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { SearchIcon } from "lucide-react"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
@@ -42,14 +42,16 @@ export function SkillSheet({
   const [query, setQuery] = useState("")
   const [draft, setDraft] = useState<string[]>(value)
   // Every open starts from what the row holds now: a choice made and undone in a sheet opened
-  // before must not come back as a checked row.
-  useEffect(() => {
-    if (!open) return
-    setQuery("")
-    setDraft(value)
-    // Only an open resets: `value` changing under an open sheet is a write landing, not a new list.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  // before must not come back as a checked row. A write landing under an open sheet is not a new
+  // list, so only the open itself resets it.
+  const [wasOpen, setWasOpen] = useState(open)
+  if (wasOpen !== open) {
+    setWasOpen(open)
+    if (open) {
+      setQuery("")
+      setDraft(value)
+    }
+  }
 
   const sorted = useMemo(() => {
     const ordered = [...skills].sort((one, other) =>

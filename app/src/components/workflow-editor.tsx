@@ -43,7 +43,6 @@ import {
   type WorkflowStage,
 } from "@/lib/workflow"
 
-/** A stage nothing has been said about yet. */
 function blankStage(name: string): WorkflowStage {
   return { name, steps: [], check: null, loop: null, ships: false }
 }
@@ -52,11 +51,6 @@ function blankStage(name: string): WorkflowStage {
  * A workflow, edited: its name and its stages in order, each stage's skills — picked through the
  * shared skill sheet, so a skill reads the same here as in the composer's menu — its loop and the
  * one stage that ships.
- *
- * The editor asks for the stage list and the skills, and derives the rest: the steps are kept
- * alphabetical, and the shipping mark follows the last stage that runs skills rather than a check.
- * What it saves is what the host would accept, since `validate` speaks the host's own refusals; a
- * preset is saved as a copy, which is the host's rule, not a question here.
  */
 export function WorkflowEditor({
   open,
@@ -86,8 +80,7 @@ export function WorkflowEditor({
   )
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  // The sheet's own place: the stage it is for, and — for a single pick — the step it replaces.
-  const [picking, setPicking] = useState<{ stage: number; step?: string } | null>(null)
+  const [picking, setPicking] = useState<{ stage: number; step: string | null } | null>(null)
 
   const marked = withShipping(stages)
 
@@ -107,17 +100,15 @@ export function WorkflowEditor({
   const add = () => setStages((held) => [...held, blankStage(`Stage ${held.length + 1}`)])
 
   const picked = (names: string[]) => {
-    if (!picking) return
-    const stage = stages[picking.stage]
-    if (!stage) return
-    if (picking.step !== undefined) {
-      // One step, swapped for the one picked; a step is one skill, so the first is the answer.
-      if (names.length !== 1) return
-      const steps = stage.steps.map((step) => (step === picking.step ? names[0] : step))
-      change(picking.stage, { steps: stepOrder(steps) })
+    const stage = picking ? stages[picking.stage] : undefined
+    const only = names[0]
+    if (!picking || !stage || !only) return
+    if (picking.step === null) {
+      change(picking.stage, { steps: stepOrder(names) })
       return
     }
-    change(picking.stage, { steps: stepOrder(names) })
+    const swapped = stage.steps.map((step) => (step === picking.step ? only : step))
+    change(picking.stage, { steps: stepOrder(swapped) })
   }
 
   const submit = async () => {
@@ -245,7 +236,7 @@ export function WorkflowEditor({
                     variant="ghost"
                     aria-label={`Steps for stage ${index + 1}`}
                     className="h-11 min-w-11"
-                    onClick={() => setPicking({ stage: index })}
+                    onClick={() => setPicking({ stage: index, step: null })}
                   >
                     <PlusIcon />
                     <span className="text-sm">Steps</span>
@@ -297,7 +288,6 @@ export function WorkflowEditor({
                 )}
                 <div className="flex flex-wrap items-center gap-2">
                   {one.check === "gate" && <Badge variant="outline">Gate</Badge>}
-                  {/* Derived, not chosen: the last stage that runs skills is the one that ships. */}
                   {one.ships && <Badge variant="secondary">Ships</Badge>}
                 </div>
               </li>
@@ -357,7 +347,7 @@ export function WorkflowEditor({
           }
           skills={skills}
           loading={skillsLoading}
-          multiple={picking?.step === undefined}
+          multiple={picking?.step === null}
           value={picking?.step ? [picking.step] : (stage?.steps ?? [])}
           onChoose={picked}
         />

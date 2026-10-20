@@ -34,7 +34,6 @@ export function SkillRow({
   selected?: boolean
   /** Whether this skill is one of those chosen, where the list is a choice of many. */
   checked?: boolean
-  /** Whether the pointer is on this row. */
   active?: boolean
   icon?: LucideIcon
   onPick?: () => void
@@ -54,7 +53,6 @@ export function SkillRow({
         active && "bg-accent text-accent-foreground",
       )}
     >
-      {/* The icon rides the title's line, so a description hangs under the title, not the icon. */}
       <span className="row-start-1 flex h-5 items-center">
         <Icon className="size-4 text-muted-foreground" />
       </span>

@@ -8,7 +8,6 @@
  * whole workflow, so the two cannot disagree about what is acceptable. What the editor derives
  * rather than asks for is here too — the stages' steps in alphabetical order, and the one stage
  * that ships — and the library entry's tolerant read, for a body a hand edit or an older plugin
- * wrote. Pure: no host, no browser, so `scripts/test-workflow.mjs` drives it.
  */
 
 import { skillNames } from "./pipeline.ts"
@@ -22,7 +21,6 @@ export const GATE = "gate"
 
 export interface WorkflowStage {
   name: string
-  /** The skills the stage applies, in the order it applies them. */
   steps: string[]
   check: typeof GATE | null
   loop: { from: string; cap: number } | null
@@ -34,7 +32,6 @@ export interface Workflow {
   stages: WorkflowStage[]
 }
 
-/** A workflow as the library answers it: its own body, and where it came from. */
 export interface WorkflowEntry extends Workflow {
   id: string
   /** A preset is read-only: a write to one forks it into a copy. */
@@ -76,11 +73,6 @@ export function shippingStage(stages: WorkflowStage[]): number | null {
   return null
 }
 
-/**
- * A workflow's stages with the shipping mark where the editor derives it. What the editor sends is
- * the stages as they were written; the mark is never something the user sets by hand, since exactly
- * one stage ships and which one it is follows from what the stages do.
- */
 export function withShipping(stages: WorkflowStage[]): WorkflowStage[] {
   const ships = shippingStage(stages)
   return stages.map((stage, index) => ({ ...stage, ships: index === ships }))
@@ -103,7 +95,6 @@ function readStage(value: unknown): WorkflowStage | null {
   }
 }
 
-/** The stages a workflow body holds, those this reading can name, in their own order. */
 export function readStages(value: unknown): WorkflowStage[] {
   return (Array.isArray(value) ? value : []).flatMap((one) => {
     const found = readStage(one)
@@ -134,7 +125,6 @@ export function parseWorkflowEntry(value: unknown): WorkflowEntry | null {
   }
 }
 
-/** The entries a library read holds, each once, in the order the host listed them. */
 export function parseWorkflowLibrary(value: unknown): WorkflowEntry[] {
   return (Array.isArray(value) ? value : []).flatMap((one) => {
     const found = parseWorkflowEntry(one)
@@ -149,7 +139,6 @@ export function parseWorkflowLibrary(value: unknown): WorkflowEntry[] {
  */
 export function workflowShape(stages: WorkflowStage[]): string {
   const named = stages.map((stage) => stage.name)
-  // Each loop draws its span once, where the span ends, and the stage it starts at is not repeated.
   const spans = new Map<number, number>()
   for (const [index, stage] of stages.entries()) {
     const start = stage.loop ? named.indexOf(stage.loop.from) : -1

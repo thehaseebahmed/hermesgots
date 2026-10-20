@@ -2,8 +2,6 @@
  * The AFK pop-up's workflow surfaces, over a seeded device database and a faked HTTP boundary: the
  * row that names the project's workflow, the library sheet with its presets first, and the editor
  * adding a stage and picking a skill through the sheet the composer's menu draws its rows with.
- *
- * `node --test --import ./scripts/component-hooks.mjs scripts/test-afk-workflows.tsx`
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -26,7 +24,6 @@ const presetStages = [
 
 type Call = { method: string; path: string; body: Record<string, unknown> | null }
 
-/** The host the screen talks to: its library, the project's AFK answer, and every call it saw. */
 function host({
   features = ["afk", "afk_switch", "afk_skills", "afk_workflows", "afk_pipeline"],
   workflow = "preset:staged",
@@ -99,7 +96,6 @@ function host({
   return { calls, fetch, library }
 }
 
-/** Waits for the reads a screen starts to land, then lets React commit what they changed. */
 async function settle() {
   for (let quiet = 0; quiet < 4; quiet += 1)
     await act(async () => {
@@ -251,7 +247,6 @@ test("the editor says what the host would refuse, before it asks", async () => {
     await click(find("[data-afk-workflow] button"))
     await click(findText("button", "New workflow"))
     await type(find('input[aria-label="Workflow name"]'), "Mine")
-    // Two stages with one name: the host's refusal, in the host's words.
     await click(findText("button", "Add stage"))
     await type(findAll('input[aria-label^="Stage"]')[1], "Build")
     await click(findText("button", "Create"))

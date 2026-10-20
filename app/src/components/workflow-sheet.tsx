@@ -10,9 +10,6 @@ import { workflowShape, type WorkflowEntry } from "@/lib/workflow"
  * The workflows a bot's account keeps: presets first, read-only, and the ones the account wrote.
  * Picking a row puts the project's work under it — one write — and the pencil opens the editor, which
  * forks a preset into a copy rather than rewriting it.
- *
- * Each row names the workflow's shape, so the sheet says what the work would do, not just what someone
- * called it.
  */
 export function WorkflowSheet({
   open,

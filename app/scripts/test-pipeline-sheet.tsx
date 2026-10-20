@@ -2,8 +2,6 @@
  * The pipeline's own screen, drawn from a snapshot: one bar per stage of the workflow the task ran,
  * and under each stage what it ran — the gate's commands with their exit codes — and what its review
  * found, counted against the skill that raised it and opening to the list.
- *
- * `node --test --import ./scripts/component-hooks.mjs scripts/test-pipeline-sheet.tsx`
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -13,7 +11,6 @@ import { createRoot } from "react-dom/client"
 import { PipelinePill, PipelineSheet } from "@/components/chat/pipeline"
 import { parsePipeline } from "@/lib/pipeline"
 
-/** A four-stage workflow, its build and test done, the review stalled on what it found. */
 const snapshot = {
   workflow: { id: "preset:staged", name: "Build · Test · Review · Summary" },
   stage: 2,
@@ -118,14 +115,11 @@ test("the sheet draws one row per stage of the workflow the task ran", async () 
       ["Build", "Test", "Review", "Summary"],
       "four stages, in the workflow's order and its own words",
     )
-    // Each stage's commands, the gate's marked with their exit codes.
     assert.match(text, /pnpm lint/, "the build's own command")
     assert.match(text, /pnpm test/, "the gate's")
     assert.match(text, /exit 1/, "with the code the gate answered")
-    // The review's findings, counted against the skill that raised them.
     const findings = document.querySelector("[data-findings]")
     assert.equal(findings?.textContent, "code-review2 findings", "the skill and what it found")
-    // And the stop the task is in, in the host's words.
     assert.match(text, /The review found two things to fix\./)
   } finally {
     await sheet.close()

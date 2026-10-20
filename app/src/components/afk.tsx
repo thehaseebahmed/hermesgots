@@ -68,7 +68,6 @@ export const AFK_SWITCH_FEATURE = "afk_switch"
 /** And the one it advertises when it can keep the skills a project's work follows. */
 export const AFK_SKILLS_FEATURE = "afk_skills"
 
-/** And the one it advertises when the project's work can run under a workflow from the library. */
 export const AFK_WORKFLOWS_FEATURE = "afk_workflows"
 
 /**
@@ -243,8 +242,6 @@ export function AfkPopup({
   const choose = (buildSkill: string | null, critiqueSkills: string[]) =>
     save(() => setProjectAfkSkills(config, projectId, buildSkill, critiqueSkills))
 
-  // Picking a workflow is one write, and the sheet closes on it: the row above says what the project
-  // holds, and the host's answer is what it holds.
   const pickWorkflow = async (picked: WorkflowEntry) => {
     setSavingWorkflow(true)
     try {
@@ -290,8 +287,6 @@ export function AfkPopup({
             saving={saving}
             onToggle={(on) => void turn(on)}
           />
-          {/* Under the switch: what the work runs under, then the skills it follows. Both are the
-              project's own setting, and a choice is the project's even with nothing left to work. */}
           {withWorkflows === "yes" && afk && !afkError && (
             <WorkflowRow workflow={afk.workflow} onOpen={() => setLibraryOpen(true)} />
           )}

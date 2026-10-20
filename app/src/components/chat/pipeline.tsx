@@ -30,7 +30,6 @@ import { cn } from "@/lib/utils"
 
 type Icon = ComponentType<{ className?: string; strokeWidth?: number }>
 
-/** The mark a step wears: the step it is where the record names one, and the stage's own otherwise. */
 const ICONS: Record<string, Icon> = {
   build: HammerIcon,
   gate: ShieldCheckIcon,
@@ -75,8 +74,6 @@ const LOOK: Record<
   },
 }
 
-/** The stages as bars, one per stage of the workflow the task ran: the run in a glance, and what
- * the pill itself wears. */
 function Bars({ steps }: { steps: PipelineStep[] }) {
   return (
     <span className="flex items-center gap-1">
@@ -137,7 +134,6 @@ export function PipelinePill({
   )
 }
 
-/** A stage's own lines, laid out the same for its commands and for the skills that ran. */
 function Lines({ entries }: { entries: StepRun[] }) {
   return (
     <ul className="mt-1.5 flex flex-col gap-1">
@@ -162,7 +158,6 @@ function Lines({ entries }: { entries: StepRun[] }) {
   )
 }
 
-/** What one skill's review found, counted beside the skill and opening to what it said. */
 function Findings({ reports }: { reports: SkillFindings[] }) {
   const [open, setOpen] = useState<string | null>(null)
   return (
@@ -223,7 +218,6 @@ function Findings({ reports }: { reports: SkillFindings[] }) {
   )
 }
 
-/** A stage's row: its mark, its own name, the round a loop is on, and what it ran. */
 function StageRow({
   step,
   stage,
@@ -271,8 +265,6 @@ function StageRow({
   )
 }
 
-/** The run in full: each stage of the workflow, what it ran, what its review found, and why the
- * host stopped it where it did. */
 export function PipelineSheet({
   open,
   onOpenChange,

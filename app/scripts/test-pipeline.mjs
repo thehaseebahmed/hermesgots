@@ -35,7 +35,6 @@ const round = (extra = {}) => ({
   ...extra,
 })
 
-/** The default preset as a task snapshot: Build, Test, Review that ships, Summary. */
 const snapshot = (extra = {}) => ({
   workflow: { id: "preset:staged", name: "Build · Test · Review · Summary" },
   stage: 0,
@@ -49,7 +48,6 @@ const snapshot = (extra = {}) => ({
   ...extra,
 })
 
-/** A record from before workflows: the stage's name and the two skill lists. */
 const legacy = (extra = {}) => ({
   stage: "build",
   build_skill: null,

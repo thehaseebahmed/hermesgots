@@ -12,7 +12,6 @@ import {
   workflowShape,
 } from "../src/lib/workflow.ts"
 
-/** A stage as the editor holds it. */
 const stage = (name, extra = {}) => ({
   name,
   steps: [],
@@ -178,8 +177,6 @@ test("what the host refuses is refused here, in the host's own words", () => {
 })
 
 test("the editor's own marks pass the rule the host applies", () => {
-  // The editor never leaves the mark for the user: what it derives is what it sends, so a workflow
-  // it built always names one stage that ships.
   assert.equal(validate({ name: "Empty summary", stages: withShipping(staged()) }), null)
   const forked = withShipping([
     stage("Migrate", { steps: ["plan"] }),

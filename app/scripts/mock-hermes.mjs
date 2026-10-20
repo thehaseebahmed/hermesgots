@@ -139,7 +139,6 @@ const lastCalls = new Map()
 const modelChanges = new Map()
 const transcripts = new Map()
 let lastRowId = 0
-// The id the next workflow the account writes takes (`wf-1`, `wf-2`, …), as the plugin's rows do.
 let lastWorkflowId = 0
 // Context compression rotates a chat to a child session (Hermes's sessions.parent_session_id): a
 // turn addressed to the old id runs on the live tip and is keyed there in runs/live, while a
@@ -173,7 +172,6 @@ const afkSkills = new Map()
 // The stage each project's held task is in, as the plugin keeps it on the session's own record
 // (`plugin/pipeline.py`). A claimed task builds until a flow says the sheet should read another.
 const afkStages = new Map()
-// The workflow each project's work runs under, by id; nothing named runs the default preset.
 const afkWorkflow = new Map()
 // The library, seeded from the plugin's presets on first read (`workflows.PRESETS`): presets are
 // read-only, and a write through the routes adds or rewrites one of the account's own rows.
@@ -213,7 +211,6 @@ const PRESET_WORKFLOWS = [
   },
 ]
 const DEFAULT_WORKFLOW = "preset:staged"
-/** The library as the routes answer it: presets first, each group in the order it was written. */
 function workflows() {
   if (!seeded) {
     seeded = true
@@ -224,7 +221,6 @@ function workflows() {
   }
   return workflowRows
 }
-/** The workflow a project's work runs under: its pick, or the default when nothing has named one. */
 function workflowOf(projectId) {
   const id = afkWorkflow.get(projectId) ?? DEFAULT_WORKFLOW
   return workflows().find((entry) => entry.id === id) ?? workflows()[0]
@@ -1150,7 +1146,6 @@ function afkSweep(project) {
   if (record) record.pipeline = staged
 }
 
-/** The name of the stage a task is in, off its session's record, as `pipeline.stage_name` reads it. */
 function afkStageName(record) {
   if (!record) return null
   if (Array.isArray(record.stages)) return record.stages[record.stage]?.name ?? null
@@ -1177,7 +1172,6 @@ function afkAnswer(project, reason) {
     // The stage its session's record holds, null for a task claimed with no critique skill: one
     // run, which ships, and no stage to name.
     stage: afkSwept.has(project.id) ? (afkStages.get(project.id) ?? null) : null,
-    // The stage's own name, and the workflow the project runs under: what the sheet's rows say.
     stage_name: afkStageName(record),
     workflow: workflowOf(project.id),
     ...skills,

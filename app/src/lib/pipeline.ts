@@ -25,7 +25,6 @@ export type AfkStage = (typeof AFK_STAGES)[number]
 /** The three steps a legacy record works through; `done` is where they leave it, not a fourth. */
 const STEPS = ["build", "gate", "critique"] as const
 
-/** One command a stage ran, and the exit code the host read where the gate answered it. */
 export interface PipelineCommand {
   command: string
   /** The repo the command runs in, where the project is more than one. */
@@ -33,7 +32,6 @@ export interface PipelineCommand {
   code: number | null
 }
 
-/** One thing a review skill reported, as the transcript would word it. */
 export interface PipelineFinding {
   title: string
   detail: string | null
@@ -45,7 +43,6 @@ export interface SkillFindings {
   findings: PipelineFinding[]
 }
 
-/** One round of a stage: the run that worked it, what it ran, and what came of it. */
 export interface PipelineRound {
   runId: string | null
   /** The commands the run itself executed, in the order it ran them. */
@@ -62,7 +59,6 @@ export interface PipelineRound {
 /** How a stage reads: finished, failing, the one the task is in now, or still to come. */
 export type StepState = "pass" | "fail" | "current" | "next"
 
-/** One stage of the workflow the task ran, and what it did. */
 export interface PipelineStage {
   /** What a row is keyed and marked by: the step a legacy record names, or the stage's own name. */
   key: string
@@ -71,7 +67,6 @@ export interface PipelineStage {
   /** The step the host judges this stage as, for a record that names one rather than a workflow. */
   kind: AfkStage | null
   state: StepState
-  /** The skills the stage applies, in the order the workflow holds them. */
   steps: string[]
   /** The host's own check: `gate` where the stage is answered by the commands the build named. */
   check: string | null
@@ -93,7 +88,6 @@ export interface SessionPipeline {
   stages: PipelineStage[]
 }
 
-/** One stage as the pill draws it: its mark, its own name, and which of the four states it is in. */
 export interface PipelineStep {
   key: string
   name: string
@@ -148,7 +142,6 @@ function gateCommands(value: unknown): PipelineCommand[] {
   return commands(gate?.commands)
 }
 
-/** What each review skill reported, out of the rounds the host kept: a title and an optional detail. */
 function findings(value: unknown): SkillFindings[] {
   const rows = Array.isArray(value) ? value : []
   return rows.flatMap((one) => {
@@ -188,8 +181,7 @@ function rounds(value: unknown): PipelineRound[] {
   })
 }
 
-/** One stage of a snapshot, as the host wrote it: its own fields beside its state and rounds. */
-function stageEntry(value: unknown): (PipelineStage & { failed: boolean }) | null {
+function stageEntry(value: unknown): ReadStage | null {
   const row = value as Record<string, unknown> | null
   const name = text(row?.name)
   if (!row || !name) return null
@@ -201,9 +193,6 @@ function stageEntry(value: unknown): (PipelineStage & { failed: boolean }) | nul
     key: name,
     name,
     kind: null,
-    // The four states are the stage's place in the run, worked out in `snapshot`; the one the host
-    // says a stage failed in is why this field is read at all.
-    state: "next",
     failed: text(row.state) === FAILED,
     steps: skillNames(row.steps),
     check: check === "gate" ? check : null,
@@ -213,14 +202,13 @@ function stageEntry(value: unknown): (PipelineStage & { failed: boolean }) | nul
   }
 }
 
-/** A stage as it is read, before its place decides what it is: whether the host said it failed. */
-type ReadStage = PipelineStage & { failed: boolean }
+/** A stage as the record holds it, before its place in the run decides what state it is in. */
+type ReadStage = Omit<PipelineStage, "state"> & { failed: boolean }
 
 function clamp(value: number, least: number, most: number) {
   return Math.min(Math.max(value, least), most)
 }
 
-/** The stop the stage the task is in carries, in the words the sheet shows. */
 function stopAt(stage: ReadStage | undefined): string | null {
   if (!stage?.failed) return null
   for (let index = stage.rounds.length - 1; index >= 0; index -= 1) {
@@ -230,7 +218,6 @@ function stopAt(stage: ReadStage | undefined): string | null {
   return null
 }
 
-/** What a stage is, from where the task is: passed, in hand, the one it failed in, or still to come. */
 function place(index: number, at: number, stopped: boolean): StepState {
   if (index < at) return "pass"
   if (index > at) return "next"
@@ -247,7 +234,7 @@ function place(index: number, at: number, stopped: boolean): StepState {
 function snapshot(record: Record<string, unknown>): SessionPipeline | null {
   const raw = (Array.isArray(record.stages) ? record.stages : []) as unknown[]
   const read = raw.flatMap((one) => {
-    const found = stageEntry(one) as ReadStage | null
+    const found = stageEntry(one)
     return found ? [found] : []
   })
   if (!read.length) return null
@@ -286,7 +273,7 @@ function legacy(
     critique: skillNames(record.critique_skills),
   }
   const stages = STEPS.map((kind, index): PipelineStage => {
-    const state: StepState = index < at ? "pass" : index > at ? "next" : reason ? "fail" : "current"
+    const state = place(index, at, reason !== null)
     return {
       key: kind,
       name: STEP_WORDS[kind],
@@ -330,7 +317,6 @@ export function parsePipeline(raw: unknown): SessionPipeline | null {
   return legacy(record, step, step === "done" ? null : text(record.reason))
 }
 
-/** The stages as the pill draws them: one mark per stage of the workflow the task ran. */
 export function pipelineSteps(pipeline: SessionPipeline): PipelineStep[] {
   return pipeline.stages.map(({ key, name, state }) => ({ key, name, state }))
 }
@@ -384,7 +370,6 @@ export function commandName(one: PipelineCommand): string {
   return one.repo ? `${one.repo}: ${one.command}` : one.command
 }
 
-/** One thing a stage ran: what it was, and what came of it where the host records that. */
 export interface StepRun {
   name: string
   /** The gate's own answer. A skill's outcome isn't recorded, so it has none. */

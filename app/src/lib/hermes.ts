@@ -2529,7 +2529,6 @@ export interface ProjectAfk {
   stage: AfkStage | null
   /** That stage's own name in the workflow's words ("Migrate", "Verify"); null once past the last. */
   stageName: string | null
-  /** The workflow the project's work runs under, as the library answers it. */
   workflow: WorkflowEntry | null
 }
 
@@ -2629,7 +2628,6 @@ function workflowPath(config: HermesConfig, rest = ""): string {
   return `${pluginRoot(config.baseUrl)}/workflows${rest}`
 }
 
-/** The workflows a bot's account keeps, presets first, read from the host's library. */
 export async function listWorkflows(
   config: HermesConfig,
   signal?: AbortSignal,
@@ -2660,12 +2658,10 @@ async function writeWorkflow(
   return parseWorkflowLibrary(answer?.workflows)
 }
 
-/** Adds a workflow to the library, answering the library it joined. */
 export function createWorkflow(config: HermesConfig, workflow: Workflow): Promise<WorkflowEntry[]> {
   return writeWorkflow(config, "POST", "", { ...workflow })
 }
 
-/** Rewrites one of the account's workflows — forking a preset into a copy — answering the library. */
 export function updateWorkflow(
   config: HermesConfig,
   id: string,
@@ -2674,7 +2670,6 @@ export function updateWorkflow(
   return writeWorkflow(config, "PATCH", `/${encodeURIComponent(id)}`, { ...workflow })
 }
 
-/** Takes a workflow out of the library, answering the library it left. */
 export function deleteWorkflow(config: HermesConfig, id: string): Promise<WorkflowEntry[]> {
   return writeWorkflow(config, "DELETE", `/${encodeURIComponent(id)}`)
 }
