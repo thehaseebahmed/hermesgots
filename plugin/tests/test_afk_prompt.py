@@ -110,6 +110,20 @@ class AfkPromptTests(unittest.TestCase):
         )
         self.assertIn("This task is worked in stages", text)
 
+    def test_a_staged_build_keeps_the_method_the_prompt_took_from_the_brief(self) -> None:
+        # The Prompt carries the method for a run that isn't staged; a stage has no Prompt, so its
+        # brief keeps the six steps it had, and the build stage's "shipping step above" still has one.
+        text = prompt_builder.afk_prompt({**RECORD, "pipeline": staged_record(pipeline.BUILD)}, TASK)
+        for step in ("1. Read.", "2. Plan.", "3. Implement.", "4. Verify.", "5. Ship.", "6. Report."):
+            self.assertIn(step, text)
+        self.assertIn("which issue it implements, `#265`", text)
+        self.assertIn("delegate_task", text, "the second opinion is still offered")
+        self.assertNotIn(prompt_builder.DEFAULT_PROMPT, text)
+
+    def test_a_run_that_is_not_staged_is_not_told_the_six_steps(self) -> None:
+        text = prompt_builder.afk_prompt(RECORD, TASK)
+        self.assertNotIn("1. Read.", text, "its method is the Prompt")
+
     def test_it_says_what_to_do_when_the_work_cannot_be_finished(self) -> None:
         text = self.text()
         self.assertIn("leave the tree consistent", text)

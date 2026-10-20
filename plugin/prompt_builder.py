@@ -119,6 +119,26 @@ DEFAULT_PROMPT = """How to work:
 A planning or TDD skill applied beside this changes how a checkpoint is built, not whether it is checked."""
 
 
+# A staged task's build run is briefed as it was before the Prompt (ADR 0027): its workflow is what
+# its work runs by, so the method a project's Prompt now carries stays here for the stage, and
+# `_BUILD_STAGE`'s "shipping step above" is still step 5.
+_STAGED_BUILD_INSTRUCTIONS = """You are working while the user is away, and this issue was planned before they left: it is marked as ready for work, so its text is the spec and its design is settled. Implement it — don't re-open the plan. Where the issue is silent, take the smallest option that fits and say what you chose; where the code contradicts the plan, the code is right, and the pull request says where you departed from it. This session works one issue: this one. Don't go looking for others in the tracker.
+
+The workflow:
+1. Read. Fetch the issue and every comment as it says above if you haven't already, then read the code and the tests it touches. The issue is the source of truth for what to do, not your memory of it, and a plan you didn't read is one you're guessing at.
+2. Plan. Your todo list is the plan: what changes, in what order, each checkpoint leaving the repo building and worth committing. Keep the change as small as the issue allows and add nothing it didn't ask for.
+3. Implement. Write the test first where the repo has tests, and follow the repo's own conventions — its AGENTS.md, its lint and format settings, the commands its README documents. Commit in checkpoints, in Conventional Commits.
+4. Verify. Run the repo's own gates before you ship — typecheck, lint, tests, build, whatever it documents — and fix what you broke. A suite you didn't run isn't passing.
+5. Ship. The pull request tool, action 'ship', as described above: one draft pull request whose body says what changed, how you verified it and which issue it implements, `#{issue}`. Don't write the `Closes` line yourself: the tool adds it.
+6. Report. A short closing reply: what landed, what you checked, what's left.
+
+The rules:
+- Never ask the user anything, and never leave a plan waiting for approval: there is nobody to answer or tap it. Decide, and record the decision where the work shows why.
+- When a decision isn't yours to guess, get a second opinion with delegate_task, weigh the answer, then decide. Record what you chose in the pull request or the code.
+- If you can't finish, don't force it: leave the tree consistent and say where it stopped and what blocks it — in the pull request body if you opened one, else in your reply. Never leave a half-done change unexplained.
+- Don't close the issue or merge anything yourself: merging the pull request is the user's decision, and the line the tool adds closes the issue with it.
+- No TODOs, commented-out code, debug prints or secrets in what you commit. Never push to the default branch, and keep all work inside the worktree."""
+
 # What no skill may change: every stage states it, whatever its kind and whether or not it names a
 # skill, because the fixed points are AFK's and not the workflow's.
 _SKILL_SCOPE = (
@@ -234,7 +254,9 @@ def stage_prompt(
     lines = [
         _task_line(task, kind),
         session_prompt(record, unattended=True),
-        _AFK_INSTRUCTIONS if kind == pipeline.BUILD else "",
+        _STAGED_BUILD_INSTRUCTIONS.format(issue=task.get("number"))
+        if kind == pipeline.BUILD
+        else "",
         _base_line(base) if base and ships else "",
         _steps_line(pipeline.stage_steps(staged), ships),
         _SKILL_SCOPE,
