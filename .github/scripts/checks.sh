@@ -32,8 +32,9 @@ app() {
   gate pnpm lint
   gate pnpm typecheck
   # Every `scripts/test-*.mjs` is a unit test and every `scripts/test-*.tsx` a component test, found
-  # by name rather than listed here, so a new file is gated the day it lands. Component files run in
-  # processes of their own, since what a connection's plugin answered is remembered for the page.
+  # by name rather than listed here, so a new file is gated the day it lands. What a connection's
+  # plugin answered is remembered for the page, so component files run in processes of their own and
+  # a test of a host that answers differently takes a connection of its own (`connection` in the kit).
   # ADR 0019 keeps geometry out of these: no layout, so nothing here measures.
   gate pnpm test:unit
   gate pnpm test:component

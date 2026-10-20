@@ -26,6 +26,15 @@ export async function settle() {
     })
 }
 
+/**
+ * A connection of a test's own. What a connection's plugin answered is remembered for the page, so a
+ * test of a host that answers differently (an older plugin) names its own rather than sharing one.
+ */
+export const connection = (name: string) => ({
+  baseUrl: `http://${name}.test/v1`,
+  apiKey: "test-key",
+})
+
 export async function seedSettings(patch: Partial<Omit<Settings, "id">> = {}) {
   await db.settings.clear()
   await db.settings.put({ ...DEFAULT_SETTINGS, ...patch, id: "settings" })

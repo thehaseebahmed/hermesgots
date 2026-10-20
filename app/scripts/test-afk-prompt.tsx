@@ -3,7 +3,8 @@
  * drawn only where the host holds a Prompt and the workflow library is off, the words it reads, the
  * editor writing them with no other mode to switch to, the skills pickers the Prompt doesn't need
  * left out, a save answering the row, a refusal keeping the words typed, and an emptied field reading
- * the host's default again.
+ * the host's default again; and a plugin that predates the Prompt, on a connection of its own, with
+ * no row to write words it can't hold.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -14,8 +15,10 @@ import {
   DEFAULT_AFK_PROMPT,
   afkHost,
   click,
+  connection,
   find,
   findText,
+  json,
   mountAfk,
   seedSettings,
   type,
@@ -210,6 +213,42 @@ test("the way out without Done writes nothing", async () => {
       fieldValue(),
       DEFAULT_AFK_PROMPT,
       "a fresh open starts from the row again, not from the draft that was left",
+    )
+  })
+})
+
+test("a bot without afk_prompt shows no Prompt row", async () => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input))
+    if (url.pathname.endsWith("/plugins/memento/info"))
+      return json({ name: "memento", features: ["afk", "afk_switch"] })
+    if (url.pathname.endsWith("/afk"))
+      return json({
+        object: "memento.afk",
+        on: false,
+        reason: null,
+        task: null,
+        refusal: null,
+        build_skill: null,
+        critique_skills: [],
+        stage: null,
+      })
+    if (url.pathname.endsWith("/tasks"))
+      return json({ repos: [], ready: [], claimed: [], blocked: [] })
+    return json({ error: { message: `No route for ${url.pathname}` } })
+  }) as unknown as typeof fetch
+  await seedSettings({ developer: true })
+  await mountAfk(connection("old-plugin"), "project-1", async () => {
+    // Boolean, not the node: a failing assertion must not print a whole DOM tree.
+    assert.equal(
+      Boolean(document.querySelector("[data-afk-prompt]")),
+      false,
+      "no Prompt row without the feature",
+    )
+    assert.equal(
+      Boolean(document.querySelector('[aria-label="Work on its own"]')),
+      true,
+      "the switch it always had",
     )
   })
 })
