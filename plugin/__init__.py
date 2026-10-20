@@ -289,6 +289,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # An app that predates this one has no picker at all rather than pickers that
                     # could only write a shape the host no longer takes.
                     "afk_workflows",
+                    # The project's own Prompt, written on its AFK row and told to every run it
+                    # starts: an app that predates it draws the sheet it has rather than a field the
+                    # host would refuse (afk.py, prompt_builder.py).
+                    "afk_prompt",
                     # Still advertised while the app draws a staged session's pipeline, which this
                     # host answers from the task's workflow snapshot (`pipeline.for_app`): the pill
                     # is drawn only where a host claims it, so dropping it here would take the
@@ -1022,19 +1026,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         project, refused = await resolve_project(project_id)
         if refused is not None:
             return refused
-        if named == "workflow":
-            try:
-                await asyncio.to_thread(afk.set_workflow, hermes_home(), project_id, value)
-            except ValueError as why:
-                return _error(web, str(why), 400)
-            found = await asyncio.to_thread(
-                afk.read,
-                hermes_home(),
-                project_id,
-                project.folders,
-                bool(getattr(project, "archived", False)),
-            )
-        else:
+        if named == "on":
             try:
                 found = await asyncio.to_thread(
                     afk.set_on,
@@ -1047,6 +1039,22 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             except afk.Refused as why:
                 # The project can't be left to work: its reason is the answer, and nothing is written.
                 return _error(web, str(why), 409)
+        else:
+            try:
+                if named == "workflow":
+                    await asyncio.to_thread(afk.set_workflow, hermes_home(), project_id, value)
+                else:
+                    await asyncio.to_thread(afk.set_prompt, hermes_home(), project_id, value)
+            except ValueError as why:
+                return _error(web, str(why), 400)
+            # A pick and a Prompt answer the sheet the same way: the whole row after the write.
+            found = await asyncio.to_thread(
+                afk.read,
+                hermes_home(),
+                project_id,
+                project.folders,
+                bool(getattr(project, "archived", False)),
+            )
         return web.json_response({"object": "memento.afk", "project_id": project_id, **found})
 
     async def workflows_response() -> "web.Response":

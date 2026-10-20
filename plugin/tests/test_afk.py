@@ -37,9 +37,11 @@ from plugin.afk import (
     NO_GITHUB,
     NO_REPOSITORY,
     Refused,
+    prompt_for,
     read,
     release,
     set_on,
+    set_prompt,
     set_workflow,
     sweep,
     sweep_all,
@@ -301,12 +303,14 @@ def afk_row(
     task: Any = None,
     refusal: Optional[str] = None,
     workflow: Any = None,
+    prompt: Any = None,
     stage: Optional[str] = None,
     stage_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """The answer `read` gives for a project holding nothing and having picked nothing.
 
-    Spelled once so a column added to the row is one edit here rather than one per test.
+    Spelled once so a column added to the row is one edit here rather than one per test. A prompt of
+    None is the bot's default method, which is what a project nobody has edited is told.
     """
     return {
         "on": on,
@@ -314,6 +318,7 @@ def afk_row(
         "task": task,
         "refusal": refusal,
         "workflow": default_workflow() if workflow is None else workflow,
+        "prompt": prompt_builder.DEFAULT_PROMPT if prompt is None else prompt,
         "stage": stage,
         "stage_name": stage_name,
     }
@@ -436,6 +441,143 @@ class WorkflowChoiceTests(unittest.TestCase):
         again = read(self.home, "p1", self.folders())
         self.assertEqual(again["workflow"], found["workflow"], "written once, then read back")
         self.assertEqual(len(workflows.library(self.home)), 4, "three presets and the migration")
+
+
+class PromptTests(unittest.TestCase):
+    """The project's Prompt: how its AFK work is carried out, kept on the host with the project.
+
+    It is told to a run beside AFK's fixed brief, so it is read off the project's row when the run is
+    posted — never from a device — and empty is the bot's default method again.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = Path(self.tmp.name)
+        self.checkout = self.home / "checkout"
+        (self.checkout / ".git").mkdir(parents=True)
+        for one in (
+            patch.object(github, "token", return_value=("token", "env")),
+            patch.object(github, "origin_repo", return_value="mock-user/memento"),
+        ):
+            one.start()
+            self.addCleanup(one.stop)
+
+    def folders(self) -> List[Any]:
+        return [folder(str(self.checkout))]
+
+    def prompt(self, project_id: str = "p1") -> str:
+        return read(self.home, project_id, self.folders())["prompt"]
+
+    def choose(self, name: str = "Mine") -> Dict[str, Any]:
+        """A workflow of this bot's own, and the project naming it."""
+        entry = workflows.create(
+            self.home, {"name": name, "stages": workflows.from_skills(None, [])}
+        )
+        set_workflow(self.home, "p1", entry["id"])
+        return entry
+
+    def test_a_project_nobody_has_edited_reads_the_default_method(self) -> None:
+        self.assertEqual(
+            self.prompt(),
+            prompt_builder.DEFAULT_PROMPT,
+            "the host serves the method, so the app holds no copy of it",
+        )
+        self.assertIsNone(afk._row(self.home, "p1"), "nothing is stored for a project that wrote none")
+
+    def test_a_prompt_written_on_a_device_is_read_back_from_the_host(self) -> None:
+        set_prompt(self.home, "p1", "Run the suite twice, and say what the second run found.")
+        self.assertEqual(
+            self.prompt(), "Run the suite twice, and say what the second run found."
+        )
+        self.assertEqual(
+            prompt_for(self.home, "p1"),
+            "Run the suite twice, and say what the second run found.",
+            "the run reads the row, with nothing of the app's in between",
+        )
+
+    def test_an_empty_prompt_is_the_default_again(self) -> None:
+        set_prompt(self.home, "p1", "Run the suite twice.")
+        set_prompt(self.home, "p1", "   ")
+        self.assertEqual(self.prompt(), prompt_builder.DEFAULT_PROMPT)
+        self.assertIsNone(
+            afk._row(self.home, "p1")["prompt"], "a blank Prompt stores nothing to read back"
+        )
+
+    def test_writing_a_prompt_clears_the_workflow_pick(self) -> None:
+        self.choose()
+        set_prompt(self.home, "p1", "Squash every checkpoint into one commit.")
+        self.assertIsNone(afk._row(self.home, "p1")["workflow_id"], "a project is never both")
+        self.assertEqual(
+            read(self.home, "p1", self.folders())["workflow"]["id"],
+            workflows.DEFAULT_ID,
+            "it runs no picked workflow any more",
+        )
+
+    def test_a_blank_prompt_clears_the_pick_too(self) -> None:
+        self.choose()
+        set_prompt(self.home, "p1", "")
+        self.assertIsNone(afk._row(self.home, "p1")["workflow_id"])
+
+    def test_a_prompt_clears_the_skill_columns_a_migration_would_read(self) -> None:
+        # A row from before the picker: reading it would migrate the project onto the workflow those
+        # columns describe, putting back the pick the Prompt took off.
+        set_skill_columns(self.home, "p1", "plan", ["code-review"])
+        set_prompt(self.home, "p1", "Squash every checkpoint into one commit.")
+        self.assertEqual(
+            read(self.home, "p1", self.folders())["workflow"]["id"],
+            workflows.DEFAULT_ID,
+            "the old columns are not a pick this project still holds",
+        )
+
+    def test_one_projects_prompt_leaves_anothers_alone(self) -> None:
+        set_prompt(self.home, "p2", "Theirs.")
+        self.assertEqual(self.prompt(), prompt_builder.DEFAULT_PROMPT)
+        self.assertEqual(self.prompt("p2"), "Theirs.")
+
+    def test_writing_a_prompt_is_no_reason_to_start_working(self) -> None:
+        set_prompt(self.home, "p1", "Squash every checkpoint into one commit.")
+        self.assertFalse(read(self.home, "p1", self.folders())["on"])
+
+    def test_a_write_names_the_prompt_as_its_own_shape(self) -> None:
+        self.assertEqual(write_from({"prompt": "Mine."}), ("prompt", "Mine."))
+        self.assertEqual(write_from({"prompt": "  Mine.  "}), ("prompt", "Mine."), "trimmed")
+        self.assertEqual(write_from({"prompt": ""}), ("prompt", None), "cleared")
+        self.assertEqual(write_from({"prompt": "   "}), ("prompt", None))
+        self.assertEqual(write_from({"prompt": None}), ("prompt", None))
+
+    def test_a_prompt_is_never_written_beside_another_shape(self) -> None:
+        for body in (
+            {"prompt": "Mine.", "on": True},
+            {"prompt": "Mine.", "workflow_id": "wf-1"},
+            {"prompt": 3},
+        ):
+            with self.subTest(body=body):
+                with self.assertRaises(ValueError):
+                    write_from(body)
+
+    def test_a_stored_prompt_is_what_the_run_is_told(self) -> None:
+        set_prompt(self.home, "p1", "Squash every checkpoint into one commit.")
+        record = {
+            "session_id": "memento-afk-s1",
+            "project_id": "p1",
+            "mode": "auto",
+            "repos": [
+                {
+                    "name": "mock-user/memento",
+                    "repo_root": str(self.checkout),
+                    "path": "/trees/afk-265",
+                    "branch": "hermes/afk-265",
+                }
+            ],
+        }
+        body = afk.run_body(record, {"repo": "mock-user/memento", "number": 265}, prompt_for(self.home, "p1"))
+        self.assertIn("Squash every checkpoint into one commit.", body["instructions"])
+        self.assertNotIn(
+            prompt_builder.DEFAULT_PROMPT,
+            body["instructions"],
+            "the project's own words stand in for the default",
+        )
 
 
 class ClaimStubTests(unittest.TestCase):
@@ -1120,7 +1262,7 @@ class SessionTests(unittest.TestCase):
             "one module owns every word the agent is told",
         )
         self.assertIn("Never ask the user anything", instructions)
-        self.assertIn("delegate_task", instructions)
+        self.assertIn("the issue is the spec", instructions, "the fixed points are AFK's own")
         self.assertIn("gh issue view", instructions, "it fetches the issue itself")
         self.assertIn(
             "You are working in a git worktree of mock-user/memento",
@@ -1128,6 +1270,16 @@ class SessionTests(unittest.TestCase):
             "the session's own prompt is kept, so its worktree and pull request lines still hold",
         )
         self.assertNotIn("Read the frontier first.", instructions, "the issue's text isn't copied in")
+
+    def test_the_run_is_told_the_prompt_the_host_holds(self) -> None:
+        set_prompt(self.home, "p1", "Squash every checkpoint into one commit.")
+        with patch.object(afk, "run_body", wraps=afk.run_body) as built:
+            self.start()
+        self.assertEqual(
+            built.call_args[0][2],
+            "Squash every checkpoint into one commit.",
+            "the Prompt comes off the project's row as the run starts, with the app closed",
+        )
 
     def test_the_run_is_the_sessions_own_and_starts_on_the_hosts_answer(self) -> None:
         self.start()

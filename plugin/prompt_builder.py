@@ -79,26 +79,43 @@ _PROGRESS_UPDATES_INSTRUCTIONS = (
 )
 
 
-# Added to an AFK session's run instead of a user (ADR 0011, ADR 0013): the issue was planned before
-# the user left, so this is implementation, not design, and there is nobody to ask. Fixed text, so
-# the prompt cache holds across the session's turns; the issue is named in one line beside it rather
-# than quoted, because the agent can read it from GitHub itself.
+# Added to an AFK session's run instead of a user (ADR 0011, ADR 0013, ADR 0027): the points no Prompt
+# and no skill may change. How the work is carried out is the project's Prompt, told after this; the
+# brief is AFK's own, so it holds whatever that Prompt says. Fixed text, so the prompt cache holds
+# across the session's turns.
 _AFK_INSTRUCTIONS = """You are working while the user is away, and this issue was planned before they left: it is marked as ready for work, so its text is the spec and its design is settled. Implement it — don't re-open the plan. Where the issue is silent, take the smallest option that fits and say what you chose; where the code contradicts the plan, the code is right, and the pull request says where you departed from it. This session works one issue: this one. Don't go looking for others in the tracker.
-
-The workflow:
-1. Read. Fetch the issue and every comment as it says above if you haven't already, then read the code and the tests it touches. The issue is the source of truth for what to do, not your memory of it, and a plan you didn't read is one you're guessing at.
-2. Plan. Your todo list is the plan: what changes, in what order, each checkpoint leaving the repo building and worth committing. Keep the change as small as the issue allows and add nothing it didn't ask for.
-3. Implement. Write the test first where the repo has tests, and follow the repo's own conventions — its AGENTS.md, its lint and format settings, the commands its README documents. Commit in checkpoints, in Conventional Commits.
-4. Verify. Run the repo's own gates before you ship — typecheck, lint, tests, build, whatever it documents — and fix what you broke. A suite you didn't run isn't passing.
-5. Ship. The pull request tool, action 'ship', as described above: one draft pull request whose body says what changed, how you verified it and which issue it implements, `#{issue}`. Don't write the `Closes` line yourself: the tool adds it.
-6. Report. A short closing reply: what landed, what you checked, what's left.
 
 The rules:
 - Never ask the user anything, and never leave a plan waiting for approval: there is nobody to answer or tap it. Decide, and record the decision where the work shows why.
-- When a decision isn't yours to guess, get a second opinion with delegate_task, weigh the answer, then decide. Record what you chose in the pull request or the code.
-- If you can't finish, don't force it: leave the tree consistent and say where it stopped and what blocks it — in the pull request body if you opened one, else in your reply. Never leave a half-done change unexplained.
-- Don't close the issue or merge anything yourself: merging the pull request is the user's decision, and the line the tool adds closes the issue with it.
-- No TODOs, commented-out code, debug prints or secrets in what you commit. Never push to the default branch, and keep all work inside the worktree."""
+- The work is verified before it ships, and the pull request ships last.
+- Nothing is merged or closed by you: merging the pull request is the user's decision, and the line the tool adds closes the issue with it. Don't write the `Closes` line yourself.
+- No TODOs, commented-out code, debug prints or secrets in what you commit. Never push to the default branch, and keep all work inside the worktree.
+- If you can't finish, don't force it: leave the tree consistent and say where it stopped and what blocks it — in the pull request body if you opened one, else in your reply. Never leave a half-done change unexplained."""
+
+# The sentence that puts the brief above whatever else a run is told — a skill the stage follows, or
+# the project's Prompt — so neither can undo a fixed point.
+_AFK_SCOPE = (
+    "A skill or a Prompt governs method only: these rules hold whatever either says — the issue is "
+    "the spec, the work is verified, nobody is asked anything and the pull request is shipped last — "
+    "so neither asks the user anything, merges or closes anything, or leaves the shipping to them."
+)
+
+
+# The method a run is told when its project has written no Prompt of its own (ADR 0027): checkpoints,
+# a check that fails before the code that passes it, the repo's own gates, a read of your own diff,
+# the two review skills once over the whole change, and a summary a person reads. It is the project's
+# to rewrite — the brief above is what no Prompt changes — and it is served by the host so the app and
+# the device hold no copy of it, and a project nobody edited is still told the careful method.
+DEFAULT_PROMPT = """How to work:
+
+- Work in checkpoints. Each one leaves the tree building and is worth committing on its own, in the repo's commit style; post a short update between them, so a long run reads as work in progress rather than a hang, and keep your todo list current as you go.
+- Write the check that fails before the code that passes it — the test, the assertion, or whatever the repo already uses — and watch it fail for the reason you mean to fix. Then make it pass. A repo with no tests is a reason to say so, not to skip the check.
+- Run the repo's own gates before you call anything done: its typecheck, lint, tests and build, whatever its README, AGENTS.md or CI names, and fix what you broke. A suite you didn't run isn't passing.
+- Read your own diff before you finish, as a reviewer would, and take what you find.
+- Once the change is whole, apply the skills `simplify-code` and `requesting-code-review` once over all of it, not once per file: load each with skill_view, and fix what each accepts in one pass.
+- Finish with a short, human summary: what landed, what each review reported and what changed because of it, what is left and why, and one line on what the user should look at first.
+
+A planning or TDD skill applied beside this changes how a checkpoint is built, not whether it is checked."""
 
 
 # What no skill may change: every stage states it, whatever its kind and whether or not it names a
@@ -177,20 +194,25 @@ def session_prompt(record: Dict[str, Any], unattended: bool = False) -> str:
     return "\n".join(line for line in lines if line)
 
 
-def afk_prompt(record: Dict[str, Any], task: Dict[str, Any]) -> str:
+def afk_prompt(record: Dict[str, Any], task: Dict[str, Any], prompt: Optional[str] = None) -> str:
     """What an AFK session's first run is told: the issue it implements, its own session's facts,
-    then how to work a planned issue with nobody to ask (ADR 0011, ADR 0013).
+    AFK's fixed rules, and then the Prompt its project works by (ADR 0011, ADR 0027).
 
-    The issue's text isn't quoted here — the agent fetches it, and the line naming it is all that
-    has to be fixed per task, so the prompt cache still holds across the session's turns. A staged
-    task is briefed for the stage it starts in instead (``stage_prompt``).
+    The brief is AFK's own, the points no Prompt may change; everything about how the work is done
+    is the Prompt — the project's words, or ``DEFAULT_PROMPT`` when it has written none. The issue's
+    text isn't quoted here — the agent fetches it, and the line naming it is all that has to be fixed
+    per task, so the prompt cache still holds across the session's turns. A staged task is briefed
+    for the stage it starts in instead (``stage_prompt``), and is told no Prompt: its workflow is
+    what its work runs by.
     """
     if pipeline.read(record.get("pipeline")) is not None:
         return stage_prompt(record, task)
     lines = [
         _afk_task_line(task),
         session_prompt(record, unattended=True),
-        _AFK_INSTRUCTIONS.format(issue=task.get("number")),
+        _AFK_INSTRUCTIONS,
+        _AFK_SCOPE,
+        prompt or DEFAULT_PROMPT,
     ]
     return "\n\n".join(line for line in lines if line)
 
@@ -212,7 +234,7 @@ def stage_prompt(
     lines = [
         _task_line(task, kind),
         session_prompt(record, unattended=True),
-        _AFK_INSTRUCTIONS.format(issue=task.get("number")) if kind == pipeline.BUILD else "",
+        _AFK_INSTRUCTIONS if kind == pipeline.BUILD else "",
         _base_line(base) if base and ships else "",
         _steps_line(pipeline.stage_steps(staged), ships),
         _SKILL_SCOPE,
