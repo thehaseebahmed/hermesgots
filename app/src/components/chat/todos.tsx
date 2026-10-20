@@ -1,5 +1,7 @@
 import { CheckIcon, PauseIcon, XIcon } from "lucide-react"
 
+import { PILL } from "@/components/chat/pill"
+import { StepRail } from "@/components/chat/step-rail"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -65,7 +67,7 @@ export function TodosPill({
     <Button
       type="button"
       variant="secondary"
-      className="h-11 shrink-0 gap-2 rounded-full px-4 tabular-nums"
+      className={cn(PILL, "tabular-nums")}
       onClick={onClick}
     >
       {stopped ? (
@@ -146,15 +148,9 @@ export function TodosSheet({
                 className="flex gap-3"
                 style={{ paddingInlineStart: `${item.depth * 1.5}rem` }}
               >
-                <div className="relative w-7 shrink-0">
-                  <div className="flex h-11 items-center">
-                    <StatusIcon status={item.status} stopped={stopped} />
-                  </div>
-                  {/* Runs from under this item's icon to the next one's. */}
-                  {index < items.length - 1 && (
-                    <div className="absolute top-10 -bottom-1 left-1/2 w-px -translate-x-1/2 bg-border" />
-                  )}
-                </div>
+                <StepRail last={index === items.length - 1}>
+                  <StatusIcon status={item.status} stopped={stopped} />
+                </StepRail>
                 <p
                   className={cn(
                     "min-w-0 flex-1 py-2.5 text-[15px] leading-6 break-words",

@@ -1,6 +1,8 @@
 import { HammerIcon, ScanSearchIcon, ShieldCheckIcon } from "lucide-react"
 import type { ComponentType } from "react"
 
+import { PILL } from "@/components/chat/pill"
+import { StepRail } from "@/components/chat/step-rail"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -17,13 +19,6 @@ import {
 } from "@/lib/pipeline"
 import { cn } from "@/lib/utils"
 
-/**
- * The stages a staged AFK task ran in, as a pill above the composer and the sheet it opens: three
- * bars — done, in hand, failed, still to come — with the stage in words beside them, and the sheet
- * behind it naming what each step ran. It reads the session's own record, so it stays after the
- * task finishes; the pull request's live state is its pill's, not this one's.
- */
-
 const ICONS: Record<
   PipelineStep["name"],
   ComponentType<{ className?: string; strokeWidth?: number }>
@@ -33,28 +28,40 @@ const ICONS: Record<
   critique: ScanSearchIcon,
 }
 
-/** A step's colour: done, in hand, failed, or still to come. */
-const TONE: Record<StepState, string> = {
-  pass: "text-success",
-  current: "text-info",
-  fail: "text-destructive",
-  next: "text-muted-foreground/40",
-}
-
-/** The same four, as a bar's fill. */
-const BAR_TONE: Record<StepState, string> = {
-  pass: "bg-success",
-  current: "bg-info",
-  fail: "bg-destructive",
-  next: "bg-muted-foreground/25",
-}
-
-/** What a step's mark means, for a reader who can't see its colour. */
-const SPOKEN: Record<StepState, string> = {
-  pass: "done",
-  current: "in progress",
-  fail: "failed",
-  next: "not started",
+/** How a step looks everywhere it is drawn, and what its mark means to a reader who can't see its
+ * colour. */
+const LOOK: Record<
+  StepState,
+  { bar: string; mark: string; badge: string; name: string; spoken: string }
+> = {
+  pass: {
+    bar: "bg-success",
+    mark: "text-success",
+    badge: "bg-success/15",
+    name: "",
+    spoken: "done",
+  },
+  current: {
+    bar: "bg-info",
+    mark: "text-info",
+    badge: "bg-info/15",
+    name: "font-medium",
+    spoken: "in progress",
+  },
+  fail: {
+    bar: "bg-destructive",
+    mark: "text-destructive",
+    badge: "bg-destructive/15",
+    name: "font-medium text-destructive",
+    spoken: "failed",
+  },
+  next: {
+    bar: "bg-muted-foreground/25",
+    mark: "text-muted-foreground/40",
+    badge: "",
+    name: "text-muted-foreground",
+    spoken: "not started",
+  },
 }
 
 /** The steps as three bars: the whole run in a glance, and what the pill itself wears. */
@@ -64,7 +71,7 @@ function Bars({ steps }: { steps: PipelineStep[] }) {
       {steps.map((step) => (
         <span
           key={step.name}
-          className={cn("h-4 w-2 rounded-full", BAR_TONE[step.state])}
+          className={cn("h-4 w-2 rounded-full", LOOK[step.state].bar)}
           data-step={step.name}
           data-state={step.state}
           aria-hidden
@@ -78,12 +85,16 @@ function Mark({ step }: { step: PipelineStep }) {
   const Icon = ICONS[step.name]
   return (
     <span className="flex items-center" data-step={step.name} data-state={step.state} aria-hidden>
-      <Icon className={cn("size-4", TONE[step.state])} strokeWidth={2.25} />
+      <Icon className={cn("size-4", LOOK[step.state].mark)} strokeWidth={2.25} />
     </span>
   )
 }
 
-/** The pipeline as a pill, first in the row above the composer; tapping it opens the run. */
+/**
+ * The run as a pill, first in the row above the composer: three bars, the stage in words, and the
+ * sheet behind it naming what each step ran. It reads the session's own record, so it stays after
+ * the task finishes; the pull request's live state is its own pill's.
+ */
 export function PipelinePill({
   pipeline,
   onClick,
@@ -97,10 +108,10 @@ export function PipelinePill({
     <Button
       type="button"
       variant="secondary"
-      className="h-11 shrink-0 gap-2.5 rounded-full px-4"
+      className={PILL}
       onClick={onClick}
       data-pipeline={pipeline.stage}
-      aria-label={`${word}. ${steps.map((step) => `${STEP_WORDS[step.name]} ${SPOKEN[step.state]}`).join(", ")}.`}
+      aria-label={`${word}. ${steps.map((step) => `${STEP_WORDS[step.name]} ${LOOK[step.state].spoken}`).join(", ")}.`}
     >
       <Bars steps={steps} />
       <span className="max-w-40 truncate">{word}</span>
@@ -163,35 +174,20 @@ export function PipelineSheet({
             const entries = stepRuns(pipeline, step, prLabel)
             return (
               <li key={step.name} className="flex gap-3">
-                <div className="relative w-7 shrink-0">
-                  <div className="flex h-11 items-center">
-                    <span
-                      className={cn(
-                        "flex size-7 items-center justify-center rounded-full",
-                        step.state === "pass" && "bg-success/15",
-                        step.state === "current" && "bg-info/15",
-                        step.state === "fail" && "bg-destructive/15",
-                      )}
-                    >
-                      <Mark step={step} />
-                    </span>
-                  </div>
-                  {/* Runs from under this step's mark to the next one's. */}
-                  {index < steps.length - 1 && (
-                    <div className="absolute top-10 -bottom-1 left-1/2 w-px -translate-x-1/2 bg-border" />
-                  )}
-                </div>
-                <div className="min-w-0 flex-1 py-2.5">
-                  <p
+                <StepRail last={index === steps.length - 1}>
+                  <span
                     className={cn(
-                      "text-[15px] leading-6",
-                      step.state === "next" && "text-muted-foreground",
-                      step.state === "current" && "font-medium",
-                      step.state === "fail" && "font-medium text-destructive",
+                      "flex size-7 items-center justify-center rounded-full",
+                      LOOK[step.state].badge,
                     )}
                   >
+                    <Mark step={step} />
+                  </span>
+                </StepRail>
+                <div className="min-w-0 flex-1 py-2.5">
+                  <p className={cn("text-[15px] leading-6", LOOK[step.state].name)}>
                     {STEP_WORDS[step.name]}
-                    <span className="sr-only">, {SPOKEN[step.state]}</span>
+                    <span className="sr-only">, {LOOK[step.state].spoken}</span>
                   </p>
                   {entries.length ? (
                     <Lines entries={entries} />
