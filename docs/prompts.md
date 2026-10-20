@@ -21,7 +21,7 @@ section instead and is told no Prompt.
 
 ## Single repo
 
-The common case: `## You are Gots!`, then `## Current Session` naming one worktree (the session's working directory), the library folder and the repo's pull request template.
+The common case: Gots's own section, then `## Current Session` naming one worktree (the session's working directory), the library folder and the repo's pull request template.
 
 ```text
 ## You are Gots!
@@ -148,7 +148,7 @@ Its pull request template is .github/pull_request_template.md.
 ```
 ## An AFK run on the default Prompt
 
-A project that wrote no Prompt of its own: `## You are Gots!`, then `## Away From Keyboard` with AFK's fixed brief, then `## User's Workflow` holding ``DEFAULT_PROMPT`` — the method every untouched project works by (ADR 0027).
+A project that wrote no Prompt of its own: Gots's section, `## Away From Keyboard` with AFK's fixed brief, then `## User's Workflow` holding ``DEFAULT_PROMPT`` — the method every untouched project works by (ADR 0027).
 
 ```text
 ## You are Gots!

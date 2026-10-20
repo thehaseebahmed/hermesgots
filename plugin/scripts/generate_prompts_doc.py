@@ -59,7 +59,7 @@ MULTI = {**SINGLE, "repos": [_repo("web"), _repo("api")]}
 VARIANTS = [
     (
         "Single repo",
-        "The common case: `## You are Gots!`, then `## Current Session` naming one worktree (the "
+        "The common case: Gots's own section, then `## Current Session` naming one worktree (the "
         "session's working directory), the library folder and the repo's pull request template.",
         SINGLE,
     ),
@@ -122,8 +122,8 @@ STAGED = pipeline.start(
 AFK_VARIANTS = [
     (
         "An AFK run on the default Prompt",
-        "A project that wrote no Prompt of its own: `## You are Gots!`, then `## Away From Keyboard` "
-        "with AFK's fixed brief, then `## User's Workflow` holding ``DEFAULT_PROMPT`` — the method "
+        "A project that wrote no Prompt of its own: Gots's section, `## Away From Keyboard` with "
+        "AFK's fixed brief, then `## User's Workflow` holding ``DEFAULT_PROMPT`` — the method "
         "every untouched project works by (ADR 0027).",
         prompt_builder.afk_prompt(AFK, TASK),
     ),
