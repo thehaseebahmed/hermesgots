@@ -1596,9 +1596,12 @@ class CritiqueRunTests(unittest.TestCase):
         self.assertIn("Critique stage", text)
         self.assertIn("/trees/afk-265", text, "the worktree the review reads")
 
-    def test_its_delegate_brief_carries_the_issue_and_the_worktree(self) -> None:
+    def test_its_delegate_briefs_carry_the_issue_and_the_worktree(self) -> None:
         text = self.run_critique()["instructions"]
+        for name in ("code-review", "log-triage"):
+            self.assertIn(f'skill_view(name="{name}")', text, "one brief per critique skill")
         self.assertIn("https://github.com/mock-user/memento/issues/265", text)
+        self.assertIn("base main", text, "the branch the pull request is against")
         self.assertIn("reports rather than implements", text, "a reviewer doesn't fix the work")
         self.assertIn("delegate_task", text)
 
