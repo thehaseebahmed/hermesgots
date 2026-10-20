@@ -132,6 +132,7 @@ export function AfkPopup({
   // The pickers' list is the bot's own skills, read the way the composer's `/` menu reads them: only
   // what this profile can run now. Asked only where the host can hold a choice at all.
   const skills = useSkills(config, open && (withSkills === "yes" || libraryOffered))
+  // The device can turn the switch off from another screen while a sheet is open.
   if (!libraryOffered && (libraryOpen || editing !== null)) {
     setLibraryOpen(false)
     setEditing(null)

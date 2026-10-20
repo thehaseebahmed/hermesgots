@@ -17,6 +17,7 @@ import {
   mount,
   mountAfk,
   seedSettings,
+  settle,
   text,
   workflowStage,
 } from "./component-kit.tsx"
@@ -27,9 +28,12 @@ const project = "project-1"
 const host = () => afkHost({ features: ["afk", "afk_switch", "afk_workflows"] })
 
 function noHost() {
-  globalThis.fetch = (async () => {
+  const calls: string[] = []
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    calls.push(String(input))
     throw new Error("the settings section reached a host")
   }) as unknown as typeof fetch
+  return calls
 }
 
 const checkedOf = (element: Element | null) => {
@@ -78,7 +82,7 @@ test("on, the row returns and opens the library", async () => {
 
 test("the Developer switch is off until it is turned on, and survives a reload", async () => {
   await seedSettings({ developer: true })
-  noHost()
+  const reached = noHost()
   // The switch root sits inside Base UI's label: the bare id belongs to a clipped hidden input.
   const row = () => find("#afk-workflows-label [data-slot='switch']")
   await mount(<DeveloperSettings />, async () => {
@@ -86,13 +90,29 @@ test("the Developer switch is off until it is turned on, and survives a reload",
     await click(row())
     assert.equal(checkedOf(row()), true, "and on once it is")
   })
-  assert.equal(
-    (await db.settings.get("settings"))?.afkWorkflows,
-    true,
-    "the device kept it, with nothing written to a host",
-  )
+  assert.deepEqual(reached, [], "the switch is the device's: nothing was asked of a host")
+  assert.equal((await db.settings.get("settings"))?.afkWorkflows, true, "the device kept it")
   await mount(<DeveloperSettings />, async () => {
     assert.equal(checkedOf(row()), true, "a fresh read of the device finds it on")
+  })
+})
+
+test("turning the switch off under an open library puts the sheet away", async () => {
+  await seedSettings({ developer: true, afkWorkflows: true })
+  globalThis.fetch = host().fetch as unknown as typeof fetch
+  await mountAfk(config, project, async () => {
+    await click(find("[data-afk-workflow] button"))
+    assert.ok(find("[data-workflow]"), "the library is open")
+
+    await db.settings.update("settings", { afkWorkflows: false })
+    await settle()
+    assert.equal(Boolean(find("[data-afk-workflow]")), false, "the row goes with the switch")
+    assert.equal(Boolean(find("[data-workflow]")), false, "and the sheet over it closes")
+
+    await db.settings.update("settings", { afkWorkflows: true })
+    await settle()
+    assert.ok(find("[data-afk-workflow]"), "turning it back on brings the row back")
+    assert.equal(Boolean(find("[data-workflow]")), false, "but not the sheet that was abandoned")
   })
 })
 
