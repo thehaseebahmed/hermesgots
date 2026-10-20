@@ -7,11 +7,10 @@ import {
   SparklesIcon,
 } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
+import { SkillRow } from "@/components/skill-row"
 import { Spinner } from "@/components/ui/spinner"
 import { optionId, type SlashItem } from "@/lib/slash"
 import type { SkillsState } from "@/lib/skills"
-import { cn } from "@/lib/utils"
 
 const COMMAND_ICONS = {
   new: PlusIcon,
@@ -108,36 +107,19 @@ export function SlashMenu({
         {items.map((item, index) => {
           const Icon = item.kind === "command" ? COMMAND_ICONS[item.name] : SparklesIcon
           return (
-            <li
+            <SkillRow
               key={`${item.kind}:${item.name}`}
               id={optionId(id, index)}
-              role="option"
-              aria-selected={index === active}
-              // Keep focus (and the keyboard) on the textarea.
-              onMouseDown={(event) => event.preventDefault()}
-              onMouseMove={() => index !== active && onActive(index)}
-              onClick={() => onPick(item)}
-              className={cn(
-                "grid min-h-11 cursor-pointer grid-cols-[auto_1fr_auto] content-center items-center gap-x-3 rounded-2xl px-3 py-2",
-                index === active && "bg-accent text-accent-foreground",
-              )}
-            >
-              {/* The icon rides the title's line, so a description hangs under the title, not the icon. */}
-              <span className="row-start-1 flex h-5 items-center">
-                <Icon className="size-4 text-muted-foreground" />
-              </span>
-              <div className="row-start-1 min-w-0 truncate font-mono text-sm">/{item.name}</div>
-              {item.kind === "skill" && item.category && (
-                <Badge variant="secondary" className="row-start-1 max-w-28">
-                  <span className="truncate">{item.category}</span>
-                </Badge>
-              )}
-              {item.description && (
-                <div className="col-start-2 min-w-0 truncate text-xs text-muted-foreground">
-                  {item.description}
-                </div>
-              )}
-            </li>
+              name={item.name}
+              slash
+              category={item.kind === "skill" ? item.category : undefined}
+              description={item.kind === "skill" ? item.description : undefined}
+              icon={Icon}
+              selected={index === active}
+              active={index === active}
+              onActive={() => index !== active && onActive(index)}
+              onPick={() => onPick(item)}
+            />
           )
         })}
       </ul>
