@@ -367,13 +367,13 @@ class StageTests(_Base):
 
     def test_a_stage_after_the_shipping_one_cannot_ship_either(self) -> None:
         with patch("plugin.ship.ship", return_value=[]) as shipped:
-            answer = self._call({"action": "ship", "commit_message": "m"}, record=self.summary())
+            answer = self._call({"action": "ship", "commit_message": "m"}, record=self.summary_record())
         shipped.assert_not_called()
         self.assertIn('"Summary"', answer["error"], "the stage it is in is named")
         self.assertIn('"Review"', answer["error"], "and the one that already opened the draft")
         self.assertIn("nothing left", answer["error"])
 
-    def summary(self) -> dict:
+    def summary_record(self) -> dict:
         """A task in the stage after the one that ships, with a skill so that stage exists."""
         record = pipeline.start(preset("preset:staged"))
         record["stage"] = 3

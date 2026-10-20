@@ -19,7 +19,7 @@ what they say.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Sequence
 
 from . import workflows
 from .workflows import GATE, names, shipping, text
@@ -466,7 +466,7 @@ def _round_again(record: Dict[str, Any], why: str) -> Optional[Step]:
     found = _loop_for(record)
     if found is None:
         return None
-    start, cap = found
+    start, cap = found.start, found.cap
     if not posts(record["stages"], start):
         # A loop whose span starts at a checkpoint has nothing of its own to repeat.
         return None
@@ -478,7 +478,14 @@ def _round_again(record: Dict[str, Any], why: str) -> Optional[Step]:
     )
 
 
-def _loop_for(record: Dict[str, Any]) -> Optional[Tuple[int, int]]:
+class Loop(NamedTuple):
+    """A workflow's loop as the rule reads it: the stage its span starts at, and its cap."""
+
+    start: int
+    cap: int
+
+
+def _loop_for(record: Dict[str, Any]) -> Optional[Loop]:
     """The loop a stage's failed checkpoint belongs to: the stage its span starts at, and its cap.
 
     The nearest loop at or after the stage the task is in, whose span reaches back to it — so a
@@ -492,7 +499,7 @@ def _loop_for(record: Dict[str, Any]) -> Optional[Tuple[int, int]]:
         cap = loop.get("cap")
         if start is None or start > index or not isinstance(cap, int) or cap < 1:
             continue
-        return start, cap
+        return Loop(start, cap)
     return None
 
 

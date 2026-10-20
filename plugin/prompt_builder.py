@@ -132,18 +132,26 @@ Then ship once with the pull_request tool, action 'ship', and write its body fro
 # changes nothing the user is about to read.
 _SUMMARY_STAGE = """This task's work is a draft pull request already, and you are in its {name} stage: write the wrap-up for the user to read when they come back — what landed, what you checked and what is left. Change nothing: the pull request is open, and the work in it is what they are reading. Don't ship."""
 
-# One brief and one verb per step, so a stage's position is read in one place rather than branched
-# on in each line the prompt is built from. A step with no brief of its own (the gate's) builds.
-_BRIEFS = {
-    pipeline.CRITIQUE: _REVIEW_STAGE,
-    pipeline.DONE: _SUMMARY_STAGE,
-    pipeline.BUILD: _BUILD_STAGE,
+# How each step is named to its own run: the verb its issue line uses, and the brief a stage that
+# names no skills is given. One table, so a step's position is read in one place rather than branched
+# on in each line the prompt is built from. A step with no words of its own (the gate's) builds.
+class StageWords(NamedTuple):
+    """A step's own words: what its run is doing, and the brief standing in for its skills."""
+
+    doing: str
+    brief: str
+
+
+_WORDS = {
+    pipeline.BUILD: StageWords("implementing", _BUILD_STAGE),
+    pipeline.CRITIQUE: StageWords("reviewing the build of", _REVIEW_STAGE),
+    pipeline.DONE: StageWords("wrapping up", _SUMMARY_STAGE),
 }
 
-_DOING = {
-    pipeline.CRITIQUE: "reviewing the build of",
-    pipeline.DONE: "wrapping up",
-}
+
+def _words(kind: Optional[str]) -> StageWords:
+    """The words of the step a task is in, building for a step that has none of its own."""
+    return _WORDS.get(kind or pipeline.DONE, _WORDS[pipeline.BUILD])
 
 
 def _pr_instructions(unattended: bool) -> str:
@@ -235,8 +243,7 @@ def _brief(record: Optional[Dict[str, Any]]) -> str:
     name = pipeline.stage_name(record) or ""
     if pipeline.single_stage(record or {}):
         return _ONE_RUN_STAGE.format(name=name)
-    brief = _BRIEFS.get(pipeline.kind(record) or pipeline.DONE, _BUILD_STAGE)
-    return brief.format(name=name)
+    return _words(pipeline.kind(record)).brief.format(name=name)
 
 
 def _steps_line(steps: List[str]) -> str:
@@ -270,7 +277,7 @@ def _task_line(task: Dict[str, Any], kind: str) -> str:
     """How the issue is named to a run, in the words of the stage it works."""
     where, url, read = _issue_ref(task)
     return (
-        f"You are {_DOING.get(kind, 'implementing')} {where}{url} for the user, while they are "
+        f"You are {_words(kind).doing} {where}{url} for the user, while they are "
         f"away. Their issue's own text isn't repeated here: read it with `{read}` (or the API), "
         f"since it is what the change is judged against."
     )

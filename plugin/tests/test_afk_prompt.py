@@ -212,14 +212,14 @@ class StagePromptTests(unittest.TestCase):
         summary = staged_record(pipeline.CRITIQUE)
         summary["stage"] = len(summary["stages"]) - 1 if len(summary["stages"]) > 3 else 3
         record = prompt_builder.stage_prompt(
-            {**RECORD, "pipeline": self.summary()}, TASK, "main"
+            {**RECORD, "pipeline": self.summary_record()}, TASK, "main"
         )
         self.assertIn("Summary stage", record)
         self.assertIn("wrapping up", record)
         self.assertIn("write the wrap-up", record)
         self.assertIn("Don't ship", record)
 
-    def summary(self):
+    def summary_record(self):
         """The preset's record, in its Summary stage, with a skill so its run exists."""
         record = pipeline.start(preset("preset:staged"))
         record["stage"] = 3
