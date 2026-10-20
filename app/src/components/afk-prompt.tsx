@@ -32,6 +32,12 @@ export function PromptEditor({
   }
 
   const submit = async () => {
+    // Done on the words the row already holds is not a write: it would turn the host's default into
+    // this project's own words, which nothing then reads as the default again.
+    if (text === prompt) {
+      onOpenChange(false)
+      return
+    }
     setSaving(true)
     try {
       if ((await onSave(text)) === "saved") onOpenChange(false)

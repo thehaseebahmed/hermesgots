@@ -36,12 +36,15 @@ const run = async ({ page, profileId, shot, until }) => {
     0,
     "and no Build and Critique pickers: a Prompt names its own skills",
   )
-  // A row of the switch's own list, a row's gap under it, not a band of its own.
+  // A row of the switch's own list, with the switch's own padding above it and none of its own.
   const switchBox = await page.locator("[data-afk-switch]").boundingBox()
   const promptBox = await row.boundingBox()
   assert.ok(switchBox && promptBox, "both rows have a box")
   const gap = Math.round(promptBox.y - (switchBox.y + switchBox.height))
-  assert.ok(gap >= 0 && gap <= 32, `the Prompt sits under the switch, not a band lower (${gap}px)`)
+  assert.ok(
+    gap >= 0 && gap <= 1,
+    `the Prompt row touches the switch's row, with no band between (${gap}px)`,
+  )
   await shot("row")
 
   await page.locator('button[aria-label="Prompt"]').click()

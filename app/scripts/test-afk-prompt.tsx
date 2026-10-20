@@ -76,6 +76,13 @@ test("the row reads the Prompt the host answers, the default included", async ()
       /#|- Work/,
       "and markdown's own marks are off it: the editor is where it reads as written",
     )
+    const words = row()?.textContent ?? ""
+    assert.match(
+      words,
+      /^Prompt\s*How to work/,
+      "the label sits over the words, a card rather than a pill",
+    )
+    assert.ok(row()?.querySelector("svg"), "and the chevron says the row opens something")
   })
 })
 
@@ -136,6 +143,21 @@ test("an emptied field saves as empty, and the row reads the default again", asy
       "and the host's default is what the row reads back",
     )
     assert.doesNotMatch(row()?.textContent ?? "", /Read the issue first/)
+  })
+})
+
+test("Done on the words nobody changed writes nothing", async () => {
+  const fake = afkHost()
+  await promptMode(fake, async () => {
+    await click(find('button[aria-label="Prompt"]'))
+    await click(findText("button", "Done")!)
+    await settled(() => !field(), "the sheet closes on Done")
+    assert.deepEqual(
+      afkWrites(fake),
+      [],
+      "opening the sheet and leaving it would otherwise write the default as the project's own words",
+    )
+    assert.match(row()?.textContent ?? "", /How to work/, "and the row reads the default still")
   })
 })
 
