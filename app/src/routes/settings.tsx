@@ -37,6 +37,7 @@ import {
   TelescopeIcon,
   TimerIcon,
   UserIcon,
+  WorkflowIcon,
   type LucideIcon,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -497,7 +498,8 @@ const LIVE_LABELS: Record<LiveStatus, { label: string; detail: string }> = {
   off: { label: "Polling", detail: "No stream open" },
 }
 
-function DeveloperSettings() {
+/** The Developer section: unlocked by tapping the version five times, and hidden again from here. */
+export function DeveloperSettings() {
   const bots = useLiveQuery(listProfiles, [])
   const settings = useLiveQuery(getSettings, [])
   return (
@@ -528,6 +530,19 @@ function DeveloperSettings() {
           subtitle="Design only, with sample meetings"
           checked={Boolean(settings?.meetings)}
           onCheckedChange={(checked) => saveSettings({ meetings: checked })}
+        />
+        <SwitchRow
+          id="afk-workflows"
+          icon={WorkflowIcon}
+          title={
+            <span className="flex items-center gap-2">
+              AFK Workflows
+              <ExperimentalBadge />
+            </span>
+          }
+          subtitle="The workflow library in a project's AFK pop-up"
+          checked={Boolean(settings?.afkWorkflows)}
+          onCheckedChange={(checked) => saveSettings({ afkWorkflows: checked })}
         />
       </Group>
       {isNative && pushAvailable() && <TestPushRow />}
