@@ -190,8 +190,16 @@ def _workflow(hermes_home: Path, project_id: str, found: Dict[str, Any]) -> Dict
     Its pick, or the default preset; and for a project whose row predates the picker, the workflow its
     old build and critique skill columns described — written to the library and named on the row the
     first time it is read, so what the project does can't change shape under the user on upgrade.
+
+    A project holding a Prompt is past the picker, so its old columns are left as they were rather
+    than migrated into a pick: that pick would be what works its next task, and the Prompt it just
+    wrote is what should.
     """
-    if found.get("workflow_id") is None and (found.get("build_skill") or found.get("critique_skills")):
+    if (
+        found.get("prompt") is None
+        and found.get("workflow_id") is None
+        and (found.get("build_skill") or found.get("critique_skills"))
+    ):
         return workflows.migrate(
             hermes_home,
             project_id,
@@ -270,56 +278,43 @@ def prompt_text(value: Any) -> Optional[str]:
     Empty and unset are the same thing — the bot's default method — so a blank Prompt clears the
     column instead of storing words a run would read as the user's.
     """
-    if value is None:
-        return None
-    if not isinstance(value, str):
+    if value is not None and not isinstance(value, str):
         raise ValueError("prompt must be text.")
-    return value.strip() or None
+    return pipeline.text(value)
 
 
 def set_prompt(hermes_home: Path, project_id: str, prompt: Optional[str]) -> None:
     """Writes the project's Prompt, clearing any workflow pick in the same write.
 
     A project is never both: a Prompt is one run's method and a workflow is the stages its work runs
-    through, and the row's own answer decides which one works the next task. A row from before the
-    picker is cleared with it — its two skill columns are only read to migrate the project onto a
-    workflow, and a migration would put back the pick this write took off. A project with no row yet
-    gets one with its switch off — the row sits under the switch, not behind it — so writing a Prompt
-    is no reason to start working anything.
+    through, and the row's own answer decides which one works the next task. The old skill columns a
+    row from before the picker carries are left alone — the migration that reads them skips a project
+    that holds a Prompt (``_workflow``), so nothing has to be deleted to keep them from coming back.
+    A project with no row yet gets one with its switch off — the row sits under the switch, not behind
+    it — so writing a Prompt is no reason to start working anything.
     """
     _upsert(
         hermes_home,
         project_id,
         prompt=prompt,
         workflow_id=None,
-        build_skill=None,
-        critique_skills=None,
         at=int(time.time()),
     )
 
 
-def prompt_for(hermes_home: Path, project_id: str) -> Optional[str]:
-    """The Prompt a project's next run is told, or None for the bot's default method.
-
-    Read from the host's row rather than from anything the app holds, because the sweep that works
-    the task runs with the app closed: a Prompt written on any device is still there when the run
-    is posted.
-    """
-    found = _row(hermes_home, project_id)
-    return found["prompt"] if found else None
-
-
 def set_workflow(hermes_home: Path, project_id: str, workflow_id: str) -> None:
-    """Points this project's AFK work at a workflow in its bot's library.
+    """Points this project's AFK work at a workflow in its bot's library, clearing any Prompt it held.
 
     The id has to be one the library holds: a project naming nothing would silently run the default
-    preset, and the user would have picked a workflow that isn't what works. A project with no row
-    yet gets one with its switch off — the row sits under the switch, not behind it — so choosing a
-    workflow is no reason to start working anything.
+    preset, and the user would have picked a workflow that isn't what works. A Prompt and a pick are
+    one choice between them, so picking a workflow drops the Prompt in the same write — the other
+    direction of what ``set_prompt`` does, or a project would hold both and its sheet would show words
+    no run reads. A project with no row yet gets one with its switch off — the row sits under the
+    switch, not behind it — so choosing a workflow is no reason to start working anything.
     """
     if workflows.get(hermes_home, workflow_id) is None:
         raise ValueError(f'There is no workflow "{workflow_id}" in this bot\'s library.')
-    _upsert(hermes_home, project_id, workflow_id=workflow_id, at=int(time.time()))
+    _upsert(hermes_home, project_id, workflow_id=workflow_id, prompt=None, at=int(time.time()))
 
 
 def release(
@@ -500,14 +495,13 @@ def session_title(task: Dict[str, Any]) -> str:
     return f"#{task.get('number')} {task.get('title') or ''}".strip()
 
 
-def run_body(
-    record: Dict[str, Any], task: Dict[str, Any], prompt: Optional[str] = None
-) -> Dict[str, Any]:
+def run_body(record: Dict[str, Any], task: Dict[str, Any], prompt: Optional[str]) -> Dict[str, Any]:
     """The ``POST /v1/runs`` request: how to work a planned issue, and the issue's name as the input.
 
-    The prompt is all `prompt_builder`'s — one module holds every word the agent is told, and the
-    project's Prompt is read off its row as the run starts, so it is told to every run however the
-    app was left. The issue's own text is left out of both: the agent reads it from GitHub.
+    The prompt is all `prompt_builder`'s — one module holds every word the agent is told — and it is
+    passed in rather than defaulted: this run is the one the project's Prompt exists for, so a caller
+    with nothing to tell it says so, and no caller forgets its way past it. The issue's own text is
+    left out of both: the agent reads it from GitHub.
     """
     return _request(
         record, prompt_builder.afk_prompt(record, task, prompt), prompt_builder.afk_input(task)
@@ -549,18 +543,28 @@ def base_branch(record: Dict[str, Any]) -> Optional[str]:
     return projects._base_branch(primary) if primary else None
 
 
+class Start(NamedTuple):
+    """What a start copies off the project's row: the task's workflow snapshot, and its Prompt."""
+
+    staged: Optional[Dict[str, Any]]
+    prompt: Optional[str]
+
+
 def _begin(
     hermes_home: Path, path: Path, project_id: str, session_id: str
-) -> Optional[Dict[str, Any]]:
-    """Writes the snapshot a staged task starts with, answering it as the run's record carries it.
+) -> Start:
+    """Writes the snapshot a staged task starts with, and answers the Prompt beside it.
 
     The project's workflow as it stands now, copied onto the task: editing or deleting the library
     entry afterwards cannot rewrite what this task ran. Written before the run is posted, so the
-    build's own instructions already know where they end.
+    build's own instructions already know where they end. The Prompt comes off the same read of the
+    row — the sweep works a task with the app closed, so the Prompt written last night is the one the
+    run reads, with nothing the app sent in between.
     """
-    staged = pipeline.start(_workflow_for(hermes_home, project_id))
+    found = _row(hermes_home, project_id) or {}
+    staged = pipeline.start(_workflow(hermes_home, project_id, found))
     sessions.set_pipeline(path, session_id, staged)
-    return staged
+    return Start(staged, found.get("prompt"))
 
 
 def publish(
@@ -622,11 +626,8 @@ async def start(
         staged = await asyncio.to_thread(
             _begin, hermes_home, db_path(hermes_home), project_id, session_id
         )
-        # The row's own Prompt, read here rather than taken from anything the app sent: the sweep
-        # works a task with the app closed, and the Prompt written last night is the one the run reads.
-        prompt = await asyncio.to_thread(prompt_for, hermes_home, project_id)
-        record = {**record, "pipeline": staged}
-        started = await _post(adapter, hermes_home, run_body(record, task, prompt))
+        record = {**record, "pipeline": staged.staged}
+        started = await _post(adapter, hermes_home, run_body(record, task, staged.prompt))
     except Exception as error:
         logger.warning("memento: AFK couldn't start the session for %s: %s", issue, error)
         await asyncio.to_thread(release, hermes_home, project_id)

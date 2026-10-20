@@ -37,7 +37,6 @@ from plugin.afk import (
     NO_GITHUB,
     NO_REPOSITORY,
     Refused,
-    prompt_for,
     read,
     release,
     set_on,
@@ -324,8 +323,8 @@ def afk_row(
     }
 
 
-class WorkflowChoiceTests(unittest.TestCase):
-    """The workflow a project's AFK work runs under: its own pick, from the bot's library."""
+class AfkHome(unittest.TestCase):
+    """A bot's home with one checkout in it, and GitHub answering for it."""
 
     def setUp(self) -> None:
         self.tmp = TemporaryDirectory()
@@ -342,6 +341,10 @@ class WorkflowChoiceTests(unittest.TestCase):
 
     def folders(self) -> List[Any]:
         return [folder(str(self.checkout))]
+
+
+class WorkflowChoiceTests(AfkHome):
+    """The workflow a project's AFK work runs under: its own pick, from the bot's library."""
 
     def choose(self, name: str = "Mine", build: Optional[str] = None, steps=()) -> Dict[str, Any]:
         """A workflow of this bot's own, and the project naming it."""
@@ -443,28 +446,12 @@ class WorkflowChoiceTests(unittest.TestCase):
         self.assertEqual(len(workflows.library(self.home)), 4, "three presets and the migration")
 
 
-class PromptTests(unittest.TestCase):
+class PromptTests(AfkHome):
     """The project's Prompt: how its AFK work is carried out, kept on the host with the project.
 
     It is told to a run beside AFK's fixed brief, so it is read off the project's row when the run is
     posted — never from a device — and empty is the bot's default method again.
     """
-
-    def setUp(self) -> None:
-        self.tmp = TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.home = Path(self.tmp.name)
-        self.checkout = self.home / "checkout"
-        (self.checkout / ".git").mkdir(parents=True)
-        for one in (
-            patch.object(github, "token", return_value=("token", "env")),
-            patch.object(github, "origin_repo", return_value="mock-user/memento"),
-        ):
-            one.start()
-            self.addCleanup(one.stop)
-
-    def folders(self) -> List[Any]:
-        return [folder(str(self.checkout))]
 
     def prompt(self, project_id: str = "p1") -> str:
         return read(self.home, project_id, self.folders())["prompt"]
@@ -491,9 +478,9 @@ class PromptTests(unittest.TestCase):
             self.prompt(), "Run the suite twice, and say what the second run found."
         )
         self.assertEqual(
-            prompt_for(self.home, "p1"),
+            afk._row(self.home, "p1")["prompt"],
             "Run the suite twice, and say what the second run found.",
-            "the run reads the row, with nothing of the app's in between",
+            "the row holds it, and the run is told it off that row",
         )
 
     def test_an_empty_prompt_is_the_default_again(self) -> None:
@@ -519,15 +506,30 @@ class PromptTests(unittest.TestCase):
         set_prompt(self.home, "p1", "")
         self.assertIsNone(afk._row(self.home, "p1")["workflow_id"])
 
-    def test_a_prompt_clears_the_skill_columns_a_migration_would_read(self) -> None:
+    def test_a_prompt_keeps_a_migration_from_putting_a_pick_back(self) -> None:
         # A row from before the picker: reading it would migrate the project onto the workflow those
-        # columns describe, putting back the pick the Prompt took off.
+        # columns describe, and that pick would be what works the next task instead of the Prompt.
         set_skill_columns(self.home, "p1", "plan", ["code-review"])
         set_prompt(self.home, "p1", "Squash every checkpoint into one commit.")
         self.assertEqual(
             read(self.home, "p1", self.folders())["workflow"]["id"],
             workflows.DEFAULT_ID,
             "the old columns are not a pick this project still holds",
+        )
+        self.assertEqual(
+            afk._row(self.home, "p1")["build_skill"],
+            "plan",
+            "and the columns are left as they were, not deleted to keep them quiet",
+        )
+
+    def test_picking_a_workflow_clears_the_prompt_too(self) -> None:
+        set_prompt(self.home, "p1", "Squash every checkpoint into one commit.")
+        self.choose()
+        self.assertIsNone(afk._row(self.home, "p1")["prompt"], "a project is never both")
+        self.assertEqual(
+            self.prompt(),
+            prompt_builder.DEFAULT_PROMPT,
+            "the sheet shows the method its next run will read",
         )
 
     def test_one_projects_prompt_leaves_anothers_alone(self) -> None:
@@ -571,7 +573,11 @@ class PromptTests(unittest.TestCase):
                 }
             ],
         }
-        body = afk.run_body(record, {"repo": "mock-user/memento", "number": 265}, prompt_for(self.home, "p1"))
+        body = afk.run_body(
+            record,
+            {"repo": "mock-user/memento", "number": 265},
+            "Squash every checkpoint into one commit.",
+        )
         self.assertIn("Squash every checkpoint into one commit.", body["instructions"])
         self.assertNotIn(
             prompt_builder.DEFAULT_PROMPT,
@@ -1272,11 +1278,14 @@ class SessionTests(unittest.TestCase):
         self.assertNotIn("Read the frontier first.", instructions, "the issue's text isn't copied in")
 
     def test_the_run_is_told_the_prompt_the_host_holds(self) -> None:
+        # Every task claimed today carries a workflow snapshot, so this proves the handoff: what the
+        # row holds is what the run is built with. `PromptTests` proves the builder puts that value
+        # in the instructions, and that a staged task is told its stage's brief instead.
         set_prompt(self.home, "p1", "Squash every checkpoint into one commit.")
         with patch.object(afk, "run_body", wraps=afk.run_body) as built:
             self.start()
         self.assertEqual(
-            built.call_args[0][2],
+            built.call_args.args[2],
             "Squash every checkpoint into one commit.",
             "the Prompt comes off the project's row as the run starts, with the app closed",
         )

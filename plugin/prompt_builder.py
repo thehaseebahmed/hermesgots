@@ -92,12 +92,18 @@ The rules:
 - No TODOs, commented-out code, debug prints or secrets in what you commit. Never push to the default branch, and keep all work inside the worktree.
 - If you can't finish, don't force it: leave the tree consistent and say where it stopped and what blocks it — in the pull request body if you opened one, else in your reply. Never leave a half-done change unexplained."""
 
+# The points no skill and no Prompt may change, stated once: the two scope sentences below quote them,
+# and every run is told one of the two.
+_FIXED_POINTS = (
+    "the issue is the spec, the work is verified, nobody is asked anything and the pull request is "
+    "shipped last"
+)
+
 # The sentence that puts the brief above whatever else a run is told — a skill the stage follows, or
 # the project's Prompt — so neither can undo a fixed point.
 _AFK_SCOPE = (
-    "A skill or a Prompt governs method only: these rules hold whatever either says — the issue is "
-    "the spec, the work is verified, nobody is asked anything and the pull request is shipped last — "
-    "so neither asks the user anything, merges or closes anything, or leaves the shipping to them."
+    f"A skill or a Prompt governs method only: these rules hold whatever either says — {_FIXED_POINTS} "
+    "— so neither asks the user anything, merges or closes anything, or leaves the shipping to them."
 )
 
 
@@ -108,7 +114,7 @@ _AFK_SCOPE = (
 # the device hold no copy of it, and a project nobody edited is still told the careful method.
 DEFAULT_PROMPT = """How to work:
 
-- Work in checkpoints. Each one leaves the tree building and is worth committing on its own, in the repo's commit style; post a short update between them, so a long run reads as work in progress rather than a hang, and keep your todo list current as you go.
+- Work in checkpoints. Each one leaves the tree building and is worth committing on its own, in the repo's commit style.
 - Write the check that fails before the code that passes it — the test, the assertion, or whatever the repo already uses — and watch it fail for the reason you mean to fix. Then make it pass. A repo with no tests is a reason to say so, not to skip the check.
 - Run the repo's own gates before you call anything done: its typecheck, lint, tests and build, whatever its README, AGENTS.md or CI names, and fix what you broke. A suite you didn't run isn't passing.
 - Read your own diff before you finish, as a reviewer would, and take what you find.
@@ -121,9 +127,8 @@ A planning or TDD skill applied beside this changes how a checkpoint is built, n
 # What no skill may change: every stage states it, whatever its kind and whether or not it names a
 # skill, because the fixed points are AFK's and not the workflow's.
 _SKILL_SCOPE = (
-    "A skill governs method only: the fixed points hold whatever it says — the issue is the "
-    "spec, the work is verified, nobody is asked anything and the pull request is shipped last — "
-    "so no skill unlocks the gate, asks the user anything or leaves the shipping to them."
+    f"A skill governs method only: the fixed points hold whatever it says — {_FIXED_POINTS} — so no "
+    "skill unlocks the gate, asks the user anything or leaves the shipping to them."
 )
 
 # A staged task's build run (ADR 0018, ADR 0020): it stops at a gate the host runs, so there is
