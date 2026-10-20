@@ -18,8 +18,8 @@ import {
   mount,
   mountAfk,
   seedSettings,
-  stage,
   text,
+  workflowStage,
 } from "./component-kit.tsx"
 
 const config = { baseUrl: "http://hermes.test/v1", apiKey: "test-key" }
@@ -80,6 +80,7 @@ test("on, the row returns and opens the library", async () => {
 test("the Developer switch is off until it is turned on, and survives a reload", async () => {
   await seedSettings({ developer: true })
   noHost()
+  // The switch root sits inside Base UI's label: the bare id belongs to a clipped hidden input.
   const row = () => find("#afk-workflows-label [data-slot='switch']")
   await mount(<DeveloperSettings />, async () => {
     assert.equal(checkedOf(row()), false, "off until it is turned on")
@@ -103,8 +104,8 @@ test("a staged task's pill and sheet draw with the workflow library off", async 
     stage: 1,
     round: 1,
     stages: [
-      stage("Build", { state: "done", rounds: [] }),
-      stage("Test", { check: "gate", state: "running", rounds: [] }),
+      workflowStage("Build", { state: "done", rounds: [] }),
+      workflowStage("Test", { check: "gate", state: "running", rounds: [] }),
     ],
   })
   assert.ok(pipeline)

@@ -83,7 +83,7 @@ export const findText = (selector: string, label: string) =>
 
 type Call = { method: string; path: string; body: Record<string, unknown> | null }
 
-export const stage = (name: string, extra: Record<string, unknown> = {}) => ({
+export const workflowStage = (name: string, extra: Record<string, unknown> = {}) => ({
   name,
   steps: [],
   check: null,
@@ -96,7 +96,7 @@ export function afkHost({
   projectId = "project-1",
   features = ["afk", "afk_switch", "afk_workflows", "afk_pipeline"],
   workflow = "preset:staged",
-  stage: heldStage = "build",
+  stage = "build",
   stageName = "Build",
 }: {
   projectId?: string
@@ -111,7 +111,7 @@ export function afkHost({
       name: "One run",
       preset: true,
       at: 1,
-      stages: [stage("Work", { ships: true })],
+      stages: [workflowStage("Work", { ships: true })],
     },
     {
       id: "preset:staged",
@@ -119,10 +119,10 @@ export function afkHost({
       preset: true,
       at: 2,
       stages: [
-        stage("Build"),
-        stage("Test", { check: "gate" }),
-        stage("Review", { ships: true }),
-        stage("Summary"),
+        workflowStage("Build"),
+        workflowStage("Test", { check: "gate" }),
+        workflowStage("Review", { ships: true }),
+        workflowStage("Summary"),
       ],
     },
   ]
@@ -137,7 +137,7 @@ export function afkHost({
     refusal: null,
     build_skill: null,
     critique_skills: [],
-    stage: heldStage,
+    stage,
     stage_name: stageName,
     workflow: library.find((entry) => entry.id === chosen),
   })
