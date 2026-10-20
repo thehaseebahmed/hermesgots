@@ -1041,8 +1041,6 @@ function afkSession(project) {
 function afkSweep(project) {
   if (afkSwept.has(project.id)) return
   afkSwept.add(project.id)
-  // The stage is the claimed task's own record (`pipeline.start` with the skills the project had
-  // when it claimed it), so it is fixed here and a later change to the pickers leaves it alone.
   const skills = afkSkills.get(project.id)
   if (skills?.critique_skills.length) afkStages.set(project.id, "build")
   else afkStages.delete(project.id)

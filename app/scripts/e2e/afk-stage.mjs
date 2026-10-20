@@ -36,7 +36,6 @@ const run = async ({ page, profileId, shot, until }) => {
   // The row's own text, without the "Working" heading above it. `textContent`, not
   // `innerText`: the row is a flex line, so innerText breaks it at every item.
   const rowText = () => working.locator("a[data-task]").textContent()
-  // The stage prefixes the title, after the number.
   const leads = async (label) =>
     new RegExp(`^#\\d+${label}: `).test(await rowText())
   await working.getByText("Building").waitFor({ timeout: 20_000 })
@@ -49,8 +48,6 @@ const run = async ({ page, profileId, shot, until }) => {
   await page.waitForTimeout(450)
   await shot("building")
 
-  // The host moves the stage on as the build's run ends and the critique starts; the sheet picks it
-  // up on its poll rather than on a reload.
   for (const [stage, label] of STAGES) {
     await say({ project_id: projectId, stage })
     await working.getByText(label).waitFor({ timeout: 20_000 })

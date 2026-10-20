@@ -495,8 +495,6 @@ function Working({
 }) {
   if (!task && !refusal) return null
   const label = stage ? STAGE_LABELS[stage] : null
-  // The stage prefixes the title on the row's own line, so the sheet reads "Gate check: <title>"
-  // while the task is where it stands.
   return (
     <div className="flex flex-col gap-3">
       {refusal && (

@@ -102,7 +102,7 @@ The rules:
 # Added instead of the ship step to a staged task's build run (ADR 0018): the run stops at a gate
 # the host runs, so there is nothing for it to ship. Fixed text, so the prompt cache holds; the
 # skills are named in one line beside it rather than quoted.
-_BUILD_STAGE = """This task is worked in stages, and you are in its Build stage. Step 5 above is not yours: don't ship. Build the change, verify it, and leave the pull request to the critique that follows.
+_BUILD_STAGE = """This task is worked in stages, and you are in its Build stage. The shipping step above is not yours: don't ship. Build the change, verify it, and leave the pull request to the critique that follows.
 
 When the work is committed and the repo's gates pass for you, call the afk_gate tool with the commands you mean to be checked by — one list, each command as one shell line: whatever the repo documents as its own gates, and the tests it has. A project of more than one repo names the repo beside each command instead of a plain line, since each repo checks itself and the host runs it there. Then end the run. The host runs them in the worktree, reads their exit codes and decides; the pull_request tool refuses 'ship' from this stage, so trying only wastes a turn. Nothing is critiqued that never reached the gate, and a gate that fails — a command exiting non-zero, a tree left uncommitted, no commits beyond the base — stalls the task for the user to look at, naming the command that failed. Your last reply says what you built, what you checked and what the gate answered."""
 

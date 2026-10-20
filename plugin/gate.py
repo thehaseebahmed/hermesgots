@@ -135,6 +135,16 @@ def _asked(commands: Any) -> Optional[List[Dict[str, str]]]:
     return asked
 
 
+def _repos(record: Dict[str, Any]) -> Dict[str, str]:
+    """Each of the session's repos by the name its own instructions give it, and its worktree."""
+    return {str(repo.get("name")): repo.get("path") for repo in record.get("repos") or []}
+
+
+def _unknown(asked: List[Dict[str, str]], trees: Dict[str, str]) -> List[str]:
+    """The repo names a call asks for that this session hasn't got."""
+    return sorted({one["repo"] for one in asked if one.get("repo") and one["repo"] not in trees})
+
+
 def _past_gate(stage: str) -> str:
     """Why a session that isn't building has no gate to run."""
     if stage == pipeline.GATE:
@@ -174,11 +184,10 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
     tree = record.get("path")
     if not tree or not os.path.isdir(tree):
         return json.dumps({"error": "This session's worktree is gone."})
-    # The repos this session works in, by the name its own instructions give them: a project of
-    # more than one has a suite per repo, and a gate that ran one of them would pass work it never
-    # saw. Refusing an unknown name before running anything keeps a typo from half-running a gate.
-    trees = {str(repo.get("name")): repo.get("path") for repo in record.get("repos") or []}
-    unknown = sorted({one["repo"] for one in asked if one.get("repo") and one["repo"] not in trees})
+    # Refusing a name this session hasn't got before anything runs keeps a typo from half-running
+    # a gate; the trees are the repos its own instructions list.
+    trees = _repos(record)
+    unknown = _unknown(asked, trees)
     if unknown:
         return json.dumps(
             {

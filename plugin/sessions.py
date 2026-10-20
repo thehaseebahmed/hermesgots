@@ -187,7 +187,7 @@ def set_pipeline(path: Path, session_id: str, pipeline: Optional[Dict[str, Any]]
 def pipeline_of(path: Path, session_id: str) -> Any:
     """The pipeline column alone, for a poll that only asks which stage a task is in.
 
-    Decoded here, not by ``read``: a five-second poll for a stage has no use for the rest of the row.
+    The whole row isn't read: a five-second poll for a stage has no use for the other columns.
     """
     conn = connect(path)
     try:
@@ -196,12 +196,7 @@ def pipeline_of(path: Path, session_id: str) -> Any:
         ).fetchone()
     finally:
         conn.close()
-    if not row or not isinstance(row[0], str) or not row[0]:
-        return None
-    try:
-        return json.loads(row[0])
-    except ValueError:
-        return None
+    return _json(row[0], None) if row else None
 
 
 def _set_json(path: Path, session_id: str, column: str, value: Any, missing: str) -> None:

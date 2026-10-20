@@ -45,7 +45,7 @@ class StartTests(unittest.TestCase):
 
 class ReadTests(unittest.TestCase):
     def test_a_row_without_a_pipeline_is_not_staged(self) -> None:
-        for value in (None, "", [], {}, {"stage": "testing"}):
+        for value in (None, "", [], {}, {"stage": "testing"}, {"critique_skills": ["x"]}):
             self.assertIsNone(pipeline.read(value))
         self.assertFalse(pipeline.blocks_ship(pipeline.read(None)))
 
@@ -58,6 +58,15 @@ class ReadTests(unittest.TestCase):
     def test_a_hand_written_gate_reads_as_none(self) -> None:
         found = pipeline.read({"stage": BUILD, "critique_skills": ["x"], "gate": "yes"})
         self.assertIsNone(found["gate"], "a gate that isn't a block is no answer at all")
+
+    def test_a_row_whose_list_was_hand_edited_to_a_string_names_no_skills(self) -> None:
+        found = pipeline.read(
+            {"stage": "build", "critique_skills": "code-review", "build_skill": "plan"}
+        )
+        self.assertEqual(
+            found["critique_skills"], [], "a string is not read one character at a time"
+        )
+        self.assertEqual(found["build_skill"], "plan", "and the rest of the row still reads")
 
 
 class ShipTests(unittest.TestCase):
@@ -154,21 +163,6 @@ class CritiqueTests(unittest.TestCase):
         self.assertEqual(step.stall, "The run failed.")
         self.assertEqual(step.stage, CRITIQUE)
         self.assertIsNone(step.next)
-
-
-class ReadTests(unittest.TestCase):
-    def test_a_row_whose_list_was_hand_edited_to_a_string_names_no_skills(self) -> None:
-        found = pipeline.read(
-            {"stage": "build", "critique_skills": "code-review", "build_skill": "plan"}
-        )
-        self.assertEqual(
-            found["critique_skills"], [], "a string is not read one character at a time"
-        )
-        self.assertEqual(found["build_skill"], "plan", "and the rest of the row still reads")
-
-    def test_a_row_with_no_stage_is_no_pipeline(self) -> None:
-        self.assertIsNone(pipeline.read({"critique_skills": ["code-review"]}))
-        self.assertIsNone(pipeline.read(None))
 
 
 class MoveTests(unittest.TestCase):

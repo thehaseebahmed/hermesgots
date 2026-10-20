@@ -107,7 +107,7 @@ class BuildStageTests(unittest.TestCase):
     def test_it_ends_at_the_gate_rather_than_at_a_pull_request(self) -> None:
         text = self.text()
         self.assertIn("Build stage", text)
-        self.assertIn("Step 5 above is not yours", text, "the ship step is given back explicitly")
+        self.assertIn("The shipping step above is not yours", text, "the ship step is given back explicitly")
         self.assertIn("afk_gate", text)
         self.assertIn("end the run", text)
         self.assertIn("refuses 'ship' from this stage", text)
