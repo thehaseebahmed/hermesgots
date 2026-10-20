@@ -82,20 +82,30 @@ class AfkPromptTests(unittest.TestCase):
     def test_the_default_method_is_served_by_the_host(self) -> None:
         text = self.text()
         self.assertIn(prompt_builder.DEFAULT_PROMPT, text, "a project that wrote none is still told it")
+        # One anchor per behaviour the default carries, instead of its prose (ADR 0027): the words are
+        # the project's to change, so a test that quoted them would make every rewording a test edit.
         for part in (
-            "checkpoints",
-            "fails before the code that passes it",
-            "the repo's own gates",
-            "Read your own diff",
-            "`simplify-code` and `requesting-code-review`",
-            "summary",
+            "Work in checkpoints",
+            "see it fail for the reason you expect",
+            "its AGENTS.md, README or CI documents",
+            "Read it as someone who did not write it",
+            "`/simplify-code`",
+            "`/requesting-code-review`",
+            "Both skills are the ask",
+            "What landed",
+            "Reviews",
+            "Still open",
+            "Your move",
+            "Skills sit on top of this",
+            "this prompt wins",
+            "Nothing here is enforced but you",
         ):
-            self.assertIn(part, text)
+            self.assertIn(part, text, f"the default still carries {part!r}")
 
     def test_the_brief_is_told_before_the_prompt(self) -> None:
         text = self.text()
         self.assertLess(
-            text.index("The rules:"), text.index("How to work:"), "the fixed points come first"
+            text.index("The rules:"), text.index("Work in checkpoints"), "the fixed points come first"
         )
 
     def test_a_projects_prompt_is_told_in_place_of_the_default(self) -> None:

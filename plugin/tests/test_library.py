@@ -339,7 +339,7 @@ class InstructionsTest(unittest.TestCase):
         self.assertNotIn("library", prompt_builder.session_prompt(legacy))
 
     def test_the_working_rhythm_block_sits_between_the_files_and_the_ship_instructions(self) -> None:
-        # How to work rides between where the files go and how the run ships, so a long stretch of
+        # The working-rhythm block rides between where the files go and how the run ships, so a long
         # tool calls reads as work in progress rather than a hang.
         text = prompt_builder.session_prompt(self.record)
         self.assertIn("Keep the user in the loop as you work", text)

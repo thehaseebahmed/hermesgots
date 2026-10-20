@@ -181,7 +181,7 @@ const afkWorkflow = new Map()
 // serves it as the default where a project wrote none (`prompt_builder.DEFAULT_PROMPT`, shortened
 // here: the app draws what it answers, in the row and in its editor).
 const afkPrompts = new Map()
-const MOCK_DEFAULT_PROMPT = "How to work:\n\n- Work in checkpoints."
+const MOCK_DEFAULT_PROMPT = "Work in checkpoints: small slices of the issue, one at a time."
 // The library, seeded from the plugin's presets on first read (`workflows.PRESETS`): presets are
 // read-only, and a write through the routes adds or rewrites one of the account's own rows.
 let workflowRows = []

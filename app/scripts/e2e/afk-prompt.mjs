@@ -5,7 +5,7 @@
 // DOM without layout can measure.
 import { app, assert, flow, makeProject, openAfk, pass } from "./lib.mjs"
 
-const DEFAULT_PROMPT = "How to work:\n\n- Work in checkpoints."
+const DEFAULT_PROMPT = "Work in checkpoints: small slices of the issue, one at a time."
 const MINE = "# Mine\n\n- Read the issue first.\n- Run the repo's own gates."
 /** The width the app's pop-ups become side drawers at, which the editor takes from the same rule. */
 const LAPTOP = 1024
@@ -29,7 +29,7 @@ const run = async ({ page, profileId, shot, until }) => {
   }
 
   const row = await openPrompt()
-  assert.match(await row.innerText(), /How to work/, "the row reads the host's default Prompt")
+  assert.match(await row.innerText(), /Work in checkpoints/, "the row reads the host's default Prompt")
   assert.equal(await page.locator("[data-afk-workflow]").count(), 0, "no Workflow row with it off")
   assert.equal(
     await page.locator("[data-afk-skills]").count(),

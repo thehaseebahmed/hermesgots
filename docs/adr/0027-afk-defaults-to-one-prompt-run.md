@@ -16,13 +16,31 @@ Three things follow from that, and each was a choice:
 - **The fixed brief stops being a method.** It keeps only what no prompt or skill may override — the
   issue is the spec, nobody is there to ask, the pull request ships last, nothing is merged or
   closed, no secrets — and the sentence saying so. Read, plan, implement, verify, ship, report moves
-  into the default prompt, where a user can change it, and a skill applied beside it changes how a
-  checkpoint is built without changing whether it is checked.
+  into the default prompt, where a user can change it.
 - **The first message of an AFK run quotes the issue.** It is the title, the description and the
   issue link, in the run's input, instead of ADR 0011's one line naming the issue for the agent to
   fetch. The description is what the change is judged against, and a run that has to fetch it can be
   wrong about it in a way nobody reads until the pull request is open. The fixed brief keeps its
   cache because the body rides in the message, not the instructions.
+
+The default prompt is the bot's, and it lives in `plugin/prompt_builder.py` (`DEFAULT_PROMPT`), so a
+project that wrote none is still told it and neither the app nor the device holds a copy. It is
+written to be applied beside other skills — a planning, TDD or spec-driven one changes how a
+checkpoint is built and what its tests assert, never whether it is checked — and it is the method in
+full: the issue in checkpoints, the smallest slice whose behaviour can be seen; on each checkpoint a
+test watched failing for the reason it should before the code that passes it, the repo's own gates,
+and a read of the agent's own diff, whose fixes land before the commit; a look at a screen at the
+widths and in the themes the repo asks for; then, once the issue is whole, `simplify-code` and
+`requesting-code-review` over the change, their findings counted and each one either fixed or named
+in a line; a draft pull request whose body fills the repo's own template with what changed, how it
+was verified, what the reviews found and what is left; and a last reply in four headings — what
+landed, the reviews, what is still open, and what the user should look at first.
+
+The checks sit on every checkpoint rather than at the end of the issue, because a run that waits to
+be checked has built a change nobody read; and the two reviews are the prompt's ask, so neither
+skill's own trigger — `simplify-code`'s "only when the user explicitly asks",
+`requesting-code-review`'s "skip documentation-only changes" — leaves a run a reason to skip what its
+project told it to do.
 
 ## Considered options
 

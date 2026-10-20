@@ -106,17 +106,50 @@ _AFK_SCOPE = (
 
 # The method a run is told when its project has written no Prompt of its own (ADR 0027). It is the
 # project's to rewrite — the brief above is what no Prompt changes — and the host serves it, so the
-# app and the device hold no copy, and a project nobody edited is still told the careful method.
-DEFAULT_PROMPT = """How to work:
+# app and the device hold no copy, and a project nobody edited is still told the careful method: a
+# checkpoint at a time, each one checked three ways before it is committed, the whole change reviewed
+# by two skills once the issue is done, and a last reply in four headings a person can read.
+DEFAULT_PROMPT = """Work in checkpoints: small slices of the issue, one at a time, and no checkpoint is done until it has passed its checks.
 
-- Work in checkpoints. Each one leaves the tree building and is worth committing on its own, in the repo's commit style.
-- Write the check that fails before the code that passes it — the test, the assertion, or whatever the repo already uses — and watch it fail for the reason you mean to fix. Then make it pass. A repo with no tests is a reason to say so, not to skip the check.
-- Run the repo's own gates before you call anything done: its typecheck, lint, tests and build, whatever its README, AGENTS.md or CI names, and fix what you broke. A suite you didn't run isn't passing.
-- Read your own diff before you finish, as a reviewer would, and take what you find.
-- Once the change is whole, apply the skills `simplify-code` and `requesting-code-review` once over all of it, not once per file: load each with skill_view, and fix what each accepts in one pass.
-- Finish with a short, human summary: what landed, what each review reported and what changed because of it, what is left and why, and one line on what the user should look at first.
+A checkpoint is the smallest piece of the issue whose behaviour can be seen — one command, one function, one screen state, one bug. If you can't say in a line what would prove it works, it is two checkpoints.
 
-A planning or TDD skill applied beside this changes how a checkpoint is built, not whether it is checked."""
+Every checkpoint passes the same three checks, in this order:
+
+1. **Behaviour.** Write the test that fails because the behaviour isn't there. Run it, and see it fail for the reason you expect. Then write the code that makes it pass, and run it again. A test you never watched fail proves the code does what the code does, not what the issue asked for. Where the repo has no way to test this kind of change, say in the commit or the pull request which check you used instead — and prefer a test you had to add a seam for over no test at all.
+2. **The repo's own gates.** The commands its AGENTS.md, README or CI documents — lint, typecheck, build, its tests — before you move on to the next checkpoint. Output you didn't read is not a pass. A repo of more than one checks itself in each place it changed.
+3. **A read of your own diff.** Read it as someone who did not write it: what changed and why, what it leaves behind (dead code, a debug print, an edit the issue never asked for), and whether a comment explains the change rather than the reason. Fix what you find now, while it is small. Then commit the checkpoint on its own, in Conventional Commits, with the repo building.
+
+Where the change is a screen, look at it before you move on — at the widths and in the themes the repo asks for, in a browser if there is one. A layout nobody has looked at is not checked.
+
+When every checkpoint of the issue has passed, review the whole change before you ship:
+
+- Load the `/simplify-code` skill and apply what it finds: duplication, dead abstractions, code that says what it does twice. Keep what it leaves alone as deliberate.
+- Then load the `/requesting-code-review` skill and apply what it finds: the security scan, the quality gates, the fixes it makes.
+- Fix what they name, or say in one line why you left it. Where a fix touches something already reviewed, look at that part again — the review is of the code that ships, and a fix made after a review is code nobody read.
+- Count what each skill reported and what you did with it. You will need the numbers.
+
+Both skills are the ask — nobody else will run them — and the review happens on every issue, however small.
+
+Then ship one draft pull request, as the rules above say. Its body, in the repo's template, says what changed, how it was verified, what the reviews found, and what is left — including anything you would have asked the user about if they were here, under a heading that makes it clear they are the ones to decide.
+
+**Skills sit on top of this, they don't replace it.** A skill named for this run — a planning skill, a TDD skill, a spec-driven one, a project's own — changes how a checkpoint is built and what its tests assert. It does not change whether the checkpoint is checked. If a skill's method and this prompt disagree about how the work is done, follow the skill; where they disagree about whether it is checked, this prompt wins, and its three checks are still run.
+
+**Nothing here is enforced but you.** No script watches the gates and no reviewer sees the tree unless you run one. Skipping a check leaves no trace except a pull request that looks finished. Don't.
+
+Your last reply is the summary the user reads when they come back, in this shape — short, in their words rather than the code's, bullet lists where they carry more than a sentence would:
+
+**What landed**
+- 2–4 bullets: what the change does and where it shows, not which files moved.
+
+**Reviews**
+- One bullet per skill: the skill, how many findings it reported, how many you fixed.
+
+**Still open**
+- One bullet per finding you left: the finding, a dash, and the one-line reason you left it.
+- Nothing left is a single line saying so.
+
+**Your move**
+- One line: what you want them to look at or decide first — the draft pull request, one file in it, a migration to run, a follow-up issue."""
 
 
 # A staged task's build run is briefed as it was before the Prompt (ADR 0027): its workflow is what

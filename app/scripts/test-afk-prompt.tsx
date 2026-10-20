@@ -67,10 +67,10 @@ test("the row reads the Prompt the host answers, the default included", async ()
   await promptMode(afkHost(), async () => {
     assert.match(
       row()?.textContent ?? "",
-      /How to work/,
+      /Work in checkpoints/,
       "an untouched project reads the host's default rather than nothing",
     )
-    assert.match(row()?.textContent ?? "", /Run the repo's own gates/, "all of its words are there")
+    assert.match(row()?.textContent ?? "", /Small slices of the issue/, "all of its words are there")
     assert.doesNotMatch(
       row()?.textContent ?? "",
       /#|- Work/,
@@ -79,7 +79,7 @@ test("the row reads the Prompt the host answers, the default included", async ()
     const words = row()?.textContent ?? ""
     assert.match(
       words,
-      /^Prompt\s*How to work/,
+      /^Prompt\s*Work in checkpoints/,
       "the label sits over the words, a card rather than a pill",
     )
     assert.ok(row()?.querySelector("svg"), "and the chevron says the row opens something")
@@ -139,7 +139,7 @@ test("an emptied field saves as empty, and the row reads the default again", asy
     assert.deepEqual(writes[0].body, { prompt: "" }, "the empty field is the write it says it is")
     assert.match(
       row()?.textContent ?? "",
-      /How to work/,
+      /Work in checkpoints/,
       "and the host's default is what the row reads back",
     )
     assert.doesNotMatch(row()?.textContent ?? "", /Read the issue first/)
@@ -157,7 +157,7 @@ test("Done on the words nobody changed writes nothing", async () => {
       [],
       "opening the sheet and leaving it would otherwise write the default as the project's own words",
     )
-    assert.match(row()?.textContent ?? "", /How to work/, "and the row reads the default still")
+    assert.match(row()?.textContent ?? "", /Work in checkpoints/, "and the row reads the default still")
   })
 })
 
@@ -181,7 +181,7 @@ test("a refusal is a toast, and the words stay where they were typed", async () 
         "# Mine\n\n- Read the issue first.",
         "the editor keeps the words, ready for another try",
       )
-      assert.match(row()?.textContent ?? "", /How to work/, "the row still reads what it held")
+      assert.match(row()?.textContent ?? "", /Work in checkpoints/, "the row still reads what it held")
     })
   } finally {
     toast.error = real
@@ -203,7 +203,7 @@ test("the way out without Done writes nothing", async () => {
     await settled(() => !field(), "Escape closes the editor as the sheet's own way out")
 
     assert.deepEqual(afkWrites(fake), [], "and nothing reached the host")
-    assert.match(row()?.textContent ?? "", /How to work/, "the row reads what it read before")
+    assert.match(row()?.textContent ?? "", /Work in checkpoints/, "the row reads what it read before")
 
     await click(find('button[aria-label="Prompt"]'))
     assert.equal(

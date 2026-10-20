@@ -94,7 +94,7 @@ export const workflowStage = (name: string, extra: Record<string, unknown> = {})
 })
 
 export const DEFAULT_AFK_PROMPT =
-  "# How to work\n\n- Work in checkpoints.\n- Run the repo's own gates."
+  "# Work in checkpoints\n\nSmall slices of the issue, one at a time."
 
 export function afkHost({
   projectId = "project-1",
