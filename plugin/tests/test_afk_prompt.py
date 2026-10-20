@@ -166,8 +166,8 @@ class CritiquePromptTests(unittest.TestCase):
     def test_one_skill_asks_for_one_reviewer(self) -> None:
         record = {**RECORD, "pipeline": {**pipeline.start(None, ["code-review"]), "stage": "critique"}}
         text = prompt_builder.critique_prompt(record, TASK, "main")
-        self.assertIn("The critique skill is", text)
-        self.assertIn("one reviewer", text)
+        self.assertIn("The critique skill, with the brief its reviewer is handed", text)
+        self.assertIn("one reviewer per skill", text)
 
     def test_each_reviewer_is_briefed_with_its_skill_the_issue_the_base_and_the_worktree(
         self,
@@ -180,8 +180,8 @@ class CritiquePromptTests(unittest.TestCase):
             self.assertIn(f"mock-user/memento#265 ({TASK['url']})", brief)
             self.assertIn("base main", brief, "the branch the pull request is against")
             self.assertIn("/trees/afk-265", brief, "the worktree the review reads")
-            self.assertIn("reports rather than implements", brief)
-            self.assertIn("changes nothing, commits nothing and ships nothing", brief)
+            self.assertIn("You report rather than implement", brief, "it speaks to the reviewer")
+            self.assertIn("change nothing, commit nothing and ship nothing", brief)
             self.assertNotIn("'ship'", brief, "a reviewer never ships")
         self.assertNotEqual(briefs[0], briefs[1], "one brief each, not one brief twice")
 
@@ -220,10 +220,18 @@ class CritiquePromptTests(unittest.TestCase):
 
     def test_a_skill_shapes_method_only(self) -> None:
         text = self.text()
-        self.assertIn("shapes method only", text)
+        self.assertIn("governs method only", text)
         self.assertIn("no skill unlocks the gate", text)
         self.assertIn("nobody is asked anything", text)
         self.assertIn("shipped last", text)
+
+    def test_the_guard_is_the_same_one_the_build_is_given(self) -> None:
+        build = prompt_builder.afk_prompt(
+            {**RECORD, "pipeline": pipeline.start("plan", ["code-review"])}, TASK
+        )
+        self.assertIn(prompt_builder._SKILL_SCOPE, build, "one guard, both stages")
+        self.assertIn(prompt_builder._SKILL_SCOPE, self.text())
+        self.assertEqual(self.text().count("governs method only"), 1, "stated once, not twice")
 
     def test_it_fixes_once_and_ships_last(self) -> None:
         text = self.text()

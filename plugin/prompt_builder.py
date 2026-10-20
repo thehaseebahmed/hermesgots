@@ -1,8 +1,9 @@
 """The prompt Gots injects into a project session's run.
 
-One module holds the whole thing: every paragraph of the run's instructions as a private string at
-the top, and ``session_prompt`` joining them for a session's record, so a reader sees exactly what
-the agent is told without tracing the session bookkeeping.
+One module holds the whole thing: every fixed paragraph of the run's instructions as a private
+string at the top, and each critique reviewer's brief built from the session's record
+(``critique_briefs``), so a reader sees exactly what the agent is told without tracing the session
+bookkeeping.
 """
 
 from __future__ import annotations
@@ -99,6 +100,14 @@ The rules:
 - No TODOs, commented-out code, debug prints or secrets in what you commit. Never push to the default branch, and keep all work inside the worktree."""
 
 
+# What no skill may change: the build's line and the critique's block are the two runs that name a
+# skill, and neither prompt carries the other's, so the points are stated once and used twice.
+_SKILL_SCOPE = (
+    "A skill governs method only: the fixed points hold whatever it says — the issue is the "
+    "spec, the work is verified, nobody is asked anything and the pull request is shipped last — "
+    "so no skill unlocks the gate, asks the user anything or leaves the shipping to them."
+)
+
 # Added instead of the ship step to a staged task's build run (ADR 0018): the run stops at a gate
 # the host runs, so there is nothing for it to ship. Fixed text, so the prompt cache holds; the
 # skills are named in one line beside it rather than quoted.
@@ -107,15 +116,18 @@ _BUILD_STAGE = """This task is worked in stages, and you are in its Build stage.
 When the work is committed and the repo's gates pass for you, call the afk_gate tool with the commands you mean to be checked by — one list, each command as one shell line: whatever the repo documents as its own gates, and the tests it has. A project of more than one repo names the repo beside each command instead of a plain line, since each repo checks itself and the host runs it there. Then end the run. The host runs them in the worktree, reads their exit codes and decides; the pull_request tool refuses 'ship' from this stage, so trying only wastes a turn. Nothing is critiqued that never reached the gate, and a gate that fails — a command exiting non-zero, a tree left uncommitted, no commits beyond the base — stalls the task for the user to look at, naming the command that failed. Your last reply says what you built, what you checked and what the gate answered."""
 
 # A staged task's second run, on the same session: the build review and the pull request, in one
-# pass. Fixed text, so the prompt cache holds across its turns. The reviewers' own briefs are built
-# beside it, one per skill, so each delegate is handed the plugin's words rather than the run's.
-_CRITIQUE_STAGE = """This task has been built and gated, and you are in its Critique stage: the pull request is yours to open, and nothing reviews the work again before the user does. Review it as work you did not do — this transcript is the author's own account of it, and its commits are in the worktree.
+# pass. Fixed text, so the prompt cache holds across its turns.
+_CRITIQUE_STAGE = (
+    """This task has been built and gated, and you are in its Critique stage: the pull request is yours to open, and nothing reviews the work again before the user does. Review it as work you did not do — this transcript is the author's own account of it, and its commits are in the worktree.
 
-Load each critique skill with skill_view before you delegate, then hand each reviewer its brief above with the delegate_task tool. A skill that prescribes its own arrangement — how many reviewers there are and what each of them reads — wins over its brief: follow the skill's own words rather than wrapping it in a single reviewer, and each reviewer it adds reports rather than implements all the same. A skill shapes method only: the fixed points hold whatever it says — the issue is the spec, the work is verified, nobody is asked anything and the pull request is shipped last — so no skill unlocks the gate, asks the user anything or leaves the shipping to them.
+Load each critique skill with skill_view before you delegate, then hand each reviewer its brief above with the delegate_task tool — one reviewer per skill, in one call — unless a skill prescribes its own arrangement: how many reviewers there are and what each of them reads wins over its brief, so follow the skill's own words rather than wrapping it in a single reviewer, and each reviewer it adds reports rather than implements all the same. """
+    + _SKILL_SCOPE
+    + """
 
 Weigh what comes back, then take what the critique accepts and fix it in one pass, in the worktree, committing as you go: there is no second review, and the user's own read of the pull request is the next one.
 
 Then ship once with the pull_request tool, action 'ship', and write its body from the repo's template with a short section on what the critique found and what changed because of it. Leave the Closes line to the tool, and merging or closing to the user. Don't ask the user anything: nobody is here to answer."""
+)
 
 
 def _pr_instructions(unattended: bool) -> str:
@@ -173,7 +185,7 @@ def critique_prompt(
         _critique_task_line(task),
         session_prompt(record, unattended=True),
         _base_line(base),
-        _critique_skills_line(record, task, base),
+        _critique_skills_line(critique_briefs(record, task, base)),
         _CRITIQUE_STAGE,
     ]
     return "\n\n".join(line for line in lines if line)
@@ -182,24 +194,24 @@ def critique_prompt(
 def critique_briefs(
     record: Dict[str, Any], task: Dict[str, Any], base: Optional[str] = None
 ) -> List[str]:
-    """The reviewers a critique delegates, one brief each — the plugin's words, not the run's.
+    """What each of a critique's reviewers is told, one brief per skill.
 
-    A reviewer is a fresh agent that never saw the build: its brief has to stand alone, so every one
-    names its own skill to load, the issue to judge the work by, the branch the pull request is
-    against and the worktree it reads, and says that it reports rather than implements. The skill is
-    named rather than quoted, like the build's, so the profile's own copy is what the reviewer reads
-    (ADR 0018).
+    A delegate never saw the build, so its brief has to stand alone and speak to the agent that
+    reads it: the skill it loads, the issue it judges the work by, the base the pull request is
+    against, the worktree it reads, and that it reports rather than implements (ADR 0018).
     """
     skills = _critique_skills(record)
     if not skills:
         return []
-    where, url, _read = _issue_ref(task)
-    place = _trees_phrase(record)
-    against = f" against base {base}" if base else ""
+    ref, place = _issue_ref(task), _worktrees_at(record)
+    clauses = [f"the build of {ref.where}{ref.url}"]
+    if place:
+        clauses.append(place)
+    if base:
+        clauses.append(f"against base {base}")
     return [
-        f'"{name}": a reviewer that loads skill_view(name="{name}") and reviews the build of '
-        f"{where}{url}{place}{against}. It reports rather than implements: it changes nothing, "
-        "commits nothing and ships nothing."
+        f'"{name}": load skill_view(name="{name}") and review {", ".join(clauses)}. You report '
+        "rather than implement: change nothing, commit nothing and ship nothing."
         for name in skills
     ]
 
@@ -220,49 +232,33 @@ def _build_skill_line(skill: Optional[str]) -> str:
         return ""
     return (
         f'This task is built by your skill "{skill}": call skill_view(name="{skill}") before you '
-        "start, and follow it for how the work is done. A skill governs method only — the fixed "
-        "points above still hold, so no skill unlocks the gate or ships for you."
+        f"start, and follow it for how the work is done. {_SKILL_SCOPE}"
     )
 
 
 def _critique_skills(record: Dict[str, Any]) -> List[str]:
-    """The critique skills a staged session follows, in the order the project picked them."""
     staged = pipeline.read(record.get("pipeline")) or {}
     return staged.get("critique_skills") or []
 
 
-def _critique_skills_line(
-    record: Dict[str, Any], task: Dict[str, Any], base: Optional[str]
-) -> str:
-    """The skills a critique follows, each with the brief its own reviewer is handed.
-
-    One reviewer per skill unless a skill prescribes another arrangement, which ``_CRITIQUE_STAGE``
-    says the run follows instead; with none chosen there is no line at all.
-    """
-    skills = _critique_skills(record)
-    briefs = critique_briefs(record, task, base)
+def _critique_skills_line(briefs: List[str]) -> str:
     if not briefs:
         return ""
-    names = ", ".join(f'"{name}"' for name in skills)
-    if len(skills) == 1:
-        return (
-            f"The critique skill is {names}: delegate one reviewer with this brief —\n"
-            + briefs[0]
-        )
-    return (
-        f"The critique skills are {names}: delegate one reviewer per skill, in one delegate_task "
-        "call, each with its own brief —\n" + "\n".join(briefs)
+    heading = (
+        "The critique skill, with the brief its reviewer is handed:"
+        if len(briefs) == 1
+        else "The critique skills, with the brief each reviewer is handed:"
     )
+    return "\n\n".join([heading, *briefs])
 
 
-def _trees_phrase(record: Dict[str, Any]) -> str:
-    """Where a reviewer reads the work: the session's worktree, or each of them."""
-    paths = [repo["path"] for repo in record.get("repos") or [] if repo.get("path")]
+def _worktrees_at(record: Dict[str, Any]) -> str:
+    paths = [repo.get("path") for repo in record.get("repos") or [] if repo.get("path")]
     if not paths:
         return ""
     if len(paths) == 1:
-        return f" in the worktree at {paths[0]}"
-    return f" in the worktrees at {' and '.join(paths)}"
+        return f"in the worktree at {paths[0]}"
+    return f"in the worktrees at {' and '.join(paths)}"
 
 
 def _base_line(base: Optional[str]) -> str:

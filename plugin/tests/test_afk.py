@@ -1602,7 +1602,7 @@ class CritiqueRunTests(unittest.TestCase):
             self.assertIn(f'skill_view(name="{name}")', text, "one brief per critique skill")
         self.assertIn("https://github.com/mock-user/memento/issues/265", text)
         self.assertIn("base main", text, "the branch the pull request is against")
-        self.assertIn("reports rather than implements", text, "a reviewer doesn't fix the work")
+        self.assertIn("You report rather than implement", text, "a reviewer doesn't fix the work")
         self.assertIn("delegate_task", text)
 
     def test_a_critique_that_cannot_start_stalls_the_task(self) -> None:
