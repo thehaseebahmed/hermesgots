@@ -31,12 +31,13 @@ pnpm mock        # fake Hermes API on :8642 (say "clean up" to trigger an approv
 pnpm e2e <flow>  # browser flows against the mock (list, all, shot <path>, up, down)
 pnpm lint        # oxlint
 pnpm typecheck   # tsc -b
+pnpm test        # unit (scripts/test-*.mjs) then component (scripts/test-*.tsx) tests
 pnpm build       # typecheck + production build (also generates the service worker)
 pnpm build:android # native-mode build (no service worker) synced into android/; set VITE_SITE_URL for sync
 pnpm format      # prettier (with the Tailwind class sorter) over src/
 ```
 
-Before you commit, run `pnpm lint`, `pnpm typecheck` and `pnpm build`. All three must pass.
+Before you commit, run `pnpm lint`, `pnpm typecheck`, `pnpm test` and `pnpm build`. All four must pass.
 
 For a change to chats, sessions, polling or sync, also run the browser flows against the mock: `pnpm e2e <flow>` (or `pnpm e2e all`); `pnpm e2e list` names them and `pnpm e2e shot <path>` screenshots a screen. The e2e-testing skill (`.agents/skills/e2e-testing/`) says how to add a flow.
 

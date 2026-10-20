@@ -12,6 +12,9 @@
     "lint": "oxlint",
     "typecheck": "tsc -b",
     "format": "prettier --write src",
+    "test": "pnpm test:unit && pnpm test:component",
+    "test:unit": "node --experimental-strip-types --test \"scripts/test-*.mjs\"",
+    "test:component": "node --test --import ./scripts/component-hooks.mjs \"scripts/test-*.tsx\"",
     "mock": "node scripts/mock-hermes.mjs",
     "e2e": "node scripts/e2e/cli.mjs"
   },

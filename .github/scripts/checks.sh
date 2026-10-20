@@ -31,17 +31,12 @@ app() {
   gate pnpm install --frozen-lockfile
   gate pnpm lint
   gate pnpm typecheck
-  gate node scripts/test-community.mjs
-  gate node --experimental-strip-types --test scripts/test-bench-matching.mjs scripts/test-benchlm-check.mjs
-  gate node --experimental-strip-types --test scripts/test-identity-session.mjs
-  gate node --experimental-strip-types --test scripts/test-model-changes.mjs
-  gate node --experimental-strip-types --test scripts/test-slash.mjs scripts/test-skills-cache.mjs
-  gate node --experimental-strip-types --test scripts/test-pipeline.mjs scripts/test-workflow.mjs
-  gate node --experimental-strip-types --test scripts/test-mcp-catalogue.mjs scripts/test-mcp-access.mjs
-  # The component tier: a screen rendered over a seeded device database, with the HTTP boundary
-  # faked. Each file is its own process, since what a connection's plugin answered is remembered
-  # for the page. ADR 0019 keeps geometry out of these: no layout, so nothing here measures.
-  gate node --test --import ./scripts/component-hooks.mjs scripts/test-afk-workflows.tsx scripts/test-afk-workflows-old-plugin.tsx scripts/test-afk-workflows-setting.tsx scripts/test-afk-prompt.tsx scripts/test-afk-prompt-old-plugin.tsx scripts/test-pipeline-sheet.tsx
+  # Every `scripts/test-*.mjs` is a unit test and every `scripts/test-*.tsx` a component test, found
+  # by name rather than listed here, so a new file is gated the day it lands. Component files run in
+  # processes of their own, since what a connection's plugin answered is remembered for the page.
+  # ADR 0019 keeps geometry out of these: no layout, so nothing here measures.
+  gate pnpm test:unit
+  gate pnpm test:component
   # `pnpm build` is `tsc -b && vite build`, and `typecheck` above has run that `tsc -b` already: the
   # tsconfigs emit nothing, so the second pass would only check the same code again.
   gate pnpm exec vite build
