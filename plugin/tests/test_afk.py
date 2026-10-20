@@ -1591,7 +1591,6 @@ class StagedFlowTests(AfkSessionTests):
 
     def test_a_failing_gate_repeats_the_build_told_what_failed_then_the_review_ships(self) -> None:
         self.start()
-        # The build's first round runs, and the gate it named fails.
         self.gated(self.BROKEN)
         self.ended()
         self.assertEqual(len(self.posted), 1, "the loop posts its next round, and nothing else")
@@ -1602,7 +1601,6 @@ class StagedFlowTests(AfkSessionTests):
             self.posted[0]["instructions"],
             "round two is told the command that failed and its exit code",
         )
-        # Its second round fixes it, and the gate passes.
         self.gated(self.PASSING)
         self.ended()
         self.assertEqual(len(self.posted), 2, "the review is the next stage to run")
@@ -1612,7 +1610,6 @@ class StagedFlowTests(AfkSessionTests):
             "Review #265 (https://github.com/mock-user/memento/issues/265)",
         )
         self.assertNotIn("The round before this one failed", self.posted[1]["instructions"])
-        # The review ships, and the workflow's empty Summary has nothing to run.
         self.ended()
         self.assertIsNone(self.shown()["task"], "the task is in review: the hold goes")
         self.assertEqual(pipeline.kind(self.pipeline()), pipeline.DONE)
@@ -1635,7 +1632,6 @@ class StagedFlowTests(AfkSessionTests):
         )
         self.assertIn("wrap-up", self.posted[1]["instructions"])
         self.assertIn("weekly-review", self.posted[1]["instructions"], "the stage's own skill is named")
-        # The summary ends the workflow, and the task it held is let go.
         self.ended()
         self.assertIsNone(self.shown()["task"])
         self.assertEqual(len(self.posted), 2, "nothing runs after the last stage")
