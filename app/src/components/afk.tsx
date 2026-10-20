@@ -42,11 +42,11 @@ import {
   type HermesConfig,
   type ProjectAfk,
   type ProjectIssue,
-  type ProjectStage,
   type ProjectTasks,
   type ProjectTask,
   type Skill,
 } from "@/lib/hermes"
+import { STAGE_WORDS, type AfkStage } from "@/lib/pipeline"
 import { usePoll } from "@/lib/poll"
 import { noteFailure } from "@/lib/report"
 import { useSkills } from "@/lib/skills"
@@ -62,14 +62,10 @@ export const AFK_SKILLS_FEATURE = "afk_skills"
 
 /**
  * What a staged task's stage reads as in the Working row: the stage itself is the host's, and a
- * project with no critique skill has none to name.
+ * project with no critique skill has none to name. `done` has no word here — nothing is held by
+ * then, so this row never says it.
  */
-const STAGE_LABELS: Record<ProjectStage, string | null> = {
-  build: "Building",
-  gate: "Gate check",
-  critique: "Critiquing",
-  done: null,
-}
+const STAGE_LABELS: Record<AfkStage, string | null> = { ...STAGE_WORDS, done: null }
 
 /** A Bot whose plugin answers without the route is left alone for a while, like every other read. */
 const unsupported = cooldown()
@@ -489,7 +485,7 @@ function Working({
   manyRepos,
 }: {
   task: ProjectIssue | null | undefined
-  stage: ProjectStage | null | undefined
+  stage: AfkStage | null | undefined
   refusal: string | null | undefined
   manyRepos: boolean
 }) {

@@ -33,6 +33,7 @@ import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
 import { ModelChange } from "@/components/chat/model-change"
 import { prLabel } from "@/components/chat/pr-look"
+import { PipelinePill, PipelineSheet } from "@/components/chat/pipeline"
 import { PrPill } from "@/components/chat/pr-pill"
 import { LibraryPill } from "@/components/chat/library-pill"
 import { OutputsDrawer } from "@/components/chat/outputs-drawer"
@@ -118,6 +119,8 @@ import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { setThreadMuted } from "@/lib/push"
+import { AFK_PIPELINE_FEATURE } from "@/lib/pipeline"
+import { usePluginFeatureOn } from "@/lib/features"
 import { modelChanges } from "@/lib/model-changes"
 import { fullModel, hostChoice, useModelInfo } from "@/lib/model-info"
 import { syncContextWindow, useModelCatalog } from "@/lib/models"
@@ -248,6 +251,7 @@ export function ChatPage() {
   // A new chat's pick, held until its first message makes the chat; it follows the chosen bot.
   const [pendingModel, setPendingModel] = useState<{ profileId?: string; choice?: ModelChoice }>()
   const [todosOpen, setTodosOpen] = useState(false)
+  const [pipelineOpen, setPipelineOpen] = useState(false)
   const [outputsOpen, setOutputsOpen] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const [historyMissing, setHistoryMissing] = useState<string>()
@@ -309,6 +313,13 @@ export function ChatPage() {
   const outputs = session?.library?.count ?? 0
   // Every pull request the session has, the ones it already finished included, as the drawer lists.
   const prs = session?.prs ?? []
+  const firstPrLabel = prs.length ? prLabel(prs[0], prs) : undefined
+  // The pipeline a staged task ran in, as its session recorded it. Where the bot's Host stages tasks
+  // and this session holds a record the pill marks them; a chat with no record asks it nothing.
+  const pipeline = session?.pipeline
+  const stagedPipeline = usePluginFeatureOn(pipeline ? profile : null, AFK_PIPELINE_FEATURE)
+    ? pipeline
+    : null
   // While a pull request's checks run, read them again every few seconds so the pill turns
   // green (or orange) as soon as they do. Forced, so the freshness gate doesn't skip a tick that
   // lands just inside its window.
@@ -769,10 +780,13 @@ export function ChatPage() {
       )}
 
       <div data-toast-above className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
-        {(todos.length > 0 || prs.length > 0 || outputs > 0) && (
+        {(stagedPipeline || todos.length > 0 || prs.length > 0 || outputs > 0) && (
           // One line, centred; wider than the screen it scrolls, from the first pill.
           <div className="-mx-3 flex [scrollbar-width:none] overflow-x-auto px-3 pb-2 sm:-mx-4 sm:px-4 [&::-webkit-scrollbar]:hidden">
             <div className="mx-auto flex w-max max-w-none min-w-full shrink-0 justify-center gap-2">
+              {stagedPipeline && (
+                <PipelinePill pipeline={stagedPipeline} onClick={() => setPipelineOpen(true)} />
+              )}
               {todos.length > 0 && (
                 <TodosPill
                   items={todos}
@@ -781,17 +795,13 @@ export function ChatPage() {
                   onClick={() => setTodosOpen(true)}
                 />
               )}
-              {outputs === 0 && prs.length === 1 ? (
+              {outputs === 0 && prs.length === 1 && firstPrLabel ? (
                 // One pull request and nothing filed: the pill itself, opening it on GitHub.
-                <PrPill pr={prs[0]} label={prLabel(prs[0], prs)} className="shrink-0" />
+                <PrPill pr={prs[0]} label={firstPrLabel} />
               ) : (
                 // Anything else there opens the session's outputs drawer, counting both.
                 (outputs > 0 || prs.length > 1) && (
-                  <LibraryPill
-                    count={outputs + prs.length}
-                    onClick={() => setOutputsOpen(true)}
-                    className="shrink-0"
-                  />
+                  <LibraryPill count={outputs + prs.length} onClick={() => setOutputsOpen(true)} />
                 )
               )}
             </div>
@@ -905,6 +915,14 @@ export function ChatPage() {
         usage={usage}
         providerUsage={providerUsage}
       />
+      {stagedPipeline && (
+        <PipelineSheet
+          open={pipelineOpen}
+          onOpenChange={setPipelineOpen}
+          pipeline={stagedPipeline}
+          prLabel={firstPrLabel}
+        />
+      )}
       <TodosSheet
         open={todosOpen}
         onOpenChange={setTodosOpen}

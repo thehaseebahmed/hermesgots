@@ -1,3 +1,4 @@
+import { PILL } from "@/components/chat/pill"
 import { prLook } from "@/components/chat/pr-look"
 import { Button } from "@/components/ui/button"
 import type { PullRequestRef } from "@/lib/db"
@@ -24,7 +25,7 @@ export function PrPill({
     <Button
       type="button"
       variant="secondary"
-      className={cn("h-11 gap-2 rounded-full px-4 tabular-nums", look.className, className)}
+      className={cn(PILL, "tabular-nums", look.className, className)}
       disabled={!pr.url}
       onClick={() => pr.url && openExternal(pr.url)}
       aria-label={`Pull request ${pr.number} in ${pr.repo}, ${look.label}`}

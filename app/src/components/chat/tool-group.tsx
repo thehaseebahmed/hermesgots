@@ -15,6 +15,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 
+import { StepRail } from "@/components/chat/step-rail"
 import { Details } from "@/components/chat/tool-card"
 import { Button } from "@/components/ui/button"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
@@ -201,15 +202,9 @@ function ToolList({
           const reason = whyFailed(tool)
           return (
             <li key={`${tool.toolCallId}-${index}`} className="flex gap-3">
-              <div className="relative w-7 shrink-0">
-                <div className="flex h-11 items-center justify-center">
-                  <StatusIcon tool={tool} icon={ICONS[kind.id]} />
-                </div>
-                {/* Runs from under this row's icon to the next one's. */}
-                {index < tools.length - 1 && (
-                  <div className="absolute top-10 -bottom-1 left-1/2 w-px -translate-x-1/2 bg-border" />
-                )}
-              </div>
+              <StepRail last={index === tools.length - 1}>
+                <StatusIcon tool={tool} icon={ICONS[kind.id]} />
+              </StepRail>
               <button
                 type="button"
                 className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg text-left text-[15px] outline-none focus-visible:ring-2 focus-visible:ring-ring/50"

@@ -1,5 +1,6 @@
 import { FolderOpenIcon } from "lucide-react"
 
+import { PILL } from "@/components/chat/pill"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -20,7 +21,7 @@ export function LibraryPill({
     <Button
       type="button"
       variant="secondary"
-      className={cn("h-11 shrink-0 gap-2 rounded-full px-4 tabular-nums", className)}
+      className={cn(PILL, "tabular-nums", className)}
       onClick={onClick}
       aria-label={`Outputs (${count})`}
     >
