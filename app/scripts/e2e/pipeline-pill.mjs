@@ -8,8 +8,8 @@ import { app, assert, flow, makeProject, mock, pass, say } from "./lib.mjs"
 
 const TASK = 265
 const PR = 27
-const OPENING = `Implement Issue #${TASK} (https://github.com/mock-user/memento/issues/${TASK})`
 const TITLE = `#${TASK} The frontier is read from GitHub and listed`
+const OPENING = `Title: The frontier is read from GitHub and listed\nDescription:\nRead the project's tasks from GitHub and list them.\n\n[Issue #${TASK}](https://github.com/mock-user/memento/issues/${TASK})`
 
 // The records `plugin/pipeline.py` writes, stage by stage, with the gate's answer each one carries.
 const GATE = {

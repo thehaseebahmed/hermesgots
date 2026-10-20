@@ -1113,11 +1113,13 @@ function pipelineRecord(skills) {
   }
 }
 
+const AFK_BODY = "Read the project's tasks from GitHub and list them."
+
 function afkSession(project) {
   const held = afkTask(project)
   const session = afkSessionId(project.id)
   const title = `#${held.number} ${held.title}`
-  const input = `Implement Issue #${held.number} (${held.url})`
+  const input = `Title: ${held.title}\nDescription:\n${AFK_BODY}\n\n[Issue #${held.number}](${held.url})`
   const now = Date.now()
   if (project.folders.some((f) => f.git))
     projectSessions.set(
@@ -1138,6 +1140,7 @@ function afkSession(project) {
       projectId: project.id,
       mode: "auto",
       afk: true,
+      titleEdited: true,
     },
   })
   noteEvent("chats")

@@ -1222,6 +1222,9 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(value["projectId"], "p1")
         self.assertEqual(value["mode"], "auto")
         self.assertIs(value["afk"], True, "the list marks it as AFK's")
+        self.assertIs(
+            value["titleEdited"], True, "Hermes's title, sliced off the opener, never replaces it"
+        )
         self.assertGreater(
             value["updatedAt"],
             value["createdAt"],

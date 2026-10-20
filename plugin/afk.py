@@ -564,7 +564,9 @@ def publish(
     Its ``updatedAt`` is newer than its ``createdAt``, because the Code list hides a session nothing
     was sent in by exactly that rule; the record is keyed by the session id, so a device has one id
     for it. It is written once, here: the chat list is last-write-wins, so a title the user edits, a
-    mode they change or a resolve they make afterwards has to win.
+    mode they change or a resolve they make afterwards has to win. The title is marked edited because
+    Hermes titles a session from a slice of its opener, which here is the issue block's `Title:` line,
+    and the app would otherwise replace the task's own name with that.
     """
     sessions.set_task(db_path(hermes_home), session_id, _held_fields(task))
     now = int(time.time() * 1000)
@@ -576,6 +578,7 @@ def publish(
         "projectId": project_id,
         "mode": "auto",
         "afk": True,
+        "titleEdited": True,
     }
     chats.merge(db_path(hermes_home), {session_id: {"at": now + 1, "value": value}})
     return value

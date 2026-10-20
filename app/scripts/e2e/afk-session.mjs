@@ -1,13 +1,13 @@
 // AFK works the task it claimed in a session of its own. The host publishes the chat record that
 // makes that session appear in Code, titled after the task and marked AFK, and opening it shows the
-// run's first message — the issue and where it is, not the issue's text. The mock's sweep publishes
+// run's first message — the issue itself: its title, its description and a link. The mock's sweep publishes
 // the session the way the plugin does, so the whole thing is covered without GitHub. Phone and
 // tablet, light and dark, with no console error.
 import { afkOn, app, assert, flow, makeProject, pass } from "./lib.mjs"
 
 const HELD = 265
 const TITLE = "#265 The frontier is read from GitHub and listed"
-const OPENER = "Implement Issue #265 (https://github.com/mock-user/memento/issues/265)"
+const ISSUE_LINK = "Issue #265"
 
 const run = async ({ page, profileId, shot, until }) => {
   const errors = []
@@ -33,11 +33,10 @@ const run = async ({ page, profileId, shot, until }) => {
   await row.click()
   await page.waitForURL("**/c/**")
   const messages = page.locator('[aria-label="Messages"]')
-  await messages.getByText(OPENER, { exact: true }).first().waitFor({ timeout: 15_000 })
-  assert.equal(
-    await messages.getByText("The frontier is read from GitHub and listed", { exact: true }).count(),
-    0,
-    "the issue's title is the row's, not a message",
+  await messages.getByText(ISSUE_LINK, { exact: true }).first().waitFor({ timeout: 15_000 })
+  assert.ok(
+    (await messages.getByText("Title: The frontier is read from GitHub and listed").count()) > 0,
+    "the run opens with the issue's title, its description and a link to it",
   )
   // Let the pane's slide-in finish, so the capture is the screen and not the move to it.
   await page.waitForTimeout(450)
