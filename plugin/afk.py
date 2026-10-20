@@ -441,11 +441,9 @@ def run_body(record: Dict[str, Any], task: Dict[str, Any]) -> Dict[str, Any]:
     The prompt is all `prompt_builder`'s — one module holds every word the agent is told — and the
     issue's own text is left out of both: the agent reads it from GitHub.
     """
-    return {
-        "session_id": record["session_id"],
-        "instructions": prompt_builder.afk_prompt(record, task),
-        "input": [{"role": "user", "content": prompt_builder.afk_input(task)}],
-    }
+    return _request(
+        record, prompt_builder.afk_prompt(record, task), prompt_builder.afk_input(task)
+    )
 
 
 def stage_body(record: Dict[str, Any], task: Dict[str, Any]) -> Dict[str, Any]:
@@ -457,18 +455,21 @@ def stage_body(record: Dict[str, Any], task: Dict[str, Any]) -> Dict[str, Any]:
     opens the pull request; the review hands it to whatever reads the diff.
     """
     staged = pipeline.read(record.get("pipeline"))
-    ships = pipeline.ships(staged)
+    return _request(
+        record,
+        prompt_builder.stage_prompt(
+            record, task, base_branch(record) if pipeline.ships(staged) else None
+        ),
+        prompt_builder.stage_input(task, pipeline.stage_name(staged)),
+    )
+
+
+def _request(record: Dict[str, Any], instructions: str, content: str) -> Dict[str, Any]:
+    """One run of the task's session: what the agent is told, and the line that opens the turn."""
     return {
         "session_id": record["session_id"],
-        "instructions": prompt_builder.stage_prompt(
-            record, task, base_branch(record) if ships else None
-        ),
-        "input": [
-            {
-                "role": "user",
-                "content": prompt_builder.stage_input(task, pipeline.stage_name(staged)),
-            }
-        ],
+        "instructions": instructions,
+        "input": [{"role": "user", "content": content}],
     }
 
 

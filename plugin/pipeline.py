@@ -628,14 +628,11 @@ def gate_verdict(record: Optional[Dict[str, Any]]) -> Optional[str]:
     The one reading of the gate's answer, so the tool and the rule that ends a stage can't disagree
     about whether a task is clear to go on.
     """
-    answer = gate_of(record) or {}
-    commands = [one for one in answer.get("commands") or [] if isinstance(one, dict)]
-    if not commands:
-        return NO_GATE
-    broken = next((one for one in commands if one.get("code") != 0), None)
-    if broken is None:
-        return None
-    return FAILED_GATE.format(failed=failing_command(record) or broken.get("command") or "")
+    broken = _broken(record)
+    if broken is not None:
+        return FAILED_GATE.format(failed=_named(broken))
+    answered = [one for one in (gate_of(record) or {}).get("commands") or [] if isinstance(one, dict)]
+    return None if answered else NO_GATE
 
 
 def failing_command(record: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -644,8 +641,18 @@ def failing_command(record: Optional[Dict[str, Any]]) -> Optional[str]:
     Its repo is part of its name where it ran in one of several, since the same line in two repos is
     two different commands. ``None`` when the gate's answer holds no command to name.
     """
+    broken = _broken(record)
+    return _named(broken) if broken is not None else None
+
+
+def _broken(record: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The first command of the stage's gate that exited non-zero, or ``None`` when none did.
+
+    The one place that says which failure a gate broke on, so the sentence a stall carries and the
+    retry a loop's next round is told always name the same command.
+    """
     answer = gate_of(record) or {}
-    broken = next(
+    return next(
         (
             one
             for one in answer.get("commands") or []
@@ -653,8 +660,10 @@ def failing_command(record: Optional[Dict[str, Any]]) -> Optional[str]:
         ),
         None,
     )
-    if broken is None:
-        return None
+
+
+def _named(broken: Dict[str, Any]) -> str:
+    """A gate command as a sentence names it, with the repo it ran in where the gate named one."""
     named = broken.get("command") or ""
     if broken.get("repo"):
         named = f"{broken['repo']}: {named}"

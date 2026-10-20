@@ -132,6 +132,19 @@ Then ship once with the pull_request tool, action 'ship', and write its body fro
 # changes nothing the user is about to read.
 _SUMMARY_STAGE = """This task's work is a draft pull request already, and you are in its {name} stage: write the wrap-up for the user to read when they come back — what landed, what you checked and what is left. Change nothing: the pull request is open, and the work in it is what they are reading. Don't ship."""
 
+# One brief and one verb per step, so a stage's position is read in one place rather than branched
+# on in each line the prompt is built from. A step with no brief of its own (the gate's) builds.
+_BRIEFS = {
+    pipeline.CRITIQUE: _REVIEW_STAGE,
+    pipeline.DONE: _SUMMARY_STAGE,
+    pipeline.BUILD: _BUILD_STAGE,
+}
+
+_DOING = {
+    pipeline.CRITIQUE: "reviewing the build of",
+    pipeline.DONE: "wrapping up",
+}
+
 
 def _pr_instructions(unattended: bool) -> str:
     return _PR_RULES + (_MERGE_READY if unattended else _MERGE_ASK)
@@ -222,12 +235,8 @@ def _brief(record: Optional[Dict[str, Any]]) -> str:
     name = pipeline.stage_name(record) or ""
     if pipeline.single_stage(record or {}):
         return _ONE_RUN_STAGE.format(name=name)
-    kind = pipeline.kind(record)
-    if kind == pipeline.CRITIQUE:
-        return _REVIEW_STAGE.format(name=name)
-    if kind in (pipeline.DONE, None):
-        return _SUMMARY_STAGE.format(name=name)
-    return _BUILD_STAGE.format(name=name)
+    brief = _BRIEFS.get(pipeline.kind(record) or pipeline.DONE, _BUILD_STAGE)
+    return brief.format(name=name)
 
 
 def _steps_line(steps: List[str]) -> str:
@@ -260,14 +269,9 @@ def _retry_line(retry: Optional[str]) -> str:
 def _task_line(task: Dict[str, Any], kind: str) -> str:
     """How the issue is named to a run, in the words of the stage it works."""
     where, url, read = _issue_ref(task)
-    if kind == pipeline.CRITIQUE:
-        doing = f"You are reviewing the build of {where}{url} for the user, while they are away."
-    elif kind == pipeline.DONE:
-        doing = f"You are wrapping up {where}{url} for the user, while they are away."
-    else:
-        doing = f"You are implementing {where}{url} for the user, while they are away."
     return (
-        f"{doing} Their issue's own text isn't repeated here: read it with `{read}` (or the API), "
+        f"You are {_DOING.get(kind, 'implementing')} {where}{url} for the user, while they are "
+        f"away. Their issue's own text isn't repeated here: read it with `{read}` (or the API), "
         f"since it is what the change is judged against."
     )
 
@@ -298,11 +302,8 @@ def _issue_ref(task: Dict[str, Any]) -> IssueRef:
 
 
 def _afk_task_line(task: Dict[str, Any]) -> str:
-    where, url, read = _issue_ref(task)
-    return (
-        f"You are implementing {where}{url} for the user, while they are away. Their issue's own "
-        f"text isn't repeated here: read it with `{read}` (or the API) and work from that."
-    )
+    """The issue's line for a run of a session staged before workflows were: it implements one."""
+    return _task_line(task, pipeline.BUILD)
 
 
 def _worktree_line(record: Dict[str, Any]) -> str:
