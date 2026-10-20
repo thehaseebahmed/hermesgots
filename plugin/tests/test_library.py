@@ -321,11 +321,20 @@ class InstructionsTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
-    def test_the_line_names_the_folder_right_after_the_worktree_line(self) -> None:
+    def test_the_folder_is_named_under_the_sessions_own_section(self) -> None:
         text = prompt_builder.session_prompt(self.record)
-        self.assertIn(f"this session's library at {self.record['files_dir']}", text)
-        self.assertIn("library_add tool", text)
-        self.assertLess(text.index("library at"), text.index("pull_request tool"))
+        self.assertIn(f"This session's library folder is {self.record['files_dir']}", text)
+        self.assertIn("library_add tool", text, "the rule that files them is told too")
+        self.assertLess(
+            text.index("library_add tool"),
+            text.index("This session's library folder"),
+            "the rule stands above the section that names its path",
+        )
+        self.assertNotIn(
+            self.record["files_dir"],
+            text.split("## Current Session")[0],
+            "no path above the section that names this session",
+        )
 
     def test_the_line_teaches_the_naming_convention(self) -> None:
         text = prompt_builder.session_prompt(self.record)
@@ -338,13 +347,14 @@ class InstructionsTest(unittest.TestCase):
         legacy = {**self.record, "files_dir": None}
         self.assertNotIn("library", prompt_builder.session_prompt(legacy))
 
-    def test_the_working_rhythm_block_sits_between_the_files_and_the_ship_instructions(self) -> None:
-        # How to work rides between where the files go and how the run ships, so a long stretch of
-        # tool calls reads as work in progress rather than a hang.
+    def test_the_gots_section_tells_its_rules_before_any_session_fact(self) -> None:
+        # The Gots section is the same for every session, so its rules are told together and above
+        # the section that names this one, which is what makes the opening shared (ADR 0028).
         text = prompt_builder.session_prompt(self.record)
         self.assertIn("Keep the user in the loop as you work", text)
-        self.assertLess(text.index("library at"), text.index("Keep the user in the loop"))
-        self.assertLess(text.index("Keep the user in the loop"), text.index("pull_request tool"))
+        self.assertLess(text.index("library_add tool"), text.index("pull_request tool"))
+        self.assertLess(text.index("pull_request tool"), text.index("Keep the user in the loop"))
+        self.assertLess(text.index("Keep the user in the loop"), text.index("## Current Session"))
 
     def test_the_block_names_the_rhythm_rules(self) -> None:
         text = prompt_builder.session_prompt(self.record)
@@ -369,7 +379,7 @@ class InstructionsTest(unittest.TestCase):
         app = Path(__file__).resolve().parents[2] / "app"
         mock_js = (app / "scripts" / "mock-hermes.mjs").read_text()
         for name, block in (
-            ("PR_INSTRUCTIONS", prompt_builder._pr_instructions(unattended=False)),
+            ("PR_INSTRUCTIONS", prompt_builder._PR_RULES),
             ("DONE_INSTRUCTIONS", prompt_builder._DONE_INSTRUCTIONS),
             ("PROGRESS_UPDATES_INSTRUCTIONS", prompt_builder._PROGRESS_UPDATES_INSTRUCTIONS),
         ):

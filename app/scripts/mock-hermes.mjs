@@ -181,7 +181,7 @@ const afkWorkflow = new Map()
 // serves it as the default where a project wrote none (`prompt_builder.DEFAULT_PROMPT`, shortened
 // here: the app draws what it answers, in the row and in its editor).
 const afkPrompts = new Map()
-const MOCK_DEFAULT_PROMPT = "How to work:\n\n- Work in checkpoints."
+const MOCK_DEFAULT_PROMPT = "Work in checkpoints: small slices of the issue, one at a time."
 // The library, seeded from the plugin's presets on first read (`workflows.PRESETS`): presets are
 // read-only, and a write through the routes adds or rewrites one of the account's own rows.
 let workflowRows = []
@@ -834,19 +834,18 @@ const PENDING_CHECK_S = 12
 
 /** Project sessions as the plugin's memento.db holds them, by Hermes session id. */
 const projectSessions = new Map()
-// The plugin's pull request instruction (prompt_builder._pr_instructions(unattended=False)), word
-// for word.
+// The plugin's pull request rules (prompt_builder._PR_RULES), word for word.
 // test_library.py matches this line word for word, so it stays one line.
 // prettier-ignore
-const PR_INSTRUCTIONS = "When the work is done and you've checked it, ship it yourself with the pull_request tool and action 'ship': it commits what's left, pushes this branch and opens a draft pull request, or pushes to the one open. Don't ask first, and don't use git push or gh for it. Write the description from the repo's pull request template when it has one (named below), else with Summary, Changes and How to test sections. The pull request stays a draft. Pass force: true only after a rebase or amend. action 'update' changes the open pull request's title or body, and 'status' reports without writing. Merging and closing are the user's decision: the tool refuses them, so ask the user with clarify instead."
+const PR_INSTRUCTIONS = "When the work is done and you've checked it, ship it yourself with the pull_request tool and action 'ship': it commits what's left, pushes this branch and opens a draft pull request, or pushes to the one open. Don't ask first, and don't use git push or gh for it. Write the description from the repo's pull request template when it has one (named under Current Session), else with Summary, Changes and How to test sections. The pull request stays a draft. Pass force: true only after a rebase or amend. action 'update' changes the open pull request's title or body, and 'status' reports without writing. Merging and closing are the user's decision: the tool refuses them, so say in the pull request that it is ready to merge and leave it a draft."
 // The plugin's done-work emphasis (prompt_builder._DONE_INSTRUCTIONS), word for word.
 // test_library.py matches this line word for word, so it stays one line.
 // prettier-ignore
-const DONE_INSTRUCTIONS = "Two things the run's prompt emphasises once the work is done: don't share the pull request url or the commit message in your reply — the pull_request result and the session's pull request list already surface them where the user sees them. And before you finish, update your todo list to its final state: every item completed, or cancelled where it was dropped."
+const DONE_INSTRUCTIONS = "Don't share the pull request url or the commit message in your reply — the pull_request result and the session's pull request list already surface them where the user sees them."
 // The plugin's working-rhythm guidance (prompt_builder._PROGRESS_UPDATES_INSTRUCTIONS), word for word.
 // test_library.py matches this line word for word, so it stays one line.
 // prettier-ignore
-const PROGRESS_UPDATES_INSTRUCTIONS = "Keep the user in the loop as you work, at a working rhythm rather than a running commentary. Post a short update between checkpoints — what landed, what you're doing next — so a long stretch of tool calls never reads as a hang. Keep the todo list current as you go: mark items done as they land and add what you discover. When something keeps failing, say what you tried and what you now think is wrong before the next attempt. Thinking out loud while you plan is welcome. Don't narrate each edit, read or command — the tool calls already show those; keep what you do say technical enough to follow the work without spelling out every implementation detail."
+const PROGRESS_UPDATES_INSTRUCTIONS = "Keep the user in the loop as you work, at a working rhythm rather than a running commentary. Post a short update between checkpoints — what landed, what you're doing next — so a long stretch of tool calls never reads as a hang. Keep the todo list current as you go — mark items done as they land, add what you discover, and leave it in its final state when you finish: every item completed, or cancelled where it was dropped. When something keeps failing, say what you tried and what you now think is wrong before the next attempt. Thinking out loud while you plan is welcome. Don't narrate each edit, read or command — the tool calls already show those; keep what you do say technical enough to follow the work without spelling out every implementation detail."
 const MODES = ["accept_edits", "auto", "plan"]
 
 // The sessions each session delegated to with delegate_task (the plugin reads them from state.db),
@@ -4096,25 +4095,33 @@ http
       const id = decodeURIComponent(sessionRoute[1])
       const route = sessionRoute[2]
       const workspace = projectSessions.get(id)
-      // What the plugin tells the agent about its worktrees, with every run, and in plan mode the
-      // plan's shape (the plugin's PLAN_INSTRUCTIONS; keep them the same).
+      // The worktree lines, word for word, and in plan mode the plan's shape (the plugin's _PLAN;
+      // keep them the same).
       const worktreeLine = (record) =>
         record.repos.length === 1
           ? `You are working in a git worktree of ${record.repos[0].name} at ${record.repos[0].path} (branch ${record.branch}). Keep all work inside it.`
           : `You are working in git worktrees of this project's repos, all on branch ${record.branch}:\n${record.repos.map((r, i) => `- ${r.name} at ${r.path}${i === 0 ? " (your current directory)" : ""}`).join("\n")}\nKeep all work inside them.`
-      // The plugin's library line (prompt_builder._files_line), word for word, with the session's path.
-      const filesLine = (record) =>
-        `Files you make for the user — screenshots, images, charts, reports, markdown — belong in this session's library at ${record.files_dir}, not in the worktree. File each one with the library_add tool (its path and a folder name, one level): name folders after the flow or change the files belong to, kebab-case — library-tab for work on the library tab, library-tab-tree-view for a follow-up change to it — not the file type, and file names kebab-case with their extension (dashboard-light.png). The tool makes ${record.files_dir}/<folder> if it needs to, moves the file there and answers with its new path; a name that isn't kebab-case, or a file of that name already in the folder, is an error — fix the name and call again. Return an image's new path in a MEDIA:<path> tag so the user sees it. Source edits stay in the worktree.`
-      // A session's filed files, as the plugin's library routes would list them (see
-      // `sessionLibrary` at module scope, shared with the project route).
+      // The plugin's library rule (prompt_builder._LIBRARY_RULES), word for word: it names no path,
+      // because the folder differs per session and belongs under the last section.
+      const LIBRARY_RULES =
+        "Files you make for the user — screenshots, images, charts, reports, markdown — belong in this session's library folder, not in the worktree; its path is under Current Session. File each one with the library_add tool (its path and a folder name, one level): name folders after the flow or change the files belong to, kebab-case — library-tab for work on the library tab, library-tab-tree-view for a follow-up change to it — not the file type, and file names kebab-case with their extension (dashboard-light.png). The tool makes the folder under it if it needs to, moves the file there and answers with its new path; a name that isn't kebab-case, or a file of that name already in the folder, is an error — fix the name and call again. Return an image's new path in a MEDIA:<path> tag so the user sees it. Source edits stay in the worktree."
+      // The session's own line, prompt_builder._library_folder_line, under the last section.
+      const libraryFolderLine = (record) =>
+        `This session's library folder is ${record.files_dir} — files you make for the user go there.`
+      // Told in sections, the fixed ones first and the session's facts last (ADR 0028), the way the
+      // plugin builds them: what Gots is and the rules for its tools, the plan's shape where the mode
+      // asks for one, then what only this session knows.
       const instructions = (record) =>
         [
-          worktreeLine(record),
-          filesLine(record),
+          "## You are Gots!",
+          LIBRARY_RULES,
           PROGRESS_UPDATES_INSTRUCTIONS,
           PR_INSTRUCTIONS,
           DONE_INSTRUCTIONS,
           record.mode === "plan" ? PLAN_INSTRUCTIONS : "",
+          "## Current Session",
+          worktreeLine(record),
+          libraryFolderLine(record),
         ]
           .filter(Boolean)
           .join("\n")
