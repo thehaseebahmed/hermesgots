@@ -1,5 +1,9 @@
 # A task is built, gated and critiqued, and the host runs the gate
 
+**Superseded in part by ADR 0020**: the stages are a project's workflow now, staging is on by default,
+and the critique no longer spawns reviewers of its own. The gate — that the host runs the commands and
+reads their exit codes — stands as written here.
+
 An AFK task was one run: one agent read the issue, implemented it, ran the repo's gates and shipped a draft
 pull request. Everything that decided whether the work was finished was that agent's own word, and nothing
 reviewed the change before the user did. A project that picks one or more critique skills now works its
