@@ -186,6 +186,11 @@ const FLOWS = {
     about:
       "AFK's pop-up names the stage its held task is in — Building, Gate check, Critiquing — prefixed to the task's title, and keeps naming it once the pickers change under it",
   },
+  "pipeline-pill": {
+    script: "e2e/pipeline-pill.mjs",
+    about:
+      "A staged session's pipeline is the first pill above the composer — three marks, green done and red failed, with the stage in words — and its sheet carries each step, the gate's commands and the pull request, still there once the task is done",
+  },
   "mcps-gate": {
     script: "e2e/mcps-gate.mjs",
     about:

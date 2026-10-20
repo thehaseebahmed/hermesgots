@@ -84,6 +84,10 @@
 // plugin/dictation.py with faster-whisper; MOCK_DICTATION=off reports it unavailable (the mic hides)
 // and MOCK_DICTATION=fail answers every clip with an error. GET /__mock/dictation lists the clips it
 // was sent (size, type, hint and the text before each), for the regression script.
+// POST /__mock/afk { project_id, stage?, reason?, pipeline?, pr?, reset? } is the dev handle on AFK's
+// own records: it stalls the project's held task at a stage, and writes the pipeline on the session
+// that task is worked in — the stage a strip or the sheet reads, the gate's answer, a pull request a
+// finished pipeline opened — which is what drives each state without a real build.
 // GET /api/plugins/memento/mcp lists the bot's MCP servers and …/mcp/catalogue the Catalogue Hermes
 // offers, each entry marked as the bot's servers have it (and `needs_config` where it declares
 // values); GET …/mcp/catalogue/{name} is one entry with the values it declares. GET …/mcp/{name} is
@@ -961,6 +965,9 @@ const workspaceRecord = (project, { sessionId, slug, mode }) => {
     repos,
     files_dir: `${repos[0].repo_root}/files/${slug}`,
     plan_file: null,
+    // The stage a staged AFK task is in, on the session's own record (`plugin/pipeline.py`); null
+    // for a session nothing staged, which is every session the app opens from Code.
+    pipeline: null,
   }
 }
 const projectTasks = (project) => {
@@ -1008,9 +1015,28 @@ function afkTask(project) {
   }
 }
 
+const afkSessionId = (project) => `memento-afk-${project.id}`
+
+/**
+ * A staged task's pipeline record as the plugin writes it (`pipeline.start`) with `extra` on top, or
+ * null when the project has no critique skill — the one thing that turns staging on.
+ */
+function pipelineRecord(skills, extra = {}) {
+  const critique = skills?.critique_skills ?? []
+  if (!critique.length) return null
+  return {
+    stage: "build",
+    build_skill: skills?.build_skill ?? null,
+    critique_skills: critique,
+    gate: null,
+    reason: null,
+    ...extra,
+  }
+}
+
 function afkSession(project) {
   const held = afkTask(project)
-  const session = `memento-afk-${project.id}`
+  const session = afkSessionId(project)
   const title = `#${held.number} ${held.title}`
   const input = `Implement Issue #${held.number} (${held.url})`
   const now = Date.now()
@@ -1042,9 +1068,13 @@ function afkSweep(project) {
   if (afkSwept.has(project.id)) return
   afkSwept.add(project.id)
   const skills = afkSkills.get(project.id)
-  if (skills?.critique_skills.length) afkStages.set(project.id, "build")
+  const staged = pipelineRecord(skills, { stage: "build" })
+  if (staged) afkStages.set(project.id, "build")
   else afkStages.delete(project.id)
   afkSession(project)
+  // The stage is recorded on the session the claim made, before its build run is posted.
+  const record = projectSessions.get(afkSessionId(project))
+  if (record) record.pipeline = staged
 }
 
 /** AFK's answer for a project: its switch, the task it holds, and its last refusal (none mocked). */
@@ -2632,6 +2662,7 @@ http
           "afk",
           "afk_switch",
           "afk_skills",
+          "afk_pipeline",
           ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : []),
           ...(MCPS
             ? [
@@ -3743,6 +3774,8 @@ http
         project_id: projectId,
         reason = "The run failed.",
         stage = null,
+        pipeline,
+        pr = null,
         reset = false,
       } = await readBody(req)
       if (reset) {
@@ -3752,6 +3785,22 @@ http
         afkStalled.set(projectId, reason)
         // Dev only: the stage the sheet's Working row names for the task that project holds.
         if (stage) afkStages.set(projectId, stage)
+        // Dev only: the record the session's own strip draws — each stage, a gate's answer, a
+        // reason — and the pull request a finished pipeline opened.
+        const project = mockProjects().find((p) => p.id === projectId)
+        const record = project && projectSessions.get(afkSessionId(project))
+        if (record && pipeline !== undefined) record.pipeline = pipeline
+        if (record && pr) {
+          const repo = repoOf(project)
+          record.prs = [
+            {
+              repo,
+              number: pr.number ?? 27,
+              title: pr.title ?? "The frontier is read from GitHub and listed",
+              url: `https://github.com/${repo}/pull/${pr.number ?? 27}`,
+            },
+          ]
+        }
       }
       return json(res, 200, { ok: true })
     }
