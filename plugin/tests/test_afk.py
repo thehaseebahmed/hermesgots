@@ -507,11 +507,17 @@ class PromptTests(AfkHome):
             workflows.DEFAULT_ID,
             "the old columns are not a pick this project still holds",
         )
-        self.assertEqual(
-            afk._row(self.home, "p1")["build_skill"],
-            "plan",
-            "and the columns are left as they were, not deleted to keep them quiet",
-        )
+
+    def test_clearing_a_prompt_does_not_bring_the_old_skills_back(self) -> None:
+        set_skill_columns(self.home, "p1", "plan", ["code-review"])
+        migrated = read(self.home, "p1", self.folders())["workflow"]["id"]
+        self.assertNotEqual(migrated, workflows.DEFAULT_ID, "migrated on its first read")
+        set_prompt(self.home, "p1", "Squash every checkpoint into one commit.")
+        set_prompt(self.home, "p1", "")
+        found = read(self.home, "p1", self.folders())
+        self.assertEqual(found["prompt"], prompt_builder.DEFAULT_PROMPT, "empty is the default")
+        self.assertEqual(found["workflow"]["id"], workflows.DEFAULT_ID, "and no pick comes back")
+        self.assertIsNone(afk._row(self.home, "p1")["workflow_id"])
 
     def test_picking_a_workflow_clears_the_prompt_too(self) -> None:
         set_prompt(self.home, "p1", "Squash every checkpoint into one commit.")

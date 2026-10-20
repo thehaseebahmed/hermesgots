@@ -189,16 +189,8 @@ def _workflow(hermes_home: Path, project_id: str, found: Dict[str, Any]) -> Dict
     Its pick, or the default preset; and for a project whose row predates the picker, the workflow its
     old build and critique skill columns described — written to the library and named on the row the
     first time it is read, so what the project does can't change shape under the user on upgrade.
-
-    A project holding a Prompt is past the picker, so its old columns are left as they were rather
-    than migrated into a pick: that pick would be what works its next task, and the Prompt it just
-    wrote is what should.
     """
-    if (
-        found.get("prompt") is None
-        and found.get("workflow_id") is None
-        and (found.get("build_skill") or found.get("critique_skills"))
-    ):
+    if found.get("workflow_id") is None and (found.get("build_skill") or found.get("critique_skills")):
         return workflows.migrate(
             hermes_home,
             project_id,
@@ -285,15 +277,17 @@ def set_prompt(hermes_home: Path, project_id: str, prompt: Optional[str]) -> Non
     """Writes the project's Prompt, clearing any workflow pick in the same write.
 
     A project is never both: a Prompt is one run's method and a workflow is the stages its work runs
-    through. The old skill columns a row from before the picker carries are left alone — the migration
-    that reads them skips a project holding a Prompt (``_workflow``) — so nothing has to be deleted to
-    keep them from coming back.
+    through. The skill columns a row from before the picker carries go with the pick: they are what
+    ``_workflow`` migrates a project with no pick from, so leaving them would put the old workflow
+    back as soon as the Prompt was cleared, and empty has to mean the default.
     """
     _upsert(
         hermes_home,
         project_id,
         prompt=prompt,
         workflow_id=None,
+        build_skill=None,
+        critique_skills=None,
         at=int(time.time()),
     )
 
