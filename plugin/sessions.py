@@ -51,6 +51,7 @@ FIELDS = (
     "plan_file",
     "files_dir",
     "task",
+    "pipeline",
 )
 REPO_FIELDS = ("name", "repo_root", "path", "branch")
 MAX_PARENT_HOPS = 5
@@ -138,6 +139,7 @@ def _record(row: Any) -> Dict[str, Any]:
         {field: repo.get(field) for field in REPO_FIELDS} for repo in repos if isinstance(repo, dict)
     ]
     record["task"] = _json(record["task"], None)
+    record["pipeline"] = _json(record["pipeline"], None)
     # A row from before repos were kept: the one tree it has.
     if not record["repos"] and record["path"]:
         record["repos"] = [
@@ -173,14 +175,40 @@ def read(path: Path, session_id: str) -> Optional[Dict[str, Any]]:
 
 def set_task(path: Path, session_id: str, task: Dict[str, Any]) -> None:
     """Records the issue AFK started this session for, so its pull request closes it."""
+    _set_json(path, session_id, "task", task)
+
+
+def set_pipeline(path: Path, session_id: str, pipeline: Optional[Dict[str, Any]]) -> None:
+    """Records the stage a staged task is in, so the pop-up can name it and a finished task can
+    still say how it got there (``pipeline.py``). ``None`` clears it."""
+    _set_json(path, session_id, "pipeline", pipeline)
+
+
+def pipeline_of(path: Path, session_id: str) -> Any:
+    """The pipeline column alone, for a poll that only asks which stage a task is in.
+
+    The whole row isn't read: a five-second poll for a stage has no use for the other columns.
+    """
+    conn = connect(path)
+    try:
+        row = conn.execute(
+            "SELECT pipeline FROM project_sessions WHERE session_id = ?", (session_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    return _json(row[0], None) if row else None
+
+
+def _set_json(path: Path, session_id: str, column: str, value: Any) -> None:
+    """Writes one JSON column on a session's row, warning when there is no row to write it on."""
     conn = connect(path)
     try:
         cursor = conn.execute(
-            "UPDATE project_sessions SET task = ? WHERE session_id = ?",
-            (json.dumps(task, separators=(",", ":")), session_id),
+            f"UPDATE project_sessions SET {column} = ? WHERE session_id = ?",
+            (json.dumps(value, separators=(",", ":")) if value else None, session_id),
         )
         if cursor.rowcount == 0:
-            logger.warning("memento: no session row for %s to name task #%s on", session_id, task.get("number"))
+            logger.warning("memento: no session row for %s to write its %s on", session_id, column)
     finally:
         conn.close()
 

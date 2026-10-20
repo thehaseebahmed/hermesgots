@@ -42,6 +42,7 @@ import {
   type HermesConfig,
   type ProjectAfk,
   type ProjectIssue,
+  type ProjectStage,
   type ProjectTasks,
   type ProjectTask,
   type Skill,
@@ -58,6 +59,17 @@ export const AFK_SWITCH_FEATURE = "afk_switch"
 
 /** And the one it advertises when it can keep the skills a project's work follows. */
 export const AFK_SKILLS_FEATURE = "afk_skills"
+
+/**
+ * What a staged task's stage reads as in the Working row: the stage itself is the host's, and a
+ * project with no critique skill has none to name.
+ */
+const STAGE_LABELS: Record<ProjectStage, string | null> = {
+  build: "Building",
+  gate: "Gate check",
+  critique: "Critiquing",
+  done: null,
+}
 
 /** A Bot whose plugin answers without the route is left alone for a while, like every other read. */
 const unsupported = cooldown()
@@ -219,7 +231,14 @@ export function AfkPopup({
           )}
           {/* Only a project left to work has anything to say here: a task held under an off switch
               reads as still working. */}
-          {afk?.on && <Working task={afk.task} refusal={afk.refusal} manyRepos={manyRepos} />}
+          {afk?.on && (
+            <Working
+              task={afk.task}
+              stage={afk.stage}
+              refusal={afk.refusal}
+              manyRepos={manyRepos}
+            />
+          )}
           <Tasks
             tasks={tasks}
             error={error}
@@ -457,21 +476,25 @@ function AfkSkills({
 }
 
 /**
- * What the sweep is doing: the task AFK holds, and why GitHub last refused it. Neither is the
- * switch's own reason — a refusal leaves the switch on — so they read as the sweep's answer rather
- * than as the project's, and both simply disappear when there is nothing to say. A project that
- * isn't left to work says nothing: the task it holds is released with the claim (#270), not here.
+ * What the sweep is doing: the task AFK holds, the stage it is in, and why GitHub last refused it.
+ * None of them is the switch's own reason — a refusal leaves the switch on — so they read as the
+ * sweep's answer rather than as the project's, and each simply disappears when there is nothing to
+ * say. A project that isn't left to work says nothing: the task it holds is released with the claim
+ * (#270), not here.
  */
 function Working({
   task,
+  stage,
   refusal,
   manyRepos,
 }: {
   task: ProjectIssue | null | undefined
+  stage: ProjectStage | null | undefined
   refusal: string | null | undefined
   manyRepos: boolean
 }) {
   if (!task && !refusal) return null
+  const label = stage ? STAGE_LABELS[stage] : null
   return (
     <div className="flex flex-col gap-3">
       {refusal && (
@@ -480,9 +503,9 @@ function Working({
         </p>
       )}
       {task && (
-        <section aria-label="Working" data-working>
+        <section aria-label="Working" data-working data-stage={label ? stage : undefined}>
           <h3 className="px-1 pb-1 text-sm text-muted-foreground">Working</h3>
-          <TaskLink task={task} note={manyRepos ? task.repo : undefined} />
+          <TaskLink task={task} label={label} note={manyRepos ? task.repo : undefined} />
         </section>
       )}
     </div>
@@ -536,13 +559,16 @@ function Tasks({
   )
 }
 
-/** One issue as the sheet shows it: its number and title, opening it on GitHub, a note under it. */
+/** One issue as the sheet shows it: its number and its title, the stage prefixing the title when it
+ * has one, opening it on GitHub, a note under it. */
 function TaskLink({
   task,
+  label,
   note,
   badge,
 }: {
   task: ProjectIssue
+  label?: string | null
   note?: ReactNode
   badge?: ReactNode
 }) {
@@ -555,10 +581,11 @@ function TaskLink({
       className="flex min-h-11 flex-col justify-center gap-0.5 rounded-2xl px-3 py-2 outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
     >
       <span className="flex min-w-0 items-start gap-2">
-        <span className="shrink-0 pt-0.5 font-mono text-xs text-muted-foreground">
-          #{task.number}
+        <span className="shrink-0 font-mono text-base text-muted-foreground">#{task.number}</span>
+        <span className="min-w-0 flex-1 text-base leading-snug break-words">
+          {label && <span className="text-muted-foreground">{`${label}: `}</span>}
+          {task.title}
         </span>
-        <span className="min-w-0 flex-1 text-base leading-snug break-words">{task.title}</span>
         {badge}
       </span>
       {note && <span className="pl-8 text-sm text-muted-foreground">{note}</span>}

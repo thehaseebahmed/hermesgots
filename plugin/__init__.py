@@ -33,6 +33,7 @@ from . import (
     delegation,
     dictation,
     events,
+    gate,
     github,
     host_model,
     library,
@@ -158,6 +159,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     todo_tool = todos.wire(adapter)
     # The agent ships its own work; see ship.py.
     ship.wire(adapter)
+    # And it runs its build's gate on the host, not its own word for it; see gate.py.
+    gate.wire(adapter)
     # The agent files its generated files in the project's library; see library.py.
     library.wire(adapter)
     # A background delegation's result would wait for the user's next message; see delegation.py.
@@ -1816,6 +1819,7 @@ def register(ctx) -> None:
             description="hermes memento link <code> --site <url>, unlink or status",
         )
     ship.register(ctx)
+    gate.register(ctx)
     library.register(ctx)
     research.register(ctx)
     register_handler = getattr(ctx, "register_platform_handler", None)
