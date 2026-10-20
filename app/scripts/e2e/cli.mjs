@@ -191,7 +191,7 @@ const FLOWS = {
   "afk-prompt": {
     script: "e2e/afk-prompt.mjs",
     about:
-      "AFK's Prompt row reads the words its runs are told and opens an editor over the whole screen — markdown source, a Write/Preview toggle over it, Done writing it back to the host",
+      "AFK's Prompt row reads the words its runs are told and opens one writing sheet for them — the bottom sheet, or the drawer from a laptop's width — with Done writing them back to the host",
   },
   "pipeline-pill": {
     script: "e2e/pipeline-pill.mjs",

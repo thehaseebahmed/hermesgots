@@ -76,15 +76,17 @@ const run = async ({ page, profileId, shot, until }) => {
       "a sheet on the screen's bottom edge",
     )
     assert.ok(height < viewport.height, `a sheet, not the whole screen (${height}px)`)
-    assert.ok(
-      Math.round(box.x) === Math.round((viewport.width - width) / 2),
+    assert.equal(
+      Math.round(box.x),
+      Math.round((viewport.width - width) / 2),
       "centred as every sheet is",
     )
     assert.ok(width <= 640 && width > viewport.width * 0.4, `a sheet's width (${width}px)`)
   } else {
     assert.equal(height, viewport.height, "the side drawer takes the height")
-    assert.ok(
-      Math.round(box.x + box.width) === viewport.width,
+    assert.equal(
+      Math.round(box.x + box.width),
+      viewport.width,
       "and from a laptop's width, flush right",
     )
     assert.ok(width < viewport.width, `a drawer leaves the project beside it (${width}px)`)

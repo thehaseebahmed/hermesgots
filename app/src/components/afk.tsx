@@ -9,7 +9,7 @@
  * device's Developer setting offers it; a project on a pick keeps running it either way, because
  * that is the host's record and not this screen's. With that library off, a plugin that advertises
  * `afk_prompt` draws the Prompt row instead: the project's words for how its work is carried out,
- * opening an editor over the whole sheet.
+ * opened in its own sheet.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -17,6 +17,7 @@ import { ChevronDownIcon, ChevronRightIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { PromptEditor } from "@/components/afk-prompt"
+import { RowText } from "@/components/settings-chrome"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { WorkflowEditor } from "@/components/workflow-editor"
 import { WorkflowSheet } from "@/components/workflow-sheet"
@@ -132,7 +133,7 @@ export function AfkPopup({
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [editing, setEditing] = useState<WorkflowEntry | "new" | null>(null)
   const [savingWorkflow, setSavingWorkflow] = useState(false)
-  // The Prompt, edited over the whole sheet: the words are its own draft until Done writes them.
+  // The Prompt, edited in its own sheet: the words are its own draft until Done writes them.
   const [promptOpen, setPromptOpen] = useState(false)
   const key = connectionKey(config)
   const switchable = usePluginFeature(config, AFK_SWITCH_FEATURE)
@@ -142,12 +143,12 @@ export function AfkPopup({
   // One row or the other: the library offered is a project running stages, and the Prompt is the
   // words a project running one run is told instead.
   const promptOffered = withPrompt === "yes" && !libraryOffered
+  // A Prompt names its own skills in its words, so the build and critique pickers are not drawn beside
+  // it and their list is not read: it is the workflow's own choice.
+  const skillsDrawn = withSkills === "yes" && !promptOffered
   // The pickers' list is the bot's own skills, read the way the composer's `/` menu reads them: only
   // what this profile can run now. Asked only where the host can hold a choice at all.
-  const skills = useSkills(
-    config,
-    open && !promptOffered && (withSkills === "yes" || libraryOffered),
-  )
+  const skills = useSkills(config, open && (skillsDrawn || libraryOffered))
   // The device can turn the switch off from another screen while a sheet is open, or turn the
   // workflow library on, which takes the Prompt row's place.
   if (!libraryOffered && (libraryOpen || editing !== null)) {
@@ -279,9 +280,16 @@ export function AfkPopup({
   const turn = (on: boolean) => save(() => setProjectAfk(config, projectId, on))
   const choose = (buildSkill: string | null, critiqueSkills: string[]) =>
     save(() => setProjectAfkSkills(config, projectId, buildSkill, critiqueSkills))
-  // The editor shows the host's refusal itself, so this answers the row rather than swallowing one.
+  // A refusal is the host's, said here the way the other writes are, and answered to the editor so it
+  // keeps the words typed rather than closing on a fail.
   const writePrompt = async (prompt: string) => {
-    setAfk(await setProjectAfkPrompt(config, projectId, prompt))
+    try {
+      setAfk(await setProjectAfkPrompt(config, projectId, prompt))
+      return true
+    } catch (failure) {
+      toast.error(failure instanceof Error ? failure.message : "Couldn't save that Prompt.")
+      return false
+    }
   }
 
   const pickWorkflow = async (picked: WorkflowEntry) => {
@@ -339,7 +347,7 @@ export function AfkPopup({
           {libraryOffered && afk && !afkError && (
             <WorkflowRow workflow={afk.workflow} onOpen={() => setLibraryOpen(true)} />
           )}
-          {withSkills === "yes" && !promptOffered && afk && !afkError && (
+          {skillsDrawn && afk && !afkError && (
             <AfkSkills
               afk={afk}
               skills={skills.status === "ok" ? skills.skills : []}
@@ -529,10 +537,7 @@ function PromptRow({ prompt, onOpen }: { prompt: string; onOpen: () => void }) {
       onClick={onOpen}
       className="flex min-h-11 w-full items-center gap-3 rounded-2xl px-1 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
     >
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="text-base">Prompt</span>
-        <span className="line-clamp-2 text-sm text-muted-foreground">{promptLine(prompt)}</span>
-      </span>
+      <RowText title="Prompt" subtitle={promptLine(prompt)} />
       <ChevronRightIcon className="shrink-0 text-muted-foreground" />
     </button>
   )
