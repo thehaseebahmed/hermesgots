@@ -132,19 +132,22 @@ Then ship once with the pull_request tool, action 'ship', and write its body fro
 # changes nothing the user is about to read.
 _SUMMARY_STAGE = """This task's work is a draft pull request already, and you are in its {name} stage: write the wrap-up for the user to read when they come back — what landed, what you checked and what is left. Change nothing: the pull request is open, and the work in it is what they are reading. Don't ship."""
 
-# How each step is named to its own run: the verb its issue line uses, and the brief a stage that
-# names no skills is given. One table, so a step's position is read in one place rather than branched
-# on in each line the prompt is built from. A step with no words of its own (the gate's) builds.
+# How each step is named to its own run: the verb its issue line uses, the brief a stage that names
+# no skills is given, and what the skills it does name are applied to. One table, so a step's words
+# are read in one place rather than branched on in each line the prompt is built from. A step with
+# no words of its own (the gate's) builds, and a step applies its skills the way a build does unless
+# it says otherwise: the shipping stage is the one that reads the diff.
 class StageWords(NamedTuple):
-    """A step's own words: what its run is doing, and the brief standing in for its skills."""
+    """A step's own words: what its run is doing, its brief, and where its skills are applied."""
 
     doing: str
     brief: str
+    use: str = "follow it for how that part of the work is done"
 
 
 _WORDS = {
     pipeline.BUILD: StageWords("implementing", _BUILD_STAGE),
-    pipeline.CRITIQUE: StageWords("reviewing the build of", _REVIEW_STAGE),
+    pipeline.CRITIQUE: StageWords("reviewing the build of", _REVIEW_STAGE, "apply it to the diff"),
     pipeline.DONE: StageWords("wrapping up", _SUMMARY_STAGE),
 }
 
@@ -214,7 +217,7 @@ def stage_prompt(
         session_prompt(record, unattended=True),
         _AFK_INSTRUCTIONS.format(issue=task.get("number")) if kind == pipeline.BUILD else "",
         _base_line(base) if base and ships else "",
-        _steps_line(pipeline.stage_steps(staged), kind),
+        _steps_line(pipeline.stage_steps(staged), _words(kind).use),
         _SKILL_SCOPE,
         _retry_line(pipeline.retry(staged)),
         _brief(staged),
@@ -247,19 +250,11 @@ def _brief(record: Optional[Dict[str, Any]]) -> str:
     return _words(pipeline.kind(record)).brief.format(name=name)
 
 
-def _steps_line(steps: List[str], kind: str) -> str:
-    """The skills the stage applies, in order, named once each rather than quoted.
-
-    A stage that ships reads the diff, so its skills are applied to that; any other stage's shape
-    the work it goes on to write, so there each one says how that part is done.
-    """
+def _steps_line(steps: List[str], use: str) -> str:
+    """The skills the stage applies, in order, named once each rather than quoted, and where they
+    are applied: ``use`` is the stage's own words for that."""
     if not steps:
         return ""
-    use = (
-        "apply it to the diff"
-        if kind == pipeline.CRITIQUE
-        else "follow it for how that part of the work is done"
-    )
     if len(steps) == 1:
         name = steps[0]
         return (
