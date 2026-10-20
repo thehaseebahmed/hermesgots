@@ -133,7 +133,6 @@ export function AfkPopup({
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [editing, setEditing] = useState<WorkflowEntry | "new" | null>(null)
   const [savingWorkflow, setSavingWorkflow] = useState(false)
-  // The Prompt, edited in its own sheet: the words are its own draft until Done writes them.
   const [promptOpen, setPromptOpen] = useState(false)
   const key = connectionKey(config)
   const switchable = usePluginFeature(config, AFK_SWITCH_FEATURE)
@@ -282,13 +281,13 @@ export function AfkPopup({
     save(() => setProjectAfkSkills(config, projectId, buildSkill, critiqueSkills))
   // A refusal is the host's, said here the way the other writes are, and answered to the editor so it
   // keeps the words typed rather than closing on a fail.
-  const writePrompt = async (prompt: string) => {
+  const writePrompt = async (prompt: string): Promise<"saved" | "refused"> => {
     try {
       setAfk(await setProjectAfkPrompt(config, projectId, prompt))
-      return true
+      return "saved"
     } catch (failure) {
       toast.error(failure instanceof Error ? failure.message : "Couldn't save that Prompt.")
-      return false
+      return "refused"
     }
   }
 
@@ -410,9 +409,6 @@ export function AfkPopup({
         )}
         {promptOffered && (
           <PromptEditor
-            // Keyed by whether it is open, so each open starts from the words the row holds rather
-            // than from a draft abandoned with the back button.
-            key={promptOpen ? "open" : "closed"}
             open={promptOpen}
             onOpenChange={setPromptOpen}
             prompt={afk?.prompt ?? ""}

@@ -1,8 +1,8 @@
 // AFK's Prompt: with the workflow library off, a project's pop-up draws the Prompt its runs are
-// told — the host's default method where the project wrote none — and opens one writing surface for
+// told — the host's default method where the project wrote none — and opens one writing sheet for
 // it, Done writing it back to the host, which the next read answers. Geometry is why this is a flow:
-// below a laptop the editor is the sheet at the screen's own height, and from a laptop's width it is
-// the side drawer, in both themes — none of which a DOM without layout can measure.
+// the row's place in the switch's list, the sheet's height and the drawer's edge — none of which a
+// DOM without layout can measure.
 import { app, assert, flow, makeProject, openAfk, pass } from "./lib.mjs"
 
 const DEFAULT_PROMPT = "How to work:\n\n- Work in checkpoints."
@@ -28,9 +28,6 @@ const run = async ({ page, profileId, shot, until }) => {
     return row
   }
 
-  // The row reads the host's answer, which is its default method where the project wrote none, and
-  // no Workflow row sits beside it: the Developer setting offers that library only when it is on.
-  // The skill pickers are the workflow's, so a Prompt has none of its own to pick.
   const row = await openPrompt()
   assert.match(await row.innerText(), /How to work/, "the row reads the host's default Prompt")
   assert.equal(await page.locator("[data-afk-workflow]").count(), 0, "no Workflow row with it off")
@@ -39,8 +36,7 @@ const run = async ({ page, profileId, shot, until }) => {
     0,
     "and no Build and Critique pickers: a Prompt names its own skills",
   )
-  // The Prompt is a row of the switch's own list, not a band of its own: the two sit a row's gap
-  // apart, with nothing padding the space between them.
+  // A row of the switch's own list, a row's gap under it, not a band of its own.
   const switchBox = await page.locator("[data-afk-switch]").boundingBox()
   const promptBox = await row.boundingBox()
   assert.ok(switchBox && promptBox, "both rows have a box")
@@ -48,7 +44,6 @@ const run = async ({ page, profileId, shot, until }) => {
   assert.ok(gap >= 0 && gap <= 32, `the Prompt sits under the switch, not a band lower (${gap}px)`)
   await shot("row")
 
-  // Tapping it opens the one writing surface, holding what the row read, with no toggle beside it.
   await page.locator('button[aria-label="Prompt"]').click()
   const field = page.locator('textarea[aria-label="Prompt"]')
   await field.waitFor({ timeout: 15_000 })
@@ -59,9 +54,7 @@ const run = async ({ page, profileId, shot, until }) => {
     "there is nothing to preview: the Prompt is written",
   )
 
-  // Below a laptop the editor is a bottom sheet like every other — on the screen's bottom edge,
-  // shorter than the screen — and from a laptop's width the side drawer, full height and flush
-  // right, with the project left beside it. Either way the field opens deep enough to read a Prompt.
+  // A bottom sheet below a laptop's width, the side drawer from it, and either way room to write.
   const editor = page.getByRole("dialog").last()
   await page.waitForTimeout(450)
   const box = await editor.boundingBox()
@@ -100,7 +93,6 @@ const run = async ({ page, profileId, shot, until }) => {
   assert.ok(box.height - fieldBox.height >= 44, "and the header and Done sit outside it")
   await shot("editor")
 
-  // Done writes the row's own shape, and the row reads what the host answered.
   await field.fill(MINE)
   await page.getByRole("button", { name: "Done" }).click()
   await field.waitFor({ state: "detached", timeout: 15_000 })
@@ -112,7 +104,6 @@ const run = async ({ page, profileId, shot, until }) => {
   )
   await shot("saved")
 
-  // The host holds it, so a reload reads the same words back rather than the default.
   const again = await openPrompt()
   assert.match(
     await again.innerText(),

@@ -93,7 +93,6 @@ export const workflowStage = (name: string, extra: Record<string, unknown> = {})
   ...extra,
 })
 
-/** The words a project's runs are told where it wrote none, as the host answers them. */
 export const DEFAULT_AFK_PROMPT =
   "# How to work\n\n- Work in checkpoints.\n- Run the repo's own gates."
 
@@ -111,9 +110,7 @@ export function afkHost({
   workflow?: string
   stage?: string | null
   stageName?: string | null
-  /** The Prompt the host answers: a project's own words, or its default where it wrote none. */
   prompt?: string
-  /** Why the host refuses a Prompt write, shown as the message it answers with; null takes it. */
   promptRefusal?: string | null
 } = {}) {
   const library: Record<string, unknown>[] = [

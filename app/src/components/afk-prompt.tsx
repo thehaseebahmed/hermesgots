@@ -18,20 +18,23 @@ export function PromptEditor({
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  /** The words the row holds, which the host answers as the default where the project wrote none. */
   prompt: string
-  /** Writes the Prompt, answering whether the host took it; a refusal has already been said. */
-  onSave: (prompt: string) => Promise<boolean>
+  onSave: (prompt: string) => Promise<"saved" | "refused">
 }) {
-  // The draft is the editor's own: the sheet is keyed by its open state, so each open starts from the
-  // words the row holds rather than from the last thing typed into it.
   const [text, setText] = useState(prompt)
   const [saving, setSaving] = useState(false)
+  // Each open starts from the words the row holds rather than from the draft the last one left, and
+  // the sheet stays the same instance so its way out still animates.
+  const [wasOpen, setWasOpen] = useState(open)
+  if (open !== wasOpen) {
+    setWasOpen(open)
+    if (open) setText(prompt)
+  }
 
   const submit = async () => {
     setSaving(true)
     try {
-      if (await onSave(text)) onOpenChange(false)
+      if ((await onSave(text)) === "saved") onOpenChange(false)
     } finally {
       setSaving(false)
     }

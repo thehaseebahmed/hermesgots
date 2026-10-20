@@ -26,10 +26,8 @@ const project = "project-1"
 
 const row = () => find("[data-afk-prompt]")
 const field = () => find('textarea[aria-label="Prompt"]')
-/** The writes the host took on a project's AFK row, which every save assertion here reads. */
 const afkWrites = (host: ReturnType<typeof afkHost>) =>
   host.calls.filter((call) => call.method === "POST" && call.path.endsWith("/afk"))
-/** The field's own value, cast once rather than at every assertion. */
 const fieldValue = () => (field() as HTMLTextAreaElement | null)?.value
 
 /** The Prompt row is drawn where the library is off, which is the Developer setting's own default. */
