@@ -172,9 +172,40 @@ class StagePromptTests(unittest.TestCase):
     def test_it_applies_its_skills_in_order_rather_than_delegating_them(self) -> None:
         text = self.text()
         self.assertIn('"code-review", "log-triage"', text, "the stage's steps, in the order it has them")
+        self.assertEqual(text.count("code-review"), 1, "the skills are named in one line, not one each")
+        self.assertEqual(text.count("log-triage"), 1)
         self.assertIn("Load each with skill_view", text)
-        self.assertNotIn("delegate_task", text, "a stage's steps are lenses in one run (ADR 0020)")
+        self.assertIn("apply it to the diff", text, "the review's work is the diff, so its skills go on that")
+        self.assertNotIn("delegate", text.lower(), "no delegation instruction at all")
         self.assertNotIn("one reviewer per skill", text)
+        self.assertNotIn("reviewer", text.lower(), "the per-skill reviewer briefs are gone")
+
+    def test_a_skill_that_asks_for_reviewers_is_not_contradicted(self) -> None:
+        text = self.text()
+        self.assertIn("governs method only", text, "the skill's own words decide how it is done")
+        for forbidding in ("don't spawn", "do not spawn", "no subagents", "nothing may be delegated"):
+            self.assertNotIn(forbidding, text.lower())
+
+    def test_a_stage_with_no_skills_still_states_the_fixed_points(self) -> None:
+        record = staged_record(pipeline.CRITIQUE, steps=())
+        text = prompt_builder.stage_prompt({**RECORD, "pipeline": record}, TASK, "main")
+        self.assertNotIn("skill_view", text, "nothing is loaded")
+        self.assertIn(prompt_builder._SKILL_SCOPE, text, "the fixed points hold with no skill to check")
+
+    def test_every_stage_states_the_guard_once(self) -> None:
+        records = [
+            self.REVIEW["pipeline"],
+            staged_record(pipeline.BUILD),
+            staged_record(pipeline.CRITIQUE, steps=("code-review", "log-triage")),
+            pipeline.start(preset("preset:one-run")),
+        ]
+        for record in records:
+            text = prompt_builder.stage_prompt({**RECORD, "pipeline": record}, TASK, "main")
+            self.assertEqual(
+                text.count(prompt_builder._SKILL_SCOPE),
+                1,
+                f"{pipeline.stage_name(record)} states the fixed points once",
+            )
 
     def test_a_skill_shapes_method_only(self) -> None:
         text = self.text()

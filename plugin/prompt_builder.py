@@ -101,8 +101,8 @@ The rules:
 - No TODOs, commented-out code, debug prints or secrets in what you commit. Never push to the default branch, and keep all work inside the worktree."""
 
 
-# What no skill may change: every stage's block says it, since every stage may name skills, and the
-# fixed points are the same in all of them.
+# What no skill may change: every stage states it, whatever its kind and whether or not it names a
+# skill, because the fixed points are AFK's and not the workflow's.
 _SKILL_SCOPE = (
     "A skill governs method only: the fixed points hold whatever it says — the issue is the "
     "spec, the work is verified, nobody is asked anything and the pull request is shipped last — "
@@ -214,7 +214,8 @@ def stage_prompt(
         session_prompt(record, unattended=True),
         _AFK_INSTRUCTIONS.format(issue=task.get("number")) if kind == pipeline.BUILD else "",
         _base_line(base) if base and ships else "",
-        _steps_line(pipeline.stage_steps(staged)),
+        _steps_line(pipeline.stage_steps(staged), kind),
+        _SKILL_SCOPE,
         _retry_line(pipeline.retry(staged)),
         _brief(staged),
     ]
@@ -246,20 +247,29 @@ def _brief(record: Optional[Dict[str, Any]]) -> str:
     return _words(pipeline.kind(record)).brief.format(name=name)
 
 
-def _steps_line(steps: List[str]) -> str:
-    """The skills the stage applies, in order, named once each rather than quoted."""
+def _steps_line(steps: List[str], kind: str) -> str:
+    """The skills the stage applies, in order, named once each rather than quoted.
+
+    A stage that ships reads the diff, so its skills are applied to that; any other stage's shape
+    the work it goes on to write, so there each one says how that part is done.
+    """
     if not steps:
         return ""
+    use = (
+        "apply it to the diff"
+        if kind == pipeline.CRITIQUE
+        else "follow it for how that part of the work is done"
+    )
     if len(steps) == 1:
         name = steps[0]
         return (
             f'This stage follows your skill "{name}": call skill_view(name="{name}") before you '
-            f"start, and follow it for how the work is done. {_SKILL_SCOPE}"
+            f"start, and {use}."
         )
     named = ", ".join(f'"{name}"' for name in steps)
     return (
         f"This stage applies these skills in order, each once: {named}. Load each with skill_view "
-        f"before you use it, and follow it for how that part of the work is done. {_SKILL_SCOPE}"
+        f"before you use it, and {use}."
     )
 
 
