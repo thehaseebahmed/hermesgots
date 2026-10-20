@@ -21,6 +21,12 @@ import {
   type AfkStage,
   type SessionPipeline,
 } from "@/lib/pipeline"
+import {
+  parseWorkflowEntry,
+  parseWorkflowLibrary,
+  type Workflow,
+  type WorkflowEntry,
+} from "@/lib/workflow"
 import { isNative } from "@/lib/native"
 import type { CronSchedule } from "@/lib/schedule"
 import {
@@ -2521,6 +2527,10 @@ export interface ProjectAfk {
   critiqueSkills: string[]
   /** The stage the task it holds is in, while it is a staged one; null for one run, or none held. */
   stage: AfkStage | null
+  /** That stage's own name in the workflow's words ("Migrate", "Verify"); null once past the last. */
+  stageName: string | null
+  /** The workflow the project's work runs under, as the library answers it. */
+  workflow: WorkflowEntry | null
 }
 
 function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
@@ -2540,6 +2550,9 @@ function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
     critiqueSkills: skillNames(body.critique_skills),
     // A plugin from before the stages answers none: that task is one run, which is what it does.
     stage: parseStage(body.stage),
+    stageName: str(body.stage_name) || null,
+    // And one from before the workflows answers none: the project runs what it always ran.
+    workflow: parseWorkflowEntry(body.workflow),
   }
 }
 
@@ -2598,6 +2611,72 @@ export function setProjectAfkSkills(
     build_skill: buildSkill,
     critique_skills: critiqueSkills,
   })
+}
+
+/**
+ * Puts a project's AFK work under a workflow from the library, answering the setting it now holds.
+ * A workflow id the host has no row for is refused there, and the answer is the setting it kept.
+ */
+export function setProjectAfkWorkflow(
+  config: HermesConfig,
+  projectId: string,
+  workflowId: string | null,
+): Promise<ProjectAfk> {
+  return writeAfk(config, projectId, { workflow_id: workflowId })
+}
+
+function workflowPath(config: HermesConfig, rest = ""): string {
+  return `${pluginRoot(config.baseUrl)}/workflows${rest}`
+}
+
+/** The workflows a bot's account keeps, presets first, read from the host's library. */
+export async function listWorkflows(
+  config: HermesConfig,
+  signal?: AbortSignal,
+): Promise<WorkflowEntry[]> {
+  const response = await request(workflowPath(config), { headers: headers(config), signal })
+  const body = (await response.json()) as Record<string, unknown> | null
+  return parseWorkflowLibrary(body?.workflows)
+}
+
+/**
+ * Writes a workflow to the library, answering the library as it now stands: a create adds a row, an
+ * update forks a preset into a copy and rewrites one of the account's own, and a delete takes one
+ * away. Writes answer the whole list, so the screen that asked draws what the host holds.
+ */
+async function writeWorkflow(
+  config: HermesConfig,
+  method: "POST" | "PATCH" | "DELETE",
+  rest: string,
+  body?: Record<string, unknown>,
+): Promise<WorkflowEntry[]> {
+  const response = await request(workflowPath(config, rest), {
+    method,
+    headers: headers(config),
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  const answer = (await response.json()) as Record<string, unknown> | null
+  return parseWorkflowLibrary(answer?.workflows)
+}
+
+/** Adds a workflow to the library, answering the library it joined. */
+export function createWorkflow(config: HermesConfig, workflow: Workflow): Promise<WorkflowEntry[]> {
+  return writeWorkflow(config, "POST", "", { ...workflow })
+}
+
+/** Rewrites one of the account's workflows — forking a preset into a copy — answering the library. */
+export function updateWorkflow(
+  config: HermesConfig,
+  id: string,
+  workflow: Workflow,
+): Promise<WorkflowEntry[]> {
+  return writeWorkflow(config, "PATCH", `/${encodeURIComponent(id)}`, { ...workflow })
+}
+
+/** Takes a workflow out of the library, answering the library it left. */
+export function deleteWorkflow(config: HermesConfig, id: string): Promise<WorkflowEntry[]> {
+  return writeWorkflow(config, "DELETE", `/${encodeURIComponent(id)}`)
 }
 
 export type LiveRunStatus = "running" | "waiting_for_approval"
