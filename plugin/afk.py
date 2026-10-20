@@ -487,8 +487,7 @@ def run_body(record: Dict[str, Any], task: Dict[str, Any], prompt: Optional[str]
     """The ``POST /v1/runs`` request: how to work a planned issue, and the issue itself as the input.
 
     The prompt is all `prompt_builder`'s — one module holds every word the agent is told — and the
-    issue's own title, description and link open the run, so what the work is judged against is in
-    front of the agent rather than something it goes and fetches (ADR 0027).
+    input is `prompt_builder.afk_input`: the issue's title, description and link.
     """
     return _request(
         record, prompt_builder.afk_prompt(record, task, prompt), prompt_builder.afk_input(task)

@@ -82,8 +82,7 @@ _PROGRESS_UPDATES_INSTRUCTIONS = (
 # Added to an AFK session's run instead of a user (ADR 0011, ADR 0013, ADR 0027): the points no Prompt
 # and no skill may change. How the work is carried out is the project's Prompt, told after this; the
 # brief is AFK's own, so it holds whatever that Prompt says. Fixed text, so the prompt cache holds
-# across the session's turns; the issue's own text rides in the run's input (`afk_input`) rather than
-# here.
+# across the session's turns.
 _AFK_INSTRUCTIONS = """You are working while the user is away, and this issue was planned before they left: it is marked as ready for work, so its text is the spec and its design is settled. Implement it — don't re-open the plan. Where the issue is silent, take the smallest option that fits and say what you chose; where the code contradicts the plan, the code is right, and the pull request says where you departed from it. This session works one issue: this one. Don't go looking for others in the tracker.
 
 The rules:
@@ -281,7 +280,6 @@ def afk_input(task: Dict[str, Any]) -> str:
     lines = [f"Title: {task.get('title') or ''}", "Description:"]
     body = task.get("body", "")
     if body:
-        # Verbatim, however long: the issue is the spec, and a truncated one makes a wrong plan.
         lines.append(body)
     return "\n".join(lines) + "\n\n" + _issue_link(task)
 
