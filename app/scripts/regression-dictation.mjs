@@ -116,6 +116,8 @@ try {
     await composer.fill("Note:")
     await mic.click()
     await page.getByRole("button", { name: "Stop" }).waitFor()
+    // How long this recording runs: one under 300ms is dropped, so Stop would have nothing to send.
+    await page.waitForTimeout(1200)
     await shot(page, `${label}-1-recording`)
     await page.getByRole("button", { name: "Stop" }).click()
     await page.getByText("Transcribing…").waitFor()
@@ -180,11 +182,9 @@ try {
     const before = (await clips()).length
     await page.getByRole("button", { name: "Voice", exact: true }).click()
     await page.getByRole("button", { name: "Stop" }).waitFor()
-    // Until two pieces have gone, each cut at a pause while the voice carries on.
-    for (const end = Date.now() + 30_000; (await clips()).length - before < 2; ) {
-      assert.ok(Date.now() < end, "two pieces sent while recording")
-      await page.waitForTimeout(250)
-    }
+    // How long this recording runs: the fake microphone speaks three phrases, and two of them are cut
+    // and sent before Stop, the third with it.
+    await page.waitForTimeout(19_000)
     const sent = (await clips()).slice(before)
     assert.equal(sent.length, 2, "two pieces sent before Stop")
     assert.equal(sent[1].context, SENTENCE, "the second piece carries on from the first")
