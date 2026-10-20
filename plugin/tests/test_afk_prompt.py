@@ -228,8 +228,9 @@ class CritiquePromptTests(unittest.TestCase):
     def test_it_fixes_once_and_ships_last(self) -> None:
         text = self.text()
         self.assertIn("fix it in one pass", text)
-        self.assertIn("there is no second review", text)
+        self.assertIn("there is no second review", text, "the user's read is the next pass")
         self.assertIn("action 'ship'", text)
+        self.assertIn("The pull request stays a draft", text)
         self.assertIn("what the critique found and what changed", text)
         self.assertIn("Leave the Closes line to the tool", text)
 
