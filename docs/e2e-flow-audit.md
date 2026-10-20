@@ -1,24 +1,25 @@
 # The audit of the end-to-end flows
 
-Every key in the end-to-end registry gets one verdict here — **stay**, **component**, **plugin** or
-**delete** — with what the flow asserts today, why it moves or stays, and what replaces it. This is
-the committed record #297's plan calls for, delivered by #299: a flow leaves the registry only once
-its replacement is green, so this page records where each assertion goes rather than claiming it has
-already arrived.
+Every key in the end-to-end registry (the `FLOWS` map in `app/scripts/e2e/cli.mjs`) gets one
+verdict here — **stay**, **component**, **plugin** or **delete** — with what the flow asserts
+today, why it moves or stays, and what replaces it. This is the committed record #297's plan calls
+for, delivered by #299: a flow leaves the registry only once its replacement is green, so this
+page records where each assertion goes rather than claiming it has already arrived.
 
-Every verdict applies one rule — a test belongs to the cheapest tier that would fail for the reason
-the change can fail — from ADR
+Every verdict applies one rule — a test belongs to the cheapest tier that would fail for the
+reason the change can fail — from ADR
 [0019](adr/0019-a-test-belongs-to-the-cheapest-tier-that-would-fail-for-its-reason.md), which owns
-what the tiers are along with `AGENTS.md`'s Testing paragraph. This page only records which one each
-flow lands in: **stay** (end-to-end), **component**, **plugin** (the plugin's own Python suite), or
-**delete** (a duplicate another flow already asserts). The end-to-end skill points here once it is
-rewritten for the seven (#317).
+what the tiers are along with `AGENTS.md`'s Testing paragraph. This page records only which one
+each flow lands in: **stay** (end-to-end), **component**, **plugin** (the plugin's own Python
+suite), or **delete** (a duplicate another flow already asserts). The end-to-end skill points here
+once it is rewritten for the seven (#317). The counts describe the registry at this commit; the
+ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **63 keys**, and every one of them has a row below.
-`pnpm e2e list` prints the same 63 keys, and the rows here are grouped by the ticket that takes them
-rather than by the registry's order, so the count is the thing to check:
+The registry in `app/scripts/e2e/cli.mjs` holds **63 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 63 keys, and the rows here are grouped by the ticket that
+takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --- | --- |
@@ -32,32 +33,33 @@ Of those 63, 57 keys point at a script under `app/scripts/e2e/` (one of them, `t
 reuses `todos.mjs`, so 56 distinct files there) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
-#297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**. Two
-things in that arithmetic did not hold, and both are checkable:
+#297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
+Two things in that arithmetic did not hold, and both are checkable:
 
 - Its clauses name **59** keys — 53 pointing at `app/scripts/e2e/` and 6 at the older
   `regression-*.mjs` — and its sixtieth is `todos-legacy` counted a second time, as "one registry
   key reusing another's script" rather than as the 53rd of the first group, which it already is.
   Today's 57 keys under `app/scripts/e2e/`, less the four that arrived since, are those 53.
-- It left out goal mode's two keys, `goal-wizard` and `goal-pill`, which the registry still held when
-  the plan was written: the commit before they left carries 61 keys
-  (`git show 8a4e842^:app/scripts/e2e/cli.mjs`). Both went with goal mode (#296), so that omission
-  costs nothing today.
+- It left out goal mode's two keys, `goal-wizard` and `goal-pill`, which the registry still held
+  when the plan was written: the commit before they left, `8a4e842^` (#282's `1b98896`, merged
+  before the plan), carries 61 keys. Both went with goal mode (#296), so that omission costs
+  nothing today.
 
 Four keys have arrived since, each component by the same rule: `delegation-model` (#318),
-`afk-skills` (#327), `afk-stage` (#328) and `pipeline-pill` (#330). So the registry holds
-59 + 4 = **63** keys, and the component verdicts are the plan's 48 less the key it counted twice,
-plus those four: **51**. #299's own criterion still says 48; that figure is superseded by the 51 above
-for the reason just given, and nothing else in the ticket's split moves.
+`afk-skills` (#327), `afk-stage` (#328) and `pipeline-pill` (#330). So the registry holds 59 + 4 =
+**63** keys, and the component verdicts are the plan's 48 less the key it counted twice, plus
+those four: **51**. #299's own criterion still says 48; the 51 above supersedes it for the reason
+just given, and nothing else in the ticket's split moves.
 
 Check any of it in one line:
 
 ```bash
 grep -c '^| `' docs/e2e-flow-audit.md                           # 63 rows, one per registry key
+grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 7
 grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 51
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 3
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
-cd app && pnpm e2e list | wc -l                                # 63 keys in the registry
+cd app && pnpm -s e2e list | wc -l                             # 63 keys in the registry
 git show 8a4e842^:app/scripts/e2e/cli.mjs |
   sed -n '/^const FLOWS = {/,/^}$/p' | grep -c '^  [a-z"-]*: {'  # 61, before goal mode left
 ```
@@ -69,7 +71,8 @@ demotion produces: a key is deleted in the change that writes that test.
 
 ### Chat, a reply and a failure — #306
 
-Six keys, one family: what the composer sends, what the thread shows of a turn, and what a send or a turn that fails leaves behind.
+Six keys, one family: what the composer sends, what the thread shows of a turn, and what a send or
+a turn that fails leaves behind.
 
 | Key | Verdict | What it asserts today | Why it moves | What replaces it |
 | --- | --- | --- | --- | --- |
@@ -82,13 +85,14 @@ Six keys, one family: what the composer sends, what the thread shows of a turn, 
 
 ### A thread and its history — #307
 
-Eight keys, one family: what a thread derives from a transcript or a run's events, and what a chat looks like after a model change, a compaction or a page of history.
+Eight keys, one family: what a thread derives from a transcript or a run's events, and what a chat
+looks like after a model change, a compaction or a page of history.
 
 | Key | Verdict | What it asserts today | Why it moves | What replaces it |
 | --- | --- | --- | --- | --- |
 | `todos` | component | The todo list shows above the composer while the reply that wrote it still runs, from the run's events and, on a host whose events the browser can't read, from the transcript — one script under two keys, this one and `todos-legacy`. | A derivation from a run's events and from a transcript, with a pill's render on top. | One component test with two legs — a change stream carrying todos, and a transcript-only host carrying the same — asserting the running turn's tool list beside the pill (#307). |
-| `todos-legacy` | delete | The same pill read from a transcript, on a host whose event stream the browser can't read. | It is `todos` run against the legacy mock: one claim under two registry keys. | Nothing of its own: the second leg of the todos test, which #307 writes as it deletes this key. |
-| `photo-progress` | delete | A message sent with a photo shows its reply's tool calls while it runs, on a host the browser can't read the events of. | It asserts the running turn's tool list from a transcript — the derivation the todos test owns; the photo is the mock's keyword, not the claim. | Nothing of its own: the tool list in that same leg. |
+| `todos-legacy` | delete | The same pill read from a transcript, on a host whose event stream the browser can't read. | It is `todos` run against the legacy mock: one claim under two registry keys. | The second leg of the todos test, which #307 writes as it deletes this key. |
+| `photo-progress` | delete | A message sent with a photo shows its reply's tool calls while it runs, on a host the browser can't read the events of. | It asserts the running turn's tool list from a transcript — the derivation the todos test owns; the photo is the mock's keyword, not the claim. | The tool list in that same leg. |
 | `model-switch` | component | A chat's model pill picks a new model, and the thread draws one divider naming it above the turn it answered with — after a reload, in a project session, and as a turn opens where the host's record hasn't reached the device. | Where a divider sits is a pure placement rule (`model-changes.ts`) drawn over a rendered thread. | A component test asserts one divider above the right turn, over a seeded record plus a turn this device sent; the placement rules stay unit tests (`scripts/test-model-changes.mjs`). |
 | `history-pages` | component | A session opened here mid-turn from another device loads its newest turn whole, Load earlier pages back a whole long turn twice, the running reply stays one reply at the end, and a chat an older version split at the page edge is mended by its next Load earlier. | Merging paged transcripts: a reconcile over rows, and the render that shows each turn once. | A component test fakes paged transcript handlers and asserts whole turns, the running reply once, and the mended chat; the reconcile stays a unit test where it is pure. |
 | `history-generations` | component | A session compacted on the host while this device already showed its turns ends with each turn once, not the whole sequence twice, and the carried turns land around the messages sent since. | A dedupe over rows Hermes re-emits under fresh ids. | A component test over a handler that re-emits carried turns, with the reconcile rules as unit tests. |
@@ -97,17 +101,19 @@ Eight keys, one family: what a thread derives from a transcript or a run's event
 
 ### The ask-the-user card — #312
 
-Three keys become one suite: the four outcomes a card can read back, an answer that survives stale reads, and a question whose window closed.
+Three keys become one test: the four outcomes a card can read back, an answer that survives stale
+reads, and a question whose window closed.
 
 | Key | Verdict | What it asserts today | Why it moves | What replaces it |
 | --- | --- | --- | --- | --- |
-| `clarify-polling` | component | An answered question survives two stale transcript reads, the turn's completion and a reload. | The settle rule over stale rows; the reload is a remount. | The one clarify suite (#312): an answered card after two stale transcript reads and a stale run status. |
-| `clarify-transcript` | component | A fresh transcript reads as Answered, No answer, Not answered or Skipped, with the answers the card holds. | A mapping from a tool row to a title and its answers, plus a render. | The same suite: the four outcomes (the mapping itself a unit test), single- and multi-select answers, on one shared fixture. |
-| `clarify-missed` | component | A question whose window closed stays as a No answer card with the question it asked, and Ask again starts a new turn that asks afresh. | The expired card's render and its retry wiring; nothing resumes the expired call, so no host behaviour is at stake. | The same suite: an expired card offers Ask again and sends a new turn. |
+| `clarify-polling` | component | An answered question survives two stale transcript reads, the turn's completion and a reload. | The settle rule over stale rows; the reload is a remount. | The one clarify test (#312): an answered card after two stale transcript reads and a stale run status. |
+| `clarify-transcript` | component | A fresh transcript reads as Answered, No answer, Not answered or Skipped, with the answers the card holds. | A mapping from a tool row to a title and its answers, plus a render. | The same test: the four outcomes (the mapping itself a unit test), single- and multi-select answers, on one shared fixture. |
+| `clarify-missed` | component | A question whose window closed stays as a No answer card with the question it asked, and Ask again starts a new turn that asks afresh. | The expired card's render and its retry wiring; nothing resumes the expired call, so no host behaviour is at stake. | The same test: an expired card offers Ask again and sends a new turn. |
 
 ### The composer — #308
 
-Four keys demoted and one deleted: the slash menu, drafts, dictation with a stubbed recording, and a reply's images holding their place.
+Four keys demoted and one deleted: the slash menu, drafts, dictation with a stubbed recording, and
+a reply's images holding their place.
 
 | Key | Verdict | What it asserts today | Why it moves | What replaces it |
 | --- | --- | --- | --- | --- |
@@ -115,25 +121,27 @@ Four keys demoted and one deleted: the slash menu, drafts, dictation with a stub
 | `drafts` | component | A composer's unsent text is kept per chat and cleared on send. | A device row read per chat. | A component test types in two chats, asserts each keeps its own text, and that a send leaves none. |
 | `dictation` | component | Dictation's pieces and their retries, the recording kept until its text is in, and no microphone where the host can't take one — with Chromium's fake microphone standing in for a real one. | A stubbed `MediaRecorder` is what the flow already used, and the pause-cut points are a pure rule. | A component test with a stubbed `MediaRecorder` asserts the pieces land in order, a failed piece retries, the recording is kept until its text is in, and the mic is absent without the host; the cut points stay unit tests. |
 | `image-skeleton` | component | An agent's images hold their place with a skeleton while they load — in a chat and in a project session — give way to the image or to the tag's text, and a lone image takes the same cell as one in a group. | A placeholder's lifecycle over a seeded reply, with the media route's answers faked. | One component test asserts that lifecycle and absorbs `image-viewer`'s opened-photo leg (#308); the cells' reserved sizes go to the snapshots. |
-| `image-viewer` | delete | A photo opened from a message holds its place while it decodes, then paints — at a fifth of the page's normal speed, so the placeholder is catchable. | A duplicate of the placeholder lifecycle the image test owns; the slowdown is the flow working around the browser, not a claim. | Nothing of its own: the opened photo's placeholder becomes the image test's second leg. |
+| `image-viewer` | delete | A photo opened from a message holds its place while it decodes, then paints — at a fifth of the page's normal speed, so the placeholder is catchable. | A duplicate of the placeholder lifecycle the image test owns; the slowdown is the flow working around the browser, not a claim. | The opened photo's placeholder becomes the image test's second leg. |
 
 ### Settings, sync and usage — #309
 
-Seven keys: what the app says about a bot's limits, a session's outputs and pull requests, a draft, and the two recovery-code screens.
+Seven keys: what the app says about a bot's limits, a session's outputs and pull requests, a
+draft, and the two recovery-code screens.
 
 | Key | Verdict | What it asserts today | Why it moves | What replaces it |
 | --- | --- | --- | --- | --- |
 | `usage-limit` | component | The notice follows the account — quiet with credits, warning near a limit, out without — a dismissal doesn't outlive the state it dismissed, the reset counts down in words, and the Usage sheet names the model in a row above its meter. | A choice over the account's windows plus a render; the choice and the reset text are already pure (`provider-usage.ts`). | A component test over seeded windows asserts the notice's choice and its words; the choice and the reset text stay unit tests, and the banner's responsive form goes to the snapshots. |
 | `outputs` | component | The outputs pill counts a session's filed files and pull requests, and opens a drawer with the session's pull requests — live and finished, newest first — and the Library's tree restricted to its own folders, as a sheet on phones and a drawer from 1024px. | List composition and two tabs drawn from the host's answers; the sheet-or-drawer choice is `usePopupDrawer`, not geometry. | A component test seeds the outputs and asserts the pill's count and both tabs; the drawer drawn as a sheet goes to the snapshots. |
 | `prs` | component | A shipped pull request lists in its project's Pull requests tab, and a host that can't reach GitHub keeps the ones the app already knows instead of storing none over them. | A failed read and what the store keeps when one fails. | A component test answers the read with an error and asserts the known rows survive, then with a list and asserts it renders. |
-| `recovery-code` | component | Setup always issues a recovery code, offers the passkey only beside it, writes nothing before the code has been copied, and gates Continue on that copy; a passkey that can't be made is a quiet choice to go on with the code alone. | Write counts and step order against a stubbed vault, with the real key handling exercised locally. | A component test asserts nothing written before the copy, one wrapper after it, and Continue gated; the code's wrap at a hyphen goes to the snapshots (#309). |
+| `recovery-code` | component | Setup always issues a recovery code, offers the passkey only beside it, writes nothing before the code has been copied, and gates Continue on that copy; a passkey that can't be made is a quiet choice to go on with the code alone. | Write counts and step order against a stubbed vault, with the real key handling exercised locally. | A component test asserts nothing written before the copy, one wrapper after it, and Continue gated. |
 | `recovery-code-rotation` | component | Replacing a code in Settings: one dialog asks for the current one, the new wrapper is written before the new code shows, and the old one is retired only once the new one is copied, over the version just written. | Two steps in one dialog and the order of two writes. | The same recovery-code tests assert one wrapper, then a second that retires the first over the version it just wrote. |
 | `onboarding` | component | The wizard's Join the leaderboard step is on by default, Continue joins the board, and a user who switches it off goes on to link bots without joining. | A switch's default and one request. | A component test asserts the step's default, the join request on Continue, and none with the switch off. |
 | `draft-mode-sync` | component | A draft and a picked mode travel in the plugin's chat record, come back to a device that lost its copy, and typing leaves `updatedAt` — the activity clock the lists sort on — alone. | Reads and writes of one record. | A component test asserts the write carries text and mode, a second render reads them back, and typing leaves `updatedAt` where it was. |
 
 ### Navigation and the rules that choose what is drawn — #310
 
-Four keys: which pane is drawn at which width, the collapsed sidebar, a chat not started, and the list a project session belongs to.
+Four keys: which pane is drawn at which width, the collapsed sidebar, a chat not started, and the
+list a project session belongs to.
 
 | Key | Verdict | What it asserts today | Why it moves | What replaces it |
 | --- | --- | --- | --- | --- |
@@ -144,7 +152,8 @@ Four keys: which pane is drawn at which width, the collapsed sidebar, a chat not
 
 ### Meetings, research, plan mode and a notification — #311
 
-Four keys: two screens read end to end, plan mode's per-session card, and a notification's question.
+Four keys: two screens read end to end, plan mode's per-session card, and a notification's
+question.
 
 | Key | Verdict | What it asserts today | Why it moves | What replaces it |
 | --- | --- | --- | --- | --- |
@@ -177,7 +186,8 @@ Five keys: the sheets that add a server, describe one, remove one, and land its 
 
 ### AFK — #304
 
-Eight keys: six about the pop-up and the session it names, two about what the plugin itself decides.
+Eight keys: six about the pop-up and the session it names, two about what the plugin itself
+decides.
 
 | Key | Verdict | What it asserts today | Why it moves | What replaces it |
 | --- | --- | --- | --- | --- |
@@ -202,67 +212,71 @@ Three keys: the fallback list, the subagent model, and a write the host never an
 
 ## The seven that stay, and why only a browser can assert each
 
-Every one of these earns its browser by a mechanism no lower tier reproduces. They are what the
-end-to-end registry holds once the other 56 keys leave (#314).
+Every one of these earns its browser by a mechanism no lower tier reproduces, and a stay is
+replaced by itself. They are what the end-to-end registry holds once the other 56 keys leave
+(#314).
 
-| Key | What it asserts today | Why only a browser can assert it |
-| --- | --- | --- |
-| `reattach` | A reply still streaming when the page reloads picks its run up again and finishes. | A live run outliving a real reload. A component test can remount a tree, but it has no run still going on a test host to rejoin, so it would pass whether or not reattachment works. |
-| `live-poll` | `runs/live` is read by one shared poll: at most 3 reads in 25s with a session, its project and the sidebar all open. | A request rate over wall-clock, with three screens mounted at once. |
-| `idle-requests` | An idle open chat makes at most 12 requests in 65s. | A request budget over 65 seconds of real time and a real fetch stack. |
-| `foreign-run` | A run started elsewhere shows as running in Code and on the open session screen, is followed to its end, and leaves no duplicate. | A run this browser never started, on a host that owns it: the app only discovers it. |
-| `compressed-run` | A chat another device started and Hermes compressed before this device loaded it lands its transcript and follows its run to its end — whether the rotation came before the run or mid-run. | A test host rotating the session id mid-run, the mechanism the plugin's run keying broke on. A faked HTTP boundary would answer the shape the code expects rather than the one the host sends. |
-| `screens` | Projects, a project, Code, Routines and a chat load their data at 390 and 1024px, in light and dark, with no console error. | Real layout at two widths: a DOM without layout has no sizes. It is also where the sweep's visual snapshots live. |
-| `stream-writes` | A streaming reply is written to IndexedDB in batches: at most 6 writes a second, where main wrote 7.5. | A write rate measured over a real stream's wall-clock. |
+| Key | Verdict | What it asserts today | Why only a browser can assert it |
+| --- | --- | --- | --- |
+| `reattach` | stay | A reply still streaming when the page reloads picks its run up again and finishes. | A live run outliving a real reload. A component test can remount a tree, but it has no run still going on a test host to rejoin, so it would pass whether or not reattachment works. |
+| `live-poll` | stay | `runs/live` is read by one shared poll: at most 3 reads in 25s with a session, its project and the sidebar all open. | A request rate over wall-clock, with three screens mounted at once. |
+| `idle-requests` | stay | An idle open chat makes at most 12 requests in 65s. | A request budget over 65 seconds of real time and a real fetch stack. |
+| `foreign-run` | stay | A run started elsewhere shows as running in Code and on the open session screen, is followed to its end, and leaves no duplicate. | A run this browser never started, on a host that owns it: the app only discovers it. |
+| `compressed-run` | stay | A chat another device started and Hermes compressed before this device loaded it lands its transcript and follows its run to its end — whether the rotation came before the run or mid-run. | A test host rotating the session id mid-run, the mechanism the plugin's run keying broke on. A faked HTTP boundary would answer the shape the code expects rather than the one the host sends. |
+| `screens` | stay | Projects, a project, Code, Routines and a chat load their data at 390 and 1024px, in light and dark, with no console error. | Real layout at two widths: a DOM without layout has no sizes. It is also where the sweep's visual snapshots live. |
+| `stream-writes` | stay | A streaming reply is written to IndexedDB in batches: at most 6 writes a second, where main wrote 7.5. | A write rate measured over a real stream's wall-clock. |
 
 ## The coverage a demotion leaves with no home
 
-The 56 keys that leave — 51 demoted, 3 deleted as duplicates, 2 moved to the plugin — take away the
-assertion of things a component test cannot see: geometry, rates over wall-clock, capture, and a
-reload with a live stream. Four of those have a home: the two request budgets and the write rate stay
-with `live-poll`, `idle-requests` and `stream-writes`, and the real reload stays with `reattach`
-(`compressed-live`'s reload leg becomes a remount, which asserts the resumed state and not the
-reload). No test has ever claimed a real audio capture — the flow ran on Chromium's fake microphone
-and the component test stubs `MediaRecorder` — so nothing is lost there that was had. What is left
-has no home, and each loss below is accepted today unless a seeded snapshot closes it.
+The 56 keys that leave — 51 demoted, 3 deleted as duplicates, 2 moved to the plugin — take away
+the assertion of things a component test cannot see: geometry, real timers and real capture, and a
+reload with a live stream. Four of those have a home: the two request budgets and the write rate
+stay with `live-poll`, `idle-requests` and `stream-writes`, and the real reload stays with
+`reattach` (`compressed-live`'s reload leg becomes a remount, which asserts the resumed state and
+not the reload). No test has ever claimed a real audio capture — the flow ran on Chromium's fake
+microphone and the component test stubs `MediaRecorder` — so nothing is lost there that was had.
 
-A snapshot is of a screen `screens` already visits, in a state seeded on it. #314 forbids widening
-that flow's set of screens, so a behaviour on a screen it never visits has no snapshot to land in.
+A snapshot is of a screen `screens` already visits, in a state seeded on it, and #314's scope is
+exactly the screens that flow visits. So a behaviour on a screen it never visits has no snapshot
+to land in. In the table below, a row that names the snapshots can still be closed by seeding that
+state; a row that says *nothing* is a loss accepted now, and accepted later unless a ticket takes
+it up.
 
 | Behaviour | Asserted today by | After the demotion |
 | --- | --- | --- |
-| The collapsed sidebar's row heights and 44px targets | `sidebar-collapse` | The snapshots, if the 1024px pass seeds a collapsed sidebar — a state on a screen the flow visits, not a screen added. Loss accepted today; #314 could close it. |
+| The collapsed sidebar's row heights and 44px targets | `sidebar-collapse` | The snapshots, if the 1024px pass seeds a collapsed sidebar — a state on a screen the flow visits, not a screen added. |
 | Pane adjacency at a tablet width | `panes` | The snapshots: `screens` visits Projects and Code at 1024px, where the list sits beside the item. |
-| The slash menu's height cap | `slash-skills` | The snapshots, with the menu open on the chat screen's pass. Loss accepted today; #314 could close it. |
-| The reserved cell sizes of a reply's images | `image-skeleton` | The snapshots, if that chat carries an image. Loss accepted today; #314 could close it. |
-| The dimmed unsent bubble | `failed-send` | The class tokens are the component test's (#306 asserts the failed row shares the queued row's own); the rendered dimness is a pixel claim no snapshot makes. Loss accepted. |
-| The full-viewport recording cover | `meetings` | Nothing: it is on a pop-up of a screen `screens` never visits, and #314 forbids adding one. Loss accepted. |
-| The usage banner's responsive form | `usage-limit` | The snapshots, if the chat screen's pass carries an account near a limit, since the banner is drawn over that screen. Loss accepted today; #314 could close it. |
-| The outputs drawer drawn as a sheet on a phone | `outputs` | Nothing: it belongs to a project session's screen, which `screens` never visits. Loss accepted. |
-| The recovery code's wrap at a hyphen, between two of its groups | `recovery-code-rotation` | Nothing: the wizard is not a screen `screens` visits, and the wrap is CSS rather than a rule. Loss accepted. |
-| A sender's Stop landing while the session id rotates | `compressed-live` | The app's rule is the component test's — Stop's request carries the rotated run and the reply settles. A real cancellation is covered by no flow, since `compressed-run` never presses Stop. Loss accepted (#307). |
+| The slash menu's height cap | `slash-skills` | The snapshots, with the menu open on the chat screen's pass. |
+| The reserved cell sizes of a reply's images | `image-skeleton` | The snapshots, if that chat carries an image. |
+| The dimmed unsent bubble | `failed-send` | The class tokens are the component test's (#306 asserts the failed row shares the queued row's own); the rendered dimness is a pixel claim no snapshot makes. |
+| The full-viewport recording cover | `meetings` | Nothing: it is on a pop-up of a screen `screens` never visits, and #314's scope adds none. |
+| The usage banner's responsive form | `usage-limit` | The snapshots, if the chat screen's pass carries an account near a limit, since the banner is drawn over that screen. |
+| The outputs drawer drawn as a sheet on a phone | `outputs` | Nothing: it belongs to a project session's screen, which `screens` never visits. |
+| The recovery code's wrap at a hyphen, between two of its groups | `recovery-code-rotation` | Nothing: the wizard is not a screen `screens` visits, and the wrap is CSS rather than a rule. |
+| A sender's Stop landing while the session id rotates | `compressed-live` | The app's rule is the component test's — Stop's request carries the rotated run and the reply settles. A real cancellation is covered by no flow, since `compressed-run` never presses Stop; #307 accepts that. |
 
 ## The one drift, and which way it is resolved
 
 `afk-switch-reasons` opens by saying a plugin too old to switch AFK "offers no switch at all". Its
 second scenario asserts the opposite: the switch is rendered (the flow counts one), disabled,
-`aria-checked="false"`, reading *Turned off*. The app's rule is that a control the host cannot honour
-is shown, in place, out of reach, as `AGENTS.md` states for AFK's switch — so the comment is the part at
-fault.
+`aria-checked="false"`, reading *Turned off*. The app's rule is that a control the host cannot
+honour is shown, in place, out of reach, as `AGENTS.md` states for AFK's switch — so the comment
+is the part at fault.
 
 - **The behaviour the comment describes is dropped.** Nothing asserts it, and `AfkSwitch`
   (`app/src/components/afk.tsx`) renders the row unconditionally, with no branch for a missing
   feature.
 - **The behaviour the flow asserts is carried over** into the AFK pop-up's component test (#304),
   which keeps the disabled switch, one reason line rather than two, and a live switch on a project
-  already on. A plugin too old to switch AFK gets no reason line, since the host gave none — the row
-  reads *Turned off* and says no more — and the test asserts that rather than inventing words for the
-  plugin.
+  already on. A plugin too old to switch AFK gets no reason line, since the host gave none — the
+  row reads *Turned off* and says no more — and the test asserts that rather than inventing words
+  for the plugin.
 - **The comment is corrected in #304**, where the pop-up's tests land, rather than here: this page
-  records the drift, and the flow goes on asserting what the app actually does until it is deleted.
+  records the drift, and the flow goes on asserting what the app actually does until it is
+  deleted.
 
 ## What this page does not decide
 
-Whether the seven run on a real Hermes is #313's question, and whether the snapshots seed the states
-named above is #314's. This page only says which keys move, where each assertion goes, and what is
-accepted if nothing picks it up.
+Whether the seven run on a real Hermes is #313's question, and whether the snapshots seed the
+states named above is #314's. This page only says which keys move, where each assertion goes, and
+what is accepted if nothing picks it up.
