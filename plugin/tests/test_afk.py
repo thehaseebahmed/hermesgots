@@ -56,6 +56,21 @@ def folder(path: str) -> SimpleNamespace:
     return SimpleNamespace(path=path)
 
 
+def lost(hermes_home: Path, project_id: str = "p1") -> None:
+    """Points a project at a workflow the library no longer holds, as a hand edit could.
+
+    The route refuses an id the library doesn't hold, so this is written straight to the row to
+    stand in for a store somebody edited behind the plugin's back.
+    """
+    conn = connect(db_path(hermes_home))
+    try:
+        conn.execute(
+            "UPDATE project_afk SET workflow_id = 'wf-gone' WHERE project_id = ?", (project_id,)
+        )
+    finally:
+        conn.close()
+
+
 class ProjectsStub(ModuleType):
     """A ``hermes_cli.projects_db`` that records what a project's edit asked of it."""
 
@@ -354,12 +369,20 @@ class AfkHome(unittest.TestCase):
 class WorkflowChoiceTests(AfkHome):
     """The workflow a project's AFK work runs under: its own pick, from the bot's library."""
 
-    def test_a_project_that_picked_nothing_runs_the_default_preset(self) -> None:
+    def test_a_project_that_picked_nothing_reads_one_run(self) -> None:
         found = read(self.home, "p1", self.folders())
         self.assertEqual(found["workflow"]["id"], workflows.DEFAULT_ID)
+        self.assertEqual(found["workflow"]["name"], "One run", "the shape a prompt run has")
+        self.assertEqual([stage["name"] for stage in found["workflow"]["stages"]], ["Build"])
+
+    def test_a_pick_the_library_lost_reads_one_run(self) -> None:
+        self.choose()
+        lost(self.home)
+        found = read(self.home, "p1", self.folders())
         self.assertEqual(
-            [stage["name"] for stage in found["workflow"]["stages"]],
-            ["Build", "Test", "Review", "Summary"],
+            found["workflow"]["id"],
+            workflows.DEFAULT_ID,
+            "a workflow the library doesn't hold is no workflow to run",
         )
 
     def test_the_pick_is_read_back_from_the_host(self) -> None:
@@ -1340,15 +1363,11 @@ class SessionTests(unittest.TestCase):
         self.assertNotIn("Read the frontier first.", instructions, "the issue's text isn't copied in")
 
     def test_the_run_is_told_the_prompt_the_host_holds(self) -> None:
-        # A claimed task carries a workflow snapshot today, so this proves the handoff — that the
-        # Prompt a run is built with came off the row — rather than the posted body; #353 makes a
-        # project that picked nothing run prompt-mode, which is where the body carries it.
         set_prompt(self.home, "p1", "Squash every checkpoint into one commit.")
-        with patch.object(afk, "run_body", wraps=afk.run_body) as built:
-            self.start()
-        self.assertEqual(
-            built.call_args.args[2],
+        self.start()
+        self.assertIn(
             "Squash every checkpoint into one commit.",
+            self.posted[0]["body"]["instructions"],
             "the Prompt comes off the project's row as the run starts, with the app closed",
         )
 
@@ -1450,16 +1469,35 @@ class StagedStartTests(SessionTests):
         self.assertIn("Build stage", text, "and the build is told where it ends")
         self.assertIn('skill_view(name="plan")', text, "and which skill governs it")
 
-    def test_a_project_that_picked_nothing_starts_the_default_preset(self) -> None:
+    def test_a_project_that_picked_nothing_works_one_prompt_run(self) -> None:
         self.start()
         record = sessions.read(db_path(self.home), self.ensured[0][0])
-        staged = pipeline.read(record["pipeline"])
-        self.assertIsNotNone(staged, "staging is on by default")
-        self.assertEqual(
-            [stage["name"] for stage in staged["stages"]],
-            ["Build", "Test", "Review", "Summary"],
+        self.assertIsNone(
+            record["pipeline"], "a prompt run is no stage, so nothing is snapshotted"
         )
-        self.assertIn("Build stage", self.posted[0]["body"]["instructions"])
+        text = self.posted[0]["body"]["instructions"]
+        self.assertIn("the pull request ships last", text, "the brief is AFK's, whatever a prompt says")
+        self.assertIn(
+            prompt_builder.DEFAULT_PROMPT, text, "the method is the Prompt the project works by"
+        )
+        self.assertNotIn("This task is worked in stages", text, "there is no stage to be told")
+        self.assertIn(
+            "ship it yourself with the pull_request tool",
+            text,
+            "the one run ships the draft itself",
+        )
+
+    def test_a_pick_the_library_lost_works_one_prompt_run(self) -> None:
+        self.choose()
+        lost(self.home)
+        self.start()
+        record = sessions.read(db_path(self.home), self.ensured[0][0])
+        self.assertIsNone(record["pipeline"], "no workflow, so nothing is snapshotted")
+        self.assertIn(
+            prompt_builder.DEFAULT_PROMPT,
+            self.posted[0]["body"]["instructions"],
+            "and the run is told its Prompt instead",
+        )
 
 
 class SweepAllTests(unittest.TestCase):
@@ -1734,12 +1772,27 @@ class StagedRunTests(AfkSessionTests):
         self.assertEqual(pipeline.kind(self.pipeline()), pipeline.CRITIQUE)
         self.assertEqual(afk.stalled(self.home)[self.SESSION]["reason"], afk.INTERRUPTED_RUN)
 
-    def test_a_workflow_that_names_no_skills_runs_and_ships_as_before(self) -> None:
+    def test_a_prompt_run_is_the_whole_task_and_lets_go_of_it(self) -> None:
         sessions.set_pipeline(db_path(self.home), self.SESSION, None)
         started = self.ended(completed=True)
         started.assert_not_called()
         self.assertIsNone(self.shown()["task"], "one finished run is still the whole task")
         self.assertIsNone(self.pipeline())
+
+    def test_a_held_task_keeps_the_snapshot_it_started_under(self) -> None:
+        """A project that picks nothing works one run from now on, but the task it already holds
+        keeps the stages it started under: the snapshot is on its own session's record."""
+        self.assertEqual(
+            self.shown()["workflow"]["id"],
+            workflows.DEFAULT_ID,
+            "the project reads as one run",
+        )
+        self.gated(0, 0)
+        started = self.ended(completed=True)
+        started.assert_called_once()
+        moved = started.call_args[0][1]["pipeline"]
+        self.assertEqual(pipeline.kind(moved), pipeline.CRITIQUE, "its next stage still runs")
+        self.assertEqual(len(pipeline.read(moved)["stages"]), 3, "the stages it started under")
 
     def test_the_sheet_names_the_stage_the_task_is_in(self) -> None:
         self.stage()

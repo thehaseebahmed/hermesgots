@@ -23,6 +23,10 @@ the agent rather than something it fetches. The title and description ride in th
 instructions, so the prompt is the same tokens every turn. It carries no model, so the host's own
 runs.
 
+A project that named no workflow works its task in one run: nothing is snapshotted, so the session
+records no pipeline and its run is the task's whole work. One that named a workflow runs its stages
+instead, under the snapshot of it written as the task starts (`_snapshot`, ADR 0027).
+
 A project that can't be left to work says why instead of offering a switch: it has no GitHub
 repository to read tasks from, the host has no GitHub account to read or claim one with, or the
 project has been put away. The reason is the host's own answer rather than the app's guess, because
@@ -184,21 +188,53 @@ def read(
     }
 
 
-def _workflow(hermes_home: Path, project_id: str, found: Dict[str, Any]) -> Dict[str, Any]:
-    """The workflow this project's AFK work runs under.
+def _legacy(found: Dict[str, Any]) -> bool:
+    """Whether a project's row predates the picker and names its work by its old skill columns."""
+    return found.get("workflow_id") is None and bool(
+        found.get("build_skill") or found.get("critique_skills")
+    )
 
-    Its pick, or the default preset; and for a project whose row predates the picker, the workflow its
-    old build and critique skill columns described — written to the library and named on the row the
-    first time it is read, so what the project does can't change shape under the user on upgrade.
+
+def _chosen(
+    hermes_home: Path, project_id: str, found: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """The workflow this project has picked, or ``None`` where it has none to run.
+
+    A row that predates the picker is migrated to the workflow its build and critique skill columns
+    described, and names it, so what the project does can't change shape under the user on upgrade.
+    A pick the library no longer holds is no pick: its delete was refused where a project still named
+    it, so only a hand edit strands one.
     """
-    if found.get("workflow_id") is None and (found.get("build_skill") or found.get("critique_skills")):
+    if _legacy(found):
         return workflows.migrate(
             hermes_home,
             project_id,
             found.get("build_skill"),
             found.get("critique_skills") or [],
         )
-    return workflows.pick(hermes_home, project_id)
+    return workflows.named(hermes_home, project_id)
+
+
+def _workflow(hermes_home: Path, project_id: str, found: Dict[str, Any]) -> Dict[str, Any]:
+    """The workflow this project's AFK work reads as: its pick, or One run where it has none.
+
+    One run is what a project that named nothing reads as, since one prompt run is the shape its
+    work has (ADR 0027).
+    """
+    return _chosen(hermes_home, project_id, found) or workflows.one_run()
+
+
+def _snapshot(
+    hermes_home: Path, project_id: str, found: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """The pipeline snapshot a task starting now begins under, or ``None`` for one prompt run.
+
+    Only a project on a workflow is staged. A project that named none works one run told its Prompt,
+    and nothing is written: its session records no pipeline, so the app draws no stage and no sheet
+    (ADR 0027).
+    """
+    chosen = _chosen(hermes_home, project_id, found)
+    return pipeline.start(chosen) if chosen is not None else None
 
 
 def _workflow_for(hermes_home: Path, project_id: str) -> Dict[str, Any]:
@@ -530,7 +566,8 @@ def base_branch(record: Dict[str, Any]) -> Optional[str]:
 
 
 class Start(NamedTuple):
-    """What a start copies off the project's row: the task's workflow snapshot, and its Prompt."""
+    """What a start copies off the project's row: the task's workflow snapshot — none for a project
+    that works one prompt run — and its Prompt."""
 
     snapshot: Optional[Dict[str, Any]]
     prompt: Optional[str]
@@ -546,10 +583,16 @@ def _begin(
     build's own instructions already know where they end. The Prompt comes off the same read of the
     row — the sweep works a task with the app closed, so the Prompt written last night is the one the
     run reads, with nothing the app sent in between.
+
+    A project that named no workflow runs one prompt run instead (ADR 0027): it has no stages, so
+    nothing is snapshotted, the session records no pipeline, and its run is told the brief and the
+    Prompt. A task already holding its work keeps the snapshot it started under, since the snapshot
+    it runs by lives on its own session's record and not here.
     """
     found = _row(hermes_home, project_id) or {}
-    staged = pipeline.start(_workflow(hermes_home, project_id, found))
-    sessions.set_pipeline(path, session_id, staged)
+    staged = _snapshot(hermes_home, project_id, found)
+    if staged is not None:
+        sessions.set_pipeline(path, session_id, staged)
     return Start(staged, found.get("prompt"))
 
 
