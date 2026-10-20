@@ -495,7 +495,8 @@ function Working({
 }) {
   if (!task && !refusal) return null
   const label = stage ? STAGE_LABELS[stage] : null
-  const note = [manyRepos ? task?.repo : null, label].filter(Boolean).join(" · ")
+  // The stage prefixes the title on the row's own line, so the sheet reads "Gate check: <title>"
+  // while the task is where it stands.
   return (
     <div className="flex flex-col gap-3">
       {refusal && (
@@ -506,7 +507,7 @@ function Working({
       {task && (
         <section aria-label="Working" data-working data-stage={label ? stage : undefined}>
           <h3 className="px-1 pb-1 text-sm text-muted-foreground">Working</h3>
-          <TaskLink task={task} note={note || undefined} />
+          <TaskLink task={task} label={label} note={manyRepos ? task.repo : undefined} />
         </section>
       )}
     </div>
@@ -560,13 +561,16 @@ function Tasks({
   )
 }
 
-/** One issue as the sheet shows it: its number and title, opening it on GitHub, a note under it. */
+/** One issue as the sheet shows it: its number and its title, the stage prefixing the title when it
+ * has one, opening it on GitHub, a note under it. */
 function TaskLink({
   task,
+  label,
   note,
   badge,
 }: {
   task: ProjectIssue
+  label?: string | null
   note?: ReactNode
   badge?: ReactNode
 }) {
@@ -582,7 +586,10 @@ function TaskLink({
         <span className="shrink-0 pt-0.5 font-mono text-xs text-muted-foreground">
           #{task.number}
         </span>
-        <span className="min-w-0 flex-1 text-base leading-snug break-words">{task.title}</span>
+        <span className="min-w-0 flex-1 text-base leading-snug break-words">
+          {label && <span className="text-muted-foreground">{`${label}: `}</span>}
+          {task.title}
+        </span>
         {badge}
       </span>
       {note && <span className="pl-8 text-sm text-muted-foreground">{note}</span>}

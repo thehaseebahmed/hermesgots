@@ -40,12 +40,19 @@ const run = async ({ page, profileId, shot, until }) => {
   // Turning it on wakes the sweep, so the claim lands on the sheet's next read.
   const control = await afkOn(page, screen, until)
   const working = page.locator("[data-working]")
+  // The row's own text, without the "Working" heading above it. `textContent`, not
+  // `innerText`: the row is a flex line, so innerText breaks it at every item.
+  const rowText = () => working.locator("a[data-task]").textContent()
+  // The stage prefixes the title, after the number.
+  const leads = async (label) =>
+    new RegExp(`^#\\d+${label}: `).test(await rowText())
   await working.getByText("Building").waitFor({ timeout: 20_000 })
   assert.equal(
     await working.getAttribute("data-stage"),
     "build",
     "the Working row says the task is building",
   )
+  assert.ok(await leads("Building"), "the task's title is prefixed with Building:")
   await page.waitForTimeout(450)
   await shot("building")
 
@@ -55,6 +62,7 @@ const run = async ({ page, profileId, shot, until }) => {
     await say({ project_id: projectId, stage })
     await working.getByText(label).waitFor({ timeout: 20_000 })
     assert.equal(await working.getAttribute("data-stage"), stage, `the Working row says ${label}`)
+    assert.ok(await leads(label), `the task's title is prefixed with ${label}:`)
     await page.waitForTimeout(450)
     await shot(stage)
   }
@@ -71,6 +79,7 @@ const run = async ({ page, profileId, shot, until }) => {
     "critique",
     "a task already claimed keeps the stage it was claimed in",
   )
+  assert.ok(await leads("Critiquing"), "and its title still says so")
   await page.waitForTimeout(450)
   await shot("stage-kept")
 
