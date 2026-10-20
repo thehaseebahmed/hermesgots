@@ -1228,6 +1228,7 @@ class SessionTests(unittest.TestCase):
         for one in (
             patch.object(github, "token", return_value=("token", "env")),
             patch.object(github, "origin_repo", return_value="mock-user/memento"),
+            patch.object(github, "login", return_value="gots-bot"),
             patch.object(github, "_request", self.request),
             patch("plugin.sessions.ensure", side_effect=self.ensure),
             patch("plugin.sessions.apply_cwd"),
@@ -1398,7 +1399,14 @@ class SessionTests(unittest.TestCase):
         self.start()
         self.assertEqual(
             self.writes,
-            [("DELETE", "/repos/mock-user/memento/issues/265/labels/gots-got-it", None)],
+            [
+                ("DELETE", "/repos/mock-user/memento/issues/265/labels/gots-got-it", None),
+                (
+                    "DELETE",
+                    "/repos/mock-user/memento/issues/265/assignees",
+                    {"assignees": ["gots-bot"]},
+                ),
+            ],
             "nothing began the work, so the task returns to the frontier rather than sitting claimed",
         )
         self.assertIsNone(read(self.home, "p1", [folder(str(self.home / "checkout"))])["task"])
@@ -1408,7 +1416,7 @@ class SessionTests(unittest.TestCase):
             self.start()
         self.assertEqual(self.posted, [], "nothing is started for a session that doesn't exist")
         self.assertEqual(self.chats(), {}, "and nothing is published to be opened")
-        self.assertEqual(len(self.writes), 1, "and the claim goes back, with no session to show it")
+        self.assertEqual(len(self.writes), 2, "and the claim goes back, with no session to show it")
 
     def test_the_session_working_the_task_is_named_on_the_projects_row(self) -> None:
         self.start()

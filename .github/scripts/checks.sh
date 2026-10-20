@@ -47,7 +47,9 @@ app() {
 
 plugin() {
   # `cryptography` is the environment's to install: the workflow adds it, the image carries it.
-  gate python3 -m unittest discover -s plugin/tests
+  # `-t .` imports each test as `plugin.tests.*`, so the package's network guard loads first
+  # whichever files run.
+  gate python3 -m unittest discover -s plugin/tests -t .
 }
 
 website() {

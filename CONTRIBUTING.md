@@ -56,7 +56,7 @@ pnpm e2e shot <path>      # Capture a screenshot of a screen
 To run plugin unit tests:
 
 ```bash
-python3 -m unittest discover -s plugin/tests
+python3 -m unittest discover -s plugin/tests -t .
 ```
 
 ### Sync with Netlify Identity
