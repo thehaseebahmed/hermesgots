@@ -5,76 +5,27 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
-import { act } from "react"
-import { createRoot } from "react-dom/client"
 
 import { PipelinePill } from "@/components/chat/pipeline"
 import { db } from "@/lib/db"
 import { parsePipeline } from "@/lib/pipeline"
 import { DeveloperSettings } from "@/routes/settings"
-import { click, find, findAll, json, mountAfk, settle, text } from "./component-kit.tsx"
+import {
+  afkHost,
+  click,
+  find,
+  findAll,
+  mount,
+  mountAfk,
+  seedSettings,
+  text,
+} from "./component-kit.tsx"
 
-const config = { baseUrl: "http://hermes.test/v1", apiKey: "test" }
+const config = { baseUrl: "http://hermes.test/v1", apiKey: "test-key" }
 const project = "project-1"
 
-type Call = { method: string; path: string }
-
-function host() {
-  const calls: Call[] = []
-  const library = [
-    {
-      id: "preset:one-run",
-      name: "One run",
-      preset: true,
-      at: 1,
-      stages: [{ name: "Work", steps: [], check: null, loop: null, ships: true }],
-    },
-    {
-      id: "preset:staged",
-      name: "Build · Test · Review · Summary",
-      preset: true,
-      at: 2,
-      stages: [
-        { name: "Build", steps: [], check: null, loop: null, ships: false },
-        { name: "Review", steps: [], check: null, loop: null, ships: true },
-      ],
-    },
-  ]
-  const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(String(input))
-    const method = (init?.method ?? "GET").toUpperCase()
-    calls.push({ method, path: url.pathname })
-    if (url.pathname.endsWith("/plugins/memento/info"))
-      return json({ name: "memento", features: ["afk", "afk_switch", "afk_workflows"] })
-    if (url.pathname.endsWith("/plugins/memento/workflows"))
-      return json({ object: "memento.workflows", workflows: library })
-    if (url.pathname.endsWith(`/projects/${project}/afk`))
-      return json({
-        object: "memento.afk",
-        project_id: project,
-        on: true,
-        reason: null,
-        task: null,
-        refusal: null,
-        build_skill: null,
-        critique_skills: [],
-        stage: null,
-        stage_name: null,
-        workflow: library[1],
-      })
-    if (url.pathname.endsWith(`/projects/${project}/tasks`))
-      return json({ repos: [], ready: [], closed: [], claimed: [], blocked: [] })
-    return json({ error: { message: `No route for ${method} ${url.pathname}` } }, 404)
-  }
-  return { calls, fetch }
-}
-
-/** The device's settings row, as the section under test reads it. */
-async function settingsRow(afkWorkflows?: boolean) {
-  await db.settings.clear()
-  if (afkWorkflows === undefined) return
-  await db.settings.put({ id: "settings", simplifiedChats: true, afkWorkflows })
-}
+/** A host that holds the AFK routes, whatever the setting says: the switch is the device's. */
+const host = () => afkHost({ features: ["afk", "afk_switch", "afk_workflows"] })
 
 /** Anything the settings section might say to a host, which it must not: the switch is the device's. */
 function noHost() {
@@ -83,24 +34,13 @@ function noHost() {
   }) as unknown as typeof fetch
 }
 
-async function mount(element: React.ReactNode, body: () => Promise<void>) {
-  const container = document.createElement("div")
-  document.body.append(container)
-  const root = createRoot(container)
-  try {
-    await act(async () => root.render(element))
-    await settle()
-    await body()
-  } finally {
-    await act(async () => root.unmount())
-    container.remove()
-  }
+const checkedOf = (element: Element | null) => {
+  assert.ok(element, "the switch is on screen")
+  return element.getAttribute("aria-checked") === "true"
 }
 
-const checkedOf = (element: Element | null) => element?.getAttribute("aria-checked") === "true"
-
 test("off, the pop-up draws no Workflow row and asks for no library", async () => {
-  await settingsRow()
+  await seedSettings({ developer: true })
   const fake = host()
   globalThis.fetch = fake.fetch as unknown as typeof fetch
   await mountAfk(config, project, async () => {
@@ -120,7 +60,7 @@ test("off, the pop-up draws no Workflow row and asks for no library", async () =
 })
 
 test("on, the row returns and opens the library", async () => {
-  await settingsRow(true)
+  await seedSettings({ developer: true, afkWorkflows: true })
   const fake = host()
   globalThis.fetch = fake.fetch as unknown as typeof fetch
   await mountAfk(config, project, async () => {
@@ -139,7 +79,7 @@ test("on, the row returns and opens the library", async () => {
 })
 
 test("the Developer switch is off until it is turned on, and survives a reload", async () => {
-  await settingsRow()
+  await seedSettings({ developer: true })
   noHost()
   const row = () => find("#afk-workflows-label [data-slot='switch']")
   await mount(<DeveloperSettings />, async () => {
@@ -158,7 +98,7 @@ test("the Developer switch is off until it is turned on, and survives a reload",
 })
 
 test("a staged task's pill draws with the workflow library off", async () => {
-  await settingsRow()
+  await seedSettings({ developer: true })
   const pipeline = parsePipeline({
     workflow: { id: "preset:staged", name: "Build · Test" },
     stage: 1,

@@ -91,6 +91,23 @@ const GROUPS = [
   { key: "blocked", label: "Blocked" },
 ] as const
 
+/**
+ * Whether the workflow library is offered on this device: the Developer switch, which counts only
+ * where the host holds the routes, and goes dark with the section it lives in as the bot-threads
+ * and meetings switches do. Off, a project on a workflow keeps running it — that is the host's own
+ * record, and nothing here changes it.
+ */
+function useAfkLibrary(config: HermesConfig) {
+  const held = usePluginFeature(config, AFK_WORKFLOWS_FEATURE)
+  return Boolean(
+    useLiveQuery(async () => {
+      if (held !== "yes") return false
+      const settings = await getSettings()
+      return Boolean(settings.developer && settings.afkWorkflows)
+    }, [held]),
+  )
+}
+
 export function AfkPopup({
   open,
   onOpenChange,
@@ -117,11 +134,7 @@ export function AfkPopup({
   const key = connectionKey(config)
   const switchable = usePluginFeature(config, AFK_SWITCH_FEATURE)
   const withSkills = usePluginFeature(config, AFK_SKILLS_FEATURE)
-  const withLibrary = usePluginFeature(config, AFK_WORKFLOWS_FEATURE)
-  // The library is the device's to offer: the host holding the routes is not enough, and a project
-  // on a pick keeps running it either way, since that is the host's own record.
-  const settings = useLiveQuery(getSettings, [])
-  const withWorkflows = withLibrary === "yes" && Boolean(settings?.afkWorkflows)
+  const withWorkflows = useAfkLibrary(config)
   // The pickers' list is the bot's own skills, read the way the composer's `/` menu reads them: only
   // what this profile can run now. Asked only where the host can hold a choice at all.
   const skills = useSkills(config, open && (withSkills === "yes" || withWorkflows))
@@ -214,9 +227,10 @@ export function AfkPopup({
   // once it's on the sheet keeps reading at AFK_MS, because turning it on wakes a sweep on the host
   // and the task it claims, or why GitHub refused it, lands after the switch's own answer.
   usePoll(readAfk, afk?.on ? AFK_MS : false, [key, projectId], {
-    // Read where either feature wants the row: a host that can hold a skill choice answers it here,
-    // whether or not it can also switch a project on.
-    active: open && (switchable === "yes" || withSkills === "yes"),
+    // Read where a feature wants the row: a host that can hold a skill choice answers it here,
+    // whether or not it can also switch a project on — and a host that holds the workflow library
+    // has to answer, since the Workflow row above is drawn from this answer.
+    active: open && (switchable === "yes" || withSkills === "yes" || withWorkflows),
     onShow: false,
   })
 

@@ -8,106 +8,33 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { connectionKey } from "@/lib/connection"
-import { DEFAULT_SETTINGS, db } from "@/lib/db"
-import { click, find, findAll, findText, json, mountAfk, text, type } from "./component-kit.tsx"
+import { db } from "@/lib/db"
+import {
+  afkHost,
+  click,
+  find,
+  findAll,
+  findText,
+  mountAfk,
+  seedSettings,
+  text,
+  type,
+} from "./component-kit.tsx"
 
 const config = { baseUrl: "http://hermes.test/v1", apiKey: "test-key" }
 const project = "project-1"
-
-const presetStages = [
-  { name: "Build", steps: [], check: null, loop: null, ships: false },
-  { name: "Test", steps: [], check: "gate", loop: null, ships: false },
-  { name: "Review", steps: [], check: null, loop: null, ships: true },
-  { name: "Summary", steps: [], check: null, loop: null, ships: false },
-]
-
-type Call = { method: string; path: string; body: Record<string, unknown> | null }
-
-function host({
-  features = ["afk", "afk_switch", "afk_workflows", "afk_pipeline"],
-  workflow = "preset:staged",
-  stage = "build",
-  stageName = "Build",
-}: {
-  features?: string[]
-  workflow?: string
-  stage?: string | null
-  stageName?: string | null
-} = {}) {
-  const library: Record<string, unknown>[] = [
-    { id: "preset:one-run", name: "One run", preset: true, at: 1, stages: [presetStages[0]] },
-    {
-      id: "preset:staged",
-      name: "Build · Test · Review · Summary",
-      preset: true,
-      at: 2,
-      stages: presetStages,
-    },
-  ]
-  const calls: Call[] = []
-  let chosen = workflow
-  const answer = () => ({
-    object: "memento.afk",
-    project_id: project,
-    on: true,
-    reason: null,
-    task: { repo: "owner/repo", number: 338, title: "Pick a workflow", url: "https://x/338" },
-    refusal: null,
-    build_skill: null,
-    critique_skills: [],
-    stage,
-    stage_name: stageName,
-    workflow: library.find((entry) => entry.id === chosen),
-  })
-  const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(String(input))
-    const method = (init?.method ?? "GET").toUpperCase()
-    const body = init?.body ? JSON.parse(String(init.body)) : null
-    calls.push({ method, path: url.pathname, body })
-    if (url.pathname.endsWith("/plugins/memento/info")) return json({ name: "memento", features })
-    if (url.pathname.endsWith("/plugins/memento/skills"))
-      return json({
-        object: "list",
-        data: [
-          { name: "code-review", description: "Review a change.", category: "review" },
-          { name: "plan", description: "Write a plan first.", category: null },
-        ],
-      })
-    if (url.pathname.endsWith("/plugins/memento/workflows") && method === "GET")
-      return json({ object: "memento.workflows", workflows: library })
-    if (url.pathname.endsWith("/plugins/memento/workflows") && method === "POST") {
-      library.push({
-        id: `wf-${library.length}`,
-        name: body?.name,
-        preset: false,
-        at: 9,
-        stages: body?.stages,
-      })
-      return json({ object: "memento.workflows", workflows: library })
-    }
-    if (url.pathname.endsWith(`/projects/${project}/afk`) && method === "GET") return json(answer())
-    if (url.pathname.endsWith(`/projects/${project}/afk`) && method === "POST") {
-      if (typeof body?.workflow_id === "string") chosen = body.workflow_id
-      return json(answer())
-    }
-    if (url.pathname.endsWith(`/projects/${project}/tasks`))
-      return json({ repos: [], ready: [], claimed: [], blocked: [] })
-    return json({ error: { message: `No route for ${method} ${url.pathname}` } }, 404)
-  }
-  return { calls, fetch, library }
-}
 
 /**
  * Every test here is the Developer setting on: this file is the library as it is offered, and the
  * pop-up's default — off — is `test-afk-workflows-setting.tsx`'s.
  */
 async function screen(body: () => Promise<void>) {
-  await db.settings.put({ ...DEFAULT_SETTINGS, id: "settings", afkWorkflows: true })
+  await seedSettings({ developer: true, afkWorkflows: true })
   await mountAfk(config, project, body)
 }
 
 test("the pop-up names the workflow the project's work runs under", async () => {
-  globalThis.fetch = host().fetch as unknown as typeof fetch
+  globalThis.fetch = afkHost().fetch as unknown as typeof fetch
   await screen(async () => {
     assert.equal(
       find("[data-afk-workflow]")?.textContent,
@@ -118,7 +45,7 @@ test("the pop-up names the workflow the project's work runs under", async () => 
 })
 
 test("the Working row names the stage the task's snapshot says", async () => {
-  globalThis.fetch = host({ stageName: "Migrate" }).fetch as unknown as typeof fetch
+  globalThis.fetch = afkHost({ stageName: "Migrate" }).fetch as unknown as typeof fetch
   await screen(async () => {
     const row = find("[data-working]")
     assert.match(row?.textContent ?? "", /Migrate/, "a workflow's own word for its stage")
@@ -127,7 +54,7 @@ test("the Working row names the stage the task's snapshot says", async () => {
 })
 
 test("the library lists presets first, and picking one is one write", async () => {
-  const fake = host()
+  const fake = afkHost()
   globalThis.fetch = fake.fetch as unknown as typeof fetch
   await screen(async () => {
     await click(find("[data-afk-workflow] button"))
@@ -156,7 +83,7 @@ test("the library lists presets first, and picking one is one write", async () =
 })
 
 test("the editor adds a stage and picks a skill through the shared sheet", async () => {
-  const fake = host()
+  const fake = afkHost()
   globalThis.fetch = fake.fetch as unknown as typeof fetch
   // A skill the device already holds, so the sheet opens on a list without waiting on the host.
   await db.skills.put({
@@ -213,7 +140,7 @@ test("the editor adds a stage and picks a skill through the shared sheet", async
 })
 
 test("the editor says what the host would refuse, before it asks", async () => {
-  const fake = host()
+  const fake = afkHost()
   globalThis.fetch = fake.fetch as unknown as typeof fetch
   await screen(async () => {
     await click(find("[data-afk-workflow] button"))

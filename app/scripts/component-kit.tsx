@@ -9,6 +9,7 @@ import { act } from "react"
 import { createRoot } from "react-dom/client"
 
 import { AfkPopup } from "@/components/afk"
+import { DEFAULT_SETTINGS, db, type Settings } from "@/lib/db"
 
 export function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -26,27 +27,42 @@ export async function settle() {
 }
 
 /**
- * The AFK pop-up open on a phone's screen, torn down after the test: a pop-up left mounted keeps
+ * The device's settings row as a screen reads it: `patch` over the defaults, and nothing left of
+ * whatever the test before ran with.
+ */
+export async function seedSettings(patch: Partial<Omit<Settings, "id">> = {}) {
+  await db.settings.clear()
+  await db.settings.put({ ...DEFAULT_SETTINGS, ...patch, id: "settings" })
+}
+
+/**
+ * A screen mounted on a phone's document and torn down after the test: a screen left mounted keeps
  * its polls running, and a run of the file would carry one test's timers into the next.
  */
-export async function mountAfk(
-  config: { baseUrl: string; apiKey?: string },
-  projectId: string,
-  body: () => Promise<void>,
-) {
+export async function mount(element: React.ReactNode, body: () => Promise<void>) {
   const container = document.createElement("div")
   document.body.append(container)
   const root = createRoot(container)
   try {
-    await act(async () =>
-      root.render(<AfkPopup open onOpenChange={() => {}} config={config} projectId={projectId} />),
-    )
+    await act(async () => root.render(element))
     await settle()
     await body()
   } finally {
     await act(async () => root.unmount())
     container.remove()
   }
+}
+
+/** The AFK pop-up open on a phone's screen, torn down after the test. */
+export function mountAfk(
+  config: { baseUrl: string; apiKey?: string },
+  projectId: string,
+  body: () => Promise<void>,
+) {
+  return mount(
+    <AfkPopup open onOpenChange={() => {}} config={config} projectId={projectId} />,
+    body,
+  )
 }
 
 export async function click(element: Element | null) {
@@ -72,3 +88,107 @@ export const find = (selector: string) => document.querySelector(selector)
 export const findAll = (selector: string) => [...document.querySelectorAll(selector)]
 export const findText = (selector: string, label: string) =>
   findAll(selector).find((one) => one.textContent?.includes(label)) ?? null
+
+type Call = { method: string; path: string; body: Record<string, unknown> | null }
+
+const stage = (name: string, extra: Record<string, unknown> = {}) => ({
+  name,
+  steps: [],
+  check: null,
+  loop: null,
+  ships: false,
+  ...extra,
+})
+
+/**
+ * A bot whose plugin answers the AFK routes, with every call it took: what it advertises, the
+ * library it holds and the stage its task is in are the test's to set. The library is this host's
+ * own, so a workflow a test saves stays in that test.
+ */
+export function afkHost({
+  projectId = "project-1",
+  features = ["afk", "afk_switch", "afk_workflows", "afk_pipeline"],
+  workflow = "preset:staged",
+  stage: heldStage = "build",
+  stageName = "Build",
+}: {
+  projectId?: string
+  features?: string[]
+  workflow?: string
+  stage?: string | null
+  stageName?: string | null
+} = {}) {
+  const library: Record<string, unknown>[] = [
+    {
+      id: "preset:one-run",
+      name: "One run",
+      preset: true,
+      at: 1,
+      stages: [stage("Work", { ships: true })],
+    },
+    {
+      id: "preset:staged",
+      name: "Build · Test · Review · Summary",
+      preset: true,
+      at: 2,
+      stages: [
+        stage("Build"),
+        stage("Test", { check: "gate" }),
+        stage("Review", { ships: true }),
+        stage("Summary"),
+      ],
+    },
+  ]
+  const calls: Call[] = []
+  let chosen = workflow
+  const answer = () => ({
+    object: "memento.afk",
+    project_id: projectId,
+    on: true,
+    reason: null,
+    task: { repo: "owner/repo", number: 338, title: "Pick a workflow", url: "https://x/338" },
+    refusal: null,
+    build_skill: null,
+    critique_skills: [],
+    stage: heldStage,
+    stage_name: stageName,
+    workflow: library.find((entry) => entry.id === chosen),
+  })
+  const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input))
+    const method = (init?.method ?? "GET").toUpperCase()
+    const body = init?.body ? JSON.parse(String(init.body)) : null
+    calls.push({ method, path: url.pathname, body })
+    if (url.pathname.endsWith("/plugins/memento/info")) return json({ name: "memento", features })
+    if (url.pathname.endsWith("/plugins/memento/skills"))
+      return json({
+        object: "list",
+        data: [
+          { name: "code-review", description: "Review a change.", category: "review" },
+          { name: "plan", description: "Write a plan first.", category: null },
+        ],
+      })
+    if (url.pathname.endsWith("/plugins/memento/workflows") && method === "GET")
+      return json({ object: "memento.workflows", workflows: library })
+    if (url.pathname.endsWith("/plugins/memento/workflows") && method === "POST") {
+      library.push({
+        id: `wf-${library.length}`,
+        name: body?.name,
+        preset: false,
+        at: 9,
+        stages: body?.stages,
+      })
+      return json({ object: "memento.workflows", workflows: library })
+    }
+    if (url.pathname.endsWith(`/projects/${projectId}/afk`) && method === "GET")
+      return json(answer())
+    if (url.pathname.endsWith(`/projects/${projectId}/afk`) && method === "POST") {
+      if (typeof body?.workflow_id === "string") chosen = body.workflow_id
+      return json(answer())
+    }
+    if (url.pathname.endsWith(`/projects/${projectId}/tasks`))
+      return json({ repos: [], ready: [], claimed: [], blocked: [] })
+    return json({ error: { message: `No route for ${method} ${url.pathname}` } }, 404)
+  }
+  return { calls, fetch, library }
+}

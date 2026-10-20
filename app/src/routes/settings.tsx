@@ -508,12 +508,8 @@ export function DeveloperSettings() {
         <SwitchRow
           id="bot-threads"
           icon={MessagesSquareIcon}
-          title={
-            <span className="flex items-center gap-2">
-              Bot threads
-              <ExperimentalBadge />
-            </span>
-          }
+          title="Bot threads"
+          experimental
           subtitle="Bots in the sidebar, chats as threads"
           checked={Boolean(settings?.botThreads)}
           onCheckedChange={(checked) => saveSettings({ botThreads: checked })}
@@ -521,12 +517,8 @@ export function DeveloperSettings() {
         <SwitchRow
           id="meetings"
           icon={AudioLinesIcon}
-          title={
-            <span className="flex items-center gap-2">
-              Meetings
-              <ExperimentalBadge />
-            </span>
-          }
+          title="Meetings"
+          experimental
           subtitle="Design only, with sample meetings"
           checked={Boolean(settings?.meetings)}
           onCheckedChange={(checked) => saveSettings({ meetings: checked })}
@@ -534,12 +526,8 @@ export function DeveloperSettings() {
         <SwitchRow
           id="afk-workflows"
           icon={WorkflowIcon}
-          title={
-            <span className="flex items-center gap-2">
-              AFK Workflows
-              <ExperimentalBadge />
-            </span>
-          }
+          title="AFK Workflows"
+          experimental
           subtitle="The workflow library in a project's AFK pop-up"
           checked={Boolean(settings?.afkWorkflows)}
           onCheckedChange={(checked) => saveSettings({ afkWorkflows: checked })}
@@ -702,6 +690,7 @@ function SwitchRow({
   id,
   icon: Icon,
   title,
+  experimental,
   subtitle,
   checked,
   disabled,
@@ -710,7 +699,9 @@ function SwitchRow({
 }: {
   id: string
   icon: LucideIcon
-  title: ReactNode
+  title: string
+  /** Marks a switch whose feature is still being built, in the one way this section says so. */
+  experimental?: boolean
   subtitle?: string
   checked: boolean
   disabled?: boolean
@@ -731,7 +722,14 @@ function SwitchRow({
       <Icon className="size-5 shrink-0 text-muted-foreground" />
       <span className="flex min-w-0 flex-1 flex-col">
         <span className={cn("truncate text-base", variant === "header" && "font-semibold")}>
-          {title}
+          {experimental ? (
+            <span className="flex items-center gap-2">
+              {title}
+              <ExperimentalBadge />
+            </span>
+          ) : (
+            title
+          )}
         </span>
         {subtitle && <span className="line-clamp-2 text-sm text-muted-foreground">{subtitle}</span>}
       </span>
