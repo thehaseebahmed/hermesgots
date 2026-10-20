@@ -56,7 +56,7 @@ def folder(path: str) -> SimpleNamespace:
     return SimpleNamespace(path=path)
 
 
-def lost(hermes_home: Path, project_id: str = "p1") -> None:
+def lose_pick(hermes_home: Path, project_id: str = "p1") -> None:
     """Points a project at a workflow the library no longer holds, as a hand edit could.
 
     The route refuses an id the library doesn't hold, so this is written straight to the row to
@@ -367,10 +367,12 @@ class WorkflowChoiceTests(AfkHome):
         self.assertEqual(found["workflow"]["id"], workflows.DEFAULT_ID)
         self.assertEqual(found["workflow"]["name"], "One run", "the shape a prompt run has")
         self.assertEqual([stage["name"] for stage in found["workflow"]["stages"]], ["Build"])
+        self.assertIsNone(found["stage"], "a prompt run is in no stage")
+        self.assertIsNone(found["stage_name"])
 
     def test_a_pick_the_library_lost_reads_one_run(self) -> None:
         self.choose()
-        lost(self.home)
+        lose_pick(self.home)
         found = read(self.home, "p1", self.folders())
         self.assertEqual(
             found["workflow"]["id"],
@@ -1464,6 +1466,7 @@ class StagedStartTests(SessionTests):
 
     def test_a_project_that_picked_nothing_works_one_prompt_run(self) -> None:
         self.start()
+        self.assertEqual(len(self.posted), 1, "one prompt run is the task's whole work")
         record = sessions.read(db_path(self.home), self.ensured[0][0])
         self.assertIsNone(
             record["pipeline"], "a prompt run is no stage, so nothing is snapshotted"
@@ -1482,7 +1485,7 @@ class StagedStartTests(SessionTests):
 
     def test_a_pick_the_library_lost_works_one_prompt_run(self) -> None:
         self.choose()
-        lost(self.home)
+        lose_pick(self.home)
         self.start()
         record = sessions.read(db_path(self.home), self.ensured[0][0])
         self.assertIsNone(record["pipeline"], "no workflow, so nothing is snapshotted")
