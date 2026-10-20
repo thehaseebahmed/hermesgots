@@ -37,6 +37,7 @@ import {
   TelescopeIcon,
   TimerIcon,
   UserIcon,
+  WorkflowIcon,
   type LucideIcon,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -497,7 +498,7 @@ const LIVE_LABELS: Record<LiveStatus, { label: string; detail: string }> = {
   off: { label: "Polling", detail: "No stream open" },
 }
 
-function DeveloperSettings() {
+export function DeveloperSettings() {
   const bots = useLiveQuery(listProfiles, [])
   const settings = useLiveQuery(getSettings, [])
   return (
@@ -506,12 +507,8 @@ function DeveloperSettings() {
         <SwitchRow
           id="bot-threads"
           icon={MessagesSquareIcon}
-          title={
-            <span className="flex items-center gap-2">
-              Bot threads
-              <ExperimentalBadge />
-            </span>
-          }
+          title="Bot threads"
+          experimental
           subtitle="Bots in the sidebar, chats as threads"
           checked={Boolean(settings?.botThreads)}
           onCheckedChange={(checked) => saveSettings({ botThreads: checked })}
@@ -519,15 +516,20 @@ function DeveloperSettings() {
         <SwitchRow
           id="meetings"
           icon={AudioLinesIcon}
-          title={
-            <span className="flex items-center gap-2">
-              Meetings
-              <ExperimentalBadge />
-            </span>
-          }
+          title="Meetings"
+          experimental
           subtitle="Design only, with sample meetings"
           checked={Boolean(settings?.meetings)}
           onCheckedChange={(checked) => saveSettings({ meetings: checked })}
+        />
+        <SwitchRow
+          id="afk-workflows"
+          icon={WorkflowIcon}
+          title="AFK Workflows"
+          experimental
+          subtitle="The workflow library in a project's AFK pop-up"
+          checked={Boolean(settings?.afkWorkflows)}
+          onCheckedChange={(checked) => saveSettings({ afkWorkflows: checked })}
         />
       </Group>
       {isNative && pushAvailable() && <TestPushRow />}
@@ -687,6 +689,7 @@ function SwitchRow({
   id,
   icon: Icon,
   title,
+  experimental,
   subtitle,
   checked,
   disabled,
@@ -695,7 +698,8 @@ function SwitchRow({
 }: {
   id: string
   icon: LucideIcon
-  title: ReactNode
+  title: string
+  experimental?: boolean
   subtitle?: string
   checked: boolean
   disabled?: boolean
@@ -715,8 +719,11 @@ function SwitchRow({
     >
       <Icon className="size-5 shrink-0 text-muted-foreground" />
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className={cn("truncate text-base", variant === "header" && "font-semibold")}>
-          {title}
+        <span className="flex min-w-0 items-center gap-2">
+          <span className={cn("truncate text-base", variant === "header" && "font-semibold")}>
+            {title}
+          </span>
+          {experimental && <ExperimentalBadge />}
         </span>
         {subtitle && <span className="line-clamp-2 text-sm text-muted-foreground">{subtitle}</span>}
       </span>

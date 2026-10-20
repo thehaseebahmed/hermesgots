@@ -6,7 +6,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { json, mountAfk } from "./component-kit.tsx"
+import { json, mountAfk, seedSettings } from "./component-kit.tsx"
 
 const config = { baseUrl: "http://hermes.test/v1", apiKey: "test-key" }
 
@@ -33,6 +33,7 @@ globalThis.fetch = (async (input: RequestInfo | URL) => {
 }) as unknown as typeof fetch
 
 test("a bot without afk_workflows shows the pop-up it always showed", async () => {
+  await seedSettings({ developer: true, afkWorkflows: true })
   await mountAfk(config, "project-1", async () => {
     // Boolean, not the node: a failing assertion must not print a whole DOM tree.
     assert.equal(Boolean(document.querySelector("[data-afk-workflow]")), false, "no Workflow row")

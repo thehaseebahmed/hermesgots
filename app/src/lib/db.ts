@@ -28,6 +28,8 @@ export interface Settings {
   botThreads?: boolean
   /** Meetings: record or add a meeting and read its notes (a design mock). Developer, local. */
   meetings?: boolean
+  /** AFK's workflow library: a project's Workflow row, its library and its editor. Developer, local. */
+  afkWorkflows?: boolean
   /** How the bot-threads sidebar orders the bots; unset is `recent`. Local. */
   botSort?: BotSort
   /** Whether the sidebar is shrunk to icons on tablet and wider; unset is expanded. Local. */

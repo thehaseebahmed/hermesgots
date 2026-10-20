@@ -41,7 +41,7 @@ app() {
   # The component tier: a screen rendered over a seeded device database, with the HTTP boundary
   # faked. Each file is its own process, since what a connection's plugin answered is remembered
   # for the page. ADR 0019 keeps geometry out of these: no layout, so nothing here measures.
-  gate node --test --import ./scripts/component-hooks.mjs scripts/test-afk-workflows.tsx scripts/test-afk-workflows-old-plugin.tsx scripts/test-pipeline-sheet.tsx
+  gate node --test --import ./scripts/component-hooks.mjs scripts/test-afk-workflows.tsx scripts/test-afk-workflows-old-plugin.tsx scripts/test-afk-workflows-setting.tsx scripts/test-pipeline-sheet.tsx
   gate pnpm build
 }
 

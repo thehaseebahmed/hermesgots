@@ -4,9 +4,13 @@
  * The switch is the host's setting for the project, so it reads back the same on every device. It is
  * always shown: a project that can't be left to work (or a Bot on a plugin too old to switch one) has
  * it off and disabled, with the reason underneath. The frontier is there where the plugin advertises
- * `afk`, the switch where it advertises `afk_switch`.
+ * `afk`, the switch where it advertises `afk_switch`. The workflow library — the Workflow row, its
+ * sheet and the editor — is there only where the plugin also advertises `afk_workflows` and the
+ * device's Developer setting offers it; a project on a pick keeps running it either way, because
+ * that is the host's record and not this screen's.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { useLiveQuery } from "dexie-react-hooks"
 import { ChevronDownIcon } from "lucide-react"
 import { toast } from "sonner"
 
@@ -34,7 +38,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { connectionKey } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
-import { usePluginFeature, type PluginFeatureAnswer } from "@/lib/features"
+import { getSettings } from "@/lib/db"
+import { usePluginFeature, usePluginFeatureOn, type PluginFeatureAnswer } from "@/lib/features"
 import { AFK_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import {
   createWorkflow,
@@ -86,6 +91,17 @@ const GROUPS = [
   { key: "blocked", label: "Blocked" },
 ] as const
 
+function useLibraryOffered(config: HermesConfig) {
+  const offered = usePluginFeatureOn(config, AFK_WORKFLOWS_FEATURE)
+  return Boolean(
+    useLiveQuery(async () => {
+      if (!offered) return false
+      const settings = await getSettings()
+      return Boolean(settings.developer && settings.afkWorkflows)
+    }, [offered]),
+  )
+}
+
 export function AfkPopup({
   open,
   onOpenChange,
@@ -112,10 +128,15 @@ export function AfkPopup({
   const key = connectionKey(config)
   const switchable = usePluginFeature(config, AFK_SWITCH_FEATURE)
   const withSkills = usePluginFeature(config, AFK_SKILLS_FEATURE)
-  const withWorkflows = usePluginFeature(config, AFK_WORKFLOWS_FEATURE)
+  const libraryOffered = useLibraryOffered(config)
   // The pickers' list is the bot's own skills, read the way the composer's `/` menu reads them: only
   // what this profile can run now. Asked only where the host can hold a choice at all.
-  const skills = useSkills(config, open && (withSkills === "yes" || withWorkflows === "yes"))
+  const skills = useSkills(config, open && (withSkills === "yes" || libraryOffered))
+  // The device can turn the switch off from another screen while a sheet is open.
+  if (!libraryOffered && (libraryOpen || editing !== null)) {
+    setLibraryOpen(false)
+    setEditing(null)
+  }
 
   const read = useCallback(
     (signal: AbortSignal) => {
@@ -196,7 +217,7 @@ export function AfkPopup({
   // Read while a sheet that draws it is open, and again when one opens: a workflow saved on another
   // device shows the next time the sheet is looked at.
   usePoll(readLibrary, false, [key], {
-    active: open && withWorkflows === "yes" && (libraryOpen || editing !== null),
+    active: open && libraryOffered && (libraryOpen || editing !== null),
     onShow: false,
   })
 
@@ -205,9 +226,7 @@ export function AfkPopup({
   // once it's on the sheet keeps reading at AFK_MS, because turning it on wakes a sweep on the host
   // and the task it claims, or why GitHub refused it, lands after the switch's own answer.
   usePoll(readAfk, afk?.on ? AFK_MS : false, [key, projectId], {
-    // Read where either feature wants the row: a host that can hold a skill choice answers it here,
-    // whether or not it can also switch a project on.
-    active: open && (switchable === "yes" || withSkills === "yes"),
+    active: open && (switchable === "yes" || withSkills === "yes" || libraryOffered),
     onShow: false,
   })
 
@@ -287,7 +306,7 @@ export function AfkPopup({
             saving={saving}
             onToggle={(on) => void turn(on)}
           />
-          {withWorkflows === "yes" && afk && !afkError && (
+          {libraryOffered && afk && !afkError && (
             <WorkflowRow workflow={afk.workflow} onOpen={() => setLibraryOpen(true)} />
           )}
           {withSkills === "yes" && afk && !afkError && (
@@ -318,7 +337,7 @@ export function AfkPopup({
             manyRepos={manyRepos}
           />
         </div>
-        {withWorkflows === "yes" && (
+        {libraryOffered && (
           <>
             <WorkflowSheet
               open={libraryOpen}
