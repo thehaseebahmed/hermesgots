@@ -126,6 +126,8 @@ _REVIEW_STAGE = """This task has been built and gated, and you are in its {name}
 
 Weigh what you find, then take what the review accepts and fix it in one pass, in the worktree, committing as you go: there is no second review, and the user's own read of the pull request is the next one.
 
+Report what the review found with the afk_findings tool before you ship: one call per skill it applied, in the order the stage names them, with that skill's findings — each a title and, where it helps, a detail — and an empty list for a skill that found nothing. The details sheet counts them, so a review that found five things and one that found nothing don't read the same.
+
 Then ship once with the pull_request tool, action 'ship', and write its body from the repo's template with a short section on what the review found and what changed because of it. Leave the Closes line to the tool, and merging or closing to the user. Don't ask the user anything: nobody is here to answer."""
 
 # A stage after the shipping one (ADR 0020): the draft is open, so its run writes the wrap-up and

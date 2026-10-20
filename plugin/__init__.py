@@ -28,11 +28,13 @@ from . import (
     clarify,
     cleanup,
     clones,
+    commands,
     community,
     context,
     delegation,
     dictation,
     events,
+    findings,
     gate,
     github,
     host_model,
@@ -163,6 +165,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     ship.wire(adapter)
     # And it runs its build's gate on the host, not its own word for it; see gate.py.
     gate.wire(adapter)
+    # A review reports what its skills found, so the sheet can count it; see findings.py.
+    findings.wire(adapter)
     # The agent files its generated files in the project's library; see library.py.
     library.wire(adapter)
     # A background delegation's result would wait for the user's next message; see delegation.py.
@@ -1878,6 +1882,8 @@ def register(ctx) -> None:
         register_hook("post_api_request", model_changes.record)
         register_hook("post_api_request", community.record)
         register_hook("pre_tool_call", sessions.before_tool)
+        # What each run executed, kept on its stage for the details sheet; see commands.py.
+        register_hook("pre_tool_call", commands.before_tool)
         register_hook("pre_tool_call", research.before_tool)
         register_hook("pre_llm_call", sessions.before_llm)
         register_hook("on_session_start", sessions.started)
@@ -1908,6 +1914,7 @@ def register(ctx) -> None:
         )
     ship.register(ctx)
     gate.register(ctx)
+    findings.register(ctx)
     library.register(ctx)
     research.register(ctx)
     register_handler = getattr(ctx, "register_platform_handler", None)

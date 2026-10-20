@@ -7,6 +7,11 @@ editing or deleting a library entry cannot rewrite what a finished task says it 
 own record, not the project's hold, which is released when a run ends, still says how the task got
 there (ADR 0018).
 
+A round also keeps what its run did: the shell commands it executed and what each review skill
+reported (``ran``, ``reported``), which ``stage_commands`` and ``stage_findings`` read back — with
+the gate's own exit codes merged onto the commands the host checked — so one read draws the details
+sheet.
+
 The machine here is the host's, and it reads the snapshot rather than a fixed list of steps
 (ADR 0020): a stage with steps posts one run of the task's session, a stage with a check and no steps
 is a checkpoint the host answers from the run before it, and a stage with neither is passed over
@@ -19,7 +24,7 @@ what they say.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, NamedTuple, Optional, Sequence
+from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Set
 
 from . import workflows
 from .workflows import GATE, names, shipping, text
@@ -48,6 +53,15 @@ NO_COMMITS = "The build left no commits in the worktree."
 # A loop whose rounds are spent: the checkpoint is still failing, so the task waits for the user with
 # the command that failed named, rather than repeating itself for ever.
 LOOP_EXHAUSTED = "The loop ran out of rounds ({cap}) and the gate still failed: {failed}."
+
+# What a stage keeps of what its run did: the most recent commands it executed, each line truncated,
+# and how many findings each review skill reported, each capped. A sheet lists them, so a run that
+# went to the shell a hundred times still leaves a record that reads.
+COMMAND_CAP = 50
+COMMAND_CHARS = 300
+FINDING_CAP = 50
+TITLE_CHARS = 200
+DETAIL_CHARS = 2000
 
 
 class Step(NamedTuple):
@@ -167,9 +181,17 @@ def _round(value: Any) -> Optional[Dict[str, Any]]:
         return None
     return {
         "run_id": text(value.get("run_id")),
-        "commands": [_command(one) for one in value.get("commands") or [] if isinstance(one, dict)],
+        "commands": [
+            one
+            for one in (
+                _command(item) for item in value.get("commands") or [] if isinstance(item, dict)
+            )
+            if one["command"]
+        ],
         "gate": value.get("gate") if isinstance(value.get("gate"), dict) else None,
-        "findings": [one for one in value.get("findings") or [] if isinstance(one, dict)],
+        "findings": [
+            one for one in (_reported(item) for item in value.get("findings") or []) if one
+        ],
         "stop": text(value.get("stop")),
         "retry": text(value.get("retry")),
     }
@@ -183,6 +205,34 @@ def _command(value: Dict[str, Any]) -> Dict[str, Any]:
         "repo": text(value.get("repo")),
         "code": code if isinstance(code, int) and not isinstance(code, bool) else None,
     }
+
+
+def _reported(value: Any) -> Optional[Dict[str, Any]]:
+    """What one review skill reported: its name and its findings, each a title and an optional detail.
+
+    A skill that reported nothing is kept with an empty list, since a sheet drawing ``0`` beside it is
+    a different thing from a skill it has never heard of.
+    """
+    if not isinstance(value, dict) or not text(value.get("skill")):
+        return None
+    return {
+        "skill": text(value.get("skill")),
+        "findings": [one for one in (_finding(item) for item in value.get("findings") or []) if one],
+    }
+
+
+def _finding(value: Any) -> Optional[Dict[str, Any]]:
+    """One finding: a title, and the detail the review gave it where it gave one."""
+    if isinstance(value, str):
+        title, detail = value, None
+    elif isinstance(value, dict):
+        title, detail = value.get("title"), value.get("detail")
+    else:
+        return None
+    title = text(title)
+    if not title:
+        return None
+    return {"title": title[:TITLE_CHARS], "detail": (text(detail) or "")[:DETAIL_CHARS] or None}
 
 
 def _upgrade(value: Dict[str, Any]) -> Dict[str, Any]:
@@ -561,15 +611,44 @@ def _again(record: Dict[str, Any], step: Step) -> Dict[str, Any]:
 
 
 def _copy(stages: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """The stages, and every round in them, copied: a write never edits the record it was given."""
+    """The stages, and every round in them, copied: a write never edits the record it was given.
+
+    A round's commands and findings are copied too: a command appended to what this hands back, or a
+    report replaced in it, must not land on the record the caller still holds.
+    """
     return [
         {
             **stage,
             "steps": list(stage.get("steps") or []),
-            "rounds": [dict(one) for one in stage.get("rounds") or []],
+            "rounds": [_round_copy(one) for one in stage.get("rounds") or []],
         }
         for stage in stages
     ]
+
+
+def _round_copy(value: Dict[str, Any]) -> Dict[str, Any]:
+    """One round of the copy: its own lists, and the gate's commands in their own dicts."""
+    return {
+        **value,
+        "commands": [dict(one) for one in value.get("commands") or [] if isinstance(one, dict)],
+        "gate": (
+            {
+                **value["gate"],
+                "commands": [
+                    dict(one)
+                    for one in value["gate"].get("commands") or []
+                    if isinstance(one, dict)
+                ],
+            }
+            if isinstance(value.get("gate"), dict)
+            else value.get("gate")
+        ),
+        "findings": [
+            {**one, "findings": [dict(item) for item in one.get("findings") or []]}
+            for one in value.get("findings") or []
+            if isinstance(one, dict)
+        ],
+    }
 
 
 def _next_stage(record: Dict[str, Any]) -> Optional[int]:
@@ -626,6 +705,164 @@ def failed(record: Dict[str, Any], why: str) -> Dict[str, Any]:
         if current is not None:
             current["stop"] = why
     return {**record, "stages": stages}
+
+
+def ran(record: Dict[str, Any], line: str, repo: Optional[str] = None) -> Dict[str, Any]:
+    """The record once the stage in hand has run one more shell command, the line only.
+
+    The run's own commands are what the sheet lists beside the gate's: a run that linted, typechecked
+    and tested in its own shell says so, whichever one the host later checked. Only the most recent
+    ``COMMAND_CAP`` of a stage's are kept, across its rounds, since a loop's third round would
+    otherwise carry every earlier one; a line longer than ``COMMAND_CHARS`` is cut, because a
+    heredoc is not a record.
+    """
+    if not record or not isinstance(line, str) or not line.strip():
+        return record
+    stages = _copy(record["stages"])
+    index = record["stage"]
+    if index >= len(stages):
+        return record
+    current = _current(stages[index])
+    if current is None:
+        return record
+    current["commands"].append(
+        {"command": line.strip()[:COMMAND_CHARS], "repo": text(repo), "code": None}
+    )
+    _trimmed(stages[index])
+    return {**record, "stages": stages}
+
+
+def _trimmed(entry: Dict[str, Any]) -> None:
+    """Drops a stage's oldest commands until it holds the most recent ``COMMAND_CAP``, in place."""
+    rounds = entry.get("rounds") or []
+    held = sum(len(one.get("commands") or []) for one in rounds)
+    for one in rounds:
+        while held > COMMAND_CAP and one.get("commands"):
+            one["commands"].pop(0)
+            held -= 1
+
+
+def reported(record: Dict[str, Any], skill: str, findings: Sequence[Any]) -> Dict[str, Any]:
+    """The record once the stage in hand says what one review skill found, capped.
+
+    A skill's report replaces the one before it, since a review that reports twice has had its second
+    say — the same way the gate's last answer is the one the run is judged by. An empty list is a
+    report too: a skill that found nothing is on the record with ``0``, not missing from it.
+    """
+    if not record or not isinstance(skill, str) or not skill.strip():
+        return record
+    stages = _copy(record["stages"])
+    index = record["stage"]
+    if index >= len(stages):
+        return record
+    current = _current(stages[index])
+    if current is None:
+        return record
+    kept = [one for one in (_finding(item) for item in findings or []) if one][:FINDING_CAP]
+    entry = {"skill": skill.strip(), "findings": kept}
+    says: List[Dict[str, Any]] = []
+    placed = False
+    for one in current["findings"]:
+        if one.get("skill") != entry["skill"]:
+            says.append(one)
+        elif not placed:
+            says.append(entry)
+            placed = True
+    current["findings"] = says if placed else [*says, entry]
+    return {**record, "stages": stages}
+
+
+def stage_commands(
+    record: Optional[Dict[str, Any]], index: Optional[int] = None
+) -> List[Dict[str, Any]]:
+    """Every command a stage ran, in order, each with the exit code the host read where it checked it.
+
+    The run's own commands and the gate's are one list: a command the gate ran carries that call's
+    exit code and ``checked``, so a sheet can mark what the host verified and stand it apart from what
+    the run ran for itself. A gate command the run never executed in its own shell (or that fell off
+    the cap) is on the list too, since the host ran it either way. Commands are read across the
+    stage's rounds, each marked with the round it ran in.
+    """
+    entry = _entry_at(record, index)
+    if entry is None:
+        return []
+    found: List[Dict[str, Any]] = []
+    for number, round_ in enumerate(entry["rounds"], start=1):
+        checked = [
+            one for one in ((round_.get("gate") or {}).get("commands") or []) if isinstance(one, dict)
+        ]
+        matched: Set[int] = set()
+        for one in round_.get("commands") or []:
+            at = _twin(one, checked, matched)
+            answer = checked[at] if at is not None else {}
+            found.append(
+                {
+                    "command": one.get("command") or "",
+                    "repo": one.get("repo") or answer.get("repo"),
+                    "code": answer.get("code"),
+                    "checked": at is not None,
+                    "round": number,
+                }
+            )
+        for at, answer in enumerate(checked):
+            if at in matched or not isinstance(answer.get("command"), str):
+                continue
+            found.append(
+                {
+                    "command": answer.get("command") or "",
+                    "repo": answer.get("repo"),
+                    "code": answer.get("code"),
+                    "checked": True,
+                    "round": number,
+                }
+            )
+    return found
+
+
+def _twin(
+    one: Dict[str, Any], checked: Sequence[Dict[str, Any]], matched: Set[int]
+) -> Optional[int]:
+    """The gate's answer to a command the run executed itself, where the gate ran the same line."""
+    for at, answer in enumerate(checked):
+        if at in matched or answer.get("command") != one.get("command"):
+            continue
+        # A gate command naming a repo is that repo's own: the same line in another one is another
+        # command, where the run's own record knows which repo it was in.
+        if answer.get("repo") and one.get("repo") and answer["repo"] != one["repo"]:
+            continue
+        matched.add(at)
+        return at
+    return None
+
+
+def stage_findings(
+    record: Optional[Dict[str, Any]], index: Optional[int] = None
+) -> List[Dict[str, Any]]:
+    """What each review skill reported in a stage, each skill once, with nothing for one that found none.
+
+    Read across the stage's rounds: a skill that reported again in a later round has had its second
+    say, and the skills keep the order they first reported in.
+    """
+    entry = _entry_at(record, index)
+    if entry is None:
+        return []
+    found: Dict[str, Dict[str, Any]] = {}
+    for round_ in entry["rounds"]:
+        for one in round_.get("findings") or []:
+            if isinstance(one, dict) and one.get("skill"):
+                found[one["skill"]] = one
+    return list(found.values())
+
+
+def _entry_at(record: Optional[Dict[str, Any]], index: Optional[int]) -> Optional[Dict[str, Any]]:
+    """The stage a read was asked about: the one in hand, or the one at ``index``."""
+    if not record:
+        return None
+    stages = record.get("stages") or []
+    at = record.get("stage") if index is None else index
+    if not isinstance(at, int) or not 0 <= at < len(stages):
+        return None
+    return stages[at]
 
 
 def gate_verdict(record: Optional[Dict[str, Any]]) -> Optional[str]:
