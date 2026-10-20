@@ -455,16 +455,14 @@ def sweep(
             return None
     auth, _ = github.token(hermes_home)
     try:
-        answers = tasks.read(hermes_home, folders, bodies=True)
+        task = tasks.next_ready(hermes_home, folders)
     except github.GitHubError as error:
         _refuse(hermes_home, project_id, str(error))
         return None
-    ready = answers.get("ready") or []
-    if not ready:
+    if task is None:
         # GitHub answered and has nothing to give: whatever it refused before is stale.
         _forget_refusal(hermes_home, project_id, found)
         return None
-    task = ready[0]
     try:
         github.claim_issue(
             task["repo"], task["number"], github.login(auth), tasks.CLAIM_LABEL, auth
