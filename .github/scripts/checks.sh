@@ -42,7 +42,9 @@ app() {
   # faked. Each file is its own process, since what a connection's plugin answered is remembered
   # for the page. ADR 0019 keeps geometry out of these: no layout, so nothing here measures.
   gate node --test --import ./scripts/component-hooks.mjs scripts/test-afk-workflows.tsx scripts/test-afk-workflows-old-plugin.tsx scripts/test-afk-workflows-setting.tsx scripts/test-afk-prompt.tsx scripts/test-afk-prompt-old-plugin.tsx scripts/test-pipeline-sheet.tsx
-  gate pnpm build
+  # `pnpm build` is `tsc -b && vite build`, and `typecheck` above has run that `tsc -b` already: the
+  # tsconfigs emit nothing, so the second pass would only check the same code again.
+  gate pnpm exec vite build
 }
 
 plugin() {
