@@ -86,6 +86,7 @@ async function store(conversationId: string, workspace: SessionWorkspace | null)
     planPending: workspace.planPending,
     planFile: workspace.planFile ?? undefined,
     blocked: workspace.blocked ?? undefined,
+    pipeline: workspace.pipeline,
   }
   // Read after every turn and catch-up; a write that changes nothing still wakes every query.
   const same = (Object.keys(next) as (keyof Conversation)[]).every(
@@ -131,6 +132,7 @@ export async function ensureSessionWorkspace(
       planPending: Boolean(conversation.planPending),
       planFile: conversation.planFile ?? null,
       blocked: null,
+      pipeline: conversation.pipeline ?? null,
     }
   }
 }

@@ -3,6 +3,7 @@ import Dexie, { type EntityTable, type Transaction } from "dexie"
 import { BOTS, LEGACY_BOT_IDS } from "@/components/bots"
 import { connectionKey } from "@/lib/connection"
 import type { ModelChange, ProviderUsage, Skill } from "@/lib/hermes"
+import type { SessionPipeline } from "@/lib/pipeline"
 import { randomId } from "@/lib/utils"
 
 export type ThemePreference = "system" | "light" | "dark"
@@ -168,6 +169,12 @@ export interface Conversation {
    * the line that tells the agent where they are. Local only; no path reaches the UI.
    */
   worktree?: { branch: string; repos: { name: string; branch: string }[]; instructions: string }
+  /**
+   * The stages a staged AFK task ran in — Build, Gate, Critique — as the plugin recorded them on the
+   * session itself, so the session still says how it got here once its task is finished. Local only;
+   * every device reads the same record.
+   */
+  pipeline?: SessionPipeline | null
   /** A plan-mode turn finished and the plan awaits the user. Local only; the plugin holds it. */
   planPending?: boolean
   /** The newest plan the plugin saved, `plans/<file>.md` under the project's folder. Local only. */

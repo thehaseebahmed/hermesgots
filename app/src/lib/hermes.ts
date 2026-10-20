@@ -14,6 +14,7 @@ import type {
 import { MAX_TODO_DEPTH } from "@/lib/db"
 import type { Doc } from "@/lib/merge"
 import type { ModelUsage } from "@/lib/pricing"
+import { parsePipeline, type SessionPipeline } from "@/lib/pipeline"
 import { isNative } from "@/lib/native"
 import type { CronSchedule } from "@/lib/schedule"
 import {
@@ -1981,6 +1982,8 @@ export interface SessionWorkspace {
   instructions: string
   /** Why the session can't take another turn: a repo it works in left the project, or it's archived. */
   blocked: string | null
+  /** The stages a staged AFK task ran in, on the session's own record; null when it isn't staged. */
+  pipeline: SessionPipeline | null
 }
 
 const MODES = new Set<string>(["accept_edits", "auto", "plan"])
@@ -2014,6 +2017,8 @@ function parseWorkspace(raw: unknown, sessionId: string): SessionWorkspace | nul
     planFile: typeof record.plan_file === "string" && record.plan_file ? record.plan_file : null,
     instructions: typeof body?.instructions === "string" ? body.instructions : "",
     blocked: typeof body?.blocked === "string" && body.blocked ? body.blocked : null,
+    // A plugin from before the stages answers none: that session is one run, which is what it is.
+    pipeline: parsePipeline(record.pipeline),
   }
 }
 
