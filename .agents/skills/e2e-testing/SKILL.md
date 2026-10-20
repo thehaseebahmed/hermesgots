@@ -150,6 +150,9 @@ Projects, attach it to your reply, or describe what it shows. Never commit scree
    if it needs one, `mock` (another mock), `alsoPolling` (also run on the polling mock under `all`)
    or `extra` (more mock URLs as env vars). A new mock variant goes in `MOCKS` there and in the
    port table above.
+   Give it a row in `docs/e2e-flow-audit.md` too, with its verdict and why no lower tier reaches
+   it: `app/scripts/test-e2e-registry.mjs` fails the app's gates on a key with no row, and on a
+   stay beyond the seven (ADR 0019).
 3. Drive the mock with words in a message: `clean up` asks for an approval, `long` streams slowly,
    `ask` asks a question, `plan` writes a plan. The header of `app/scripts/mock-hermes.mjs` lists
    its words and env vars, and `.agents/skills/mock-server-scenarios.md` has recipes. Seeded
