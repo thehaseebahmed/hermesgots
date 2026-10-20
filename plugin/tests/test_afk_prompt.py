@@ -103,6 +103,12 @@ class AfkPromptTests(unittest.TestCase):
         self.assertEqual(
             text, prompt_builder.afk_prompt(staged, TASK), "the stage's brief is as it was"
         )
+        self.assertEqual(
+            text.count("governs method only"),
+            1,
+            "a stage is told the skill's scope, not both it and the Prompt's",
+        )
+        self.assertIn("This task is worked in stages", text)
 
     def test_it_says_what_to_do_when_the_work_cannot_be_finished(self) -> None:
         text = self.text()

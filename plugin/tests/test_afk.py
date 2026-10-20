@@ -341,10 +341,6 @@ class AfkHome(unittest.TestCase):
     def folders(self) -> List[Any]:
         return [folder(str(self.checkout))]
 
-
-class WorkflowChoiceTests(AfkHome):
-    """The workflow a project's AFK work runs under: its own pick, from the bot's library."""
-
     def choose(self, name: str = "Mine", build: Optional[str] = None, steps=()) -> Dict[str, Any]:
         """A workflow of this bot's own, and the project naming it."""
         entry = workflows.create(
@@ -353,6 +349,10 @@ class WorkflowChoiceTests(AfkHome):
         )
         set_workflow(self.home, "p1", entry["id"])
         return entry
+
+
+class WorkflowChoiceTests(AfkHome):
+    """The workflow a project's AFK work runs under: its own pick, from the bot's library."""
 
     def test_a_project_that_picked_nothing_runs_the_default_preset(self) -> None:
         found = read(self.home, "p1", self.folders())
@@ -454,14 +454,6 @@ class PromptTests(AfkHome):
 
     def prompt(self, project_id: str = "p1") -> str:
         return read(self.home, project_id, self.folders())["prompt"]
-
-    def choose(self, name: str = "Mine") -> Dict[str, Any]:
-        """A workflow of this bot's own, and the project naming it."""
-        entry = workflows.create(
-            self.home, {"name": name, "stages": workflows.from_skills(None, [])}
-        )
-        set_workflow(self.home, "p1", entry["id"])
-        return entry
 
     def test_a_project_nobody_has_edited_reads_the_default_method(self) -> None:
         self.assertEqual(

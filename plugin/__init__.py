@@ -1043,10 +1043,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             try:
                 if named == "workflow":
                     await asyncio.to_thread(afk.set_workflow, hermes_home(), project_id, value)
-                elif named == "prompt":
-                    await asyncio.to_thread(afk.set_prompt, hermes_home(), project_id, value)
                 else:
-                    return _error(web, f"{named} isn't a write this route takes.", 400)
+                    await asyncio.to_thread(afk.set_prompt, hermes_home(), project_id, value)
             except ValueError as why:
                 return _error(web, str(why), 400)
             found = await asyncio.to_thread(

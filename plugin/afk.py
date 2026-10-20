@@ -144,7 +144,7 @@ def read(
     hermes_home: Path, project_id: str, folders: Iterable[Any], archived: bool = False
 ) -> Dict[str, Any]:
     """Everything the app's sheet shows: the switch and its reason, the task held, the last refusal,
-    and the workflow this project's work runs under.
+    the workflow this project's work runs under, and the Prompt its runs are told.
 
     An archived project is turned off here if anything had left it on, and reads off whatever
     happens: it was put away, so its switch isn't a setting anything acts on. Writing it off rather
@@ -538,7 +538,7 @@ def base_branch(record: Dict[str, Any]) -> Optional[str]:
 class Start(NamedTuple):
     """What a start copies off the project's row: the task's workflow snapshot, and its Prompt."""
 
-    staged: Optional[Dict[str, Any]]
+    snapshot: Optional[Dict[str, Any]]
     prompt: Optional[str]
 
 
@@ -615,11 +615,11 @@ async def start(
     try:
         await asyncio.to_thread(_adopt, hermes_home, project_id, session_id)
         sessions.apply_cwd(session_id, record["path"])
-        staged = await asyncio.to_thread(
+        began = await asyncio.to_thread(
             _begin, hermes_home, db_path(hermes_home), project_id, session_id
         )
-        record = {**record, "pipeline": staged.staged}
-        started = await _post(adapter, hermes_home, run_body(record, task, staged.prompt))
+        record = {**record, "pipeline": began.snapshot}
+        started = await _post(adapter, hermes_home, run_body(record, task, began.prompt))
     except Exception as error:
         logger.warning("memento: AFK couldn't start the session for %s: %s", issue, error)
         await asyncio.to_thread(release, hermes_home, project_id)
@@ -946,8 +946,8 @@ def _missing_skill(
 
     Its workflow's steps are the choices worth judging: a preset names none, so a project working
     under one claims as it always did, and a workflow naming a skill the profile has lost claims
-    nothing until the user picks otherwise (ADR 0018). ``_workflow_for`` is what the task itself
-    will be snapshotted from, so this and the task can't disagree.
+    nothing until the user picks otherwise (ADR 0018). It is built from the same row a task's snapshot
+    is (``_workflow``), so this and the task can't disagree.
     """
     staged = pipeline.start(_workflow_for(hermes_home, project_id))
     known = set(skills)
