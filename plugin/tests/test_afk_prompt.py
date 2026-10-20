@@ -161,24 +161,84 @@ class CritiquePromptTests(unittest.TestCase):
         self.assertIn('"code-review"', text)
         self.assertIn('"log-triage"', text)
         self.assertIn("delegate_task", text)
-        self.assertIn("one reviewer for each", text)
+        self.assertIn("one reviewer per skill", text)
 
     def test_one_skill_asks_for_one_reviewer(self) -> None:
         record = {**RECORD, "pipeline": {**pipeline.start(None, ["code-review"]), "stage": "critique"}}
         text = prompt_builder.critique_prompt(record, TASK, "main")
-        self.assertIn("The critique skill is", text)
-        self.assertIn("delegate one reviewer for it", text)
+        self.assertIn("The critique skill, with the brief its reviewer is handed", text)
+        self.assertIn("one reviewer per skill", text)
 
-    def test_a_reviewer_reports_rather_than_implements(self) -> None:
+    def test_each_reviewer_is_briefed_with_its_skill_the_issue_the_base_and_the_worktree(
+        self,
+    ) -> None:
+        briefs = prompt_builder.critique_briefs(self.RECORD, TASK, "main")
+        self.assertEqual(len(briefs), 2, "a skill each, so two lenses rather than one review")
+        for name, brief in zip(("code-review", "log-triage"), briefs):
+            self.assertIn(f'"{name}"', brief, "the reviewer knows which lens it is")
+            self.assertIn(f'skill_view(name="{name}")', brief, "and loads that skill itself")
+            self.assertIn(f"mock-user/memento#265 ({TASK['url']})", brief)
+            self.assertIn("base main", brief, "the branch the pull request is against")
+            self.assertIn("/trees/afk-265", brief, "the worktree the review reads")
+            self.assertIn("You report rather than implement", brief, "it speaks to the reviewer")
+            self.assertIn("change nothing, commit nothing and ship nothing", brief)
+            self.assertNotIn("'ship'", brief, "a reviewer never ships")
+        self.assertNotEqual(briefs[0], briefs[1], "one brief each, not one brief twice")
+
+    def test_the_prompt_hands_over_every_brief(self) -> None:
         text = self.text()
-        self.assertIn("reports rather than implements", text)
-        self.assertIn("changes nothing, commits nothing and ships nothing", text)
+        for brief in prompt_builder.critique_briefs(self.RECORD, TASK, "main"):
+            self.assertIn(brief, text)
+
+    def test_a_brief_without_a_base_leaves_it_out(self) -> None:
+        for brief in prompt_builder.critique_briefs(self.RECORD, TASK, None):
+            self.assertNotIn("base ", brief, "an unknown base is left out rather than guessed")
+            self.assertIn("/trees/afk-265", brief)
+
+    def test_a_multi_repo_brief_names_every_worktree(self) -> None:
+        record = {
+            **RECORD,
+            "repos": [
+                *RECORD["repos"],
+                {
+                    "name": "mock-user/api",
+                    "repo_root": "/api",
+                    "path": "/trees/api-265",
+                    "branch": "hermes/afk-265",
+                },
+            ],
+        }
+        for brief in prompt_builder.critique_briefs(record, TASK, "main"):
+            self.assertIn("/trees/afk-265 and /trees/api-265", brief)
+
+    def test_a_skill_that_prescribes_its_own_arrangement_gets_it(self) -> None:
+        text = self.text()
+        self.assertIn("prescribes its own arrangement", text)
+        self.assertIn("wins over its brief", text)
+        self.assertIn("rather than wrapping it in a single reviewer", text)
+        self.assertIn("reports rather than implements all the same", text)
+
+    def test_a_skill_shapes_method_only(self) -> None:
+        text = self.text()
+        self.assertIn("governs method only", text)
+        self.assertIn("no skill unlocks the gate", text)
+        self.assertIn("nobody is asked anything", text)
+        self.assertIn("shipped last", text)
+
+    def test_the_guard_is_the_same_one_the_build_is_given(self) -> None:
+        build = prompt_builder.afk_prompt(
+            {**RECORD, "pipeline": pipeline.start("plan", ["code-review"])}, TASK
+        )
+        self.assertIn(prompt_builder._SKILL_SCOPE, build, "one guard, both stages")
+        self.assertIn(prompt_builder._SKILL_SCOPE, self.text())
+        self.assertEqual(self.text().count("governs method only"), 1, "stated once, not twice")
 
     def test_it_fixes_once_and_ships_last(self) -> None:
         text = self.text()
         self.assertIn("fix it in one pass", text)
-        self.assertIn("there is no second review", text)
+        self.assertIn("there is no second review", text, "the user's read is the next pass")
         self.assertIn("action 'ship'", text)
+        self.assertIn("The pull request stays a draft", text)
         self.assertIn("what the critique found and what changed", text)
         self.assertIn("Leave the Closes line to the tool", text)
 

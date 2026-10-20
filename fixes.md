@@ -1650,3 +1650,87 @@ modules open `state.db` with their own copy of the read-only URI, timeout and er
 - Why it is risky: those callers feed worktree resolution (`record_for_call`) and push routing, so a
   wrong id writes a session's plan or a notification under another chat; and the five readers are
   on paths from a background clone to the dashboard, each with an error policy somebody chose.
+
+---
+
+# Deferred fixes from the simplify pass on the critique's briefs
+
+A cleanup review of `feat(afk): brief each critique reviewer on its own skill` (four parallel
+reviewers: reuse, quality, efficiency, altitude) turned up one change too wide for a cleanup pass,
+recorded here instead of applied: it rewrites how a staged task's base branch is read, which this
+diff only repeats into a new place.
+
+Everything else the review found is applied on this branch: each brief is built from values read
+once, so one prompt build no longer reads the session's pipeline twice; the skills line is data
+only, with the rule about how many reviewers each skill gets stated once, in the critique stage's
+fixed text; the fixed points every skill has to respect live in one `_SKILL_SCOPE` the build's line
+and the critique's block both use, so the two can't drift apart again; the worktree clause is built
+without a leading space the caller has to know about; and the issue reference is read as the named
+tuple it is instead of a positional unpack that throws a field away.
+
+Three findings are declined rather than filed. A reviewer's brief does not repeat how to read the
+issue (`gh issue view …`): it names the issue and its url, and every reviewer is a Hermes agent with
+the tools to read a link — the command would be repeated in full once per skill. The number of
+critique skills a project may pick is unbounded, which the picker and the ticket both intend ("one or
+more"), so a cap is a product decision rather than cleanup. And a repo whose record holds no worktree
+path is left out of a brief rather than named as unknown: `sessions` writes a path for every worktree
+it makes, so the row that would hit it is a hand edit outside what a prompt builder has to defend
+against.
+
+## Risky
+
+### 1. One base branch stands for every repo's
+
+`afk.base_branch` reads one branch from the record's first repo — its worktree path, whose
+`projects._base_branch` fallback (`git branch --show-current`) answers the session's own branch when
+`origin/HEAD` is unset — and `critique_prompt` hands that one value to `_base_line` and to every
+reviewer's brief. `ship._repo_status` (`plugin/ship.py`) answers the opposite: a base per repo, read
+from each repo's `repo_root`, which is what each pull request is opened against.
+
+- Cost: a project whose repos default to different branches (`main` here, `master` there) briefs
+  every reviewer against the first repo's branch, including the reviewers reading the second repo's
+  worktree; and in the fallback case it can name the session's own branch as the base, which is not
+  a branch the change is against at all. The prompt states it twice — once in the base line and once
+  in each brief — so the wrong value is hard to miss and easy to believe.
+- Suggested fix: carry the base per repo, from `ship.status` or from `projects._base_branch(repo[
+  "repo_root"])`, and render each worktree with its own base in the brief; `critique_prompt`'s
+  `base` parameter and `_base_line` then go away.
+- Why it is not applied here: the scalar predates this branch (`#328`), and the fix changes the
+  prompts every staged task gets plus the `critique_body` signature, and settles how a multi-repo
+  project's bases are read — a decision that belongs beside `ship`'s own per-repo handling rather
+  than in a cleanup of the briefs that repeat it.
+- Why it is risky: the same read feeds `pipeline.advance`'s commit count through `ship.status`, so
+  changing which path the base comes from can change a gate's verdict as well as a prompt.
+
+---
+
+Found by the `/code-review` pass on this branch, whose other findings are fixed rather than filed: the
+briefs now speak to the reviewer they are handed to instead of describing it in the third person, the
+skills line no longer restates how many reviewers a skill gets, and the two commit summaries that ran
+past 72 characters were folded into the pass they belonged to.
+
+## Risky
+
+### 1. A reviewer is told not to write, and nothing refuses it
+
+`critique_briefs` ends every reviewer's brief with "You report rather than implement: change nothing,
+commit nothing and ship nothing." The only machinery behind that is the brief itself. A delegated
+agent runs as a child of the critique session, and `sessions.before_tool`'s refusal of mutating tools is
+keyed on the session's own mode — plan mode — which a staged critique session is not in, since it has
+to fix what it accepts: so a reviewer that decides to "just fix" a finding can edit the worktree, and
+the run then weighs that edit as something it did.
+
+- Cost: the separation the stage exists for collapses — the author and the reviewer become one voice
+  again, exactly what delegating with fresh eyes is for — and nothing in the transcript or the record
+  says which change came from which. It is the one criterion of #324 that holds by instruction rather
+  than by the host.
+- Suggested fix: refuse mutating tools in `pre_tool_call` for a child task of a session whose pipeline
+  stage is `critique`, the way plan mode refuses them for a session, allowing the reads and the shell
+  reads a review needs.
+- Why it is not applied here: it changes what every delegated child of a staged session may do, and it
+  needs a way to tell a child task from the one that owns the session — the hook is handed a task id
+  and a session id, not a parent. That is a decision about delegation itself, not about the text this
+  ticket writes, and the brief has been the whole enforcement since the stage shipped.
+- Why it is risky: a predicate that gets the child check wrong either blocks a reviewer's reads or
+  blocks the critique session's own fixes, and the second leaves a staged task unable to ship — the
+  same stall a failed gate is supposed to produce, but for a reason nobody would look for.

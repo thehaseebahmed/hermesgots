@@ -55,6 +55,7 @@ run ends, so a session can still say how it got here after its task is finished.
 - A chosen skill that disappears stalls the sweep rather than the run: the switch stays on and the reason is
   recorded, so a stale choice is visible instead of silent.
 - The prompt's fixed text grows by two stage blocks, each constant so the prompt cache holds across a run's
-  turns, with the chosen skill named in one line beside them rather than quoted.
+  turns, with the chosen skills named beside them — and one reviewer brief built per skill, naming that
+  skill rather than quoting it — so the profile's own copy is what both the run and its reviewers read.
 - The pipeline's record has to outlive the hold, so it is written on the session's row and read back for a
   finished session — the strip and the pop-up's Working row read the same record.
