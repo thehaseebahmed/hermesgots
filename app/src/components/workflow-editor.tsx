@@ -121,7 +121,7 @@ export function WorkflowEditor({
   }
 
   const submit = async () => {
-    const body: Workflow = { name, stages: withShipping(stages) }
+    const body: Workflow = { name, stages: marked }
     const refusal = validate(body)
     if (refusal) {
       setError(refusal)

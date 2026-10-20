@@ -178,6 +178,7 @@ const afkWorkflow = new Map()
 // The library, seeded from the plugin's presets on first read (`workflows.PRESETS`): presets are
 // read-only, and a write through the routes adds or rewrites one of the account's own rows.
 let workflowRows = []
+let seeded = false
 const PRESET_WORKFLOWS = [
   {
     id: "preset:one-run",
@@ -214,11 +215,13 @@ const PRESET_WORKFLOWS = [
 const DEFAULT_WORKFLOW = "preset:staged"
 /** The library as the routes answer it: presets first, each group in the order it was written. */
 function workflows() {
-  if (!workflowRows.length)
+  if (!seeded) {
+    seeded = true
     workflowRows = PRESET_WORKFLOWS.map((entry) => ({
       ...entry,
       stages: entry.stages.map((stage) => ({ ...stage })),
     }))
+  }
   return workflowRows
 }
 /** The workflow a project's work runs under: its pick, or the default when nothing has named one. */

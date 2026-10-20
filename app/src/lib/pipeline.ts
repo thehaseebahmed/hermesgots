@@ -221,14 +221,20 @@ function clamp(value: number, least: number, most: number) {
 }
 
 /** The stop the stage the task is in carries, in the words the sheet shows. */
-function stopAt(stages: PipelineStage[], at: number, failed: boolean[]): string | null {
-  const stage = stages[at]
-  if (!stage || !failed[at]) return null
+function stopAt(stage: ReadStage | undefined): string | null {
+  if (!stage?.failed) return null
   for (let index = stage.rounds.length - 1; index >= 0; index -= 1) {
     const stop = stage.rounds[index].stop
     if (stop) return stop
   }
   return null
+}
+
+/** What a stage is, from where the task is: passed, in hand, the one it failed in, or still to come. */
+function place(index: number, at: number, stopped: boolean): StepState {
+  if (index < at) return "pass"
+  if (index > at) return "next"
+  return stopped ? "fail" : "current"
 }
 
 /**
@@ -246,24 +252,17 @@ function snapshot(record: Record<string, unknown>): SessionPipeline | null {
   })
   if (!read.length) return null
   const at = clamp(count(record.stage) ?? 0, 0, read.length)
-  const failed = read.map((one) => one.failed)
-  const reason = stopAt(read, at, failed)
+  const reason = stopAt(read[at])
   const stages = read.map((one, index) => ({
     ...one,
-    state: (index < at
-      ? "pass"
-      : index > at
-        ? "next"
-        : reason || failed[index]
-          ? "fail"
-          : "current") as StepState,
+    state: place(index, at, reason !== null || Boolean(read[at]?.failed)),
   }))
   const workflow = record.workflow as Record<string, unknown> | null
   return {
     workflow: text(workflow?.name),
     stage: at,
     round: Math.max(count(record.round) ?? 1, 1),
-    reason: reason ?? stopAt(stages, at, failed),
+    reason,
     stages,
   }
 }

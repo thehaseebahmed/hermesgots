@@ -11,6 +11,8 @@
  * wrote. Pure: no host, no browser, so `scripts/test-workflow.mjs` drives it.
  */
 
+import { skillNames } from "./pipeline.ts"
+
 export const MAX_STAGES = 12
 export const MIN_CAP = 1
 export const MAX_CAP = 10
@@ -55,20 +57,11 @@ function whole(value: unknown): number | null {
 }
 
 /**
- * The names a workflow holds, each once: a bare string is no list of skills, and neither is a value
- * that isn't a list at all (`workflows.names`).
- */
-export function stepNames(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return [...new Set(value.map(text).filter((name): name is string => name !== null))]
-}
-
-/**
  * A stage's steps as the editor keeps them: each once, alphabetical, so the screen and the run
  * agree on the order whatever order they were picked in.
  */
 export function stepOrder(value: unknown): string[] {
-  return stepNames(value).sort((one, other) => {
+  return skillNames(value).sort((one, other) => {
     const folded = one.localeCompare(other, "en", { sensitivity: "base" })
     return folded === 0 ? one.localeCompare(other, "en") : folded
   })
@@ -103,7 +96,7 @@ function readStage(value: unknown): WorkflowStage | null {
   const cap = whole(loop?.cap)
   return {
     name,
-    steps: stepNames(row.steps),
+    steps: skillNames(row.steps),
     check: text(row.check) === GATE ? GATE : null,
     loop: from && cap !== null ? { from, cap } : null,
     ships: Boolean(row.ships),
@@ -201,7 +194,7 @@ export function validate(value: unknown): string | null {
     seen.set(name, read.length)
     const check = text(stage.check)
     if (check !== null && check !== GATE) return `A stage's check is "${GATE}", or nothing at all.`
-    const steps = stepNames(stage.steps)
+    const steps = skillNames(stage.steps)
     if (check !== null && steps.length)
       return `"${name}" names both steps and a check: a stage runs its skills or the host answers it, not both.`
     const loop = stage.loop === null || stage.loop === undefined ? null : record(stage.loop)

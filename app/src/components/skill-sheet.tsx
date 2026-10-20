@@ -108,7 +108,7 @@ export function SkillSheet({
                   category={skill.category}
                   description={skill.description}
                   selected={draft.includes(skill.name)}
-                  checked={multiple && draft.includes(skill.name)}
+                  checked={draft.includes(skill.name)}
                   onPick={() => pick(skill.name)}
                 />
               ))}

@@ -268,7 +268,7 @@ export function AfkPopup({
       setLibrary(await deleteWorkflow(config, entry.id))
       setEditing(null)
       // The project may have run under it: the host answers what it holds now.
-      await save(() => getProjectAfk(config, projectId))
+      setAfk(await getProjectAfk(config, projectId))
     } catch (failure) {
       toast.error(failure instanceof Error ? failure.message : "Couldn't delete that workflow.")
     }
