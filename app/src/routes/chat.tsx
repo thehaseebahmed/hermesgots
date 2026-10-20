@@ -313,10 +313,11 @@ export function ChatPage() {
   const outputs = session?.library?.count ?? 0
   // Every pull request the session has, the ones it already finished included, as the drawer lists.
   const prs = session?.prs ?? []
-  // The stages a staged task ran in, as its session recorded them. Where the bot's Host stages tasks
+  const firstPrLabel = prs.length ? prLabel(prs[0], prs) : undefined
+  // The pipeline a staged task ran in, as its session recorded it. Where the bot's Host stages tasks
   // and this session holds a record the pill marks them; a chat with no record asks it nothing.
   const pipeline = session?.pipeline
-  const stages = usePluginFeatureOn(pipeline ? profile : null, AFK_PIPELINE_FEATURE)
+  const stagedPipeline = usePluginFeatureOn(pipeline ? profile : null, AFK_PIPELINE_FEATURE)
     ? pipeline
     : null
   // While a pull request's checks run, read them again every few seconds so the pill turns
@@ -779,11 +780,13 @@ export function ChatPage() {
       )}
 
       <div data-toast-above className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
-        {(stages || todos.length > 0 || prs.length > 0 || outputs > 0) && (
+        {(stagedPipeline || todos.length > 0 || prs.length > 0 || outputs > 0) && (
           // One line, centred; wider than the screen it scrolls, from the first pill.
           <div className="-mx-3 flex [scrollbar-width:none] overflow-x-auto px-3 pb-2 sm:-mx-4 sm:px-4 [&::-webkit-scrollbar]:hidden">
             <div className="mx-auto flex w-max max-w-none min-w-full shrink-0 justify-center gap-2">
-              {stages && <PipelinePill pipeline={stages} onClick={() => setPipelineOpen(true)} />}
+              {stagedPipeline && (
+                <PipelinePill pipeline={stagedPipeline} onClick={() => setPipelineOpen(true)} />
+              )}
               {todos.length > 0 && (
                 <TodosPill
                   items={todos}
@@ -792,17 +795,13 @@ export function ChatPage() {
                   onClick={() => setTodosOpen(true)}
                 />
               )}
-              {outputs === 0 && prs.length === 1 ? (
+              {outputs === 0 && prs.length === 1 && firstPrLabel ? (
                 // One pull request and nothing filed: the pill itself, opening it on GitHub.
-                <PrPill pr={prs[0]} label={prLabel(prs[0], prs)} className="shrink-0" />
+                <PrPill pr={prs[0]} label={firstPrLabel} />
               ) : (
                 // Anything else there opens the session's outputs drawer, counting both.
                 (outputs > 0 || prs.length > 1) && (
-                  <LibraryPill
-                    count={outputs + prs.length}
-                    onClick={() => setOutputsOpen(true)}
-                    className="shrink-0"
-                  />
+                  <LibraryPill count={outputs + prs.length} onClick={() => setOutputsOpen(true)} />
                 )
               )}
             </div>
@@ -916,12 +915,12 @@ export function ChatPage() {
         usage={usage}
         providerUsage={providerUsage}
       />
-      {stages && (
+      {stagedPipeline && (
         <PipelineSheet
           open={pipelineOpen}
           onOpenChange={setPipelineOpen}
-          pipeline={stages}
-          prLabel={prs.length ? prLabel(prs[0], prs) : undefined}
+          pipeline={stagedPipeline}
+          prLabel={firstPrLabel}
         />
       )}
       <TodosSheet

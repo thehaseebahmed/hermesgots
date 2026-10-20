@@ -28,7 +28,8 @@ const FLOWS = {
   },
   "slash-skills": {
     script: "e2e/slash-skills.mjs",
-    about: "The composer's / menu lists the bot's skills from the Gots plugin, not Hermes's /v1/skills",
+    about:
+      "The composer's / menu lists the bot's skills from the Gots plugin, not Hermes's /v1/skills",
   },
   "model-switch": {
     script: "e2e/model-switch.mjs",
@@ -77,7 +78,8 @@ const FLOWS = {
   },
   "compressed-run": {
     script: "e2e/compressed-run.mjs",
-    about: "A compressed chat another device started loads its transcript and follows its run on a device that never saw it",
+    about:
+      "A compressed chat another device started loads its transcript and follows its run on a device that never saw it",
     alsoPolling: true,
   },
   "compressed-live": {
@@ -189,7 +191,7 @@ const FLOWS = {
   "pipeline-pill": {
     script: "e2e/pipeline-pill.mjs",
     about:
-      "A staged session's pipeline is the first pill above the composer — three marks, green done and red failed, with the stage in words — and its sheet carries each step, the gate's commands and the pull request, still there once the task is done",
+      "A staged session's pipeline is the first pill above the composer — three bars, green where a step is done and red where it failed, with the stage in words — and its sheet counts the stage out of three and names what each step ran, still there once the task is done",
   },
   "mcps-gate": {
     script: "e2e/mcps-gate.mjs",

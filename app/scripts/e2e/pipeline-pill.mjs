@@ -1,16 +1,10 @@
-// A staged AFK task's session carries its pipeline as a pill above the composer, first in the row
-// with the todos and the outputs: three marks for Build, Gate and Critique — green where a step is
-// done, blue for the one the task is in, red for the one that failed, grey for the ones still to
-// come — and the stage in words beside them. Tapping it opens the run in a sheet: each step, the
-// skill it builds with, every gate command with the code it exited, the skills that critiqued it,
-// and the host's own sentence when it stopped. It is drawn from the record on the session itself,
-// so it is still there once the task has finished, and a session that never ran a pipeline has none.
-//
-// The host is driven through its own routes — the switch, the sweep that stages the claimed task,
-// and the record each stage writes — and the app reads that record the way it always does, when the
-// screen mounts and through `refreshWorkspace`. One chat is reloaded at the end, to prove the pill
-// is drawn from what the host kept rather than from anything the flow left in memory.
-import { app, assert, flow, makeProject, mock, pass } from "./lib.mjs"
+// A staged AFK task's session carries its pipeline as a pill above the composer, first in the row,
+// and the sheet behind it says how far it got and what each step ran. The host is driven through its
+// own routes — the switch, the sweep that stages the claimed task, and the record each stage writes —
+// and the app reads that record the way it always does, when the screen mounts and through
+// `refreshWorkspace`. One chat is reloaded at the end, to prove the pill is drawn from what the host
+// kept rather than from anything the flow left in memory.
+import { app, assert, flow, makeProject, mock, pass, say } from "./lib.mjs"
 
 const TASK = 265
 const PR = 27
@@ -24,19 +18,14 @@ const GATE = {
     { command: "pnpm test", repo: null, code: 0 },
   ],
 }
+const PASSED = { stage: "build", build_skill: "plan", critique_skills: ["code-review"], gate: GATE }
 const RECORDS = {
-  gate: { stage: "gate", build_skill: "plan", critique_skills: ["code-review"], gate: GATE },
-  critique: {
-    stage: "critique",
-    build_skill: "plan",
-    critique_skills: ["code-review"],
-    gate: GATE,
-  },
-  done: { stage: "done", build_skill: "plan", critique_skills: ["code-review"], gate: GATE },
+  gate: { ...PASSED, stage: "gate" },
+  critique: { ...PASSED, stage: "critique" },
+  done: { ...PASSED, stage: "done" },
   stalled: {
+    ...PASSED,
     stage: "gate",
-    build_skill: "plan",
-    critique_skills: ["code-review"],
     gate: { commands: [{ command: "pnpm test", repo: null, code: 1 }] },
     reason: "The gate failed: pnpm test exited 1.",
   },
@@ -59,7 +48,7 @@ const write = (projectId, body) => post(afkPath(projectId), body)
  * the reason it stopped — and the pull request a finished pipeline opened, the way the host's own
  * pipeline writes them.
  */
-const stage = (projectId, body) => post(`${mock}/__mock/afk`, { project_id: projectId, ...body })
+const staged = (projectId, body) => say({ project_id: projectId, ...body })
 
 /**
  * Leaves a project to work and waits for its sweep to claim the task, which is what stages the
@@ -169,13 +158,22 @@ async function opens(page, until, title, lines) {
   return sheet
 }
 
-const run = async ({ page, until, shot }) => {
+/**
+ * A screen that throws still paints, so both a thrown error and a console error fail the run that
+ * drove it.
+ */
+function watch(page) {
   const errors = []
   page.on("pageerror", (error) => errors.push(error.message))
   page.on("console", (message) => {
     if (message.type() === "error") errors.push(message.text())
   })
-  const projectId = await makeProject(until, "Pipeline strip")
+  return errors
+}
+
+const run = async ({ page, until, shot }) => {
+  const errors = watch(page)
+  const projectId = await makeProject(until, "Pipeline pill")
   const id = `memento-afk-${projectId}`
   // A critique skill is what turns the pipeline on, written the way the sheet's pickers write it.
   assert.equal(
@@ -214,7 +212,7 @@ const run = async ({ page, until, shot }) => {
   await building.waitFor({ state: "hidden", timeout: 10_000 })
 
   // The gate has run and passed, and the task waits at it while its build goes on.
-  await stage(projectId, { pipeline: RECORDS.gate })
+  await staged(projectId, { pipeline: RECORDS.gate })
   await reread(page, id)
   await reads(
     page,
@@ -227,7 +225,7 @@ const run = async ({ page, until, shot }) => {
   await shot("gate")
 
   // Critiquing: the gate passed, so the task is in its second run, and the sheet has its commands.
-  await stage(projectId, { pipeline: RECORDS.critique })
+  await staged(projectId, { pipeline: RECORDS.critique })
   await reread(page, id)
   await reads(
     page,
@@ -257,7 +255,10 @@ const run = async ({ page, until, shot }) => {
   await critiquing.waitFor({ state: "hidden", timeout: 10_000 })
 
   // Shipped: every mark green, and the run's sheet names the pull request it opened.
-  await stage(projectId, { pipeline: RECORDS.done, pr: { number: PR } })
+  await staged(projectId, {
+    pipeline: RECORDS.done,
+    pr: { number: PR, title: `#${TASK} The frontier is read from GitHub and listed` },
+  })
   await reread(page, id)
   await rereadPrs(page, id)
   await reads(page, until, "done", { build: "pass", gate: "pass", critique: "pass" }, "Shipped")
@@ -284,7 +285,7 @@ const run = async ({ page, until, shot }) => {
 
   // A stalled task keeps the stage it reached: its mark is red, the pill says so, and the sheet
   // carries the command that failed with the code it exited.
-  await stage(projectId, { pipeline: RECORDS.stalled })
+  await staged(projectId, { pipeline: RECORDS.stalled })
   await reread(page, id)
   await reads(page, until, "gate", { build: "pass", gate: "fail", critique: "next" }, "Stalled")
   await page.waitForTimeout(450)
@@ -300,13 +301,9 @@ const run = async ({ page, until, shot }) => {
 }
 
 const plain = async ({ page, until, shot }) => {
-  const errors = []
-  page.on("pageerror", (error) => errors.push(error.message))
-  page.on("console", (message) => {
-    if (message.type() === "error") errors.push(message.text())
-  })
+  const errors = watch(page)
   // A project with no critique skill is one run: its session is never staged, and has no pill.
-  const projectId = await makeProject(until, "Pipeline strip plain")
+  const projectId = await makeProject(until, "Pipeline pill plain")
   const id = `memento-afk-${projectId}`
   await workOn(until, projectId)
   await seed(page, { id, projectId })
@@ -324,12 +321,8 @@ const plain = async ({ page, until, shot }) => {
 }
 
 const olderPlugin = async ({ page, until, shot }) => {
-  const errors = []
-  page.on("pageerror", (error) => errors.push(error.message))
-  page.on("console", (message) => {
-    if (message.type() === "error") errors.push(message.text())
-  })
-  const projectId = await makeProject(until, "Pipeline strip old")
+  const errors = watch(page)
+  const projectId = await makeProject(until, "Pipeline pill old")
   const id = `memento-afk-${projectId}`
   assert.equal(
     (await write(projectId, { build_skill: "plan", critique_skills: ["code-review"] })).status,

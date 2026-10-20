@@ -86,8 +86,8 @@
 // was sent (size, type, hint and the text before each), for the regression script.
 // POST /__mock/afk { project_id, stage?, reason?, pipeline?, pr?, reset? } is the dev handle on AFK's
 // own records: it stalls the project's held task at a stage, and writes the pipeline on the session
-// that task is worked in — the stage a strip or the sheet reads, the gate's answer, a pull request a
-// finished pipeline opened — which is what drives each state without a real build.
+// that task is worked in — the stage the pill reads, the gate's answer, a pull request a finished
+// pipeline opened — which is what drives each state without a real build.
 // GET /api/plugins/memento/mcp lists the bot's MCP servers and …/mcp/catalogue the Catalogue Hermes
 // offers, each entry marked as the bot's servers have it (and `needs_config` where it declares
 // values); GET …/mcp/catalogue/{name} is one entry with the values it declares. GET …/mcp/{name} is
@@ -1015,13 +1015,24 @@ function afkTask(project) {
   }
 }
 
-const afkSessionId = (project) => `memento-afk-${project.id}`
+const afkSessionId = (projectId) => `memento-afk-${projectId}`
 
 /**
- * A staged task's pipeline record as the plugin writes it (`pipeline.start`) with `extra` on top, or
- * null when the project has no critique skill — the one thing that turns staging on.
+ * The stage AFK's pop-up names for the task a project holds. The plugin reads it off the session's
+ * own record (`afk.stage`), so the fixture moves the two together: a record write can't leave the
+ * pop-up naming a stage the record isn't in. `afk-stage.mjs` writes a stage on its own, for a
+ * project whose session carries no record.
  */
-function pipelineRecord(skills, extra = {}) {
+function setAfkStage(projectId, stage) {
+  if (stage) afkStages.set(projectId, stage)
+  else afkStages.delete(projectId)
+}
+
+/**
+ * A staged task's pipeline record as the plugin writes it (`pipeline.start`), or null when the
+ * project has no critique skill — the one thing that turns staging on.
+ */
+function pipelineRecord(skills) {
   const critique = skills?.critique_skills ?? []
   if (!critique.length) return null
   return {
@@ -1030,13 +1041,12 @@ function pipelineRecord(skills, extra = {}) {
     critique_skills: critique,
     gate: null,
     reason: null,
-    ...extra,
   }
 }
 
 function afkSession(project) {
   const held = afkTask(project)
-  const session = afkSessionId(project)
+  const session = afkSessionId(project.id)
   const title = `#${held.number} ${held.title}`
   const input = `Implement Issue #${held.number} (${held.url})`
   const now = Date.now()
@@ -1068,12 +1078,11 @@ function afkSweep(project) {
   if (afkSwept.has(project.id)) return
   afkSwept.add(project.id)
   const skills = afkSkills.get(project.id)
-  const staged = pipelineRecord(skills, { stage: "build" })
-  if (staged) afkStages.set(project.id, "build")
-  else afkStages.delete(project.id)
+  const staged = pipelineRecord(skills)
+  setAfkStage(project.id, staged?.stage)
   afkSession(project)
   // The stage is recorded on the session the claim made, before its build run is posted.
-  const record = projectSessions.get(afkSessionId(project))
+  const record = projectSessions.get(afkSessionId(project.id))
   if (record) record.pipeline = staged
 }
 
@@ -3251,7 +3260,9 @@ http
               error: { message: "A skills write names build_skill and critique_skills." },
             })
           if (body.build_skill !== null && typeof body.build_skill !== "string")
-            return json(res, 400, { error: { message: "build_skill must be a skill's name or null." } })
+            return json(res, 400, {
+              error: { message: "build_skill must be a skill's name or null." },
+            })
           if (
             !Array.isArray(body.critique_skills) ||
             !body.critique_skills.every((name) => typeof name === "string")
@@ -3755,7 +3766,7 @@ http
         if (record.plan_pending) waiting[record.session_id] ??= { kind: "plan" }
       // AFK's own wait: a session whose run ended without finishing, or one a restart adopted.
       for (const [projectId, why] of afkStalled) {
-        const session = `memento-afk-${projectId}`
+        const session = afkSessionId(projectId)
         if (!projectSessions.has(session) || sessions[session]) continue
         waiting[session] = { kind: "stalled", reason: why }
       }
@@ -3767,12 +3778,13 @@ http
       return json(res, 200, { object: "memento.runs", sessions, run_ids, waiting })
     }
     // Dev only: POST { project_id, reason } makes the project's claimed task stalled — its session
-    // waiting with that reason, the way a failed run or a restart leaves it — and { reset: true }
-    // clears every project's, which a flow that repeats needs since the mock keeps its state.
+    // waiting with that reason, the way a failed run or a restart leaves it — { pipeline, pr } moves
+    // the record the session's pill reads, and { reset: true } clears every project's, which a flow
+    // that repeats needs since the mock keeps its state.
     if (url.pathname === "/__mock/afk" && req.method === "POST") {
       const {
         project_id: projectId,
-        reason = "The run failed.",
+        reason,
         stage = null,
         pipeline,
         pr = null,
@@ -3782,22 +3794,28 @@ http
         afkStalled.clear()
         afkStages.clear()
       } else {
-        afkStalled.set(projectId, reason)
+        // Only a write that names a stop stalls the task: one that moves the pipeline's record
+        // leaves the session working, so a shipped pipeline isn't also reported as stalled.
+        if (typeof reason === "string") afkStalled.set(projectId, reason)
         // Dev only: the stage the sheet's Working row names for the task that project holds.
-        if (stage) afkStages.set(projectId, stage)
+        if (stage) setAfkStage(projectId, stage)
         // Dev only: the record the session's own strip draws — each stage, a gate's answer, a
         // reason — and the pull request a finished pipeline opened.
         const project = mockProjects().find((p) => p.id === projectId)
-        const record = project && projectSessions.get(afkSessionId(project))
-        if (record && pipeline !== undefined) record.pipeline = pipeline
+        const record = project && projectSessions.get(afkSessionId(project.id))
+        if (record && pipeline !== undefined) {
+          record.pipeline = pipeline
+          setAfkStage(projectId, pipeline?.stage)
+        }
         if (record && pr) {
           const repo = repoOf(project)
+          const number = pr.number ?? 27
           record.prs = [
             {
               repo,
-              number: pr.number ?? 27,
+              number,
               title: pr.title ?? "The frontier is read from GitHub and listed",
-              url: `https://github.com/${repo}/pull/${pr.number ?? 27}`,
+              url: `https://github.com/${repo}/pull/${number}`,
             },
           ]
         }

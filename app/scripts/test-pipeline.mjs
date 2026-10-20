@@ -4,9 +4,11 @@ import test from "node:test"
 import {
   commandName,
   parsePipeline,
+  parseStage,
   pipelineSteps,
   stageNumber,
   stageWord,
+  stepRuns,
 } from "../src/lib/pipeline.ts"
 
 /** A pipeline record as the plugin's column holds it (`plugin/pipeline.py`). */
@@ -87,11 +89,12 @@ test("a stalled task fails the step it stopped in, and only that one", () => {
   assert.deepEqual(states(stalled("critique")), ["build:pass", "gate:pass", "critique:fail"])
 })
 
-test("a critique that ended without a pull request is the fail the done stage hides", () => {
+test("a finished pipeline has passed every step, and a reason left beside it is no stop", () => {
   const ended = parsePipeline(
     record({ stage: "done", reason: "The critique ended without opening a pull request." }),
   )
-  assert.deepEqual(states(ended), ["build:pass", "gate:pass", "critique:fail"])
+  assert.equal(ended.reason, null, "a stopped run keeps the stage it stopped in, never done")
+  assert.deepEqual(states(ended), ["build:pass", "gate:pass", "critique:pass"])
 })
 
 test("the stage a task is in has one word, and the host's stop overrides it", () => {
@@ -101,7 +104,7 @@ test("the stage a task is in has one word, and the host's stop overrides it", ()
   assert.equal(word({ stage: "critique" }), "Critiquing")
   assert.equal(word({ stage: "done" }), "Shipped")
   assert.equal(word({ stage: "gate", reason: "The gate failed." }), "Stalled")
-  assert.equal(word({ stage: "done", reason: "The critique opened nothing." }), "Stalled")
+  assert.equal(word({ stage: "done", reason: "The critique opened nothing." }), "Shipped")
 })
 
 test("a command is named with its repo only where the project has one", () => {
@@ -119,5 +122,61 @@ test("a task's stage is counted from one of three, a finished pipeline at the la
     at({ stage: "gate", reason: "The gate failed." }),
     2,
     "a stalled task keeps its stage",
+  )
+})
+
+test("a stage is read only where this build of the app knows it", () => {
+  assert.equal(parseStage("critique"), "critique")
+  for (const value of [null, undefined, "", "shipping", 3, ["gate"]])
+    assert.equal(parseStage(value), null, `${JSON.stringify(value)} is no stage`)
+})
+
+test("each step lists what it ran, in the order the record keeps it", () => {
+  const runs = (extra, name, pr) =>
+    stepRuns(
+      parsePipeline(record(extra)),
+      pipelineSteps(parsePipeline(record(extra))).find((step) => step.name === name),
+      pr,
+    )
+  const gate = {
+    commands: [
+      { command: "pnpm lint", repo: null, code: 0 },
+      { command: "pnpm test", repo: "app", code: 1 },
+      { command: "pnpm build", repo: null, code: null },
+    ],
+  }
+  assert.deepEqual(runs({ stage: "build", build_skill: "plan" }, "build"), [{ name: "plan" }])
+  assert.deepEqual(runs({ stage: "gate", gate }, "gate"), [
+    { name: "pnpm lint", end: "exit 0", failed: false },
+    { name: "app: pnpm test", end: "exit 1", failed: true },
+    { name: "pnpm build", end: "not read", failed: false },
+  ])
+  assert.deepEqual(
+    runs({ stage: "done", gate }, "critique", "PR #27").map((one) => one.name),
+    ["code-review", "PR #27"],
+    "a critique that shipped names the pull request it opened",
+  )
+  assert.deepEqual(
+    runs({ stage: "critique", gate }, "critique", "PR #27").map((one) => one.name),
+    ["code-review"],
+    "one still going has opened nothing yet",
+  )
+})
+
+test("a step still to come ran nothing — its skills are chosen, not executed", () => {
+  const pipeline = parsePipeline(record({ stage: "build", build_skill: "plan" }))
+  for (const step of pipelineSteps(pipeline).filter((one) => one.name !== "build"))
+    assert.deepEqual(stepRuns(pipeline, step, "PR #27"), [], `${step.name} lists nothing`)
+  assert.deepEqual(
+    stepRuns(parsePipeline(record({ stage: "build" })), { name: "build", state: "current" }),
+    [],
+    "a project that picked no build skill ran none",
+  )
+})
+
+test("skill names are trimmed, kept once, and never read off a bare string", () => {
+  assert.deepEqual(
+    parsePipeline(record({ critique_skills: ["  a  ", "a", "", "b"] })).critiqueSkills,
+    ["a", "b"],
   )
 })

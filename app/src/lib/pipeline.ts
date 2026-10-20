@@ -1,8 +1,8 @@
 /**
- * The stages a staged AFK task runs in — Build, Gate, Critique — as the session's own record holds
- * them (`plugin/pipeline.py`), and the rule that turns that record into the three marks a session's
- * pipeline pill draws and the sheet under it explains. Pure: the record in, the steps out, so it is
- * tested with no host and no browser.
+ * A staged AFK task's stages — Build, Gate, Critique — as the session's own record holds them
+ * (`plugin/pipeline.py`), the rule that turns that record into the three bars a session's pipeline
+ * pill draws and the sheet under it explains, and the stage vocabulary AFK's pop-up names it by.
+ * Pure: the record in, the steps out, so it is tested with no host and no browser.
  *
  * The record outlives the hold, which is released when a run ends, so a finished task still says
  * how it got here (ADR 0018). A session that never ran a pipeline holds none, and the pill is not
@@ -12,9 +12,13 @@
 /** The feature a Host advertises when it can stage a task: the pill is drawn only there. */
 export const AFK_PIPELINE_FEATURE = "afk_pipeline"
 
-const STAGES = ["build", "gate", "critique", "done"] as const
+/** Every stage a staged task runs in, in order, and the one it ends in (`pipeline.STAGES`). */
+export const AFK_STAGES = ["build", "gate", "critique", "done"] as const
 
-export type PipelineStage = (typeof STAGES)[number]
+export type AfkStage = (typeof AFK_STAGES)[number]
+
+/** The three steps a task works through; `done` is where they leave it, not a fourth step. */
+const STEPS = ["build", "gate", "critique"] as const
 
 /** One command the build named for its gate, and the exit code the host read. */
 export interface PipelineCommand {
@@ -25,7 +29,7 @@ export interface PipelineCommand {
 }
 
 export interface SessionPipeline {
-  stage: PipelineStage
+  stage: AfkStage
   /** The skill the project picked to build by, when it picked one. */
   buildSkill: string | null
   /** The skills the critique runs one reviewer per, in the order the project picked them. */
@@ -40,7 +44,7 @@ export interface SessionPipeline {
 export type StepState = "pass" | "fail" | "current" | "next"
 
 export interface PipelineStep {
-  name: "build" | "gate" | "critique"
+  name: (typeof STEPS)[number]
   state: StepState
 }
 
@@ -48,11 +52,23 @@ function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null
 }
 
-function names(value: unknown): string[] {
-  // Typed, not re-derived: the host already writes these trimmed and each once. A bare string is
-  // no list of skills.
+/**
+ * The names a list holds, each once, in its own order — `pipeline.names`, which is also how the
+ * AFK read takes the skills a project picked. A bare string is no list of skills: read one
+ * character at a time it would name eleven of them.
+ */
+export function skillNames(value: unknown): string[] {
   if (!Array.isArray(value)) return []
-  return value.filter((name): name is string => typeof name === "string" && Boolean(name.trim()))
+  const names = value
+    .filter((name): name is string => typeof name === "string")
+    .map((name) => text(name))
+    .filter((name): name is string => name !== null)
+  return [...new Set(names)]
+}
+
+/** A stage as the host wrote it, or null for one this build of the app doesn't know. */
+export function parseStage(value: unknown): AfkStage | null {
+  return (AFK_STAGES as readonly unknown[]).includes(value) ? (value as AfkStage) : null
 }
 
 function commands(value: unknown): PipelineCommand[] {
@@ -75,28 +91,29 @@ function commands(value: unknown): PipelineCommand[] {
 export function parsePipeline(raw: unknown): SessionPipeline | null {
   if (!raw || typeof raw !== "object") return null
   const record = raw as Record<string, unknown>
-  if (!(STAGES as readonly unknown[]).includes(record.stage)) return null
+  const stage = parseStage(record.stage)
+  if (!stage) return null
   return {
-    stage: record.stage as PipelineStage,
+    stage,
     buildSkill: text(record.build_skill),
-    critiqueSkills: names(record.critique_skills),
+    critiqueSkills: skillNames(record.critique_skills),
     commands: commands(record.gate),
-    reason: text(record.reason),
+    // A stopped run keeps the stage it stopped in and a finished one has nothing to stop
+    // (`pipeline.advance` answers `done` with no stall), so a reason left beside `done` is a
+    // leftover this reading drops rather than a stop it draws.
+    reason: stage === "done" ? null : text(record.reason),
   }
 }
 
 /**
- * The three steps as the strip draws them: everything before the stage the task is in has passed,
+ * The three steps as the pill draws them: everything before the stage the task is in has passed,
  * that one is lit — or failing, where the host recorded why it stopped — and the rest are still to
- * come. A done pipeline has passed every step, except a critique that ended without its pull
- * request, which is the one failure a done stage keeps.
+ * come. `done` is past all three, so a finished pipeline has passed every step.
  */
 export function pipelineSteps(pipeline: SessionPipeline): PipelineStep[] {
-  const names = STAGES.slice(0, 3) as PipelineStep["name"][]
-  const at = STAGES.indexOf(pipeline.stage)
+  const at = AFK_STAGES.indexOf(pipeline.stage)
   const stalled = pipeline.reason !== null
-  return names.map((name, index) => {
-    if (pipeline.stage === "done") return { name, state: stalled && index === 2 ? "fail" : "pass" }
+  return STEPS.map((name, index) => {
     if (index < at) return { name, state: "pass" }
     if (index > at) return { name, state: "next" }
     return { name, state: stalled ? "fail" : "current" }
@@ -110,31 +127,26 @@ export const STEP_WORDS: Record<PipelineStep["name"], string> = {
   critique: "Critique",
 }
 
+/** Each stage in words, where a screen names the stage a task is in rather than marking it. */
+export const STAGE_WORDS: Record<AfkStage, string> = {
+  build: "Building",
+  gate: "Gate check",
+  critique: "Critiquing",
+  done: "Shipped",
+}
+
 /**
  * Which of the three stages a task has reached, counting from one — the stage it is in, and the last
  * of them all for a pipeline that finished, since every stage of that one is behind it.
  */
 export function stageNumber(pipeline: SessionPipeline): number {
-  const at = STAGES.indexOf(pipeline.stage)
-  return Math.min(Math.max(at, 0) + 1, 3)
+  return Math.min(Math.max(AFK_STAGES.indexOf(pipeline.stage), 0) + 1, STEPS.length)
 }
 
-/**
- * The stage a task is in, in words — the words AFK's pop-up uses for the same stage, so the two
- * places that name it agree. A pipeline the host stopped says so instead of the stage it stopped in.
- */
+/** The stage a task is in, in words — or that the host stopped it where it was. */
 export function stageWord(pipeline: SessionPipeline): string {
   if (pipeline.reason !== null) return "Stalled"
-  switch (pipeline.stage) {
-    case "build":
-      return "Building"
-    case "gate":
-      return "Gate check"
-    case "critique":
-      return "Critiquing"
-    case "done":
-      return "Shipped"
-  }
+  return STAGE_WORDS[pipeline.stage]
 }
 
 /**
@@ -143,4 +155,36 @@ export function stageWord(pipeline: SessionPipeline): string {
  */
 export function commandName(one: PipelineCommand): string {
   return one.repo ? `${one.repo}: ${one.command}` : one.command
+}
+
+/** One thing a step ran: what it was, and what came of it where the host records that. */
+export interface StepRun {
+  name: string
+  /** The gate's own answer. A skill's outcome isn't recorded yet, so it has none. */
+  end?: string
+  failed?: boolean
+}
+
+/**
+ * What a step ran, in the order the record keeps it. A step still to come ran nothing — the skills
+ * are chosen for it, not executed — so it lists none, and the row says so instead.
+ */
+export function stepRuns(
+  pipeline: SessionPipeline,
+  step: PipelineStep,
+  prLabel?: string,
+): StepRun[] {
+  if (step.state === "next") return []
+  if (step.name === "build") return pipeline.buildSkill ? [{ name: pipeline.buildSkill }] : []
+  if (step.name === "critique") {
+    const skills: StepRun[] = pipeline.critiqueSkills.map((name) => ({ name }))
+    // A critique that shipped is the step that opened the pull request.
+    if (step.state === "pass" && prLabel) skills.push({ name: prLabel })
+    return skills
+  }
+  return pipeline.commands.map((one) => ({
+    name: commandName(one),
+    end: one.code === null ? "not read" : `exit ${one.code}`,
+    failed: one.code !== null && one.code !== 0,
+  }))
 }

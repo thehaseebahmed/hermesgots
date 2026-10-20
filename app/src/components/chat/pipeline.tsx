@@ -5,13 +5,14 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import {
-  commandName,
   pipelineSteps,
   stageNumber,
   stageWord,
+  stepRuns,
   STEP_WORDS,
   type PipelineStep,
   type SessionPipeline,
+  type StepRun,
   type StepState,
 } from "@/lib/pipeline"
 import { cn } from "@/lib/utils"
@@ -107,36 +108,8 @@ export function PipelinePill({
   )
 }
 
-/** One thing a step ran: what it was, and what came of it where the host records that. */
-interface Ran {
-  name: string
-  /** The gate's own answer. A skill's outcome isn't recorded yet, so it has none. */
-  end?: string
-  failed?: boolean
-}
-
-/**
- * What a step ran, in the order the record keeps it. A step still to come ran nothing — the skills
- * are chosen for it, not executed — so it lists none, and the row says so instead.
- */
-function ran(pipeline: SessionPipeline, step: PipelineStep, prLabel?: string): Ran[] {
-  if (step.state === "next") return []
-  if (step.name === "build") return pipeline.buildSkill ? [{ name: pipeline.buildSkill }] : []
-  if (step.name === "critique") {
-    const skills: Ran[] = pipeline.critiqueSkills.map((name) => ({ name }))
-    // A critique that shipped is the step that opened the pull request.
-    if (step.state === "pass" && prLabel) skills.push({ name: prLabel })
-    return skills
-  }
-  return pipeline.commands.map((one) => ({
-    name: commandName(one),
-    end: one.code === null ? "not read" : `exit ${one.code}`,
-    failed: one.code !== null && one.code !== 0,
-  }))
-}
-
 /** A step's own lines, laid out the same for the gate's commands and for the skills that ran. */
-function Lines({ entries }: { entries: Ran[] }) {
+function Lines({ entries }: { entries: StepRun[] }) {
   return (
     <ul className="mt-1.5 flex flex-col gap-1">
       {entries.map((entry) => (
@@ -187,7 +160,7 @@ export function PipelineSheet({
         </div>
         <ol className="flex flex-col px-6 pt-4">
           {steps.map((step, index) => {
-            const entries = ran(pipeline, step, prLabel)
+            const entries = stepRuns(pipeline, step, prLabel)
             return (
               <li key={step.name} className="flex gap-3">
                 <div className="relative w-7 shrink-0">

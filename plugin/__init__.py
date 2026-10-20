@@ -284,8 +284,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # ones to critique, written beside the switch. Advertised apart from the switch,
                     # so an older plugin keeps the pop-up it has, with no pickers in it.
                     "afk_skills",
-                    # And whether a staged task's stages reach the app: the strip a session carries
-                    # under its header, drawn from the pipeline record on the session itself
+                    # And whether a staged task's stages reach the app: the pipeline pill a session
+                    # carries above its composer, drawn from the record on the session itself
                     # (pipeline.py). Advertised apart from the pickers, since a session's own record
                     # says whether it was staged at all.
                     "afk_pipeline",
