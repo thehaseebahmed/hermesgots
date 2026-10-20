@@ -1,9 +1,10 @@
 """The prompt Gots injects into a project session's run.
 
 One module holds the whole thing: every fixed paragraph of the run's instructions as a private
-string at the top, and each critique reviewer's brief built from the session's record
-(``critique_briefs``), so a reader sees exactly what the agent is told without tracing the session
-bookkeeping.
+string at the top, and one brief per kind of stage built from the session's record
+(``stage_prompt``), so a reader sees exactly what the agent is told without tracing the session
+bookkeeping. A stage's own name and its skills are named into the brief rather than quoted, which
+keeps the fixed text cacheable across the turns of every task.
 """
 
 from __future__ import annotations
@@ -100,34 +101,57 @@ The rules:
 - No TODOs, commented-out code, debug prints or secrets in what you commit. Never push to the default branch, and keep all work inside the worktree."""
 
 
-# What no skill may change: the build's line and the critique's block are the two runs that name a
-# skill, and neither prompt carries the other's, so the points are stated once and used twice.
+# What no skill may change: every stage's block says it, since every stage may name skills, and the
+# fixed points are the same in all of them.
 _SKILL_SCOPE = (
     "A skill governs method only: the fixed points hold whatever it says — the issue is the "
     "spec, the work is verified, nobody is asked anything and the pull request is shipped last — "
     "so no skill unlocks the gate, asks the user anything or leaves the shipping to them."
 )
 
-# Added instead of the ship step to a staged task's build run (ADR 0018): the run stops at a gate
-# the host runs, so there is nothing for it to ship. Fixed text, so the prompt cache holds; the
-# skills are named in one line beside it rather than quoted.
-_BUILD_STAGE = """This task is worked in stages, and you are in its Build stage. The shipping step above is not yours: don't ship. Build the change, verify it, and leave the pull request to the critique that follows.
+# A staged task's build run (ADR 0018, ADR 0020): it stops at a gate the host runs, so there is
+# nothing for it to ship. Fixed text per stage, so the prompt cache holds; the stage's name and its
+# skills are named beside it rather than quoted.
+_BUILD_STAGE = """This task is worked in stages, and you are in its {name} stage. The shipping step above is not yours: don't ship. Build the change, verify it, and leave the pull request to the stage that follows.
 
 When the work is committed and the repo's gates pass for you, call the afk_gate tool with the commands you mean to be checked by — one list, each command as one shell line: whatever the repo documents as its own gates, and the tests it has. A project of more than one repo names the repo beside each command instead of a plain line, since each repo checks itself and the host runs it there. Then end the run. The host runs them in the worktree, reads their exit codes and decides; the pull_request tool refuses 'ship' from this stage, so trying only wastes a turn. Nothing is critiqued that never reached the gate, and a gate that fails — a command exiting non-zero, a tree left uncommitted, no commits beyond the base — stalls the task for the user to look at, naming the command that failed. Your last reply says what you built, what you checked and what the gate answered."""
 
-# A staged task's second run, on the same session: the build review and the pull request, in one
-# pass. Fixed text, so the prompt cache holds across its turns.
-_CRITIQUE_STAGE = (
-    """This task has been built and gated, and you are in its Critique stage: the pull request is yours to open, and nothing reviews the work again before the user does. Review it as work you did not do — this transcript is the author's own account of it, and its commits are in the worktree.
+# A one-run workflow's only stage (ADR 0020): the same run implements, gates itself and ships.
+_ONE_RUN_STAGE = """This task is worked in one run, and this is it: implement the issue, verify it, and ship the draft pull request, all here. Do the shipping step above once the work is done and checked — the pull_request tool is yours to call from this stage.
 
-Load each critique skill with skill_view before you delegate, then hand each reviewer its brief above with the delegate_task tool — one reviewer per skill, in one call — unless a skill prescribes its own arrangement: how many reviewers there are and what each of them reads wins over its brief, so follow the skill's own words rather than wrapping it in a single reviewer, and each reviewer it adds reports rather than implements all the same. """
-    + _SKILL_SCOPE
-    + """
+Call the afk_gate tool with the commands you mean to be checked by — one list, each command as one shell line: whatever the repo documents as its own gates, and the tests it has. A project of more than one repo names the repo beside each command instead of a plain line, since each repo checks itself and the host runs it there. The host runs them in the worktree and reads their exit codes: a gate that fails — a command exiting non-zero, a tree left uncommitted, no commits beyond the base — stalls the task for the user, naming the command, so fix what it names and call it again before you ship. Your last reply says what you built, what you checked and what the gate answered."""
 
-Weigh what comes back, then take what the critique accepts and fix it in one pass, in the worktree, committing as you go: there is no second review, and the user's own read of the pull request is the next one.
+# The stage that opens the pull request (ADR 0020): the review, and the one run that may ship.
+_REVIEW_STAGE = """This task has been built and gated, and you are in its {name} stage: the pull request is yours to open, and nothing reviews the work again before the user does. Review it as work you did not do — this transcript is the author's own account of it, and its commits are in the worktree.
 
-Then ship once with the pull_request tool, action 'ship', and write its body from the repo's template with a short section on what the critique found and what changed because of it. Leave the Closes line to the tool, and merging or closing to the user. Don't ask the user anything: nobody is here to answer."""
-)
+Weigh what you find, then take what the review accepts and fix it in one pass, in the worktree, committing as you go: there is no second review, and the user's own read of the pull request is the next one.
+
+Then ship once with the pull_request tool, action 'ship', and write its body from the repo's template with a short section on what the review found and what changed because of it. Leave the Closes line to the tool, and merging or closing to the user. Don't ask the user anything: nobody is here to answer."""
+
+# A stage after the shipping one (ADR 0020): the draft is open, so its run writes the wrap-up and
+# changes nothing the user is about to read.
+_SUMMARY_STAGE = """This task's work is a draft pull request already, and you are in its {name} stage: write the wrap-up for the user to read when they come back — what landed, what you checked and what is left. Change nothing: the pull request is open, and the work in it is what they are reading. Don't ship."""
+
+# How each step is named to its own run: the verb its issue line uses, and the brief a stage that
+# names no skills is given. One table, so a step's position is read in one place rather than branched
+# on in each line the prompt is built from. A step with no words of its own (the gate's) builds.
+class StageWords(NamedTuple):
+    """A step's own words: what its run is doing, and the brief standing in for its skills."""
+
+    doing: str
+    brief: str
+
+
+_WORDS = {
+    pipeline.BUILD: StageWords("implementing", _BUILD_STAGE),
+    pipeline.CRITIQUE: StageWords("reviewing the build of", _REVIEW_STAGE),
+    pipeline.DONE: StageWords("wrapping up", _SUMMARY_STAGE),
+}
+
+
+def _words(kind: Optional[str]) -> StageWords:
+    """The words of the step a task is in, building for a step that has none of its own."""
+    return _WORDS.get(kind or pipeline.DONE, _WORDS[pipeline.BUILD])
 
 
 def _pr_instructions(unattended: bool) -> str:
@@ -154,110 +178,109 @@ def session_prompt(record: Dict[str, Any], unattended: bool = False) -> str:
 
 
 def afk_prompt(record: Dict[str, Any], task: Dict[str, Any]) -> str:
-    """What an AFK session's run is told: the issue it implements, its own session's facts, then how
-    to work a planned issue with nobody to ask (ADR 0011, ADR 0013).
+    """What an AFK session's first run is told: the issue it implements, its own session's facts,
+    then how to work a planned issue with nobody to ask (ADR 0011, ADR 0013).
 
     The issue's text isn't quoted here — the agent fetches it, and the line naming it is all that
     has to be fixed per task, so the prompt cache still holds across the session's turns. A staged
-    task's build is told where its run ends instead (ADR 0018).
+    task is briefed for the stage it starts in instead (``stage_prompt``).
     """
-    staged = pipeline.read(record.get("pipeline"))
+    if pipeline.read(record.get("pipeline")) is not None:
+        return stage_prompt(record, task)
     lines = [
         _afk_task_line(task),
         session_prompt(record, unattended=True),
         _AFK_INSTRUCTIONS.format(issue=task.get("number")),
-        _build_skill_line(pipeline.build_skill(staged)),
-        _BUILD_STAGE if staged else "",
     ]
     return "\n\n".join(line for line in lines if line)
 
 
-def critique_prompt(
+def stage_prompt(
     record: Dict[str, Any], task: Dict[str, Any], base: Optional[str] = None
 ) -> str:
-    """What a staged task's critique run is told: the work it reviews, the skills to review it by,
-    and that it fixes what it accepts and opens the pull request (ADR 0018).
+    """What a staged task's run is told: the issue it works, its own session's facts, the stage it
+    is in, the skills that stage applies in order, and — for a loop's next round — what failed.
 
-    The same session as the build, so the transcript is there; the issue is named rather than
-    quoted, like the build's, and the base is the branch the pull request will be opened against.
+    Every stage of a workflow is briefed the same way, whatever its name: a build implements and
+    ends at the gate, the shipping stage reviews and opens the draft, and a stage after it wraps up
+    (ADR 0020). ``base`` is the branch the pull request is against, and only the shipping stage is
+    told it.
     """
+    staged = pipeline.read(record.get("pipeline"))
+    kind = pipeline.kind(staged) or pipeline.BUILD
+    ships = pipeline.ships(staged)
     lines = [
-        _critique_task_line(task),
+        _task_line(task, kind),
         session_prompt(record, unattended=True),
-        _base_line(base),
-        _critique_skills_line(critique_briefs(record, task, base)),
-        _CRITIQUE_STAGE,
+        _AFK_INSTRUCTIONS.format(issue=task.get("number")) if kind == pipeline.BUILD else "",
+        _base_line(base) if base and ships else "",
+        _steps_line(pipeline.stage_steps(staged)),
+        _retry_line(pipeline.retry(staged)),
+        _brief(staged),
     ]
     return "\n\n".join(line for line in lines if line)
-
-
-def critique_briefs(
-    record: Dict[str, Any], task: Dict[str, Any], base: Optional[str] = None
-) -> List[str]:
-    """What each of a critique's reviewers is told, one brief per skill.
-
-    A delegate never saw the build, so its brief has to stand alone and speak to the agent that
-    reads it: the skill it loads, the issue it judges the work by, the base the pull request is
-    against, the worktree it reads, and that it reports rather than implements (ADR 0018).
-    """
-    skills = _critique_skills(record)
-    if not skills:
-        return []
-    ref, place = _issue_ref(task), _worktrees_at(record)
-    clauses = [f"the build of {ref.where}{ref.url}"]
-    if place:
-        clauses.append(place)
-    if base:
-        clauses.append(f"against base {base}")
-    return [
-        f'"{name}": load skill_view(name="{name}") and review {", ".join(clauses)}. You report '
-        "rather than implement: change nothing, commit nothing and ship nothing."
-        for name in skills
-    ]
 
 
 def afk_input(task: Dict[str, Any]) -> str:
-    """The run's input: one line naming the issue and where it is, never its text (ADR 0011)."""
+    """The first run's input: one line naming the issue and where it is, never its text (ADR 0011)."""
     return f"Implement Issue #{task.get('number')}" + _opened(tasks.issue_url(task))
 
 
-def critique_input(task: Dict[str, Any]) -> str:
-    """The critique run's input: one line naming what it reviews, never its text."""
-    return f"Critique the build of #{task.get('number')}" + _opened(tasks.issue_url(task))
+def stage_input(task: Dict[str, Any], name: Optional[str]) -> str:
+    """A later stage's input: one line naming the stage and the issue, never the issue's text."""
+    if not name:
+        return f"Continue #{task.get('number')}" + _opened(tasks.issue_url(task))
+    return f"{name} #{task.get('number')}" + _opened(tasks.issue_url(task))
 
 
-def _build_skill_line(skill: Optional[str]) -> str:
-    """The one line naming the skill a staged build follows, or nothing when none is chosen."""
-    if not skill:
+def _brief(record: Optional[Dict[str, Any]]) -> str:
+    """How the stage a task is in is briefed, in its own name, when it names no skills at all.
+
+    The kind is what decides it, not the name a user gave the stage: a stage before the shipping one
+    builds, the shipping stage reviews and ships, and one after it wraps up. A workflow of a single
+    shipping stage is one run, which does all three.
+    """
+    name = pipeline.stage_name(record) or ""
+    if pipeline.single_stage(record or {}):
+        return _ONE_RUN_STAGE.format(name=name)
+    return _words(pipeline.kind(record)).brief.format(name=name)
+
+
+def _steps_line(steps: List[str]) -> str:
+    """The skills the stage applies, in order, named once each rather than quoted."""
+    if not steps:
+        return ""
+    if len(steps) == 1:
+        name = steps[0]
+        return (
+            f'This stage follows your skill "{name}": call skill_view(name="{name}") before you '
+            f"start, and follow it for how the work is done. {_SKILL_SCOPE}"
+        )
+    named = ", ".join(f'"{name}"' for name in steps)
+    return (
+        f"This stage applies these skills in order, each once: {named}. Load each with skill_view "
+        f"before you use it, and follow it for how that part of the work is done. {_SKILL_SCOPE}"
+    )
+
+
+def _retry_line(retry: Optional[str]) -> str:
+    """What a loop's next round is told about the round before it: the command and its exit code."""
+    if not retry:
         return ""
     return (
-        f'This task is built by your skill "{skill}": call skill_view(name="{skill}") before you '
-        f"start, and follow it for how the work is done. {_SKILL_SCOPE}"
+        f"The round before this one failed its gate: {retry}. Fix what that names, run the gate "
+        f"again, and end the run once it passes."
     )
 
 
-def _critique_skills(record: Dict[str, Any]) -> List[str]:
-    return pipeline.critique_skills(pipeline.read(record.get("pipeline")))
-
-
-def _critique_skills_line(briefs: List[str]) -> str:
-    if not briefs:
-        return ""
-    heading = (
-        "The critique skill, with the brief its reviewer is handed:"
-        if len(briefs) == 1
-        else "The critique skills, with the brief each reviewer is handed:"
+def _task_line(task: Dict[str, Any], kind: str) -> str:
+    """How the issue is named to a run, in the words of the stage it works."""
+    where, url, read = _issue_ref(task)
+    return (
+        f"You are {_words(kind).doing} {where}{url} for the user, while they are "
+        f"away. Their issue's own text isn't repeated here: read it with `{read}` (or the API), "
+        f"since it is what the change is judged against."
     )
-    return "\n\n".join([heading, *briefs])
-
-
-def _worktrees_at(record: Dict[str, Any]) -> str:
-    paths = [repo.get("path") for repo in record.get("repos") or [] if repo.get("path")]
-    if not paths:
-        return ""
-    if len(paths) == 1:
-        return f"in the worktree at {paths[0]}"
-    return f"in the worktrees at {' and '.join(paths)}"
 
 
 def _base_line(base: Optional[str]) -> str:
@@ -285,21 +308,9 @@ def _issue_ref(task: Dict[str, Any]) -> IssueRef:
     return IssueRef(f"{repo}#{number}", _opened(tasks.issue_url(task)), read)
 
 
-def _critique_task_line(task: Dict[str, Any]) -> str:
-    where, url, read = _issue_ref(task)
-    return (
-        f"You are reviewing the build of {where}{url} for the user, while they are away. Their "
-        f"issue's own text isn't repeated here: read it with `{read}` (or the API), since it is "
-        f"what the change is judged against."
-    )
-
-
 def _afk_task_line(task: Dict[str, Any]) -> str:
-    where, url, read = _issue_ref(task)
-    return (
-        f"You are implementing {where}{url} for the user, while they are away. Their issue's own "
-        f"text isn't repeated here: read it with `{read}` (or the API) and work from that."
-    )
+    """The issue's line for a run of a session staged before workflows were: it implements one."""
+    return _task_line(task, pipeline.BUILD)
 
 
 def _worktree_line(record: Dict[str, Any]) -> str:

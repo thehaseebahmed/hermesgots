@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 from plugin import pipeline, ship
 from plugin.store import db_path
-from plugin.tests._helpers import staged as staged_record
+from plugin.tests._helpers import preset, staged as staged_record
 
 
 def _record(tmp):
@@ -350,22 +350,42 @@ class RefusalTests(_Base):
 
 
 class StageTests(_Base):
-    """A staged task's build can't ship: the critique stage opens the pull request instead."""
+    """Only the workflow's shipping stage may open the pull request, in either direction from it."""
 
     def staged(self, stage: str) -> dict:
         return {**_record(self.tmp), "pipeline": staged_record(stage)}
 
     def test_a_build_cannot_ship(self) -> None:
         answer = self._call({"action": "ship", "commit_message": "m"}, record=self.staged(pipeline.BUILD))
-        self.assertIn("build stage", answer["error"], "the refusal names the stage")
+        self.assertIn('"Build"', answer["error"], "the refusal names the stage it is in")
+        self.assertIn('"Review"', answer["error"], "and the one that ships")
         self.assertIn("afk_gate", answer["error"])
-        self.assertIn("critique stage", answer["error"])
 
     def test_a_task_at_its_gate_cannot_ship_either(self) -> None:
         answer = self._call({"action": "ship", "commit_message": "m"}, record=self.staged(pipeline.GATE))
-        self.assertIn("gate stage", answer["error"])
+        self.assertIn('"Test"', answer["error"])
 
-    def test_a_critique_ships(self) -> None:
+    def test_a_stage_after_the_shipping_one_cannot_ship_either(self) -> None:
+        with patch("plugin.ship.ship", return_value=[]) as shipped:
+            answer = self._call({"action": "ship", "commit_message": "m"}, record=self.summary_record())
+        shipped.assert_not_called()
+        self.assertIn('"Summary"', answer["error"], "the stage it is in is named")
+        self.assertIn('"Review"', answer["error"], "and the one that already opened the draft")
+        self.assertIn("nothing left", answer["error"])
+
+    def summary_record(self) -> dict:
+        """A task in the stage after the one that ships, with a skill so that stage exists."""
+        record = pipeline.start(preset("preset:staged"))
+        record["stage"] = 3
+        record["stages"][3]["steps"] = ["weekly-review"]
+        record["stages"][3]["rounds"] = [pipeline.new_round()]
+        return {**_record(self.tmp), "pipeline": pipeline.read(record)}
+
+    def test_a_finished_task_cannot_ship(self) -> None:
+        answer = self._call({"action": "ship", "commit_message": "m"}, record=self.staged(pipeline.DONE))
+        self.assertIn("workflow has finished", answer["error"])
+
+    def test_the_shipping_stage_ships(self) -> None:
         with patch("plugin.ship.ship", return_value=[]) as shipped:
             answer = self._call(
                 {"action": "ship", "commit_message": "m"}, record=self.staged(pipeline.CRITIQUE)

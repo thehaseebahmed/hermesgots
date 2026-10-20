@@ -60,6 +60,51 @@ def staged(
     return record
 
 
+def preset(workflow_id: str = workflows.DEFAULT_ID) -> Dict[str, Any]:
+    """A preset as the library seeds it, in the shape ``pipeline.start`` snapshots.
+
+    Read from the plugin's own presets rather than copied into a test, so a preset whose body moves
+    is tested as it ships.
+    """
+    for found, name, stages in workflows.PRESETS:
+        if found == workflow_id:
+            return {"id": found, "name": name, "stages": stages}
+    raise KeyError(f"no preset {workflow_id}")
+
+
+def placed(
+    workflow: Dict[str, Any],
+    index: int = 0,
+    gate: Optional[Dict[str, Any]] = None,
+    stop: Optional[str] = None,
+) -> Dict[str, Any]:
+    """A task's snapshot of ``workflow``, in the stage at ``index``, as the engine leaves it.
+
+    Every stage before it has finished and it is the one in hand — what a task looks like once the
+    runs before this stage have ended, which is where a test of one stage's end starts. ``gate`` is
+    the answer the stage's round carries and ``stop`` why it stalled.
+    """
+    record = pipeline.start(workflow)
+    record["stage"] = index
+    for at, entry in enumerate(record["stages"]):
+        entry["state"] = (
+            pipeline.FINISHED
+            if at < index
+            else pipeline.CURRENT
+            if at == index
+            else pipeline.TODO
+        )
+        entry["rounds"] = [pipeline.new_round()] if at <= index else []
+    if index < len(record["stages"]):
+        current = record["stages"][index]["rounds"][-1]
+        if gate is not None:
+            current["gate"] = gate
+        if stop is not None:
+            current["stop"] = stop
+            record["stages"][index]["state"] = pipeline.FAILED
+    return record
+
+
 def make_fake_agent(lookup_fn, scope_already=None):
     """Inject fake agent.credential_pool and agent.secret_scope modules.
 

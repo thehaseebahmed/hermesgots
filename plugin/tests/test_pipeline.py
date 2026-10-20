@@ -14,7 +14,7 @@ from typing import Any, Dict, List
 
 from plugin import pipeline, workflows
 from plugin.pipeline import BUILD, CRITIQUE, DONE, GATE_CHECK
-from plugin.tests._helpers import staged
+from plugin.tests._helpers import placed, preset, staged
 
 WORKFLOW: Dict[str, Any] = {
     "id": "wf-test",
@@ -224,6 +224,219 @@ class MoveTests(unittest.TestCase):
         before = pipeline.gate_of(record)
         pipeline.gated(record, gate(0))
         self.assertEqual(pipeline.gate_of(record), before, "the record is a value, not a buffer")
+
+
+class PostsTests(unittest.TestCase):
+    """Which stages post a run of the task's session, and which the host answers itself."""
+
+    STAGED = preset("preset:staged")
+
+    def test_a_stage_before_the_shipping_one_posts_a_run_even_with_no_skill(self) -> None:
+        stages = pipeline.start(self.STAGED)["stages"]
+        self.assertTrue(
+            pipeline.posts(stages, 0),
+            "a preset's build names no skill, and its built-in brief is what implements the issue",
+        )
+
+    def test_the_shipping_stage_posts_a_run_even_with_no_skill(self) -> None:
+        stages = pipeline.start(self.STAGED)["stages"]
+        self.assertTrue(pipeline.posts(stages, 2), "nothing ships if the review never runs")
+
+    def test_a_checkpoint_posts_none(self) -> None:
+        stages = pipeline.start(self.STAGED)["stages"]
+        self.assertFalse(
+            pipeline.posts(stages, 1), "the host answers the gate from the run before it"
+        )
+
+    def test_a_stage_after_the_shipping_one_posts_only_when_it_names_steps(self) -> None:
+        stages = pipeline.start(self.STAGED)["stages"]
+        self.assertFalse(pipeline.posts(stages, 3), "an empty Summary has nothing to do")
+        stages[3]["steps"] = ["weekly-review"]
+        self.assertTrue(pipeline.posts(stages, 3))
+
+    def test_the_stage_a_task_is_in_is_the_one_that_posts(self) -> None:
+        record = pipeline.start(self.STAGED)
+        self.assertTrue(pipeline.posts_now(record), "Build runs")
+        self.assertFalse(
+            pipeline.posts_now({**record, "stage": 1}), "Test is a checkpoint, so nothing is posted"
+        )
+        self.assertTrue(pipeline.posts_now({**record, "stage": 2}), "Review runs")
+        self.assertFalse(
+            pipeline.posts_now({**record, "stage": 4}), "past its last stage, nothing is posted"
+        )
+
+
+class NameTests(unittest.TestCase):
+    def test_a_task_names_the_stage_it_is_in_and_the_one_that_ships(self) -> None:
+        record = pipeline.start(preset("preset:staged"))
+        self.assertEqual(pipeline.stage_name({**record, "stage": 0}), "Build")
+        self.assertEqual(pipeline.stage_name({**record, "stage": 3}), "Summary")
+        self.assertEqual(pipeline.shipping_name(record), "Review")
+        self.assertIsNone(pipeline.stage_name({**record, "stage": 4}))
+
+
+class LoopTests(unittest.TestCase):
+    """The preset whose build repeats while the gate fails: a round, its failure, and its cap."""
+
+    LOOP = preset("preset:loop")
+    BROKEN = [{"command": "pnpm test", "code": 1}]
+
+    def failing(self, rounds: int = 1) -> Dict[str, Any]:
+        """The loop preset's build, in hand after ``rounds`` rounds that each failed their gate."""
+        record = placed(self.LOOP, 0)
+        record["stages"][0]["rounds"] = [
+            {**pipeline.new_round(), "gate": {"commands": self.BROKEN}} for _ in range(rounds)
+        ]
+        return pipeline.read(record)
+
+    def test_a_failed_checkpoint_starts_another_round_of_the_stage_the_loop_starts_at(self) -> None:
+        step = pipeline.advance(self.failing(), worktree=tree())
+        self.assertIsNone(step.stall, "a loop is work, not a wait for the user")
+        self.assertEqual(step.index, 0, "back to the build the loop starts at")
+        self.assertEqual(step.retry, "pnpm test exited 1", "the command, as a sentence names it")
+
+    def test_the_next_round_keeps_the_round_it_replaces_and_is_told_what_failed(self) -> None:
+        record = self.failing()
+        moved = pipeline.moved(record, pipeline.advance(record, worktree=tree()))
+        self.assertEqual(moved["stage"], 0)
+        self.assertEqual(moved["round"], 2)
+        self.assertEqual(len(moved["stages"][0]["rounds"]), 2, "nothing the task ran is lost")
+        self.assertEqual(moved["stages"][0]["rounds"][0]["gate"], record["stages"][0]["rounds"][0]["gate"])
+        self.assertEqual(
+            moved["stages"][0]["rounds"][1]["retry"],
+            "pnpm test exited 1",
+            "the round it starts is told the command that failed",
+        )
+        self.assertEqual(pipeline.retry(moved), "pnpm test exited 1")
+        self.assertIsNone(pipeline.reason(moved), "a repeating build is not a stalled task")
+
+    def test_a_gate_that_passes_leaves_the_loop_for_the_review(self) -> None:
+        record = pipeline.gated(self.failing(), [{"command": "pnpm test", "code": 0}])
+        step = pipeline.advance(record, worktree=tree())
+        self.assertIsNone(step.retry)
+        self.assertEqual(pipeline.kind(pipeline.moved(record, step)), CRITIQUE)
+        self.assertEqual(pipeline.stage_name(pipeline.moved(record, step)), "Review")
+
+    def test_past_the_cap_it_stalls_naming_the_command(self) -> None:
+        step = pipeline.advance(self.failing(rounds=3), worktree=tree())
+        self.assertEqual(
+            step.stall,
+            "The loop ran out of rounds (3) and the gate still failed: pnpm test exited 1.",
+            "the user is told the command, not only that a loop ended",
+        )
+        self.assertIsNone(step.index, "a stall starts nothing")
+
+    def test_past_the_cap_it_lands_on_the_checkpoint_and_nothing_after_it_starts(self) -> None:
+        record = self.failing(rounds=3)
+        moved = pipeline.moved(record, pipeline.advance(record, worktree=tree()))
+        self.assertEqual(pipeline.kind(moved), GATE_CHECK, "it waits at the checkpoint it failed")
+        self.assertEqual(moved["stages"][2]["rounds"], [], "the review never starts")
+        self.assertEqual(moved["stages"][2]["state"], pipeline.TODO)
+
+    def test_the_cap_is_the_loops_own(self) -> None:
+        once = {
+            "id": "wf-once",
+            "name": "Build ⇄ Test",
+            "stages": [
+                {"name": "Build", "steps": ["plan"]},
+                {
+                    "name": "Test",
+                    "steps": [],
+                    "check": workflows.GATE,
+                    "loop": {"from": "Build", "cap": 1},
+                },
+                {"name": "Review", "steps": [], "ships": True},
+            ],
+        }
+        step = pipeline.advance(placed(once, 0, gate={"commands": self.BROKEN}), worktree=tree())
+        self.assertIn("ran out of rounds (1)", step.stall or "")
+
+    def test_a_span_of_several_stages_repeats_from_its_first_one(self) -> None:
+        span = {
+            "id": "wf-span",
+            "name": "Build · Polish ⇄ Test",
+            "stages": [
+                {"name": "Build", "steps": ["plan"]},
+                {"name": "Polish", "steps": ["code-review"]},
+                {
+                    "name": "Test",
+                    "steps": [],
+                    "check": workflows.GATE,
+                    "loop": {"from": "Build", "cap": 3},
+                },
+                {"name": "Review", "steps": [], "ships": True},
+            ],
+        }
+        record = placed(span, 2, gate={"commands": self.BROKEN})
+        step = pipeline.advance(record, worktree=tree())
+        self.assertEqual(step.index, 0, "the span starts at its first stage")
+        moved = pipeline.moved(record, step)
+        self.assertEqual(moved["stage"], 0)
+        self.assertEqual(moved["stages"][1]["state"], pipeline.TODO, "Polish has to run again")
+
+
+class FlowTests(unittest.TestCase):
+    """A workflow's stages handing over to one another, one run at a time."""
+
+    STAGED = preset("preset:staged")
+
+    def test_a_workflow_with_a_summary_that_names_nothing_ends_after_its_review(self) -> None:
+        record = placed(self.STAGED, 2)
+        step = pipeline.advance(record)
+        self.assertEqual(
+            step.stage, DONE, "an empty Summary has nothing to run, so the task is over"
+        )
+        moved = pipeline.moved(record, step)
+        self.assertEqual(moved["stage"], 4)
+        self.assertEqual(
+            moved["stages"][3]["state"], pipeline.FINISHED, "it is drawn as done, not still to come"
+        )
+
+    def test_a_summary_that_names_a_skill_is_started_like_any_other_stage(self) -> None:
+        record = placed(self.STAGED, 2)
+        record["stages"][3]["steps"] = ["weekly-review"]
+        step = pipeline.advance(record)
+        self.assertEqual(step.index, 3)
+        self.assertEqual(step.stage, DONE, "a stage after the shipping one has shipped")
+        moved = pipeline.moved(record, step)
+        self.assertEqual(pipeline.stage_name(moved), "Summary")
+        self.assertEqual(moved["stages"][3]["rounds"], [pipeline.new_round()])
+
+    def test_a_summary_that_finished_ends_the_task(self) -> None:
+        record = placed(self.STAGED, 3)
+        self.assertEqual(pipeline.advance(record).stage, DONE)
+        self.assertEqual(pipeline.moved(record, pipeline.advance(record))["stage"], 4)
+
+    def test_a_review_hands_over_without_being_gated(self) -> None:
+        record = placed(self.STAGED, 2)
+        self.assertFalse(pipeline.measured(record), "the pull request is what judges a review")
+        self.assertEqual(pipeline.advance(record).stage, DONE)
+
+
+class SingleStageTests(unittest.TestCase):
+    def test_one_run_is_a_workflow_of_one_shipping_stage(self) -> None:
+        record = pipeline.start(preset("preset:one-run"))
+        self.assertTrue(pipeline.ships(record))
+        self.assertTrue(pipeline.measured(record))
+        self.assertTrue(pipeline.gating(record))
+        self.assertEqual(pipeline.advance(pipeline.gated(record, gate(0)), worktree=tree()).stage, DONE)
+
+    def test_a_shipping_stage_with_a_stage_after_it_is_not_one_run(self) -> None:
+        after = {
+            "id": "wf-ship-then-summary",
+            "name": "Ship · Summary",
+            "stages": [
+                {"name": "Ship", "steps": [], "ships": True},
+                {"name": "Summary", "steps": ["weekly-review"]},
+            ],
+        }
+        record = placed(after, 0)
+        self.assertFalse(pipeline.gating(record), "it gates nothing: the review is what judges it")
+        self.assertEqual(
+            pipeline.moved(record, pipeline.advance(record))["stage"],
+            1,
+            "the stage after it is the task's next one, not its end",
+        )
 
 
 class GateTests(unittest.TestCase):
