@@ -2511,7 +2511,7 @@ export async function getProjectTasks(
  * A project's AFK switch: whether it is left to work its own tasks, and why it can't be. The
  * setting is the host's, so it is the same on every device the project is opened from. Needs
  * plugin 0.50, 0.51 for the task it holds and the last refusal, 0.56 for the skills its work
- * follows and 0.58 for the stage a staged task is in.
+ * follows, 0.58 for the stage a staged task is in and 0.60 for the Prompt its runs are told.
  */
 export interface ProjectAfk {
   on: boolean
@@ -2530,6 +2530,12 @@ export interface ProjectAfk {
   /** That stage's own name in the workflow's words ("Migrate", "Verify"); null once past the last. */
   stageName: string | null
   workflow: WorkflowEntry | null
+  /**
+   * How the project's work is carried out, told to every run it starts: the project's own words,
+   * or the bot's default method where it has written none. Empty is that default again, which is
+   * why the host answers the default rather than nothing.
+   */
+  prompt: string
 }
 
 function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
@@ -2552,6 +2558,8 @@ function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
     stageName: str(body.stage_name) || null,
     // And one from before the workflows answers none: the project runs what it always ran.
     workflow: parseWorkflowEntry(body.workflow),
+    // A plugin from before the Prompt answers none, which is only read where the host advertises it.
+    prompt: str(body.prompt),
   }
 }
 
@@ -2622,6 +2630,19 @@ export function setProjectAfkWorkflow(
   workflowId: string | null,
 ): Promise<ProjectAfk> {
   return writeAfk(config, projectId, { workflow_id: workflowId })
+}
+
+/**
+ * Writes how a project's AFK work is carried out — its Prompt — on its host, answering the setting
+ * it now holds. An empty one is the bot's default again, and the answer carries those words, since
+ * that is what the project's next run is told.
+ */
+export function setProjectAfkPrompt(
+  config: HermesConfig,
+  projectId: string,
+  prompt: string,
+): Promise<ProjectAfk> {
+  return writeAfk(config, projectId, { prompt })
 }
 
 function workflowPath(config: HermesConfig, rest = ""): string {
