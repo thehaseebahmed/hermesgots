@@ -4,6 +4,7 @@ import { app, assert, compress, flow, pass, runId } from "./lib.mjs"
 
 for (const [name, viewport, dark] of [
   ["compaction-divider", { width: 1440, height: 900 }, false],
+  ["compaction-divider-narrow", { width: 320, height: 640 }, false],
   ["compaction-divider-phone-dark", { width: 390, height: 844 }, true],
 ]) {
   await flow(
@@ -45,7 +46,11 @@ for (const [name, viewport, dark] of [
         place.turn,
         "and sits above the turn that ran on the compacted context",
       )
+      await divider.evaluate((el) => el.scrollIntoView({ block: "center" }))
+      await page.waitForTimeout(400)
       await shot("thread")
+      if (process.env.SHOTS_DIR)
+        await divider.screenshot({ path: `${process.env.SHOTS_DIR}/${name}-divider.png` })
       pass("the thread marks the compaction")
     },
     { viewport, dark },

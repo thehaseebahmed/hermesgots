@@ -8,48 +8,44 @@ import type { Compaction } from "@/lib/hermes"
  */
 
 /**
- * One squiggle per side, at a fixed size whatever the label's width: six humps of 8px, so the pattern
- * is the same beside "gpt-5" as beside a long provider/model, and the row is centred on its label.
- * Drawn at its own pixel size, so the stroke never thins or stretches; its round ends keep the humps
- * soft.
+ * One squiggle per side, running to the edge of the row: each hump is a fixed 26px, so a wide row
+ * shows more of them and a narrow one fewer, and they look the same either way. The wave is drawn
+ * longer than any row and clipped, from the label outwards, so a hump is cut at the row's edge and
+ * never squeezed. Drawn at its own pixel size, so the stroke never thins; its round ends keep the
+ * humps soft.
  */
-const HUMP = 8
-const HUMPS = 6
-const RISE = ` q ${HUMP / 4} -3 ${HUMP / 2} 0 q ${HUMP / 4} 3 ${HUMP / 2} 0`
+const HUMP = 26
+const HUMPS = 30
+const RISE = ` q ${HUMP / 4} -2 ${HUMP / 2} 0 q ${HUMP / 4} 2 ${HUMP / 2} 0`
 const SPAN = HUMP * HUMPS
 const WAVE = `M0 3${RISE.repeat(HUMPS)}`
 
-function Squiggle() {
+function Squiggle({ side }: { side: "left" | "right" }) {
   return (
-    <svg
+    <div
       aria-hidden
-      viewBox={`0 0 ${SPAN} 6`}
-      width={SPAN}
-      height={6}
-      className="shrink-0 text-muted-foreground"
+      className={`flex min-w-0 flex-1 overflow-hidden text-muted-foreground ${side === "left" ? "justify-end" : "justify-start"}`}
     >
-      <path
-        d={WAVE}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.5}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
+      <svg viewBox={`0 0 ${SPAN} 6`} width={SPAN} height={6} className="shrink-0">
+        <path
+          d={WAVE}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </div>
   )
 }
 
 function Divider({ label, text }: { label: string; text: string }) {
   return (
-    <div
-      role="separator"
-      aria-label={label}
-      className="flex items-center justify-center gap-3 py-1"
-    >
-      <Squiggle />
+    <div role="separator" aria-label={label} className="flex items-center gap-3 py-1">
+      <Squiggle side="left" />
       <span className="min-w-0 truncate text-sm text-muted-foreground">{text}</span>
-      <Squiggle />
+      <Squiggle side="right" />
     </div>
   )
 }
