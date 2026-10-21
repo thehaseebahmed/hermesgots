@@ -6,7 +6,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { sendFromMain } from "@/lib/chat"
+import { sendFromMain, settleRouting } from "@/lib/chat"
 import { db, mainThreadId } from "@/lib/db"
 import { TRIAGE_MS } from "@/lib/freshness"
 import { botProfile, json, seedSettings, until } from "./component-kit.tsx"
@@ -40,7 +40,7 @@ function host(name: string, triage: Answer, features: string[] = ["queue", "tria
         })
       return json(
         triage === "thread"
-          ? { decision: "thread", thread: "t1", session_id: "t1-hermes" }
+          ? { decision: "thread", thread: "t1", session_id: "t1-hermes", item: { id: "q_1" } }
           : { decision: "main" },
       )
     }
@@ -148,5 +148,57 @@ test("a bot whose plugin lacks the feature has a plain Main", async () => {
   const seen = host("route-plain", "thread", ["queue"])
   assert.equal(await sendFromMain(MAIN, "hello"), undefined)
   assert.equal(triaged(seen).length, 0)
+  assert.equal(runsFor(seen, MAIN_SESSION).length, 1)
+})
+
+test("a message sent while another is triaged waits behind it, untriaged", async () => {
+  await seed("route-second")
+  const seen = host("route-second", "hang")
+  const first = sendFromMain(MAIN, "first")
+  await until(
+    async () => (await messagesOf(MAIN)).some((m) => m.status === "routing"),
+    "the first to be routing",
+  )
+  await sendFromMain(MAIN, "second")
+  assert.equal(triaged(seen).filter((r) => r.body.text === "second").length, 0)
+  assert.ok((await messagesOf(MAIN)).some((m) => m.content === "second" && m.status === "queued"))
+  await first
+  assert.ok(!(await messagesOf(MAIN)).some((m) => m.status === "routing"))
+})
+
+test("a repeated ask carries the same id, so the host can answer it as before", async () => {
+  await seed("route-retry")
+  const seen = host("route-retry", "hang")
+  await sendFromMain(MAIN, "hello")
+  const asks = triaged(seen)
+  assert.equal(asks.length, 2)
+  assert.equal(asks[0].body.id, asks[1].body.id)
+})
+
+test("a message left routing by a closed page becomes one to send again", async () => {
+  await seed("route-stale")
+  await db.messages.add({
+    id: "m1",
+    conversationId: MAIN,
+    role: "user",
+    content: "hi",
+    status: "routing",
+    createdAt: 5,
+  })
+  await settleRouting(MAIN)
+  assert.equal((await db.messages.get("m1"))?.status, "error")
+})
+
+test("a thread answer without the queued message is not taken as sent", async () => {
+  await seed("route-noitem")
+  const seen = host("route-noitem", "thread")
+  const fetchWith = globalThis.fetch
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input instanceof Request ? input.url : input))
+    return url.pathname.endsWith("/triage")
+      ? json({ decision: "thread", thread: "t1" })
+      : fetchWith(input, init)
+  }) as typeof fetch
+  assert.equal(await sendFromMain(MAIN, "more on Lisbon"), undefined)
   assert.equal(runsFor(seen, MAIN_SESSION).length, 1)
 })

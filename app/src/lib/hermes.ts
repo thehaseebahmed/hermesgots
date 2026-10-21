@@ -1321,7 +1321,7 @@ export type Triage = { decision: "main" } | { decision: "thread"; threadId: stri
 export async function triageMessage(
   config: HermesConfig,
   sessionId: string,
-  item: { text: string; run: Record<string, unknown> },
+  item: { id: string; text: string; run: Record<string, unknown> },
   signal?: AbortSignal,
 ): Promise<Triage> {
   const response = await request(
@@ -1329,12 +1329,13 @@ export async function triageMessage(
     {
       method: "POST",
       headers: headers(config),
-      body: JSON.stringify({ text: item.text, body: item.run }),
+      body: JSON.stringify({ id: item.id, text: item.text, body: item.run }),
       signal,
     },
   )
   const body = await response.json()
-  return body?.decision === "thread" && typeof body.thread === "string"
+  // A thread's answer counts only with the queued item that proves the host has the message.
+  return body?.decision === "thread" && typeof body.thread === "string" && body.item?.id
     ? { decision: "thread", threadId: body.thread }
     : { decision: "main" }
 }

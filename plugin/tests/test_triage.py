@@ -46,7 +46,7 @@ class TriageTests(unittest.TestCase):
 
     def run_triage(self, llm, text="more on Lisbon", session="memento-main-bot"):
         with mock.patch.object(triage, "_llm", return_value=llm), mock.patch.object(
-            triage, "_rows", return_value=[]
+            triage, "_rows", return_value={}
         ):
             return triage.triage(self.path, self.home, session, text)
 
@@ -55,7 +55,8 @@ class TriageTests(unittest.TestCase):
 
     def test_continue_names_the_thread_and_its_session(self):
         found = self.run_triage(Llm({"decision": "continue", "thread": "t1"}))
-        self.assertEqual(found, {"decision": "thread", "thread": "t1", "session_id": "s1"})
+        self.assertEqual(found["decision"], "thread")
+        self.assertEqual((found["thread"], found["session_id"]), ("t1", "s1"))
 
     def test_every_failure_is_main(self):
         for llm in (
@@ -83,7 +84,7 @@ class TriageTests(unittest.TestCase):
 
 class CandidateTests(unittest.TestCase):
     def pick(self, records):
-        with mock.patch.object(triage, "_rows", return_value=[]):
+        with mock.patch.object(triage, "_rows", return_value={}):
             return triage.candidates(records, MAIN, Path("."))
 
     def test_plain_threads_only(self):
@@ -112,9 +113,44 @@ class CandidateTests(unittest.TestCase):
 
     def test_carries_title_last_line_and_activity(self):
         records = {MAIN: chat(main=True), "t": chat(hermesSessionId="s", title="Lisbon", updatedAt=7)}
-        with mock.patch.object(triage, "_rows", return_value=[{"role": "user", "text": "hi\nthere"}]):
+        with mock.patch.object(
+            triage, "_rows", return_value={"s": [{"role": "user", "text": "hi\nthere"}]}
+        ):
             found = triage.candidates(records, MAIN, Path("."))
         self.assertEqual(found, [{"id": "t", "title": "Lisbon", "last": "hi there", "active": 7}])
+
+
+class RowsTests(unittest.TestCase):
+    def test_one_connection_reads_every_session_and_follows_compression(self):
+        import sqlite3
+
+        home = Path(tempfile.mkdtemp())
+        conn = sqlite3.connect(home / "state.db")
+        conn.execute("CREATE TABLE sessions (id TEXT, parent_session_id TEXT)")
+        conn.execute("CREATE TABLE messages (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT)")
+        conn.execute("INSERT INTO sessions VALUES ('child', 'a')")
+        conn.executemany(
+            "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
+            [("a", "user", "old"), ("child", "assistant", "newest"), ("b", "user", "other")],
+        )
+        conn.commit()
+        conn.close()
+        found = triage._rows(home, ["a", "b", "none"], 1)
+        self.assertEqual(found["a"], [{"role": "assistant", "text": "newest"}])
+        self.assertEqual(found["b"], [{"role": "user", "text": "other"}])
+        self.assertEqual(found["none"], [])
+
+    def test_a_past_deadline_asks_no_model(self):
+        llm = Llm({"decision": "continue", "thread": "t"})
+        with mock.patch.object(triage, "_llm", return_value=llm):
+            self.assertIsNone(triage.decide("hi", [{"id": "t", "title": "", "last": "", "active": 1}], [], 0.0))
+        self.assertEqual(llm.calls, [])
+
+    def test_an_answer_is_given_once_per_id(self):
+        triage.remember("s:1", {"decision": "main"})
+        self.assertEqual(triage.given("s:1"), {"decision": "main"})
+        self.assertIsNone(triage.given("s:2"))
+        self.assertIsNone(triage.given(None))
 
 
 if __name__ == "__main__":

@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import time
+from collections import OrderedDict
+from contextlib import closing
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -66,23 +69,39 @@ def _line(text: Any, limit: int) -> str:
     return flat if len(flat) <= limit else flat[: limit - 1] + "…"
 
 
-def _rows(home: Path, session_id: str, count: int) -> List[Dict[str, str]]:
-    """The newest ``count`` user and assistant rows of a session, oldest first; none if unreadable."""
+def _rows(
+    home: Path, session_ids: List[str], count: int, conn: Optional[sqlite3.Connection] = None
+) -> Dict[str, List[Dict[str, str]]]:
+    """Each session's newest ``count`` user and assistant rows, oldest first, on one connection.
+
+    A session that compression moved on is read through its children too, so its last line is the
+    chat's latest. A session that can't be read is left out.
+    """
     state = home / "state.db"
-    if not state.exists():
-        return []
-    try:
-        with sqlite3.connect(f"{state.as_uri()}?mode=ro", uri=True, timeout=2) as conn:
-            found = conn.execute(
+    if conn is None:
+        if not state.exists():
+            return {}
+        try:
+            with closing(sqlite3.connect(f"{state.as_uri()}?mode=ro", uri=True, timeout=2)) as opened:
+                return _rows(home, session_ids, count, opened)
+        except sqlite3.Error:
+            return {}
+    found: Dict[str, List[Dict[str, str]]] = {}
+    for session_id in session_ids:
+        try:
+            rows = conn.execute(
                 """SELECT role, content FROM messages
-                   WHERE session_id = ? AND role IN ('user', 'assistant')
+                   WHERE (session_id = ? OR session_id IN
+                          (SELECT id FROM sessions WHERE parent_session_id = ?))
+                     AND role IN ('user', 'assistant')
                      AND content IS NOT NULL AND content != ''
                    ORDER BY id DESC LIMIT ?""",
-                (session_id, count),
+                (session_id, session_id, count),
             ).fetchall()
-    except sqlite3.Error:
-        return []
-    return [{"role": role, "text": content} for role, content in reversed(found)]
+        except sqlite3.Error:
+            continue
+        found[session_id] = [{"role": role, "text": text} for role, text in reversed(rows)]
+    return found
 
 
 def candidates(records: Dict[str, Dict[str, Any]], main_id: str, home: Path) -> List[Dict[str, Any]]:
@@ -105,8 +124,10 @@ def candidates(records: Dict[str, Dict[str, Any]], main_id: str, home: Path) -> 
         found.append((active if isinstance(active, (int, float)) else 0, chat_id, value, session_id))
     found.sort(key=lambda row: row[0], reverse=True)
     result = []
-    for active, chat_id, value, session_id in found[:MAX_CANDIDATES]:
-        last = _rows(home, session_id, 1)
+    top = found[:MAX_CANDIDATES]
+    lines = _rows(home, [session_id for _, _, _, session_id in top], 1)
+    for active, chat_id, value, session_id in top:
+        last = lines.get(session_id) or []
         result.append(
             {
                 "id": chat_id,
@@ -133,12 +154,18 @@ def _prompt(text: str, options: List[Dict[str, Any]], turns: List[Dict[str, str]
     return "\n".join(lines)
 
 
-def decide(text: str, options: List[Dict[str, Any]], turns: List[Dict[str, str]]) -> Optional[str]:
+def decide(
+    text: str,
+    options: List[Dict[str, Any]],
+    turns: List[Dict[str, str]],
+    deadline: Optional[float] = None,
+) -> Optional[str]:
     """The id of the thread the message continues, or None to stay in Main."""
     if not options or not isinstance(text, str) or not text.strip():
         return None
     llm = _llm()
-    if llm is None:
+    # Past the deadline nobody is waiting for the answer, so the model isn't asked at all.
+    if llm is None or (deadline is not None and time.monotonic() > deadline):
         return None
     try:
         result = llm.complete_structured(
@@ -160,8 +187,28 @@ def decide(text: str, options: List[Dict[str, Any]], turns: List[Dict[str, str]]
     return thread if isinstance(thread, str) and any(o["id"] == thread for o in options) else None
 
 
-def triage(path: Path, home: Path, session_id: str, text: str) -> Dict[str, Any]:
-    """``{ decision: "main" }`` or ``{ decision: "thread", thread, session_id }``.
+# Answers already given, by the id the app sent with the message: a request the app repeats after a
+# dropped response gets the same answer back, and the message is queued once.
+_given: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+GIVEN_CAP = 64
+
+
+def given(key: Optional[str]) -> Optional[Dict[str, Any]]:
+    return _given.get(key) if key else None
+
+
+def remember(key: Optional[str], answer: Dict[str, Any]) -> None:
+    if not key:
+        return
+    _given[key] = answer
+    while len(_given) > GIVEN_CAP:
+        _given.popitem(last=False)
+
+
+def triage(
+    path: Path, home: Path, session_id: str, text: str, deadline: Optional[float] = None
+) -> Dict[str, Any]:
+    """``{ decision: "main" }`` or ``{ decision: "thread", thread, session_id, model_choice }``.
 
     Only a Main thread's session is triaged; any other session, and any failure, is Main.
     """
@@ -181,13 +228,16 @@ def triage(path: Path, home: Path, session_id: str, text: str) -> Dict[str, Any]
         if main_id is None:
             return {"decision": MAIN}
         options = candidates(records, main_id, home)
-        thread = decide(text, options, _rows(home, session_id, MAIN_TURNS))
+        turns = _rows(home, [session_id], MAIN_TURNS).get(session_id) or []
+        thread = decide(text, options, turns, deadline)
         if thread is None:
             return {"decision": MAIN}
+        value = records[thread]["value"]
         return {
             "decision": THREAD,
             "thread": thread,
-            "session_id": records[thread]["value"]["hermesSessionId"],
+            "session_id": value["hermesSessionId"],
+            "model_choice": value.get("modelChoice"),
         }
     except Exception:
         logger.debug("memento: triage failed", exc_info=True)

@@ -12,6 +12,7 @@ set the profile's main model from a bot's Default model (``host_model.py``), lab
 from __future__ import annotations
 
 import asyncio
+import time
 import contextlib
 import json
 import logging
@@ -1658,32 +1659,58 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         session_id, text = request.match_info["session_id"], body.get("text")
         if not isinstance(text, str):
             return _error(web, "text must be a string", 400)
+        key = body.get("id") if isinstance(body.get("id"), str) else None
+        answered = triage.given(f"{session_id}:{key}" if key else None)
+        if answered is not None:
+            return web.json_response(answered)
         path = store_path()
+        deadline = time.monotonic() + triage.DEADLINE_S
         try:
             found = await asyncio.wait_for(
-                asyncio.to_thread(triage.triage, path, hermes_home(), session_id, text),
+                asyncio.to_thread(
+                    triage.triage, path, hermes_home(), session_id, text, deadline
+                ),
                 triage.DEADLINE_S,
             )
         except asyncio.TimeoutError:
             found = {"decision": triage.MAIN}
-        if found["decision"] != triage.THREAD:
-            return web.json_response({"object": "memento.triage", **found})
-        # The message goes to the thread's own session, so Main never holds it.
-        thread = found["session_id"]
-        files = [
-            {key: file[key] for key in ("name", "type", "size", "path") if key in file}
-            for file in (body.get("attachments") or [])[:20]
-            if isinstance(file, dict)
-        ]
-        try:
-            run = outbox.clean_body(thread, body.get("body"))
-            item = await asyncio.to_thread(
-                outbox.add, path, thread, request_profile(), text, files, run
-            )
-        except ValueError:
-            return web.json_response({"object": "memento.triage", "decision": triage.MAIN})
-        follow_queue(request, thread, path)
-        return web.json_response({"object": "memento.triage", **found, "item": item})
+        answer: Dict[str, Any] = {"object": "memento.triage", "decision": triage.MAIN}
+        if found["decision"] == triage.THREAD and time.monotonic() <= deadline + 0.5:
+            thread = found["session_id"]
+            files = [
+                {k: file[k] for k in ("name", "type", "size", "path") if k in file}
+                for file in (body.get("attachments") or [])[:20]
+                if isinstance(file, dict)
+            ]
+            try:
+                # The thread runs on its own model, not Main's.
+                run_body = body.get("body")
+                if isinstance(run_body, dict):
+                    run_body = {k: v for k, v in run_body.items() if k not in ("model", "provider")}
+                    choice = found.get("model_choice")
+                    if isinstance(choice, dict) and choice.get("model") and choice.get("provider"):
+                        run_body["model"], run_body["provider"] = choice["model"], choice["provider"]
+                run = outbox.clean_body(thread, run_body)
+                # A thread whose last run was stopped waits for its user to send again, and a
+                # message put behind that would sit unseen.
+                runs = outbox.session_runs(adapter, await outbox.session_ids(adapter, thread))
+                resumed = (await asyncio.to_thread(outbox.read, path, thread))["resumed_at"]
+                if outbox.state(runs, resumed) != "paused":
+                    item = await asyncio.to_thread(
+                        outbox.add, path, thread, request_profile(), text, files, run
+                    )
+                    follow_queue(request, thread, path)
+                    answer = {
+                        "object": "memento.triage",
+                        "decision": triage.THREAD,
+                        "thread": found["thread"],
+                        "session_id": thread,
+                        "item": item,
+                    }
+            except ValueError:
+                pass
+        triage.remember(f"{session_id}:{key}" if key else None, answer)
+        return web.json_response(answer)
 
     async def remove_queued(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)

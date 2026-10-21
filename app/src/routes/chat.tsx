@@ -91,6 +91,7 @@ import {
   refreshQueue,
   reattachRun,
   sendFromMain,
+  settleRouting,
   sendMessage,
   steerText,
   stopMessage,
@@ -222,6 +223,10 @@ function FollowOnSend({ lastUserId }: { lastUserId?: string }) {
 
 export function ChatPage() {
   const { id } = useParams()
+  // A message left routing by a page that closed mid-triage was never sent.
+  useEffect(() => {
+    if (id) void settleRouting(id)
+  }, [id])
   const navigate = useNavigate()
   const { root, up } = useNav()
   const settings = useLiveQuery(() => db.settings.get("settings"), [])
