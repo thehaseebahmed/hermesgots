@@ -740,13 +740,7 @@ export function ChatPage() {
                     return (
                       <MessageScrollerItem key={message.id} messageId={message.id}>
                         {change && <ModelChange model={change} />}
-                        <MessageItem
-                          message={message}
-                          showStats
-                          botId={profile?.botId}
-                          busy={busy}
-                          plain={Boolean(session)}
-                        />
+                        <MessageItem message={message} showStats busy={busy} />
                       </MessageScrollerItem>
                     )
                   })}

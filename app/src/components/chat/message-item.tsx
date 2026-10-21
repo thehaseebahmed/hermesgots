@@ -16,10 +16,9 @@ import { AgentCards } from "@/components/chat/agent-card"
 import { MediaTag } from "@/components/chat/media-image"
 import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
 import { ToolGroup } from "@/components/chat/tool-group"
-import { Bot } from "@/components/bot"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Button } from "@/components/ui/button"
-import { Message as MessageRow, MessageAvatar, MessageContent } from "@/components/ui/message"
+import { Message as MessageRow, MessageContent } from "@/components/ui/message"
 import { Spinner } from "@/components/ui/spinner"
 import { DELEGATE_TOOL } from "@/lib/agents"
 import { openable } from "@/lib/attachments"
@@ -219,23 +218,6 @@ function FailedActions({ message }: { message: Message }) {
   )
 }
 
-export function TypingBubble() {
-  return (
-    <Bubble variant="muted">
-      <BubbleContent className="flex h-10 items-center gap-1.5 px-4" aria-label="Hermes is writing">
-        {[0, 150, 300].map((delay) => (
-          <span
-            key={delay}
-            className="size-2 animate-typing-dot rounded-full bg-muted-foreground/70"
-            style={{ animationDelay: `${delay}ms` }}
-          />
-        ))}
-      </BubbleContent>
-    </Bubble>
-  )
-}
-
-/** A project session's working line: no bubble, just what the agent is doing. */
 function StatusLine({ text }: { text: string }) {
   return (
     <div className="flex items-center gap-2 px-1 text-sm text-muted-foreground" aria-live="polite">
@@ -248,19 +230,19 @@ function StatusLine({ text }: { text: string }) {
 interface MessageItemProps {
   message: Message
   showStats: boolean
-  botId?: string
   /** Whether a reply is streaming in this chat, so queued messages know they'll go on their own. */
   busy?: boolean
-  /** A project session's thread: no avatars, and the agent's replies sit on the page, not in bubbles. */
-  plain?: boolean
 }
 
+/**
+ * One message in a thread, drawn the same way wherever it is: the agent's reply sits on the page,
+ * with no bubble and no picture, and only the user's own message wears a bubble — with the pictures
+ * gone, that bubble is the cue for who spoke.
+ */
 export const MessageItem = memo(function MessageItem({
   message,
   showStats,
-  botId,
   busy,
-  plain,
 }: MessageItemProps) {
   // Replies type out a word at a time, however Hermes delivers them.
   const content = useReveal(message.role === "assistant" ? message.content : "")
@@ -270,7 +252,7 @@ export const MessageItem = memo(function MessageItem({
   const failed = message.status === "error"
 
   if (message.role === "user") {
-    if (plain && isPlanApproval(message.content)) return <PlanApprovedCard />
+    if (isPlanApproval(message.content)) return <PlanApprovedCard />
     const queued = message.status === "queued"
     // A message this device is still holding, waiting its turn or waiting to be sent again, wears the
     // same dimmed bubble: one cue for "not through yet", whether the queue holds it or the send failed.
@@ -315,19 +297,10 @@ export const MessageItem = memo(function MessageItem({
 
   const error = (
     <>
-      <AlertCircleIcon className="mt-0.5 size-4 shrink-0" />
+      <AlertCircleIcon role="img" aria-label="Failed" className="mt-0.5 size-4 shrink-0" />
       <span>{message.statusText ?? "Something went wrong."}</span>
     </>
   )
-  // A turn that failed with nothing to show for it — nothing streamed, no call ran — is the whole
-  // row: plain text on the page, with no bot beside it to answer for it.
-  const bareError =
-    failed &&
-    !message.content &&
-    !message.tools?.length &&
-    !message.steers?.length &&
-    !message.approval?.resolved
-
   const streaming = message.status === "streaming"
   const approval = message.approval
   const awaitingApproval = Boolean(approval && !approval.resolved)
@@ -339,13 +312,6 @@ export const MessageItem = memo(function MessageItem({
   const tools = (message.tools ?? []).filter((t) => t !== asking)
   // The tool group right above already names the running call, so repeating it here is noise.
   const runningTool = tools.some((t) => t.status === "running")
-  // Like a person's "typing…", the dots show only while the model thinks or writes: not while a
-  // tool runs (hidden ones included) or the turn waits on the user.
-  const typing =
-    streaming &&
-    !awaitingApproval &&
-    !awaitingClarify &&
-    !message.tools?.some((t) => t.status === "running")
 
   // An answered approval and each steer split the reply so they sit where they happened: what
   // Hermes said and ran before, the card or the user's message, then what came after.
@@ -385,31 +351,15 @@ export const MessageItem = memo(function MessageItem({
     since = b.time
   }
 
-  // The avatar lines up with the bubble, which has the stats line under it only once the reply is done.
+  // A reply's stats come only once it is done and fully revealed, so they never count up.
   const statsShown = showStats && !streaming && !revealing && Boolean(message.stats)
-  const statusShown =
-    streaming &&
-    Boolean(content) &&
-    Boolean(message.statusText) &&
-    !awaitingApproval &&
-    !awaitingClarify
+  const statusLine = streaming && !runningTool
   const footer = (
     <>
-      {plain ? (
-        streaming &&
-        !runningTool && (
-          <StatusLine
-            text={awaitingApproval ? "Waiting for your approval…" : describeActivity(message)}
-          />
-        )
-      ) : (
-        <>
-          {statusShown && (
-            <div className="px-1 text-xs text-muted-foreground">{message.statusText}</div>
-          )}
-          {/* Last, so the avatar stays level with it however much the turn has said or run. */}
-          {typing && <TypingBubble />}
-        </>
+      {statusLine && (
+        <StatusLine
+          text={awaitingApproval ? "Waiting for your approval…" : describeActivity(message)}
+        />
       )}
       {/* An error on a reply that streamed says so plainly: it isn't the bot's answer. */}
       {failed && (
@@ -423,10 +373,7 @@ export const MessageItem = memo(function MessageItem({
   )
 
   const footerShown =
-    (plain ? streaming : typing || statusShown) ||
-    failed ||
-    (message.status === "stopped" && !message.content) ||
-    statsShown
+    statusLine || failed || (message.status === "stopped" && !message.content) || statsShown
   return (
     <div className="flex flex-col gap-3">
       {segments.map((segment, i) => {
@@ -440,15 +387,7 @@ export const MessageItem = memo(function MessageItem({
           <Fragment key={breaks[i - 1]?.key ?? "start"}>
             {i > 0 && breaks[i - 1].node}
             {(parts.length > 0 || (last && footerShown)) && (
-              <AssistantRow
-                conversationId={message.conversationId}
-                botId={botId}
-                plain={plain}
-                busy={busy}
-                noAvatar={bareError}
-                lift={last && statsShown}
-                parts={parts}
-              >
+              <AssistantRow conversationId={message.conversationId} busy={busy} parts={parts}>
                 {last && footer}
               </AssistantRow>
             )}
@@ -476,34 +415,19 @@ function sameMessage(a: MessageItemProps, b: MessageItemProps) {
 
 function AssistantRow({
   conversationId,
-  botId,
-  plain,
   busy,
-  noAvatar,
-  lift,
   parts,
   children,
 }: {
   conversationId: string
-  botId?: string
-  plain?: boolean
   /** A reply is streaming in this chat, so a card that sends (a missed question) waits. */
   busy?: boolean
-  /** Nothing but the error stands here, so no picture of the bot stands beside it. */
-  noAvatar?: boolean
-  /** A line sits under the last bubble, so the avatar rises to stay level with it. */
-  lift?: boolean
   parts: Part[]
   children?: ReactNode
 }) {
   return (
-    <MessageRow align="start" className="gap-2">
-      {!plain && !noAvatar && (
-        <MessageAvatar className={cn("size-8 bg-transparent", lift && "mb-6")}>
-          <Bot id={botId} className="size-8" />
-        </MessageAvatar>
-      )}
-      <MessageContent className={plain ? "gap-3" : "gap-2"}>
+    <MessageRow align="start">
+      <MessageContent className="gap-3">
         {parts.map((part) =>
           part.kind === "clarify" ? (
             <ClarifyCard
@@ -520,16 +444,10 @@ function AssistantRow({
             </div>
           ) : part.kind === "media" ? (
             <MediaTag key={part.at} conversationId={conversationId} paths={part.paths} />
-          ) : plain ? (
-            <Markdown key={part.at} plain className="px-1 text-[15px] leading-relaxed">
+          ) : (
+            <Markdown key={part.at} className="px-1 text-[15px] leading-relaxed">
               {part.text}
             </Markdown>
-          ) : (
-            <Bubble key={part.at} variant="muted" className="max-w-[min(100%,42rem)]">
-              <BubbleContent className="px-4 py-3 text-[15px]">
-                <Markdown>{part.text}</Markdown>
-              </BubbleContent>
-            </Bubble>
           ),
         )}
         {children}

@@ -196,7 +196,7 @@ function AgentView({ agent, server }: { agent: DelegatedAgent; server: HermesCon
           <p className="px-2 text-sm text-muted-foreground">Nothing yet.</p>
         )}
         {messages?.map((message) => (
-          <MessageItem key={message.id} message={message} showStats={false} plain />
+          <MessageItem key={message.id} message={message} showStats={false} />
         ))}
         <div ref={end} />
       </div>
