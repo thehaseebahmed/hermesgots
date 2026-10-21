@@ -8,8 +8,9 @@ covering the screens, routes and state its diff moves — and the whole registry
 sweep passed. `pnpm e2e all` by hand is for when someone asks for it.
 
 ADR 0002 rejected a nightly full set while the repository was private, and the reason was its
-minutes. The repository is public now, and ADR 0030 retires that budget: standard GitHub-hosted
-runners cost nothing on a public repository. ADR 0002's other objection still holds: a nightly
+minutes. The repository is public now, so standard GitHub-hosted runners cost nothing, and ADR 0030
+keeps the discipline anyway: the run skips a night `main` didn't move and refuses to run on a private
+repository. ADR 0002's other objection still holds: a nightly
 failure is read a merge after the change that caused it. That is the price, and it's paid only for
 the flows a change didn't think it touched. The flows it did touch were run before it landed.
 
@@ -28,5 +29,5 @@ the flows a change didn't think it touched. The flows it did touch were run befo
   server logs are the run's artifact.
 - The Playwright version is pinned in two places, the workflow and the development image's
   `Dockerfile`. Bump them together.
-- If the repository goes private again, ADR 0030 reverses, and this run costs about 1,100 minutes a
-  month if `main` moves every day.
+- If the repository goes private, the scheduled run stops itself (ADR 0030). Started by hand it costs
+  about 37 minutes; every night it would cost about 1,100 a month.
