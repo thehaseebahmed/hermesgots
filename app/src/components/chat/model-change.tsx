@@ -1,3 +1,6 @@
+import { formatTokens } from "@/lib/format"
+import type { Compaction } from "@/lib/hermes"
+
 /**
  * What changed in a chat between the turns either side of it: a squiggle broken by a word. The model
  * that took over, in its provider/model form; or that the host compacted the conversation. A label,
@@ -41,7 +44,7 @@ function Divider({ label, text }: { label: string; text: string }) {
   return (
     <div role="separator" aria-label={label} className="flex items-center gap-3 py-1">
       <Squiggle />
-      <span className="text-[15px] text-muted-foreground">{text}</span>
+      <span className="text-sm text-muted-foreground">{text}</span>
       <Squiggle />
     </div>
   )
@@ -51,6 +54,14 @@ export function ModelChange({ model }: { model: string }) {
   return <Divider label={`Model switched to ${model}`} text={model} />
 }
 
-export function Compacted() {
-  return <Divider label="Conversation compacted" text="Conversation compacted" />
+/** The context as it stood before the host compacted it, where the host recorded it. */
+function sizeNote({ tokens, window }: Compaction) {
+  if (!tokens) return ""
+  if (!window) return ` · ${formatTokens(tokens)}`
+  return ` · ${formatTokens(tokens)} of ${formatTokens(window)} (${Math.round((tokens / window) * 100)}%)`
+}
+
+export function Compacted({ compaction }: { compaction: Compaction }) {
+  const note = sizeNote(compaction)
+  return <Divider label={`Conversation compacted${note}`} text={`Conversation compacted${note}`} />
 }

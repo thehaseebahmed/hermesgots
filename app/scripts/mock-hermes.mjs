@@ -4126,7 +4126,15 @@ http
       const { session, child } = await readBody(req)
       if (!session || !child) return json(res, 400, { error: { message: "session and child" } })
       compressed.set(session, child)
-      const rotated = [...(compactions.get(session) ?? []), { at: Date.now() }]
+      const last = lastCalls.get(session)
+      const rotated = [
+        ...(compactions.get(session) ?? []),
+        {
+          at: Date.now(),
+          ...(last?.prompt_tokens ? { tokens: last.prompt_tokens } : {}),
+          ...(last?.context_length ? { window: last.context_length } : {}),
+        },
+      ]
       compactions.set(session, rotated)
       compactions.set(child, rotated)
       // The child shares the lineage's rows: a read of either id sees root→tip, and turns land in

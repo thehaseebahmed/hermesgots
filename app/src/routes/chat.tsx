@@ -760,7 +760,9 @@ export function ChatPage() {
                     const change = changes.get(message.id)
                     return (
                       <MessageScrollerItem key={message.id} messageId={message.id}>
-                        {compacted.before.has(message.id) && <Compacted />}
+                        {compacted.before.has(message.id) && (
+                          <Compacted compaction={compacted.before.get(message.id)!} />
+                        )}
                         {change && <ModelChange model={change} />}
                         <MessageItem
                           message={message}
@@ -771,7 +773,7 @@ export function ChatPage() {
                       </MessageScrollerItem>
                     )
                   })}
-                  {compacted.trailing && <Compacted />}
+                  {compacted.trailing && <Compacted compaction={compacted.trailing} />}
                 </AgentsContext.Provider>
               </MessageScrollerContent>
             </MessageScrollerViewport>

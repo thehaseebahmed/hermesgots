@@ -12,6 +12,7 @@ from contextlib import closing
 from pathlib import Path
 
 from plugin import compactions
+from plugin.store import connect, db_path
 from plugin.tests._helpers import temp_hermes_home
 
 
@@ -42,6 +43,30 @@ class CompactionsTest(unittest.TestCase):
             ],
         )
         self.assertEqual(compactions.read(self.home, "s3"), [{"at": 100500}, {"at": 200000}])
+
+    def test_a_compaction_carries_the_parents_last_size_where_recorded(self) -> None:
+        store(
+            self.home,
+            [
+                ("s1", None, "compression", 100.0, None, None),
+                ("s2", "s1", "compression", 200.0, None, None),
+                ("s3", "s2", None, None, None, None),
+            ],
+        )
+        conn = connect(db_path(self.home))
+        conn.execute(
+            "INSERT INTO context (session_id, prompt_tokens, context_length, at) "
+            "VALUES ('s1', 168000, 200000, 1)"
+        )
+        conn.execute(
+            "INSERT INTO context (session_id, prompt_tokens, at) VALUES ('s3', 5000, 2)"
+        )
+        conn.commit()
+        conn.close()
+        self.assertEqual(
+            compactions.read(self.home, "s3"),
+            [{"at": 100000, "tokens": 168000, "window": 200000}, {"at": 200000}],
+        )
 
     def test_an_uncompacted_chat_has_none(self) -> None:
         store(self.home, [("s1", None, None, None, None, None)])

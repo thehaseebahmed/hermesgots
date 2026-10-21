@@ -15,7 +15,7 @@ const message = (id, role, createdAt) => ({
 const turn = (n, at) => [message(`u${n}`, "user", at), message(`a${n}`, "assistant", at + 1)]
 const marked = (thread, compactions) => {
   const { before, trailing } = compactionMarks(thread, compactions)
-  return { before: [...before].sort(), trailing }
+  return { before: [...before.keys()].sort(), trailing: trailing !== undefined }
 }
 
 test("one between turns sits above the next turn", () => {
@@ -46,4 +46,13 @@ test("no compactions, or none known, mark nothing", () => {
   assert.deepEqual(marked(turn(1, 100), []), { before: [], trailing: false })
   assert.deepEqual(marked(turn(1, 100), undefined), { before: [], trailing: false })
   assert.deepEqual(marked([], [{ at: 1 }]), { before: [], trailing: false })
+})
+
+test("each divider carries the compaction it marks, the first of a gap", () => {
+  const thread = [...turn(1, 100), ...turn(2, 200)]
+  const first = { at: 120, tokens: 168000, window: 200000 }
+  const marks = compactionMarks(thread, [first, { at: 130, tokens: 90000 }])
+  assert.deepEqual(marks.before.get("u2"), first)
+  const last = compactionMarks(thread, [{ at: 500, tokens: 7 }])
+  assert.deepEqual(last.trailing, { at: 500, tokens: 7 })
 })

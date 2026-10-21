@@ -27,7 +27,8 @@ for (const [name, viewport, dark] of [
       await send("second question")
       await done()
       await until(async () => (await divider.count()) === 1, 15_000, "the divider to appear")
-      assert.equal((await divider.innerText()).trim(), "Conversation compacted")
+      const text = (await divider.innerText()).trim()
+      assert.match(text, /^Conversation compacted · \d+(\.\d)?k of \d+k \(\d+%\)$/, "with its size")
       const place = await page.evaluate(() => {
         const items = [...document.querySelectorAll("[data-slot=message-scroller-item]")]
         return {

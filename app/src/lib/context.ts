@@ -116,7 +116,11 @@ async function readContext(conversationId: string): Promise<void> {
 
 function sameCompactions(before: Compaction[] | undefined, after: Compaction[]) {
   return (
-    (before?.length ?? 0) === after.length && (before ?? []).every((c, i) => c.at === after[i].at)
+    (before?.length ?? 0) === after.length &&
+    (before ?? []).every(
+      (c, i) =>
+        c.at === after[i].at && c.tokens === after[i].tokens && c.window === after[i].window,
+    )
   )
 }
 

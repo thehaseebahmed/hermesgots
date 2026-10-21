@@ -1806,6 +1806,9 @@ export interface ModelChange {
 /** A point where the host compacted a chat's context, on its own clock. */
 export interface Compaction {
   at: number
+  /** The context just before it: the last prompt size the host recorded, and the window it was measured against. */
+  tokens?: number
+  window?: number
 }
 
 export interface SessionContext {
@@ -1858,8 +1861,17 @@ function readCompactions(value: unknown): Compaction[] | undefined {
   if (!Array.isArray(value)) return undefined
   const found: Compaction[] = []
   for (const raw of value) {
-    const at = (raw as { at?: unknown } | null)?.at
-    if (typeof at === "number" && Number.isFinite(at)) found.push({ at })
+    const row = (raw ?? {}) as Record<string, unknown>
+    if (typeof row.at !== "number" || !Number.isFinite(row.at)) continue
+    const count = (value: unknown) =>
+      typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined
+    const tokens = count(row.tokens)
+    const window = count(row.window)
+    found.push({
+      at: row.at,
+      ...(tokens ? { tokens } : {}),
+      ...(window ? { window } : {}),
+    })
   }
   return found
 }
