@@ -31,9 +31,7 @@ for (const width of [390, 1024]) {
         await page.getByText("Inbox triage").first().waitFor({ timeout: 15_000 })
         await shot("routines")
 
-        // A session that has started: a place in a project, so its header is centred, its bot's name
-        // and the repositories it works in under the title. Nothing is sent from it — the host's
-        // workspace answer would replace the worktree seeded here.
+        // Nothing is sent from it — the host's workspace answer would replace the worktree seeded here.
         const sessionId = `e2e-header-${runId()}`
         await seed([
           {
@@ -73,7 +71,6 @@ for (const width of [390, 1024]) {
         await settled(page)
         await shot("session")
 
-        // A session's header has no picture: the title and its line take the room.
         assert.equal(
           await header.locator('[role="img"]').count(),
           0,
@@ -95,9 +92,7 @@ for (const width of [390, 1024]) {
         await assertOneLine(title, `the session's title at ${look}`)
         await assertOneLine(subtitle.first(), `the session's line at ${look}`)
 
-        // The title truncates rather than pushing the controls: its text is wider than its box. Its
-        // block and its line sit centred in the room the controls leave — the row's own centre on a
-        // phone, where the back control and the actions are the same width.
+        // The block and the row share a centre on a phone only: from 768px the actions carry a ring.
         const geometry = await header.evaluate((el) => {
           const rect = (slot) => {
             const r = el.querySelector(`[data-slot="${slot}"]`).getBoundingClientRect()
@@ -110,7 +105,7 @@ for (const width of [390, 1024]) {
             lineClient: el.querySelector('[data-slot="header-line"]').clientWidth,
             title: rect("header-title"),
             line: rect("header-line"),
-            text: rect("header-text"),
+            middle: rect("header-middle"),
             row: rect("header-row"),
           }
         })
@@ -125,12 +120,12 @@ for (const width of [390, 1024]) {
         )
         const centre = (box) => box.x + box.width / 2
         assert.ok(
-          geometry.title.x >= geometry.text.x - 2 &&
-            geometry.title.right <= geometry.text.right + 2,
+          geometry.title.x >= geometry.middle.x - 2 &&
+            geometry.title.right <= geometry.middle.right + 2,
           `the title stays in the room the controls leave at ${look}`,
         )
         assert.ok(
-          Math.abs(centre(geometry.title) - centre(geometry.text)) <= 2,
+          Math.abs(centre(geometry.title) - centre(geometry.middle)) <= 2,
           `the title is centred in that room at ${look}`,
         )
         assert.ok(
@@ -153,6 +148,26 @@ for (const width of [390, 1024]) {
           "the reply to finish",
         )
         await shot("chat")
+        // The width's own boundaries: exactly 768 draws a tablet's two names, and a laptop's width
+        // draws three. The session then sits beside Code's list, so its room is not the one measured
+        // above and only the line is asserted.
+        if (width === 1024) {
+          for (const [at, expected] of [
+            [768, "Test bot · memento, gots-app +2"],
+            [1280, "Test bot · memento, gots-app, docs +1"],
+          ]) {
+            await page.setViewportSize({ width: at, height: at === 768 ? 768 : 900 })
+            await page.goto(`${app}/c/${sessionId}`)
+            const laptop = page.locator("header").filter({ hasText: SESSION_TITLE })
+            const laptopLine = laptop.getByText(/^Test bot · /)
+            await laptopLine.first().waitFor({ timeout: 15_000 })
+            assert.equal(
+              (await laptopLine.first().innerText()).trim(),
+              expected,
+              `the session's line names what a ${at}px screen has room for (${look})`,
+            )
+          }
+        }
         pass(
           `Projects, a project, Code, Routines, a chat and a session's centred header load at ${look}`,
         )

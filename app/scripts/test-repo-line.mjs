@@ -87,15 +87,8 @@ test("the running tool wins while the session streams", () => {
   )
 })
 
-test("an empty activity is an idle session", () => {
-  assert.equal(
-    sessionSubtitle({ activity: "", botName: "Gots", names: ["gots/a"], cap: 1 }),
-    "Gots · a",
-  )
-  assert.equal(
-    sessionSubtitle({ activity: "  ", botName: "Gots", names: ["gots/a"], cap: 1 }),
-    "Gots · a",
-  )
+test("an idle session reads the bot and its repositories", () => {
+  assert.equal(sessionSubtitle({ botName: "Gots", names: ["gots/a"], cap: 1 }), "Gots · a")
 })
 
 test("a session in no repositories says the bot alone", () => {

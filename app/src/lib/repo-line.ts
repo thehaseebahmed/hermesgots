@@ -44,9 +44,9 @@ function withoutSharedOwner(names: readonly string[]): string[] {
 export function repoLine(names: readonly string[], cap: RepoCap): string {
   const kept = names.map((name) => name.trim()).filter(Boolean)
   const shown = withoutSharedOwner(kept)
-  const listed = shown.slice(0, cap)
-  const left = shown.length - listed.length
-  return left > 0 ? `${listed.join(", ")} +${left}` : listed.join(", ")
+  const line = shown.slice(0, cap).join(", ")
+  const left = shown.length - cap
+  return left > 0 ? `${line} +${left}` : line
 }
 
 /**
@@ -65,7 +65,6 @@ export function sessionSubtitle({
   names: readonly string[]
   cap: RepoCap
 }): string {
-  const running = activity?.trim()
-  if (running) return running
+  if (activity) return activity
   return [botName?.trim(), repoLine(names, cap)].filter((part) => part).join(" · ")
 }

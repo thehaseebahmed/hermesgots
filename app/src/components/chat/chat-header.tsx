@@ -11,10 +11,10 @@ import { cn } from "@/lib/utils"
  * `showBot` is false), then the title with its status under it, both cut with an ellipsis; actions
  * right.
  * `centered` gives a coding session's arrangement instead: the same leading control, then the title
- * centred over its subtitle with no picture — a session is a place in a project, not a conversation
- * with a bot. Its block is centred in the room the controls leave, which is the row's own centre
- * where they match in width; the muted mark moves into the actions, so it cannot pull the title off
- * centre.
+ * centred over its subtitle. Its block is centred in the room the controls leave, which is the row's
+ * own centre where they match in width; the muted mark moves into the actions, so it cannot pull the
+ * title off centre. A session is a place in a project, not a conversation with a bot, so it passes
+ * `showBot={false}`: the picture stays a caller's decision, and the arrangement doesn't second-guess it.
  * `className` can pin it in the page's flow instead.
  */
 export function ChatHeader({
@@ -64,9 +64,9 @@ export function ChatHeader({
             <MenuIcon />
           </Button>
         )}
-        {showBot && !centered && <Bot id={botId} animate className="pointer-events-auto size-11" />}
+        {showBot && <Bot id={botId} animate className="pointer-events-auto size-11" />}
         <div
-          data-slot="header-text"
+          data-slot="header-middle"
           className={cn(
             "pointer-events-auto flex min-w-0 flex-1 items-center gap-1.5",
             centered && "justify-center",

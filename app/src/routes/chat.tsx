@@ -694,8 +694,8 @@ export function ChatPage() {
         botId={profile?.botId}
         muted={Boolean(conversation?.muted || profile?.muted)}
         centered={centered}
-        // Beside its bot, a thread already shows the picture, and a session's header never does.
-        showBot={!(botPath && xl) && !unstarted}
+        // Beside its bot, a thread already shows the picture.
+        showBot={!session && !unstarted && !(botPath && xl)}
         actions={actions}
         leading={
           botPath ? (

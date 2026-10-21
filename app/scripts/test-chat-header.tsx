@@ -104,6 +104,7 @@ test("a session's header has no picture and reads its title over its repositorie
       title="Give a session a centred header"
       subtitle="Gots · hermesgots, gots-app +1"
       centered
+      showBot={false}
       leading={back}
       actions={options}
     />,
@@ -116,7 +117,7 @@ test("a session's header has no picture and reads its title over its repositorie
         "the caller's back control leads the row",
       )
       assert.ok(!find('[aria-label="Open conversations"]'), "a session has no drawer to open")
-      assert.ok(!find('[role="img"]'), "a session's header draws no picture here")
+      assert.ok(!find('[role="img"]'), "a session's header draws no picture")
       assert.deepEqual(
         lines(text),
         ["Give a session a centred header", "Gots · hermesgots, gots-app +1"],
