@@ -276,7 +276,7 @@ export function ChatPage() {
     () => modelChanges(thread ?? [], conversation?.modelChanges),
     [thread, conversation?.modelChanges],
   )
-  // Where the host compacted this chat's context: the turn each fell in carries a divider above it.
+  // Where the host compacted this chat's context: the first message after each carries a divider above it.
   const compacted = useMemo(
     () => compactionMarks(thread ?? [], conversation?.compactions),
     [thread, conversation?.compactions],
@@ -760,7 +760,7 @@ export function ChatPage() {
                     const change = changes.get(message.id)
                     return (
                       <MessageScrollerItem key={message.id} messageId={message.id}>
-                        {compacted.has(message.id) && <Compacted />}
+                        {compacted.before.has(message.id) && <Compacted />}
                         {change && <ModelChange model={change} />}
                         <MessageItem
                           message={message}
@@ -771,6 +771,7 @@ export function ChatPage() {
                       </MessageScrollerItem>
                     )
                   })}
+                  {compacted.trailing && <Compacted />}
                 </AgentsContext.Provider>
               </MessageScrollerContent>
             </MessageScrollerViewport>

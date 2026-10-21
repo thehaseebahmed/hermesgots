@@ -13,35 +13,37 @@ const message = (id, role, createdAt) => ({
 })
 
 const turn = (n, at) => [message(`u${n}`, "user", at), message(`a${n}`, "assistant", at + 1)]
+const marked = (thread, compactions) => {
+  const { before, trailing } = compactionMarks(thread, compactions)
+  return { before: [...before].sort(), trailing }
+}
 
-test("a compaction marks the turn it fell in", () => {
-  const thread = [...turn(1, 100), ...turn(2, 200), ...turn(3, 300)]
-  assert.deepEqual([...compactionMarks(thread, [{ at: 250 }])], ["u2"])
-})
-
-test("one in the newest turn marks that turn", () => {
+test("one between turns sits above the next turn", () => {
   const thread = [...turn(1, 100), ...turn(2, 200)]
-  assert.deepEqual([...compactionMarks(thread, [{ at: 999 }])], ["u2"])
+  assert.deepEqual(marked(thread, [{ at: 150 }]), { before: ["u2"], trailing: false })
 })
 
-test("several in one turn are one divider; several turns each get one", () => {
-  const thread = [...turn(1, 100), ...turn(2, 200), ...turn(3, 300)]
-  const marks = compactionMarks(thread, [{ at: 210 }, { at: 220 }, { at: 310 }])
-  assert.deepEqual([...marks].sort(), ["u2", "u3"])
+test("one as a turn opens sits between the user's message and the reply", () => {
+  const thread = [...turn(1, 100), message("u2", "user", 200), message("a2", "assistant", 210)]
+  assert.deepEqual(marked(thread, [{ at: 205 }]), { before: ["a2"], trailing: false })
 })
 
-test("one before every loaded turn marks nothing", () => {
+test("one after everything closes the thread", () => {
   const thread = [...turn(1, 100)]
-  assert.equal(compactionMarks(thread, [{ at: 50 }]).size, 0)
+  assert.deepEqual(marked(thread, [{ at: 500 }]), { before: [], trailing: true })
 })
 
-test("a reply whose user row isn't loaded opens its turn", () => {
-  const thread = [message("a1", "assistant", 100), ...turn(2, 200)]
-  assert.deepEqual([...compactionMarks(thread, [{ at: 150 }])], ["a1"])
+test("several in one gap are one divider", () => {
+  const thread = [...turn(1, 100), ...turn(2, 200)]
+  assert.deepEqual(marked(thread, [{ at: 120 }, { at: 130 }]), { before: ["u2"], trailing: false })
+})
+
+test("one before every loaded message marks nothing", () => {
+  assert.deepEqual(marked(turn(1, 100), [{ at: 50 }]), { before: [], trailing: false })
 })
 
 test("no compactions, or none known, mark nothing", () => {
-  const thread = [...turn(1, 100)]
-  assert.equal(compactionMarks(thread, []).size, 0)
-  assert.equal(compactionMarks(thread, undefined).size, 0)
+  assert.deepEqual(marked(turn(1, 100), []), { before: [], trailing: false })
+  assert.deepEqual(marked(turn(1, 100), undefined), { before: [], trailing: false })
+  assert.deepEqual(marked([], [{ at: 1 }]), { before: [], trailing: false })
 })

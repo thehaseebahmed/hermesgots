@@ -132,7 +132,7 @@ The host's record of the models a chat's calls ran on, one row per change. A thr
 _Avoid_: model switch, model update, fallback
 
 **Compaction**:
-A point where Hermes compressed a chat's context, ending the session and continuing in a child. The host records when; the thread marks the turn it fell in with a divider.
+A point where Hermes compressed a chat's context, ending the session and continuing in a child. The host records when; the thread draws a divider above the first message written after it.
 _Avoid_: compression event, summary
 
 **Subagent model**:
