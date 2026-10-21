@@ -2,7 +2,7 @@ import Dexie, { type EntityTable, type Transaction } from "dexie"
 
 import { BOTS, LEGACY_BOT_IDS } from "@/components/bots"
 import { connectionKey } from "@/lib/connection"
-import type { ModelChange, ProviderUsage, Skill } from "@/lib/hermes"
+import type { Compaction, ModelChange, ProviderUsage, Skill } from "@/lib/hermes"
 import type { SessionPipeline } from "@/lib/pipeline"
 import { randomId } from "@/lib/utils"
 
@@ -135,6 +135,11 @@ export interface Conversation {
    * thread can show where the model changed. Local only; every device reads the same list.
    */
   modelChanges?: ModelChange[]
+  /**
+   * When the host compacted this chat's context, oldest first, so its thread can mark where. Local
+   * only; every device reads the same list.
+   */
+  compactions?: Compaction[]
   /** Newest Hermes transcript row this device has caught up to. Local only; never synced. */
   hermesTip?: number
   /**

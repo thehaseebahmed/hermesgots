@@ -1,7 +1,8 @@
 /**
- * Where a chat's model changed, between the turns either side of it: a squiggle broken by the name
- * of the model that took over, in its provider/model form. A label, not a control — the pill under
- * the composer is where a model is picked — so it takes no touch target of its own.
+ * What changed in a chat between the turns either side of it: a squiggle broken by a word. The model
+ * that took over, in its provider/model form; or that the host compacted the conversation. A label,
+ * not a control — the pill under the composer is where a model is picked — so it takes no touch
+ * target of its own.
  */
 
 /**
@@ -36,16 +37,20 @@ function Squiggle() {
   )
 }
 
-export function ModelChange({ model }: { model: string }) {
+function Divider({ label, text }: { label: string; text: string }) {
   return (
-    <div
-      role="separator"
-      aria-label={`Model switched to ${model}`}
-      className="flex items-center gap-3 py-1"
-    >
+    <div role="separator" aria-label={label} className="flex items-center gap-3 py-1">
       <Squiggle />
-      <span className="text-[15px] text-muted-foreground">{model}</span>
+      <span className="text-[15px] text-muted-foreground">{text}</span>
       <Squiggle />
     </div>
   )
+}
+
+export function ModelChange({ model }: { model: string }) {
+  return <Divider label={`Model switched to ${model}`} text={model} />
+}
+
+export function Compacted() {
+  return <Divider label="Conversation compacted" text="Conversation compacted" />
 }

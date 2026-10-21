@@ -4,7 +4,7 @@ import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { db, type Conversation, type ModelChoice, type Profile } from "@/lib/db"
 import { fullModel } from "@/lib/model-info"
 import { modelFacts, sameModel, type Catalog } from "@/lib/models"
-import { getSessionContext, type ModelChange } from "@/lib/hermes"
+import { getSessionContext, type Compaction, type ModelChange } from "@/lib/hermes"
 
 /** Bots whose plugin has no context route (an older plugin). */
 const unsupported = cooldown()
@@ -75,10 +75,11 @@ async function readContext(conversationId: string): Promise<void> {
     if (!(await lacksRoute(profile, error, "context"))) return
     unsupported.start(key)
     // One left from before would be older than the turns since, the model list with it.
-    if (conversation.liveContext || conversation.modelChanges)
+    if (conversation.liveContext || conversation.modelChanges || conversation.compactions)
       await db.conversations.update(conversationId, {
         liveContext: undefined,
         modelChanges: undefined,
+        compactions: undefined,
       })
     return
   }
@@ -99,12 +100,24 @@ async function readContext(conversationId: string): Promise<void> {
   // The host omits the list when it couldn't read it: unknown is not "no changes", so a missing
   // list keeps the dividers we have rather than clearing them.
   const changesMoved = changes !== undefined && !sameChanges(conversation.modelChanges, changes)
-  if (!contextMoved && !changesMoved) return
+  // The same for compactions: only a list the host sent can replace the one held, and one more or
+  // fewer is the only way it moves.
+  const compacted = live.compactions
+  const compactedMoved =
+    compacted !== undefined && !sameCompactions(conversation.compactions, compacted)
+  if (!contextMoved && !changesMoved && !compactedMoved) return
   // Not through updateConversation: this is local, so it mustn't move the sync clock.
   await db.conversations.update(conversationId, {
     ...(contextMoved ? { liveContext: context } : {}),
     ...(changesMoved ? { modelChanges: changes } : {}),
+    ...(compactedMoved ? { compactions: compacted } : {}),
   })
+}
+
+function sameCompactions(before: Compaction[] | undefined, after: Compaction[]) {
+  return (
+    (before?.length ?? 0) === after.length && (before ?? []).every((c, i) => c.at === after[i].at)
+  )
 }
 
 /**
