@@ -1,5 +1,8 @@
 # CI spends a private repository's minutes by tiering the events
 
+**Superseded by ADR 0030**: the repository is public, so the allowance below no longer limits CI.
+The habits it set stand, and ADR 0030 restates them as a rule that holds whether or not CI is free.
+
 Memento is a private repository, so every job on a GitHub-hosted runner is billed against its plan's
 monthly allowance — 2,000 minutes on GitHub Free, 3,000 on Pro or Team — and nothing in the
 repository measures what a run cost or warns when the allowance is nearly gone. The checks

@@ -2,7 +2,7 @@
 // spent allowance beside credits in hand shows nothing, a spent account with nothing behind it says
 // so, a dismissal doesn't outlive the state it dismissed, and the reset line counts down ("Resets in
 // 3d 4h", never a clock time). The Usage sheet names the model in a row of its own, above the meter.
-import { app, assert, flow, mock, pass } from "./lib.mjs"
+import { app, assert, flow, mock, pass, settled } from "./lib.mjs"
 
 /** Moves the mock's account to `percent` for every later read; "" puts it back to the env's figure. */
 const accountAt = (percent) =>
@@ -17,9 +17,6 @@ const notice = async (page) => {
   const alert = alerts(page).first()
   return (await alert.count()) ? alert.textContent() : null
 }
-/** How long a notice that is going, or a drawer that is coming, takes to settle: Playwright counts
- *  a drawer visible from its first frame, which a screenshot would catch half off the screen. */
-const settled = (page) => page.waitForTimeout(600)
 
 // The screen the app paints the notice on: any chat, its provider being the bot's host model.
 await flow("usage-limit", async ({ page, profileId, seed, until, shot }) => {

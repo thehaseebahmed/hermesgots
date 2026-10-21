@@ -1,0 +1,83 @@
+name: E2E nightly
+
+# The whole browser registry (`pnpm e2e all`) against the mock, on main, once a night. A change runs
+# the flows it touches before it lands; this is what catches the ones it didn't think it touched
+# (ADR 0029). A night whose main is the commit the last green sweep already passed is skipped.
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-nightly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  sweep:
+    name: Sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Skip an unchanged main
+        id: moved
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" != schedule ]; then echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          last=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow e2e-nightly.yml --branch main \
+            --status success --limit 1 --json headSha --jq '.[0].headSha // ""' || echo "")
+          if [ "$last" = "$GITHUB_SHA" ]; then
+            echo "main is still $GITHUB_SHA, which the last green sweep passed"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.moved.outputs.run == 'true'
+        uses: actions/checkout@v4
+
+      - if: steps.moved.outputs.run == 'true'
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - if: steps.moved.outputs.run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Install
+        if: steps.moved.outputs.run == 'true'
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      # The same Playwright the development image carries (`Dockerfile`), found by the CLI in the
+      # global root.
+      - name: Install Playwright and Chromium
+        if: steps.moved.outputs.run == 'true'
+        run: |
+          npm install -g playwright@1.63.0
+          npx -y playwright@1.63.0 install --with-deps chromium
+
+      # Screenshots and server logs land under the runner's temp, where the upload finds them.
+      - name: Run every flow
+        if: steps.moved.outputs.run == 'true'
+        working-directory: app
+        run: TMPDIR="$RUNNER_TEMP" pnpm e2e all
+
+      - name: Upload screenshots and server logs
+        if: failure() && steps.moved.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-nightly-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/memento-e2e
+            ${{ runner.temp }}/memento-e2e-logs
+          retention-days: 14
+          if-no-files-found: ignore

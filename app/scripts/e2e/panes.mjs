@@ -19,11 +19,7 @@ const CASES = [
 for (const [width, collapsed, panes] of CASES) {
   await flow(
     `panes-${width}${collapsed ? "-rail" : ""}`,
-    async ({ page, profileId, seed, shot: take }) => {
-      const shot = async (step) => {
-        await page.waitForTimeout(400)
-        return take(step)
-      }
+    async ({ page, profileId, seed, shot }) => {
       page.on("pageerror", (error) => errors.push(`${width}: ${error.message}`))
       page.on("console", (message) => {
         if (message.type() === "error") errors.push(`${width}: ${message.text()}`)

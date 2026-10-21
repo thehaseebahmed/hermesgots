@@ -40,10 +40,23 @@ try {
       { timeout: 5000 },
     )
 
+  // What the composer keeps under a draft key, polled until it reads `value` (undefined once gone).
+  const saved = async (key, value) => {
+    let text
+    for (const end = Date.now() + 5000; Date.now() < end; await page.waitForTimeout(50)) {
+      text = await page.evaluate(
+        async (key) => (await (await import("/src/lib/db.ts")).db.drafts.get(key))?.text,
+        key,
+      )
+      if (text === value) return
+    }
+    assert.equal(text, value, `the draft under ${key}`)
+  }
+
   // A new chat's text survives leaving for Settings and coming back.
   await page.goto(app)
   await composer.fill("half a new chat")
-  await page.waitForTimeout(600)
+  await saved("new", "half a new chat")
   await page.goto(`${app}/settings`)
   await page.goto(app)
   await shows("half a new chat")
@@ -56,7 +69,7 @@ try {
   await page.waitForTimeout(500)
   assert.equal(await text(), "", "another chat starts from its own text")
   await composer.fill("draft for two")
-  await page.waitForTimeout(600)
+  await saved("c:two", "draft for two")
   await page.reload()
   await shows("draft for two")
   await page.goto(`${app}/c/one`)
@@ -92,12 +105,7 @@ try {
   await page.goto(`${app}/c/one`)
   await shows("draft for one")
   await composer.press("Enter")
-  await page.waitForTimeout(800)
-  const left = await page.evaluate(async () => {
-    const { db } = await import("/src/lib/db.ts")
-    return (await db.drafts.get("c:one"))?.text
-  })
-  assert.equal(left, undefined, "a sent message leaves no draft")
+  await saved("c:one", undefined)
   console.log("PASS: composer drafts are kept per chat and cleared on send")
 } finally {
   await browser.close()

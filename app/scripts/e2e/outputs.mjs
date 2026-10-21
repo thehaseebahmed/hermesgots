@@ -95,7 +95,6 @@ await flow("outputs", async ({ page, seed, send, stored, until, shot }) => {
     const look = `${width}${dark ? "-dark" : ""}`
     await page.setViewportSize({ width, height: width < 768 ? 844 : 900 })
     await page.emulateMedia({ colorScheme: dark ? "dark" : "light" })
-    await page.waitForTimeout(500)
     await shot(`prs-${look}`)
     const shown = page.getByRole("dialog")
     await shown.getByRole("tab", { name: "Library" }).click()

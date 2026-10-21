@@ -104,8 +104,15 @@ await flow("history-generations", async ({ page, seed, until, shot }) => {
     replies,
     `the compaction adds no reply: ${summary}`,
   )
-  // And what is drawn: a beat for the live queries, then the thread as it reads.
-  await page.waitForTimeout(2000)
+  // And what is drawn, once the live queries have drawn each turn: a turn drawn twice still fails
+  // the assertion below rather than the wait.
+  await page
+    .waitForFunction(
+      (texts) => texts.every((text) => document.body.innerText.includes(text)),
+      ["first turn's work", "second turn's work"],
+      { timeout: 10_000 },
+    )
+    .catch(() => {})
   const drawn = await page.evaluate(() => document.body.innerText)
   for (const text of ["first turn's work", "second turn's work"])
     assert.equal(drawn.split(text).length - 1, 1, `"${text}" is drawn once: ${drawn.slice(-400)}`)

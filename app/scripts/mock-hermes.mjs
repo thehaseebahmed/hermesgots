@@ -3982,12 +3982,17 @@ http
         // Only a write that names a stop stalls the task: one that moves the pipeline's record
         // leaves the session working, so a shipped pipeline isn't also reported as stalled.
         if (typeof reason === "string") afkStalled.set(projectId, reason)
-        // Dev only: the stage the sheet's Working row names for the task that project holds.
-        if (stage) setAfkStage(projectId, stage)
-        // Dev only: the record the session's own strip draws — each stage, a gate's answer, a
-        // reason — and the pull request a finished pipeline opened.
         const project = mockProjects().find((p) => p.id === projectId)
         const record = project && projectSessions.get(afkSessionId(project.id))
+        // Dev only: the stage the sheet's Working row names for the task that project holds. The
+        // host moves the session's own record as its pipeline advances, and the row's name is read
+        // off that record, so a record from before workflows moves with it.
+        if (stage) {
+          setAfkStage(projectId, stage)
+          if (record?.pipeline && !Array.isArray(record.pipeline.stages)) record.pipeline.stage = stage
+        }
+        // Dev only: the record the session's own strip draws — each stage, a gate's answer, a
+        // reason — and the pull request a finished pipeline opened.
         if (record && pipeline !== undefined) {
           record.pipeline = pipeline
           setAfkStage(projectId, afkStageOf(pipeline))

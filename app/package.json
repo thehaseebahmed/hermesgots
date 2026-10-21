@@ -6,12 +6,15 @@
   "scripts": {
     "dev": "vite",
     "dev:netlify": "pnpm --package=netlify-cli dlx netlify dev",
-    "build": "tsc -b && vite build",
-    "build:android": "tsc -b && vite build --mode native && cap sync android",
+    "build": "pnpm typecheck && vite build",
+    "build:android": "pnpm typecheck && vite build --mode native && cap sync android",
     "preview": "vite preview",
     "lint": "oxlint",
-    "typecheck": "tsc -b",
+    "typecheck": "node node_modules/typescript-7/bin/tsc -b",
     "format": "prettier --write src",
+    "test": "pnpm test:unit && pnpm test:component",
+    "test:unit": "node --experimental-strip-types --test \"scripts/test-*.mjs\"",
+    "test:component": "node --test --import ./scripts/component-hooks.mjs \"scripts/test-*.tsx\"",
     "mock": "node scripts/mock-hermes.mjs",
     "e2e": "node scripts/e2e/cli.mjs"
   },
@@ -58,6 +61,7 @@
     "prettier-plugin-tailwindcss": "^0.8.1",
     "shadcn": "^4.21.1",
     "typescript": "~6.0.2",
+    "typescript-7": "npm:typescript@7.0.2",
     "vite": "^8.3.0",
     "vite-plugin-pwa": "^1.3.0"
   }

@@ -194,8 +194,6 @@ for (const dark of [false, true]) {
         0,
         "the drawer offers no expand button",
       )
-      // The sheet slides in: let it settle before the shot.
-      await page.waitForTimeout(500)
       await shot("drawer")
       pass(`The phone drawer is always the full list, with no collapse button, ${look}`)
     },

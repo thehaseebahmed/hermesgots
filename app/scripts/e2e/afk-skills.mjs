@@ -2,13 +2,31 @@
 // both listed from the bot's own skills — only what its host can run now — and kept on the host, so a
 // reload reads the same choice back and another project has its own. Either clears back to nothing.
 // A plugin that predates the pickers shows the pop-up it has, its switch still working — a flow of
-// its own, since each browser here loads the app a few times and no more.
+// its own, since each browser here loads the app a few times and no more. The pickers are a plugin's
+// from before the Prompt (ADR 0027): where the host holds a Prompt, its words name the skills and no
+// picker is drawn, so this flow's host answers as that older plugin, without `afk_prompt`.
 import { app, assert, flow, makeProject, mock, openAfk, pass } from "./lib.mjs"
 
 const BUILD = "plan"
 const CRITIQUE = ["github-pr-workflow", "log-triage"]
 // The mock's profile holds these three, so a picker listing anything else is not the bot's own list.
 const OFFERED = ["github-pr-workflow", "log-triage", "plan"]
+
+/** The host's `info` answered without these features: a plugin from before they were added. */
+async function withoutFeatures(page, ...missing) {
+  await page.route("**/api/plugins/memento/info", async (route) => {
+    if (route.request().method() !== "GET") return route.continue()
+    const response = await route.fetch()
+    const body = await response.json()
+    await route.fulfill({
+      response,
+      json: {
+        ...body,
+        features: (body.features ?? []).filter((feature) => !missing.includes(feature)),
+      },
+    })
+  })
+}
 
 function pickers(page, until) {
   const build = () => page.getByRole("combobox", { name: "Build skill" })
@@ -41,6 +59,7 @@ const choosing = async ({ page, profileId, shot, until }) => {
   page.on("console", (message) => {
     if (message.type() === "error") errors.push(message.text())
   })
+  await withoutFeatures(page, "afk_prompt")
   const project = await makeProject(until, "AFK skills")
   const screen = `${app}/projects/${profileId}/${project}`
   const other = await makeProject(until, "AFK skills other")
@@ -50,20 +69,16 @@ const choosing = async ({ page, profileId, shot, until }) => {
   page.on("request", (request) => {
     if (request.method() === "GET" && request.url().endsWith("/afk")) afkReads.push(request.url())
   })
-  const snap = async (name) => {
-    await page.waitForTimeout(450)
-    await shot(name)
-  }
 
   await openAfk(page, screen)
   await build().waitFor({ timeout: 15_000 })
   await critique().waitFor({ timeout: 15_000 })
   assert.equal((await build().innerText()).trim(), "None", "nothing is chosen to build by")
   assert.equal((await critique().innerText()).trim(), "None", "nothing is chosen to critique")
-  await snap("empty")
+  await shot("empty")
 
   await openBuild()
-  await snap("build-menu")
+  await shot("build-menu")
   const offered = await page
     .getByRole("option")
     .evaluateAll((nodes) => nodes.map((node) => node.textContent.trim()))
@@ -75,7 +90,7 @@ const choosing = async ({ page, profileId, shot, until }) => {
   await page.getByRole("option", { name: BUILD, exact: true }).click()
   await reads(build, BUILD)
   await openCritique()
-  await snap("critique-menu")
+  await shot("critique-menu")
   const lenses = await page
     .getByRole("menuitemcheckbox")
     .evaluateAll((nodes) => nodes.map((node) => node.textContent.trim()))
@@ -88,7 +103,7 @@ const choosing = async ({ page, profileId, shot, until }) => {
   await page.getByRole("menuitemcheckbox", { name: CRITIQUE[1], exact: true }).click()
   await reads(critique, CRITIQUE.join(", "))
   await closeMenu()
-  await snap("chosen")
+  await shot("chosen")
 
   // The write landed on this project alone: another's AFK row is the one it always was.
   const neighbour = await (
@@ -125,7 +140,7 @@ const choosing = async ({ page, profileId, shot, until }) => {
   await page.getByRole("menuitem", { name: "Clear", exact: true }).click()
   await reads(critique, "None")
   await closeMenu()
-  await snap("cleared")
+  await shot("cleared")
 
   assert.deepEqual(errors, [], `no console error (${errors.join("; ")})`)
 }
@@ -138,18 +153,7 @@ const olderPlugin = async ({ page, profileId, shot, until }) => {
   })
   const screen = `${app}/projects/${profileId}/${await makeProject(until, "AFK skills old")}`
   const { build, critique } = pickers(page, until)
-  await page.route("**/api/plugins/memento/info", async (route) => {
-    if (route.request().method() !== "GET") return route.continue()
-    const response = await route.fetch()
-    const body = await response.json()
-    await route.fulfill({
-      response,
-      json: {
-        ...body,
-        features: (body.features ?? []).filter((feature) => feature !== "afk_skills"),
-      },
-    })
-  })
+  await withoutFeatures(page, "afk_skills")
   await openAfk(page, screen)
   const control = page.getByRole("switch", { name: "Work on its own" })
   await control.waitFor({ timeout: 15_000 })

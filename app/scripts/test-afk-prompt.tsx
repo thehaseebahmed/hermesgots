@@ -3,7 +3,8 @@
  * drawn only where the host holds a Prompt and the workflow library is off, the words it reads, the
  * editor writing them with no other mode to switch to, the skills pickers the Prompt doesn't need
  * left out, a save answering the row, a refusal keeping the words typed, and an emptied field reading
- * the host's default again.
+ * the host's default again; and a plugin that predates the Prompt, on a connection of its own, with
+ * no row to write words it can't hold.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -14,8 +15,10 @@ import {
   DEFAULT_AFK_PROMPT,
   afkHost,
   click,
+  connection,
   find,
   findText,
+  json,
   mountAfk,
   seedSettings,
   type,
@@ -31,10 +34,14 @@ const afkWrites = (host: ReturnType<typeof afkHost>) =>
 const fieldValue = () => (field() as HTMLTextAreaElement | null)?.value
 
 /** The Prompt row is drawn where the library is off, which is the Developer setting's own default. */
-async function promptMode(host: ReturnType<typeof afkHost>, body: () => Promise<void>) {
+async function promptMode(
+  host: ReturnType<typeof afkHost>,
+  body: () => Promise<void>,
+  server = config,
+) {
   await seedSettings({ developer: true })
   globalThis.fetch = host.fetch as unknown as typeof fetch
-  await mountAfk(config, project, body)
+  await mountAfk(server, project, body)
 }
 
 /** Waits for a render the dismissal's own listener causes, outside the act the click ran in. */
@@ -46,13 +53,18 @@ async function settled(check: () => boolean, what: string) {
   assert.ok(check(), what)
 }
 
-/** A host that advertises the skill pickers too, so where they are drawn is the app's choice. */
+/**
+ * A host that advertises the skill pickers too, so where they are drawn is the app's choice — on a
+ * connection of its own, since what a connection answered is remembered for the page: on the shared
+ * one, whichever test mounted first would decide whether the pickers were offered at all.
+ */
 const WITH_SKILLS = ["afk", "afk_switch", "afk_skills", "afk_workflows", "afk_prompt"]
+const withSkills = connection("with-skills")
 
 test("the library on, no Prompt row", async () => {
   await seedSettings({ developer: true, afkWorkflows: true })
   globalThis.fetch = afkHost({ features: WITH_SKILLS }).fetch as unknown as typeof fetch
-  await mountAfk(config, project, async () => {
+  await mountAfk(withSkills, project, async () => {
     assert.equal(row(), null, "a project running a workflow is told no Prompt")
     assert.match(
       find("[data-afk-workflow]")?.textContent ?? "",
@@ -100,13 +112,17 @@ test("tapping the row opens the editor on the host's words, to write and nothing
 })
 
 test("the skills pickers are not drawn under a Prompt", async () => {
-  await promptMode(afkHost({ features: WITH_SKILLS }), async () => {
-    assert.equal(
-      find("[data-afk-skills]"),
-      null,
-      "a Prompt names its own skills, so Build and Critique have nothing to say",
-    )
-  })
+  await promptMode(
+    afkHost({ features: WITH_SKILLS }),
+    async () => {
+      assert.equal(
+        find("[data-afk-skills]"),
+        null,
+        "a Prompt names its own skills, so Build and Critique have nothing to say",
+      )
+    },
+    withSkills,
+  )
 })
 
 test("Done writes the Prompt, and the row reads what the host answered", async () => {
@@ -210,6 +226,42 @@ test("the way out without Done writes nothing", async () => {
       fieldValue(),
       DEFAULT_AFK_PROMPT,
       "a fresh open starts from the row again, not from the draft that was left",
+    )
+  })
+})
+
+test("a bot without afk_prompt shows no Prompt row", async () => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input))
+    if (url.pathname.endsWith("/plugins/memento/info"))
+      return json({ name: "memento", features: ["afk", "afk_switch"] })
+    if (url.pathname.endsWith("/afk"))
+      return json({
+        object: "memento.afk",
+        on: false,
+        reason: null,
+        task: null,
+        refusal: null,
+        build_skill: null,
+        critique_skills: [],
+        stage: null,
+      })
+    if (url.pathname.endsWith("/tasks"))
+      return json({ repos: [], ready: [], claimed: [], blocked: [] })
+    return json({ error: { message: `No route for ${url.pathname}` } })
+  }) as unknown as typeof fetch
+  await seedSettings({ developer: true })
+  await mountAfk(connection("old-plugin"), "project-1", async () => {
+    // Boolean, not the node: a failing assertion must not print a whole DOM tree.
+    assert.equal(
+      Boolean(document.querySelector("[data-afk-prompt]")),
+      false,
+      "no Prompt row without the feature",
+    )
+    assert.equal(
+      Boolean(document.querySelector('[aria-label="Work on its own"]')),
+      true,
+      "the switch it always had",
     )
   })
 })

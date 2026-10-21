@@ -22,7 +22,28 @@ def db_path(hermes_home: Path) -> Path:
 def connect(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=5, isolation_level=None)
-    if conn.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
+    if _version(conn) < SCHEMA_VERSION:
+        # One transaction: a statement at a time paid a sync to disk each, and two processes opening
+        # a fresh store could both read a table's columns and both add the same one.
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            _migrate(conn)
+            conn.execute("COMMIT")
+        except BaseException:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            conn.close()
+            raise
+    return conn
+
+
+def _version(conn: sqlite3.Connection) -> int:
+    return conn.execute("PRAGMA user_version").fetchone()[0]
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    # Read again under the lock: another connection may have migrated while this one waited.
+    if _version(conn) < SCHEMA_VERSION:
         conn.execute(
             """CREATE TABLE IF NOT EXISTS chats (
                    id TEXT PRIMARY KEY,
@@ -338,4 +359,3 @@ def connect(path: Path) -> sqlite3.Connection:
                )"""
         )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-    return conn

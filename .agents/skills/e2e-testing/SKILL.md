@@ -8,9 +8,12 @@ category: testing
 
 Gots's e2e flows drive the real app (Vite) in headless Chromium with Playwright against the mock
 Hermes (`app/scripts/mock-hermes.mjs`). The `e2e` CLI starts the app and whichever mocks a flow
-needs, runs it, and stops them again. CI doesn't run these, so run the flows your change touches
-before you call a change to chats, sessions, polling or sync done. `pnpm lint`, `pnpm typecheck`
-and `pnpm build` still have to pass on top of that.
+needs, runs it, and stops them again. Pull requests don't run these. Before you call a change to
+chats, sessions, polling or sync done, run the flows it touches: the ones covering the screens,
+routes and state its diff moves (`pnpm e2e list` names them). **Don't run `pnpm e2e all` unless
+you're asked to.** It takes over half an hour, and `.github/workflows/e2e-nightly.yml` runs the whole
+registry on `main` every night (ADR 0029). `pnpm lint`, `pnpm typecheck` and `pnpm build` still have
+to pass on top of that.
 
 ## The CLI
 
@@ -21,7 +24,7 @@ the same.
 pnpm e2e list                     # every flow, one line each
 pnpm e2e chat-message             # one flow
 pnpm e2e approval reattach        # several
-pnpm e2e all                      # every flow; approval and reattach again on the polling mock
+pnpm e2e all                      # every flow, only when asked (nightly CI runs it on main)
 pnpm e2e approval --polling       # on the mock without its change stream, so the app polls
 pnpm e2e live-poll --app http://localhost:15174   # against an app already running (say main's)
 pnpm e2e shot /code --width 390 --dark            # a screenshot of any screen (below)
@@ -141,6 +144,10 @@ Projects, attach it to your reply, or describe what it shows. Never commit scree
    - `send` types into the composer and sends.
    - `lastReply(chatId)` reads the newest reply's status and length.
    - `until(check, ms, what)` polls a check.
+   - `shot` captures the page at rest (animations run to their end), and `settled(page)` waits until
+     nothing is still moving before a box or a class is read. Wait for what the flow needs — a
+     row, a request, a draft written — never for a fixed time; a fixed wait is only for a window
+     the flow measures, something that must not happen within it, or a recording's own length.
    - `held(pattern, fail)` holds requests matching a pattern back until its `release()` (10s at most),
      so a placeholder can be looked at while the bytes are still coming; `fail` answers a url ending
      in it as a file the host can't serve.
@@ -150,6 +157,9 @@ Projects, attach it to your reply, or describe what it shows. Never commit scree
    if it needs one, `mock` (another mock), `alsoPolling` (also run on the polling mock under `all`)
    or `extra` (more mock URLs as env vars). A new mock variant goes in `MOCKS` there and in the
    port table above.
+   Give it a row in `docs/e2e-flow-audit.md` too, with its verdict and why no lower tier reaches
+   it: `app/scripts/test-e2e-registry.mjs` fails the app's gates on a key with no row, and on a
+   stay beyond the seven (ADR 0019).
 3. Drive the mock with words in a message: `clean up` asks for an approval, `long` streams slowly,
    `ask` asks a question, `plan` writes a plan. The header of `app/scripts/mock-hermes.mjs` lists
    its words and env vars, and `.agents/skills/mock-server-scenarios.md` has recipes. Seeded

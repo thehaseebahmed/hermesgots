@@ -17,20 +17,20 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **63 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 63 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **64 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 64 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --- | --- |
 | stay | 7 |
-| component | 51 |
+| component | 52 |
 | plugin | 2 |
 | delete | 3 |
-| **total** | **63** |
+| **total** | **64** |
 
-Of those 63, 57 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 56 distinct files there) and 6 point at the older
+Of those 64, 58 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 57 distinct files there) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -39,27 +39,32 @@ Two things in that arithmetic did not hold, and both are checkable:
 - Its clauses name **59** keys — 53 pointing at `app/scripts/e2e/` and 6 at the older
   `regression-*.mjs` — and its sixtieth is `todos-legacy` counted a second time, as "one registry
   key reusing another's script" rather than as the 53rd of the first group, which it already is.
-  Today's 57 keys under `app/scripts/e2e/`, less the four that arrived since, are those 53.
+  Today's 58 keys under `app/scripts/e2e/`, less the five that arrived since, are those 53.
 - It left out goal mode's two keys, `goal-wizard` and `goal-pill`, which the registry still held
   when the plan was written: the commit before they left, `8a4e842^` (#282's `1b98896`, merged
   before the plan), carries 61 keys. Both went with goal mode (#296), so that omission costs
   nothing today.
 
-Four keys have arrived since, each component by the same rule: `delegation-model` (#318),
-`afk-skills` (#327), `afk-stage` (#328) and `pipeline-pill` (#330). So the registry holds 59 + 4 =
-**63** keys, and the component verdicts are the plan's 48 less the key it counted twice, plus
-those four: **51**. #299's own criterion still says 48; the 51 above supersedes it for the reason
-just given, and nothing else in the ticket's split moves.
+Five keys have arrived since, each component by the same rule: `delegation-model` (#318),
+`afk-skills` (#327), `afk-stage` (#328), `pipeline-pill` (#330) and `afk-prompt` (#359). So the
+registry holds 59 + 5 = **64** keys, and the component verdicts are the plan's 48 less the key it
+counted twice, plus those five: **52**. #299's own criterion still says 48; the 52 above supersedes
+it for the reason just given, and nothing else in the ticket's split moves.
+
+`app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
+a key with no row here, a row with no key, a verdict outside the four, a count in the table above
+that its rows don't add up to, or a stay beyond the seven fails the app's gates. A new flow is then
+an argument this page has to carry, never a default (ADR 0019).
 
 Check any of it in one line:
 
 ```bash
-grep -c '^| `' docs/e2e-flow-audit.md                           # 63 rows, one per registry key
+grep -c '^| `' docs/e2e-flow-audit.md                           # 64 rows, one per registry key
 grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 7
-grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 51
+grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 52
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 3
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
-cd app && pnpm -s e2e list | wc -l                             # 63 keys in the registry
+cd app && pnpm -s e2e list | wc -l                             # 64 keys in the registry
 git show 8a4e842^:app/scripts/e2e/cli.mjs |
   sed -n '/^const FLOWS = {/,/^}$/p' | grep -c '^  [a-z"-]*: {'  # 61, before goal mode left
 ```
@@ -186,7 +191,7 @@ Five keys: the sheets that add a server, describe one, remove one, and land its 
 
 ### AFK — #304
 
-Eight keys: six about the pop-up and the session it names, two about what the plugin itself
+Nine keys: seven about the pop-up and the session it names, two about what the plugin itself
 decides.
 
 | Key | Verdict | What it asserts today | Why it moves | What replaces it |
@@ -197,6 +202,7 @@ decides.
 | `afk-switch-reasons` | component | Where the switch can't be offered: a host with no GitHub account says why once rather than as both the switch's reason and the frontier's refusal; a plugin too old to switch it shows the switch off and out of reach, reading Turned off and saying nothing about the plugin; and a project already on keeps a live switch with the reason under it. | The same pop-up's refusal line; the drift is recorded below. | A component test asserts the one reason line, the disabled switch with no spinner under it, and the live switch on a project already on. |
 | `afk-stalled` | component | An AFK session nothing is working any more waits where the user finds it: Code's Waiting on you and, from 1280px, the sidebar's Waiting for input, each with the host's own reason under it. | Two renders from one plugin answer; the width is `useLarge`'s switch, not geometry. | A component test asserts both waiting lines and the reason under each at both widths, with a mocked media query. |
 | `afk-stage` | component | The pop-up names the stage a staged task is in, by the stage's own name from the task's snapshot, read from the host on its own poll, and keeps naming it once the pickers change under it; a project with no critique skill is one run, with no stage to name. | A prefix over the host's own record. | A component test asserts each stage's prefix as the host's answer moves, and none for a one-run task. |
+| `afk-prompt` | component | With the workflow library off, the pop-up draws a Prompt row under the switch reading the words its runs are told — the host's default where the project wrote none — opening one writing sheet (a bottom sheet, or the drawer from 1024px) whose Done writes them back for the next read to answer. | The row's rule, the words and the write are a render over the host's answer; only the row's place in the list, the sheet's height and the drawer's edge are geometry. | `app/scripts/test-afk-prompt.tsx`, which landed with the flow (#359) and is green: the row only where the library is off and the host holds a Prompt, the words it reads, the one writing surface, a save answering the row, a refusal keeping the words, an emptied field reading the default, and no row on a plugin that predates it. |
 | `afk-claim` | plugin | Turning a project on has the host claim its oldest ready task — assigned and marked — so the pop-up says what it is working, the frontier no longer offers it, and a GitHub refusal leaves the switch on with its reason. | What it asserts is what the plugin decided: the claim sweep. ADR 0019 sends the plugin's own behaviour back to the plugin's suite. | Plugin tests: the claim takes the oldest ready task, one at a time, and a refusal keeps the switch on with its reason. The pop-up's working and refusal lines join the AFK component test (#304). |
 | `afk-session` | plugin | AFK works its claimed task in a session of its own: the published chat record makes the Code row, titled after the task and marked AFK, and opening it shows one line naming the task rather than the brief. | The published session record is the plugin's; only the Code row's mark is the app's. | Plugin tests: the published record carries the AFK mark, the task's title and its opener. The Code row's mark joins the Code component test. |
 
@@ -213,7 +219,7 @@ Three keys: the fallback list, the subagent model, and a write the host never an
 ## The seven that stay, and why only a browser can assert each
 
 Every one of these earns its browser by a mechanism no lower tier reproduces, and a stay is
-replaced by itself. They are what the end-to-end registry holds once the other 56 keys leave
+replaced by itself. They are what the end-to-end registry holds once the other 57 keys leave
 (#314).
 
 | Key | Verdict | What it asserts today | Why only a browser can assert it |
@@ -228,7 +234,7 @@ replaced by itself. They are what the end-to-end registry holds once the other 5
 
 ## The coverage a demotion leaves with no home
 
-The 56 keys that leave — 51 demoted, 3 deleted as duplicates, 2 moved to the plugin — take away
+The 57 keys that leave — 52 demoted, 3 deleted as duplicates, 2 moved to the plugin — take away
 the assertion of things a component test cannot see: geometry, real timers and real capture, and a
 reload with a live stream. Four of those have a home: the two request budgets and the write rate
 stay with `live-poll`, `idle-requests` and `stream-writes`, and the real reload stays with
@@ -250,6 +256,7 @@ it up.
 | The reserved cell sizes of a reply's images | `image-skeleton` | The snapshots, if that chat carries an image. |
 | The dimmed unsent bubble | `failed-send` | The class tokens are the component test's (#306 asserts the failed row shares the queued row's own); the rendered dimness is a pixel claim no snapshot makes. |
 | The full-viewport recording cover | `meetings` | Nothing: it is on a pop-up of a screen `screens` never visits, and #314's scope adds none. |
+| The Prompt row's place under the switch, the editor sheet's height and the drawer's edge | `afk-prompt` | The snapshots, if the project screen's pass opens AFK's Prompt editor — a pop-up on a screen the flow visits, not a screen added. |
 | The usage banner's responsive form | `usage-limit` | The snapshots, if the chat screen's pass carries an account near a limit, since the banner is drawn over that screen. |
 | The outputs drawer drawn as a sheet on a phone | `outputs` | Nothing: it belongs to a project session's screen, which `screens` never visits. |
 | The recovery code's wrap at a hyphen, between two of its groups | `recovery-code-rotation` | Nothing: the wizard is not a screen `screens` visits, and the wrap is CSS rather than a rule. |

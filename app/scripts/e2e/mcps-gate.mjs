@@ -11,7 +11,7 @@
 // `mcps_config` opens a sheet with only the Tools tab it can fill — with the removal under it, since
 // removing a server is its own feature and doesn't need the block. The `info` answer is the only
 // thing that changes; nothing logs an error.
-import { app, assert, flow, pass } from "./lib.mjs"
+import { app, assert, flow, pass, settled } from "./lib.mjs"
 
 const run = async ({ page, profileId, shot }) => {
   const editor = `/settings/bots/${profileId}`
@@ -59,9 +59,15 @@ const run = async ({ page, profileId, shot }) => {
   await gate("mcps", "mcps_write")
 
   // The Bot's editor answers, and carries no MCP tab at all.
+  // No tab is only an answer once the host's has come back: before it, there is none either.
+  const answered = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/plugins/memento/info") && response.request().method() === "GET",
+  )
   await page.goto(`${app}${editor}`)
   await page.getByRole("button", { name: "Test connection" }).waitFor({ timeout: 15_000 })
-  await page.waitForTimeout(1_000)
+  await answered
+  await settled(page)
   assert.equal(await tab().count(), 0, "the Bot's editor has no MCP tab")
   await shot("no-tab")
 

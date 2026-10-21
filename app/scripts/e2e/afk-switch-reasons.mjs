@@ -58,7 +58,6 @@ const run = async ({ page, profileId, shot, until }) => {
     0,
     "no spinner under the reason",
   )
-  await page.waitForTimeout(450)
   await shot("no-github")
   await page.unroute("**/api/plugins/memento/projects/*/afk")
   await page.unroute("**/api/plugins/memento/projects/*/tasks")
@@ -88,7 +87,6 @@ const run = async ({ page, profileId, shot, until }) => {
     1,
     "the row says so rather than explaining the plugin",
   )
-  await page.waitForTimeout(450)
   await shot("no-switch")
   await page.unroute("**/api/plugins/memento/info")
 
@@ -119,7 +117,6 @@ const run = async ({ page, profileId, shot, until }) => {
   )
   assert.equal(await page.getByText("Turned on", { exact: true }).count(), 1, "reading its state")
   assert.equal(await page.getByText(NO_GITHUB, { exact: true }).count(), 1, "and says why under it")
-  await page.waitForTimeout(450)
   await shot("on-with-reason")
   await page.unroute("**/api/plugins/memento/projects/*/afk")
 

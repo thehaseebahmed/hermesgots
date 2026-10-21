@@ -15,6 +15,33 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? "playwright")
 export const runId = () => Math.random().toString(36).slice(2, 8)
 
 /**
+ * Resolves once nothing on the page is still moving: a sheet's slide, a pane's push, a fade. Two
+ * frames first, so a transition the last step started has been created; then every animation with
+ * an end — a spinner, a skeleton's pulse and a bot's idle motion have none — has reached it. A box
+ * read before then is a moving target.
+ */
+export async function settled(page, timeout = 5_000) {
+  await page.evaluate(
+    () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
+  )
+  await page.waitForFunction(
+    () =>
+      document
+        .getAnimations()
+        .every(
+          (animation) =>
+            animation.effect?.getComputedTiming().iterations === Infinity ||
+            (animation.playState !== "running" && !animation.pending),
+        ),
+    undefined,
+    { timeout, polling: "raf" },
+  )
+}
+
+/** A screenshot of the page at rest: animations with an end are run to it, and endless ones stop. */
+const capture = (page, path) => page.screenshot({ path, animations: "disabled" })
+
+/**
  * Opens the app with the bot set up, runs `body`, and closes the browser. A failure saves
  * `failed.png` (with SHOTS_DIR set) before it is thrown.
  */
@@ -25,7 +52,7 @@ export async function flow(name, body, { viewport = { width: 1440, height: 900 }
     if (!shots) return
     mkdirSync(shots, { recursive: true })
     const path = `${shots}/${name}-${step}.png`
-    await page.screenshot({ path })
+    await capture(page, path)
     return path
   }
   try {
@@ -155,7 +182,7 @@ export async function signedIn({ width = 1440, dark = false, vault = "exists" } 
     async shot(name) {
       if (!shots) return
       mkdirSync(shots, { recursive: true })
-      await page.screenshot({ path: `${shots}/${name}.png` })
+      await capture(page, `${shots}/${name}.png`)
     },
   }
 }

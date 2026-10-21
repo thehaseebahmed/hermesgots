@@ -3,7 +3,7 @@
 // it, Done writing it back to the host, which the next read answers. Geometry is why this is a flow:
 // the row's place in the switch's list, the sheet's height and the drawer's edge — none of which a
 // DOM without layout can measure.
-import { app, assert, flow, makeProject, openAfk, pass } from "./lib.mjs"
+import { app, assert, flow, makeProject, openAfk, pass, settled } from "./lib.mjs"
 
 const DEFAULT_PROMPT = "Work in checkpoints: small slices of the issue, one at a time."
 const MINE = "# Mine\n\n- Read the issue first.\n- Run the repo's own gates."
@@ -24,7 +24,7 @@ const run = async ({ page, profileId, shot, until }) => {
     await openAfk(page, screen)
     const row = page.locator("[data-afk-prompt]")
     await row.waitFor({ timeout: 15_000 })
-    await page.waitForTimeout(450)
+    await settled(page)
     return row
   }
 
@@ -59,7 +59,7 @@ const run = async ({ page, profileId, shot, until }) => {
 
   // A bottom sheet below a laptop's width, the side drawer from it, and either way room to write.
   const editor = page.getByRole("dialog").last()
-  await page.waitForTimeout(450)
+  await settled(page)
   const box = await editor.boundingBox()
   const viewport = page.viewportSize()
   assert.ok(box && viewport, "the editor has a box on screen")

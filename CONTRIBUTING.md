@@ -23,11 +23,12 @@ pnpm dev       # Start Vite dev server on http://localhost:5173
 
 ### Verification & Testing
 
-Before creating a pull request, run the following checks. All three must pass:
+Before creating a pull request, run the following checks. All four must pass:
 
 ```bash
 pnpm lint        # Run oxlint
 pnpm typecheck   # Type-check TypeScript sources
+pnpm test        # Unit and component tests
 pnpm build       # Build production bundle and generate service worker
 ```
 
@@ -56,7 +57,7 @@ pnpm e2e shot <path>      # Capture a screenshot of a screen
 To run plugin unit tests:
 
 ```bash
-python3 -m unittest discover -s plugin/tests
+python3 -m unittest discover -s plugin/tests -t .
 ```
 
 ### Sync with Netlify Identity

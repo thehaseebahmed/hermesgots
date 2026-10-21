@@ -25,11 +25,6 @@ const run = async ({ page, profileId, shot, until }) => {
   page.on("request", (request) => {
     if (request.method() === "GET" && request.url().endsWith("/afk")) afkReads.push(request.url())
   })
-  // The sheet slides in on a phone and a drawer on a tablet: let it settle before a shot.
-  const snap = async (name) => {
-    await page.waitForTimeout(450)
-    await shot(name)
-  }
 
   // The switch starts off and in reach, and the row reads that state.
   await openAfk(page, screen)
@@ -41,11 +36,11 @@ const run = async ({ page, profileId, shot, until }) => {
     "a project that can be worked offers the switch",
   )
   assert.equal(await page.getByText("Turned off", { exact: true }).count(), 1, "the row says off")
-  await snap("off")
+  await shot("off")
   await control().click()
   await reads("true")
   assert.equal(await page.getByText("Turned on", { exact: true }).count(), 1, "the row says on")
-  await snap("on")
+  await shot("on")
   const askedFirst = afkReads.length
 
   // The setting is the project's, kept on the host: a reload reads it back, and off is its write.
@@ -60,7 +55,7 @@ const run = async ({ page, profileId, shot, until }) => {
   await control().click()
   await reads("false")
   assert.equal(await page.getByText("Turned off", { exact: true }).count(), 1, "and back to off")
-  await snap("turned-off")
+  await shot("turned-off")
 
   assert.deepEqual(errors, [], `no console error (${errors.join("; ")})`)
 }
