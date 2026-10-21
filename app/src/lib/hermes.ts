@@ -1314,14 +1314,22 @@ export async function addToQueue(
   return queueItem((await response.json())?.item ?? {})
 }
 
-/** The host's triage of a message sent from Main: it stays, or the plugin queued it on a thread. */
-export type Triage = { decision: "main" } | { decision: "thread"; threadId: string }
+/**
+ * The host's triage of a message sent from Main: it stays, or the plugin queued it on an older
+ * thread (`thread`) or on one it just made (`new`).
+ */
+export type Triage = { decision: "main" } | { decision: "thread" | "new"; threadId: string }
 
 /** Asks the host where a message from Main belongs; a thread's answer means it is already queued there. */
 export async function triageMessage(
   config: HermesConfig,
   sessionId: string,
-  item: { id: string; text: string; run: Record<string, unknown> },
+  item: {
+    id: string
+    text: string
+    run: Record<string, unknown>
+    attachments?: { name: string; type: string; size: number; path?: string }[]
+  },
   signal?: AbortSignal,
 ): Promise<Triage> {
   const response = await request(
@@ -1329,14 +1337,21 @@ export async function triageMessage(
     {
       method: "POST",
       headers: headers(config),
-      body: JSON.stringify({ id: item.id, text: item.text, body: item.run }),
+      body: JSON.stringify({
+        id: item.id,
+        text: item.text,
+        body: item.run,
+        attachments: item.attachments ?? [],
+      }),
       signal,
     },
   )
   const body = await response.json()
   // A thread's answer counts only with the queued item that proves the host has the message.
-  return body?.decision === "thread" && typeof body.thread === "string" && body.item?.id
-    ? { decision: "thread", threadId: body.thread }
+  return (body?.decision === "thread" || body?.decision === "new") &&
+    typeof body.thread === "string" &&
+    body.item?.id
+    ? { decision: body.decision, threadId: body.thread }
     : { decision: "main" }
 }
 

@@ -1675,13 +1675,31 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except asyncio.TimeoutError:
             found = {"decision": triage.MAIN}
         answer: Dict[str, Any] = {"object": "memento.triage", "decision": triage.MAIN}
-        if found["decision"] == triage.THREAD and time.monotonic() <= deadline + 0.5:
+        if time.monotonic() > deadline + 0.5:
+            found = {"decision": triage.MAIN}
+        files = [
+            {k: file[k] for k in ("name", "type", "size", "path") if k in file}
+            for file in (body.get("attachments") or [])[:20]
+            if isinstance(file, dict)
+        ]
+        if found["decision"] == triage.NEW:
+            # Made here and not in the decision, so one nobody waited for leaves no thread.
+            try:
+                started = await asyncio.to_thread(
+                    triage.start_thread,
+                    path,
+                    request_profile(),
+                    found["main"],
+                    text,
+                    files,
+                    body.get("body"),
+                )
+                follow_queue(request, started["session_id"], path)
+                answer = {"object": "memento.triage", "decision": triage.NEW, **started}
+            except Exception:
+                logger.debug("memento: triage couldn't open a thread", exc_info=True)
+        elif found["decision"] == triage.THREAD:
             thread = found["session_id"]
-            files = [
-                {k: file[k] for k in ("name", "type", "size", "path") if k in file}
-                for file in (body.get("attachments") or [])[:20]
-                if isinstance(file, dict)
-            ]
             try:
                 # The thread runs on its own model, not Main's.
                 run_body = body.get("body")

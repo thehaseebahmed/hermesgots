@@ -1,17 +1,18 @@
-"""Triage: a Main message stays or continues a thread, and every failure is Main.
+"""Triage: a Main message stays, continues a thread or opens a new one, and every failure is Main.
 
 Run: python3 -m unittest plugin.tests.test_triage -v
 """
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from plugin import chats, triage
+from plugin import chats, outbox, triage
 from plugin.store import db_path
 
 MAIN = "main-bot"
@@ -75,11 +76,68 @@ class TriageTests(unittest.TestCase):
         self.assertEqual(self.run_triage(llm, session="s2"), {"decision": "main"})
         self.assertEqual(llm.calls, [])
 
-    def test_no_candidates_asks_no_model(self):
+    def test_no_threads_still_lets_a_message_open_one(self):
         chats.merge(self.path, {k: {"at": 2, "deleted": True} for k in ("t1", "t2")})
         llm = Llm({"decision": "continue", "thread": "t1"})
         self.assertEqual(self.run_triage(llm), {"decision": "main"})
-        self.assertEqual(llm.calls, [])
+        self.assertEqual(len(llm.calls), 1)
+        self.assertEqual(self.run_triage(Llm({"decision": "new"}))["decision"], "new")
+
+    def test_new_asks_for_a_thread_and_makes_nothing_yet(self):
+        found = self.run_triage(Llm({"decision": "new", "thread": "t1"}))
+        self.assertEqual(found["decision"], "new")
+        self.assertEqual(found["main"]["hermesSessionId"], "memento-main-bot")
+        self.assertEqual(set(chats.read(self.path)), {MAIN, "t1", "t2"})
+
+    def test_open_thread_writes_the_record_a_new_chat_has(self):
+        chat_id, session = triage.open_thread(self.path, self.records[MAIN]["value"])
+        self.assertEqual(session, f"memento-{chat_id}")
+        record = chats.read(self.path)[chat_id]
+        self.assertEqual(record["at"], record["value"]["changedAt"])
+        value = record["value"]
+        self.assertEqual(
+            (value["profileId"], value["title"], value["hermesSessionId"], value["createdAt"] == value["updatedAt"]),
+            ("bot", "New chat", session, True),
+        )
+        self.assertNotIn("main", value)
+        self.assertNotIn("projectId", value)
+
+    def test_a_new_thread_is_started_with_only_the_message_and_its_files(self):
+        body = {
+            "model": "m",
+            "provider": "p",
+            "instructions": "i",
+            "session_id": "memento-main-bot",
+            "input": [{"role": "user", "content": "plan my trip"}],
+            "conversation_history": [{"role": "user", "content": "old"}],
+        }
+        files = [{"name": "a.pdf", "type": "application/pdf", "size": 3, "path": "/h/a.pdf"}]
+        started = triage.start_thread(
+            self.path, "bot", self.records[MAIN]["value"], "plan my trip", files, body
+        )
+        self.assertEqual(started["session_id"], f"memento-{started['thread']}")
+        self.assertEqual(chats.read(self.path)[started["thread"]]["value"]["hermesSessionId"], started["session_id"])
+        queued = outbox.read(self.path, started["session_id"])["items"]
+        self.assertEqual([item["id"] for item in queued], [started["item"]["id"]])
+        self.assertEqual(queued[0]["attachments"], files)
+        row, _ = outbox.head(self.path, started["session_id"])
+        run = json.loads(row["body"])
+        self.assertEqual(run["session_id"], started["session_id"])
+        self.assertEqual(run["input"], body["input"])
+        self.assertNotIn("conversation_history", run)
+        self.assertEqual(outbox.read(self.path, "memento-main-bot")["items"], [])
+
+    def test_a_thread_that_cant_be_started_leaves_no_record(self):
+        before = set(chats.read(self.path))
+        with self.assertRaises(ValueError):
+            triage.start_thread(self.path, "bot", self.records[MAIN]["value"], "hi", [], {"input": []})
+        after = chats.read(self.path)
+        self.assertEqual({k for k, v in after.items() if not v.get("deleted")}, before)
+
+    def test_discard_leaves_a_tombstone(self):
+        chat_id, _ = triage.open_thread(self.path, self.records[MAIN]["value"])
+        triage.discard(self.path, chat_id)
+        self.assertTrue(chats.read(self.path)[chat_id].get("deleted"))
 
 
 class CandidateTests(unittest.TestCase):

@@ -2287,8 +2287,8 @@ async function streamCompletion(req, res, body) {
 const runs = new Map()
 const PLUGIN_VERSION = process.env.MOCK_PLUGIN_VERSION || "0.29.1"
 const DICTATION = process.env.MOCK_DICTATION ?? "on"
-// plugin/triage.py: MOCK_TRIAGE=off hides the feature, "thread" continues the newest plain thread of
-// the bot, "slow" answers after 10s and "fail" answers an error; anything else stays in Main.
+// plugin/triage.py: MOCK_TRIAGE=off hides the feature, "new" opens a new thread, "thread" continues
+// the newest plain thread of the bot, "slow" answers after 10s and "fail" answers an error; anything else stays in Main.
 const TRIAGE = process.env.MOCK_TRIAGE ?? "stay"
 // MOCK_PRS_FAIL=1 is a host that can't reach GitHub: the plugin's read of a session's pull requests
 // answers an error instead of a list, so the app must keep the pull requests it already knows.
@@ -3902,9 +3902,33 @@ http
           return v && !e.deleted && cid !== mainEntry?.[0] && !v.main && !v.projectId && !v.discardedAt
         })
         .sort((a, b) => (b[1].value.updatedAt ?? 0) - (a[1].value.updatedAt ?? 0))[0]
-      if (TRIAGE !== "thread" || !mainEntry || !thread || !Array.isArray(body?.input))
+      if (!["thread", "new"].includes(TRIAGE) || !mainEntry || !Array.isArray(body?.input))
         return json(res, 200, { object: "memento.triage", decision: "main" })
-      const target = thread[1].value.hermesSessionId
+      if (TRIAGE === "thread" && !thread)
+        return json(res, 200, { object: "memento.triage", decision: "main" })
+      let made
+      if (TRIAGE === "new") {
+        const chatId = randomUUID()
+        const now = Date.now()
+        made = {
+          id: chatId,
+          value: {
+            id: chatId,
+            profileId: mainEntry[1].value.profileId,
+            title: "New chat",
+            hermesSessionId: `memento-${chatId}`,
+            createdAt: now,
+            updatedAt: now,
+            changedAt: now,
+          },
+        }
+        ;(pluginChatLists.get(pluginProfile ?? "") ?? pluginChats).set(chatId, {
+          at: now,
+          value: made.value,
+        })
+        noteEvent("chats", chatId)
+      }
+      const target = made ? made.value.hermesSessionId : thread[1].value.hermesSessionId
       const queue = queueOf(target)
       const { input: _input, ...template } = body
       queue.template = { ...template, session_id: target }
@@ -3922,8 +3946,8 @@ http
       setTimeout(() => pumpQueue(target), 50)
       return json(res, 200, {
         object: "memento.triage",
-        decision: "thread",
-        thread: thread[0],
+        decision: made ? "new" : "thread",
+        thread: made ? made.id : thread[0],
         session_id: target,
         item: { ...item, body: undefined, run_id: null, sent_at: null, error: null },
       })
