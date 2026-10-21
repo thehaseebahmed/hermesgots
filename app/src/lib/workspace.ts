@@ -352,7 +352,8 @@ export function planApprovalMessage(planFile: string | undefined) {
 }
 
 /** Matched on its text so a copy loaded from the transcript, on any device, reads the same. */
-export const isPlanApproval = (text: string) => text.startsWith(PLAN_GO_AHEAD)
+export const isPlanApproval = (text: string) =>
+  text === planApprovalMessage(undefined) || text.startsWith(PLAN_GO_AHEAD + " in `")
 
 export interface RepoRef {
   name: string

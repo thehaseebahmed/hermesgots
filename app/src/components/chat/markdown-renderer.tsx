@@ -19,10 +19,7 @@ function CodeBlock({ language, code }: { language?: string; code: string }) {
   }
 
   return (
-    <div
-      data-md-code
-      className="my-3 overflow-hidden rounded-2xl bg-background/70 dark:bg-background/40"
-    >
+    <div data-md-code className="my-3 overflow-hidden rounded-2xl bg-muted">
       <div className="flex items-center justify-between pt-1.5 pr-1.5 pl-4 text-xs text-muted-foreground">
         <span>{language || "code"}</span>
         <Button
@@ -51,10 +48,7 @@ const components: ComponentProps<typeof ReactMarkdown>["components"] = {
       return <CodeBlock language={match?.[1]} code={text.replace(/\n$/, "")} />
     }
     return (
-      <code
-        data-md-code
-        className="rounded-md bg-background/60 px-1.5 py-0.5 font-mono text-[0.85em]"
-      >
+      <code data-md-code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[0.85em]">
         {children}
       </code>
     )

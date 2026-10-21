@@ -159,23 +159,6 @@
   }
 }
 
-@keyframes typing-dot {
-  0%,
-  60%,
-  100% {
-    opacity: 0.35;
-    transform: translateY(0);
-  }
-  30% {
-    opacity: 1;
-    transform: translateY(-2px);
-  }
-}
-
-@utility animate-typing-dot {
-  animation: typing-dot 1.2s ease-in-out infinite;
-}
-
 /* Bot characters (src/components/bot.tsx): still unless the wrapper carries .bot-animate, which
    gives each artwork its own motion. */
 .bot-animate {
@@ -327,8 +310,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .bot-animate *,
-  .animate-typing-dot {
+  .bot-animate * {
     animation: none !important;
   }
 }
