@@ -90,6 +90,7 @@ import {
   queueMessage,
   refreshQueue,
   reattachRun,
+  sendFromMain,
   sendMessage,
   steerText,
   stopMessage,
@@ -596,7 +597,14 @@ export function ChatPage() {
         navigate(`/c/${conversationId}`, { replace: true, state: { quiet: true } })
       }
       if (session?.draftAt) void updateConversation(conversationId, { draftAt: undefined })
-      await sendMessage(conversationId, text, { attachments })
+      // Main's messages are triaged by the host first; a thread and a new chat never are.
+      const moved = conversation?.main
+        ? await sendFromMain(conversationId, text, attachments)
+        : await sendMessage(conversationId, text, { attachments })
+      if (moved) {
+        const thread = await db.conversations.get(moved)
+        toast.success(`Sent to ${thread?.title ?? "a thread"}`)
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't send your message.")
       throw error

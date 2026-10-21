@@ -51,6 +51,7 @@ from . import (
     prompt_builder,
     repos,
     research,
+    triage,
     sessions,
     skill_catalog,
     push,
@@ -322,6 +323,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "research_rewrite",
                     "research_compare",
                     "community",
+                    # A message sent from Main is sorted into a thread by the host; see triage.py.
+                    *(["triage"] if triage.available() is None else []),
                     # Hermes's own MCP built-ins, and the MCP screen with them; see mcp.py.
                     *mcp_features,
                 ],
@@ -1645,6 +1648,43 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         follow_queue(request, session_id, path)
         return web.json_response({"object": "memento.queued", "item": item})
 
+    async def triage_message(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        session_id, text = request.match_info["session_id"], body.get("text")
+        if not isinstance(text, str):
+            return _error(web, "text must be a string", 400)
+        path = store_path()
+        try:
+            found = await asyncio.wait_for(
+                asyncio.to_thread(triage.triage, path, hermes_home(), session_id, text),
+                triage.DEADLINE_S,
+            )
+        except asyncio.TimeoutError:
+            found = {"decision": triage.MAIN}
+        if found["decision"] != triage.THREAD:
+            return web.json_response({"object": "memento.triage", **found})
+        # The message goes to the thread's own session, so Main never holds it.
+        thread = found["session_id"]
+        files = [
+            {key: file[key] for key in ("name", "type", "size", "path") if key in file}
+            for file in (body.get("attachments") or [])[:20]
+            if isinstance(file, dict)
+        ]
+        try:
+            run = outbox.clean_body(thread, body.get("body"))
+            item = await asyncio.to_thread(
+                outbox.add, path, thread, request_profile(), text, files, run
+            )
+        except ValueError:
+            return web.json_response({"object": "memento.triage", "decision": triage.MAIN})
+        follow_queue(request, thread, path)
+        return web.json_response({"object": "memento.triage", **found, "item": item})
+
     async def remove_queued(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -1702,6 +1742,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/queue", get_queue)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue", add_queued)
+    app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/triage", triage_message)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue/{{item_id}}/remove", remove_queued)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue/{{item_id}}/send", send_queued)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue/{{item_id}}/steer", steer_queued)

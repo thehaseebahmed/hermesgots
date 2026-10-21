@@ -363,7 +363,7 @@ export interface Steer {
 }
 
 /** `queued` is a user message waiting for the current reply to finish. */
-export type MessageStatus = "queued" | "streaming" | "done" | "error" | "stopped"
+export type MessageStatus = "routing" | "queued" | "streaming" | "done" | "error" | "stopped"
 
 export interface Message {
   id: string

@@ -1,7 +1,7 @@
 import { toast } from "sonner"
 
 import { serverConfig } from "@/lib/connection"
-import { READ_TIMEOUT_MS } from "@/lib/freshness"
+import { READ_TIMEOUT_MS, TRIAGE_MS } from "@/lib/freshness"
 import {
   db,
   getActiveProfile,
@@ -26,6 +26,7 @@ import {
   getQueue,
   getSessionTitle,
   hasPluginFeature,
+  triageMessage,
   HermesError,
   labelSession,
   queueAction,
@@ -1228,6 +1229,65 @@ async function queueOnHost(
     run,
   })
   return { item, sent }
+}
+
+/**
+ * Sends a message typed in a bot's Main thread. The host triages it first when it can: the message
+ * wears a routing state meanwhile, and it stays in Main — sent as any message is — unless the host
+ * answers in time that it belongs to an older thread, which the plugin has then queued. A timeout,
+ * a failure or a bot without the feature is just a send to Main. Returns the thread it moved to.
+ */
+export async function sendFromMain(
+  conversationId: string,
+  text: string,
+  attachments: Attachment[] = [],
+): Promise<string | undefined> {
+  const content = text.trim()
+  const host = await hostOf(conversationId)
+  // Files are saved per session before a send, and a message with any is sent where it was typed.
+  const triaged =
+    host?.conversation.main &&
+    content &&
+    !attachments.length &&
+    !controllers.has(conversationId) &&
+    (await hostQueue(host.config)) &&
+    (await hasPluginFeature(host.config, "triage"))
+  if (!host || !triaged) {
+    await sendMessage(conversationId, text, { attachments })
+    return undefined
+  }
+  const held: Message = {
+    id: randomId(),
+    conversationId,
+    role: "user",
+    content,
+    status: "routing",
+    createdAt: nextAt(await getMessages(conversationId)),
+  }
+  await db.messages.add(held)
+  let moved: string | undefined
+  try {
+    const run = runRequest(host.config, {
+      ...modelOf(host.conversation, host.profile),
+      sessionId: host.conversation.hermesSessionId,
+      messages: [{ role: "user", content: await wireContent(content, []) }],
+    })
+    const answer = await triageMessage(
+      host.config,
+      host.conversation.hermesSessionId,
+      { text: content, run },
+      AbortSignal.timeout(TRIAGE_MS),
+    )
+    if (answer.decision === "thread") moved = answer.threadId
+  } catch {
+    // Main it is.
+  }
+  if (moved) {
+    await db.messages.delete(held.id)
+    return moved
+  }
+  await sendMessage(conversationId, text, { queuedId: held.id })
+  return undefined
 }
 
 /** Holds a message until the current reply finishes. */

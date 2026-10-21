@@ -31,6 +31,8 @@ export const CATCH_UP_MS = 30_000
 export const FOLLOW_UP_MS = 2 * 60_000
 /** A turn that ended within this long read them itself. */
 export const JUST_FOLLOWED_UP_MS = 3_000
+/** A message sent from Main waits this long for the host's triage before it stays in Main. */
+export const TRIAGE_MS = 5_000
 /** A send doesn't wait to catch the chat up when it caught up this recently. */
 export const SEND_CAUGHT_UP_MS = 5_000
 /** An open chat looks for a turn the plugin started from its queue, while one waits there. */
