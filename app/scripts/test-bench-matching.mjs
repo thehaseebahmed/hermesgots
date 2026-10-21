@@ -32,6 +32,25 @@ test("gemma4 is BenchLM's gemma-4", () => {
   assert.equal(scoreFor(map, "gemma4:31b"), 31.65)
 })
 
+test("a bare family reaches the row BenchLM keys by its creator", () => {
+  const m = scoreMapOf([{ modelKey: "reflection-beam", score: 51.5 }])
+  assert.equal(scoreFor(m, "beam"), 51.5)
+  assert.equal(scoreFor(m, "ollama-cloud/beam"), 51.5)
+})
+
+test("a row's own key is not aliased again", () => {
+  assert.deepEqual(benchCandidates("reflection-beam"), ["reflection-beam"])
+})
+
+test("a family alias never shadows an exact row", () => {
+  const m = scoreMapOf([
+    { modelKey: "reflection-beam", score: 2 },
+    { modelKey: "beam", score: 1 },
+  ])
+  assert.equal(scoreFor(m, "beam"), 1)
+  assert.equal(scoreFor(m, "ollama-cloud/beam"), 1)
+})
+
 test("dated snapshots map onto their base model", () => {
   assert.equal(scoreFor(map, "claude-opus-4-5-20251101"), 40.33)
   assert.equal(scoreFor(map, "claude-haiku-4-5-20251001"), 16.77)

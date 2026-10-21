@@ -12,9 +12,6 @@
   "ollama-cloud/nemotron-3-nano:30b": "no BenchLM nemotron-3 nano row",
   "ollama-cloud/nemotron-3-super": "no BenchLM nemotron-3 super row",
   "ollama-cloud/nemotron-3-ultra": "no BenchLM nemotron-3 ultra row",
-  "ollama-cloud/qwen3.5:397b": "no BenchLM qwen3.5 397b row",
-  "anthropic/claude-sonnet-4-5": "ranked overall on BenchLM (48.57, #107/950); the deployed proxy still serves coding",
-  "anthropic/claude-sonnet-4-5-20250929": "ranked overall on BenchLM (48.57, #107/950); the deployed proxy still serves coding",
   "deepseek/deepseek-flash": "no BenchLM row",
   "deepseek/deepseek-v4-flash-vision-exp": "experimental variant, no BenchLM row",
   "deepseek/deepseek-v4-flash": "BenchLM has no deepseek-v4-flash row",
@@ -22,5 +19,6 @@
   "xai/grok-4.20-0309-non-reasoning": "BenchLM has no grok-4.20 0309 row",
   "xai/grok-4.20-0309-reasoning": "BenchLM has no grok-4.20 0309 row",
   "xai/grok-4.20-multi-agent-0309": "BenchLM has no grok-4.20 multi-agent row",
-  "xai/grok-4.7": "BenchLM has no grok-4.7 row"
+  "xai/grok-4.7": "BenchLM has no grok-4.7 row",
+  "xai/grok-build-0.1": "BenchLM has no grok-build row"
 }

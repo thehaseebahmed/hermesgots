@@ -52,8 +52,7 @@ export function scoreMapOf(rows: ScoredRow[]): Map<string, number | undefined> {
  * The map is keyed by the same candidates, so a catalog id reaches a BenchLM row it spells differently.
  */
 export function scoreFor(map: Map<string, number | undefined>, model: string): number | undefined {
-  const full = normalise(model)
-  for (const key of [...benchCandidates(full), lastSegment(full)]) {
+  for (const key of benchCandidates(model)) {
     if (map.has(key)) return map.get(key)
   }
   return undefined
@@ -62,8 +61,18 @@ export function scoreFor(map: Map<string, number | undefined>, model: string): n
 const DATE_SUFFIX = /-(\d{8}|\d{4}-\d{2}-\d{2}|\d{2}-\d{4}|\d{4}|latest)$/
 const VARIANT_SUFFIX = /-(preview|free)$/
 
-/** `gemma4` is BenchLM's `gemma-4`; the rule applies to every candidate. */
-const gemmaAlias = (id: string) => id.replace(/\bgemma4(?=[-:]|$)/, "gemma-4")
+const BENCHLM_KEY_BY_FAMILY: Record<string, string> = {
+  gemma4: "gemma-4",
+  beam: "reflection-beam",
+}
+
+const aliasFamily = (id: string) =>
+  id
+    .split("/")
+    .map((segment) =>
+      segment.replace(/^([a-z0-9]+)/, (token) => BENCHLM_KEY_BY_FAMILY[token] ?? token),
+    )
+    .join("/")
 
 /**
  * Ids a catalog spelling might be stored under, most specific first. A lookup takes the first
@@ -87,8 +96,9 @@ export function benchCandidates(id: string): string[] {
       }
     }
   }
-  const aliased = out.map(gemmaAlias)
-  const candidates = [...new Set([...out, ...aliased])]
+  const bare = lastSegment(base)
+  const aliased = [...out, bare].map(aliasFamily)
+  const candidates = [...new Set([...out, bare, ...aliased])]
   candidateCache.set(id, candidates)
   return candidates
 }
