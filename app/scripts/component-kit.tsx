@@ -7,9 +7,11 @@
 import assert from "node:assert/strict"
 import { act } from "react"
 import { createRoot } from "react-dom/client"
+import { MemoryRouter, Route, Routes } from "react-router"
 
 import { AfkPopup } from "@/components/afk"
-import { DEFAULT_SETTINGS, db, type Settings } from "@/lib/db"
+import { DEFAULT_SETTINGS, db, type Message, type Profile, type Settings } from "@/lib/db"
+import { ChatPage } from "@/routes/chat"
 
 export function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -35,6 +37,21 @@ export const connection = (name: string) => ({
   apiKey: "test-key",
 })
 
+export function botProfile(name: string, patch: Partial<Profile> = {}): Profile {
+  const server = connection(name)
+  return {
+    id: "bot-1",
+    name: "A bot",
+    baseUrl: server.baseUrl,
+    apiKey: server.apiKey,
+    model: "test/model",
+    botId: "bot-1",
+    createdAt: 1,
+    updatedAt: 1,
+    ...patch,
+  }
+}
+
 export async function seedSettings(patch: Partial<Omit<Settings, "id">> = {}) {
   await db.settings.clear()
   await db.settings.put({ ...DEFAULT_SETTINGS, ...patch, id: "settings" })
@@ -52,6 +69,43 @@ export async function mount(element: React.ReactNode, body: () => Promise<void>)
     await act(async () => root.unmount())
     container.remove()
   }
+}
+
+export const chatScreen = (id: string) => (
+  <MemoryRouter initialEntries={[`/c/${id}`]}>
+    <Routes>
+      <Route path="/c/:id" element={<ChatPage />} />
+    </Routes>
+  </MemoryRouter>
+)
+
+export async function seedChat({
+  id,
+  projectId,
+  messages = [],
+  profile,
+}: {
+  id: string
+  projectId?: string
+  messages?: Message[]
+  profile: Profile
+}) {
+  await seedSettings()
+  await db.profiles.clear()
+  await db.profiles.put(profile)
+  await db.messages.clear()
+  await db.conversations.clear()
+  await db.conversations.put({
+    id,
+    profileId: profile.id,
+    title: projectId ? "A session" : "A chat",
+    hermesSessionId: `${id}-hermes`,
+    projectId,
+    createdAt: 1,
+    updatedAt: 1,
+    changedAt: 1,
+  })
+  await db.messages.bulkPut(messages.map((message) => ({ ...message, conversationId: id })))
 }
 
 export function mountAfk(
@@ -73,6 +127,14 @@ export async function click(element: Element | null) {
   await settle()
 }
 
+export async function until(check: () => Promise<boolean>, what: string) {
+  for (let i = 0; i < 500; i += 1) {
+    if (await check()) return
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  assert.fail(`waited for ${what}`)
+}
+
 export async function type(element: Element | null, value: string) {
   assert.ok(element, "the field is on screen")
   const prototype =
@@ -90,6 +152,21 @@ export const find = (selector: string) => document.querySelector(selector)
 export const findAll = (selector: string) => [...document.querySelectorAll(selector)]
 export const findText = (selector: string, label: string) =>
   findAll(selector).find((one) => one.textContent?.includes(label)) ?? null
+
+const THINKING_LABEL = /^(Thinking…|Thought|Thought for \d+[sm].*)$/
+
+export const thinkingLines = () =>
+  findAll("button").filter((button) => THINKING_LABEL.test(button.textContent?.trim() ?? ""))
+
+export function onlyThinkingLine() {
+  const found = thinkingLines()
+  assert.equal(found.length, 1, "one thinking line, once per reply")
+  return found[0]
+}
+
+export const lineLabel = (line: Element) => line.textContent?.trim() ?? ""
+
+export const expanded = (line: Element) => line.getAttribute("aria-expanded")
 
 type Call = { method: string; path: string; body: Record<string, unknown> | null }
 

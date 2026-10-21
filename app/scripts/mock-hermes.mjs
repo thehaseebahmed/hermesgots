@@ -1303,6 +1303,14 @@ async function playTurn(req, body, last, out) {
   out.status("Thinking…")
   await sleep(500)
 
+  // A prompt that asks to think out loud gets a block of working-out before the answer, in both the
+  // shapes Hermes streams reasoning in: a completion's `reasoning_content` delta and a run's
+  // `reasoning.available` event. The channel is optional so a call site without one can't throw.
+  if (/\bthink out loud\b/i.test(last))
+    out.reason?.(
+      "They want the working-out, not just the answer. I'm weighing what's under /var/log and what is safe to drop, then I'll keep the reply to the point.",
+    )
+
   // Hermes's clarify tool: a tool call whose result is the user's answers, which the plugin shows
   // on runs; a chat completion can't show it and the result says so.
   const ask = async (questions) => {
@@ -2209,6 +2217,8 @@ async function streamCompletion(req, res, body) {
   const { prompt_tokens, completion_tokens } = await playTurn(req, body, last, {
     closed: () => closed,
     say: (piece) => chunk({ content: piece }),
+    // One chunk carrying the whole block, the way a provider reports a finished one.
+    reason: (text) => chunk({ reasoning_content: text }),
     status: (text) => frame({ kind: "thinking", text }, "hermes.status"),
     // Completions carry no result on this stream.
     // Only the run stream says whether a call failed.
@@ -2514,6 +2524,7 @@ function startRun(req, body) {
       return read
     },
     say: (delta) => push("message.delta", { delta }),
+    reason: (text) => push("reasoning.available", { text }),
     status: () => {},
     tool: ({ tool, label, status, result }) =>
       push(

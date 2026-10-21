@@ -15,6 +15,7 @@ import { Markdown } from "@/components/chat/markdown"
 import { AgentCards } from "@/components/chat/agent-card"
 import { MediaTag } from "@/components/chat/media-image"
 import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
+import { ThinkingLine } from "@/components/chat/thinking-line"
 import { ToolGroup } from "@/components/chat/tool-group"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Button } from "@/components/ui/button"
@@ -26,6 +27,7 @@ import { removeQueued, sendQueued } from "@/lib/chat"
 import type { Attachment, Message, ToolEvent } from "@/lib/db"
 import { describeActivity, formatDuration } from "@/lib/format"
 import { mediaImages } from "@/lib/media-tags"
+import { thoughtSpan } from "@/lib/thinking"
 import { cn } from "@/lib/utils"
 import { useReveal } from "@/lib/reveal"
 import { isPlanApproval } from "@/lib/workspace"
@@ -232,6 +234,7 @@ interface MessageItemProps {
   showStats: boolean
   /** Whether a reply is streaming in this chat, so queued messages know they'll go on their own. */
   busy?: boolean
+  showThinking?: boolean
 }
 
 /**
@@ -243,6 +246,7 @@ export const MessageItem = memo(function MessageItem({
   message,
   showStats,
   busy,
+  showThinking = true,
 }: MessageItemProps) {
   // Replies type out a word at a time, however Hermes delivers them.
   const content = useReveal(message.role === "assistant" ? message.content : "")
@@ -351,9 +355,14 @@ export const MessageItem = memo(function MessageItem({
     since = b.time
   }
 
+  const reasoning = showThinking ? message.reasoning?.trim() : undefined
+  const thinkingOpen = streaming && !message.content
+  const thinkingProgress =
+    Boolean(reasoning) && thinkingOpen && !awaitingApproval && !awaitingClarify
+
   // A reply's stats come only once it is done and fully revealed, so they never count up.
   const statsShown = showStats && !streaming && !revealing && Boolean(message.stats)
-  const statusLine = streaming && !runningTool
+  const statusLine = streaming && !runningTool && !thinkingProgress
   const footer = (
     <>
       {statusLine && (
@@ -376,6 +385,13 @@ export const MessageItem = memo(function MessageItem({
     statusLine || failed || (message.status === "stopped" && !message.content) || statsShown
   return (
     <div className="flex flex-col gap-3">
+      {reasoning && (
+        <ThinkingLine
+          reasoning={reasoning}
+          thinking={thinkingOpen}
+          spanMs={thoughtSpan(message.id)}
+        />
+      )}
       {segments.map((segment, i) => {
         const last = i === segments.length - 1
         const parts = toParts(

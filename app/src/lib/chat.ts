@@ -53,6 +53,7 @@ import { liveTurn, noteFollowUps, patchStats, reconcileHistory } from "@/lib/his
 import { isLive } from "@/lib/live"
 import { unknownLastTurn } from "@/lib/model-changes"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
+import { noteAnswer, noteThinking } from "@/lib/thinking"
 import { quietly } from "@/lib/report"
 import { randomId } from "@/lib/utils"
 import { knownLiveRun, readLiveRuns } from "@/lib/waiting"
@@ -275,22 +276,26 @@ function raiseApproval(turn: Turn, event: ApprovalRequestEvent) {
 
 function streamHandlers(turn: Turn): StreamHandlers {
   const { draft, touch } = turn
+  const watchedHere = !turn.resumed
   const started = () => {
     turn.firstTokenAt ??= Date.now()
   }
   return {
     onContent(delta) {
+      if (watchedHere) noteAnswer(draft.id)
       started()
       draft.content += delta
       draft.statusText = undefined
       touch()
     },
     onReasoning(delta) {
+      if (watchedHere) noteThinking(draft.id)
       started()
       draft.reasoning = (draft.reasoning ?? "") + delta
       touch()
     },
     onReasoningBlock(text) {
+      if (watchedHere) noteThinking(draft.id)
       started()
       draft.reasoning = draft.reasoning ? `${draft.reasoning}\n\n${text}` : text
       touch()
