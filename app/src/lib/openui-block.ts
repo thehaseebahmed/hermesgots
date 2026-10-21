@@ -46,11 +46,7 @@ function idOf(source: string) {
   return undefined
 }
 
-/**
- * Whether a text can carry a block at all. Every block opens on a fence whose info string is exactly
- * `openui-lang`, so a text without that word holds none, and a caller can skip the line scan with it.
- */
-export function carriesBlock(content: string): boolean {
+export function mayCarryBlock(content: string): boolean {
   return content.includes(INFO)
 }
 
@@ -61,7 +57,7 @@ export function carriesBlock(content: string): boolean {
  * inside another fence, or indented into a list item, is an example of Lang and stays code.
  */
 export function openuiParts(content: string): OpenuiPart[] {
-  if (!carriesBlock(content)) return content ? [{ kind: "text", at: 0, text: content }] : []
+  if (!mayCarryBlock(content)) return content ? [{ kind: "text", at: 0, text: content }] : []
 
   const lines = content.split("\n")
   const starts: number[] = []
