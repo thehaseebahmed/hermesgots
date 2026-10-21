@@ -2810,7 +2810,7 @@ http
           "afk_workflows",
           "afk_prompt",
           "afk_pipeline",
-          ...(RESEARCH ? ["research", "research_followup", "research_rewrite"] : []),
+          ...(RESEARCH ? ["research", "research_followup", "research_rewrite", "research_compare"] : []),
           ...(MCPS
             ? [
                 "mcps",
