@@ -8,9 +8,12 @@ category: testing
 
 Gots's e2e flows drive the real app (Vite) in headless Chromium with Playwright against the mock
 Hermes (`app/scripts/mock-hermes.mjs`). The `e2e` CLI starts the app and whichever mocks a flow
-needs, runs it, and stops them again. CI doesn't run these, so run the flows your change touches
-before you call a change to chats, sessions, polling or sync done. `pnpm lint`, `pnpm typecheck`
-and `pnpm build` still have to pass on top of that.
+needs, runs it, and stops them again. Pull requests don't run these. Before you call a change to
+chats, sessions, polling or sync done, run the flows it touches: the ones covering the screens,
+routes and state its diff moves (`pnpm e2e list` names them). **Don't run `pnpm e2e all` unless
+you're asked to.** It takes over half an hour, and `.github/workflows/e2e-nightly.yml` runs the whole
+registry on `main` every night (ADR 0029). `pnpm lint`, `pnpm typecheck` and `pnpm build` still have
+to pass on top of that.
 
 ## The CLI
 
@@ -21,7 +24,7 @@ the same.
 pnpm e2e list                     # every flow, one line each
 pnpm e2e chat-message             # one flow
 pnpm e2e approval reattach        # several
-pnpm e2e all                      # every flow; approval and reattach again on the polling mock
+pnpm e2e all                      # every flow, only when asked (nightly CI runs it on main)
 pnpm e2e approval --polling       # on the mock without its change stream, so the app polls
 pnpm e2e live-poll --app http://localhost:15174   # against an app already running (say main's)
 pnpm e2e shot /code --width 390 --dark            # a screenshot of any screen (below)
