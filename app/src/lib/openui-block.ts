@@ -46,6 +46,10 @@ function idOf(source: string) {
   return undefined
 }
 
+export function mayCarryBlock(content: string): boolean {
+  return content.includes(INFO)
+}
+
 /**
  * Splits a reply into text and the blocks it asks to be drawn as live Lang: a ```openui-lang fence
  * whose body runs to a closing fence, or to the end of a reply still streaming. The info string is
@@ -53,6 +57,8 @@ function idOf(source: string) {
  * inside another fence, or indented into a list item, is an example of Lang and stays code.
  */
 export function openuiParts(content: string): OpenuiPart[] {
+  if (!mayCarryBlock(content)) return content ? [{ kind: "text", at: 0, text: content }] : []
+
   const lines = content.split("\n")
   const starts: number[] = []
   let offset = 0
