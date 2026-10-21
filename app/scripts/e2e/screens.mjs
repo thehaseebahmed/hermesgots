@@ -106,6 +106,8 @@ for (const width of [390, 1024]) {
           return {
             scroll: el.querySelector('[data-slot="header-title"]').scrollWidth,
             client: el.querySelector('[data-slot="header-title"]').clientWidth,
+            lineScroll: el.querySelector('[data-slot="header-line"]').scrollWidth,
+            lineClient: el.querySelector('[data-slot="header-line"]').clientWidth,
             title: rect("header-title"),
             line: rect("header-line"),
             text: rect("header-text"),
@@ -115,6 +117,11 @@ for (const width of [390, 1024]) {
         assert.ok(
           geometry.scroll > geometry.client,
           `the session's title truncates at ${look} (${geometry.scroll}px of ${geometry.client}px)`,
+        )
+        // The count is decided before the line is drawn, so the whole line — its +N with it — fits.
+        assert.ok(
+          geometry.lineScroll <= geometry.lineClient + 1,
+          `the session's line fits at ${look} (${geometry.lineScroll}px of ${geometry.lineClient}px)`,
         )
         const centre = (box) => box.x + box.width / 2
         assert.ok(
