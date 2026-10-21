@@ -11,8 +11,8 @@ import path from "node:path"
 import { scoreFor, scoreMapOf } from "../src/lib/model-match.ts"
 
 const PROVIDERS = ["github-copilot", "ollama-cloud", "anthropic", "deepseek", "xai"]
-// The candidate deploy carries main's proxy, which serves the overall surface the app's picker
-// reads; the apex host still answers with the older coding payload until that deploy is promoted.
+// Every push to main deploys the candidate build first, so ids are checked against what the site
+// will serve before a release reaches it.
 const BENCHLM_URL = "https://candidate--hermesgots.netlify.app/.netlify/functions/benchlm"
 const MODELS_DEV_URL = "https://models.dev/api.json"
 const here = path.dirname(fileURLToPath(import.meta.url))
