@@ -87,6 +87,26 @@ _Avoid_: alert, limit banner, usage warning
 One Hermes profile the user has linked to Gots: its own agent, skills and settings, reached at the host it runs on.
 _Avoid_: profile, agent, assistant
 
+**Thread**:
+One of a bot's chats, shown as a card on the bot's screen. A project session is not one.
+_Avoid_: conversation, session
+
+**Main thread**:
+A bot's one permanent chat, where its messages land first and where the ones that need no thread of their own stay. It can't be deleted.
+_Avoid_: default chat, general chat, inbox
+
+**Triage**:
+The host's decision, for each message sent from the Main thread, whether it stays there, continues an older thread or opens a new one. Unsure means it stays.
+_Avoid_: routing, sorting, dispatch
+
+**Triage model**:
+The model a bot's host makes that decision with. Nothing set means the bot's own model decides.
+_Avoid_: router model, decision model
+
+**Moved marker**:
+What the Main thread shows in place of a message that triage sent to another thread, with the way to undo it.
+_Avoid_: redirect notice, forwarded message
+
 **Host**:
 The machine a bot's Hermes runs on: where its profiles, its MCP servers and the keys they use live.
 _Avoid_: server, backend, machine
