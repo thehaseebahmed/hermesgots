@@ -1,7 +1,11 @@
 /**
- * A chat's header: the drawer control, then the bot's picture, then the title with its status under
- * it, all left; the actions stay on the right. Alignment and truncation are layout, so the sweep
- * owns those (ADR 0019); this asserts the arrangement — what is there, in what order.
+ * Both arrangements of a header. A chat's: the drawer control, then the bot's picture, then the
+ * title with its status under it, all left; the actions stay on the right. A coding session's: the
+ * caller's back control, then the title centred over its subtitle, with the muted mark beside the
+ * actions instead of inside the text.
+ * Centring itself is layout — a DOM without layout cannot measure it, so the browser sweep proves
+ * it (ADR 0019) — and this asserts the arrangement: what is there, in what order. Nothing here
+ * reads a class name, a Tailwind token or a computed style, so a restyle does not fail it.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -10,6 +14,7 @@ import { ChatHeader } from "@/components/chat/chat-header"
 import { find, mount } from "./component-kit.tsx"
 
 const options = <button type="button" aria-label="Chat options" />
+const back = <button type="button" aria-label="Back to Code" />
 
 function rowParts() {
   const header = find("header")
@@ -91,4 +96,72 @@ test("an unstarted chat keeps the row's middle", async () => {
       "the actions are still the row's last part",
     )
   })
+})
+
+test("a session's header has no picture and reads its title over its repositories", async () => {
+  await mount(
+    <ChatHeader
+      title="Give a session a centred header"
+      subtitle="Gots · hermesgots, gots-app +1"
+      centered
+      showBot={false}
+      leading={back}
+      actions={options}
+    />,
+    async () => {
+      const row = rowParts()
+      assert.equal(row.length, 3, "the row is the leading control, text, actions")
+      const [leading, text, actions] = row
+      assert.ok(
+        leading.contains(find('[aria-label="Back to Code"]')),
+        "the caller's back control leads the row",
+      )
+      assert.ok(!find('[aria-label="Open conversations"]'), "a session has no drawer to open")
+      assert.ok(!find('[role="img"]'), "a session's header draws no picture")
+      assert.deepEqual(
+        lines(text),
+        ["Give a session a centred header", "Gots · hermesgots, gots-app +1"],
+        "the title is the line over its subtitle",
+      )
+      assert.ok(
+        actions.contains(find('[aria-label="Chat options"]')),
+        "the actions are the row's last part",
+      )
+    },
+  )
+})
+
+test("a muted centred header keeps the mark beside the actions", async () => {
+  await mount(
+    <ChatHeader
+      title="A session's title"
+      subtitle="2 files"
+      centered
+      muted
+      showBot={false}
+      leading={back}
+      actions={options}
+    />,
+    async () => {
+      const row = rowParts()
+      const [leading, text, actions] = row
+      assert.ok(leading.contains(find('[aria-label="Back to Code"]')), "the back control leads")
+      assert.deepEqual(
+        lines(text),
+        ["A session's title", "2 files"],
+        "the text block carries exactly its two lines, the mark is not one of them",
+      )
+      assert.ok(
+        !text.querySelector('[aria-label="Muted"]'),
+        "the mark does not sit inside the text block, pulling the title off centre",
+      )
+      const mark = actions.querySelector('[aria-label="Muted"]')
+      assert.ok(mark, "the muted mark is beside the actions, the row's last part")
+      assert.equal(actions.children[0], mark, "the mark comes before the options it sits beside")
+      assert.ok(
+        actions.contains(find('[aria-label="Chat options"]')),
+        "the actions are still the row's last part",
+      )
+    },
+  )
 })

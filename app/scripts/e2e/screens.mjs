@@ -1,6 +1,11 @@
-// Projects, a project, Code, Routines and a chat load their data at phone and tablet widths, in light and
-// dark mode, with no errors in the console.
-import { app, assert, flow, pass } from "./lib.mjs"
+// Projects, a project, Code, Routines, a chat and a coding session load their data at phone and
+// tablet widths, in light and dark mode, with no errors in the console; the session's header is
+// centred, with its bot and its repositories under the title rather than a picture beside it.
+import { app, assert, assertOneLine, flow, pass, runId, settled } from "./lib.mjs"
+
+const SESSION_TITLE =
+  "Give a coding session's screen the centred header it was promised, with every repository named"
+const BRANCH = "hermes/sunny-biscuit-03af"
 
 const errors = []
 for (const width of [390, 1024]) {
@@ -8,7 +13,7 @@ for (const width of [390, 1024]) {
     const look = `${width}${dark ? "-dark" : ""}`
     await flow(
       `screens-${look}`,
-      async ({ page, profileId, send, lastReply, until, shot }) => {
+      async ({ page, profileId, send, seed, lastReply, until, shot }) => {
         page.on("pageerror", (error) => errors.push(`${look}: ${error.message}`))
         page.on("console", (message) => {
           if (message.type() === "error") errors.push(`${look}: ${message.text()}`)
@@ -25,6 +30,114 @@ for (const width of [390, 1024]) {
         await page.goto(`${app}/routines`)
         await page.getByText("Inbox triage").first().waitFor({ timeout: 15_000 })
         await shot("routines")
+
+        // Nothing is sent from it — the host's workspace answer would replace the worktree seeded here.
+        const sessionId = `e2e-header-${runId()}`
+        await seed([
+          {
+            id: sessionId,
+            hermesSessionId: sessionId,
+            title: SESSION_TITLE,
+            projectId: "p_1a2b3c4d",
+            mode: "auto",
+            worktree: {
+              branch: BRANCH,
+              instructions: "",
+              repos: [
+                { name: "mock-user/memento", branch: BRANCH },
+                { name: "mock-user/gots-app", branch: BRANCH },
+                { name: "mock-user/docs", branch: BRANCH },
+                { name: "mock-user/website", branch: BRANCH },
+              ],
+            },
+          },
+        ])
+        await page.evaluate(async (id) => {
+          const { db } = await import("/src/lib/db.ts")
+          await db.messages.put({
+            id: `${id}-opening`,
+            conversationId: id,
+            role: "user",
+            content: "Ship the header",
+            status: "done",
+            createdAt: Date.now() - 900,
+          })
+        }, sessionId)
+        await page.goto(`${app}/c/${sessionId}`)
+        // The app shell's own header is in the page too, so the session's is the one with its title.
+        const header = page.locator("header").filter({ hasText: SESSION_TITLE })
+        const title = header.getByText(SESSION_TITLE, { exact: true })
+        await title.waitFor({ timeout: 15_000 })
+        await settled(page)
+        await shot("session")
+
+        assert.equal(
+          await header.locator('[role="img"]').count(),
+          0,
+          `no bot picture in the session's header at ${look}`,
+        )
+        // The owner the repositories share said once, the names the width has room for, the rest counted.
+        const line = width < 768 ? "Test bot · memento +3" : "Test bot · memento, gots-app +2"
+        const subtitle = header.getByText(/^Test bot · /)
+        await subtitle.first().waitFor({ timeout: 5_000 })
+        assert.equal(
+          (await subtitle.first().innerText()).trim(),
+          line,
+          `the session's line names the bot and the repositories at ${look}`,
+        )
+        assert.ok(
+          !(await header.innerText()).includes(BRANCH),
+          `the branch is not in the session's header at ${look}`,
+        )
+        await assertOneLine(title, `the session's title at ${look}`)
+        await assertOneLine(subtitle.first(), `the session's line at ${look}`)
+
+        // The block and the row share a centre on a phone only: from 768px the actions carry a ring.
+        const geometry = await header.evaluate((el) => {
+          const rect = (slot) => {
+            const r = el.querySelector(`[data-slot="${slot}"]`).getBoundingClientRect()
+            return { x: r.x, width: r.width, right: r.right }
+          }
+          return {
+            scroll: el.querySelector('[data-slot="header-title"]').scrollWidth,
+            client: el.querySelector('[data-slot="header-title"]').clientWidth,
+            lineScroll: el.querySelector('[data-slot="header-line"]').scrollWidth,
+            lineClient: el.querySelector('[data-slot="header-line"]').clientWidth,
+            title: rect("header-title"),
+            line: rect("header-line"),
+            middle: rect("header-middle"),
+            row: rect("header-row"),
+          }
+        })
+        assert.ok(
+          geometry.scroll > geometry.client,
+          `the session's title truncates at ${look} (${geometry.scroll}px of ${geometry.client}px)`,
+        )
+        // The count is decided before the line is drawn, so the whole line — its +N with it — fits.
+        assert.ok(
+          geometry.lineScroll <= geometry.lineClient + 1,
+          `the session's line fits at ${look} (${geometry.lineScroll}px of ${geometry.lineClient}px)`,
+        )
+        const centre = (box) => box.x + box.width / 2
+        assert.ok(
+          geometry.title.x >= geometry.middle.x - 2 &&
+            geometry.title.right <= geometry.middle.right + 2,
+          `the title stays in the room the controls leave at ${look}`,
+        )
+        assert.ok(
+          Math.abs(centre(geometry.title) - centre(geometry.middle)) <= 2,
+          `the title is centred in that room at ${look}`,
+        )
+        assert.ok(
+          Math.abs(centre(geometry.line) - centre(geometry.title)) <= 2,
+          `the session's line is centred under the title at ${look}`,
+        )
+        if (width < 768)
+          assert.ok(
+            Math.abs(centre(geometry.title) - centre(geometry.row)) <= 2,
+            `the title is centred on the row at ${look}`,
+          )
+
         await page.goto(app)
         await send("hello")
         await page.waitForURL("**/c/**", { timeout: 15_000 })
@@ -35,7 +148,29 @@ for (const width of [390, 1024]) {
           "the reply to finish",
         )
         await shot("chat")
-        pass(`Projects, a project, Code, Routines and a chat load at ${look}`)
+        // The width's own boundaries: exactly 768 draws a tablet's two names, and a laptop's width
+        // draws three. The session then sits beside Code's list, so its room is not the one measured
+        // above and only the line is asserted.
+        if (width === 1024) {
+          for (const [at, expected] of [
+            [768, "Test bot · memento, gots-app +2"],
+            [1280, "Test bot · memento, gots-app, docs +1"],
+          ]) {
+            await page.setViewportSize({ width: at, height: at === 768 ? 768 : 900 })
+            await page.goto(`${app}/c/${sessionId}`)
+            const laptop = page.locator("header").filter({ hasText: SESSION_TITLE })
+            const laptopLine = laptop.getByText(/^Test bot · /)
+            await laptopLine.first().waitFor({ timeout: 15_000 })
+            assert.equal(
+              (await laptopLine.first().innerText()).trim(),
+              expected,
+              `the session's line names what a ${at}px screen has room for (${look})`,
+            )
+          }
+        }
+        pass(
+          `Projects, a project, Code, Routines, a chat and a session's centred header load at ${look}`,
+        )
       },
       { viewport: { width, height: width < 768 ? 844 : 768 }, dark },
     )

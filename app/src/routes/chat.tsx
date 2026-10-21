@@ -25,13 +25,14 @@ import {
   SEND_CAUGHT_UP_MS,
 } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
+import { repoCap, sessionSubtitle } from "@/lib/repo-line"
 import { useBreakReminderEligibility } from "@/components/break-reminder-context"
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
-import { ModelChange } from "@/components/chat/model-change"
+import { Compacted, ModelChange } from "@/components/chat/model-change"
 import { prLabel } from "@/components/chat/pr-look"
 import { PipelinePill, PipelineSheet } from "@/components/chat/pipeline"
 import { PrPill } from "@/components/chat/pr-pill"
@@ -104,6 +105,7 @@ import {
   getMessages,
   updateConversation,
 } from "@/lib/db"
+import { compactionMarks } from "@/lib/compactions"
 import { serverConfig } from "@/lib/connection"
 import { describeActivity } from "@/lib/format"
 import { supportsSteer, type HermesProject } from "@/lib/hermes"
@@ -273,6 +275,11 @@ export function ChatPage() {
   const changes = useMemo(
     () => modelChanges(thread ?? [], conversation?.modelChanges),
     [thread, conversation?.modelChanges],
+  )
+  // Where the host compacted this chat's context: the first message after each carries a divider above it.
+  const compacted = useMemo(
+    () => compactionMarks(thread ?? [], conversation?.compactions),
+    [thread, conversation?.compactions],
   )
   // Only a run can be steered, and only on a Hermes that has the route.
   const [steerRoute, setSteerRoute] = useState<{ baseUrl: string; ok: boolean }>()
@@ -671,16 +678,30 @@ export function ChatPage() {
     </div>
   )
 
+  // A session is a place in a project, not a conversation with a bot, so its header is centred.
+  const centered = Boolean(session)
+  let subtitle: string | undefined
+  if (!unstarted)
+    subtitle = session
+      ? sessionSubtitle({
+          activity,
+          botName: profile?.name,
+          names: sessionRepos.map((repo) => repo.name),
+          cap: repoCap({ wide, xlarge: xl }),
+        })
+      : activity || repliesLine
+
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <ChatHeader
         // Nothing started has no title yet, and its bot is the big one in the middle.
         title={unstarted ? "" : (conversation?.title ?? "New chat")}
-        subtitle={unstarted ? undefined : activity || repliesLine || session?.worktree?.branch}
+        subtitle={subtitle}
         botId={profile?.botId}
         muted={Boolean(conversation?.muted || profile?.muted)}
-        // Beside its bot, which already shows the bot's picture.
-        showBot={!(botPath && xl) && !unstarted}
+        centered={centered}
+        // Beside its bot, a thread already shows the picture.
+        showBot={!session && !unstarted && !(botPath && xl)}
         actions={actions}
         leading={
           botPath ? (
@@ -739,6 +760,9 @@ export function ChatPage() {
                     const change = changes.get(message.id)
                     return (
                       <MessageScrollerItem key={message.id} messageId={message.id}>
+                        {compacted.before.has(message.id) && (
+                          <Compacted compaction={compacted.before.get(message.id)!} />
+                        )}
                         {change && <ModelChange model={change} />}
                         <MessageItem
                           message={message}
@@ -749,6 +773,7 @@ export function ChatPage() {
                       </MessageScrollerItem>
                     )
                   })}
+                  {compacted.trailing && <Compacted compaction={compacted.trailing} />}
                 </AgentsContext.Provider>
               </MessageScrollerContent>
             </MessageScrollerViewport>

@@ -45,6 +45,19 @@ await flow(
     assert.equal(await page.getByText("Draft session").count(), 0, "no title before it starts")
     assert.equal(await page.getByText("Give me a tour").count(), 0, "no suggestions")
     assert.equal(await page.locator("header img").count(), 0, "no bot in the header")
+    const chip = page.locator("li").filter({ hasText: "mock-user/memento" })
+    assert.equal(await chip.count(), 1, "the session names the repository it will work in")
+    assert.equal(
+      await chip.getByText("new branch from", { exact: true }).count(),
+      1,
+      "and says it starts a branch",
+    )
+    assert.equal(await chip.getByText("main", { exact: true }).count(), 1, "from main")
+    assert.equal(
+      (await page.locator("header").innerText()).trim(),
+      "",
+      "the header carries no text",
+    )
     await shot("session")
     pass("a session not started shows the bot, a greeting and its first line")
 

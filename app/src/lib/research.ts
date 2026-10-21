@@ -44,7 +44,13 @@ export const MISSION_TYPES: {
     example: "Explain how transformers work, starting from the basics",
     ready: true,
   },
-  { id: "compare", name: "Compare & decide", icon: ScaleIcon, example: "Postgres or Cosmos DB?" },
+  {
+    id: "compare",
+    name: "Compare & decide",
+    icon: ScaleIcon,
+    example: "Postgres or Cosmos DB?",
+    ready: true,
+  },
   {
     id: "verify",
     name: "Verify a claim",
@@ -72,8 +78,9 @@ export const MISSION_TYPES: {
   { id: "brainstorm", name: "Brainstorm", icon: LightbulbIcon, example: "10 novel feature ideas" },
 ]
 
-export type OutputFormat = "guide" | "quiz" | "glossary"
-export const FORMATS: { id: OutputFormat; name: string }[] = [
+/** A comparison delivers one `memo`, which isn't one of the formats a Learn mission can make. */
+export type OutputFormat = "guide" | "quiz" | "glossary" | "memo"
+export const FORMATS: { id: Exclude<OutputFormat, "memo">; name: string }[] = [
   { id: "guide", name: "Guide" },
   { id: "quiz", name: "Quiz" },
   { id: "glossary", name: "Glossary" },
@@ -107,6 +114,9 @@ export interface Claim {
   source: string
   snippet: string
   confidence: "supported" | "uncertain"
+  /** A comparison's option and criterion the claim was read for. */
+  option?: string
+  criterion?: string
 }
 
 /** A run of text, with the claims behind it, or flagged when no claim backs it. */
@@ -152,7 +162,61 @@ export interface Ledger {
   claims: Claim[]
 }
 
+export interface Option {
+  id: string
+  name: string
+}
+
+/** What a comparison is judged on; `weight` is 1 (nice to have) to `MAX_WEIGHT` (decisive). */
+export interface Criterion {
+  id: string
+  name: string
+  weight: number
+}
+
+export const MIN_OPTIONS = 2
+export const MAX_OPTIONS = 5
+export const MIN_CRITERIA = 2
+export const MAX_CRITERIA = 6
+export const MAX_WEIGHT = 5
+export const MAX_SCORE = 10
+
+/** The judge's score of one option on one criterion; `flagged` when no claim backs it. */
+export interface Cell {
+  score: number | null
+  reason: string
+  claims: string[]
+  flagged: boolean
+}
+
+export interface MemoOption extends Option {
+  /** The option's advocate's case, then its answer to the others'. */
+  case: Span[][]
+  rebuttal: Span[][]
+}
+
+export interface Memo {
+  options: MemoOption[]
+  /** By option id, then criterion id; absent until the judge has scored. */
+  scores?: Record<string, Record<string, Cell>>
+  /** An option a claim shows can't work on a criterion at all. */
+  ruledOut: { option: string; criterion: string; claim: string }[]
+  verdict: Span[][]
+  flip: Span[][]
+  /** The model that judged; absent for the profile's own. */
+  judgedBy?: ModelChoice
+}
+
+/** The ranking, worked out by the plugin's code from the scores and weights, never by a model. */
+export interface Decision {
+  ranking: { option: string; total: number; ruledOut: boolean; thin: string[] }[]
+  leader?: string
+  margin?: number
+  close: boolean
+}
+
 export interface Outputs {
+  memo?: Memo
   guide?: Section[]
   quiz?: QuizQuestion[]
   glossary?: GlossaryTerm[]
@@ -212,6 +276,11 @@ export interface Mission {
   researcher?: ModelChoice
   /** The model the mission writes with, when not the profile's own. */
   writer?: ModelChoice
+  /** A comparison's options and criteria, and the model that judges it when not the bot's own. */
+  options: Option[]
+  criteria: Criterion[]
+  judge?: ModelChoice
+  decision?: Decision
   /** Only once the mission itself has been read, not from the list. */
   ledger?: Ledger
   outputs?: Outputs
@@ -222,19 +291,69 @@ const pick = <T extends string>(value: unknown, options: readonly T[], fallback:
 const text = (value: unknown) => (typeof value === "string" ? value : "")
 const list = (value: unknown) => (Array.isArray(value) ? value : [])
 const STAGES = ["brief", "scope", "reading", "drafting", "reviewing", "delivered"] as const
-const FORMAT_IDS = ["guide", "quiz", "glossary"] as const
+const FORMAT_IDS = ["guide", "quiz", "glossary", "memo"] as const
 const KIND_IDS = ["papers", "docs", "articles", "videos", "forums"] as const
 
 function toOutputs(raw: unknown): Outputs | undefined {
   const outputs = raw as Record<string, Record<string, unknown>> | undefined
   return (
     outputs && {
+      memo: outputs.memo && toMemo(outputs.memo),
       guide: outputs.guide && (list(outputs.guide.sections) as Section[]),
       quiz: outputs.quiz && (list(outputs.quiz.questions) as QuizQuestion[]),
       glossary: outputs.glossary && (list(outputs.glossary.terms) as GlossaryTerm[]),
     }
   )
 }
+
+function toMemo(raw: Record<string, unknown>): Memo {
+  const rows = (value: unknown) =>
+    Array.isArray(value) ? (value as Record<string, unknown>[]) : []
+  const scores = raw.scores as Memo["scores"] | undefined
+  return {
+    options: rows(raw.options).map((o) => ({
+      id: text(o.id),
+      name: text(o.name),
+      case: list(o.case) as Span[][],
+      rebuttal: list(o.rebuttal) as Span[][],
+    })),
+    scores: scores && Object.keys(scores).length ? scores : undefined,
+    ruledOut: rows(raw.ruled_out).map((r) => ({
+      option: text(r.option),
+      criterion: text(r.criterion),
+      claim: text(r.claim),
+    })),
+    verdict: list(raw.verdict) as Span[][],
+    flip: list(raw.flip) as Span[][],
+    judgedBy: toChoice(raw.judged_by),
+  }
+}
+
+function toDecision(raw: unknown): Decision | undefined {
+  const decision = raw as Record<string, unknown> | undefined
+  if (!decision) return undefined
+  return {
+    ranking: list(decision.ranking).map((row: Record<string, unknown>) => ({
+      option: text(row.option),
+      total: Number(row.total) || 0,
+      ruledOut: Boolean(row.ruled_out),
+      thin: list(row.thin).filter((id): id is string => typeof id === "string"),
+    })),
+    leader: text(decision.leader) || undefined,
+    margin: typeof decision.margin === "number" ? decision.margin : undefined,
+    close: Boolean(decision.close),
+  }
+}
+
+const toOptions = (raw: unknown): Option[] =>
+  list(raw).map((o: Record<string, unknown>) => ({ id: text(o.id), name: text(o.name) }))
+
+const toCriteria = (raw: unknown): Criterion[] =>
+  list(raw).map((k: Record<string, unknown>) => ({
+    id: text(k.id),
+    name: text(k.name),
+    weight: Number(k.weight) || 1,
+  }))
 
 function toChoice(raw: unknown): ModelChoice | undefined {
   const choice = raw as Record<string, unknown> | null | undefined
@@ -266,7 +385,7 @@ function toMission(raw: Record<string, unknown>, profileId: string): Mission {
   return {
     id: text(raw.id),
     profileId,
-    type: "learn",
+    type: MISSION_TYPES.find((t) => t.id === raw.type)?.id ?? "learn",
     input: text(raw.input),
     title: text(raw.title),
     goal: text(raw.goal),
@@ -303,6 +422,10 @@ function toMission(raw: Record<string, unknown>, profileId: string): Mission {
         : undefined,
     researcher: toChoice(raw.researcher),
     writer: toChoice(raw.writer),
+    options: toOptions(raw.options),
+    criteria: toCriteria(raw.criteria),
+    judge: toChoice(raw.judge),
+    decision: toDecision(raw.decision),
     ledger: ledger && {
       sources: list(ledger.sources) as Source[],
       claims: list(ledger.claims) as Claim[],
@@ -461,6 +584,8 @@ async function act(
 
 /** Starts a mission on the bot; the plugin reads the question back as a brief. */
 export async function createMission(profile: Profile, input: string, type: MissionType) {
+  if (type === "compare" && !(await hasPluginFeature(profile, "research_compare")))
+    throw new Error("Its Gots plugin needs an update for Compare & decide.")
   const raw = await createResearch(profile, input, type)
   const mission = toMission(raw, profile.id)
   put({ ...mission, ledger: mission.ledger ?? { sources: [], claims: [] } })
@@ -472,11 +597,27 @@ export const confirmBrief = (
   brief: Pick<Mission, "goal" | "format" | "audience" | "depth">,
 ) => act(mission, "brief", brief)
 
+/** A comparison's brief: the decision, who decides, and what is compared and judged on. */
+export const confirmComparison = (
+  mission: Mission,
+  brief: {
+    goal: string
+    audience: string
+    depth: Depth
+    options: string[]
+    criteria: { name: string; weight: number }[]
+  },
+) => act(mission, "brief", brief)
+
 export const editBrief = (mission: Mission) => act(mission, "edit")
 
 /** The Scope Gate: nothing is researched until the outline and the kinds of source are approved. */
 export const approveScope = (mission: Mission, outline: string[], sources: SourceKind[]) =>
   act(mission, "start", { outline, source_kinds: sources })
+
+/** A comparison's Scope Gate: the kinds of source, and the model that judges (the bot's own if none). */
+export const approveComparison = (mission: Mission, sources: SourceKind[], judge?: ModelChoice) =>
+  act(mission, "start", { source_kinds: sources, ...(judge ? { judge } : {}) })
 
 /** Another format from the same ledger: no new reading, only writing. */
 export const makeFormat = (mission: Mission, format: OutputFormat) =>
@@ -535,9 +676,57 @@ export const RESEARCH_STAGES: { id: MissionStage; name: string }[] = [
 
 /** How many pieces the first format is written in: a section per outline point, else one. */
 export const pieces = (mission: Mission) =>
-  mission.format === "guide" ? Math.max(1, mission.outline.length) : 1
+  mission.type === "compare"
+    ? 2 * mission.options.length + 1
+    : mission.format === "guide"
+      ? Math.max(1, mission.outline.length)
+      : 1
 
 /** A made format as Markdown, its claims numbered and listed with their sources at the end. */
+function memoMarkdown(mission: Mission, cite: (ids?: string[]) => string) {
+  const memo = mission.outputs?.memo
+  const out: string[] = []
+  if (!memo) return out
+  const prose = (paragraphs: Span[][]) =>
+    paragraphs.map((p) =>
+      p.map((s) => `${s.text}${s.flagged ? " (no source)" : cite(s.cites)}`).join(""),
+    )
+  const name = (id: string) => memo.options.find((o) => o.id === id)?.name ?? id
+  const decision = mission.decision
+  if (decision?.leader) {
+    out.push(
+      `**${name(decision.leader)} leads.**${decision.close ? " It is a close call." : ""}`,
+      "",
+    )
+    out.push(...prose(memo.verdict).flatMap((p) => [p, ""]))
+    out.push(
+      "| Option | Total | " +
+        mission.criteria.map((k) => `${k.name} (×${k.weight})`).join(" | ") +
+        " |",
+      "|---|---|" + mission.criteria.map(() => "---|").join(""),
+    )
+    for (const row of decision.ranking)
+      out.push(
+        `| ${name(row.option)}${row.ruledOut ? " (ruled out)" : ""} | ${row.total} | ` +
+          mission.criteria.map((k) => memo.scores?.[row.option]?.[k.id]?.score ?? "–").join(" | ") +
+          " |",
+      )
+    out.push("")
+    if (memo.flip.length)
+      out.push("## What would change this", "", ...prose(memo.flip).flatMap((p) => [p, ""]))
+  }
+  for (const option of memo.options)
+    out.push(
+      `## The case for ${option.name}`,
+      "",
+      ...prose(option.case).flatMap((p) => [p, ""]),
+      ...(option.rebuttal.length
+        ? [`### Answering the others`, "", ...prose(option.rebuttal).flatMap((p) => [p, ""])]
+        : []),
+    )
+  return out
+}
+
 export function toMarkdown(mission: Mission, format: OutputFormat) {
   const ledger = mission.ledger ?? { sources: [], claims: [] }
   const used = new Set<string>()
@@ -547,7 +736,9 @@ export function toMarkdown(mission: Mission, format: OutputFormat) {
   }
   const out = [`# ${mission.title}`, ""]
   const outputs = mission.outputs ?? {}
-  if (format === "guide") {
+  if (format === "memo") {
+    out.push(...memoMarkdown(mission, cite))
+  } else if (format === "guide") {
     for (const section of outputs.guide ?? []) {
       out.push(`## ${section.title}`, "")
       for (const paragraph of section.paragraphs)

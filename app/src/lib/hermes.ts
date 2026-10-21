@@ -1803,6 +1803,14 @@ export interface ModelChange {
   provider?: string
 }
 
+/** A point where the host compacted a chat's context, on its own clock. */
+export interface Compaction {
+  at: number
+  /** The context just before it: the last prompt size the host recorded, and the window it was measured against. */
+  tokens?: number
+  window?: number
+}
+
 export interface SessionContext {
   /** Prompt tokens of the session's latest model call. */
   tokens?: number
@@ -1812,6 +1820,8 @@ export interface SessionContext {
   model?: string
   /** Every model the session's calls ran on, oldest first, so its thread can show where it changed. */
   modelChanges?: ModelChange[]
+  /** Every time the host compacted the chat, oldest first, so its thread can mark where. */
+  compactions?: Compaction[]
 }
 
 /**
@@ -1834,14 +1844,36 @@ export async function getSessionContext(
   const tokens = count(body?.prompt_tokens)
   const model = typeof body?.model === "string" && body.model ? body.model : undefined
   const modelChanges = readChanges(body?.model_changes)
+  const compactions = readCompactions(body?.compactions)
   // A host that recorded a change but no figure for it still has the list worth showing.
-  if (!tokens && !modelChanges) return null
+  if (!tokens && !modelChanges && !compactions) return null
   return {
     ...(tokens ? { tokens } : {}),
     window: count(body?.context_length),
     model,
     ...(modelChanges ? { modelChanges } : {}),
+    ...(compactions ? { compactions } : {}),
   }
+}
+
+/** The plugin's `compactions`: a list, even an empty one, is the host's answer; anything else is unknown. */
+function readCompactions(value: unknown): Compaction[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const found: Compaction[] = []
+  for (const raw of value) {
+    const row = (raw ?? {}) as Record<string, unknown>
+    if (typeof row.at !== "number" || !Number.isFinite(row.at)) continue
+    const count = (value: unknown) =>
+      typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined
+    const tokens = count(row.tokens)
+    const window = count(row.window)
+    found.push({
+      at: row.at,
+      ...(tokens ? { tokens } : {}),
+      ...(window ? { window } : {}),
+    })
+  }
+  return found
 }
 
 /** The plugin's `model_changes`, dropping anything that isn't a row. */

@@ -75,7 +75,7 @@ export function CiteChip({ id, onCite }: { id: string; onCite: (id: string) => v
   )
 }
 
-function Spans({ spans, onCite }: { spans: Span[]; onCite: (id: string) => void }) {
+export function Spans({ spans, onCite }: { spans: Span[]; onCite: (id: string) => void }) {
   return spans.map((span, index) =>
     span.flagged ? (
       <span key={index}>
@@ -99,7 +99,7 @@ function Spans({ spans, onCite }: { spans: Span[]; onCite: (id: string) => void 
 }
 
 /** A line of placeholder text while a section is still being written. */
-function Bars({ lines = 3 }: { lines?: number }) {
+export function Bars({ lines = 3 }: { lines?: number }) {
   return (
     <div className="flex flex-col gap-2.5 py-1" aria-hidden>
       {Array.from({ length: lines }, (_, i) => (
@@ -366,9 +366,11 @@ const order: MissionStage[] = ["reading", "drafting", "reviewing", "delivered"]
 function stageDetail(mission: Mission, stage: MissionStage) {
   if (stage === "reading") return `${mission.found} sources · ${mission.claimCount} claims`
   if (stage === "drafting")
-    return mission.format === "guide"
-      ? `${mission.written} of ${pieces(mission)} sections`
-      : `${mission.claimCount} claims`
+    return mission.type === "compare"
+      ? `${mission.written} of ${pieces(mission)} steps`
+      : mission.format === "guide"
+        ? `${mission.written} of ${pieces(mission)} sections`
+        : `${mission.claimCount} claims`
   return mission.stage === "delivered"
     ? `${mission.claimCount} claims checked`
     : "Every claim to a source"
@@ -398,7 +400,13 @@ export function StageStrip({ mission }: { mission: Mission }) {
   // Reading has no known end, so its third fills as claims come in, up to a typical ledger.
   const progress =
     mission.stage === "reading"
-      ? Math.min(1, mission.claimCount / (mission.outline.length * 4 || 1)) / 3
+      ? Math.min(
+          1,
+          mission.claimCount /
+            ((mission.type === "compare"
+              ? mission.options.length * mission.criteria.length * 1.5
+              : mission.outline.length * 4) || 1),
+        ) / 3
       : mission.stage === "drafting"
         ? 1 / 3 + mission.written / pieces(mission) / 3
         : 0.9

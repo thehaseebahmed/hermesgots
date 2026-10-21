@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 30
+SCHEMA_VERSION = 31
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -358,4 +358,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    at INTEGER NOT NULL
                )"""
         )
+        # v31: a comparison's options and criteria, the model that judges it, and the option and
+        # criterion each claim was read for (research.py).
+        mission_columns = {row[1] for row in conn.execute("PRAGMA table_info(research_missions)")}
+        for column in ("options", "criteria", "judge"):
+            if column not in mission_columns:
+                conn.execute(f"ALTER TABLE research_missions ADD COLUMN {column} TEXT")
+        claim_columns = {row[1] for row in conn.execute("PRAGMA table_info(research_claims)")}
+        for column in ("option_id", "criterion_id"):
+            if column not in claim_columns:
+                conn.execute(f"ALTER TABLE research_claims ADD COLUMN {column} TEXT")
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
