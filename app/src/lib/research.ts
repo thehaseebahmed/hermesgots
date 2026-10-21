@@ -18,6 +18,7 @@ import {
   createResearch,
   getResearch,
   hasPluginFeature,
+  hasPluginFeatureNow,
   listResearch,
   researchAction,
 } from "@/lib/hermes"
@@ -584,8 +585,10 @@ async function act(
 
 /** Starts a mission on the bot; the plugin reads the question back as a brief. */
 export async function createMission(profile: Profile, input: string, type: MissionType) {
-  if (type === "compare" && !(await hasPluginFeature(profile, "research_compare")))
-    throw new Error("Its Gots plugin needs an update for Compare & decide.")
+  if (type === "compare" && !(await hasPluginFeatureNow(profile, "research_compare")))
+    throw new Error(
+      "Its Gots plugin needs an update for Compare & decide, or a hermes gateway restart after one.",
+    )
   const raw = await createResearch(profile, input, type)
   const mission = toMission(raw, profile.id)
   put({ ...mission, ledger: mission.ledger ?? { sources: [], claims: [] } })

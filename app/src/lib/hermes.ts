@@ -1265,6 +1265,12 @@ export async function hasPluginFeature(config: HermesConfig, feature: string) {
   return Boolean((await getPluginFeatureList(config))?.includes(feature))
 }
 
+/** `hasPluginFeature` asked of the host again: an answer from before its plugin updated is stale. */
+export function hasPluginFeatureNow(config: HermesConfig, feature: string) {
+  pluginFeatures.delete(connectionKey(config))
+  return hasPluginFeature(config, feature)
+}
+
 /** A message waiting on the Hermes host for the session's run to finish. */
 export interface QueueItem {
   id: string
