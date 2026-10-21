@@ -52,6 +52,18 @@ _Avoid_: client-side computation
 What a project session is doing — idle, working, waiting on the user, or closed by the user as resolved or discarded. Composed from the host's run status and this device's own marks, not derived from one source.
 _Avoid_: status, state machine
 
+**Conversation**:
+The stored record of one exchange with a bot: the row a chat list shows and sync carries. A coding session's conversation also names its project.
+_Avoid_: chat object, session record, thread
+
+**Thread**:
+A conversation's messages in the order they happened, as the screen draws them — what the agent said, what it ran, and what it thought. Every thread is drawn the same way, whoever it is with.
+_Avoid_: transcript, message log, feed, timeline
+
+**Thinking**:
+What a model worked out before it answered, drawn above the reply as a line that folds once the answer starts. It is kept with the reply; how long it took is kept only where this device watched it think.
+_Avoid_: chain of thought, scratchpad, reasoning trace
+
 **Command**:
 Something Gots itself does from the composer: a new chat, settings, or how a message sent mid-reply goes. A command never reaches the agent as a message.
 _Avoid_: slash command, action, app skill
