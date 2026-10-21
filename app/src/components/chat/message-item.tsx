@@ -248,8 +248,6 @@ function StatusLine({ text }: { text: string }) {
 interface MessageItemProps {
   message: Message
   showStats: boolean
-  /** A simplified chat: the agent's tool calls and its activity line are left out. */
-  simple?: boolean
   botId?: string
   /** Whether a reply is streaming in this chat, so queued messages know they'll go on their own. */
   busy?: boolean
@@ -263,7 +261,6 @@ export const MessageItem = memo(function MessageItem({
   botId,
   busy,
   plain,
-  simple,
 }: MessageItemProps) {
   // Replies type out a word at a time, however Hermes delivers them.
   const content = useReveal(message.role === "assistant" ? message.content : "")
@@ -339,9 +336,7 @@ export const MessageItem = memo(function MessageItem({
   const asking = awaitingClarify
     ? message.tools?.findLast((t) => t.tool === "clarify" && t.status === "running")
     : undefined
-  const tools = (message.tools ?? []).filter(
-    (t) => t !== asking && (!simple || t.tool === "clarify"),
-  )
+  const tools = (message.tools ?? []).filter((t) => t !== asking)
   // The tool group right above already names the running call, so repeating it here is noise.
   const runningTool = tools.some((t) => t.status === "running")
   // Like a person's "typing…", the dots show only while the model thinks or writes: not while a
@@ -394,7 +389,6 @@ export const MessageItem = memo(function MessageItem({
   const statsShown = showStats && !streaming && !revealing && Boolean(message.stats)
   const statusShown =
     streaming &&
-    !simple &&
     Boolean(content) &&
     Boolean(message.statusText) &&
     !awaitingApproval &&

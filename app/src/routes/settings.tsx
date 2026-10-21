@@ -25,7 +25,6 @@ import {
   CornerDownRightIcon,
   DatabaseIcon,
   MenuIcon,
-  MessageCircleIcon,
   MessagesSquareIcon,
   MessageSquareTextIcon,
   MonitorIcon,
@@ -778,7 +777,6 @@ function AppearanceSettings() {
     async () => ({ ...DEFAULT_SETTINGS, ...(await db.settings.get("settings")) }),
     [],
   )
-  const simplified = chatSettings?.simplifiedChats
   return (
     <>
       <Group>
@@ -797,14 +795,6 @@ function AppearanceSettings() {
         ))}
       </Group>
       <Group>
-        <SwitchRow
-          id="simplified-chats"
-          icon={MessageCircleIcon}
-          title="Simplified chats"
-          subtitle="Hide tool calls, stats and context use"
-          checked={simplified ?? DEFAULT_SETTINGS.simplifiedChats}
-          onCheckedChange={(checked) => saveAppearance({ simplifiedChats: checked })}
-        />
         <SwitchRow
           id="steer-by-default"
           icon={CornerDownRightIcon}

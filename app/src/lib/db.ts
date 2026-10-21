@@ -14,8 +14,6 @@ export type LibrarySort = "new" | "old" | "az" | "za"
 
 export interface Settings {
   id: "settings"
-  /** Plain chats leave out context use, reply stats and tool calls; project sessions show them. */
-  simplifiedChats: boolean
   /** A message sent while a reply runs steers it, instead of waiting in the queue. */
   steerByDefault?: boolean
   /** Reminds phone users to put the app away while a bot chat or code session runs. On by default. */
@@ -58,7 +56,7 @@ export interface Settings {
  * since next-themes keeps it on the device. Sync carries them as the `settings` document's one
  * record and the fingerprint watches them, so this list is the one place that says what syncs.
  */
-export const APPEARANCE_FIELDS = ["simplifiedChats", "steerByDefault", "breakReminders"] as const
+export const APPEARANCE_FIELDS = ["steerByDefault", "breakReminders"] as const
 
 /** Those switches as sync reads them, present rather than optional, so a read needs no fallback. */
 export type Appearance = Required<Pick<Settings, (typeof APPEARANCE_FIELDS)[number]>>
@@ -468,7 +466,6 @@ export interface CachedSkills {
 /** Carries a default for every appearance switch, so reading one never needs a fallback. */
 export const DEFAULT_SETTINGS: Settings & Appearance = {
   id: "settings",
-  simplifiedChats: true,
   steerByDefault: false,
   breakReminders: true,
 }
@@ -660,6 +657,17 @@ db.version(15).upgrade((tx) =>
 // v16: the skills the bot last listed, so the composer's `/` menu opens on them offline.
 db.version(16).stores({ skills: "id" })
 
+// v17: a chat always shows the agent's work, so the switch that hid it goes from the settings row
+// rather than riding along in every save.
+db.version(17).upgrade((tx) =>
+  tx
+    .table("settings")
+    .filter((settings: Record<string, unknown>) => "simplifiedChats" in settings)
+    .modify((settings: Record<string, unknown>) => {
+      delete settings.simplifiedChats
+    }),
+)
+
 db.on("populate", (tx) => seedProfile(tx))
 
 export async function getSettings(): Promise<Settings> {
@@ -682,9 +690,21 @@ export async function saveAppearance(patch: Partial<Appearance>) {
   await saveSettings({ ...patch, appearanceAt: Date.now() })
 }
 
-/** Takes the appearance record another device wrote, clock and all, so this one doesn't push it back. */
-export async function adoptAppearance(value: Appearance, at: number) {
-  await saveSettings({ ...value, appearanceAt: at })
+/**
+ * Takes the appearance record another device wrote, clock and all, so this one doesn't push it back.
+ * A record can name a switch this build doesn't have — one that was retired, or one from a newer
+ * build — and writing that name back would put a field nothing reads in this device's settings row.
+ */
+export async function adoptAppearance(
+  value: Partial<Record<keyof Appearance, unknown>>,
+  at: number,
+) {
+  const known: Partial<Appearance> = {}
+  for (const field of APPEARANCE_FIELDS) {
+    const on = value[field]
+    if (typeof on === "boolean") known[field] = on
+  }
+  await saveSettings({ ...known, appearanceAt: at })
 }
 
 export async function listProfiles() {
