@@ -30,6 +30,7 @@ from . import (
     clones,
     commands,
     community,
+    compactions,
     context,
     delegation,
     dictation,
@@ -676,6 +677,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 logger.debug("memento: couldn't resolve session %s", session_id, exc_info=True)
         found = await asyncio.to_thread(context.read, path, session_id) or {}
         changes = await asyncio.to_thread(model_changes.read, path, session_id, asked_id)
+        # The profile's home is read on the loop thread, where its scope is visible.
+        from hermes_constants import get_hermes_home
+
+        compacted = await asyncio.to_thread(compactions.read, Path(get_hermes_home()), session_id)
         body = {
             "object": "memento.context",
             "session_id": session_id,
@@ -685,6 +690,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # dividers it already has instead of clearing them.
         if changes is not None:
             body["model_changes"] = changes
+        if compacted is not None:
+            body["compactions"] = compacted
         # Never a 404 for an unknown session: the app reads a 404 as a missing plugin.
         return web.json_response(body)
 

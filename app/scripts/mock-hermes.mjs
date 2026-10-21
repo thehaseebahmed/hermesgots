@@ -144,6 +144,8 @@ const pluginChatLists = new Map()
 const lastCalls = new Map()
 // What model each keyed session's calls ran on, oldest first: what the app draws its dividers from.
 const modelChanges = new Map()
+// When each chat was compacted (the plugin's `compactions`), keyed by every id of its lineage.
+const compactions = new Map()
 const transcripts = new Map()
 let lastRowId = 0
 let lastWorkflowId = 0
@@ -3713,6 +3715,7 @@ http
         provider: call?.provider ?? null,
         at: call ? Date.now() : null,
         model_changes: modelChanges.get(id) ?? [],
+        compactions: compactions.get(id) ?? [],
       })
     }
     const usageRoute = /^\/api\/plugins\/memento\/usage$/.exec(url.pathname)
@@ -4123,6 +4126,17 @@ http
       const { session, child } = await readBody(req)
       if (!session || !child) return json(res, 400, { error: { message: "session and child" } })
       compressed.set(session, child)
+      const last = lastCalls.get(session)
+      const rotated = [
+        ...(compactions.get(session) ?? []),
+        {
+          at: Date.now(),
+          ...(last?.prompt_tokens ? { tokens: last.prompt_tokens } : {}),
+          ...(last?.context_length ? { window: last.context_length } : {}),
+        },
+      ]
+      compactions.set(session, rotated)
+      compactions.set(child, rotated)
       // The child shares the lineage's rows: a read of either id sees root→tip, and turns land in
       // one transcript whichever id they were addressed with.
       if (!transcripts.has(session)) transcripts.set(session, [])
