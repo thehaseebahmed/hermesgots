@@ -85,6 +85,7 @@ PR titles follow the same format. Fill in `.github/pull_request_template.md` for
 | `src/lib/hermes.ts` | Hermes API client and SSE parser |
 | `src/lib/chat.ts` | Send/stop a turn, stream it into IndexedDB and resume it after a drop; approval answers |
 | `src/lib/thinking.ts` | A reply's thinking line: its label and the span behind that label's number, which lives only in this page's memory (ADR 0029 — never written to the reply's row, never synced, never `stats.durationMs`). Import-free, so `scripts/test-thinking.mjs` runs it as a pure rule |
+| `src/lib/openui-block.ts` | A reply's interface, read out of its text: `openuiParts` splits a reply into its text and the `openui-lang` blocks, each with the body it holds, the `# id:` on its first line when it carries one, and whether the reply is still streaming it — a block inside another fence, or indented into a list item, stays text. Import-free, so `scripts/test-openui-block.mjs` runs it as a pure rule |
 | `src/lib/db.ts` | Dexie schema, types, settings and profile (bot) helpers |
 | `src/lib/cron.ts` | Fetches Hermes cron jobs and their runs (from the Gots plugin) |
 | `src/lib/version.ts` | The app's version, the oldest plugin it works with (`MIN_PLUGIN_VERSION`) |
