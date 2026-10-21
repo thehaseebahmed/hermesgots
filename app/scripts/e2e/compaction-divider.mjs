@@ -35,7 +35,7 @@ for (const [name, viewport, dark] of [
       const text = (await divider.innerText()).trim()
       assert.match(
         text,
-        /^Compaction - \d+(\.\d)?k of \d+k \(\d+%\)$/,
+        /^Compaction · \d+(\.\d)?k of \d+k \(\d+%\)$/,
         "with its size and how full it was",
       )
       const place = await page.evaluate(() => {
