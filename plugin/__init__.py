@@ -1658,70 +1658,73 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "text must be a string", 400)
         key = body.get("id") if isinstance(body.get("id"), str) else None
         memo = f"{session_id}:{key}" if key else None
-        answered = triage.given(memo)
-        if answered is not None:
-            return web.json_response(answered)
-        path = store_path()
-        deadline = time.monotonic() + triage.DEADLINE_S
-        try:
-            found = await asyncio.wait_for(
-                asyncio.to_thread(
-                    triage.triage, path, hermes_home(), session_id, text, deadline
-                ),
-                triage.DEADLINE_S,
-            )
-        except asyncio.TimeoutError:
-            found = {"decision": triage.MAIN}
-        answer: Dict[str, Any] = {"object": "memento.triage", "decision": triage.MAIN}
-        if time.monotonic() > deadline + 0.5:
-            found = {"decision": triage.MAIN}
-        files = outbox.clean_files(body.get("attachments"))
-        if found["decision"] == triage.NEW:
-            # Made here and not in the decision, so one nobody waited for leaves no thread.
+        # A repeat of an ask still being decided waits for it and gets its answer, so the message
+        # is queued once however the app's retry races the first request.
+        async with triage.lock(memo):
+            answered = triage.given(memo)
+            if answered is not None:
+                return web.json_response(answered)
+            path = store_path()
+            deadline = time.monotonic() + triage.DEADLINE_S
             try:
-                started = await asyncio.to_thread(
-                    triage.start_thread,
-                    path,
-                    request_profile(),
-                    found["profile_id"],
-                    text,
-                    files,
-                    body.get("body"),
+                found = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        triage.triage, path, hermes_home(), session_id, text, deadline
+                    ),
+                    triage.DEADLINE_S,
                 )
-                follow_queue(request, started["session_id"], path)
-                answer = {"object": "memento.triage", "decision": triage.NEW, **started}
-            except Exception:
-                logger.debug("memento: triage couldn't open a thread", exc_info=True)
-        elif found["decision"] == triage.THREAD:
-            thread = found["session_id"]
-            try:
-                # The thread runs on its own model, not Main's.
-                run_body = body.get("body")
-                if isinstance(run_body, dict):
-                    run_body = {k: v for k, v in run_body.items() if k not in ("model", "provider")}
-                    choice = found.get("model_choice")
-                    if isinstance(choice, dict) and choice.get("model") and choice.get("provider"):
-                        run_body["model"], run_body["provider"] = choice["model"], choice["provider"]
-                run = outbox.clean_body(thread, run_body)
-                # A thread whose last run was stopped waits for its user to send again, and a
-                # message put behind that would sit unseen.
-                runs = outbox.session_runs(adapter, await outbox.session_ids(adapter, thread))
-                resumed = (await asyncio.to_thread(outbox.read, path, thread))["resumed_at"]
-                if outbox.state(runs, resumed) != "paused":
-                    item = await asyncio.to_thread(
-                        outbox.add, path, thread, request_profile(), text, files, run
+            except asyncio.TimeoutError:
+                found = {"decision": triage.MAIN}
+            answer: Dict[str, Any] = {"object": "memento.triage", "decision": triage.MAIN}
+            if time.monotonic() > deadline + 0.5:
+                found = {"decision": triage.MAIN}
+            files = outbox.clean_files(body.get("attachments"))
+            if found["decision"] == triage.NEW:
+                # Made here and not in the decision, so one nobody waited for leaves no thread.
+                try:
+                    started = await asyncio.to_thread(
+                        triage.start_thread,
+                        path,
+                        request_profile(),
+                        found["profile_id"],
+                        text,
+                        files,
+                        body.get("body"),
                     )
-                    follow_queue(request, thread, path)
-                    answer = {
-                        "object": "memento.triage",
-                        "decision": triage.THREAD,
-                        "thread": found["thread"],
-                        "session_id": thread,
-                        "item": item,
-                    }
-            except ValueError:
-                pass
-        triage.remember(memo, answer)
+                    follow_queue(request, started["session_id"], path)
+                    answer = {"object": "memento.triage", "decision": triage.NEW, **started}
+                except Exception:
+                    logger.debug("memento: triage couldn't open a thread", exc_info=True)
+            elif found["decision"] == triage.THREAD:
+                thread = found["session_id"]
+                try:
+                    # The thread runs on its own model, not Main's.
+                    run_body = body.get("body")
+                    if isinstance(run_body, dict):
+                        run_body = {k: v for k, v in run_body.items() if k not in ("model", "provider")}
+                        choice = found.get("model_choice")
+                        if isinstance(choice, dict) and choice.get("model") and choice.get("provider"):
+                            run_body["model"], run_body["provider"] = choice["model"], choice["provider"]
+                    run = outbox.clean_body(thread, run_body)
+                    # A thread whose last run was stopped waits for its user to send again, and a
+                    # message put behind that would sit unseen.
+                    runs = outbox.session_runs(adapter, await outbox.session_ids(adapter, thread))
+                    resumed = (await asyncio.to_thread(outbox.read, path, thread))["resumed_at"]
+                    if outbox.state(runs, resumed) != "paused":
+                        item = await asyncio.to_thread(
+                            outbox.add, path, thread, request_profile(), text, files, run
+                        )
+                        follow_queue(request, thread, path)
+                        answer = {
+                            "object": "memento.triage",
+                            "decision": triage.THREAD,
+                            "thread": found["thread"],
+                            "session_id": thread,
+                            "item": item,
+                        }
+                except ValueError:
+                    pass
+            triage.remember(memo, answer)
         return web.json_response(answer)
 
     async def remove_queued(request: "web.Request") -> "web.Response":

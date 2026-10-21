@@ -11,6 +11,7 @@ chat, or Main itself, the 15 most recently active, each as id, title, last line 
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sqlite3
 import time
@@ -199,7 +200,9 @@ def decide(
     return thread if isinstance(thread, str) and any(o["id"] == thread for o in options) else None
 
 
-def open_thread(path: Path, profile_id: Optional[str]) -> Tuple[str, str]:
+def open_thread(
+    path: Path, profile_id: Optional[str], model_choice: Optional[Dict[str, str]] = None
+) -> Tuple[str, str]:
     """Makes the chat record a new chat on the bot would have, and returns its id and session id.
 
     The id is the app's own kind (a UUID) and the session is ``memento-<id>``, so every device and
@@ -214,8 +217,11 @@ def open_thread(path: Path, profile_id: Optional[str]) -> Tuple[str, str]:
         "title": "New chat",
         "hermesSessionId": session_id,
         "createdAt": now,
-        "updatedAt": now,
+        # Past createdAt, so the daily cleanup doesn't read a thread whose first message is still
+        # waiting in the queue as one nothing happened in.
+        "updatedAt": now + 1,
         "changedAt": now,
+        **({"modelChoice": model_choice} if model_choice else {}),
     }
     chats.merge(path, {chat_id: {"at": now, "value": value}})
     return chat_id, session_id
@@ -236,7 +242,14 @@ def start_thread(
     on the host) with the app closed. A failure after the record was made takes the record back and
     raises, so the caller leaves the message in Main.
     """
-    chat_id, session_id = open_thread(path, profile_id)
+    # The run goes out on the model it names, so the thread says so too.
+    run = body if isinstance(body, dict) else {}
+    choice = (
+        {"provider": run["provider"], "model": run["model"]}
+        if isinstance(run.get("model"), str) and isinstance(run.get("provider"), str)
+        else None
+    )
+    chat_id, session_id = open_thread(path, profile_id, choice)
     try:
         item = outbox.add(path, session_id, profile, text, files, outbox.clean_body(session_id, body))
     except Exception:
@@ -257,6 +270,29 @@ def discard(path: Path, chat_id: str) -> None:
 # dropped response gets the same answer back, and the message is queued once.
 _given: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
 GIVEN_CAP = 64
+
+
+_locks: "Dict[str, List[Any]]" = {}
+
+
+class lock:
+    """Serialises asks that share a key, so a repeat waits for the first and reads its answer."""
+
+    def __init__(self, key: Optional[str]) -> None:
+        self.key = key
+        self.entry: List[Any] = [asyncio.Lock(), 0]
+
+    async def __aenter__(self) -> None:
+        if self.key is not None:
+            self.entry = _locks.setdefault(self.key, self.entry)
+        self.entry[1] += 1
+        await self.entry[0].acquire()
+
+    async def __aexit__(self, *exc: Any) -> None:
+        self.entry[0].release()
+        self.entry[1] -= 1
+        if self.key is not None and not self.entry[1]:
+            _locks.pop(self.key, None)
 
 
 def given(key: Optional[str]) -> Optional[Dict[str, Any]]:

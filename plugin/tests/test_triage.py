@@ -100,8 +100,9 @@ class TriageTests(unittest.TestCase):
         value = record["value"]
         self.assertEqual(
             (value["profileId"], value["title"], value["hermesSessionId"], value["createdAt"] == value["updatedAt"]),
-            ("bot", "New chat", session, True),
+            ("bot", "New chat", session, False),
         )
+        self.assertGreater(value["updatedAt"], value["createdAt"])
         self.assertNotIn("main", value)
         self.assertNotIn("projectId", value)
 
@@ -129,6 +130,34 @@ class TriageTests(unittest.TestCase):
         self.assertEqual(run["input"], body["input"])
         self.assertNotIn("conversation_history", run)
         self.assertEqual(outbox.read(self.path, "memento-main-bot")["items"], [])
+
+    def test_a_new_thread_says_which_model_its_first_turn_runs_on(self):
+        body = {"model": "m", "provider": "p", "input": [{"role": "user", "content": "hi"}]}
+        started = triage.start_thread(self.path, "bot", "bot", "hi", [], body)
+        value = chats.read(self.path)[started["thread"]]["value"]
+        self.assertEqual(value["modelChoice"], {"provider": "p", "model": "m"})
+        plain = triage.start_thread(
+            self.path, "bot", "bot", "hi", [], {"input": [{"role": "user", "content": "hi"}]}
+        )
+        self.assertNotIn("modelChoice", chats.read(self.path)[plain["thread"]]["value"])
+
+    def test_a_repeated_ask_waits_for_the_first(self):
+        import asyncio
+
+        order = []
+
+        async def ask(name, hold):
+            async with triage.lock("s:1"):
+                order.append(f"{name} in")
+                await asyncio.sleep(hold)
+                order.append(f"{name} out")
+
+        async def both():
+            await asyncio.gather(ask("a", 0.05), ask("b", 0))
+
+        asyncio.run(both())
+        self.assertEqual(order, ["a in", "a out", "b in", "b out"])
+        self.assertEqual(triage._locks, {})
 
     def test_a_thread_that_cant_be_started_leaves_no_record(self):
         before = set(chats.read(self.path))
