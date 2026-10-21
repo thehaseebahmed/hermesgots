@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 /**
- * Floating header: round drawer button (or `leading`) left, bot (unless `showBot` is false) + title
- * centre, actions right.
+ * Floating header, read from the left: the drawer button (or `leading`), the bot's picture (unless
+ * `showBot` is false), then the title with its status under it, both cut with an ellipsis; actions
+ * right.
  * `className` can pin it in the page's flow instead.
  */
 export function ChatHeader({
@@ -23,7 +24,6 @@ export function ChatHeader({
 }: {
   title: string
   botId?: string
-  /** Its notifications are muted. */
   muted?: boolean
   showBot?: boolean
   subtitle?: string
@@ -41,39 +41,32 @@ export function ChatHeader({
       )}
     >
       <div className="mx-auto flex max-w-3xl items-center gap-3">
-        <div className="pointer-events-auto size-11 shrink-0">
-          {leading ?? (
-            <Button
-              variant="outline"
-              size="icon-lg"
-              className="size-11 rounded-full bg-background/80 backdrop-blur md:hidden"
-              onClick={openDrawer}
-              aria-label="Open conversations"
-            >
-              <MenuIcon />
-            </Button>
-          )}
-        </div>
-        <div className="pointer-events-auto flex min-w-0 flex-1 flex-col items-center">
-          {showBot && <Bot id={botId} animate className="size-11" />}
-          <div className="flex max-w-1/2 min-w-0 flex-col items-center empty:hidden">
-            {title && (
-              <span className="flex max-w-full items-center gap-1.5">
-                <span className="truncate text-sm font-semibold">{title}</span>
-                {muted && (
-                  <BellOffIcon
-                    className="size-3.5 shrink-0 text-muted-foreground"
-                    aria-label="Muted"
-                  />
-                )}
-              </span>
-            )}
+        {leading ? (
+          <div className="pointer-events-auto shrink-0">{leading}</div>
+        ) : (
+          <Button
+            variant="outline"
+            size="icon-lg"
+            className="pointer-events-auto size-11 shrink-0 rounded-full bg-background/80 backdrop-blur md:hidden"
+            onClick={openDrawer}
+            aria-label="Open conversations"
+          >
+            <MenuIcon />
+          </Button>
+        )}
+        {showBot && <Bot id={botId} animate className="pointer-events-auto size-11" />}
+        <div className="pointer-events-auto flex min-w-0 flex-1 items-center gap-1.5">
+          <div className="flex min-w-0 flex-col">
+            {title && <span className="min-w-0 truncate text-sm font-semibold">{title}</span>}
             {subtitle && (
-              <span className="max-w-full truncate text-[11px] leading-tight text-muted-foreground">
+              <span className="min-w-0 truncate text-[11px] leading-tight text-muted-foreground">
                 {subtitle}
               </span>
             )}
           </div>
+          {muted && (
+            <BellOffIcon className="size-3.5 shrink-0 text-muted-foreground" aria-label="Muted" />
+          )}
         </div>
         <div className="pointer-events-auto flex shrink-0 items-center gap-2">{actions}</div>
       </div>
