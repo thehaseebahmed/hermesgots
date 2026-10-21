@@ -4,8 +4,10 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
+import { useState } from "react"
 
 import { PipelinePill, PipelineSheet } from "@/components/chat/pipeline"
+import { useStagedPipeline } from "@/lib/afk-workflows"
 import { db } from "@/lib/db"
 import { parsePipeline } from "@/lib/pipeline"
 import { DeveloperSettings } from "@/routes/settings"
@@ -116,30 +118,91 @@ test("turning the switch off under an open library puts the sheet away", async (
   })
 })
 
-test("a staged task's pill and sheet draw with the workflow library off", async () => {
-  await seedSettings({ developer: true })
-  const pipeline = parsePipeline({
-    workflow: { id: "preset:staged", name: "Build · Test" },
-    stage: 1,
-    round: 1,
-    stages: [
-      workflowStage("Build", { state: "done", rounds: [] }),
-      workflowStage("Test", { check: "gate", state: "running", rounds: [] }),
-    ],
+const staged = parsePipeline({
+  workflow: { id: "preset:staged", name: "Build · Test" },
+  stage: 1,
+  round: 1,
+  stages: [
+    workflowStage("Build", { state: "done", rounds: [] }),
+    workflowStage("Test", { check: "gate", state: "running", rounds: [] }),
+  ],
+})
+
+// A session's pill and the sheet an open flag keeps, drawn from the one result the chat screen uses.
+// The host is told apart per case: what a bot advertises is remembered per connection.
+let hosts = 0
+function Session({ server }: { server: { baseUrl: string; apiKey: string } }) {
+  const pipeline = useStagedPipeline(server, staged)
+  const [open, setOpen] = useState(false)
+  if (!pipeline && open) setOpen(false)
+  return (
+    <>
+      {pipeline && <PipelinePill pipeline={pipeline} onClick={() => setOpen(true)} />}
+      {pipeline && <PipelineSheet open={open} onOpenChange={setOpen} pipeline={pipeline} />}
+    </>
+  )
+}
+
+async function session(
+  settings: Parameters<typeof seedSettings>[0],
+  features: string[],
+  body: () => Promise<void>,
+) {
+  await seedSettings(settings)
+  globalThis.fetch = afkHost({ features }).fetch as unknown as typeof fetch
+  const server = { baseUrl: `http://staged-${hosts++}.test/v1`, apiKey: "test-key" }
+  await mount(<Session server={server} />, body)
+}
+
+const drawn = () => ({
+  pill: findAll("[data-pipeline]").length > 0,
+  sheet: findAll("ol > li").length > 0,
+})
+
+test("off, a staged session draws no pill and no sheet", async () => {
+  await session({ developer: true }, ["afk_pipeline"], async () => {
+    assert.deepEqual(drawn(), { pill: false, sheet: false })
   })
-  assert.ok(pipeline)
-  await mount(<PipelinePill pipeline={pipeline} onClick={() => {}} />, async () => {
-    assert.equal(
-      findAll("[data-pipeline] [data-step]").length,
-      2,
-      "the record still draws, whichever way the setting is set",
-    )
-  })
-  await mount(<PipelineSheet open onOpenChange={() => {}} pipeline={pipeline} />, async () => {
+})
+
+test("on, the pill draws and opens the sheet", async () => {
+  await session({ developer: true, afkWorkflows: true }, ["afk_pipeline"], async () => {
+    assert.equal(findAll("[data-pipeline] [data-step]").length, 2)
+    await click(find("[data-pipeline]"))
     assert.deepEqual(
       findAll("ol > li").map((row) => row.getAttribute("data-stage")),
       ["Build", "Test"],
-      "and the sheet under it, rows and all",
     )
+  })
+})
+
+test("with Developer off the switch alone draws nothing", async () => {
+  await session({ developer: false, afkWorkflows: true }, ["afk_pipeline"], async () => {
+    assert.deepEqual(drawn(), { pill: false, sheet: false })
+  })
+})
+
+test("the pipeline feature is enough: the library feature is never read", async () => {
+  await session({ developer: true, afkWorkflows: true }, ["afk_pipeline"], async () => {
+    assert.equal(drawn().pill, true)
+  })
+})
+
+test("the library feature without the pipeline feature draws none", async () => {
+  await session({ developer: true, afkWorkflows: true }, ["afk_workflows"], async () => {
+    assert.deepEqual(drawn(), { pill: false, sheet: false })
+  })
+})
+
+test("turning the switch off closes an open sheet, and it stays closed when turned on", async () => {
+  await session({ developer: true, afkWorkflows: true }, ["afk_pipeline"], async () => {
+    await click(find("[data-pipeline]"))
+    assert.equal(drawn().sheet, true)
+    await db.settings.update("settings", { afkWorkflows: false })
+    await settle()
+    assert.deepEqual(drawn(), { pill: false, sheet: false })
+    await db.settings.update("settings", { afkWorkflows: true })
+    await settle()
+    assert.deepEqual(drawn(), { pill: true, sheet: false })
   })
 })

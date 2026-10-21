@@ -185,6 +185,10 @@ const run = async ({ page, until, shot }) => {
   assert.equal(held.number, TASK, "the sweep claimed the oldest ready task")
 
   await seed(page, { id, projectId })
+  await page.evaluate(async () => {
+    const { db } = await import("/src/lib/db.ts")
+    await db.settings.update("settings", { developer: true, afkWorkflows: true })
+  })
   await page.goto(`${app}/c/${id}`)
   await page.locator('[aria-label="Messages"]').waitFor({ timeout: 15_000 })
 

@@ -12,7 +12,6 @@
  * opened in its own sheet.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
-import { useLiveQuery } from "dexie-react-hooks"
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react"
 import { toast } from "sonner"
 
@@ -42,7 +41,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { connectionKey } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
-import { getSettings } from "@/lib/db"
+import { useAfkWorkflowsOn } from "@/lib/afk-workflows"
 import { usePluginFeature, usePluginFeatureOn, type PluginFeatureAnswer } from "@/lib/features"
 import { AFK_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import {
@@ -101,13 +100,8 @@ const GROUPS = [
 
 function useLibraryOffered(config: HermesConfig) {
   const offered = usePluginFeatureOn(config, AFK_WORKFLOWS_FEATURE)
-  return Boolean(
-    useLiveQuery(async () => {
-      if (!offered) return false
-      const settings = await getSettings()
-      return Boolean(settings.developer && settings.afkWorkflows)
-    }, [offered]),
-  )
+  const on = useAfkWorkflowsOn()
+  return offered && on
 }
 
 export function AfkPopup({
