@@ -34,10 +34,14 @@ const afkWrites = (host: ReturnType<typeof afkHost>) =>
 const fieldValue = () => (field() as HTMLTextAreaElement | null)?.value
 
 /** The Prompt row is drawn where the library is off, which is the Developer setting's own default. */
-async function promptMode(host: ReturnType<typeof afkHost>, body: () => Promise<void>) {
+async function promptMode(
+  host: ReturnType<typeof afkHost>,
+  body: () => Promise<void>,
+  server = config,
+) {
   await seedSettings({ developer: true })
   globalThis.fetch = host.fetch as unknown as typeof fetch
-  await mountAfk(config, project, body)
+  await mountAfk(server, project, body)
 }
 
 /** Waits for a render the dismissal's own listener causes, outside the act the click ran in. */
@@ -49,13 +53,18 @@ async function settled(check: () => boolean, what: string) {
   assert.ok(check(), what)
 }
 
-/** A host that advertises the skill pickers too, so where they are drawn is the app's choice. */
+/**
+ * A host that advertises the skill pickers too, so where they are drawn is the app's choice — on a
+ * connection of its own, since what a connection answered is remembered for the page: on the shared
+ * one, whichever test mounted first would decide whether the pickers were offered at all.
+ */
 const WITH_SKILLS = ["afk", "afk_switch", "afk_skills", "afk_workflows", "afk_prompt"]
+const withSkills = connection("with-skills")
 
 test("the library on, no Prompt row", async () => {
   await seedSettings({ developer: true, afkWorkflows: true })
   globalThis.fetch = afkHost({ features: WITH_SKILLS }).fetch as unknown as typeof fetch
-  await mountAfk(config, project, async () => {
+  await mountAfk(withSkills, project, async () => {
     assert.equal(row(), null, "a project running a workflow is told no Prompt")
     assert.match(
       find("[data-afk-workflow]")?.textContent ?? "",
@@ -103,13 +112,17 @@ test("tapping the row opens the editor on the host's words, to write and nothing
 })
 
 test("the skills pickers are not drawn under a Prompt", async () => {
-  await promptMode(afkHost({ features: WITH_SKILLS }), async () => {
-    assert.equal(
-      find("[data-afk-skills]"),
-      null,
-      "a Prompt names its own skills, so Build and Critique have nothing to say",
-    )
-  })
+  await promptMode(
+    afkHost({ features: WITH_SKILLS }),
+    async () => {
+      assert.equal(
+        find("[data-afk-skills]"),
+        null,
+        "a Prompt names its own skills, so Build and Critique have nothing to say",
+      )
+    },
+    withSkills,
+  )
 })
 
 test("Done writes the Prompt, and the row reads what the host answered", async () => {
