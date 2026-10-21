@@ -45,7 +45,7 @@ Cluster A is the template. Each one:
    line for the plugin's half, and the `fixes.md` entry deleted.
 
 Gates before every commit: `python3 -m unittest discover -s plugin/tests -t .` from the repo root (it stubs
-Hermes, so it runs anywhere), then `pnpm lint`, `pnpm typecheck` and `pnpm build` from `app/`, plus the
+Hermes, so it runs anywhere), then `pnpm lint`, `pnpm typecheck`, `pnpm test` and `pnpm build` from `app/`, plus the
 browser flows for anything touching chats, sessions, polling or sync (`pnpm e2e <flow>`, `pnpm e2e list`).
 
 `docs/adr/0006-...` settled one thing that constrains all of them: **the change stream stays

@@ -141,6 +141,10 @@ Projects, attach it to your reply, or describe what it shows. Never commit scree
    - `send` types into the composer and sends.
    - `lastReply(chatId)` reads the newest reply's status and length.
    - `until(check, ms, what)` polls a check.
+   - `shot` captures the page at rest (animations run to their end), and `settled(page)` waits until
+     nothing is still moving before a box or a class is read. Wait for what the flow needs — a
+     row, a request, a draft written — never for a fixed time; a fixed wait is only for a window
+     the flow measures, something that must not happen within it, or a recording's own length.
    - `held(pattern, fail)` holds requests matching a pattern back until its `release()` (10s at most),
      so a placeholder can be looked at while the bytes are still coming; `fail` answers a url ending
      in it as a file the host can't serve.
