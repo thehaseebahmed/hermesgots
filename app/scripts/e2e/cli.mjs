@@ -40,10 +40,6 @@ const FLOWS = {
     script: "e2e/model-switch.mjs",
     about: "Changing the model mid-chat shows where it changed in the thread, on a reload too",
   },
-  "compaction-divider": {
-    script: "e2e/compaction-divider.mjs",
-    about: "A compacted conversation is marked in the thread, above the turn it fell in",
-  },
   "usage-limit": {
     script: "e2e/usage-limit.mjs",
     about:
