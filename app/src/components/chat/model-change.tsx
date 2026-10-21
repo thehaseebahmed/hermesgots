@@ -1,3 +1,4 @@
+import { formatTokens } from "@/lib/format"
 import type { Compaction } from "@/lib/hermes"
 
 /**
@@ -55,11 +56,13 @@ export function ModelChange({ model }: { model: string }) {
 }
 
 /** How full the context was when the host compacted it, where the host recorded it. */
-function percent({ tokens, window }: Compaction) {
-  return tokens && window ? ` at ${Math.round((tokens / window) * 100)}%` : ""
+function size({ tokens, window }: Compaction) {
+  if (!tokens) return ""
+  if (!window) return ` - ${formatTokens(tokens)}`
+  return ` - ${formatTokens(tokens)} of ${formatTokens(window)} (${Math.round((tokens / window) * 100)}%)`
 }
 
 export function Compacted({ compaction }: { compaction: Compaction }) {
-  const text = `Conversation compacted${percent(compaction)}`
+  const text = `Compaction${size(compaction)}`
   return <Divider label={text} text={text} />
 }
