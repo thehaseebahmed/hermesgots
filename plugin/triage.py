@@ -1,4 +1,5 @@
-"""Triage: whether a message sent from a bot's Main thread stays there or continues an older thread.
+"""Triage: whether a message sent from a bot's Main thread stays there, continues an older thread or
+opens a new one.
 
 The host decides (docs/adr/0029), so a message reaches the right thread with the app closed and
 every device sees the same decision. Unsure means Main: an unparseable answer, an unknown thread, a
@@ -10,15 +11,18 @@ chat, or Main itself, the 15 most recently active, each as id, title, last line 
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sqlite3
 import time
+import uuid
 from collections import OrderedDict
 from contextlib import closing
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from . import chats, research
+from . import chats, outbox, research
+from .sessions import MEMENTO_ID_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -32,20 +36,23 @@ MAX_TEXT = 2000
 DEADLINE_S = 3.0
 MAIN = "main"
 THREAD = "thread"
+NEW = "new"
 
 SYSTEM = (
     "You sort one message a person sent to their assistant's main conversation. Say whether it "
-    "belongs in an older thread, or stays in the main conversation."
+    "belongs in an older thread, starts a thread of its own, or stays in the main conversation."
 )
 INSTRUCTIONS = (
     "Answer decision: continue only when the message clearly carries on one thread's subject, and "
-    "name that thread's id in thread. Answer stay, with no thread, for everything else: a new "
-    "subject, a one-off question, small talk, or anything you are not sure of. When in doubt, stay."
+    "name that thread's id in thread. Answer new, with no thread, only when the message opens a "
+    "discussion of its own that will run for many turns: a project, a task or a topic to work "
+    "through. Answer stay, with no thread, for everything else: a one-off question, small talk, or "
+    "anything you are not sure of. When in doubt, stay."
 )
 SCHEMA = {
     "type": "object",
     "properties": {
-        "decision": {"type": "string", "enum": ["stay", "continue"]},
+        "decision": {"type": "string", "enum": ["stay", "continue", "new"]},
         "thread": {"type": ["string", "null"]},
     },
     "required": ["decision"],
@@ -143,6 +150,8 @@ def _prompt(text: str, options: List[Dict[str, Any]], turns: List[Dict[str, str]
     lines = ["Threads:"]
     for option in options:
         lines.append(f'- id {option["id"]} · "{option["title"]}" · last: {option["last"] or "(nothing)"}')
+    if not options:
+        lines.append("(none)")
     lines.append("")
     lines.append("Main's latest turns:")
     for turn in turns:
@@ -160,8 +169,8 @@ def decide(
     turns: List[Dict[str, str]],
     deadline: Optional[float] = None,
 ) -> Optional[str]:
-    """The id of the thread the message continues, or None to stay in Main."""
-    if not options or not isinstance(text, str) or not text.strip():
+    """The id of the thread the message continues, ``NEW`` for a thread of its own, or None to stay."""
+    if not isinstance(text, str) or not text.strip():
         return None
     llm = _llm()
     # Past the deadline nobody is waiting for the answer, so the model isn't asked at all.
@@ -181,16 +190,109 @@ def decide(
         logger.debug("memento: triage's model call failed", exc_info=True)
         return None
     parsed = getattr(result, "parsed", None)
-    if not isinstance(parsed, dict) or parsed.get("decision") != "continue":
+    if not isinstance(parsed, dict):
+        return None
+    if parsed.get("decision") == NEW:
+        return NEW
+    if parsed.get("decision") != "continue":
         return None
     thread = parsed.get("thread")
     return thread if isinstance(thread, str) and any(o["id"] == thread for o in options) else None
+
+
+def open_thread(
+    path: Path, profile_id: Optional[str], model_choice: Optional[Dict[str, str]] = None
+) -> Tuple[str, str]:
+    """Makes the chat record a new chat on the bot would have, and returns its id and session id.
+
+    The id is the app's own kind (a UUID) and the session is ``memento-<id>``, so every device and
+    the dashboard label treat it as any chat. The title is Hermes's to give once the first turn runs.
+    """
+    chat_id = str(uuid.uuid4())
+    session_id = f"{MEMENTO_ID_PREFIX}{chat_id}"
+    now = int(time.time() * 1000)
+    value = {
+        "id": chat_id,
+        "profileId": profile_id,
+        "title": "New chat",
+        "hermesSessionId": session_id,
+        "createdAt": now,
+        # Past createdAt, so the daily cleanup doesn't read a thread whose first message is still
+        # waiting in the queue as one nothing happened in.
+        "updatedAt": now + 1,
+        "changedAt": now,
+        **({"modelChoice": model_choice} if model_choice else {}),
+    }
+    chats.merge(path, {chat_id: {"at": now, "value": value}})
+    return chat_id, session_id
+
+
+def start_thread(
+    path: Path,
+    profile: Optional[str],
+    profile_id: Optional[str],
+    text: str,
+    files: List[Dict[str, Any]],
+    body: Any,
+) -> Dict[str, Any]:
+    """A new thread with the message queued as its first turn: ``{ thread, session_id, item }``.
+
+    The queued body is the app's own run request for the message, rebound to the new session, so the
+    dispatcher starts the thread with just the message (and the attachments it names, already saved
+    on the host) with the app closed. A failure after the record was made takes the record back and
+    raises, so the caller leaves the message in Main.
+    """
+    # The run goes out on the model it names, so the thread says so too.
+    run = body if isinstance(body, dict) else {}
+    choice = (
+        {"provider": run["provider"], "model": run["model"]}
+        if isinstance(run.get("model"), str) and isinstance(run.get("provider"), str)
+        else None
+    )
+    chat_id, session_id = open_thread(path, profile_id, choice)
+    try:
+        item = outbox.add(path, session_id, profile, text, files, outbox.clean_body(session_id, body))
+    except Exception:
+        discard(path, chat_id)
+        raise
+    return {"thread": chat_id, "session_id": session_id, "item": item}
+
+
+def discard(path: Path, chat_id: str) -> None:
+    """Takes back a thread whose first message never got queued, as a tombstone every device keeps."""
+    try:
+        chats.merge(path, {chat_id: {"at": int(time.time() * 1000) + 1, "deleted": True}})
+    except Exception:
+        logger.debug("memento: triage couldn't take back a thread", exc_info=True)
 
 
 # Answers already given, by the id the app sent with the message: a request the app repeats after a
 # dropped response gets the same answer back, and the message is queued once.
 _given: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
 GIVEN_CAP = 64
+
+
+_locks: "Dict[str, List[Any]]" = {}
+
+
+class lock:
+    """Serialises asks that share a key, so a repeat waits for the first and reads its answer."""
+
+    def __init__(self, key: Optional[str]) -> None:
+        self.key = key
+        self.entry: List[Any] = [asyncio.Lock(), 0]
+
+    async def __aenter__(self) -> None:
+        if self.key is not None:
+            self.entry = _locks.setdefault(self.key, self.entry)
+        self.entry[1] += 1
+        await self.entry[0].acquire()
+
+    async def __aexit__(self, *exc: Any) -> None:
+        self.entry[0].release()
+        self.entry[1] -= 1
+        if self.key is not None and not self.entry[1]:
+            _locks.pop(self.key, None)
 
 
 def given(key: Optional[str]) -> Optional[Dict[str, Any]]:
@@ -208,7 +310,8 @@ def remember(key: Optional[str], answer: Dict[str, Any]) -> None:
 def triage(
     path: Path, home: Path, session_id: str, text: str, deadline: Optional[float] = None
 ) -> Dict[str, Any]:
-    """``{ decision: "main" }`` or ``{ decision: "thread", thread, session_id, model_choice }``.
+    """``{ decision: "main" }``, ``{ decision: "thread", thread, session_id, model_choice }`` or
+    ``{ decision: "new", profile_id }``, where the caller makes the thread once it knows it is still wanted.
 
     Only a Main thread's session is triaged; any other session, and any failure, is Main.
     """
@@ -229,9 +332,12 @@ def triage(
             return {"decision": MAIN}
         options = candidates(records, main_id, home)
         turns = _rows(home, [session_id], MAIN_TURNS).get(session_id) or []
-        thread = decide(text, options, turns, deadline)
-        if thread is None:
+        chosen = decide(text, options, turns, deadline)
+        if chosen is None:
             return {"decision": MAIN}
+        if chosen == NEW:
+            return {"decision": NEW, "profile_id": records[main_id]["value"].get("profileId")}
+        thread = chosen
         value = records[thread]["value"]
         return {
             "decision": THREAD,

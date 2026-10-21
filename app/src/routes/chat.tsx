@@ -122,6 +122,7 @@ import { useCodePane, useRememberOpened } from "@/lib/pane"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
+import { syncNow } from "@/lib/sync"
 import { setThreadMuted } from "@/lib/push"
 import { useStagedPipeline } from "@/lib/afk-workflows"
 import { modelChanges } from "@/lib/model-changes"
@@ -606,8 +607,12 @@ export function ChatPage() {
       const moved = conversation?.main
         ? await sendFromMain(conversationId, text, attachments)
         : await sendMessage(conversationId, text, { attachments })
-      if (moved) {
-        const thread = await db.conversations.get(moved)
+      if (moved?.created) {
+        // The host made the thread, so this device learns of it with the chat list.
+        void syncNow()
+        toast.success("Started a new thread")
+      } else if (moved) {
+        const thread = await db.conversations.get(moved.threadId)
         toast.success(`Sent to ${thread?.title ?? "a thread"}`)
       }
     } catch (error) {

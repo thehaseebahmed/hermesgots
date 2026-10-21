@@ -14,15 +14,17 @@ import { botProfile, json, seedSettings, until } from "./component-kit.tsx"
 const MAIN = mainThreadId("bot-1")
 const MAIN_SESSION = `memento-${MAIN}`
 
-type Answer = "stay" | "thread" | "fail" | "hang"
+type Answer = "stay" | "thread" | "new" | "fail" | "hang"
 
 /** One host: what it advertises, how triage answers, and every request it was sent. */
+const uploads: string[] = []
+
 function host(name: string, triage: Answer, features: string[] = ["queue", "triage"]) {
   const seen: { path: string; body: any }[] = []
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input instanceof Request ? input.url : input))
     if (!url.host.startsWith(name)) return json({})
-    const body = init?.body ? JSON.parse(String(init.body)) : undefined
+    const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined
     seen.push({ path: url.pathname, body })
     if (url.pathname.endsWith("/capabilities"))
       return json({ features: { run_submission: true, run_events_sse: true } })
@@ -41,8 +43,14 @@ function host(name: string, triage: Answer, features: string[] = ["queue", "tria
       return json(
         triage === "thread"
           ? { decision: "thread", thread: "t1", session_id: "t1-hermes", item: { id: "q_1" } }
-          : { decision: "main" },
+          : triage === "new"
+            ? { decision: "new", thread: "n1", session_id: "memento-n1", item: { id: "q_2" } }
+            : { decision: "main" },
       )
+    }
+    if (url.pathname.endsWith("/attachments") && init?.method === "POST") {
+      uploads.push(url.searchParams.get("name") ?? "")
+      return json({ name: url.searchParams.get("name"), path: `/host/${url.searchParams.get("name")}`, size: 3 })
     }
     // The run is refused, so a send ends at once; that it was posted is what the tests read.
     if (url.pathname.endsWith("/v1/runs") && init?.method === "POST")
@@ -123,7 +131,7 @@ test("a failed triage sends the message to Main", async () => {
 test("a message the host sent to a thread never enters Main", async () => {
   await seed("route-thread")
   const seen = host("route-thread", "thread")
-  assert.equal(await sendFromMain(MAIN, "more on Lisbon"), "t1")
+  assert.deepEqual(await sendFromMain(MAIN, "more on Lisbon"), { threadId: "t1", created: false })
   assert.equal(runsFor(seen, MAIN_SESSION).length, 0, "Main's session never starts a run")
   assert.deepEqual(await messagesOf(MAIN), [])
 })
@@ -200,5 +208,52 @@ test("a thread answer without the queued message is not taken as sent", async ()
       : fetchWith(input, init)
   }) as typeof fetch
   assert.equal(await sendFromMain(MAIN, "more on Lisbon"), undefined)
+  assert.equal(runsFor(seen, MAIN_SESSION).length, 1)
+})
+
+test("a message the host opened a new thread for never enters Main", async () => {
+  await seed("route-new")
+  const seen = host("route-new", "new")
+  assert.deepEqual(await sendFromMain(MAIN, "plan my move"), { threadId: "n1", created: true })
+  assert.equal(runsFor(seen, MAIN_SESSION).length, 0, "Main's session never starts a run")
+  assert.deepEqual(await messagesOf(MAIN), [])
+})
+
+test("a message with files is triaged with them saved on the host first", async () => {
+  await seed("route-files")
+  uploads.length = 0
+  const seen = host("route-files", "new")
+  const attachment = {
+    id: "a1",
+    name: "brief.pdf",
+    type: "application/pdf",
+    size: 3,
+    blob: new Blob(["pdf"]),
+  }
+  assert.deepEqual(await sendFromMain(MAIN, "read this", [attachment]), {
+    threadId: "n1",
+    created: true,
+  })
+  assert.deepEqual(uploads, ["brief.pdf"])
+  const ask = triaged(seen)[0].body
+  assert.deepEqual(ask.attachments, [
+    { name: "brief.pdf", type: "application/pdf", size: 3, path: "/host/brief.pdf" },
+  ])
+  assert.match(JSON.stringify(ask.body.input), /\/host\/brief\.pdf/)
+})
+
+test("a stay keeps the files already saved and saves nothing twice", async () => {
+  await seed("route-files-stay")
+  uploads.length = 0
+  const seen = host("route-files-stay", "stay")
+  const attachment = {
+    id: "a1",
+    name: "brief.pdf",
+    type: "application/pdf",
+    size: 3,
+    blob: new Blob(["pdf"]),
+  }
+  assert.equal(await sendFromMain(MAIN, "read this", [attachment]), undefined)
+  assert.deepEqual(uploads, ["brief.pdf"])
   assert.equal(runsFor(seen, MAIN_SESSION).length, 1)
 })

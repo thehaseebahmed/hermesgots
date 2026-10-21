@@ -100,6 +100,15 @@ def clean_body(session_id: str, body: Any) -> Dict[str, Any]:
     return run
 
 
+def clean_files(files: Any) -> List[Dict[str, Any]]:
+    """The attachment fields a queued item keeps, for at most 20 files."""
+    return [
+        {key: file[key] for key in ("name", "type", "size", "path") if key in file}
+        for file in (files or [])[:20]
+        if isinstance(file, dict)
+    ]
+
+
 def _remember_body(conn: Any, session_id: str, profile: Optional[str], body: Dict[str, Any]) -> None:
     # What a steer handed back needs to start a run of its own: everything but the message.
     template = {key: value for key, value in body.items() if key != "input"}
