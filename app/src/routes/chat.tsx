@@ -332,8 +332,6 @@ export function ChatPage() {
     const timer = window.setInterval(read, PR_PENDING_MS)
     return () => window.clearInterval(timer)
   }, [id, checksRunning])
-  // Plain chats hide context use, stats and tool calls unless the user turned that off.
-  const simple = !session && resolved.simplifiedChats
   const modelChoice = conversation
     ? conversation.modelChoice
     : pendingModel?.profileId === profile?.id
@@ -600,9 +598,7 @@ export function ChatPage() {
 
   const actions = conversation && (
     <div className="flex items-center gap-2">
-      {wide && configured && !simple && (
-        <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />
-      )}
+      {wide && configured && <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />}
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
@@ -617,7 +613,7 @@ export function ChatPage() {
           <EllipsisIcon />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-44">
-          {configured && !simple && !wide && (
+          {configured && !wide && (
             <>
               <DropdownMenuItem onClick={() => setUsageOpen(true)}>
                 <ContextIcon usage={usage} />
@@ -680,9 +676,7 @@ export function ChatPage() {
       <ChatHeader
         // Nothing started has no title yet, and its bot is the big one in the middle.
         title={unstarted ? "" : (conversation?.title ?? "New chat")}
-        subtitle={
-          unstarted ? undefined : (!simple && activity) || repliesLine || session?.worktree?.branch
-        }
+        subtitle={unstarted ? undefined : activity || repliesLine || session?.worktree?.branch}
         botId={profile?.botId}
         muted={Boolean(conversation?.muted || profile?.muted)}
         // Beside its bot, which already shows the bot's picture.
@@ -748,8 +742,7 @@ export function ChatPage() {
                         {change && <ModelChange model={change} />}
                         <MessageItem
                           message={message}
-                          showStats={!simple}
-                          simple={simple}
+                          showStats
                           botId={profile?.botId}
                           busy={busy}
                           plain={Boolean(session)}

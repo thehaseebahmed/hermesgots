@@ -25,12 +25,6 @@ await flow("usage-limit", async ({ page, profileId, seed, until, shot }) => {
   // A run that fails midway leaves the mock holding the figure it died on, and this one drives the
   // figure to 100% before it is done, so it starts from the mock's own default.
   await accountAt("")
-  // A plain chat hides the Context ring behind the Simplified chats switch; the sheet is what this
-  // flow reads, so it comes off.
-  await page.evaluate(async () => {
-    const { db } = await import("/src/lib/db.ts")
-    await db.settings.update("settings", { simplifiedChats: false })
-  })
   // The dev server re-bundles its dependencies now and then and answers a load with a blank page; a
   // flow's assertions can't tell that from the app being broken, so it loads again.
   const loads = async (load) => {
