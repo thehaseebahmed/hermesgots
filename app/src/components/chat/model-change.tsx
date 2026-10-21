@@ -1,4 +1,3 @@
-import { formatTokens } from "@/lib/format"
 import type { Compaction } from "@/lib/hermes"
 
 /**
@@ -9,14 +8,15 @@ import type { Compaction } from "@/lib/hermes"
  */
 
 /**
- * One squiggle per side, stretched to its half of the row: ten humps a side is a rule at any width,
- * where more of them at a fixed size read as a texture. The stroke keeps its own width through that
- * stretch rather than thinning with it, and its round ends keep the humps soft.
+ * One squiggle per side, at a fixed size whatever the label's width: six humps of 8px, so the pattern
+ * is the same beside "gpt-5" as beside a long provider/model, and the row is centred on its label.
+ * Drawn at its own pixel size, so the stroke never thins or stretches; its round ends keep the humps
+ * soft.
  */
-const RISE = " q 0.625 -2 1.25 0 q 0.625 2 1.25 0"
-const HUMPS = 10
-/** A hump each way spans 2.5, so the wave is as wide as its humps and never squashed to fit. */
-const SPAN = 2.5 * HUMPS
+const HUMP = 8
+const HUMPS = 6
+const RISE = ` q ${HUMP / 4} -3 ${HUMP / 2} 0 q ${HUMP / 4} 3 ${HUMP / 2} 0`
+const SPAN = HUMP * HUMPS
 const WAVE = `M0 3${RISE.repeat(HUMPS)}`
 
 function Squiggle() {
@@ -24,8 +24,9 @@ function Squiggle() {
     <svg
       aria-hidden
       viewBox={`0 0 ${SPAN} 6`}
-      preserveAspectRatio="none"
-      className="h-1.5 flex-1 text-muted-foreground"
+      width={SPAN}
+      height={6}
+      className="shrink-0 text-muted-foreground"
     >
       <path
         d={WAVE}
@@ -34,7 +35,6 @@ function Squiggle() {
         strokeWidth={1.5}
         strokeLinecap="round"
         strokeLinejoin="round"
-        vectorEffect="non-scaling-stroke"
       />
     </svg>
   )
@@ -42,9 +42,13 @@ function Squiggle() {
 
 function Divider({ label, text }: { label: string; text: string }) {
   return (
-    <div role="separator" aria-label={label} className="flex items-center gap-3 py-1">
+    <div
+      role="separator"
+      aria-label={label}
+      className="flex items-center justify-center gap-3 py-1"
+    >
       <Squiggle />
-      <span className="text-sm text-muted-foreground">{text}</span>
+      <span className="min-w-0 truncate text-sm text-muted-foreground">{text}</span>
       <Squiggle />
     </div>
   )
@@ -54,14 +58,12 @@ export function ModelChange({ model }: { model: string }) {
   return <Divider label={`Model switched to ${model}`} text={model} />
 }
 
-/** The context as it stood before the host compacted it, where the host recorded it. */
-function sizeNote({ tokens, window }: Compaction) {
-  if (!tokens) return ""
-  if (!window) return ` · ${formatTokens(tokens)}`
-  return ` · ${formatTokens(tokens)} of ${formatTokens(window)} (${Math.round((tokens / window) * 100)}%)`
+/** How full the context was when the host compacted it, where the host recorded it. */
+function percent({ tokens, window }: Compaction) {
+  return tokens && window ? ` at ${Math.round((tokens / window) * 100)}%` : ""
 }
 
 export function Compacted({ compaction }: { compaction: Compaction }) {
-  const note = sizeNote(compaction)
-  return <Divider label={`Conversation compacted${note}`} text={`Conversation compacted${note}`} />
+  const text = `Conversation compacted${percent(compaction)}`
+  return <Divider label={text} text={text} />
 }

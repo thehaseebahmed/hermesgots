@@ -15,7 +15,11 @@ for (const [name, viewport, dark] of [
       await seed([{ id: chatId, title: "A long chat", hermesSessionId: sessionId }])
       await page.goto(`${app}/c/${chatId}`)
       const done = () =>
-        until(async () => (await lastReply(chatId))?.status === "done", 20_000, "the reply to finish")
+        until(
+          async () => (await lastReply(chatId))?.status === "done",
+          20_000,
+          "the reply to finish",
+        )
 
       await send("first question")
       await done()
@@ -28,7 +32,7 @@ for (const [name, viewport, dark] of [
       await done()
       await until(async () => (await divider.count()) === 1, 15_000, "the divider to appear")
       const text = (await divider.innerText()).trim()
-      assert.match(text, /^Conversation compacted · \d+(\.\d)?k of \d+k \(\d+%\)$/, "with its size")
+      assert.match(text, /^Conversation compacted at \d+%$/, "with how full it was")
       const place = await page.evaluate(() => {
         const items = [...document.querySelectorAll("[data-slot=message-scroller-item]")]
         return {
@@ -36,7 +40,11 @@ for (const [name, viewport, dark] of [
           turn: items.findIndex((item) => item.textContent?.includes("second question")),
         }
       })
-      assert.equal(place.divider, place.turn, "and sits above the turn that ran on the compacted context")
+      assert.equal(
+        place.divider,
+        place.turn,
+        "and sits above the turn that ran on the compacted context",
+      )
       await shot("thread")
       pass("the thread marks the compaction")
     },
