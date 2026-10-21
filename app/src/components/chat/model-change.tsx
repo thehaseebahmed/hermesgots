@@ -8,14 +8,14 @@ import type { Compaction } from "@/lib/hermes"
  */
 
 /**
- * One squiggle per side, running to the edge of the row: each hump is a fixed 26px, so a wide row
+ * One squiggle per side, running to the edge of the row: each hump is a fixed 17px, so a wide row
  * shows more of them and a narrow one fewer, and they look the same either way. The wave is drawn
  * longer than any row and clipped, from the label outwards, so a hump is cut at the row's edge and
  * never squeezed. Drawn at its own pixel size, so the stroke never thins; its round ends keep the
  * humps soft.
  */
-const HUMP = 26
-const HUMPS = 30
+const HUMP = 17
+const HUMPS = 48
 const RISE = ` q ${HUMP / 4} -2 ${HUMP / 2} 0 q ${HUMP / 4} 2 ${HUMP / 2} 0`
 const SPAN = HUMP * HUMPS
 const WAVE = `M0 3${RISE.repeat(HUMPS)}`
