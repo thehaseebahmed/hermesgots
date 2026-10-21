@@ -65,6 +65,8 @@ Send these phrases in a chat message to trigger specific mock behaviors:
 | `plan` | Enters plan mode: agent reads, asks clarify questions, writes structured plan, leaves it pending |
 | `clean` / `delete` | Triggers approval request for `find /var/log -name '*.log.*' -mtime +90 -delete` |
 | `long` / `slow` | 20-step slow reply (1s per step) — tests stream resume after disconnect |
+| `think out loud` | Four paced reasoning pieces before the answer: one `reasoning.available` event per piece on a run, one `reasoning_content` delta per piece on a completion |
+| `think out loud` + `stall` | The same four pieces, then a 2.5s hold after the last with nothing else on the wire, so a client's thinking line is the only thing on it |
 | `fail` | Tool call fails with "Permission denied" |
 | `ask` | Single clarify question: "Which logs should I count as old?" |
 | `ask five` | Five clarify questions (env, services, name, data handling, reviewers) |
@@ -299,6 +301,17 @@ pnpm mock
 # Run a few turns
 # GET /api/plugins/memento/sessions/{id}/context
 # → { prompt_tokens, output_tokens, context_length, model, provider, at }
+```
+
+### 13. Test a Reply Thinking
+
+```bash
+pnpm mock
+# In chat: "think out loud, then stall"
+# Watch the reply: the working line up before any reasoning, then gone while the four pieces
+# stream with the thinking line open and nothing else on the wire
+# The first answer token folds the line to "Thought for 7s"; reload the thread and it reads
+# "Thought", with no number
 ```
 
 ---

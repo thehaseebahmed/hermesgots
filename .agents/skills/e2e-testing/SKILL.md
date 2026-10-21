@@ -55,6 +55,7 @@ elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` l
 | Flow | Checks |
 |---|---|
 | `chat-message` | A new chat sends its message, gets the whole reply, and shows in Recents |
+| `thinking-line` | A turn told to think out loud and stall shows its working line before any reasoning, with no thinking line yet; once the mock's four pieces stream the working line stands down while the line reads Thinking…, open over them, no tool run and no answer begun; the first answer token folds it to Thought for 7s, and a reload reads a bare Thought, folded, over the reasoning it still holds |
 | `approval` | A project session waiting on an approval shows in the sidebar's Waiting for input and its project's Waiting on you. Both move it to Idle once it's allowed |
 | `reattach` | A reply still streaming when the page reloads picks its run up again and finishes |
 | `history-pages` | A session opened mid-turn from another device loads the running turn whole, pages back a turn longer than a page twice, and keeps one reply per turn, at the end; a chat an older version split is mended by Load earlier. Main showed the running turn twice |
@@ -159,7 +160,7 @@ Projects, attach it to your reply, or describe what it shows. Never commit scree
    port table above.
    Give it a row in `docs/e2e-flow-audit.md` too, with its verdict and why no lower tier reaches
    it: `app/scripts/test-e2e-registry.mjs` fails the app's gates on a key with no row, and on a
-   stay beyond the seven (ADR 0019).
+   stay beyond the eight (ADR 0019).
 3. Drive the mock with words in a message: `clean up` asks for an approval, `long` streams slowly,
    `ask` asks a question, `plan` writes a plan. The header of `app/scripts/mock-hermes.mjs` lists
    its words and env vars, and `.agents/skills/mock-server-scenarios.md` has recipes. Seeded

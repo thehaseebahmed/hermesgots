@@ -56,6 +56,9 @@
 // "marathon" for a turn longer than a transcript page: 40 steps of text and a tool call, quick at
 // first and slow for the last 12, so a device can open the session while it runs ("sprint" and
 // "relay": all quick).
+// Say "think out loud" for the turn's working-out before any of its answer: four reasoning pieces,
+// paced, as a run's `reasoning.available` events or a completion's `reasoning_content` deltas. Say
+// "stall" as well and the turn then holds 2.5s with nothing else on the wire.
 // Project sessions get a worktree in each of the project's repos on
 // POST /api/plugins/memento/sessions/{id}/workspace (GET reads it back, POST …/mode changes the
 // permission mode, POST …/workspace/remove removes the trees unless a turn mentioned "commit"). In
@@ -1281,6 +1284,20 @@ function pageRows(rows, params) {
         .reverse()
 }
 
+// What a turn asked to think out loud says, one piece per reasoning event — a whole paragraph each,
+// since a run's reasoning reaches the app a block at a time and its blocks are joined as paragraphs.
+const REASONING = [
+  "They want the working-out, not just the answer.",
+  "I'm weighing what's under /var/log and what is safe to drop.",
+  "The old gzipped rotations are the bulk of it, and nothing will read them again.",
+  "So the answer names the folders and what can go, and leaves the delete to them.",
+]
+// On top of the turn's own pause, so a client's working line is up before any reasoning lands.
+const REASONING_LEAD_MS = 2500
+// Between pieces, slow enough that each is seen to arrive as an event of its own.
+const REASONING_PACE_MS = 700
+const REASONING_STALL_MS = 2500
+
 /**
  * The scripted turn behind both endpoints. `out` sends it over the wire: `say` streams a piece of the
  * reply, `status` a status line, `tool` a tool's progress, and `approve` asks and resolves to a choice.
@@ -1303,13 +1320,21 @@ async function playTurn(req, body, last, out) {
   out.status("Thinking…")
   await sleep(500)
 
-  // A prompt that asks to think out loud gets a block of working-out before the answer, in both the
-  // shapes Hermes streams reasoning in: a completion's `reasoning_content` delta and a run's
-  // `reasoning.available` event. The channel is optional so a call site without one can't throw.
-  if (/\bthink out loud\b/i.test(last))
-    out.reason?.(
-      "They want the working-out, not just the answer. I'm weighing what's under /var/log and what is safe to drop, then I'll keep the reply to the point.",
-    )
+  // A prompt that asks to think out loud gets its working-out before the answer, in both the shapes
+  // Hermes streams reasoning in: a completion's `reasoning_content` delta and a run's
+  // `reasoning.available` event.
+  if (/\bthink out loud\b/i.test(last)) {
+    // After the turn's own pause, so the client's working line is up before any reasoning lands.
+    await sleep(REASONING_LEAD_MS)
+    for (const [i, piece] of REASONING.entries()) {
+      if (out.closed()) break
+      if (i) await sleep(REASONING_PACE_MS)
+      out.reason?.(piece, i)
+    }
+    // A turn told to stall holds here, thinking and doing nothing else: what the app's thinking line
+    // has to stand up to. A run stopped meanwhile isn't held, so Stop lands as on any other turn.
+    if (!out.closed() && /\bstall\b/i.test(last)) await sleep(REASONING_STALL_MS)
+  }
 
   // Hermes's clarify tool: a tool call whose result is the user's answers, which the plugin shows
   // on runs; a chat completion can't show it and the result says so.
@@ -2217,8 +2242,9 @@ async function streamCompletion(req, res, body) {
   const { prompt_tokens, completion_tokens } = await playTurn(req, body, last, {
     closed: () => closed,
     say: (piece) => chunk({ content: piece }),
-    // One chunk carrying the whole block, the way a provider reports a finished one.
-    reason: (text) => chunk({ reasoning_content: text }),
+    // One delta per piece, carrying its own paragraph break: the app appends a completion's deltas
+    // as they come, where a run's blocks are joined for it.
+    reason: (text, i) => chunk({ reasoning_content: i ? `\n\n${text}` : text }),
     status: (text) => frame({ kind: "thinking", text }, "hermes.status"),
     // Completions carry no result on this stream.
     // Only the run stream says whether a call failed.
@@ -2524,6 +2550,7 @@ function startRun(req, body) {
       return read
     },
     say: (delta) => push("message.delta", { delta }),
+    // One event per piece: the app adds each reasoning block as it lands, so the line grows.
     reason: (text) => push("reasoning.available", { text }),
     status: () => {},
     tool: ({ tool, label, status, result }) =>
