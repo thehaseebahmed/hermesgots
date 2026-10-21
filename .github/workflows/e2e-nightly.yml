@@ -2,7 +2,7 @@ name: E2E nightly
 
 # The whole browser registry (`pnpm e2e all`) against the mock, on main, once a night. A change runs
 # the flows it touches before it lands; this is what catches the ones it didn't think it touched
-# (ADR 0029), and never on a private repository (ADR 0030). A night whose main is the commit the last green sweep already passed is skipped.
+# (ADR 0029). A night whose main is the commit the last green sweep already passed is skipped.
 on:
   schedule:
     - cron: "17 2 * * *"
@@ -28,13 +28,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.event_name }}" != schedule ]; then echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
-          # Standard runners are free only on a public repository (ADR 0030); an unattended schedule
-          # must not be able to spend a private repository's allowance.
-          if [ "$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" != false ]; then
-            echo "the repository is not public, so the schedule does not spend its minutes"
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
           last=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow e2e-nightly.yml --branch main \
             --status success --limit 1 --json headSha --jq '.[0].headSha // ""' || echo "")
           if [ "$last" = "$GITHUB_SHA" ]; then

@@ -20,9 +20,7 @@ What that asks of a workflow, whatever it costs today:
   skipped workflow leaves its check pending and blocks the merge. `changed-areas.sh` still answers
   what moved.
 - **Keep one owner for the check set** (`checks.sh`), so CI and the development image can't drift.
-- **Scheduled work skips when nothing moved**, as the nightly e2e run does (ADR 0029), and **declines
-  to run at all on a private repository**: a schedule is the one trigger nobody watches, so it must
-  not be able to spend an allowance unattended. A person can still start it by hand.
+- **Scheduled work skips when nothing moved**, as the nightly e2e run does (ADR 0029).
 - **Every job has a timeout and every workflow a concurrency group**, so a hang or a pile-up is cut
   off rather than billed. Artifacts are kept for days, not months.
 - **Standard runners only.** A larger runner is a deliberate, argued exception.
@@ -43,7 +41,5 @@ pull request runs.
 
 - ADR 0002 carries a line pointing here. ADRs 0003 and 0004 cite it for the diff gating and its
   mechanism; both stand.
-- The nightly workflow checks the repository's visibility before it spends anything.
-- If the repository goes private, nothing needs reworking: the scheduled run stops itself, and a
-  manual run costs about 37 minutes a time. A scheduled run every day would cost about 1,100 a month
-  against a 2,000 or 3,000 allowance, which is why it declines.
+- If the repository goes private, the nightly run needs a second look: every night it would cost
+  about 1,100 minutes a month against a 2,000 or 3,000 allowance.
