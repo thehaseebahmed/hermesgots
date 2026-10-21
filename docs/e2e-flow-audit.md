@@ -12,25 +12,25 @@ reason the change can fail — from ADR
 what the tiers are along with `AGENTS.md`'s Testing paragraph. This page records only which one
 each flow lands in: **stay** (end-to-end), **component**, **plugin** (the plugin's own Python
 suite), or **delete** (a duplicate another flow already asserts). The end-to-end skill points here
-once it is rewritten for the seven (#317). The counts describe the registry at this commit; the
+once it is rewritten for the eight (#317). The counts describe the registry at this commit; the
 ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **64 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 64 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **65 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 65 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --- | --- |
-| stay | 7 |
+| stay | 8 |
 | component | 52 |
 | plugin | 2 |
 | delete | 3 |
-| **total** | **64** |
+| **total** | **65** |
 
-Of those 64, 58 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 57 distinct files there) and 6 point at the older
+Of those 65, 59 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 58 distinct files there) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -39,32 +39,34 @@ Two things in that arithmetic did not hold, and both are checkable:
 - Its clauses name **59** keys — 53 pointing at `app/scripts/e2e/` and 6 at the older
   `regression-*.mjs` — and its sixtieth is `todos-legacy` counted a second time, as "one registry
   key reusing another's script" rather than as the 53rd of the first group, which it already is.
-  Today's 58 keys under `app/scripts/e2e/`, less the five that arrived since, are those 53.
+  Today's 59 keys under `app/scripts/e2e/`, less the six that arrived since, are those 53.
 - It left out goal mode's two keys, `goal-wizard` and `goal-pill`, which the registry still held
   when the plan was written: the commit before they left, `8a4e842^` (#282's `1b98896`, merged
   before the plan), carries 61 keys. Both went with goal mode (#296), so that omission costs
   nothing today.
 
-Five keys have arrived since, each component by the same rule: `delegation-model` (#318),
-`afk-skills` (#327), `afk-stage` (#328), `pipeline-pill` (#330) and `afk-prompt` (#359). So the
-registry holds 59 + 5 = **64** keys, and the component verdicts are the plan's 48 less the key it
-counted twice, plus those five: **52**. #299's own criterion still says 48; the 52 above supersedes
-it for the reason just given, and nothing else in the ticket's split moves.
+Six keys have arrived since: five are components by the same rule — `delegation-model` (#318),
+`afk-skills` (#327), `afk-stage` (#328), `pipeline-pill` (#330) and `afk-prompt` (#359) — and the
+sixth, `thinking-line` (#368), is the only stay among them, for what no lower tier can watch. So
+the registry holds 59 + 6 = **65** keys, the component verdicts are the plan's 48 less the key it
+counted twice, plus those five: **52**, and the stays are the plan's 7 plus the one: **8**. #299's
+own criterion still says 48; the 52 above supersedes it for the reason just given, and nothing
+else in the ticket's split moves.
 
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
 a key with no row here, a row with no key, a verdict outside the four, a count in the table above
-that its rows don't add up to, or a stay beyond the seven fails the app's gates. A new flow is then
+that its rows don't add up to, or a stay beyond the eight fails the app's gates. A new flow is then
 an argument this page has to carry, never a default (ADR 0019).
 
 Check any of it in one line:
 
 ```bash
-grep -c '^| `' docs/e2e-flow-audit.md                           # 64 rows, one per registry key
-grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 7
+grep -c '^| `' docs/e2e-flow-audit.md                           # 65 rows, one per registry key
+grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 8
 grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 52
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 3
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
-cd app && pnpm -s e2e list | wc -l                             # 64 keys in the registry
+cd app && pnpm -s e2e list | wc -l                             # 65 keys in the registry
 git show 8a4e842^:app/scripts/e2e/cli.mjs |
   sed -n '/^const FLOWS = {/,/^}$/p' | grep -c '^  [a-z"-]*: {'  # 61, before goal mode left
 ```
@@ -216,7 +218,7 @@ Three keys: the fallback list, the subagent model, and a write the host never an
 | `delegation-model` | component | The subagent model is recorded as the host's delegation model, cleared back to inherit, the field greyed while a write is on its way, and no field at all without the feature. | A picker and one write: the fallbacks' shape, on another field. | A component test asserts the write, the clear as its own write, the saving state, and no field without the feature. |
 | `fallbacks-silent-host` | component | A host that takes a fallback write and never answers it: the field is given up on and comes back rather than staying greyed out with a save that never lands. | A timeout, which fake timers assert at no wall-clock cost. | A component test with fake timers asserts the field returns after the write's timeout. |
 
-## The seven that stay, and why only a browser can assert each
+## The eight that stay, and why only a browser can assert each
 
 Every one of these earns its browser by a mechanism no lower tier reproduces, and a stay is
 replaced by itself. They are what the end-to-end registry holds once the other 57 keys leave
@@ -224,6 +226,7 @@ replaced by itself. They are what the end-to-end registry holds once the other 5
 
 | Key | Verdict | What it asserts today | Why only a browser can assert it |
 | --- | --- | --- | --- |
+| `thinking-line` | stay | A turn asked to think out loud and then stall: the working line reading *Writing…* before any reasoning lands, the line open on *Thinking…* with the working line gone from the reply while reasoning streams and no tool has run, one piece on the row with the rest still to come, the line folded to *Thought for 7s* at the first answer token, and a reload of the thread reading a bare *Thought*. | The stream is what no lower tier reaches: the app's line following a host's own reasoning events as they arrive in wall-clock time, a piece at a time — a faked HTTP boundary answers the shape the code expects, and would pass whether or not a host streams reasoning before its answer. The bare *Thought* after it is a real reload clearing the `thinking.ts` module's memory, which a remount in a test process does not; the line, its fold and its label are already `test-thinking-line.tsx`'s, and this flow proves the live path feeds them. |
 | `reattach` | stay | A reply still streaming when the page reloads picks its run up again and finishes. | A live run outliving a real reload. A component test can remount a tree, but it has no run still going on a test host to rejoin, so it would pass whether or not reattachment works. |
 | `live-poll` | stay | `runs/live` is read by one shared poll: at most 3 reads in 25s with a session, its project and the sidebar all open. | A request rate over wall-clock, with three screens mounted at once. |
 | `idle-requests` | stay | An idle open chat makes at most 12 requests in 65s. | A request budget over 65 seconds of real time and a real fetch stack. |
@@ -284,6 +287,6 @@ is the part at fault.
 
 ## What this page does not decide
 
-Whether the seven run on a real Hermes is #313's question, and whether the snapshots seed the
+Whether the eight run on a real Hermes is #313's question, and whether the snapshots seed the
 states named above is #314's. This page only says which keys move, where each assertion goes, and
 what is accepted if nothing picks it up.

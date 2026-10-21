@@ -26,6 +26,11 @@ const FLOWS = {
     script: "e2e/chat-message.mjs",
     about: "Start a new chat, send a message, get the whole reply and find it in Recents",
   },
+  "thinking-line": {
+    script: "e2e/thinking-line.mjs",
+    about:
+      "A turn watched thinking: the working line before any reasoning, the line open and the working line gone as it streams, folded at the first answer token, and a reload reading Thought",
+  },
   "slash-skills": {
     script: "e2e/slash-skills.mjs",
     about:

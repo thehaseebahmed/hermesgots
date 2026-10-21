@@ -15,10 +15,12 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? "playwright")
 export const runId = () => Math.random().toString(36).slice(2, 8)
 
 /**
- * Resolves once nothing on the page is still moving: a sheet's slide, a pane's push, a fade. Two
- * frames first, so a transition the last step started has been created; then every animation with
- * an end — a spinner, a skeleton's pulse and a bot's idle motion have none — has reached it. A box
- * read before then is a moving target.
+ * Resolves once nothing the clock drives is still moving: a sheet's slide, a pane's push, a fade.
+ * Two frames first, so a transition the last step started has been created; then every animation
+ * with an end — a spinner, a skeleton's pulse and a bot's idle motion have none — has reached it. A
+ * box read before then is a moving target. An animation a scroll places rather than the clock is
+ * skipped: a chat thread too short to scroll leaves its fade's scroll timeline before its range, so
+ * it can sit pending for as long as the page is open.
  */
 export async function settled(page, timeout = 5_000) {
   await page.evaluate(
@@ -31,6 +33,7 @@ export async function settled(page, timeout = 5_000) {
         .every(
           (animation) =>
             animation.effect?.getComputedTiming().iterations === Infinity ||
+            !(animation.timeline instanceof DocumentTimeline) ||
             (animation.playState !== "running" && !animation.pending),
         ),
     undefined,
@@ -215,7 +218,10 @@ function helpers(page) {
       await composer.fill(text)
       await composer.press("Enter")
     },
-    /** The chat's newest message when it's a reply: its status and length. */
+    /**
+     * The chat's newest message when it's a reply: what the app has written for it so far, and how
+     * long its text is.
+     */
     lastReply(chatId) {
       return page.evaluate(async (id) => {
         const { db } = await import("/src/lib/db.ts")
@@ -223,7 +229,13 @@ function helpers(page) {
           -1,
         )
         return last?.role === "assistant"
-          ? { status: last.status, length: last.content.length }
+          ? {
+              status: last.status,
+              length: last.content.length,
+              content: last.content,
+              reasoning: last.reasoning ?? "",
+              tools: last.tools?.length ?? 0,
+            }
           : null
       }, chatId)
     },
