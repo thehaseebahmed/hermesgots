@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 33
+SCHEMA_VERSION = 34
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -391,4 +391,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    SELECT id, session_id, text, thread, at, undone FROM main_moves_old"""
             )
             conn.execute("DROP TABLE main_moves_old")
+        # v34: settings the host keeps for the bot that aren't Hermes's own config: the triage model
+        # (triage.py).
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS host_settings (
+                   key TEXT PRIMARY KEY,
+                   value TEXT NOT NULL
+               )"""
+        )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

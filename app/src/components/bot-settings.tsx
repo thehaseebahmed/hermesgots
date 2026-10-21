@@ -10,6 +10,7 @@ import { BOTS } from "@/components/bots"
 import {
   DefaultModelSetting,
   DelegationModelSetting,
+  TriageModelSetting,
   FallbackModelsSetting,
 } from "@/components/chat/model-picker"
 import {
@@ -510,6 +511,7 @@ export function BotEditor({
             </Field>
           )}
           <DelegationModelSetting profile={profile} />
+          <TriageModelSetting profile={profile} />
           <FallbackModelsSetting profile={profile} />
         </FieldGroup>
       </TabsContent>

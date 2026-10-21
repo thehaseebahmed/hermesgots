@@ -21,7 +21,8 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import chats, outbox, research
+from . import chats, host_model, outbox, research
+from .store import connect
 from .sessions import MEMENTO_ID_PREFIX
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,8 @@ TURN_CHARS = 400
 MAX_TEXT = 2000
 # The decision is given up on after this long; the app waits a little longer than this for the answer.
 DEADLINE_S = 3.0
+# The row in ``host_settings`` that holds the triage model, as JSON ``{provider, model}``.
+MODEL_KEY = "triage_model"
 MAIN = "main"
 THREAD = "thread"
 NEW = "new"
@@ -163,29 +166,109 @@ def _prompt(text: str, options: List[Dict[str, Any]], turns: List[Dict[str, str]
     return "\n".join(lines)
 
 
+class Withheld(Exception):
+    """The host's config doesn't let Gots pick the model of a model call."""
+
+
+def read_model(path: Path) -> Optional[Dict[str, str]]:
+    """The triage model this bot's host holds, or None when the bot's own model decides."""
+    if not path.exists():
+        return None
+    import json
+
+    conn = connect(path)
+    try:
+        row = conn.execute("SELECT value FROM host_settings WHERE key = ?", (MODEL_KEY,)).fetchone()
+    finally:
+        conn.close()
+    try:
+        held = json.loads(row[0]) if row else None
+    except ValueError:
+        return None
+    if not isinstance(held, dict):
+        return None
+    provider, model = held.get("provider"), held.get("model")
+    if isinstance(provider, str) and isinstance(model, str) and provider and model:
+        return {"provider": provider, "model": model}
+    return None
+
+
+def set_model(
+    config_path: Path, path: Path, pick: Optional[Dict[str, str]], gate: Dict[str, bool]
+) -> Optional[Dict[str, str]]:
+    """Makes ``pick`` the model triage decides with; None clears it, so the bot's own model decides.
+
+    The pick overrides the model of a call, which the host's config has to allow (``gate``, from
+    ``research.llm_gate``): ``Withheld`` otherwise. Hermes checks it the way it checks the main
+    model, and a refusal is a ValueError with its reason; a refused or withheld pick writes nothing,
+    and a pick already held isn't checked again.
+    """
+    import json
+
+    if pick is None:
+        if path.exists():
+            conn = connect(path)
+            try:
+                conn.execute("DELETE FROM host_settings WHERE key = ?", (MODEL_KEY,))
+            finally:
+                conn.close()
+        return None
+    if not (gate.get("model") and gate.get("provider")):
+        raise Withheld(
+            "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable memento`."
+        )
+    if read_model(path) == pick:
+        return pick
+    from gateway.run import _load_gateway_config
+
+    cfg = _load_gateway_config(config_path=config_path) or {}
+    routed = host_model._switch(cfg, pick["provider"], pick["model"])
+    resolved = {"provider": routed.target_provider, "model": routed.new_model}
+    conn = connect(path)
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO host_settings (key, value) VALUES (?, ?)",
+            (MODEL_KEY, json.dumps(resolved)),
+        )
+    finally:
+        conn.close()
+    return resolved
+
+
 def decide(
     text: str,
     options: List[Dict[str, Any]],
     turns: List[Dict[str, str]],
     deadline: Optional[float] = None,
+    model: Optional[Dict[str, str]] = None,
 ) -> Optional[str]:
-    """The id of the thread the message continues, ``NEW`` for a thread of its own, or None to stay."""
+    """The id of the thread the message continues, ``NEW`` for a thread of its own, or None to stay.
+
+    ``model`` is the triage model; without one the bot's own decides."""
     if not isinstance(text, str) or not text.strip():
         return None
     llm = _llm()
     # Past the deadline nobody is waiting for the answer, so the model isn't asked at all.
     if llm is None or (deadline is not None and time.monotonic() > deadline):
         return None
+    ask = dict(
+        instructions=INSTRUCTIONS,
+        input=[{"type": "text", "text": _prompt(text, options, turns)}],
+        json_schema=SCHEMA,
+        system_prompt=SYSTEM,
+        max_tokens=200,
+        temperature=0,
+        purpose="memento.triage",
+    )
     try:
-        result = llm.complete_structured(
-            instructions=INSTRUCTIONS,
-            input=[{"type": "text", "text": _prompt(text, options, turns)}],
-            json_schema=SCHEMA,
-            system_prompt=SYSTEM,
-            max_tokens=200,
-            temperature=0,
-            purpose="memento.triage",
-        )
+        try:
+            result = llm.complete_structured(**ask, **(model or {}))
+        except Exception as error:
+            name = type(error).__name__
+            if not (model and ("Trust" in name or "Override" in name or "Denied" in name)):
+                raise
+            # The host took the permission back after the pick: the bot's own model decides.
+            result = llm.complete_structured(**ask)
     except Exception:
         logger.debug("memento: triage's model call failed", exc_info=True)
         return None
@@ -332,7 +415,7 @@ def triage(
             return {"decision": MAIN}
         options = candidates(records, main_id, home)
         turns = _rows(home, [session_id], MAIN_TURNS).get(session_id) or []
-        chosen = decide(text, options, turns, deadline)
+        chosen = decide(text, options, turns, deadline, read_model(path))
         if chosen is None:
             return {"decision": MAIN}
         if chosen == NEW:

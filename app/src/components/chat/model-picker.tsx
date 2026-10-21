@@ -13,6 +13,7 @@ import {
 import { toast } from "sonner"
 
 import { MODEL_SORTS, sortByFacts, type ModelSort } from "@/components/chat/model-sort"
+import { Banner } from "@/components/banner"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { usePopupForm } from "@/lib/popup-form"
 import { Button } from "@/components/ui/button"
@@ -29,6 +30,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { rememberModel, type ModelChoice, type Profile } from "@/lib/db"
 import { useDelegationModel } from "@/lib/delegation"
+import { useTriageModel } from "@/lib/triage-model"
 import { MAX_FALLBACKS, withFallback } from "@/lib/fallback-list"
 import { useFallbackModels } from "@/lib/fallbacks"
 import { formatTokens } from "@/lib/format"
@@ -674,6 +676,62 @@ export function DelegationModelSetting({ profile }: { profile: Profile }) {
         type="button"
         variant="outline"
         aria-label={`Subagent model: ${pick ? fullModel(pick) : "Default model"}`}
+        className="h-11 w-full justify-between gap-2 font-normal"
+        disabled={!providers.length || saving}
+        onClick={() => setOpen(true)}
+      >
+        <span className="truncate">{pick ? fullModel(pick) : "Default model"}</span>
+        <ChevronDownIcon className="shrink-0 text-muted-foreground" />
+      </Button>
+      <Popup open={open} onOpenChange={setOpen} anchor={field}>
+        <PopupContent initialFocus={false} fixedHeight={PICKER_HEIGHT}>
+          <ModelPicker
+            providers={providers}
+            fallback={{ label: "Default model", model: own?.model }}
+            recent={profile.recentModels}
+            choice={pick}
+            onChoose={(next) => {
+              reportWrite(save(next))
+              setOpen(false)
+            }}
+          />
+        </PopupContent>
+      </Popup>
+    </Field>
+  )
+}
+
+/**
+ * A bot's triage model, in its settings: the model its host decides with where a message sent from
+ * Main goes. Nothing set means the bot's own model decides.
+ */
+export function TriageModelSetting({ profile }: { profile: Profile }) {
+  const [open, setOpen] = useState(false)
+  const field = useRef<HTMLButtonElement>(null)
+  const { pick, supported, saving, save, withheld } = useTriageModel(profile)
+  const info = useModelInfo(profile)
+  const providers = info?.providers ?? []
+  if (!supported) return null
+  const own = botModel(profile, info)
+
+  return (
+    <Field aria-labelledby="triage-model-label" aria-busy={saving || undefined}>
+      <div className="flex items-center gap-2">
+        <FieldLabel id="triage-model-label">Triage model</FieldLabel>
+        {saving && <Spinner className="size-3.5" />}
+      </div>
+      {withheld && (
+        <Banner>
+          This host doesn't let Gots pick the model. Allow it with{" "}
+          <code className="font-mono text-[13px]">hermes plugins enable memento</code>.
+        </Banner>
+      )}
+      <Button
+        ref={field}
+        id="triage-model"
+        type="button"
+        variant="outline"
+        aria-label={`Triage model: ${pick ? fullModel(pick) : "Default model"}`}
         className="h-11 w-full justify-between gap-2 font-normal"
         disabled={!providers.length || saving}
         onClick={() => setOpen(true)}

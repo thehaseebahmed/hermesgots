@@ -14,6 +14,7 @@ from unittest import mock
 
 from plugin import chats, outbox, triage
 from plugin.store import db_path
+from plugin.tests._host import Result, hermes
 
 MAIN = "main-bot"
 
@@ -241,6 +242,102 @@ class RowsTests(unittest.TestCase):
         self.assertEqual(triage.given("s:1"), {"decision": "main"})
         self.assertIsNone(triage.given("s:2"))
         self.assertIsNone(triage.given(None))
+
+
+class TriageModelTests(unittest.TestCase):
+    config_path = Path("/home/h/config.yaml")
+    allowed = {"model": True, "provider": True}
+
+    def setUp(self):
+        self.home = Path(tempfile.mkdtemp())
+        self.path = db_path(self.home)
+        chats.merge(
+            self.path,
+            {
+                MAIN: chat(main=True, hermesSessionId="memento-main-bot", title="Main"),
+                "t1": chat(hermesSessionId="s1", title="Trip", updatedAt=5),
+            },
+        )
+
+    def set(self, pick, gate=None, results=()):
+        patch, calls, _ = hermes({"model": {"default": "own", "provider": "openrouter"}}, results)
+        with patch:
+            return triage.set_model(self.config_path, self.path, pick, gate or self.allowed), calls
+
+    def test_unset_reads_as_none(self):
+        self.assertIsNone(triage.read_model(self.path))
+        self.assertIsNone(triage.read_model(self.home / "missing.db"))
+
+    def test_a_pick_is_written_and_read_back_as_hermes_resolved_it(self):
+        saved, calls = self.set(
+            {"provider": "anthropic", "model": "haiku"}, results=[Result(True, "claude-haiku", "anthropic")]
+        )
+        self.assertEqual(saved, {"provider": "anthropic", "model": "claude-haiku"})
+        self.assertEqual(triage.read_model(self.path), saved)
+        self.assertEqual(calls["switch"][0]["raw_input"], "haiku")
+        # Nothing goes into Hermes's config: the pick is the bot's triage setting alone.
+        self.assertEqual(calls["write"], [])
+
+    def test_clearing_falls_back_to_the_bots_own_model(self):
+        self.set({"provider": "a", "model": "b"})
+        saved, _ = self.set(None)
+        self.assertIsNone(saved)
+        self.assertIsNone(triage.read_model(self.path))
+        self.assertEqual(self.set(None)[0], None)
+
+    def test_a_refused_pick_writes_nothing(self):
+        self.set({"provider": "a", "model": "b"})
+        with self.assertRaisesRegex(ValueError, "Unknown provider"):
+            self.set({"provider": "nope", "model": "c"}, results=[Result(False, error="Unknown provider 'nope'.")])
+        self.assertEqual(triage.read_model(self.path), {"provider": "a", "model": "b"})
+
+    def test_a_pick_needs_the_hosts_override_permission(self):
+        for gate in ({"model": False, "provider": False}, {"model": True, "provider": False}):
+            with self.assertRaises(triage.Withheld):
+                self.set({"provider": "a", "model": "b"}, gate=gate)
+        self.assertIsNone(triage.read_model(self.path))
+        # Clearing needs none: it asks nothing of the host.
+        self.assertIsNone(self.set(None, gate={"model": False, "provider": False})[0])
+
+    def test_a_pick_already_held_is_not_checked_again(self):
+        self.set({"provider": "a", "model": "b"})
+        _, calls = self.set({"provider": "a", "model": "b"})
+        self.assertEqual(calls["switch"], [])
+
+    def test_triage_decides_with_the_picked_model(self):
+        self.set({"provider": "a", "model": "b"})
+        llm = Llm({"decision": "stay"})
+        with mock.patch.object(triage, "_llm", return_value=llm), mock.patch.object(
+            triage, "_rows", return_value={}
+        ):
+            triage.triage(self.path, self.home, "memento-main-bot", "hi")
+        self.assertEqual((llm.calls[0]["provider"], llm.calls[0]["model"]), ("a", "b"))
+
+    def test_triage_without_a_pick_uses_the_bots_own_model(self):
+        llm = Llm({"decision": "stay"})
+        with mock.patch.object(triage, "_llm", return_value=llm), mock.patch.object(
+            triage, "_rows", return_value={}
+        ):
+            triage.triage(self.path, self.home, "memento-main-bot", "hi")
+        self.assertNotIn("model", llm.calls[0])
+        self.assertNotIn("provider", llm.calls[0])
+
+    def test_a_pick_the_host_no_longer_allows_falls_back_to_the_bots_own(self):
+        class Denied(Exception):
+            pass
+
+        class Llm2(Llm):
+            def complete_structured(self, **kwargs):
+                self.calls.append(kwargs)
+                if "model" in kwargs:
+                    raise Denied("override denied")
+                return SimpleNamespace(parsed={"decision": "new"})
+
+        llm = Llm2()
+        with mock.patch.object(triage, "_llm", return_value=llm):
+            decided = triage.decide("hi", [], [], None, {"provider": "a", "model": "b"})
+        self.assertEqual(decided, triage.NEW)
+        self.assertEqual(len(llm.calls), 2)
 
 
 if __name__ == "__main__":
