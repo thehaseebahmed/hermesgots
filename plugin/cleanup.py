@@ -59,6 +59,9 @@ def _empty_chats(records: Dict[str, Dict[str, Any]], hermes_home: Path, now: int
         if value.get("draftAt") or value.get("draftText"):
             # Saved on purpose: a draft someone is still writing.
             continue
+        if value.get("main"):
+            # A bot's Main thread is permanent, empty or not.
+            continue
         if now - created < GRACE_MS:
             continue
         if _has_messages(hermes_home, session_id) is False:
