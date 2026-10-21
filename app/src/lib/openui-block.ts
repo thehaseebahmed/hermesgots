@@ -1,3 +1,5 @@
+// `at` indexes into the string given to `openuiParts`, and the parts tile that string in order,
+// with no gaps or overlaps.
 export type OpenuiPart =
   | { kind: "text"; at: number; text: string }
   | { kind: "openui"; at: number; source: string; id?: string; open: boolean }
@@ -10,7 +12,7 @@ const ID = /^# id: ([a-z0-9-]{1,40})$/
 const INFO = "openui-lang"
 
 function fenceOf(line: string) {
-  const match = FENCE.exec(line)
+  const match = FENCE.exec(line.replace(/\r$/, ""))
   if (!match) return null
   return { char: match[1][0], length: match[1].length, rest: match[2] }
 }
@@ -20,9 +22,20 @@ function closes(line: string, char: string, length: number) {
   return !!fence && fence.char === char && fence.length >= length && /^[ \t]*$/.test(fence.rest)
 }
 
-// CommonMark: a list marker is followed by one to four spaces before its item's own content.
+function unixLines(text: string) {
+  return text.replace(/\r\n?/g, "\n")
+}
+
+// A marker's content starts 1 to 4 spaces after it; five or more leaves one space.
 function contentColumn(item: RegExpExecArray) {
-  return item[1].length + item[2].length + Math.min(item[3].length || 1, 4)
+  const spaces = item[3].length
+  return item[1].length + item[2].length + (spaces > 4 ? 1 : Math.max(spaces, 1))
+}
+
+// CommonMark strips up to the opener's indent from every line of the body.
+function deindent(text: string, spaces: number) {
+  if (!spaces) return text
+  return text.replace(new RegExp(`^ {0,${spaces}}`, "gm"), "")
 }
 
 function idOf(source: string) {
@@ -35,8 +48,9 @@ function idOf(source: string) {
 
 /**
  * Splits a reply into text and the blocks it asks to be drawn as live Lang: a ```openui-lang fence
- * whose body runs to a closing fence, or to the end of a reply still streaming. A block inside
- * another fence, or indented into a list item, is an example of Lang and stays code.
+ * whose body runs to a closing fence, or to the end of a reply still streaming. The info string is
+ * compared exactly, so a space before or after `openui-lang` leaves the fence as text. A block
+ * inside another fence, or indented into a list item, is an example of Lang and stays code.
  */
 export function openuiParts(content: string): OpenuiPart[] {
   const lines = content.split("\n")
@@ -48,9 +62,13 @@ export function openuiParts(content: string): OpenuiPart[] {
   }
 
   const parts: OpenuiPart[] = []
+  const items: number[] = []
+  const insideItem = (indent: number) => {
+    while (items.length && indent < items[items.length - 1]) items.pop()
+    return items.length > 0
+  }
   let textFrom = 0
   let plain: Fence | null = null
-  let item: number | null = null
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
@@ -60,16 +78,17 @@ export function openuiParts(content: string): OpenuiPart[] {
     }
     const listItem = LIST_ITEM.exec(line)
     if (listItem) {
-      item = contentColumn(listItem)
+      insideItem(listItem[1].length)
+      items.push(contentColumn(listItem))
       continue
     }
     if (!line.trim()) continue
     const indent = line.length - line.trimStart().length
-    if (item !== null && indent < item) item = null
+    const inItem = insideItem(indent)
 
     const fence = fenceOf(line)
     if (!fence) continue
-    if (fence.rest !== INFO || (item !== null && indent >= item)) {
+    if (fence.rest !== INFO || inItem) {
       plain = { char: fence.char, length: fence.length }
       continue
     }
@@ -83,9 +102,8 @@ export function openuiParts(content: string): OpenuiPart[] {
     }
     const open = close < 0
     const bodyStart = i + 1 < lines.length ? starts[i + 1] : content.length
-    const source = open
-      ? content.slice(bodyStart).replace(/\n$/, "")
-      : content.slice(bodyStart, starts[close] - 1)
+    const body = open ? content.slice(bodyStart) : content.slice(bodyStart, starts[close])
+    const source = deindent(unixLines(body), indent).replace(/\n$/, "")
     const id = idOf(source)
 
     if (starts[i] > textFrom)
@@ -97,7 +115,7 @@ export function openuiParts(content: string): OpenuiPart[] {
       textFrom = content.length
       break
     }
-    textFrom = starts[close] + lines[close].length
+    textFrom = starts[close] + lines[close].replace(/\r$/, "").length
     i = close
   }
 
