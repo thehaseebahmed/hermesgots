@@ -214,21 +214,22 @@ plugin/tests -t .` once the plugin moves.
 
 ## Tickets
 
-Each is verifiable on its own; the edges are the order.
+On the tracker: #384 is the spec, and its seven children are the build order — each titled the
+commit that lands it, each carrying the issue its edges name as a native blocker. Work the frontier.
 
-1. `feat(chat): read an openui block out of a reply` — `lib/openui-block.ts`, its unit test. Edge: none.
-2. `feat(chat): fold a thread's patches onto their interfaces` — `lib/openui-thread.ts`, its unit test.
-   Edge: 1.
-3. `feat(chat): draw an interface from gots' components` — the library, the renderer, the streaming
-   draw, the fallback ladder, `toParts` and `MessageItem`, component tests. Edge: 1, 2.
-4. `feat(chat): chart an interface` — `chart.tsx`, the chart component with its required summary, the
-   chunk assertion. Edge: 3.
-5. `test(chat): prove an interface in a real thread` — the test host's replies, the e2e flow including
-   the scroll hold, the audit row. Edge: 3, 4.
-6. `feat(plugin): tell the model the component library` — the artifact, the drift and 4,000-character
-   tests, the system-prompt section, the feature. Edge: 3.
-7. `feat(settings): switch interfaces off from appearance` — the switch, the plugin's route and stored
-   flag, the app's drawing gate, new chats only. Edge: 6.
+1. #385 `feat(chat): read an interface out of a reply` — `lib/openui-block.ts`, its unit test. Edge: none.
+2. #386 `feat(chat): fold a thread's patches onto their interfaces` — `lib/openui-thread.ts`, its unit
+   test. Edge: 1.
+3. #387 `feat(chat): draw an interface from gots' components` — the library, the renderer, the
+   streaming draw, the fallback ladder, `toParts` and `MessageItem`, component tests. Edge: 1, 2.
+4. #388 `feat(chat): chart an interface` — `chart.tsx`, the chart component with its required summary,
+   the chunk assertion. Edge: 3.
+5. #389 `test(chat): prove an interface in a real thread` — the test host's replies, the e2e flow
+   including the scroll hold, the audit row. Edge: 3, 4.
+6. #390 `feat(plugin): tell the model the component library` — the artifact, the drift and
+   4,000-character tests, the system-prompt section, the feature. Edge: 3.
+7. #391 `feat(settings): switch interfaces off from appearance` — the switch, the plugin's route and
+   stored flag, the app's drawing gate, new chats only. Edge: 6.
 
 ## Risks
 
