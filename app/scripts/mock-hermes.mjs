@@ -2287,6 +2287,8 @@ async function streamCompletion(req, res, body) {
 const runs = new Map()
 const PLUGIN_VERSION = process.env.MOCK_PLUGIN_VERSION || "0.29.1"
 const DICTATION = process.env.MOCK_DICTATION ?? "on"
+// plugin/moves.py: the messages triage moved out of each Main session, for its Moved markers.
+const moves = new Map()
 // plugin/triage.py: MOCK_TRIAGE=off hides the feature, "new" opens a new thread, "thread" continues
 // the newest plain thread of the bot, "slow" answers after 10s and "fail" answers an error; anything else stays in Main.
 const TRIAGE = process.env.MOCK_TRIAGE ?? "stay"
@@ -2815,7 +2817,7 @@ http
           "afk_workflows",
           "afk_prompt",
           "afk_pipeline",
-          ...(TRIAGE !== "off" ? ["triage"] : []),
+          ...(TRIAGE !== "off" ? ["triage", "moves"] : []),
           ...(RESEARCH ? ["research", "research_followup", "research_rewrite", "research_compare"] : []),
           ...(MCPS
             ? [
@@ -3888,10 +3890,16 @@ http
         size: data.length,
       })
     }
+    const movesRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/moves$/.exec(url.pathname)
+    if (PLUGIN && !profile && TRIAGE !== "off" && req.method === "GET" && movesRoute)
+      return json(res, 200, {
+        object: "memento.moves",
+        moves: moves.get(decodeURIComponent(movesRoute[1])) ?? [],
+      })
     const triageRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/triage$/.exec(url.pathname)
     if (PLUGIN && !profile && TRIAGE !== "off" && req.method === "POST" && triageRoute) {
       const id = decodeURIComponent(triageRoute[1])
-      const { text, attachments, body } = await readBody(req)
+      const { id: askId, text, attachments, body } = await readBody(req)
       if (TRIAGE === "fail") return json(res, 500, { error: { message: "Triage failed." } })
       if (TRIAGE === "slow") await new Promise((resolve) => setTimeout(resolve, 10_000))
       const entries = [...(pluginChatLists.get(pluginProfile ?? "") ?? pluginChats).entries()]
@@ -3942,6 +3950,17 @@ http
         body: { ...body, session_id: target },
       }
       queue.items.push(item)
+      const moved = moves.get(id) ?? []
+      if (!moved.some((m) => m.id === askId))
+        moved.push({
+          id: String(askId ?? randomUUID()),
+          text: String(text ?? ""),
+          thread: made ? made.id : thread[0],
+          at: Date.now(),
+          undone: false,
+        })
+      moves.set(id, moved)
+      noteEvent("session", id)
       noteEvent("session", target)
       setTimeout(() => pumpQueue(target), 50)
       return json(res, 200, {

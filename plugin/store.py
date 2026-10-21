@@ -11,7 +11,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 31
+SCHEMA_VERSION = 33
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -368,4 +368,27 @@ def _migrate(conn: sqlite3.Connection) -> None:
         for column in ("option_id", "criterion_id"):
             if column not in claim_columns:
                 conn.execute(f"ALTER TABLE research_claims ADD COLUMN {column} TEXT")
+        # v32: the messages triage sent out of a Main thread, for its Moved markers (moves.py).
+        # v33: a v32 store also had a thread_session column nothing read; it is rebuilt without it.
+        move_columns = {row[1] for row in conn.execute("PRAGMA table_info(main_moves)")}
+        if "thread_session" in move_columns:
+            conn.execute("ALTER TABLE main_moves RENAME TO main_moves_old")
+            conn.execute("DROP INDEX IF EXISTS main_moves_session")
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS main_moves (
+                   id TEXT PRIMARY KEY,
+                   session_id TEXT NOT NULL,
+                   text TEXT NOT NULL,
+                   thread TEXT NOT NULL,
+                   at INTEGER NOT NULL,
+                   undone INTEGER NOT NULL DEFAULT 0
+               )"""
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS main_moves_session ON main_moves (session_id, at)")
+        if "thread_session" in move_columns:
+            conn.execute(
+                """INSERT INTO main_moves (id, session_id, text, thread, at, undone)
+                   SELECT id, session_id, text, thread, at, undone FROM main_moves_old"""
+            )
+            conn.execute("DROP TABLE main_moves_old")
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

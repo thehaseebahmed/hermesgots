@@ -46,6 +46,7 @@ from . import (
     media,
     model_changes,
     merges,
+    moves,
     outbox,
     pipeline,
     projects,
@@ -325,7 +326,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "research_compare",
                     "community",
                     # A message sent from Main is sorted into a thread by the host; see triage.py.
-                    *(["triage"] if triage.available() is None else []),
+                    *(["triage", "moves"] if triage.available() is None else []),
                     # Hermes's own MCP built-ins, and the MCP screen with them; see mcp.py.
                     *mcp_features,
                 ],
@@ -1692,6 +1693,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                         body.get("body"),
                     )
                     follow_queue(request, started["session_id"], path)
+                    # Main shows a marker where the message went; it never entered Main's session.
+                    await asyncio.to_thread(moves.record, path, key, session_id, text, started["thread"])
+                    events.note("session", session_id, path, True)
                     answer = {"object": "memento.triage", "decision": triage.NEW, **started}
                 except Exception:
                     logger.debug("memento: triage couldn't open a thread", exc_info=True)
@@ -1715,6 +1719,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                             outbox.add, path, thread, request_profile(), text, files, run
                         )
                         follow_queue(request, thread, path)
+                        await asyncio.to_thread(
+                            moves.record, path, key, session_id, text, found["thread"]
+                        )
+                        events.note("session", session_id, path, True)
                         answer = {
                             "object": "memento.triage",
                             "decision": triage.THREAD,
@@ -1726,6 +1734,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     pass
             triage.remember(memo, answer)
         return web.json_response(answer)
+
+    async def get_moves(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        found = await asyncio.to_thread(moves.read, store_path(), request.match_info["session_id"])
+        return web.json_response({"object": "memento.moves", "moves": found})
 
     async def remove_queued(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1785,6 +1800,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/queue", get_queue)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue", add_queued)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/triage", triage_message)
+    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/moves", get_moves)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue/{{item_id}}/remove", remove_queued)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue/{{item_id}}/send", send_queued)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue/{{item_id}}/steer", steer_queued)
