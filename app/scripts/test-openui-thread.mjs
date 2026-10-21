@@ -85,6 +85,44 @@ test("a patch to the first of three interfaces changes that one alone", () => {
   )
 })
 
+test("a merge prunes what the statement named root cannot reach, and only that", () => {
+  const rooted = '# id: sales\nroot = Stack([t])\nt = Card("a")\nq = Card("q")'
+  const named = '# id: team\nmain = Stack([t])\nt = Card("a")\nq = Card("q")'
+  const out = resolveInterfaces(
+    [
+      assistant("r1", block(rooted)),
+      assistant("r2", block('# id: sales\nt = Card("b")')),
+      assistant("r3", block(named)),
+      assistant("r4", block('# id: team\nt = Card("b")')),
+    ],
+    "Stack",
+  )
+  assert.deepEqual(
+    out.get("r1"),
+    [
+      {
+        at: 0,
+        draw: { kind: "interface", source: 'root = Stack([t])\nt = Card("b")', id: "sales" },
+      },
+    ],
+    "an interface rooted at `root` loses the statement root cannot reach",
+  )
+  assert.deepEqual(
+    out.get("r3"),
+    [
+      {
+        at: 0,
+        draw: {
+          kind: "interface",
+          source: 'main = Stack([t])\nt = Card("b")\nq = Card("q")',
+          id: "team",
+        },
+      },
+    ],
+    "one entered by another name keeps it, so the merge is not given a root of its own",
+  )
+})
+
 test("an id never seen earlier in the thread is reported as an orphan", () => {
   const out = resolveInterfaces([assistant("r1", block('# id: ghost\nt = Card("x")'))])
   assert.deepEqual(
