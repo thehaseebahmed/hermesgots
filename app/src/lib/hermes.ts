@@ -1328,7 +1328,7 @@ export async function triageMessage(
     id: string
     text: string
     run: Record<string, unknown>
-    attachments?: { name: string; type: string; size: number; path?: string }[]
+    attachments: { name: string; type: string; size: number; path?: string }[]
   },
   signal?: AbortSignal,
 ): Promise<Triage> {
@@ -1341,7 +1341,7 @@ export async function triageMessage(
         id: item.id,
         text: item.text,
         body: item.run,
-        attachments: item.attachments ?? [],
+        attachments: item.attachments,
       }),
       signal,
     },

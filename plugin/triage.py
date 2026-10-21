@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import chats, outbox, research
+from .sessions import MEMENTO_ID_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -166,8 +167,8 @@ def decide(
     options: List[Dict[str, Any]],
     turns: List[Dict[str, str]],
     deadline: Optional[float] = None,
-) -> Optional[Tuple[str, Optional[str]]]:
-    """``("continue", thread id)`` or ``("new", None)``, or None to stay in Main."""
+) -> Optional[str]:
+    """The id of the thread the message continues, ``NEW`` for a thread of its own, or None to stay."""
     if not isinstance(text, str) or not text.strip():
         return None
     llm = _llm()
@@ -191,25 +192,25 @@ def decide(
     if not isinstance(parsed, dict):
         return None
     if parsed.get("decision") == NEW:
-        return (NEW, None)
+        return NEW
     if parsed.get("decision") != "continue":
         return None
     thread = parsed.get("thread")
-    return ("continue", thread) if isinstance(thread, str) and any(o["id"] == thread for o in options) else None
+    return thread if isinstance(thread, str) and any(o["id"] == thread for o in options) else None
 
 
-def open_thread(path: Path, main: Dict[str, Any]) -> Tuple[str, str]:
+def open_thread(path: Path, profile_id: Optional[str]) -> Tuple[str, str]:
     """Makes the chat record a new chat on the bot would have, and returns its id and session id.
 
     The id is the app's own kind (a UUID) and the session is ``memento-<id>``, so every device and
     the dashboard label treat it as any chat. The title is Hermes's to give once the first turn runs.
     """
     chat_id = str(uuid.uuid4())
-    session_id = f"memento-{chat_id}"
+    session_id = f"{MEMENTO_ID_PREFIX}{chat_id}"
     now = int(time.time() * 1000)
     value = {
         "id": chat_id,
-        "profileId": main.get("profileId"),
+        "profileId": profile_id,
         "title": "New chat",
         "hermesSessionId": session_id,
         "createdAt": now,
@@ -223,7 +224,7 @@ def open_thread(path: Path, main: Dict[str, Any]) -> Tuple[str, str]:
 def start_thread(
     path: Path,
     profile: Optional[str],
-    main: Dict[str, Any],
+    profile_id: Optional[str],
     text: str,
     files: List[Dict[str, Any]],
     body: Any,
@@ -235,7 +236,7 @@ def start_thread(
     on the host) with the app closed. A failure after the record was made takes the record back and
     raises, so the caller leaves the message in Main.
     """
-    chat_id, session_id = open_thread(path, main)
+    chat_id, session_id = open_thread(path, profile_id)
     try:
         item = outbox.add(path, session_id, profile, text, files, outbox.clean_body(session_id, body))
     except Exception:
@@ -274,7 +275,7 @@ def triage(
     path: Path, home: Path, session_id: str, text: str, deadline: Optional[float] = None
 ) -> Dict[str, Any]:
     """``{ decision: "main" }``, ``{ decision: "thread", thread, session_id, model_choice }`` or
-    ``{ decision: "new", main }``, where the caller makes the thread once it knows it is still wanted.
+    ``{ decision: "new", profile_id }``, where the caller makes the thread once it knows it is still wanted.
 
     Only a Main thread's session is triaged; any other session, and any failure, is Main.
     """
@@ -298,9 +299,9 @@ def triage(
         chosen = decide(text, options, turns, deadline)
         if chosen is None:
             return {"decision": MAIN}
-        if chosen[0] == NEW:
-            return {"decision": NEW, "main": records[main_id]["value"]}
-        thread = chosen[1]
+        if chosen == NEW:
+            return {"decision": NEW, "profile_id": records[main_id]["value"].get("profileId")}
+        thread = chosen
         value = records[thread]["value"]
         return {
             "decision": THREAD,

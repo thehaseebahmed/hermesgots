@@ -1634,10 +1634,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         files = body.get("attachments") or []
         if not isinstance(files, list) or not all(isinstance(file, dict) for file in files):
             return _error(web, "attachments must be a list", 400)
-        files = [
-            {key: file[key] for key in ("name", "type", "size", "path") if key in file}
-            for file in files[:20]
-        ]
+        files = outbox.clean_files(files)
         path = store_path()
         try:
             run = outbox.clean_body(session_id, body.get("body"))
@@ -1660,7 +1657,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if not isinstance(text, str):
             return _error(web, "text must be a string", 400)
         key = body.get("id") if isinstance(body.get("id"), str) else None
-        answered = triage.given(f"{session_id}:{key}" if key else None)
+        memo = f"{session_id}:{key}" if key else None
+        answered = triage.given(memo)
         if answered is not None:
             return web.json_response(answered)
         path = store_path()
@@ -1677,11 +1675,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         answer: Dict[str, Any] = {"object": "memento.triage", "decision": triage.MAIN}
         if time.monotonic() > deadline + 0.5:
             found = {"decision": triage.MAIN}
-        files = [
-            {k: file[k] for k in ("name", "type", "size", "path") if k in file}
-            for file in (body.get("attachments") or [])[:20]
-            if isinstance(file, dict)
-        ]
+        files = outbox.clean_files(body.get("attachments"))
         if found["decision"] == triage.NEW:
             # Made here and not in the decision, so one nobody waited for leaves no thread.
             try:
@@ -1689,7 +1683,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     triage.start_thread,
                     path,
                     request_profile(),
-                    found["main"],
+                    found["profile_id"],
                     text,
                     files,
                     body.get("body"),
@@ -1727,7 +1721,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     }
             except ValueError:
                 pass
-        triage.remember(f"{session_id}:{key}" if key else None, answer)
+        triage.remember(memo, answer)
         return web.json_response(answer)
 
     async def remove_queued(request: "web.Request") -> "web.Response":
