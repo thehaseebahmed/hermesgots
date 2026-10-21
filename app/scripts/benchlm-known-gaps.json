@@ -3,6 +3,7 @@
   "github-copilot/kimi-k3": "BenchLM has no kimi-k3 row",
   "github-copilot/mai-code-1-flash-picker": "no BenchLM family yet",
   "github-copilot/mai-code-1.1-flash": "no BenchLM family yet",
+  "ollama-cloud/beam": "BenchLM has no beam row on the coding surface",
   "ollama-cloud/deepseek-v4-flash": "BenchLM has no deepseek-v4-flash row",
   "ollama-cloud/deepseek-v4-flash:0731": "snapshot tag, BenchLM has no deepseek-v4-flash row",
   "ollama-cloud/deepseek-v4-pro": "BenchLM has no deepseek-v4-pro row",
