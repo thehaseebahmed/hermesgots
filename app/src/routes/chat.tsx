@@ -119,8 +119,7 @@ import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { setThreadMuted } from "@/lib/push"
-import { AFK_PIPELINE_FEATURE } from "@/lib/pipeline"
-import { usePluginFeatureOn } from "@/lib/features"
+import { useStagedPipeline } from "@/lib/afk-workflows"
 import { modelChanges } from "@/lib/model-changes"
 import { fullModel, hostChoice, useModelInfo } from "@/lib/model-info"
 import { syncContextWindow, useModelCatalog } from "@/lib/models"
@@ -317,9 +316,9 @@ export function ChatPage() {
   // The pipeline a staged task ran in, as its session recorded it. Where the bot's Host stages tasks
   // and this session holds a record the pill marks them; a chat with no record asks it nothing.
   const pipeline = session?.pipeline
-  const stagedPipeline = usePluginFeatureOn(pipeline ? profile : null, AFK_PIPELINE_FEATURE)
-    ? pipeline
-    : null
+  const stagedPipeline = useStagedPipeline(profile, pipeline)
+  // A sheet put away because the pipeline went (the switch turned off) stays closed when it returns.
+  if (!stagedPipeline && pipelineOpen) setPipelineOpen(false)
   // While a pull request's checks run, read them again every few seconds so the pill turns
   // green (or orange) as soon as they do. Forced, so the freshness gate doesn't skip a tick that
   // lands just inside its window.
