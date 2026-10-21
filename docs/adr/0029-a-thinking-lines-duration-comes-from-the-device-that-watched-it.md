@@ -23,10 +23,12 @@ next device that reads it, and has no source at all for a turn another device ra
 What this costs is worth saying plainly: the same reply reads "Thought for 12s" on the device that ran
 it and "Thought" on one that caught up, and that is deliberate rather than a sync bug. Anyone reaching
 for a fix should know the number cannot be recovered after the fact — it needs a host field, not a
-guess in the app. The cost of the live timer is that it lives in memory: navigating away and back
-drops the number while the thinking itself, kept with the reply, stays.
+guess in the app. The cost of the live timer is that it lives in memory: a reload, or the app
+restarting, drops the number while the thinking itself, kept with the reply, stays.
 
 The switch that used to hide the work went with the same change. Settings → Appearance no longer
-offers Simplified chats, because a thread now shows what it ran, what it cost and what it thought
-whoever it is with — the folding line is what keeps that readable, and a reply's thinking stays folded
-until the user asks for it.
+offers Simplified chats, because a thread now shows what it ran, what it cost and what it thought —
+the folding line is what keeps that readable: a reply's thinking is drawn open while the model
+thinks, folds once the answer starts, and opens again when the user asks for it. The line is drawn in
+a chat and in a delegated agent's sub-thread, which is drawn as a chat's thread is; a project
+session's own thread draws none, its conversation being the worktree's.

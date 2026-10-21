@@ -740,7 +740,12 @@ export function ChatPage() {
                     return (
                       <MessageScrollerItem key={message.id} messageId={message.id}>
                         {change && <ModelChange model={change} />}
-                        <MessageItem message={message} showStats busy={busy} />
+                        <MessageItem
+                          message={message}
+                          showStats
+                          busy={busy}
+                          showThinking={!session}
+                        />
                       </MessageScrollerItem>
                     )
                   })}

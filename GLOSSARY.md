@@ -61,7 +61,7 @@ A conversation's messages in the order they happened, as the screen draws them �
 _Avoid_: transcript, message log, feed, timeline
 
 **Thinking**:
-What a model worked out before it answered, drawn above the reply as a line that folds once the answer starts. It is kept with the reply; how long it took is kept only where this device watched it think.
+What a model worked out before it answered, drawn above a chat's reply as a line that streams open while it thinks and folds at the answer, a tap opening it again. It reads "Thinking…" while it thinks, "Thought for 12s" where this device watched it think and bare "Thought" where it didn't; the reasoning is kept with the reply, the span is not, and a coding session's own thread draws none — a delegated agent's sub-thread keeps it, drawn as a chat's thread is.
 _Avoid_: chain of thought, scratchpad, reasoning trace
 
 **Command**:
