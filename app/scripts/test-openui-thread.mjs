@@ -117,6 +117,68 @@ test("a block that enters through the root component draws once the caller names
   )
 })
 
+test("a statement a patch comments out leaves the live statement alone", () => {
+  const sales = '# id: sales\nroot = Stack([t])\nt = Card("a")'
+  const out = resolveInterfaces([
+    assistant("r1", block(sales)),
+    assistant("r2", block('# id: sales\n# t = Card("b")\n# a note')),
+  ])
+  assert.deepEqual(
+    out.get("r1"),
+    [{ at: 0, draw: { kind: "interface", source: sales, id: "sales" } }],
+    "the merge reads what the parser reads, so a commented line changes nothing",
+  )
+  assert.deepEqual(
+    out.get("r2"),
+    [{ at: 0, draw: { kind: "patch", id: "sales" } }],
+    "and it is a patch",
+  )
+})
+
+test("a closed block patches an interface the reply before it never finished", () => {
+  const writing = '# id: sales\nroot = Stack([t])\nt = Card("a")'
+  const out = resolveInterfaces([
+    assistant("r1", block(writing, true)),
+    assistant("r2", block('# id: sales\nt = Card("b")')),
+  ])
+  assert.deepEqual(
+    out.get("r1"),
+    [
+      {
+        at: 0,
+        draw: { kind: "interface", source: 'root = Stack([t])\nt = Card("b")', id: "sales" },
+      },
+    ],
+    "the interface an open block opened still takes the next reply's patch",
+  )
+  assert.deepEqual(
+    out.get("r2"),
+    [{ at: 0, draw: { kind: "patch", id: "sales" } }],
+    "and the patch draws nothing of its own",
+  )
+})
+
+test("an `@` call to the root component is not an entry", () => {
+  const out = resolveInterfaces(
+    [assistant("r1", block('# id: sales\nmain = @Stack([t])\nt = Card("a")'))],
+    "Stack",
+  )
+  assert.deepEqual(
+    out.get("r1"),
+    [{ at: 0, draw: { kind: "orphan", id: "sales" } }],
+    "the library calls a function, so nothing here roots a program",
+  )
+})
+
+test("a finished block with no id and no entry draws nothing and is an orphan", () => {
+  const out = resolveInterfaces([assistant("r1", block('t = Card("x")'))])
+  assert.deepEqual(
+    out.get("r1"),
+    [{ at: 0, draw: { kind: "orphan" } }],
+    "no entry to draw, and no id to patch",
+  )
+})
+
 test("ids that differ only by case are two interfaces", () => {
   const sales = '# id: sales\nroot = Stack([t])\nt = Card("a")'
   const capital = '# id: Sales\nroot = Stack([u])\nu = Card("b")'
