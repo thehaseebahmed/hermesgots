@@ -7,7 +7,9 @@ import { afkOn, app, assert, flow, makeProject, pass } from "./lib.mjs"
 
 const HELD = 265
 const TITLE = "#265 The frontier is read from GitHub and listed"
-const ISSUE_LINK = "Issue #265"
+// A message a person sends is shown as written, so the opener's link reads as the Markdown the plugin
+// wrote rather than as a link.
+const ISSUE_LINK = "[Issue #265](https://github.com/mock-user/memento/issues/265)"
 const ISSUE_BODY = "Read the project's tasks from GitHub and list them."
 
 const run = async ({ page, profileId, shot, until }) => {
@@ -34,13 +36,13 @@ const run = async ({ page, profileId, shot, until }) => {
   await row.click()
   await page.waitForURL("**/c/**")
   const messages = page.locator('[aria-label="Messages"]')
-  await messages.getByText(ISSUE_LINK, { exact: true }).first().waitFor({ timeout: 15_000 })
+  await messages.getByText(ISSUE_LINK).first().waitFor({ timeout: 15_000 })
   assert.ok(
     (await messages.getByText("Title: The frontier is read from GitHub and listed").count()) > 0,
     "the run opens with the issue's own title",
   )
   assert.ok(
-    (await messages.getByText(ISSUE_BODY, { exact: true }).count()) > 0,
+    (await messages.getByText(ISSUE_BODY).count()) > 0,
     "and its description in the issue's own words, not a summary of them",
   )
   await shot("session")

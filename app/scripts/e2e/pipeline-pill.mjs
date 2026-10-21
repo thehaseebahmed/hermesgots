@@ -342,7 +342,9 @@ const olderPlugin = async ({ page, until, shot }) => {
   assert.equal(
     await page.evaluate(async (id) => {
       const { db } = await import("/src/lib/db.ts")
-      return (await db.conversations.get(id))?.pipeline?.stage ?? null
+      // The record's position is a stage's index; what that stage is judged as is its kind.
+      const pipeline = (await db.conversations.get(id))?.pipeline
+      return pipeline?.stages[pipeline.stage]?.kind ?? null
     }, id),
     "build",
     "the staged record reached the conversation, and only the feature keeps the pill away",
