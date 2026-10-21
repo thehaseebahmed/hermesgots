@@ -11,7 +11,9 @@ import path from "node:path"
 import { scoreFor, scoreMapOf } from "../src/lib/model-match.ts"
 
 const PROVIDERS = ["github-copilot", "ollama-cloud", "anthropic", "deepseek", "xai"]
-const BENCHLM_URL = "https://memento.thehaseebahmed.com/.netlify/functions/benchlm"
+// The candidate deploy carries main's proxy, which serves the overall surface the app's picker
+// reads; the apex host still answers with the older coding payload until that deploy is promoted.
+const BENCHLM_URL = "https://candidate--hermesgots.netlify.app/.netlify/functions/benchlm"
 const MODELS_DEV_URL = "https://models.dev/api.json"
 const here = path.dirname(fileURLToPath(import.meta.url))
 const GAPS_PATH = path.join(here, "benchlm-known-gaps.json")
