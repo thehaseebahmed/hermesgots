@@ -106,7 +106,12 @@ export function useThreads(profileId: string | undefined): Thread[] | undefined 
         }
       }),
     )
-    return rows.sort((a, b) => a.chat.createdAt - b.chat.createdAt)
+    // Main stays first, whenever it was made.
+    return rows.sort(
+      (a, b) =>
+        Number(Boolean(b.chat.main)) - Number(Boolean(a.chat.main)) ||
+        a.chat.createdAt - b.chat.createdAt,
+    )
   }, [profileId])
 
   return rows?.map(({ chat, opener, last, replies, streaming, failed, local }) => {

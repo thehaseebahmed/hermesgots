@@ -662,17 +662,21 @@ export function ChatPage() {
                 Resolve
               </DropdownMenuItem>
             ))}
-          <DropdownMenuSeparator />
-          {session && !session.discardedAt && (
-            <DropdownMenuItem onClick={() => setDiscarding(true)}>
-              <ArchiveXIcon />
-              Discard
-            </DropdownMenuItem>
+          {!conversation.main && (
+            <>
+              <DropdownMenuSeparator />
+              {session && !session.discardedAt && (
+                <DropdownMenuItem onClick={() => setDiscarding(true)}>
+                  <ArchiveXIcon />
+                  Discard
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem variant="destructive" onClick={() => setDeleting(true)}>
+                <Trash2Icon />
+                Delete
+              </DropdownMenuItem>
+            </>
           )}
-          <DropdownMenuItem variant="destructive" onClick={() => setDeleting(true)}>
-            <Trash2Icon />
-            Delete
-          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

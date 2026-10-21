@@ -167,6 +167,8 @@ export interface Conversation {
   discardedAt?: number
   /** Its pushes are muted. Synced through the chat list, which is where the plugin reads it. */
   muted?: boolean
+  /** The bot's Main thread: its permanent chat, which can't be deleted or discarded. Synced. */
+  main?: boolean
   /** Permission mode. The plugin holds it live; the user's saved pick also travels in the chat record. */
   mode?: SessionMode
   /**
@@ -821,6 +823,35 @@ export async function createConversation(
   return conversation
 }
 
+/** A bot's Main thread has an id every device derives, so two devices never make two. */
+export const mainThreadId = (profileId: string) => `main-${profileId}`
+
+/**
+ * Makes the bot's Main thread the first time it's asked for. Its change clock is 0, so a record
+ * another device already synced always wins the merge over this empty copy.
+ */
+export async function ensureMainThread(profileId: string): Promise<Conversation> {
+  const id = mainThreadId(profileId)
+  return db.transaction("rw", db.conversations, async () => {
+    const existing = await db.conversations.get(id)
+    if (existing) return existing
+    const now = Date.now()
+    const conversation: Conversation = {
+      id,
+      profileId,
+      title: "Main",
+      titleEdited: true,
+      hermesSessionId: `memento-${id}`,
+      createdAt: now,
+      updatedAt: now,
+      changedAt: 0,
+      main: true,
+    }
+    await db.conversations.add(conversation)
+    return conversation
+  })
+}
+
 /** Every change to a chat's synced fields goes through here so sync sees it. */
 export async function updateConversation(
   id: string,
@@ -833,6 +864,8 @@ export async function deleteConversation(id: string, { remote = false } = {}) {
   const tables = [db.conversations, db.messages, db.tombstones, db.drafts, db.dictations]
   await db.transaction("rw", tables, async () => {
     const conversation = await db.conversations.get(id)
+    // Main goes only when another device says so (`remote`), never from here.
+    if (conversation?.main && !remote) return
     await db.messages.where("conversationId").equals(id).delete()
     await db.drafts.delete(`c:${id}`)
     await db.dictations.delete(`c:${id}`)

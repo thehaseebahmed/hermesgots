@@ -31,13 +31,15 @@ import { serverConfig } from "@/lib/connection"
 import {
   createConversation,
   db,
+  ensureMainThread,
   setActiveProfile,
   type Attachment,
   type ModelChoice,
 } from "@/lib/db"
 import { useNav } from "@/lib/nav"
 import { setBotMuted } from "@/lib/push"
-import { useNow, useThreads, type Thread } from "@/lib/threads"
+import { useXLarge } from "@/lib/media"
+import { useBotThreads, useNow, useThreads, type Thread } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { reasonText } from "@/lib/waiting"
 import { draftKey } from "@/lib/drafts"
@@ -156,13 +158,32 @@ export function BotThreadsPage({
     if (found) void setActiveProfile(profileId)
   }, [found, profileId])
 
+  // The bot's Main thread is made the first time its screen opens, and with room for the bot
+  // beside a thread it opens at once. Narrower, it leads the list: opening it there would trap back.
+  const enabled = useBotThreads()
+  const large = useXLarge()
+  const opened = useRef(false)
+  useEffect(() => {
+    if (!found || !enabled) return
+    let live = true
+    void ensureMainThread(profileId).then(({ id }) => {
+      // Once per visit, so closing Main back to its bot doesn't open it again.
+      if (!live || !large || openThread || opened.current) return
+      opened.current = true
+      navigate(`/c/${id}`, { replace: true, state: { bot: profileId } })
+    })
+    return () => {
+      live = false
+    }
+  }, [found, enabled, large, profileId, openThread, navigate])
+
   // An unknown or removed bot falls back to the active one.
   useEffect(() => {
     if (profile === null) root("/")
   }, [profile, root])
 
   // Opens at the newest thread, and follows a new one in.
-  const count = threads?.length ?? 0
+  const count = threads?.filter((t) => !t.chat.main).length ?? 0
   useLayoutEffect(() => {
     const element = scroller.current
     if (element) element.scrollTop = element.scrollHeight
