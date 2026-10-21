@@ -259,7 +259,8 @@ const FLOWS = {
   },
   screens: {
     script: "e2e/screens.mjs",
-    about: "Projects, a project, Code, Routines and a chat load at 390 and 1024px, light and dark",
+    about:
+      "Projects, a project, Code, Routines, a chat and a started session load at 390 and 1024px, light and dark, the session's header centred with its repositories and no bot picture",
   },
   "sidebar-collapse": {
     script: "e2e/sidebar-collapse.mjs",
@@ -295,7 +296,7 @@ const FLOWS = {
   "session-empty": {
     script: "e2e/session-empty.mjs",
     about:
-      "A chat or session not started shows the big bot, a greeting once an hour and the bot's five lines in turn",
+      "A chat or session not started shows the big bot, a greeting once an hour and the bot's five lines in turn; a session's header holds no text, with its repository chip and the branch it starts from below",
   },
   onboarding: {
     script: "e2e/onboarding.mjs",

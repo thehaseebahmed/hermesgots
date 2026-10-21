@@ -25,6 +25,7 @@ import {
   SEND_CAUGHT_UP_MS,
 } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
+import { repoCap, sessionSubtitle } from "@/lib/repo-line"
 import { useBreakReminderEligibility } from "@/components/break-reminder-context"
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { BotPicker } from "@/components/chat/bot-picker"
@@ -671,16 +672,30 @@ export function ChatPage() {
     </div>
   )
 
+  // A session is a place in a project, not a conversation with a bot, so its header is centred.
+  const centered = Boolean(session)
+  let subtitle: string | undefined
+  if (!unstarted)
+    subtitle = session
+      ? sessionSubtitle({
+          activity,
+          botName: profile?.name,
+          names: sessionRepos.map((repo) => repo.name),
+          cap: repoCap({ wide, xlarge: xl }),
+        })
+      : activity || repliesLine
+
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <ChatHeader
         // Nothing started has no title yet, and its bot is the big one in the middle.
         title={unstarted ? "" : (conversation?.title ?? "New chat")}
-        subtitle={unstarted ? undefined : activity || repliesLine || session?.worktree?.branch}
+        subtitle={subtitle}
         botId={profile?.botId}
         muted={Boolean(conversation?.muted || profile?.muted)}
-        // Beside its bot, which already shows the bot's picture.
-        showBot={!(botPath && xl) && !unstarted}
+        centered={centered}
+        // Beside its bot, a thread already shows the picture.
+        showBot={!session && !unstarted && !(botPath && xl)}
         actions={actions}
         leading={
           botPath ? (
