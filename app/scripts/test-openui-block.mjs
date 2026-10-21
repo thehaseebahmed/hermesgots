@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 
-import { openuiParts } from "../src/lib/openui-block.ts"
+import { carriesBlock, openuiParts } from "../src/lib/openui-block.ts"
 
 const asText = (reply) => [{ kind: "text", at: 0, text: reply }]
 
@@ -296,6 +296,15 @@ test("a malformed id is no id, and the block still comes back", () => {
     assert.equal("id" in part, false, `${line} carries no id at all`)
     assert.ok(part.source.startsWith(line), `${line} is still the body's first line`)
   }
+})
+
+test("a text that cannot hold a block says so, and comes back whole", () => {
+  assert.equal(carriesBlock(""), false, "an empty text holds none")
+  assert.equal(carriesBlock("Just an answer, nothing to draw."), false, "nor does prose")
+  assert.equal(carriesBlock("```openui\na = 1\n```"), false, "nor a fence named openui alone")
+  assert.equal(carriesBlock("```openui-lang\na = 1\n```"), true, "the info string is the marker")
+  const reply = "Just an answer, nothing to draw."
+  assert.deepEqual(openuiParts(reply), asText(reply), "and the reply is still one text part")
 })
 
 test("the splitter touches nothing but the string", () => {
