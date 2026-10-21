@@ -2287,6 +2287,9 @@ async function streamCompletion(req, res, body) {
 const runs = new Map()
 const PLUGIN_VERSION = process.env.MOCK_PLUGIN_VERSION || "0.29.1"
 const DICTATION = process.env.MOCK_DICTATION ?? "on"
+// plugin/triage.py: MOCK_TRIAGE=off hides the feature, "thread" continues the newest plain thread of
+// the bot, "slow" answers after 10s and "fail" answers an error; anything else stays in Main.
+const TRIAGE = process.env.MOCK_TRIAGE ?? "stay"
 // MOCK_PRS_FAIL=1 is a host that can't reach GitHub: the plugin's read of a session's pull requests
 // answers an error instead of a list, so the app must keep the pull requests it already knows.
 let PRS_FAIL = process.env.MOCK_PRS_FAIL === "1"
@@ -2812,6 +2815,7 @@ http
           "afk_workflows",
           "afk_prompt",
           "afk_pipeline",
+          ...(TRIAGE !== "off" ? ["triage"] : []),
           ...(RESEARCH ? ["research", "research_followup", "research_rewrite", "research_compare"] : []),
           ...(MCPS
             ? [
@@ -3882,6 +3886,46 @@ http
         name: basename(path),
         path,
         size: data.length,
+      })
+    }
+    const triageRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/triage$/.exec(url.pathname)
+    if (PLUGIN && !profile && TRIAGE !== "off" && req.method === "POST" && triageRoute) {
+      const id = decodeURIComponent(triageRoute[1])
+      const { text, attachments, body } = await readBody(req)
+      if (TRIAGE === "fail") return json(res, 500, { error: { message: "Triage failed." } })
+      if (TRIAGE === "slow") await new Promise((resolve) => setTimeout(resolve, 10_000))
+      const entries = [...(pluginChatLists.get(pluginProfile ?? "") ?? pluginChats).entries()]
+      const mainEntry = entries.find(([, e]) => e.value?.main && e.value.hermesSessionId === id)
+      const thread = entries
+        .filter(([cid, e]) => {
+          const v = e.value
+          return v && !e.deleted && cid !== mainEntry?.[0] && !v.main && !v.projectId && !v.discardedAt
+        })
+        .sort((a, b) => (b[1].value.updatedAt ?? 0) - (a[1].value.updatedAt ?? 0))[0]
+      if (TRIAGE !== "thread" || !mainEntry || !thread || !Array.isArray(body?.input))
+        return json(res, 200, { object: "memento.triage", decision: "main" })
+      const target = thread[1].value.hermesSessionId
+      const queue = queueOf(target)
+      const { input: _input, ...template } = body
+      queue.template = { ...template, session_id: target }
+      queue.authorization = req.headers.authorization
+      queue.url = req.url
+      const item = {
+        id: `q_${randomUUID().replace(/-/g, "").slice(0, 20)}`,
+        text: String(text ?? ""),
+        attachments: attachments ?? [],
+        created_at: Date.now(),
+        body: { ...body, session_id: target },
+      }
+      queue.items.push(item)
+      noteEvent("session", target)
+      setTimeout(() => pumpQueue(target), 50)
+      return json(res, 200, {
+        object: "memento.triage",
+        decision: "thread",
+        thread: thread[0],
+        session_id: target,
+        item: { ...item, body: undefined, run_id: null, sent_at: null, error: null },
       })
     }
     const queueRoute =

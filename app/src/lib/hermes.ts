@@ -14,12 +14,7 @@ import type {
 import { MAX_TODO_DEPTH } from "@/lib/db"
 import type { Doc } from "@/lib/merge"
 import type { ModelUsage } from "@/lib/pricing"
-import {
-  parsePipeline,
-  parseStage,
-  type AfkStage,
-  type SessionPipeline,
-} from "@/lib/pipeline"
+import { parsePipeline, parseStage, type AfkStage, type SessionPipeline } from "@/lib/pipeline"
 import {
   parseWorkflowEntry,
   parseWorkflowLibrary,
@@ -1317,6 +1312,32 @@ export async function addToQueue(
     body: JSON.stringify({ text: item.text, attachments: item.attachments, body: item.run }),
   })
   return queueItem((await response.json())?.item ?? {})
+}
+
+/** The host's triage of a message sent from Main: it stays, or the plugin queued it on a thread. */
+export type Triage = { decision: "main" } | { decision: "thread"; threadId: string }
+
+/** Asks the host where a message from Main belongs; a thread's answer means it is already queued there. */
+export async function triageMessage(
+  config: HermesConfig,
+  sessionId: string,
+  item: { id: string; text: string; run: Record<string, unknown> },
+  signal?: AbortSignal,
+): Promise<Triage> {
+  const response = await request(
+    `${pluginRoot(config.baseUrl)}/sessions/${encodeURIComponent(sessionId)}/triage`,
+    {
+      method: "POST",
+      headers: headers(config),
+      body: JSON.stringify({ id: item.id, text: item.text, body: item.run }),
+      signal,
+    },
+  )
+  const body = await response.json()
+  // A thread's answer counts only with the queued item that proves the host has the message.
+  return body?.decision === "thread" && typeof body.thread === "string" && body.item?.id
+    ? { decision: "thread", threadId: body.thread }
+    : { decision: "main" }
 }
 
 /** `remove` drops a queued message, `send` puts it first and lets a paused queue go, `steer` hands it to the running reply. */

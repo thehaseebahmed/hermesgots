@@ -1,7 +1,7 @@
 import { toast } from "sonner"
 
 import { serverConfig } from "@/lib/connection"
-import { READ_TIMEOUT_MS } from "@/lib/freshness"
+import { READ_TIMEOUT_MS, TRIAGE_MS } from "@/lib/freshness"
 import {
   db,
   getActiveProfile,
@@ -26,6 +26,7 @@ import {
   getQueue,
   getSessionTitle,
   hasPluginFeature,
+  triageMessage,
   HermesError,
   labelSession,
   queueAction,
@@ -1228,6 +1229,104 @@ async function queueOnHost(
     run,
   })
   return { item, sent }
+}
+
+/**
+ * Sends a message typed in a bot's Main thread. The host triages it first when it can: the message
+ * wears a routing state meanwhile, and it stays in Main — sent as any message is — unless the host
+ * answers in time that it belongs to an older thread, which the plugin has then queued. A timeout,
+ * a failure or a bot without the feature is just a send to Main. Returns the thread it moved to.
+ */
+export async function sendFromMain(
+  conversationId: string,
+  text: string,
+  attachments: Attachment[] = [],
+): Promise<string | undefined> {
+  const content = text.trim()
+  const host = await hostOf(conversationId)
+  // Files are saved per session before a send, and a message with any is sent where it was typed.
+  // One typed while another is being triaged waits in the queue behind it, untriaged.
+  const triaged =
+    host?.conversation.main &&
+    content &&
+    !attachments.length &&
+    !controllers.has(conversationId) &&
+    !routing.has(conversationId) &&
+    (await hostQueue(host.config)) &&
+    (await hasPluginFeature(host.config, "triage"))
+  if (!host || !triaged) {
+    if (routing.has(conversationId) && content)
+      await queueMessage(conversationId, text, attachments)
+    else await sendMessage(conversationId, text, { attachments })
+    return undefined
+  }
+  routing.add(conversationId)
+  const held: Message = {
+    id: randomId(),
+    conversationId,
+    role: "user",
+    content,
+    status: "routing",
+    createdAt: nextAt(await getMessages(conversationId)),
+  }
+  try {
+    await db.messages.add(held)
+    let moved: string | undefined
+    try {
+      const run = runRequest(host.config, {
+        ...modelOf(host.conversation, host.profile),
+        sessionId: host.conversation.hermesSessionId,
+        messages: [{ role: "user", content: await wireContent(content, []) }],
+      })
+      const ask = (ms: number) =>
+        triageMessage(
+          host.config,
+          host.conversation.hermesSessionId,
+          { id: held.id, text: content, run },
+          AbortSignal.timeout(ms),
+        )
+      // A dropped answer is asked for again under the same id: the host answers it as it did
+      // before, so a message it already queued on a thread isn't also sent to Main.
+      const answer = await ask(TRIAGE_MS * 0.7).catch(() => ask(TRIAGE_MS * 0.3))
+      if (answer.decision === "thread") moved = answer.threadId
+    } catch {
+      // Main it is.
+    }
+    if (moved) return moved
+    routing.delete(conversationId)
+    if (controllers.has(conversationId)) {
+      // A reply started while the host decided: this goes after it.
+      await db.messages.delete(held.id)
+      await queueMessage(conversationId, content)
+    } else {
+      await sendMessage(conversationId, text, { queuedId: held.id })
+    }
+    return undefined
+  } finally {
+    routing.delete(conversationId)
+    // Whatever happened, the held row doesn't outlive the attempt.
+    await db.messages
+      .where("id")
+      .equals(held.id)
+      .filter((m) => m.status === "routing")
+      .delete()
+  }
+}
+
+/** Chats whose Main message is being triaged on this page. */
+const routing = new Set<string>()
+
+/**
+ * A routing message that nothing here is deciding on (the page reloaded or closed mid-triage) was
+ * never sent: it becomes a failed message to send again or take back.
+ */
+export async function settleRouting(conversationId: string) {
+  if (routing.has(conversationId)) return
+  await db.messages
+    .where("conversationId")
+    .equals(conversationId)
+    .filter((m) => m.status === "routing")
+    .modify({ status: "error", statusText: "Not sent" })
 }
 
 /** Holds a message until the current reply finishes. */
