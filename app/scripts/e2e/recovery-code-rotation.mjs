@@ -43,8 +43,11 @@ async function scenario(name, { width, dark, narrow = false }) {
     await page.goto(`${app}/settings/account`)
     const rotate = page.getByRole("button", { name: "New recovery code" })
     await rotate.waitFor({ timeout: 15_000 })
-    // Unlocking may have added the vault's inbox; from here nothing is written until it's asked for.
-    await page.waitForTimeout(1000)
+    // Unlocking adds the vault's inbox, the one write nobody asked for (`ensureInbox`): it is
+    // waited for rather than given a second, which it can outlast late in a sweep, so every write
+    // counted from here is one the flow asked for.
+    for (const end = Date.now() + 15_000; !held.data?.inbox; await page.waitForTimeout(100))
+      assert.ok(Date.now() < end, `the vault's inbox is written on unlocking, for ${name}`)
     const before = vaults.length
 
     // Backing out of the dialog asks for nothing and writes nothing.
