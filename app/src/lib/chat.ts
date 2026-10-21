@@ -53,6 +53,7 @@ import { refreshChatProviderUsage } from "@/lib/provider-usage"
 import { liveTurn, noteFollowUps, patchStats, reconcileHistory } from "@/lib/history"
 import { isLive } from "@/lib/live"
 import { unknownLastTurn } from "@/lib/model-changes"
+import { refreshMoves } from "@/lib/moves"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { noteAnswer, noteThinking } from "@/lib/thinking"
 import { quietly } from "@/lib/report"
@@ -1296,8 +1297,10 @@ export async function sendFromMain(
       // A dropped answer is asked for again under the same id: the host answers it as it did
       // before, so a message it already queued on a thread isn't also sent to Main.
       const answer = await ask(TRIAGE_MS * 0.7).catch(() => ask(TRIAGE_MS * 0.3))
-      if (answer.decision !== "main")
+      if (answer.decision !== "main") {
         moved = { threadId: answer.threadId, created: answer.decision === "new" }
+        void refreshMoves(conversationId)
+      }
     } catch {
       // Main it is.
     }

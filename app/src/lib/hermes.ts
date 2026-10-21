@@ -1355,6 +1355,43 @@ export async function triageMessage(
     : { decision: "main" }
 }
 
+/** A message triage sent out of Main, as the host recorded it; `at` is on the host's clock. */
+export interface Move {
+  id: string
+  text: string
+  /** The chat it went to. */
+  threadId: string
+  at: number
+  undone: boolean
+}
+
+/** The messages triage moved out of a Main thread, oldest first. */
+export async function getMoves(config: HermesConfig, sessionId: string): Promise<Move[]> {
+  const response = await request(
+    `${pluginRoot(config.baseUrl)}/sessions/${encodeURIComponent(sessionId)}/moves`,
+    { headers: headers(config), signal: AbortSignal.timeout(READ_TIMEOUT_MS) },
+  )
+  return readMoves((await response.json())?.moves)
+}
+
+function readMoves(value: unknown): Move[] {
+  if (!Array.isArray(value)) return []
+  const found: Move[] = []
+  for (const raw of value) {
+    const row = (raw ?? {}) as Record<string, unknown>
+    if (typeof row.id !== "string" || typeof row.thread !== "string" || typeof row.at !== "number")
+      continue
+    found.push({
+      id: row.id,
+      text: typeof row.text === "string" ? row.text : "",
+      threadId: row.thread,
+      at: row.at,
+      undone: Boolean(row.undone),
+    })
+  }
+  return found
+}
+
 /** `remove` drops a queued message, `send` puts it first and lets a paused queue go, `steer` hands it to the running reply. */
 export async function queueAction(
   config: HermesConfig,

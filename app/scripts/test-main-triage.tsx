@@ -6,8 +6,13 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
+import { renderToStaticMarkup } from "react-dom/server"
+import { MemoryRouter } from "react-router"
+
+import { MovedMarker } from "@/components/chat/moved-marker"
 import { sendFromMain, settleRouting } from "@/lib/chat"
-import { db, mainThreadId } from "@/lib/db"
+import { db, mainThreadId, type Message } from "@/lib/db"
+import { moveMarks, refreshMoves } from "@/lib/moves"
 import { TRIAGE_MS } from "@/lib/freshness"
 import { botProfile, json, seedSettings, until } from "./component-kit.tsx"
 
@@ -19,7 +24,7 @@ type Answer = "stay" | "thread" | "new" | "fail" | "hang"
 /** One host: what it advertises, how triage answers, and every request it was sent. */
 const uploads: string[] = []
 
-function host(name: string, triage: Answer, features: string[] = ["queue", "triage"]) {
+function host(name: string, triage: Answer, features: string[] = ["queue", "triage", "moves"]) {
   const seen: { path: string; body: any }[] = []
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input instanceof Request ? input.url : input))
@@ -50,7 +55,11 @@ function host(name: string, triage: Answer, features: string[] = ["queue", "tria
     }
     if (url.pathname.endsWith("/attachments") && init?.method === "POST") {
       uploads.push(url.searchParams.get("name") ?? "")
-      return json({ name: url.searchParams.get("name"), path: `/host/${url.searchParams.get("name")}`, size: 3 })
+      return json({
+        name: url.searchParams.get("name"),
+        path: `/host/${url.searchParams.get("name")}`,
+        size: 3,
+      })
     }
     // The run is refused, so a send ends at once; that it was posted is what the tests read.
     if (url.pathname.endsWith("/v1/runs") && init?.method === "POST")
@@ -256,4 +265,61 @@ test("a stay keeps the files already saved and saves nothing twice", async () =>
   assert.equal(await sendFromMain(MAIN, "read this", [attachment]), undefined)
   assert.deepEqual(uploads, ["brief.pdf"])
   assert.equal(runsFor(seen, MAIN_SESSION).length, 1)
+})
+
+test("a move is read back from the host and leaves a marker, a stay leaves none", async () => {
+  await seed("route-marks")
+  host("route-marks", "stay")
+  await refreshMoves(MAIN)
+  assert.equal((await db.conversations.get(MAIN))?.moves, undefined)
+  const move = { id: "m1", text: "more on Lisbon", thread: "t1", at: 10, undone: false }
+  const fetchWith = globalThis.fetch
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input instanceof Request ? input.url : input))
+    return url.pathname.endsWith("/moves") ? json({ moves: [move] }) : fetchWith(input, init)
+  }) as typeof fetch
+  await refreshMoves(MAIN)
+  assert.deepEqual((await db.conversations.get(MAIN))?.moves, [
+    { id: "m1", text: "more on Lisbon", threadId: "t1", at: 10, undone: false },
+  ])
+  await refreshMoves("t1")
+  assert.equal((await db.conversations.get("t1"))?.moves, undefined)
+})
+
+test("markers sit in time order among Main's messages, and an undone move has none", () => {
+  const at = (id: string, createdAt: number) =>
+    ({ id, conversationId: MAIN, role: "user", content: id, createdAt }) as Message
+  const marks = moveMarks(
+    [at("a", 5), at("b", 20), at("c", 30)],
+    [
+      { id: "m1", text: "x", threadId: "t1", at: 10, undone: false },
+      { id: "m2", text: "y", threadId: "t1", at: 15, undone: false },
+      { id: "m3", text: "z", threadId: "t1", at: 99, undone: false },
+      { id: "m4", text: "w", threadId: "t1", at: 12, undone: true },
+    ],
+  )
+  assert.deepEqual(
+    marks.before.get("b")?.map((m) => m.id),
+    ["m1", "m2"],
+  )
+  assert.equal(marks.before.size, 1)
+  assert.deepEqual(
+    marks.trailing.map((m) => m.id),
+    ["m3"],
+  )
+})
+
+test("tapping a marker opens its thread", async () => {
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <MovedMarker
+        move={{ id: "m1", text: "more on Lisbon", threadId: "t1", at: 10, undone: false }}
+        title="Trip to Lisbon"
+        profileId="bot-1"
+      />
+    </MemoryRouter>,
+  )
+  assert.match(html, /href="\/c\/t1"/)
+  assert.match(html, /Moved to Trip to Lisbon/)
+  assert.match(html, /more on Lisbon/)
 })

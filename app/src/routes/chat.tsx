@@ -33,6 +33,7 @@ import { ChatHeader } from "@/components/chat/chat-header"
 import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
 import { Compacted, ModelChange } from "@/components/chat/model-change"
+import { MovedMarker } from "@/components/chat/moved-marker"
 import { prLabel } from "@/components/chat/pr-look"
 import { PipelinePill, PipelineSheet } from "@/components/chat/pipeline"
 import { PrPill } from "@/components/chat/pr-pill"
@@ -108,9 +109,10 @@ import {
   updateConversation,
 } from "@/lib/db"
 import { compactionMarks } from "@/lib/compactions"
+import { moveMarks } from "@/lib/moves"
 import { serverConfig } from "@/lib/connection"
 import { describeActivity } from "@/lib/format"
-import { supportsSteer, type HermesProject } from "@/lib/hermes"
+import { supportsSteer, type HermesProject, type Move } from "@/lib/hermes"
 import { readProjects, useProjects } from "@/lib/projects"
 import { caughtUpWithin, loadEarlierHistory, reconcileHistory } from "@/lib/history"
 import { contextWindow } from "@/lib/context"
@@ -287,6 +289,31 @@ export function ChatPage() {
   const compacted = useMemo(
     () => compactionMarks(thread ?? [], conversation?.compactions),
     [thread, conversation?.compactions],
+  )
+  const moved = useMemo(
+    () => moveMarks(thread ?? [], conversation?.moves),
+    [thread, conversation?.moves],
+  )
+  // One query for every moved-to thread's title, not one per marker: a write to any conversation
+  // re-runs a live query.
+  const movedIds = useMemo(
+    () => [...new Set(conversation?.moves?.map((m) => m.threadId))].sort(),
+    [conversation?.moves],
+  )
+  const movedTitles = useLiveQuery(
+    async () =>
+      new Map(
+        (await db.conversations.bulkGet(movedIds)).flatMap((c) => (c ? [[c.id, c.title]] : [])),
+      ),
+    [movedIds],
+  )
+  const moveMarker = (move: Move) => (
+    <MovedMarker
+      key={move.id}
+      move={move}
+      title={movedTitles?.get(move.threadId)}
+      profileId={conversation?.profileId ?? ""}
+    />
   )
   // Only a run can be steered, and only on a Hermes that has the route.
   const [steerRoute, setSteerRoute] = useState<{ baseUrl: string; ok: boolean }>()
@@ -753,7 +780,7 @@ export function ChatPage() {
         }
       />
 
-      {hasMessages ? (
+      {hasMessages || moved.trailing.length ? (
         <MessageScrollerProvider autoScroll defaultScrollPosition="end">
           <MessageScroller className="flex-1">
             <MessageScrollerViewport aria-label="Messages">
@@ -782,6 +809,7 @@ export function ChatPage() {
                     const change = changes.get(message.id)
                     return (
                       <MessageScrollerItem key={message.id} messageId={message.id}>
+                        {moved.before.get(message.id)?.map(moveMarker)}
                         {compacted.before.has(message.id) && (
                           <Compacted compaction={compacted.before.get(message.id)!} />
                         )}
@@ -796,6 +824,7 @@ export function ChatPage() {
                     )
                   })}
                   {compacted.trailing && <Compacted compaction={compacted.trailing} />}
+                  {moved.trailing.map(moveMarker)}
                 </AgentsContext.Provider>
               </MessageScrollerContent>
             </MessageScrollerViewport>

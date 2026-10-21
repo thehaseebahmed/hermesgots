@@ -3,6 +3,7 @@ import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { db } from "@/lib/db"
 import { getSessionTodos, type SessionTodos } from "@/lib/hermes"
 import { TODO_TOOLS } from "@/lib/tools"
+import { tracked } from "@/lib/tracked"
 
 /** Bots whose plugin has no todos route (an older plugin). */
 const unsupported = cooldown()
@@ -24,15 +25,6 @@ async function store(conversationId: string, todos: SessionTodos | null) {
   await db.conversations.update(conversationId, {
     todos: todos ? { ...todos, at: Date.now() } : undefined,
   })
-}
-
-/** The chat and its bot, when the bot's plugin can read its list. */
-async function tracked(conversationId: string) {
-  const conversation = await db.conversations.get(conversationId)
-  const profile = conversation && (await db.profiles.get(conversation.profileId))
-  // Keyless chats have no session id Hermes knows.
-  if (!conversation || !profile?.apiKey || profile.disabled) return null
-  return { conversation, profile }
 }
 
 /**

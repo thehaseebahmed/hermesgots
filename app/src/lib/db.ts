@@ -2,7 +2,7 @@ import Dexie, { type EntityTable, type Transaction } from "dexie"
 
 import { BOTS, LEGACY_BOT_IDS } from "@/components/bots"
 import { connectionKey } from "@/lib/connection"
-import type { Compaction, ModelChange, ProviderUsage, Skill } from "@/lib/hermes"
+import type { Compaction, ModelChange, Move, ProviderUsage, Skill } from "@/lib/hermes"
 import type { SessionPipeline } from "@/lib/pipeline"
 import { randomId } from "@/lib/utils"
 
@@ -140,6 +140,11 @@ export interface Conversation {
    * only; every device reads the same list.
    */
   compactions?: Compaction[]
+  /**
+   * The messages triage moved out of this Main thread, oldest first, for its Moved markers. Local
+   * only; every device reads the same list from the host.
+   */
+  moves?: Move[]
   /** Newest Hermes transcript row this device has caught up to. Local only; never synced. */
   hermesTip?: number
   /**
