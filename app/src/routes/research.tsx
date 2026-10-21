@@ -18,14 +18,17 @@ import {
   PencilIcon,
   PlusIcon,
   RotateCcwIcon,
+  ScaleIcon,
   SparklesIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 
+import { attempt } from "@/lib/attempt"
 import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
+import { CompareBriefForm, CompareScopeForm, MemoCanvas, SourceKinds } from "@/components/compare"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ModelPicker, PICKER_HEIGHT } from "@/components/chat/model-picker"
 import { useOpenDrawer } from "@/components/drawer-context"
@@ -83,7 +86,6 @@ import {
   MAX_FOLLOWUPS,
   MAX_OUTLINE,
   MISSION_TYPES,
-  SOURCE_KINDS,
   approveScope,
   confirmBrief,
   createMission,
@@ -111,24 +113,15 @@ const FORMAT_ICONS: Record<OutputFormat, typeof BookOpenTextIcon> = {
   guide: BookOpenTextIcon,
   quiz: ListChecksIcon,
   glossary: BookAIcon,
+  memo: ScaleIcon,
 }
 
 /** The picture of the bot running the mission. */
 const useMissionBotId = (mission: Mission) =>
   useLiveQuery(() => db.profiles.get(mission.profileId), [mission.profileId])?.botId
 
-/** Runs an action on a mission, saying why when it fails. */
-async function attempt(what: string, action: () => Promise<unknown>) {
-  try {
-    await action()
-    return true
-  } catch (error) {
-    toast.error(error instanceof Error ? error.message : `Couldn't ${what}.`)
-    return false
-  }
-}
-
-const formatName = (format: OutputFormat) => FORMATS.find((f) => f.id === format)!.name
+const formatName = (format: OutputFormat) =>
+  format === "memo" ? "Memo" : FORMATS.find((f) => f.id === format)!.name
 
 /**
  * Research: start a mission from a question, and the missions so far by what they need. Where the
@@ -377,8 +370,11 @@ function missionLine(mission: Mission) {
       return `Drafting · ${mission.found} sources`
     case "reviewing":
       return "Reviewing"
-    default:
+    default: {
+      const leader = mission.options.find((o) => o.id === mission.decision?.leader)
+      if (leader) return `${leader.name} leads${mission.decision?.close ? " · close call" : ""}`
       return mission.formats.map(formatName).join(", ")
+    }
   }
 }
 
@@ -547,6 +543,7 @@ function MissionMenu({
   const [rewriting, setRewriting] = useState(false)
   const made = format && mission.formats.includes(format)
   const canAsk =
+    mission.type === "learn" &&
     mission.stage === "delivered" &&
     Boolean(mission.followups) &&
     mission.outline.length < MAX_OUTLINE &&
@@ -800,7 +797,12 @@ function ReadBack({ mission }: { mission: Mission }) {
       {mission.busy === "brief" ? (
         <Thinking label="Reading your question" />
       ) : (
-        !mission.error && <BriefForm key={mission.goal} mission={mission} />
+        !mission.error &&
+        (mission.type === "compare" ? (
+          <CompareBriefForm key={mission.goal} mission={mission} />
+        ) : (
+          <BriefForm key={mission.goal} mission={mission} />
+        ))
       )}
     </div>
   )
@@ -912,9 +914,12 @@ function ScopeGate({ mission }: { mission: Mission }) {
           <Thinking label="Proposing an outline" />
         </>
       ) : (
-        !mission.error && (
+        !mission.error &&
+        (mission.type === "compare" ? (
+          <CompareScopeForm key={mission.outline.join("\n")} mission={mission} botId={botId} />
+        ) : (
           <ScopeForm key={mission.outline.join("\n")} mission={mission} botId={botId} />
-        )
+        ))
       )}
     </div>
   )
@@ -975,33 +980,7 @@ function ScopeForm({ mission, botId }: { mission: Mission; botId?: string }) {
       </ol>
       <div className="flex flex-col gap-2">
         <h2 className="font-semibold">Sources</h2>
-        <div className="flex flex-wrap gap-2">
-          {SOURCE_KINDS.map((kind) => {
-            const on = sources.includes(kind.id)
-            return (
-              <button
-                key={kind.id}
-                type="button"
-                role="checkbox"
-                aria-checked={on}
-                onClick={() =>
-                  setSources(on ? sources.filter((s) => s !== kind.id) : [...sources, kind.id])
-                }
-                className={cn(
-                  "flex min-h-11 items-center gap-1.5 rounded-full border px-3.5 text-sm transition-colors",
-                  on ? "border-primary/40 bg-primary/10 font-medium" : "text-muted-foreground",
-                )}
-              >
-                {on ? (
-                  <CheckIcon className="size-4 text-primary" />
-                ) : (
-                  <PlusIcon className="size-4" />
-                )}
-                {kind.name}
-              </button>
-            )
-          })}
-        </div>
+        <SourceKinds value={sources} onChange={setSources} />
       </div>
       <Button
         size="lg"
@@ -1044,7 +1023,10 @@ function WorkView({ mission, onBack }: { mission: Mission; onBack?: () => void }
         making: undefined,
       }
     : mission
-  const kept = revision ? FORMATS.map((f) => f.id).filter((f) => revision.outputs[f]?.length) : []
+  const kept: OutputFormat[] = revision
+    ? FORMATS.map((f) => f.id).filter((f) => revision.outputs[f]?.length)
+    : []
+  const compared = mission.type === "compare"
   const viewed = revision && !kept.includes(format) ? (kept[0] ?? format) : format
   const canvas: OutputFormat | "making" = revision
     ? viewed
@@ -1119,7 +1101,8 @@ function WorkView({ mission, onBack }: { mission: Mission; onBack?: () => void }
                 Revision {revision.number}: {revisionReason(revision)}
               </Banner>
             ) : (
-              delivered && (
+              delivered &&
+              !compared && (
                 <FormatTabs mission={mission} value={format} onChange={setFormat} onMake={make} />
               )
             )}
@@ -1130,7 +1113,9 @@ function WorkView({ mission, onBack }: { mission: Mission; onBack?: () => void }
                 {mission.audience.charAt(0).toLowerCase() + mission.audience.slice(1)}
               </p>
             </div>
-            {canvas === "making" ? (
+            {compared ? (
+              <MemoCanvas mission={shown} onCite={cite} />
+            ) : canvas === "making" ? (
               <MakingCanvas found={mission.found} />
             ) : canvas === "quiz" ? (
               <QuizCanvas questions={outputs.quiz ?? []} onCite={cite} />

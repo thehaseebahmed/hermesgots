@@ -322,6 +322,88 @@ const OUTLINE = [
 ]
 
 
+// A comparison: three runtimes on three criteria, with a claim or two for each cell, the advocates'
+// cases and the judge's scores. Node.js wins; Deno is ruled out on one criterion.
+const COMPARE_SOURCES = [
+  { id: "s1", title: "Bun documentation: runtime", url: "https://bun.sh/docs/runtime", kind: "docs" },
+  { id: "s2", title: "Node.js releases", url: "https://nodejs.org/en/about/previous-releases", kind: "docs" },
+  { id: "s3", title: "Deno manual: compatibility", url: "https://docs.deno.com/runtime/fundamentals/node/", kind: "docs" },
+]
+
+const COMPARE_CLAIMS = [
+  { id: "c1", option: "o1", criterion: "k1", source: "s1", confidence: "supported", text: "Bun starts and installs packages much faster than Node.js.", snippet: "Bun starts up to 4x faster than Node.js and installs packages up to 25x faster than npm." },
+  { id: "c2", option: "o2", criterion: "k1", source: "s2", confidence: "supported", text: "Node.js ships V8 and has no startup-time advantage over its rivals.", snippet: "Node.js is built on the V8 JavaScript engine and runs a single-threaded event loop." },
+  { id: "c3", option: "o3", criterion: "k1", source: "s3", confidence: "uncertain", text: "Deno's startup is quick for small programs, but type checking adds time.", snippet: "Deno checks types by default, which adds a step before a program runs." },
+  { id: "c4", option: "o2", criterion: "k2", source: "s2", confidence: "supported", text: "Node.js has the largest package ecosystem and every tool supports it.", snippet: "The npm registry hosts more than two million packages, and Node.js is the runtime they target first." },
+  { id: "c5", option: "o1", criterion: "k2", source: "s1", confidence: "supported", text: "Bun aims to run most Node.js packages unchanged, but not all of them.", snippet: "Bun implements the majority of Node.js APIs, and some modules are not yet fully supported." },
+  { id: "c6", option: "o3", criterion: "k2", source: "s3", confidence: "supported", text: "Deno can run npm packages, but some native add-ons don't work.", snippet: "Deno supports npm packages through npm: specifiers, with limits on native add-ons." },
+  { id: "c7", option: "o2", criterion: "k3", source: "s2", confidence: "supported", text: "Node.js publishes long-term support lines that get fixes for years.", snippet: "Even-numbered releases become Long Term Support and are maintained for 30 months." },
+  { id: "c8", option: "o1", criterion: "k3", source: "s1", confidence: "supported", text: "Bun is younger and its releases change behavior more often.", snippet: "Bun is still under active development and some APIs may change between minor releases." },
+]
+
+const COMPARE_OPTIONS = [
+  { id: "o1", name: "Bun" },
+  { id: "o2", name: "Node.js" },
+  { id: "o3", name: "Deno" },
+]
+const COMPARE_CRITERIA = [
+  { id: "k1", name: "Speed", weight: 4 },
+  { id: "k2", name: "Ecosystem", weight: 5 },
+  { id: "k3", name: "Stability", weight: 3 },
+]
+
+const para = (...spans) => [spans]
+const CASES = {
+  o1: para({ text: "Bun is the fastest of the three to start and to install packages.", cites: ["c1"] }, { text: " It runs most Node.js code unchanged, though not all.", cites: ["c5"] }),
+  o2: para({ text: "Node.js has the largest ecosystem, and every tool targets it first.", cites: ["c4"] }, { text: " Its long-term support lines are maintained for years.", cites: ["c7"] }),
+  o3: para({ text: "Deno runs npm packages, and small programs start quickly.", cites: ["c6", "c3"] }),
+}
+const REBUTTALS = {
+  o1: para({ text: "Node.js's ecosystem lead is real, but Bun runs most of it unchanged.", cites: ["c4", "c5"] }),
+  o2: para({ text: "Bun starts faster, but it is younger and its behavior changes more often.", cites: ["c1", "c8"] }),
+  o3: para({ text: "Neither rival is as strict about types by default.", flagged: true }),
+}
+const SCORES = {
+  o1: {
+    k1: { score: 9, reason: "Starts and installs far faster than the others.", claims: ["c1"], flagged: false },
+    k2: { score: 6, reason: "Runs most but not all Node.js packages.", claims: ["c5"], flagged: false },
+    k3: { score: 4, reason: "Younger, with APIs that still move.", claims: ["c8"], flagged: false },
+  },
+  o2: {
+    k1: { score: 6, reason: "No startup advantage.", claims: ["c2"], flagged: false },
+    k2: { score: 10, reason: "The biggest ecosystem by a long way.", claims: ["c4"], flagged: false },
+    k3: { score: 9, reason: "Long-term support lines.", claims: ["c7"], flagged: false },
+  },
+  o3: {
+    k1: { score: 6, reason: "Quick for small programs; type checking adds time.", claims: ["c3"], flagged: false },
+    k2: { score: 3, reason: "No claim shows it covers native add-ons.", claims: [], flagged: true },
+    k3: { score: 6, reason: "", claims: [], flagged: true },
+  },
+}
+const VERDICT = para(
+  { text: "Node.js leads: it has the largest ecosystem and the most stable releases.", cites: ["c4", "c7"] },
+  { text: " Bun's speed is real but it weighs less than compatibility here.", cites: ["c1"] },
+)
+const FLIP = para({ text: "Packages Bun fully supports would close the gap.", cites: ["c5"] })
+
+/** The ranking as research.py's `decide` works it out: weighted scores out of 100. */
+function decide(m) {
+  const memo = m.outputs.memo
+  if (!memo?.scores) return { ranking: [], leader: null, margin: null, close: false }
+  const ruled = new Set((memo.ruled_out ?? []).map((r) => r.option))
+  const weight = m.criteria.reduce((sum, k) => sum + k.weight, 0)
+  const rows = m.options.map((o) => {
+    const cells = memo.scores[o.id] ?? {}
+    const got = m.criteria.reduce((sum, k) => sum + (cells[k.id]?.score ?? 0) * k.weight, 0)
+    const thin = m.criteria.filter((k) => cells[k.id]?.flagged || cells[k.id]?.score == null).map((k) => k.id)
+    return { option: o.id, total: Math.round((got / (weight * 10)) * 100), ruled_out: ruled.has(o.id), thin }
+  })
+  const ranking = rows.sort((a, b) => a.ruled_out - b.ruled_out || b.total - a.total)
+  const eligible = ranking.filter((r) => !r.ruled_out)
+  const margin = eligible.length > 1 ? eligible[0].total - eligible[1].total : null
+  return { ranking, leader: eligible[0]?.option ?? null, margin, close: margin !== null && margin <= 5 }
+}
+
 const SOURCE_KINDS = ["papers", "docs", "articles", "videos", "forums"]
 const FAIL_ONCE = process.env.MOCK_RESEARCH_FAIL === "1"
 const WRITERS = process.env.MOCK_RESEARCH_WRITERS !== "off"
@@ -469,7 +551,8 @@ function summary(m) {
 }
 
 function full(m) {
-  return { ...summary(m), ledger: m.ledger, outputs: m.outputs, revisions: m.revisions }
+  const found = { ...summary(m), ledger: m.ledger, outputs: m.outputs, revisions: m.revisions }
+  return m.type === "compare" ? { ...found, decision: decide(m) } : found
 }
 
 function change(m, fields, note) {
@@ -497,6 +580,75 @@ function readBrief(m, note) {
       note,
     )
   })
+}
+
+function readComparison(m, note) {
+  later(1500, () => {
+    if (!missions.has(m.id)) return
+    change(
+      m,
+      {
+        busy: null,
+        title: "Bun, Node.js or Deno",
+        goal: "Decide which JavaScript runtime to build a new backend on.",
+        audience: "A developer starting a backend",
+        options: COMPARE_OPTIONS,
+        criteria: COMPARE_CRITERIA,
+      },
+      note,
+    )
+  })
+}
+
+/** A comparison's reading: its claims one at a time, then the memo built step by step. */
+function compare(m, note) {
+  const step = () => {
+    if (!missions.has(m.id) || m.stage !== "reading") return
+    const claims = m.ledger.claims
+    if (claims.length < COMPARE_CLAIMS.length) {
+      const { option, criterion, ...claim } = COMPARE_CLAIMS[claims.length]
+      if (!m.ledger.sources.some((s) => s.id === claim.source))
+        m.ledger.sources.push(COMPARE_SOURCES.find((s) => s.id === claim.source))
+      claims.push({ ...claim, option, criterion })
+      change(m, {}, note)
+      return later(400, step)
+    }
+    change(m, { stage: "drafting", written: 0 }, note)
+    later(800, () => memo(m, note))
+  }
+  later(400, step)
+}
+
+function memo(m, note) {
+  const options = m.options.map((o) => ({ id: o.id, name: o.name, case: [], rebuttal: [] }))
+  const save = (extra = {}) => {
+    m.outputs.memo = { options: structuredClone(options), judged_by: m.judge, ...extra }
+    change(m, { written: m.written + 1 }, note)
+  }
+  const steps = [
+    ...options.map((o) => () => ((o.case = CASES[o.id]), save())),
+    ...options.map((o) => () => ((o.rebuttal = REBUTTALS[o.id]), save())),
+    () =>
+      save({
+        scores: SCORES,
+        ruled_out: [{ option: "o3", criterion: "k2", claim: "c6" }],
+        verdict: VERDICT,
+        flip: FLIP,
+      }),
+  ]
+  const next = () => {
+    if (!missions.has(m.id)) return
+    const run = steps.shift()
+    if (run) return run(), later(700, next)
+    change(m, { stage: "reviewing" }, note)
+    later(600, () => {
+      if (!missions.has(m.id)) return
+      m.formats = ["memo"]
+      revise(m, "first")
+      change(m, { stage: "delivered", formats: ["memo"], pending: null }, note)
+    })
+  }
+  next()
 }
 
 function proposeOutline(m, note) {
@@ -606,11 +758,19 @@ export async function handleResearch(req, res, path, { json, readBody, noteEvent
     }
     const { input, type } = await readBody(req)
     if (typeof input !== "string" || !input.trim()) return fail(400, "The question is required."), true
-    if (type && type !== "learn") return fail(400, "Only Learn & understand missions can be started so far."), true
-    const m = mission({ id: `r_${Math.random().toString(16).slice(2, 18)}`, input, title: input, busy: "brief" })
+    if (type && !["learn", "compare"].includes(type))
+      return fail(400, "Only Learn & understand and Compare & decide missions can be started so far."), true
+    const m = mission({
+      id: `r_${Math.random().toString(16).slice(2, 18)}`,
+      input,
+      title: input,
+      busy: "brief",
+      ...(type === "compare" ? { type, format: "memo" } : {}),
+    })
     missions.set(m.id, m)
     note(m.id)
-    readBrief(m, note)
+    if (type === "compare") readComparison(m, note)
+    else readBrief(m, note)
     json(res, 202, { object: "memento.research.mission", mission: full(m) })
     return true
   }
@@ -624,6 +784,29 @@ export async function handleResearch(req, res, path, { json, readBody, noteEvent
   switch (action) {
     case "brief":
       if (moved(["brief"])) return fail(409, "The mission has moved on; reload it."), true
+      if (m.type === "compare") {
+        const names = [...new Set((body.options ?? []).map((o) => (typeof o === "string" ? o : o?.name)).filter((o) => typeof o === "string" && o.trim()))]
+        const criteria = (body.criteria ?? []).filter((k) => typeof k?.name === "string" && k.name.trim())
+        if (names.length < 2 || names.length > 5) return fail(400, "Compare 2 to 5 options."), true
+        if (criteria.length < 2 || criteria.length > 6) return fail(400, "Judge on 2 to 6 criteria."), true
+        if (criteria.some((k) => !Number.isInteger(k.weight) || k.weight < 1 || k.weight > 5))
+          return fail(400, "A criterion's weight is a whole number from 1 to 5."), true
+        change(
+          m,
+          {
+            goal: body.goal,
+            audience: body.audience,
+            depth: body.depth,
+            options: names.map((name, i) => ({ id: `o${i + 1}`, name })),
+            criteria: criteria.map((k, i) => ({ id: `k${i + 1}`, name: k.name, weight: k.weight })),
+            stage: "scope",
+            outline: criteria.map((k) => k.name),
+            error: null,
+          },
+          note,
+        )
+        break
+      }
       change(m, { goal: body.goal, audience: body.audience, format: body.format, depth: body.depth, stage: "scope", busy: "outline", outline: [], error: null }, note)
       proposeOutline(m, note)
       break
@@ -633,6 +816,18 @@ export async function handleResearch(req, res, path, { json, readBody, noteEvent
       break
     case "start": {
       if (moved(["scope"])) return fail(409, "The mission has moved on; reload it."), true
+      if (m.type === "compare") {
+        const kinds = body.source_kinds ?? []
+        if (!kinds.length || kinds.some((k) => !SOURCE_KINDS.includes(k))) return fail(400, "Pick the kinds of source."), true
+        const judge = body.judge?.model ? { provider: body.judge.provider ?? "", model: body.judge.model } : null
+        if (judge && !WRITERS)
+          return fail(403, "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable memento`."), true
+        m.ledger = { sources: [], claims: [] }
+        m.outputs = {}
+        change(m, { source_kinds: kinds, judge, stage: "reading", written: 0, formats: [], error: null }, note)
+        compare(m, note)
+        break
+      }
       const outline = (body.outline ?? []).filter((p) => typeof p === "string" && p.trim())
       const kinds = body.source_kinds ?? []
       if (!outline.length) return fail(400, "The outline needs a point."), true
@@ -644,12 +839,14 @@ export async function handleResearch(req, res, path, { json, readBody, noteEvent
       break
     }
     case "formats":
+      if (m.type === "compare") return fail(400, "A comparison has one format, the memo."), true
       if (moved(["delivered"]) || m.making || m.formats.includes(body.format))
         return fail(409, "That format is already made or on its way."), true
       change(m, { making: body.format, error: null }, note)
       makeFormat(m, note)
       break
     case "followup": {
+      if (m.type === "compare") return fail(400, "Questions can only be added to a Learn & understand mission so far."), true
       if (moved(["delivered"]) || m.making) return fail(409, "The mission has moved on; reload it."), true
       const covered = new Set(m.outline.map((p) => p.toLowerCase()))
       const questions = [...new Set((body.questions ?? []).filter((q) => typeof q === "string" && q.trim()).map((q) => q.trim()))]
@@ -664,6 +861,7 @@ export async function handleResearch(req, res, path, { json, readBody, noteEvent
       break
     }
     case "rewrite": {
+      if (m.type === "compare") return fail(400, "Only a Learn & understand mission can be rewritten with another model."), true
       const failedRewrite = m.error && m.pending?.reason === "rewrite"
       if ((moved(["delivered"]) && !failedRewrite) || m.making) return fail(409, "The mission isn't delivered yet."), true
       const model = typeof body.model === "string" && body.model ? { provider: body.provider ?? "", model: body.model } : null
@@ -677,7 +875,7 @@ export async function handleResearch(req, res, path, { json, readBody, noteEvent
     case "retry":
       if (!m.error) return fail(409, "Nothing failed."), true
       change(m, { error: null }, note)
-      if (m.stage === "reading") research(m, note)
+      if (m.stage === "reading") (m.type === "compare" ? compare : research)(m, note)
       else if (m.stage === "drafting") write(m, note)
       break
     case "remove":

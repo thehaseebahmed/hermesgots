@@ -319,6 +319,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "research",
                     "research_followup",
                     "research_rewrite",
+                    "research_compare",
                     "community",
                     # Hermes's own MCP built-ins, and the MCP screen with them; see mcp.py.
                     *mcp_features,

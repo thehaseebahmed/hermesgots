@@ -17,6 +17,11 @@ it carries on with the app closed:
 - **Reviewing.** Plain code, not a model: a sentence without a marker, or whose markers name no
   claim, is flagged as having no source.
 
+A Compare & decide mission reads the same way, with every claim tagged by the option and criterion
+it bears on, and drafts a memo instead: an advocate per option makes its case, each answers the
+others', and one judge scores every option on every criterion from the ledger. The ranking is code
+(``decide``), never the judge's.
+
 Another format (a quiz, a glossary) is written later from the same ledger, without new reading.
 A delivered mission is written again, whole, when the user asks the questions it missed (read for
 first) or picks another model to write it; every delivery is kept as a revision with its reason.
@@ -48,8 +53,19 @@ logger = logging.getLogger(__name__)
 # The plugin context, kept by wire() so llm_gate can see whether the host offers ctx.llm.
 ctx: Any = None
 
-TYPES = ("learn",)
+TYPES = ("learn", "compare")
 FORMATS = ("guide", "quiz", "glossary")
+# A comparison delivers one thing, the memo; there are no other formats to make.
+COMPARE_FORMAT = "memo"
+MIN_OPTIONS = 2
+MAX_OPTIONS = 5
+MIN_CRITERIA = 2
+MAX_CRITERIA = 6
+MAX_NAME = 60
+MAX_WEIGHT = 5
+MAX_SCORE = 10
+# Totals this many points apart or fewer (of 100) read as a tie.
+CLOSE_POINTS = 5
 DEPTHS = ("overview", "deep")
 SOURCE_KINDS = ("papers", "docs", "articles", "videos", "forums")
 SOURCE_NAMES = {
@@ -174,6 +190,9 @@ def _summary(row: Any, conn: Any) -> Dict[str, Any]:
         "pending": _loads(row["pending"], None),
         "writer": _loads(row["writer"], None),
         "researcher": _loads(row["researcher"], None),
+        "options": _loads(row["options"], []),
+        "criteria": _loads(row["criteria"], []),
+        "judge": _loads(row["judge"], None),
         "found": counts[0],
         "claims": counts[1],
         "created_at": row["created_at"],
@@ -186,7 +205,10 @@ def _row(conn: Any, mission_id: str) -> Any:
 
 
 def _update(path: Path, mission_id: str, **fields: Any) -> None:
-    for key in ("outline", "source_kinds", "formats", "followups", "suggestions", "pending", "writer", "researcher"):
+    for key in (
+        "outline", "source_kinds", "formats", "followups", "suggestions", "pending", "writer", "researcher",
+        "options", "criteria", "judge",
+    ):
         if key in fields and fields[key] is not None and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
     fields["updated_at"] = _now()
@@ -229,6 +251,8 @@ def mission(path: Path, mission_id: str) -> Optional[Dict[str, Any]]:
                 "SELECT format, content FROM research_outputs WHERE mission_id = ?", (mission_id,)
             )
         }
+        if found["type"] == "compare":
+            found["decision"] = decide(found["options"], found["criteria"], found["outputs"].get(COMPARE_FORMAT))
         found["revisions"] = [
             {
                 "number": rev["number"],
@@ -254,7 +278,7 @@ def _ledger(conn: Any, mission_id: str) -> Dict[str, List[Dict[str, Any]]]:
         (mission_id,),
     ).fetchall()
     claims = conn.execute(
-        """SELECT id, text, source_id, snippet, confidence FROM research_claims
+        """SELECT id, text, source_id, snippet, confidence, option_id, criterion_id FROM research_claims
            WHERE mission_id = ? ORDER BY at, rowid""",
         (mission_id,),
     ).fetchall()
@@ -267,6 +291,7 @@ def _ledger(conn: Any, mission_id: str) -> Dict[str, List[Dict[str, Any]]]:
                 "source": row["source_id"],
                 "snippet": row["snippet"],
                 "confidence": row["confidence"],
+                **({"option": row["option_id"], "criterion": row["criterion_id"]} if row["option_id"] or row["criterion_id"] else {}),
             }
             for row in claims
         ],
@@ -289,7 +314,7 @@ def create(path: Path, profile: Optional[str], text: Any, kind: Any = "learn") -
     text = _text(text, MAX_INPUT, "The question")
     kind = kind or "learn"
     if kind not in TYPES:
-        raise ResearchError("Only Learn & understand missions can be started so far.")
+        raise ResearchError("Only Learn & understand and Compare & decide missions can be started so far.")
     mission_id = f"r_{uuid.uuid4().hex[:16]}"
     now = _now()
     conn = _open(path)
@@ -297,9 +322,12 @@ def create(path: Path, profile: Optional[str], text: Any, kind: Any = "learn") -
         conn.execute(
             """INSERT INTO research_missions (id, profile, type, input, title, goal, format, audience,
                    depth, outline, source_kinds, stage, busy, formats, written, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, '', 'guide', '', 'overview', '[]', ?, 'brief', 'brief', '[]', 0,
+               VALUES (?, ?, ?, ?, ?, '', ?, '', 'overview', '[]', ?, 'brief', 'brief', '[]', 0,
                        ?, ?)""",
-            (mission_id, profile, kind, text, _title_from(text), json.dumps(list(SOURCE_KINDS[:3])), now, now),
+            (
+                mission_id, profile, kind, text, _title_from(text),
+                COMPARE_FORMAT if kind == "compare" else "guide", json.dumps(list(SOURCE_KINDS[:3])), now, now,
+            ),
         )
     finally:
         conn.close()
@@ -324,7 +352,9 @@ def _need(path: Path, mission_id: str, stages: Tuple[str, ...]) -> Dict[str, Any
 
 def confirm_brief(path: Path, mission_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
     """The user's brief: the outline is proposed next, from it."""
-    _need(path, mission_id, ("brief",))
+    found = _need(path, mission_id, ("brief",))
+    if found["type"] == "compare":
+        return _confirm_compare_brief(path, mission_id, body)
     fields = {
         "goal": _text(body.get("goal"), MAX_GOAL, "The goal"),
         "audience": _text(body.get("audience"), MAX_AUDIENCE, "The audience"),
@@ -341,6 +371,65 @@ def confirm_brief(path: Path, mission_id: str, body: Dict[str, Any]) -> Dict[str
     return mission(path, mission_id)  # type: ignore[return-value]
 
 
+def _names(raw: Any, what: str) -> List[str]:
+    if not isinstance(raw, list):
+        raise ResearchError(f"The {what} are required.")
+    names: List[str] = []
+    for item in raw:
+        name = item.get("name") if isinstance(item, dict) else item
+        if isinstance(name, str) and name.strip():
+            name = _text(name, MAX_NAME, f"A name in the {what}")
+            if name.casefold() not in {other.casefold() for other in names}:
+                names.append(name)
+    return names
+
+
+def compare_lists(raw_options: Any, raw_criteria: Any) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """A comparison's options and criteria as the user edited them, numbered o1.., k1.. in order."""
+    names = _names(raw_options, "options")
+    if not MIN_OPTIONS <= len(names) <= MAX_OPTIONS:
+        raise ResearchError(f"Compare {MIN_OPTIONS} to {MAX_OPTIONS} options.")
+    criteria: List[Dict[str, Any]] = []
+    if not isinstance(raw_criteria, list):
+        raise ResearchError("The criteria are required.")
+    for item in raw_criteria:
+        if not isinstance(item, dict) or not isinstance(item.get("name"), str) or not item["name"].strip():
+            continue
+        name = _text(item["name"], MAX_NAME, "A criterion")
+        if name.casefold() in {c["name"].casefold() for c in criteria}:
+            continue
+        weight = item.get("weight")
+        if not isinstance(weight, int) or isinstance(weight, bool) or not 1 <= weight <= MAX_WEIGHT:
+            raise ResearchError(f"A criterion's weight is a whole number from 1 to {MAX_WEIGHT}.")
+        criteria.append({"name": name, "weight": weight})
+    if not MIN_CRITERIA <= len(criteria) <= MAX_CRITERIA:
+        raise ResearchError(f"Judge on {MIN_CRITERIA} to {MAX_CRITERIA} criteria.")
+    return (
+        [{"id": f"o{i + 1}", "name": name} for i, name in enumerate(names)],
+        [{"id": f"k{i + 1}", **criterion} for i, criterion in enumerate(criteria)],
+    )
+
+
+def _confirm_compare_brief(path: Path, mission_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    options, criteria = compare_lists(body.get("options"), body.get("criteria"))
+    fields: Dict[str, Any] = {
+        "goal": _text(body.get("goal"), MAX_GOAL, "The decision"),
+        "audience": _text(body.get("audience"), MAX_AUDIENCE, "The audience"),
+        "depth": body.get("depth"),
+    }
+    if fields["depth"] not in DEPTHS:
+        raise ResearchError("Pick a depth.")
+    if body.get("title") is not None:
+        fields["title"] = _text(body.get("title"), MAX_TITLE, "The title")
+    # The criteria are what gets researched, so they are the Scope Gate's outline: no model call.
+    _update(
+        path, mission_id, **fields, options=options, criteria=criteria, format=COMPARE_FORMAT, stage="scope",
+        busy=None, outline=[criterion["name"] for criterion in criteria], error=None,
+    )
+    _tell(path, "research_scope", mission_id)
+    return mission(path, mission_id)  # type: ignore[return-value]
+
+
 def edit_brief(path: Path, mission_id: str) -> Dict[str, Any]:
     """Back from the Scope Gate to the brief."""
     _need(path, mission_id, ("scope",))
@@ -350,7 +439,9 @@ def edit_brief(path: Path, mission_id: str) -> Dict[str, Any]:
 
 def approve_scope(path: Path, mission_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
     """The Scope Gate passed: clears any earlier reading and puts the mission at reading."""
-    _need(path, mission_id, ("scope",))
+    found = _need(path, mission_id, ("scope",))
+    if found["type"] == "compare":
+        return _approve_compare_scope(path, found, body)
     points = body.get("outline")
     if not isinstance(points, list):
         raise ResearchError("The outline is required.")
@@ -376,6 +467,35 @@ def approve_scope(path: Path, mission_id: str, body: Dict[str, Any]) -> Dict[str
     return mission(path, mission_id)  # type: ignore[return-value]
 
 
+def pick_model(body: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    """A model the user picked (``{ provider, model }``), checked against what the host allows;
+    None when they picked none, which is the profile's own."""
+    if body.get("model") is None and body.get("provider") is None:
+        return None
+    model = _text(body.get("model"), MAX_MODEL, "The model")
+    provider = _text(body.get("provider"), MAX_MODEL, "The provider", required=False)
+    allowed = llm_gate()
+    if not allowed["model"] or (provider and not allowed["provider"]):
+        raise ResearchError(
+            "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable memento`.", 403
+        )
+    return {"provider": provider, "model": model} if provider else {"model": model}
+
+
+def _approve_compare_scope(path: Path, found: Dict[str, Any], body: Dict[str, Any]) -> Dict[str, Any]:
+    kinds = body.get("source_kinds")
+    if not isinstance(kinds, list) or not kinds or any(kind not in SOURCE_KINDS for kind in kinds):
+        raise ResearchError("Pick the kinds of source.")
+    judge = pick_model(body.get("judge") if isinstance(body.get("judge"), dict) else {})
+    mission_id = found["id"]
+    _clear(path, mission_id)
+    _update(
+        path, mission_id, source_kinds=list(dict.fromkeys(kinds)), judge=judge, stage="reading", busy=None,
+        error=None, run_id=None,
+    )
+    return mission(path, mission_id)  # type: ignore[return-value]
+
+
 RESEARCH_TABLES = ("research_sources", "research_claims", "research_outputs", "research_revisions")
 
 
@@ -392,6 +512,8 @@ def _clear(path: Path, mission_id: str) -> None:
 def make_format(path: Path, mission_id: str, fmt: Any) -> Dict[str, Any]:
     """Another format from the same ledger: no new reading, only writing."""
     found = _need(path, mission_id, ("delivered",))
+    if found["type"] != "learn":
+        raise ResearchError("A comparison has one format, the memo.")
     if fmt not in FORMATS:
         raise ResearchError("Pick a format.")
     if fmt in found["formats"] or found["making"]:
@@ -404,6 +526,8 @@ def followup(path: Path, mission_id: str, body: Dict[str, Any]) -> Dict[str, Any
     """Questions the delivered mission missed: the researcher reads for them in the same session and
     ledger, then the outline is planned again around them and everything made is written again."""
     found = _need(path, mission_id, ("delivered",))
+    if found["type"] != "learn":
+        raise ResearchError("Questions can only be added to a Learn & understand mission so far.")
     if found["making"]:
         raise ResearchError("Wait for the format being made.", 409)
     raw = body.get("questions")
@@ -456,18 +580,7 @@ def rewrite(path: Path, mission_id: str, body: Dict[str, Any]) -> Dict[str, Any]
         raise ResearchError("The mission isn't delivered yet.", 409)
     if found["making"]:
         raise ResearchError("Wait for the format being made.", 409)
-    writer = None
-    if body.get("model") is not None or body.get("provider") is not None:
-        model = _text(body.get("model"), MAX_MODEL, "The model")
-        provider = _text(body.get("provider"), MAX_MODEL, "The provider", required=False)
-        allowed = llm_gate()
-        if not allowed["model"] or (provider and not allowed["provider"]):
-            raise ResearchError(
-                "This host doesn't let Gots pick the model. Allow it with "
-                "`hermes plugins enable memento`.",
-                403,
-            )
-        writer = {"provider": provider, "model": model} if provider else {"model": model}
+    writer = pick_model(body)
     _first_revision(path, found)
     _update(
         path,
@@ -541,7 +654,7 @@ def retry(path: Path, mission_id: str) -> Dict[str, Any]:
         raise ResearchError("Nothing failed.", 409)
     if found["stage"] == "brief":
         _update(path, mission_id, busy="brief", error=None)
-    elif found["stage"] == "scope":
+    elif found["stage"] == "scope" and found["type"] == "learn":
         _update(path, mission_id, busy="outline", error=None)
     else:
         _update(path, mission_id, error=None)
@@ -648,7 +761,74 @@ OUTLINE_SCHEMA = {
 }
 
 
+COMPARE_BRIEF_SYSTEM = (
+    "You read back a decision someone is weighing, so they can correct it before any research "
+    "starts. Stay close to what they asked; never widen it and never pick a winner."
+)
+COMPARE_BRIEF_INSTRUCTIONS = (
+    f"Read the request below and fill in the brief. title: what is being decided in at most six "
+    f"words, no trailing punctuation. goal: one sentence starting with Decide, saying what is chosen "
+    f"and for what. audience: who decides, as a short phrase starting with a capital letter. depth: "
+    f"overview, unless they ask for depth or detail. options: the {MIN_OPTIONS} to {MAX_OPTIONS} "
+    f"things being compared, named as the request names them; if it names none, the "
+    f"{MIN_OPTIONS} or 3 most common real contenders. criteria: {MIN_CRITERIA + 1} to "
+    f"{MAX_CRITERIA - 1} things the decision turns on, each a short phrase with a weight from 1 "
+    f"(nice to have) to {MAX_WEIGHT} (decisive), the ones the request stresses weighted highest."
+)
+COMPARE_BRIEF_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "goal": {"type": "string"},
+        "audience": {"type": "string"},
+        "depth": {"type": "string", "enum": list(DEPTHS)},
+        "options": {"type": "array", "items": {"type": "string"}, "minItems": MIN_OPTIONS, "maxItems": MAX_OPTIONS},
+        "criteria": {
+            "type": "array",
+            "minItems": MIN_CRITERIA,
+            "maxItems": MAX_CRITERIA,
+            "items": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}, "weight": {"type": "integer"}},
+                "required": ["name", "weight"],
+            },
+        },
+    },
+    "required": ["title", "goal", "audience", "depth", "options", "criteria"],
+}
+
+
+def _compare_brief(path: Path, row: Dict[str, Any]) -> None:
+    answer = _structured(
+        "brief", COMPARE_BRIEF_SYSTEM, COMPARE_BRIEF_INSTRUCTIONS, row["input"], COMPARE_BRIEF_SCHEMA, 1500
+    )
+    names = [name for name in (_clip(o, MAX_NAME) for o in answer.get("options") or [] if isinstance(o, str)) if name]
+    names = list(dict.fromkeys(names))[:MAX_OPTIONS]
+    criteria = []
+    for item in answer.get("criteria") or []:
+        name = _clip(item.get("name"), MAX_NAME) if isinstance(item, dict) else ""
+        weight = item.get("weight") if isinstance(item, dict) else None
+        if name and name.casefold() not in {c["name"].casefold() for c in criteria}:
+            weight = weight if isinstance(weight, int) and 1 <= weight <= MAX_WEIGHT else 3
+            criteria.append({"name": name, "weight": weight})
+    criteria = criteria[:MAX_CRITERIA]
+    if len(names) < MIN_OPTIONS or len(criteria) < MIN_CRITERIA:
+        raise ResearchError("The model couldn't find the options and criteria in that. Try again.", 502)
+    fields = {
+        "title": _clip(answer.get("title"), MAX_TITLE) or row["title"],
+        "goal": _clip(answer.get("goal"), MAX_GOAL),
+        "audience": _clip(answer.get("audience"), MAX_AUDIENCE) or "Someone deciding",
+        "depth": answer.get("depth") if answer.get("depth") in DEPTHS else "overview",
+        "options": [{"id": f"o{i + 1}", "name": name} for i, name in enumerate(names)],
+        "criteria": [{"id": f"k{i + 1}", **criterion} for i, criterion in enumerate(criteria)],
+    }
+    _update(path, row["id"], **fields, busy=None)
+    _tell(path, "research_brief", row["id"], fields["title"])
+
+
 def _brief(path: Path, row: Dict[str, Any]) -> None:
+    if row["type"] == "compare":
+        return _compare_brief(path, row)
     answer = _structured("brief", BRIEF_SYSTEM, BRIEF_INSTRUCTIONS, row["input"], BRIEF_SCHEMA, 1500)
     fields = {
         "title": _clip(answer.get("title"), MAX_TITLE) or row["title"],
@@ -681,6 +861,13 @@ def _clip(value: Any, limit: int) -> str:
 
 
 def _brief_text(row: Dict[str, Any]) -> str:
+    if row["type"] == "compare":
+        return (
+            f"Request: {row['input']}\nTitle: {row['title']}\nDecision: {row['goal']}\n"
+            f"Audience: {row['audience']}\n"
+            + "".join(f"Option {o['id']}: {o['name']}\n" for o in row["options"])
+            + "".join(f"Criterion {k['id']} (weight {k['weight']}): {k['name']}\n" for k in row["criteria"])
+        )
     return (
         f"Request: {row['input']}\nTitle: {row['title']}\nGoal: {row['goal']}\n"
         f"Audience: {row['audience']}\nDepth: {'in depth' if row['depth'] == 'deep' else 'overview'}"
@@ -696,7 +883,28 @@ RESEARCHER_INSTRUCTIONS = """You are the researcher of a Gots research mission. 
 - Never use the terminal, write files or ask the user anything. When the outline is covered, reply with one line saying how many claims you recorded."""
 
 
+COMPARE_RESEARCHER_INSTRUCTIONS = """You are the researcher of a Gots comparison. Your output is the evidence ledger, not a verdict: advocates and a judge work from the claims you record, and from nothing else.
+- For every option on every criterion, find sources with web_search and read the best ones in full with web_extract. Look for evidence against each option as hard as for it.
+- Call claim_add once for every fact a judge would need: the claim in your own plain words, the page's URL and title, the kind of source, the option's id and the criterion's id it bears on, and the passage that says so copied word for word from the page (one to three whole sentences, no ellipses, no paraphrase). The tool fetches the page and refuses a passage it can't find there; copy it again exactly, or pick another passage.
+- Prefer primary sources (the option's own documentation, benchmarks with their method, source code) over opinion. Mark a claim uncertain when sources disagree or the source is weak. If you find no evidence for an option on a criterion, record nothing for it: the judge must see the gap.
+- Never use the terminal, write files or ask the user anything. When every option and criterion is covered, reply with one line saying how many claims you recorded."""
+
+
+def _compare_prompt(found: Dict[str, Any]) -> str:
+    per_cell = "2 to 3" if found["depth"] == "deep" else "1 to 2"
+    options = "\n".join(f"- {o['id']}: {o['name']}" for o in found["options"])
+    criteria = "\n".join(f"- {k['id']}: {k['name']} (weight {k['weight']} of {MAX_WEIGHT})" for k in found["criteria"])
+    kinds = ", ".join(SOURCE_NAMES[kind] for kind in found["source_kinds"] if kind in SOURCE_NAMES)
+    return (
+        f"Comparison: {found['title']}\nDecision: {found['goal']}\nFor: {found['audience']}\n"
+        f"Options:\n{options}\nCriteria:\n{criteria}\nPrefer: {kinds}\n\n"
+        f"Record {per_cell} claims for each option on each criterion."
+    )
+
+
 def researcher_prompt(found: Dict[str, Any]) -> str:
+    if found["type"] == "compare":
+        return _compare_prompt(found)
     per_point = "6 to 10" if found["depth"] == "deep" else "3 to 6"
     if found["followups"]:
         latest = found["followups"][-1]
@@ -720,7 +928,7 @@ def researcher_prompt(found: Dict[str, Any]) -> str:
 def run_body(found: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "session_id": f"{SESSION_PREFIX}{found['id']}",
-        "instructions": RESEARCHER_INSTRUCTIONS,
+        "instructions": COMPARE_RESEARCHER_INSTRUCTIONS if found["type"] == "compare" else RESEARCHER_INSTRUCTIONS,
         "input": [{"role": "user", "content": researcher_prompt(found)}],
     }
 
@@ -813,6 +1021,20 @@ def record(path: Path, mission_id: str, args: Dict[str, Any],
         raise ResearchError("snippet must be the whole passage, a full sentence at least.")
     title = _clip(args.get("title"), 300) or urllib.parse.urlparse(url).netloc
     kind = args.get("kind") if args.get("kind") in SOURCE_KINDS else "articles"
+    option_id = criterion_id = None
+    if row["type"] == "compare":
+        # A claim says which option and criterion it bears on, so the advocates and the judge can
+        # find it; an id the mission doesn't have is refused rather than guessed at.
+        options = {o["id"] for o in _loads(row["options"], [])}
+        criteria = {k["id"] for k in _loads(row["criteria"], [])}
+        option_id = args.get("option") or None
+        criterion_id = args.get("criterion") or None
+        if option_id not in options and option_id is not None:
+            raise ResearchError(f"option must be one of: {', '.join(sorted(options))}.")
+        if criterion_id not in criteria and criterion_id is not None:
+            raise ResearchError(f"criterion must be one of: {', '.join(sorted(criteria))}.")
+        if option_id is None:
+            raise ResearchError(f"Say which option the claim is about with option ({', '.join(sorted(options))}).")
     held = check_passage(fetch(url), snippet)
     if held is False:
         raise ResearchError(
@@ -847,9 +1069,9 @@ def record(path: Path, mission_id: str, args: Dict[str, Any],
             source_id = source["id"]
         claim_id = f"c{count + 1}"
         conn.execute(
-            """INSERT INTO research_claims (mission_id, id, source_id, text, snippet, confidence, at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (mission_id, claim_id, source_id, text, snippet, confidence, now),
+            """INSERT INTO research_claims (mission_id, id, source_id, text, snippet, confidence, at,
+                   option_id, criterion_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (mission_id, claim_id, source_id, text, snippet, confidence, now, option_id, criterion_id),
         )
         conn.execute("COMMIT")
     finally:
@@ -877,6 +1099,8 @@ SCHEMA = {
                 "description": "The passage that supports the claim, copied word for word from the page: one to three whole sentences.",
             },
             "confidence": {"type": "string", "enum": ["supported", "uncertain"]},
+            "option": {"type": "string", "description": "Comparisons only: the id of the option the claim is about (o1, o2, ...)."},
+            "criterion": {"type": "string", "description": "Comparisons only: the id of the criterion it bears on (k1, k2, ...)."},
         },
         "required": ["claim", "url", "title", "snippet"],
     },
@@ -1221,6 +1445,8 @@ def _replan(found: Dict[str, Any], questions: List[str]) -> List[str]:
 
 
 def _draft(path: Path, found: Dict[str, Any]) -> None:
+    if found["type"] == "compare":
+        return _draft_compare(path, found)
     mission_id = found["id"]
     pending = found["pending"]
     if found["stage"] == "drafting":
@@ -1308,6 +1534,253 @@ def _suggest(path: Path, mission_id: str) -> None:
     if latest is None or latest["stage"] != "delivered" or len(latest["followups"]) != rounds:
         return
     _update(path, mission_id, suggestions=questions[:MAX_SUGGESTIONS])
+
+
+# --- a comparison's memo ------------------------------------------------------------------------
+
+
+def decide(options: List[Dict[str, Any]], criteria: List[Dict[str, Any]], memo: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """The ranking, by code and never by a model: each score times its criterion's weight, as a
+    share of the best possible total (0 to 100). An option the judge ruled out can't lead, and a
+    cell with no claim behind it is thin."""
+    memo = memo or {}
+    scores = memo.get("scores") or {}
+    ruled = {item.get("option") for item in memo.get("ruled_out") or []}
+    weight = sum(criterion["weight"] for criterion in criteria) or 1
+    rows = []
+    for option in options:
+        cells = scores.get(option["id"]) or {}
+        got = 0.0
+        thin = []
+        for criterion in criteria:
+            cell = cells.get(criterion["id"]) or {}
+            score = cell.get("score")
+            got += (score if isinstance(score, (int, float)) else 0) * criterion["weight"]
+            if cell.get("flagged") or score is None:
+                thin.append(criterion["id"])
+        rows.append(
+            {"option": option["id"], "total": round(got / (weight * MAX_SCORE) * 100), "ruled_out": option["id"] in ruled, "thin": thin}
+        )
+    ranking = sorted(rows, key=lambda row: (row["ruled_out"], -row["total"]))
+    eligible = [row for row in ranking if not row["ruled_out"]]
+    judged = bool(scores)
+    margin = eligible[0]["total"] - eligible[1]["total"] if len(eligible) > 1 else None
+    return {
+        "ranking": ranking if judged else [],
+        "leader": eligible[0]["option"] if judged and eligible else None,
+        "margin": margin if judged else None,
+        "close": judged and margin is not None and margin <= CLOSE_POINTS,
+    }
+
+
+def _plain(paragraphs: List[List[Dict[str, Any]]]) -> str:
+    return "\n".join("".join(span["text"] for span in paragraph) for paragraph in paragraphs)
+
+
+def _compare_ledger_text(found: Dict[str, Any], only: Optional[str] = None) -> str:
+    """The ledger with each claim's option and criterion, so a model can tell what it is evidence
+    for. ``only`` keeps one option's claims and the ones about no option."""
+    names = {o["id"]: o["name"] for o in found["options"]}
+    topics = {k["id"]: k["name"] for k in found["criteria"]}
+    sources = {source["id"]: source for source in found["ledger"]["sources"]}
+    lines = []
+    for claim in found["ledger"]["claims"]:
+        if only and claim.get("option") not in (None, only):
+            continue
+        source = sources.get(claim["source"]) or {}
+        note = " (uncertain)" if claim["confidence"] == "uncertain" else ""
+        about = names.get(claim.get("option"), "")
+        if claim.get("criterion") in topics:
+            about = f"{about} / {topics[claim['criterion']]}"
+        lines.append(
+            f"[{claim['id']}]{note} ({about}) {claim['text']}\n    Source: {source.get('title', '')}\n"
+            f"    Passage: \"{claim['snippet']}\""
+        )
+    return "\n".join(lines)
+
+
+CASE_SCHEMA = {
+    "type": "object",
+    "properties": {"paragraphs": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 3}},
+    "required": ["paragraphs"],
+}
+CITE_RULE = (
+    "End every sentence with the ids of the claims behind it in square brackets, right after its "
+    "full stop, like \"... the values. [c3]\" or \"[c3, c7]\". Write no sentence the ledger doesn't "
+    "support, and never make up an id."
+)
+
+
+def _advocate_system(found: Dict[str, Any], option: Dict[str, Any]) -> str:
+    return (
+        f"You argue for {option['name']} in a decision for {found['audience'].lower()}: {found['goal']} "
+        f"Make the strongest honest case you can from the evidence ledger and nothing else. Never "
+        f"misstate a claim, and never hide a weakness the ledger shows: say it and say why it "
+        f"matters less. Plain words, short sentences, no markdown."
+    )
+
+
+def write_case(found: Dict[str, Any], option: Dict[str, Any]) -> List[List[Dict[str, Any]]]:
+    known = {claim["id"] for claim in found["ledger"]["claims"]}
+    criteria = "; ".join(f"{k['name']} (weight {k['weight']})" for k in found["criteria"])
+    instructions = (
+        f"Make the case for {option['name']} on the criteria: {criteria}. Write 2 to 3 paragraphs. "
+        + CITE_RULE
+    )
+    answer = _structured(
+        "case", _advocate_system(found, option), instructions, _compare_ledger_text(found, option["id"]),
+        CASE_SCHEMA, 2500, found.get("writer"),
+    )
+    paragraphs = [spans(text, known) for text in answer.get("paragraphs") or [] if isinstance(text, str) and text.strip()]
+    paragraphs = [paragraph for paragraph in paragraphs if paragraph]
+    if not paragraphs:
+        raise ResearchError(f"The advocate for {option['name']} wrote nothing.", 502)
+    return paragraphs
+
+
+def write_rebuttal(found: Dict[str, Any], option: Dict[str, Any], cases: Dict[str, str]) -> List[List[Dict[str, Any]]]:
+    known = {claim["id"] for claim in found["ledger"]["claims"]}
+    rivals = "\n\n".join(
+        f"The case for {o['name']}:\n{cases[o['id']]}" for o in found["options"] if o["id"] != option["id"] and o["id"] in cases
+    )
+    instructions = (
+        f"The rival cases follow, then the evidence ledger. Answer the strongest points made against "
+        f"{option['name']}, and say where a rival is stronger than {option['name']} when the "
+        f"ledger shows it. Write 1 to 2 paragraphs. " + CITE_RULE
+    )
+    answer = _structured(
+        "rebuttal", _advocate_system(found, option), instructions,
+        f"{rivals}\n\nLedger:\n{_compare_ledger_text(found)}", CASE_SCHEMA, 2000, found.get("writer"),
+    )
+    paragraphs = [spans(text, known) for text in answer.get("paragraphs") or [] if isinstance(text, str) and text.strip()]
+    return [paragraph for paragraph in paragraphs if paragraph]
+
+
+JUDGE_SYSTEM = (
+    "You judge a decision between options, impartially. You have the advocates' cases and rebuttals "
+    "and the evidence ledger. Score from the evidence, not from how well an advocate argued: an "
+    "option's score on a criterion rests on the claims in the ledger, and a score with no claim "
+    "behind it is not allowed."
+)
+JUDGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "scores": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "option": {"type": "string"},
+                    "criterion": {"type": "string"},
+                    "score": {"type": "integer"},
+                    "reason": {"type": "string"},
+                    "claims": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["option", "criterion", "score", "reason", "claims"],
+            },
+        },
+        "ruled_out": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"option": {"type": "string"}, "criterion": {"type": "string"}, "claim": {"type": "string"}},
+                "required": ["option", "criterion", "claim"],
+            },
+        },
+        "verdict": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 3},
+        "flip": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 2},
+    },
+    "required": ["scores", "ruled_out", "verdict", "flip"],
+}
+
+
+def judge(found: Dict[str, Any], options: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """One judge reads every case and rebuttal and the ledger, then scores each option on each
+    criterion (0 to 10, with the claims that settle it), rules out any option that fails a criterion
+    outright, and writes the verdict and what would flip it. The ranking is not its to make."""
+    known = {claim["id"] for claim in found["ledger"]["claims"]}
+    ids = {o["id"] for o in found["options"]}
+    topics = {k["id"] for k in found["criteria"]}
+    text = "\n\n".join(
+        f"Option {o['id']} ({o['name']})\nCase:\n{_plain(o['case'])}\nRebuttal:\n{_plain(o['rebuttal'])}" for o in options
+    )
+    criteria = "\n".join(f"- {k['id']}: {k['name']} (weight {k['weight']})" for k in found["criteria"])
+    instructions = (
+        f"Decision: {found['goal']}\nCriteria:\n{criteria}\n\nScore every option on every criterion "
+        f"from 0 (fails it) to {MAX_SCORE} (excels), with a one-sentence reason and the ids of the "
+        f"claims it rests on. Put in ruled_out only an option a claim shows can't work at all on a "
+        f"criterion (a hard requirement), naming the claim. Write the verdict in 1 to 3 short "
+        f"paragraphs saying what the evidence favours and why, and flip in 1 or 2 sentences saying "
+        f"what would change it. In verdict and flip: {CITE_RULE}"
+    )
+    answer = _structured(
+        "judge", JUDGE_SYSTEM, instructions, f"{text}\n\nLedger:\n{_compare_ledger_text(found)}", JUDGE_SCHEMA, 6000,
+        found.get("judge") or found.get("writer"),
+    )
+    scores: Dict[str, Dict[str, Any]] = {oid: {} for oid in ids}
+    for item in answer.get("scores") or []:
+        if not isinstance(item, dict) or item.get("option") not in ids or item.get("criterion") not in topics:
+            continue
+        score = item.get("score")
+        if isinstance(score, bool) or not isinstance(score, int):
+            continue
+        cites = [cid for cid in dict.fromkeys(item.get("claims") or []) if cid in known]
+        reason = _clip(item.get("reason"), MAX_CLAIM)
+        scores[item["option"]][item["criterion"]] = {
+            "score": max(0, min(MAX_SCORE, score)),
+            "reason": reason,
+            "claims": cites,
+            # No claim behind a score, or none said why: the app shows it as thin.
+            "flagged": not cites or not reason,
+        }
+    ruled_out = [
+        {"option": item["option"], "criterion": item["criterion"], "claim": item["claim"]}
+        for item in answer.get("ruled_out") or []
+        if isinstance(item, dict) and item.get("option") in ids and item.get("criterion") in topics
+        and item.get("claim") in known
+    ]
+    verdict = [spans(text, known) for text in answer.get("verdict") or [] if isinstance(text, str) and text.strip()]
+    flip = [spans(text, known) for text in answer.get("flip") or [] if isinstance(text, str) and text.strip()]
+    if not any(scores.values()):
+        raise ResearchError("The judge scored nothing.", 502)
+    return {"scores": scores, "ruled_out": ruled_out, "verdict": verdict, "flip": flip}
+
+
+def write_memo(path: Path, found: Dict[str, Any]) -> None:
+    """Each option's advocate makes its case from the ledger, each answers the others' cases, and
+    one judge scores. Saved after every step so the app shows the memo building."""
+    mission_id = found["id"]
+    options = [{"id": o["id"], "name": o["name"], "case": [], "rebuttal": []} for o in found["options"]]
+    judged_by = found.get("judge") or found.get("writer")
+    done = 0
+
+    def save(extra: Optional[Dict[str, Any]] = None) -> None:
+        nonlocal done
+        done += 1
+        _save_output(path, mission_id, COMPARE_FORMAT, {"options": options, "judged_by": judged_by, **(extra or {})})
+        _update(path, mission_id, written=done)
+
+    for index, option in enumerate(found["options"]):
+        options[index]["case"] = write_case(found, option)
+        save()
+    cases = {o["id"]: _plain(o["case"]) for o in options}
+    for index, option in enumerate(found["options"]):
+        options[index]["rebuttal"] = write_rebuttal(found, option, cases)
+        save()
+    save(judge(found, options))
+
+
+def _draft_compare(path: Path, found: Dict[str, Any]) -> None:
+    mission_id = found["id"]
+    if found["stage"] == "drafting":
+        write_memo(path, found)
+        _update(path, mission_id, stage="reviewing")
+    found = mission(path, mission_id) or found
+    found["formats"] = [COMPARE_FORMAT]
+    if not found["revisions"]:
+        _revision(path, found, "first")
+    _update(path, mission_id, stage="delivered", formats=[COMPARE_FORMAT], pending=None)
+    _tell(path, "research_done", mission_id, found["title"])
 
 
 def _make(path: Path, found: Dict[str, Any]) -> None:
@@ -1471,7 +1944,9 @@ def finished_reading(path: Path, mission_id: str, status: Optional[str]) -> bool
     if rounds:
         enough = found["claims"] > (rounds[-1].get("claims") or 0)
     else:
-        enough = found["claims"] >= MIN_CLAIMS
+        enough = found["claims"] >= (
+            max(MIN_CLAIMS, 2 * len(found["options"])) if found["type"] == "compare" else MIN_CLAIMS
+        )
     if not enough:
         stopped = status in ("failed", "cancelled", "interrupted")
         if stopped:
