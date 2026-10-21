@@ -52,11 +52,7 @@ export function scoreMapOf(rows: ScoredRow[]): Map<string, number | undefined> {
  * The map is keyed by the same candidates, so a catalog id reaches a BenchLM row it spells differently.
  */
 export function scoreFor(map: Map<string, number | undefined>, model: string): number | undefined {
-  const full = normalise(model)
-  const short = lastSegment(full)
-  // A vendor-prefixed id keeps its family inside the segment, so the bare segment is tried both as
-  // it is and under its alias.
-  for (const key of [...benchCandidates(full), short, aliasFamily(short)]) {
+  for (const key of benchCandidates(model)) {
     if (map.has(key)) return map.get(key)
   }
   return undefined
@@ -65,17 +61,17 @@ export function scoreFor(map: Map<string, number | undefined>, model: string): n
 const DATE_SUFFIX = /-(\d{8}|\d{4}-\d{2}-\d{2}|\d{2}-\d{4}|\d{4}|latest)$/
 const VARIANT_SUFFIX = /-(preview|free)$/
 
-/**
- * Families BenchLM stores under a spelling no shape rule derives: the catalog's family on the left,
- * BenchLM's own row key on the right — a glued version, or a creator the catalog id leaves out.
- */
-const FAMILY_ALIASES: Record<string, string> = { gemma4: "gemma-4", beam: "reflection-beam" }
+const BENCHLM_KEY_BY_FAMILY: Record<string, string> = {
+  gemma4: "gemma-4",
+  beam: "reflection-beam",
+}
 
-/** Applied to every candidate, replacing the family token that starts a segment. */
 const aliasFamily = (id: string) =>
   id
     .split("/")
-    .map((segment) => segment.replace(/^([a-z0-9]+)/, (token) => FAMILY_ALIASES[token] ?? token))
+    .map((segment) =>
+      segment.replace(/^([a-z0-9]+)/, (token) => BENCHLM_KEY_BY_FAMILY[token] ?? token),
+    )
     .join("/")
 
 /**
@@ -100,8 +96,9 @@ export function benchCandidates(id: string): string[] {
       }
     }
   }
-  const aliased = out.map(aliasFamily)
-  const candidates = [...new Set([...out, ...aliased])]
+  const bare = lastSegment(base)
+  const aliased = [...out, bare].map(aliasFamily)
+  const candidates = [...new Set([...out, bare, ...aliased])]
   candidateCache.set(id, candidates)
   return candidates
 }
