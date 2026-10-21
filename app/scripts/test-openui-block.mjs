@@ -1,7 +1,3 @@
-/**
- * A reply's `openui-lang` fences: which ones are blocks to draw, where each one starts, the body it
- * holds, its id, and whether the reply is still streaming it.
- */
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
@@ -10,7 +6,6 @@ import { openuiParts } from "../src/lib/openui-block.ts"
 
 const asText = (reply) => [{ kind: "text", at: 0, text: reply }]
 
-/** Every part starts exactly where its `at` says it does. */
 const startsWhereItSays = (reply, parts) =>
   parts.every((part) =>
     part.kind === "text"

@@ -2,20 +2,29 @@ export type OpenuiPart =
   | { kind: "text"; at: number; text: string }
   | { kind: "openui"; at: number; source: string; id?: string; open: boolean }
 
-const FENCE = /^( {0,3})(`{3,}|~{3,})(.*)$/
+type Fence = { char: string; length: number }
+
+const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/
 const LIST_ITEM = /^( *)([*+-]|[0-9]{1,9}[.)])( +|$)/
 const ID = /^# id: ([a-z0-9-]{1,40})$/
 const INFO = "openui-lang"
 
-/** A bare run of the opener's character, at least as long, up to three spaces in. */
-function closes(line: string, char: string, length: number) {
-  const body = line.replace(/^ {0,3}/, "")
-  let run = 0
-  while (body[run] === char) run++
-  return run >= length && /^[ \t]*$/.test(body.slice(run))
+function fenceOf(line: string) {
+  const match = FENCE.exec(line)
+  if (!match) return null
+  return { char: match[1][0], length: match[1].length, rest: match[2] }
 }
 
-/** The block's id sits on the first line of the body with anything on it. */
+function closes(line: string, char: string, length: number) {
+  const fence = fenceOf(line)
+  return !!fence && fence.char === char && fence.length >= length && /^[ \t]*$/.test(fence.rest)
+}
+
+// CommonMark: a list marker is followed by one to four spaces before its item's own content.
+function contentColumn(item: RegExpExecArray) {
+  return item[1].length + item[2].length + Math.min(item[3].length || 1, 4)
+}
+
 function idOf(source: string) {
   for (const line of source.split("\n")) {
     const trimmed = line.trim()
@@ -40,9 +49,7 @@ export function openuiParts(content: string): OpenuiPart[] {
 
   const parts: OpenuiPart[] = []
   let textFrom = 0
-  let plain: { char: string; length: number } | null = null
-  // The innermost open list item's content column: a fence that far in belongs to the item. A
-  // nested item is already measured from the margin, so it just becomes the current one.
+  let plain: Fence | null = null
   let item: number | null = null
 
   for (let i = 0; i < lines.length; i++) {
@@ -53,24 +60,23 @@ export function openuiParts(content: string): OpenuiPart[] {
     }
     const listItem = LIST_ITEM.exec(line)
     if (listItem) {
-      item = listItem[1].length + listItem[2].length + Math.min(listItem[3].length || 1, 4)
+      item = contentColumn(listItem)
       continue
     }
     if (!line.trim()) continue
-    if (item !== null && line.length - line.trimStart().length < item) item = null
+    const indent = line.length - line.trimStart().length
+    if (item !== null && indent < item) item = null
 
-    const fence = FENCE.exec(line)
+    const fence = fenceOf(line)
     if (!fence) continue
-    const char = fence[2][0]
-    const length = fence[2].length
-    if (fence[3] !== INFO || (item !== null && fence[1].length >= item)) {
-      plain = { char, length }
+    if (fence.rest !== INFO || (item !== null && indent >= item)) {
+      plain = { char: fence.char, length: fence.length }
       continue
     }
 
     let close = -1
     for (let j = i + 1; j < lines.length; j++) {
-      if (closes(lines[j], char, length)) {
+      if (closes(lines[j], fence.char, fence.length)) {
         close = j
         break
       }
