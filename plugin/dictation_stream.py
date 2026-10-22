@@ -13,6 +13,10 @@ The rule that decides what is committed is ``newly_committed`` over ``settled``:
 most recent windows agree on, short of the newest — the frontier word is held back until a later
 window still has it — and past what is already committed. All plain functions over lists of words,
 which is what lets the promise be tested without a model or a microphone.
+
+A phrase is committed as text when it finishes, and tidied on the bot's own model first
+(``dictation_cleanup.py``): the words a window commits are never rewritten, so the phrase — not a
+later guess — is what carries the user's sentence into the bar.
 """
 
 from __future__ import annotations
@@ -27,7 +31,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
-from . import dictation
+from . import dictation, dictation_cleanup
 
 # The audio a rolling window covers, and the least time between two decodes.
 WINDOW_S = 4.0
@@ -204,6 +208,8 @@ class Take:
         vocabulary: Sequence[str] = (),
         language: str = "",
         model: str = "",
+        clean: Optional[Callable[[str], str]] = None,
+        cleanup_model: Optional[Dict[str, str]] = None,
         window_s: float = WINDOW_S,
         hop_s: float = HOP_S,
         quiet_s: float = QUIET_S,
@@ -223,6 +229,9 @@ class Take:
         self._transcribe = transcribe
         self._decode = decode
         self._clock = clock
+        # A finished phrase's cleanup, injected as the transcriber is: the rules of when a phrase is
+        # tidied are the take's, and what a model answers is the cleaner's (#290).
+        self._clean = clean or dictation_cleanup.Cleaner(self.vocabulary, model=cleanup_model)
         self._lock = threading.RLock()
         self._samples: List[float] = []
         self._committed: List[str] = []
@@ -379,13 +388,28 @@ class Take:
         phrase: Optional[Dict[str, Any]] = None
         if self._phrase_words:
             self._closed += 1
-            phrase = {"id": self._closed, "text": " ".join(self._phrase_words)}
+            # Tidied before it is committed, and only here: a phrase is cleaned once, as it closes,
+            # so what answers this request is the text the user reads (#290, ADR 0017).
+            phrase = {"id": self._closed, "text": self._tidied(" ".join(self._phrase_words))}
             self._phrases.append(phrase)
         self._phrase_words = []
         self._phrase_from = max(0, len(self._samples) - int(OVERLAP_S * self.rate))
         self._previous = []
         self._decoded_at = self._clock()
         return {"words": "", "phrases": [phrase] if phrase else [], "behind": self._behind}
+
+    def _tidied(self, text: str) -> str:
+        """The phrase as the user reads it: its tidied words, or the words the host heard.
+
+        A cleanup that raises or answers nothing is a cleanup that didn't happen, so the take goes
+        on with the phrase exactly as it was heard — the promise that a take can't be failed by its
+        own cleanup (ADR 0017).
+        """
+        try:
+            cleaned = self._clean(text)
+        except Exception:
+            return text
+        return cleaned if isinstance(cleaned, str) and cleaned.strip() else text
 
 
 # Whisper keeps the last 224 prompt tokens; a hundred words is well inside that.
@@ -517,12 +541,15 @@ def start(
     profile: str,
     hint: str = "",
     vocabulary: Sequence[str] = (),
+    cleanup_model: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Opens a take for a profile: waits for the host's model, then answers whether it is ready.
 
     This is the one call of a take that may wait — a cold host loads its model inside it — and the
     voice bar says the take is preparing until it answers. The bot's vocabulary rides in here and
-    is carried by the take, into every window's prompt and, later, into cleanup's instructions.
+    is carried by the take, into every window's prompt and into each finished phrase's cleanup.
+    ``cleanup_model`` is that cleanup's model where the bot has picked one (the Dictation tab's
+    field, #295); without one the bot's own model tidies every phrase.
     """
     state = dictation.info()
     if not state.get("ready"):
@@ -541,6 +568,7 @@ def start(
         vocabulary=vocabulary,
         language=language,
         model=model,
+        cleanup_model=cleanup_model,
     )
     takes.open(profile, take)
     return {"take": take.id, "ready": True, "model": model, "language": language}

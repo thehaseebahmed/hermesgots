@@ -10,8 +10,9 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
-from plugin import dictation, dictation_stream
+from plugin import dictation, dictation_cleanup, dictation_stream
 from plugin.tests.test_dictation import hermes
+from plugin.tests.test_dictation_cleanup import FakeLlm
 
 SLICE_S = 0.25
 RATE = 16000
@@ -77,6 +78,21 @@ def push(heard: dictation_stream.Take, clock: Clock, count: int = 1, pause: bool
         clock.advance(SLICE_S)
         answers.append(heard.add(b"opus", pause=pause and index == count - 1))
     return answers
+
+
+class Tidy:
+    """A finished phrase's cleanup with a scripted answer per phrase, and what it was asked."""
+
+    def __init__(self, *answers, error=None) -> None:
+        self.answers = list(answers)
+        self.error = error
+        self.calls = []
+
+    def __call__(self, text):
+        self.calls.append(text)
+        if self.error is not None:
+            raise self.error
+        return self.answers.pop(0) if self.answers else text
 
 
 class AgreeTest(unittest.TestCase):
@@ -312,6 +328,86 @@ class PhraseTest(unittest.TestCase):
         self.assertEqual(heard.add(b"opus", pause=True)["phrases"], [])
 
 
+class CleanupTest(unittest.TestCase):
+    """A finished phrase is tidied before it is committed, once, and the take carries on either way."""
+
+    def test_a_finished_phrase_is_committed_as_its_tidied_text(self) -> None:
+        tidy = Tidy("Hello there, my friend.")
+        heard, _, clock = take(Scripted(["um hello there my friend"] * 6), clean=tidy)
+        push(heard, clock, count=5)
+        answer = heard.add(b"opus", pause=True)
+        self.assertEqual([phrase["text"] for phrase in answer["phrases"]], ["Hello there, my friend."])
+        # The model is asked to tidy the phrase as the host heard it, and the words it heard are
+        # still the words the take committed: a phrase's tidying is what the user reads, not a
+        # rewrite of what was said.
+        self.assertEqual(tidy.calls, ["um hello there my friend"])
+        self.assertEqual(
+            heard.committed, ["um", "hello", "there", "my", "friend"]
+        )
+
+    def test_the_tail_phrase_is_tidied_before_stop_answers_with_it(self) -> None:
+        # The phrase that closes at Stop is the one the user waits for, so it is tidied inside the
+        # answer Stop gives, not after it.
+        heard, _, clock = take(Scripted(["um hello there"] * 4), clean=Tidy("Hello there."))
+        push(heard, clock, count=2)
+        self.assertEqual(
+            [phrase["text"] for phrase in heard.stop()["phrases"]], ["Hello there."]
+        )
+
+    def test_a_phrase_is_tidied_once_and_never_again(self) -> None:
+        tidy = Tidy("Hello there, my friend.", "And then some.")
+        heard, _, clock = take(
+            Scripted(["um hello there my friend"] * 3 + ["and then some"] * 4), clean=tidy
+        )
+        push(heard, clock, count=5)
+        first = heard.add(b"opus", pause=True)["phrases"][0]
+        push(heard, clock, count=4)
+        heard.add(b"opus", pause=True)
+        heard.stop()
+        self.assertEqual(
+            [phrase["text"] for phrase in heard.phrases],
+            ["Hello there, my friend.", "And then some."],
+        )
+        self.assertEqual(len(tidy.calls), 2, "one call for each phrase, and none for the take")
+        # A phrase the bar has already been handed does not change when a later one closes.
+        self.assertEqual(heard.phrases[0], first)
+
+    def test_a_cleanup_that_raises_leaves_the_phrase_as_it_was_heard(self) -> None:
+        heard, _, clock = take(
+            Scripted(["um hello there my friend"] * 3 + ["and then some"] * 5),
+            clean=Tidy(error=RuntimeError("the host's model is down")),
+        )
+        push(heard, clock, count=5)
+        answer = heard.add(b"opus", pause=True)
+        self.assertEqual(
+            [phrase["text"] for phrase in answer["phrases"]], ["um hello there my friend"]
+        )
+        # The take is unaffected: the next phrase closes and Stop still answers.
+        push(heard, clock, count=3)
+        self.assertEqual(
+            [phrase["text"] for phrase in heard.stop()["phrases"]], ["and then some"]
+        )
+
+    def test_a_cleanup_that_answers_nothing_leaves_the_phrase_as_it_was_heard(self) -> None:
+        heard, _, clock = take(Scripted(["um hello there my friend"] * 6), clean=Tidy(""))
+        push(heard, clock, count=5)
+        answer = heard.add(b"opus", pause=True)
+        self.assertEqual(
+            [phrase["text"] for phrase in answer["phrases"]], ["um hello there my friend"]
+        )
+
+    def test_a_take_s_cleanup_is_asked_with_its_own_words(self) -> None:
+        # The take's vocabulary reaches the cleanup's instructions, through the real cleaner: a name
+        # the host heard as a common word is what the bot's own list corrects.
+        llm = FakeLlm({"text": "Gots ships it."})
+        with mock.patch.object(dictation_cleanup, "ctx", mock.Mock(llm=llm)):
+            heard, _, clock = take(Scripted(["gots ships it"] * 4), vocabulary=["Gots"])
+            push(heard, clock, count=2)
+            answer = heard.stop()
+        self.assertEqual([phrase["text"] for phrase in answer["phrases"]], ["Gots ships it."])
+        self.assertIn("Vocabulary: Gots", llm.calls[0]["input"][0]["text"])
+
+
 class StopTest(unittest.TestCase):
     def test_a_stop_before_any_audio_answers_nothing_and_lets_the_take_go(self) -> None:
         heard, _, _ = take()
@@ -542,6 +638,26 @@ class StartTest(unittest.TestCase):
         # the cleanup a finished phrase will get.
         self.assertEqual(heard.vocabulary, ["Gots", "DeepSeek"])
         self.assertIn("Gots DeepSeek", heard._prompt())
+
+    def test_a_take_carries_the_cleanup_model_it_was_opened_with(self) -> None:
+        # The seam the Dictation tab's pick fits into (#295): the take's cleaner holds the model,
+        # and the bot's own model is what answers without one.
+        _, patch = hermes()
+        profiles = dictation_stream.Takes()
+        with patch:
+            started = dictation_stream.start(
+                profiles, "haseeb", "Gots", [], {"provider": "acme", "model": "fast"}
+            )
+        heard = profiles.get("haseeb", started["take"])
+        self.assertEqual(heard._clean.model, {"provider": "acme", "model": "fast"})
+
+    def test_a_take_with_no_cleanup_model_tidies_on_the_bot_s_own(self) -> None:
+        _, patch = hermes()
+        profiles = dictation_stream.Takes()
+        with patch:
+            started = dictation_stream.start(profiles, "haseeb", "Gots", [])
+        heard = profiles.get("haseeb", started["take"])
+        self.assertIsNone(heard._clean.model)
 
     def test_a_host_that_cannot_dictate_refuses_the_take(self) -> None:
         _, patch = hermes(_load_stt_config=lambda: {"enabled": False})

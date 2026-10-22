@@ -35,6 +35,7 @@ from . import (
     context,
     delegation,
     dictation,
+    dictation_cleanup,
     dictation_stream,
     meetings,
     events,
@@ -2407,6 +2408,7 @@ def register(ctx) -> None:
     library.register(ctx)
     research.register(ctx)
     meetings.register(ctx)
+    dictation_cleanup.register(ctx)
     register_handler = getattr(ctx, "register_platform_handler", None)
     if register_handler is None:
         logger.warning("memento: this Hermes version can't add API server routes; update Hermes")
