@@ -8,8 +8,12 @@ the whole window, and the guesses disagree at their end — the last word or two
 being spoken, or still being weighed. Committing the guess wholesale means words appear and are then
 taken away and replaced, which in a field the user is reading looks like the app fighting itself.
 Committing only what the newest two windows agree on means a word appears once, correct, about a
-second after it is said. The cost is that second, and it is the price of the text never moving under
-the reader's eye.
+second after it is said. The word they agree on last is held back for one more window, because that
+is the word the newer guess was still weighing: a word is only shown once a later window still has
+it, behind a word both windows had. A phrase that closes does not wait for that window — the host
+decodes the phrase's own audio whole and commits its tail from that — so the last words of a phrase
+arrive with the pause rather than at the end of the take. The cost is that second, and it is the
+price of the text never moving under the reader's eye.
 
 Showing it in the bar rather than the composer is the same principle applied to the field. The
 composer is a plain textarea: a live partial inside it has to be replaced on every window, has to

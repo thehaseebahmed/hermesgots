@@ -314,7 +314,7 @@ One stretch of a dictation between two pauses: the unit that finishes, is cleane
 _Avoid_: chunk, piece, segment, utterance
 
 **Committed text**:
-The words of a dictation the host has settled on. Gots never changes them again; a phrase still being heard is not committed yet.
+The words of a dictation the host has settled on: two windows agreed on them and a later window still had them. Gots never changes them again, so a word is shown once and never replaced, reordered or taken away; the newest word two windows agree on waits for the next window before it counts, and a phrase still being heard is not committed yet.
 _Avoid_: partial, interim, stable prefix, live text
 
 **Cleanup**:
