@@ -72,6 +72,21 @@ const clips = async () => (await (await fetch(`${mock}/__mock/dictation`)).json(
 const streamClips = async () => (await (await fetch(`${streamMock}/__mock/dictation`)).json()).clips
 /** The takes a streaming host holds: one it has stopped or cancelled is no longer there. */
 const takeState = async () => await (await fetch(`${streamMock}/__mock/dictation-take`)).json()
+/** Waits until the host holds a take: Cancel a moment earlier and there is nothing to cancel. */
+async function takeHeld(what) {
+  for (let end = Date.now() + 10_000; !(await takeState()).takes.length;) {
+    assert.ok(Date.now() < end, what)
+    await new Promise((done) => setTimeout(done, 50))
+  }
+}
+
+/** Waits until the host holds no take: the bar never waits on that request, so a flow doesn't either. */
+async function noTakes(what) {
+  for (let end = Date.now() + 5000; (await takeState()).takes.length;) {
+    assert.ok(Date.now() < end, what)
+    await new Promise((done) => setTimeout(done, 50))
+  }
+}
 
 const PHONE = { width: 390, height: 844 }
 
@@ -238,6 +253,10 @@ try {
       "no transcribing that never ends",
     )
     await page.getByText("The recording stopped.").waitFor()
+    // The line says what failed and what to try, and closing it discards the recording Retry
+    // would have sent.
+    await page.getByText("Check the microphone in this app's permissions, then try again.").waitFor()
+    await page.getByRole("button", { name: "Discard" }).waitFor()
     await shot(page, "phone-light-9-recorder-failed")
 
     await retried(page)
@@ -417,11 +436,12 @@ try {
       await composer.fill("")
       await mic.click()
       await page.getByRole("button", { name: "Stop" }).waitFor()
+      await takeHeld("the host has the take being cancelled")
       await page.waitForTimeout(900)
       await page.getByRole("button", { name: "Cancel" }).click()
       await mic.waitFor()
       assert.equal(await composer.inputValue(), "")
-      assert.deepEqual((await takeState()).takes, [], "a cancelled take is dropped on the host")
+      await noTakes("a cancelled take is dropped on the host")
       assert.equal(
         await page.evaluate(async () => (await import("/src/lib/db.ts")).db.dictations.count()),
         0,
@@ -441,8 +461,102 @@ try {
         "",
         "the take went out as the message, not into the field as well",
       )
-      assert.deepEqual((await takeState()).takes, [], "the send finished the take on the host")
+      await noTakes("the send finished the take on the host")
       await shot(page, `${label}-14-sent`)
+      await page.close()
+    }
+
+    // A host that refuses the take says why, in its own words, with the one thing to try: the take
+    // stops there rather than leaving the bar preparing for a host that never opened one, and Retry
+    // asks again on a host that answers.
+    {
+      const page = await open(streamMock, PHONE)
+      const composer = page.getByRole("textbox").last()
+      const mic = page.getByRole("button", { name: "Voice", exact: true })
+      // The take's whole bar, so its failure line and the buttons beside it are scoped to it.
+      const bar = page.getByRole("group", { name: "Dictation take" })
+      const refusal = "This Hermes can't decode audio while it is spoken."
+      let asked = 0
+      await page.route("**/api/plugins/memento/dictation/take", async (route) => {
+        asked += 1
+        if (asked > 1) return route.continue()
+        await route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({ error: { message: refusal } }),
+        })
+      })
+      await composer.fill("Note:")
+      await mic.click()
+      await page.getByText(refusal).waitFor({ timeout: 15_000 })
+      await page.getByText("Check that this bot's host can dictate, then try again.").waitFor()
+      assert.equal(await page.getByText("Preparing…").count(), 0, "a refused take is not left preparing")
+      await shot(page, "phone-light-15-start-refused")
+
+      await bar.getByRole("button", { name: "Retry" }).click()
+      await bar.getByText("Preparing…").waitFor({ timeout: 15_000 })
+      assert.equal(asked, 2, "Retry asked the host again")
+      await takeHeld("the retried take open on the host")
+      await bar.getByRole("button", { name: "Cancel" }).click()
+      await mic.waitFor()
+      assert.equal(await composer.inputValue(), "Note:", "the composer is as it was")
+      assert.deepEqual((await takeState()).takes, [], "the cancelled take is dropped on the host")
+      await page.close()
+    }
+
+    // A host that goes away mid-take ends the take with the words it already had, says what
+    // happened and what to try, and lets go of the microphone and of its take: the next take opens
+    // on the same page.
+    {
+      const page = await open(streamMock, PHONE)
+      const composer = page.getByRole("textbox").last()
+      const mic = page.getByRole("button", { name: "Voice", exact: true })
+      const bar = page.getByRole("group", { name: "Dictation take" })
+      const broken = "Couldn't decode the recording: bad container"
+      let slices = 0
+      await page.route("**/api/plugins/memento/dictation/take/**/audio", async (route) => {
+        slices += 1
+        // The one slice the host fails, and never again: the take after the failure is a working one.
+        if (slices !== 6) return route.continue()
+        await route.fulfill({
+          status: 502,
+          contentType: "application/json",
+          body: JSON.stringify({ error: { message: broken } }),
+        })
+      })
+      await composer.fill("")
+      await mic.click()
+      await bar.getByText("Let us ship 25 things.").waitFor({ timeout: 15_000 })
+      await page.getByText(broken).waitFor({ timeout: 15_000 })
+      await page.getByText("Try again; the words it already heard are kept.").waitFor()
+      assert.equal(
+        await page.getByText("Transcribing…").count(),
+        0,
+        "no transcribing that never ends",
+      )
+      await shot(page, "phone-light-16-host-gone")
+      await bar.getByRole("button", { name: "Dismiss" }).click()
+      await mic.waitFor()
+      assert.equal(
+        await composer.inputValue(),
+        TAKE,
+        "the words the host had committed land where the take began",
+      )
+      // The host is told to forget the take without the bar waiting on it, so let that land.
+      await noTakes("the failed take is let go on the host")
+      assert.equal(
+        await page.evaluate(async () => (await import("/src/lib/db.ts")).db.dictations.count()),
+        0,
+        "a failed take keeps nothing on the device",
+      )
+      // The microphone and the profile's take were let go with it: another take opens here.
+      await mic.click()
+      await bar.getByText("Preparing…").waitFor({ timeout: 15_000 })
+      await page.waitForTimeout(1500)
+      await shot(page, "phone-light-17-after-failure-take")
+      await takeHeld("a take open after the failure")
+      await bar.getByRole("button", { name: "Cancel" }).click()
+      await mic.waitFor()
       await page.close()
     }
 
