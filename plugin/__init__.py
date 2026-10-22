@@ -1686,11 +1686,15 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     async def record_move(
         path, key, session_id, text, thread, thread_session, item, body, files, new=False
     ) -> None:
-        # Main shows a marker where the message went; it never entered Main's session.
-        await asyncio.to_thread(
-            moves.record, path, key, session_id, text, thread,
-            thread_session=thread_session, item=item, new=new, body=body.get("body"), files=files,
-        )
+        # Main shows a marker where the message went; it never entered Main's session. The message
+        # is already on its thread, so a marker that can't be kept must not fail the answer.
+        try:
+            await asyncio.to_thread(
+                moves.record, path, key, session_id, text, thread,
+                thread_session=thread_session, item=item, new=new, body=body.get("body"), files=files,
+            )
+        except Exception:
+            logger.debug("memento: couldn't record a move", exc_info=True)
 
     async def triage_message(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1784,15 +1788,22 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return web.json_response(answer)
 
     async def move_phases(path: Path, found: List[Dict[str, Any]]) -> Dict[str, Tuple[str, Any]]:
-        """Each open move's ``(phase, outbox item)``: one outbox read per thread, not per move."""
-        threads = {m["thread_session"] for m in found if m["thread_session"] and m["item"]}
-        reads = {t: await asyncio.to_thread(outbox.read, path, t) for t in threads}
-        statuses = getattr(adapter, "_run_statuses", None) or {}
+        """Each move's ``(phase, outbox item)``: one outbox read per thread, not per move. The outbox
+        forgets a sent item after an hour, so an older move is a reply that finished."""
+        recent = time.time() * 1000 - outbox.KEEP_SENT_MS
+        open_ = [m for m in found if m["at"] >= recent and m["thread_session"] and m["item"]]
+        threads = sorted({m["thread_session"] for m in open_})
+        reads = dict(
+            zip(threads, await asyncio.gather(*(asyncio.to_thread(outbox.read, path, t) for t in threads)))
+        )
+        statuses = getattr(adapter, "_run_statuses", None)
+        statuses = statuses if isinstance(statuses, dict) else {}
         phases = {}
         for move in found:
-            read = reads.get(move["thread_session"])
+            read = reads.get(move["thread_session"]) if move in open_ else None
             item = read and next((i for i in read["items"] + read["sent"] if i["id"] == move["item"]), None)
-            phases[move["id"]] = (moves.phase(item, statuses.get(item and item.get("run_id"))), item)
+            status = statuses.get(item.get("run_id")) if item else None
+            phases[move["id"]] = (moves.phase(item, status), item)
         return phases
 
     async def get_moves(request: "web.Request") -> "web.Response":
@@ -1817,24 +1828,29 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if denied is not None:
             return denied
         path, session_id, key = store_path(), request.match_info["session_id"], request.match_info["move_id"]
-        move = await asyncio.to_thread(moves.get, path, session_id, key)
-        if move is None:
-            return _error(web, "No such move.", 404)
-        if move["undone"]:
-            return web.json_response({"object": "memento.move.undone", "undone": True})
-        where, item = (await move_phases(path, [move]))[key]
-        if not moves.undoable(move, where):
-            return _error(web, "The thread has already replied to this message.", 409)
-        try:
-            # Built first, so a body the host refuses leaves the message where it is.
-            run = outbox.clean_body(session_id, move["body"])
-        except ValueError as error:
-            return _error(web, str(error), 400)
-        thread_session = move["thread_session"]
-        if where == moves.QUEUED:
-            await asyncio.to_thread(outbox.remove, path, thread_session, move["item"])
-        else:
-            if where == moves.RUNNING:
+        # A double tap, or two devices, wait for each other and the second finds it undone.
+        async with triage.lock(f"undo:{session_id}:{key}"):
+            move = await asyncio.to_thread(moves.get, path, session_id, key)
+            if move is None:
+                return _error(web, "No such move.", 404)
+            if move["undone"]:
+                return web.json_response({"object": "memento.move.undone", "undone": True})
+            where, item = (await move_phases(path, [move]))[key]
+            if not moves.undoable(move, where) or (where != moves.QUEUED and item is None):
+                return _error(web, "The thread has already replied to this message.", 409)
+            try:
+                # Built first, so a body the host refuses leaves the message where it is.
+                run = outbox.clean_body(session_id, move["body"])
+            except ValueError as error:
+                return _error(web, str(error), 400)
+            thread_session = move["thread_session"]
+            taken = None
+            if where == moves.QUEUED:
+                taken = await asyncio.to_thread(outbox.take, path, thread_session, move["item"])
+                if taken is None:
+                    # The dispatcher started it between the read and now: the thread is replying.
+                    return _error(web, "The thread has already started on this message.", 409)
+            elif where == moves.RUNNING:
                 try:
                     await outbox.post(
                         adapter,
@@ -1845,13 +1861,31 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     )
                 except outbox.StartError as error:
                     return _error(web, f"Couldn't stop the thread's reply: {error}", 502)
-            await asyncio.to_thread(outbox.remove_sent, path, thread_session, move["item"])
-            await asyncio.to_thread(moves.take_from_transcript, hermes_home(), thread_session, move["text"])
-        if move["new"]:
-            # The thread existed only for this message.
-            await asyncio.to_thread(triage.discard, path, move["thread"])
-        await asyncio.to_thread(outbox.add, path, session_id, request_profile(), move["text"], move["files"], run)
-        await asyncio.to_thread(moves.mark_undone, path, key)
+            try:
+                await asyncio.to_thread(
+                    outbox.add, path, session_id, request_profile(), move["text"], move["files"], run
+                )
+            except Exception:
+                logger.debug("memento: couldn't queue an undone move on Main", exc_info=True)
+                if taken is not None:
+                    await asyncio.to_thread(outbox.put_back, path, taken)
+                return _error(web, "Couldn't put the message back in Main.", 500)
+            await asyncio.to_thread(moves.mark_undone, path, key)
+            if taken is None:
+                # Main has the message now; what is left in the thread is tidied best effort.
+                await asyncio.to_thread(outbox.remove_sent, path, thread_session, move["item"])
+                await asyncio.to_thread(
+                    moves.take_from_transcript,
+                    hermes_home(),
+                    thread_session,
+                    move["text"],
+                    item.get("sent_at") or 0,
+                )
+            if move["new"]:
+                left = await asyncio.to_thread(outbox.read, path, thread_session)
+                if not left["items"] and not left["sent"]:
+                    # The thread existed only for this message.
+                    await asyncio.to_thread(triage.discard, path, move["thread"])
         follow_queue(request, session_id, path)
         events.note("session", session_id, path, True)
         events.note("session", thread_session, path, True)

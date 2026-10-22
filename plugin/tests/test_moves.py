@@ -130,27 +130,71 @@ class UndoTests(unittest.TestCase):
         self.assertFalse(moves.undoable(moves.get(self.path, "main-s", "m2"), moves.QUEUED))
         self.assertIsNone(moves.get(self.path, "other", "m1"))
 
-    def test_the_message_leaves_the_threads_transcript(self):
+    def _transcript(self, rows):
         state = self.home / "state.db"
         conn = sqlite3.connect(state)
-        conn.execute("CREATE TABLE messages (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT)")
+        conn.execute(
+            "CREATE TABLE messages (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, timestamp REAL)"
+        )
         conn.executemany(
-            "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
-            [
-                ("memento-t1", "user", "earlier"),
-                ("memento-t1", "assistant", "ok"),
-                ("memento-t1", "user", "more on Lisbon"),
-                ("memento-t1", "assistant", "partial"),
-                ("other", "user", "more on Lisbon"),
-            ],
+            "INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)", rows
         )
         conn.commit()
         conn.close()
-        self.assertEqual(moves.take_from_transcript(self.home, "memento-t1", "more on Lisbon"), 2)
-        left = sqlite3.connect(state).execute("SELECT session_id, content FROM messages ORDER BY id").fetchall()
-        self.assertEqual(left, [("memento-t1", "earlier"), ("memento-t1", "ok"), ("other", "more on Lisbon")])
+        return state
+
+    def _left(self, state):
+        return sqlite3.connect(state).execute("SELECT session_id, content FROM messages ORDER BY id").fetchall()
+
+    def test_the_message_leaves_the_threads_transcript(self):
+        state = self._transcript(
+            [
+                ("memento-t1", "user", "earlier", 90),
+                ("memento-t1", "assistant", "ok", 91),
+                ("memento-t1", "user", '<attachment name="a" />\nmore on Lisbon', 100),
+                ("memento-t1", "assistant", "partial", 101),
+                ("other", "user", "more on Lisbon", 100),
+            ]
+        )
+        self.assertEqual(moves.take_from_transcript(self.home, "memento-t1", "more on Lisbon", 99_000), 2)
+        self.assertEqual(
+            self._left(state),
+            [("memento-t1", "earlier"), ("memento-t1", "ok"), ("other", "more on Lisbon")],
+        )
         self.assertEqual(moves.take_from_transcript(self.home, "memento-t1", "absent"), 0)
         self.assertEqual(moves.take_from_transcript(Path(tempfile.mkdtemp()), "x", "y"), 0)
+
+    def test_the_transcript_is_left_alone_unless_the_message_is_certain(self):
+        state = self._transcript(
+            [
+                ("memento-t1", "user", "ok", 10),
+                ("memento-t1", "assistant", "fine", 11),
+                ("memento-t1", "user", "okay, and also this", 200),
+                ("memento-t1", "assistant", "reply", 201),
+            ]
+        )
+        # A substring of a later message, and an older exact match, are not the moved message.
+        self.assertEqual(moves.take_from_transcript(self.home, "memento-t1", "ok", 150_000), 0)
+        self.assertEqual(moves.take_from_transcript(self.home, "memento-t1", "okay", 150_000), 0)
+        self.assertEqual(len(self._left(state)), 4)
+        # Neither is the thread's newest user row when it was written before the item was sent.
+        self.assertEqual(moves.take_from_transcript(self.home, "memento-t1", "okay, and also this", 500_000), 0)
+        self.assertEqual(len(self._left(state)), 4)
+
+    def test_a_list_read_does_not_load_bodies_and_old_ones_are_dropped(self):
+        self._move()
+        listed = moves.read(self.path, "main-s")[0]
+        self.assertIs(listed["body"], True)
+        self.assertEqual(listed["files"], [])
+        conn = connect(self.path)
+        conn.execute("UPDATE main_moves SET at = 1")
+        conn.close()
+        moves.record(self.path, "m2", "main-s", "fresh", "t2", thread_session="s", item="q", body=self.body)
+        self.assertIsNone(moves.get(self.path, "main-s", "m1")["body"])
+        self.assertEqual(moves.get(self.path, "main-s", "m2")["body"], self.body)
+
+    def test_phase_ignores_a_status_that_is_not_a_record(self):
+        self.assertEqual(moves.phase({"run_id": "r"}, "running"), moves.REPLIED)
 
     def test_a_v33_store_gains_the_columns(self):
         old = db_path(Path(tempfile.mkdtemp()))

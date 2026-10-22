@@ -1299,7 +1299,7 @@ export async function sendFromMain(
       const answer = await ask(TRIAGE_MS * 0.7).catch(() => ask(TRIAGE_MS * 0.3))
       if (answer.decision !== "main") {
         moved = { threadId: answer.threadId, created: answer.decision === "new" }
-        void refreshMoves(conversationId)
+        void refreshMoves(conversationId).catch(quietly("Reading a chat's moves"))
       }
     } catch {
       // Main it is.

@@ -1398,10 +1398,10 @@ export interface Move {
   undoable: boolean
 }
 
-/** The messages triage moved out of a Main thread, oldest first. */
 const movesRoot = (config: HermesConfig, sessionId: string) =>
   `${pluginRoot(config.baseUrl)}/sessions/${encodeURIComponent(sessionId)}/moves`
 
+/** The messages triage moved out of a Main thread, oldest first. */
 export async function getMoves(config: HermesConfig, sessionId: string): Promise<Move[]> {
   const response = await request(movesRoot(config, sessionId), {
     headers: headers(config),
