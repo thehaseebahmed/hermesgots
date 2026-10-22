@@ -333,6 +333,19 @@ try {
       await mic.click()
       await bar.getByText("Preparing…").waitFor()
       await shot(page, `${label}-9-preparing`)
+      // Every text the bar shows, in order, so the flow can read it at any two moments of a take.
+      await page.evaluate(() => {
+        window.__heard = []
+        window.__hearWatcher = window.setInterval(() => {
+          const region = document.querySelector('[role="region"][aria-label="Dictation"]')
+          const text = [...(region?.querySelectorAll("p") ?? [])]
+            .map((line) => line.textContent)
+            .filter((line) => line && line !== "Behind")
+            .join(" ")
+            .trim()
+          if (text && window.__heard.at(-1) !== text) window.__heard.push(text)
+        }, 40)
+      })
       await bar.getByText("Let us ship the dictation").waitFor({ timeout: 15_000 })
       await bar.getByText("Behind").waitFor()
       assert.equal(await bar.getAttribute("aria-live"), "off", "the transcript is read on request")
@@ -343,6 +356,23 @@ try {
       // The take lands where the caret was, and the tail phrase closed at Stop is part of it.
       assert.equal(await composer.inputValue(), "Note: Let us ship the dictation feature today.")
       await shot(page, `${label}-11-heard`)
+      // Read at two moments: what the bar showed earlier starts what it showed later, so no word
+      // was replaced, reordered or taken away while the user was reading it.
+      const moments = await page.evaluate(() => {
+        window.clearInterval(window.__hearWatcher)
+        return window.__heard
+      })
+      assert.ok(moments.length >= 2, `the bar was read at two moments (${JSON.stringify(moments)})`)
+      for (const [at, earlier] of moments.slice(0, -1).entries()) {
+        assert.ok(
+          moments[at + 1].startsWith(earlier),
+          `"${moments[at + 1]}" starts with "${earlier}"`,
+        )
+      }
+      assert.ok(
+        moments.some((text) => text.split(" ").length > 1),
+        `the take's words arrived over more than one moment (${JSON.stringify(moments)})`,
+      )
       // One request in flight: the host never had two slices to answer at once.
       const heard = await (await fetch(`${streamMock}/__mock/dictation-take`)).json()
       assert.ok(heard.slices.length > 1, "the take was sent slice by slice")
