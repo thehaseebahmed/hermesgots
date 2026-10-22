@@ -65,7 +65,7 @@ What a model worked out before it answered, drawn above a chat's reply as a line
 _Avoid_: chain of thought, scratchpad, reasoning trace
 
 **Command**:
-Something Gots itself does from the composer: a new chat, settings, or how a message sent mid-reply goes. A command never reaches the agent as a message.
+Something Gots itself does from the composer: opening a thread (a chat, where threads are off), settings, or how a message sent mid-reply goes. A command never reaches the agent as a message.
 _Avoid_: slash command, action, app skill
 
 **Skill**:
@@ -88,11 +88,11 @@ One Hermes profile the user has linked to Gots: its own agent, skills and settin
 _Avoid_: profile, agent, assistant
 
 **Thread**:
-One of a bot's chats, shown as a card on the bot's screen. A project session is not one.
+One of a bot's chats, drawn as a card inside its Main thread at the time it was started. A project session is not one.
 _Avoid_: conversation, session
 
 **Main thread**:
-A bot's one permanent chat, where its messages land first and where the ones that need no thread of their own stay. It can't be deleted.
+A bot's one permanent chat and the screen its bot opens to: its messages land there first, the ones needing no thread stay there, and every thread it has is drawn inside it as a card. It can't be deleted.
 _Avoid_: default chat, general chat, inbox
 
 **Triage**:
@@ -104,7 +104,7 @@ The model a bot's host makes that decision with. Nothing set means the bot's own
 _Avoid_: router model, decision model
 
 **Moved marker**:
-What the Main thread shows in place of a message that triage sent to another thread, with the way to undo it.
+What the Main thread shows in place of a message triage sent into an older thread, with the way to undo it. A message that opened a new thread is drawn there as that thread's card instead.
 _Avoid_: redirect notice, forwarded message
 
 **Host**:
