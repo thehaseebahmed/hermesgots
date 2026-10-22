@@ -23,7 +23,6 @@ import {
 
 import type { ChartProps, ChartSeries } from "./chart.tsx"
 
-/** The app's chart tokens: five series colours, and a sixth series starts them again. */
 const PALETTE = ["--chart-1", "--chart-2", "--chart-3", "--chart-4", "--chart-5"].map(
   (token) => `var(${token})`,
 )
