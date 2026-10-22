@@ -8,10 +8,15 @@ missions with their evidence ledgers (``research.py``)."""
 
 from __future__ import annotations
 
+import json
+import logging
 import sqlite3
 from pathlib import Path
+from typing import Any, Optional
 
-SCHEMA_VERSION = 33
+logger = logging.getLogger(__name__)
+
+SCHEMA_VERSION = 34
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -35,6 +40,39 @@ def connect(path: Path) -> sqlite3.Connection:
             conn.close()
             raise
     return conn
+
+
+def get_setting(path: Path, key: str) -> Optional[Any]:
+    """A value kept in ``host_settings`` (JSON), or None when it isn't there."""
+    if not path.exists():
+        return None
+    conn = connect(path)
+    try:
+        row = conn.execute("SELECT value FROM host_settings WHERE key = ?", (key,)).fetchone()
+    finally:
+        conn.close()
+    try:
+        return json.loads(row[0]) if row else None
+    except ValueError:
+        logger.debug("memento: the %s setting isn't valid JSON", key)
+        return None
+
+
+def put_setting(path: Path, key: str, value: Optional[Any]) -> None:
+    """Keeps ``value`` (JSON) under ``key`` in ``host_settings``; None removes it."""
+    if value is None and not path.exists():
+        return
+    conn = connect(path)
+    try:
+        if value is None:
+            conn.execute("DELETE FROM host_settings WHERE key = ?", (key,))
+        else:
+            conn.execute(
+                "INSERT OR REPLACE INTO host_settings (key, value) VALUES (?, ?)",
+                (key, json.dumps(value)),
+            )
+    finally:
+        conn.close()
 
 
 def _version(conn: sqlite3.Connection) -> int:
@@ -391,4 +429,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    SELECT id, session_id, text, thread, at, undone FROM main_moves_old"""
             )
             conn.execute("DROP TABLE main_moves_old")
+        # v34: settings the host keeps for the bot that aren't Hermes's own config: the triage model
+        # (triage.py).
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS host_settings (
+                   key TEXT PRIMARY KEY,
+                   value TEXT NOT NULL
+               )"""
+        )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

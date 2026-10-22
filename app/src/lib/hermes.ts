@@ -1048,6 +1048,37 @@ export async function setDelegationModel(
   return pickOf((await response.json())?.delegation)
 }
 
+/**
+ * The model a bot's host makes its triage decisions with; `null` when the bot's own model decides.
+ * Newer plugin only; a host without the route answers 404.
+ */
+export async function getTriageModel(
+  config: HermesConfig,
+  signal?: AbortSignal,
+): Promise<ModelChoice | null> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/triage-model`, {
+    headers: headers(config),
+    signal,
+  })
+  return pickOf((await response.json())?.triage_model)
+}
+
+/** Makes `pick` the model triage decides with; `null` clears it. Answers with what the host holds,
+ * and throws with its reason when it refuses (Hermes's, or that the host withholds the override). */
+export async function setTriageModel(
+  config: HermesConfig,
+  pick: ModelChoice | null,
+  signal?: AbortSignal,
+): Promise<ModelChoice | null> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/triage-model`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ triage_model: pick }),
+    signal,
+  })
+  return pickOf((await response.json())?.triage_model)
+}
+
 export async function checkHealth(config: HermesConfig) {
   const response = await request(`${serverRoot(config.baseUrl)}/health`, {
     headers: headers(config),
@@ -1456,7 +1487,8 @@ export async function researchAction(
   return (await response.json())?.mission as Record<string, unknown> | undefined
 }
 
-/** Whether the host lets a mission be written with another model (`info`'s `research.writers`). */
+/** Whether the host lets Gots pick the model of a call (`info`'s `research.writers`): a Research
+ * rewrite, a judge, a bot's triage model. */
 export async function getResearchWriters(config: HermesConfig) {
   const response = await request(`${pluginRoot(config.baseUrl)}/info`, { headers: headers(config) })
   const writers = (await response.json())?.research?.writers

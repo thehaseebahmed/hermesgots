@@ -326,7 +326,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "research_compare",
                     "community",
                     # A message sent from Main is sorted into a thread by the host; see triage.py.
-                    *(["triage", "moves"] if triage.available() is None else []),
+                    *(["triage", "moves", "triage_model"] if triage.available() is None else []),
                     # Hermes's own MCP built-ins, and the MCP screen with them; see mcp.py.
                     *mcp_features,
                 ],
@@ -591,6 +591,40 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except ImportError:
             return _error(web, "This Hermes version can't read models from here.", 501)
         return web.json_response({"object": "memento.delegation", "delegation": pick})
+
+    async def get_triage_model(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        pick = await asyncio.to_thread(triage.read_model, store_path())
+        return web.json_response({"object": "memento.triage_model", "triage_model": pick})
+
+    async def set_triage_model(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            pick = host_model.clean_triage_model(await json_body(request))
+        except ValueError as error:
+            return _error(web, str(error), 400)
+        config_path = host_config_path()
+        scope = profile_scope()
+        path = store_path()
+        gate = await asyncio.to_thread(research.llm_gate)
+
+        def run() -> Optional[Dict[str, str]]:
+            with scope():
+                return triage.set_model(config_path, path, pick, gate)
+
+        try:
+            saved = await asyncio.to_thread(run)
+        except triage.Withheld as error:
+            return _error(web, str(error), 403)
+        except ValueError as error:
+            return _error(web, str(error), 400)
+        except ImportError:
+            return _error(web, "This Hermes version can't switch models from here.", 501)
+        return web.json_response({"object": "memento.triage_model", "triage_model": saved})
 
     async def set_delegation(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1445,6 +1479,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/model", set_host_model)
     app.router.add_get(f"{PREFIX}/fallbacks", get_fallbacks)
     app.router.add_get(f"{PREFIX}/delegation", get_delegation)
+    app.router.add_get(f"{PREFIX}/triage-model", get_triage_model)
     app.router.add_get(f"{PREFIX}/skills", list_skills)
     app.router.add_get(f"{PREFIX}/mcp", list_mcp_servers)
     app.router.add_get(f"{PREFIX}/mcp/catalogue", list_mcp_catalogue)
@@ -1463,6 +1498,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_delete(f"{PREFIX}/mcp/{{name}}", remove_mcp_server)
     app.router.add_post(f"{PREFIX}/fallbacks", set_fallbacks)
     app.router.add_post(f"{PREFIX}/delegation", set_delegation)
+    app.router.add_post(f"{PREFIX}/triage-model", set_triage_model)
     app.router.add_get(f"{PREFIX}/github", github_status)
     app.router.add_get(f"{PREFIX}/github/repos", github_repos)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/label", label_session)

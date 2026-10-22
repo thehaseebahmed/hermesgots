@@ -2327,6 +2327,7 @@ const profileOf = (req) => PROFILE_PATH.exec(req.url ?? "")?.[1] ?? ""
 // The fallback models the plugin's `fallbacks` route recorded, per profile.
 const fallbacksOf = new Map()
 const delegationsOf = new Map()
+const triageModelsOf = new Map()
 // The provider figure every later usage read serves, set by `usage?percent=N` and cleared by
 // `percent=`: a dev-only override, so an e2e flow can move an account from approaching to out
 // without restarting the mock (which the env alone can't do mid-run).
@@ -2808,6 +2809,7 @@ http
           "host_model",
           "fallbacks",
           "delegation_model",
+          ...(TRIAGE !== "off" ? ["triage_model"] : []),
           "skills",
           "queue",
           "dictation",
@@ -3343,6 +3345,40 @@ http
         }
         delegationsOf.delete(key)
         return json(res, 200, { object: "memento.delegation", delegation: null })
+      }
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/triage-model") {
+      const key = pluginProfile ?? ""
+      if (req.method === "GET") {
+        return json(res, 200, {
+          object: "memento.triage_model",
+          triage_model: triageModelsOf.get(key) ?? null,
+        })
+      }
+      if (req.method === "POST") {
+        const body = await readBody(req)
+        if (!("triage_model" in body)) {
+          return json(res, 400, {
+            error: { message: "Body needs a triage_model key: an object, or null to clear it" },
+          })
+        }
+        if (body.triage_model != null) {
+          // The override is the host's to allow, as it is for a Research rewrite.
+          if (!RESEARCH_WRITERS) {
+            return json(res, 403, {
+              error: {
+                message:
+                  "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable memento`.",
+              },
+            })
+          }
+          const { saved, error } = checkedPick(body.triage_model, "Triage model")
+          if (error) return json(res, 400, { error: { message: error } })
+          triageModelsOf.set(key, saved)
+          return json(res, 200, { object: "memento.triage_model", triage_model: saved })
+        }
+        triageModelsOf.delete(key)
+        return json(res, 200, { object: "memento.triage_model", triage_model: null })
       }
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/github") {

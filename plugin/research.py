@@ -714,6 +714,7 @@ def _structured(purpose: str, system: str, instructions: str, text: str, schema:
             continue
         except Exception as error:
             name = type(error).__name__
+            name = type(error).__name__
             if options and ("Trust" in name or "Override" in name or "Denied" in name):
                 raise ResearchError(
                     f"{error} Allow it with `hermes plugins enable memento`, or pick Default.", 403
