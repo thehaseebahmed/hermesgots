@@ -242,8 +242,8 @@ export function afkHost({
     const method = (init?.method ?? "GET").toUpperCase()
     const body = init?.body ? JSON.parse(String(init.body)) : null
     calls.push({ method, path: url.pathname, body })
-    if (url.pathname.endsWith("/plugins/memento/info")) return json({ name: "memento", features })
-    if (url.pathname.endsWith("/plugins/memento/skills"))
+    if (url.pathname.endsWith("/plugins/gots/info")) return json({ name: "gots", features })
+    if (url.pathname.endsWith("/plugins/gots/skills"))
       return json({
         object: "list",
         data: [
@@ -251,9 +251,9 @@ export function afkHost({
           { name: "plan", description: "Write a plan first.", category: null },
         ],
       })
-    if (url.pathname.endsWith("/plugins/memento/workflows") && method === "GET")
+    if (url.pathname.endsWith("/plugins/gots/workflows") && method === "GET")
       return json({ object: "memento.workflows", workflows: library })
-    if (url.pathname.endsWith("/plugins/memento/workflows") && method === "POST") {
+    if (url.pathname.endsWith("/plugins/gots/workflows") && method === "POST") {
       library.push({
         id: `wf-${library.length}`,
         name: body?.name,

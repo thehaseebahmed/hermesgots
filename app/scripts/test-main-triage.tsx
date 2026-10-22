@@ -42,7 +42,7 @@ function host(name: string, triage: Answer, features: string[] = ["queue", "tria
     seen.push({ path: url.pathname, body })
     if (url.pathname.endsWith("/capabilities"))
       return json({ features: { run_submission: true, run_events_sse: true } })
-    if (url.pathname.endsWith("/plugins/memento/info")) return json({ features })
+    if (url.pathname.endsWith("/plugins/gots/info")) return json({ features })
     if (url.pathname.endsWith("/triage")) {
       if (triage === "fail") return json({ error: { message: "no" } }, 500)
       if (triage === "hang")

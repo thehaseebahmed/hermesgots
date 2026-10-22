@@ -14,7 +14,7 @@ const run = async ({ page, until, shot }) => {
   const noted = []
   page.on("request", (request) => {
     const path = new URL(request.url()).pathname
-    if (path.endsWith("/skills") && path.includes("plugins/memento")) plugin.push(path)
+    if (path.endsWith("/skills") && path.includes("plugins/gots")) plugin.push(path)
     if (path === "/v1/skills") hermes.push(path)
   })
   page.on("console", (message) => noted.push(message.text()))

@@ -233,8 +233,8 @@ test("the way out without Done writes nothing", async () => {
 test("a bot without afk_prompt shows no Prompt row", async () => {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input))
-    if (url.pathname.endsWith("/plugins/memento/info"))
-      return json({ name: "memento", features: ["afk", "afk_switch"] })
+    if (url.pathname.endsWith("/plugins/gots/info"))
+      return json({ name: "gots", features: ["afk", "afk_switch"] })
     if (url.pathname.endsWith("/afk"))
       return json({
         object: "memento.afk",

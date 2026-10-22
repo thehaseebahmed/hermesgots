@@ -2800,7 +2800,7 @@ http
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/info") {
       return json(res, 200, {
-        name: "memento",
+        name: OLD_PLUGIN ? "memento" : "gots",
         version: PLUGIN_VERSION,
         features: [
           "cron_runs",
