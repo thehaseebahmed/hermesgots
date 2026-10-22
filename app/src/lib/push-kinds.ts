@@ -6,7 +6,7 @@
  * notification channel of its own, so Android's settings can turn it off too.
  */
 
-export type PushFeature = "chats" | "code" | "routines" | "research"
+export type PushFeature = "chats" | "code" | "routines" | "research" | "meetings"
 
 export type PushCategory =
   | "chat_input"
@@ -23,6 +23,8 @@ export type PushCategory =
   | "research_input"
   | "research_done"
   | "research_failed"
+  | "meeting_done"
+  | "meeting_failed"
 
 export interface PushCategoryInfo {
   id: PushCategory
@@ -39,6 +41,7 @@ export const PUSH_FEATURES: { id: PushFeature; title: string }[] = [
   { id: "code", title: "Code" },
   { id: "routines", title: "Routines" },
   { id: "research", title: "Research" },
+  { id: "meetings", title: "Meetings" },
 ]
 
 export const PUSH_CATEGORIES: PushCategoryInfo[] = [
@@ -98,6 +101,8 @@ export const PUSH_CATEGORIES: PushCategoryInfo[] = [
   },
   { id: "research_done", feature: "research", title: "Mission ready", on: true, importance: 3 },
   { id: "research_failed", feature: "research", title: "Mission failed", on: true, importance: 3 },
+  { id: "meeting_done", feature: "meetings", title: "Notes ready", on: true, importance: 3 },
+  { id: "meeting_failed", feature: "meetings", title: "Notes failed", on: true, importance: 3 },
 ]
 
 export type PushPrefs = Partial<Record<string, boolean>>
@@ -125,6 +130,8 @@ export function channelName(category: PushCategoryInfo) {
 export function pushPath(kind: unknown, id: unknown) {
   if (kind === "routine_failed") return "/routines"
   if (kind === "clone_failed") return "/projects"
+  if (typeof kind === "string" && kind.startsWith("meeting_"))
+    return typeof id === "string" && id ? `/meetings/${encodeURIComponent(id)}` : "/meetings"
   if (typeof kind === "string" && kind.startsWith("research_"))
     return typeof id === "string" && id ? `/research/${encodeURIComponent(id)}` : "/research"
   return typeof id === "string" && id ? `/s/${encodeURIComponent(id)}` : null

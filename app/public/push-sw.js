@@ -18,6 +18,8 @@ const WORDS = {
   research_done: "Your research is ready",
   research_failed: "The mission stopped with an error",
   afk_pr: "A task's pull request is ready to review",
+  meeting_done: "Your meeting notes are ready",
+  meeting_failed: "Meeting notes failed",
 }
 
 // When the plugin is older or couldn't find a name.
@@ -28,6 +30,8 @@ const UNTITLED = {
   research_scope: "A research mission",
   research_done: "A research mission",
   research_failed: "A research mission",
+  meeting_done: "A meeting",
+  meeting_failed: "A meeting",
 }
 
 // What the push is about when it isn't a session.
@@ -49,7 +53,9 @@ async function show(data) {
     SCREENS[data.kind] ||
     (String(data.kind).startsWith("research_")
       ? `/research${sessionId ? `/${encodeURIComponent(sessionId)}` : ""}`
-      : undefined)
+      : String(data.kind).startsWith("meeting_")
+        ? `/meetings${sessionId ? `/${encodeURIComponent(sessionId)}` : ""}`
+        : undefined)
   // A newer push about the same thing replaces one still showing; what waits on the user is one
   // thing, whichever way.
   const group = ["approval", "question", "plan"].includes(data.kind) ? "session" : data.kind

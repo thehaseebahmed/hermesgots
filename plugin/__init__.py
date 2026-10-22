@@ -2146,6 +2146,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             )
         except meetings.MeetingError as error:
             return _error(web, str(error), error.status)
+        if found["stage"] == "writing":
+            meetings.spawn(store_path(), found["id"])
         return web.json_response({"object": "memento.meeting", "meeting": found}, status=201)
 
     async def get_meeting(request: "web.Request") -> "web.Response":
@@ -2189,7 +2191,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             found = await asyncio.to_thread(step, path, meeting_id)
         except meetings.MeetingError as error:
             return _error(web, str(error), error.status)
-        if found["stage"] == "transcribing" and not found["error"]:
+        if found["stage"] in ("transcribing", "writing") and not found["error"]:
             meetings.spawn(path, meeting_id)
         return web.json_response({"object": "memento.meeting", "meeting": found})
 
@@ -2272,6 +2274,7 @@ def register(ctx) -> None:
     findings.register(ctx)
     library.register(ctx)
     research.register(ctx)
+    meetings.register(ctx)
     register_handler = getattr(ctx, "register_platform_handler", None)
     if register_handler is None:
         logger.warning("memento: this Hermes version can't add API server routes; update Hermes")
