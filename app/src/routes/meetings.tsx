@@ -13,8 +13,11 @@ import {
   FolderIcon,
   ListIcon,
   MenuIcon,
+  MicIcon,
+  PauseIcon,
   PlusIcon,
   RotateCcwIcon,
+  SquareIcon,
   Trash2Icon,
   type LucideIcon,
 } from "lucide-react"
@@ -26,12 +29,13 @@ import { useOpenDrawer } from "@/components/drawer-context"
 import { ExperimentalBadge } from "@/components/experimental-badge"
 import { ItemGroup, ItemRow, ItemSearch } from "@/components/item-list"
 import { itemGroups } from "@/lib/item-groups"
-import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { FullscreenPopup, Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
+  AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
@@ -53,7 +57,9 @@ import {
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { canRecord } from "@/lib/dictation"
 import { formatRelative } from "@/lib/format"
+import { useMeetingRecorder, type Recorded } from "@/lib/meeting-recorder"
 import {
   addRecording,
   addTranscript,
@@ -558,9 +564,8 @@ function DropZone({
   )
 }
 
-/** A recording or a transcript from the device, by its extension, for the bot to write up. */
-function UploadForm({ onAdded }: { onAdded: () => void }) {
-  const go = useSwap()
+/** The bot and project a new meeting goes to, shared by the upload and the recorder. */
+function useTarget() {
   const active = useMeetingBot()
   const bots = useMeetingBots()
   const [botId, setBotId] = useState<string>()
@@ -569,62 +574,16 @@ function UploadForm({ onAdded }: { onAdded: () => void }) {
   const projects = useMeetingProjects(profile)
   const noAudio = useNoAudio(profile)
   const [projectId, setProjectId] = useState(NO_PROJECT)
-  const [busy, setBusy] = useState(false)
-  const [picked, setPicked] = useState<{ file: File; text?: string }>()
-  const parsed = picked?.text !== undefined ? parseTranscript(picked.text) : undefined
-  const refused = Boolean(picked && !parsed && noAudio)
+  const project = projects.some((p) => p.id === projectId) ? projectId : undefined
+  return { bots, profile, projects, noAudio, projectId, project, setBotId, setProjectId }
+}
 
-  const choose = async (file: File) => {
-    if (!isTranscript(file)) {
-      setPicked({ file })
-      return
-    }
-    if (file.size > MAX_TRANSCRIPT_BYTES) {
-      toast.error("That file is too big for a transcript.")
-      return
-    }
-    setPicked({ file, text: await file.text() })
-  }
+type Target = ReturnType<typeof useTarget>
 
-  const ready = Boolean(profile && picked && !refused && (!parsed || parsed.lines.length > 0))
-
-  const add = async () => {
-    if (!profile || !picked || !ready || busy) return
-    const title = baseName(picked.file.name)
-    const project = projects.some((p) => p.id === projectId) ? projectId : undefined
-    setBusy(true)
-    try {
-      const meeting = parsed
-        ? await addTranscript(profile, { title, projectId: project, lines: parsed.lines })
-        : await addRecording(profile, { title, projectId: project, file: picked.file })
-      onAdded()
-      go(`/meetings/${meeting.id}`)
-    } catch (error) {
-      toast.error(message(error, "Couldn't add the meeting."))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const detail = !picked
-    ? undefined
-    : parsed
-      ? parsed.lines.length
-        ? [
-            `${parsed.lines.length} ${parsed.lines.length === 1 ? "line" : "lines"}`,
-            `${parsed.timed ? "" : "about "}${length(parsed.duration)}`,
-          ].join(" · ")
-        : "No lines found"
-      : sizeText(picked.file.size)
-
+function TargetFields({ target }: { target: Target }) {
+  const { bots, profile, setBotId, setProjectId } = target
   return (
-    <form
-      className="flex flex-col gap-5 px-6"
-      onSubmit={(event) => {
-        event.preventDefault()
-        void add()
-      }}
-    >
+    <>
       {bots.length > 1 && (
         <div
           className="-mx-6 flex [scrollbar-width:none] gap-2 overflow-x-auto px-6"
@@ -654,7 +613,85 @@ function UploadForm({ onAdded }: { onAdded: () => void }) {
           })}
         </div>
       )}
+    </>
+  )
+}
 
+function ProjectField({ target }: { target: Target }) {
+  const { projects, projectId, setProjectId } = target
+  if (!projects.length) return null
+  return (
+    <Field>
+      <FieldLabel htmlFor="meeting-project">Project</FieldLabel>
+      <ProjectSelect
+        id="meeting-project"
+        projects={projects}
+        value={projectId}
+        onChange={setProjectId}
+      />
+    </Field>
+  )
+}
+
+/** A recording or a transcript from the device, by its extension, for the bot to write up. */
+function UploadForm({ target, onAdded }: { target: Target; onAdded: () => void }) {
+  const go = useSwap()
+  const { profile, noAudio, project } = target
+  const [busy, setBusy] = useState(false)
+  const [picked, setPicked] = useState<{ file: File; text?: string }>()
+  const parsed = picked?.text !== undefined ? parseTranscript(picked.text) : undefined
+  const refused = Boolean(picked && !parsed && noAudio)
+
+  const choose = async (file: File) => {
+    if (!isTranscript(file)) {
+      setPicked({ file })
+      return
+    }
+    if (file.size > MAX_TRANSCRIPT_BYTES) {
+      toast.error("That file is too big for a transcript.")
+      return
+    }
+    setPicked({ file, text: await file.text() })
+  }
+
+  const ready = Boolean(profile && picked && !refused && (!parsed || parsed.lines.length > 0))
+
+  const add = async () => {
+    if (!profile || !picked || !ready || busy) return
+    const title = baseName(picked.file.name)
+    setBusy(true)
+    try {
+      const meeting = parsed
+        ? await addTranscript(profile, { title, projectId: project, lines: parsed.lines })
+        : await addRecording(profile, { title, projectId: project, file: picked.file })
+      onAdded()
+      go(`/meetings/${meeting.id}`)
+    } catch (error) {
+      toast.error(message(error, "Couldn't add the meeting."))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const detail = !picked
+    ? undefined
+    : parsed
+      ? parsed.lines.length
+        ? [
+            `${parsed.lines.length} ${parsed.lines.length === 1 ? "line" : "lines"}`,
+            `${parsed.timed ? "" : "about "}${length(parsed.duration)}`,
+          ].join(" · ")
+        : "No lines found"
+      : sizeText(picked.file.size)
+
+  return (
+    <form
+      className="flex flex-col gap-5"
+      onSubmit={(event) => {
+        event.preventDefault()
+        void add()
+      }}
+    >
       <DropZone
         accept={`${RECORDING_TYPES},${TRANSCRIPT_TYPES}`}
         icon={parsed ? FileTextIcon : FileAudioIcon}
@@ -665,18 +702,6 @@ function UploadForm({ onAdded }: { onAdded: () => void }) {
       />
       {refused && <Banner>{noAudio}</Banner>}
 
-      {projects.length > 0 && (
-        <Field>
-          <FieldLabel htmlFor="meeting-project">Project</FieldLabel>
-          <ProjectSelect
-            id="meeting-project"
-            projects={projects}
-            value={projectId}
-            onChange={setProjectId}
-          />
-        </Field>
-      )}
-
       <Button type="submit" size="lg" className="h-11 rounded-full" disabled={!ready || busy}>
         Add
       </Button>
@@ -684,7 +709,130 @@ function UploadForm({ onAdded }: { onAdded: () => void }) {
   )
 }
 
-/** A new meeting: a recording or a transcript for the bot to write up. */
+const clockText = (ms: number) => clock(Math.floor(ms / 1000))
+
+/** The room recorded in the app: the whole screen while it runs, then the bot writes it up. */
+function RecordForm({ target, onAdded }: { target: Target; onAdded: () => void }) {
+  const go = useSwap()
+  const { profile, noAudio, project } = target
+  const [open, setOpen] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const save = useCallback(
+    async ({ file }: Recorded) => {
+      if (!profile) return
+      setOpen(false)
+      setSaving(true)
+      try {
+        const meeting = await addRecording(profile, {
+          title: file.name.replace(/\.[^.]+$/, ""),
+          projectId: project,
+          file,
+        })
+        onAdded()
+        go(`/meetings/${meeting.id}`)
+      } catch (error) {
+        toast.error(message(error, "Couldn't add the meeting."))
+      } finally {
+        setSaving(false)
+      }
+    },
+    [profile, project, onAdded, go],
+  )
+  const recorder = useMeetingRecorder(save)
+  const running = recorder.state !== "idle"
+  const unavailable = !canRecord() ? "This browser can't record." : noAudio
+
+  const begin = async () => {
+    setOpen(await recorder.start())
+  }
+
+  return (
+    <div className="flex flex-col gap-5">
+      {unavailable && <Banner>{unavailable}</Banner>}
+      {recorder.error && !running && <Banner>{recorder.error}</Banner>}
+      <Button
+        type="button"
+        size="lg"
+        className="h-11 rounded-full"
+        disabled={Boolean(unavailable) || !profile || saving}
+        onClick={() => void begin()}
+      >
+        <MicIcon /> Start recording
+      </Button>
+
+      <FullscreenPopup
+        open={open && running}
+        onOpenChange={(next) => {
+          if (!next) setConfirming(true)
+        }}
+      >
+        <div className="flex flex-1 flex-col items-center justify-center gap-8 p-6">
+          <Bot
+            id={profile?.botId ?? ""}
+            className="size-32"
+            animate={recorder.state === "recording"}
+          />
+          <div className="flex flex-col items-center gap-1">
+            <span className="font-mono text-5xl font-semibold tabular-nums" role="timer">
+              {clockText(recorder.elapsed)}
+            </span>
+            <span className="text-sm text-muted-foreground">
+              {recorder.state === "paused" ? "Paused" : "Recording"}
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center justify-center gap-3 p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+          <Button
+            type="button"
+            variant="outline"
+            size="lg"
+            className="h-12 rounded-full px-6"
+            onClick={recorder.state === "paused" ? recorder.resume : recorder.pause}
+          >
+            {recorder.state === "paused" ? <MicIcon /> : <PauseIcon />}
+            {recorder.state === "paused" ? "Resume" : "Pause"}
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="lg"
+            className="h-12 rounded-full px-6"
+            onClick={recorder.end}
+          >
+            <SquareIcon /> End meeting
+          </Button>
+        </div>
+      </FullscreenPopup>
+
+      <AlertDialog open={confirming} onOpenChange={setConfirming}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Stop recording?</AlertDialogTitle>
+            <AlertDialogDescription>
+              End the meeting and have it written up, or discard what was recorded.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep recording</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                recorder.discard()
+                setOpen(false)
+              }}
+            >
+              Discard
+            </AlertDialogAction>
+            <AlertDialogAction onClick={recorder.end}>End meeting</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  )
+}
+
+/** A new meeting: recorded here, or a recording or transcript for the bot to write up. */
 function NewMeeting({
   open,
   onOpenChange,
@@ -692,13 +840,32 @@ function NewMeeting({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  const target = useTarget()
+  const [tab, setTab] = useState("record")
+  const close = () => onOpenChange(false)
   return (
     <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent size="md">
         <PopupHeader className="pb-2">
           <PopupTitle>New meeting</PopupTitle>
         </PopupHeader>
-        <UploadForm onAdded={() => onOpenChange(false)} />
+        <div className="flex flex-col gap-5 px-6">
+          <TargetFields target={target} />
+          <Tabs value={tab} onValueChange={(value) => setTab(value as string)}>
+            <TabsList className="w-full">
+              <TabsTrigger value="record">Record</TabsTrigger>
+              <TabsTrigger value="upload">Upload</TabsTrigger>
+            </TabsList>
+            <TabsContent value="record" className="flex flex-col gap-5 pt-5">
+              <ProjectField target={target} />
+              <RecordForm target={target} onAdded={close} />
+            </TabsContent>
+            <TabsContent value="upload" className="flex flex-col gap-5 pt-5">
+              <ProjectField target={target} />
+              <UploadForm target={target} onAdded={close} />
+            </TabsContent>
+          </Tabs>
+        </div>
       </PopupContent>
     </Popup>
   )

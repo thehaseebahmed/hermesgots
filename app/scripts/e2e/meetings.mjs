@@ -54,6 +54,7 @@ for (const [width, dark] of [
       }
       const addFile = async (file) => {
         await page.getByRole("button", { name: "New meeting" }).click()
+        await page.getByRole("tab", { name: "Upload" }).click()
         await page.locator("input[type=file]").first().setInputFiles(file)
       }
       // Adding goes to the new meeting; beside the list another one may already be open.
@@ -130,6 +131,50 @@ for (const [width, dark] of [
       assert.ok(await page.getByText("(Owner not stated)").first().isVisible(), "no invented owner")
       await shot("4-notes")
       pass(`${width}: a recording is sent, transcribed and written up`)
+
+      // The room recorded in the app: a stand-in microphone, pause, end, and the file goes up.
+      await toList()
+      await page.evaluate(() => {
+        navigator.mediaDevices.getUserMedia = async () => {
+          const context = new AudioContext()
+          const tone = context.createOscillator()
+          const out = context.createMediaStreamDestination()
+          tone.connect(out)
+          tone.start()
+          return out.stream
+        }
+      })
+      await page.getByRole("button", { name: "New meeting" }).click()
+      await page.getByRole("button", { name: "Start recording" }).click()
+      await page.getByRole("timer").waitFor({ timeout: 5_000 })
+      await page.waitForFunction(
+        () => /^0:0[1-9]$/.test(document.querySelector("[role=timer]")?.textContent ?? ""),
+        undefined,
+        { timeout: 10_000 },
+      )
+      await shot("6-recording")
+      await page.getByRole("button", { name: "Pause" }).click()
+      const paused = await page.getByRole("timer").textContent()
+      await page.waitForTimeout(1200)
+      assert.equal(
+        await page.getByRole("timer").textContent(),
+        paused,
+        "the clock holds while paused",
+      )
+      await page.getByRole("button", { name: "Resume" }).click()
+      const before = page.url()
+      await page.getByRole("button", { name: "End meeting" }).click()
+      await page.waitForURL((url) => /\/meetings\/m_/.test(url.pathname) && url.href !== before, {
+        timeout: 10_000,
+      })
+      // The meeting it replaces stays on screen while the pane slides: wait until only one is left.
+      await page.waitForFunction(
+        () =>
+          document.body.innerText.split("A finished run does not push by default.").length === 2,
+        undefined,
+        { timeout: 20_000 },
+      )
+      pass(`${width}: a meeting recorded in the app is sent and written up`)
 
       await page.getByRole("button", { name: "Show 0:21 in the transcript" }).first().click()
       await page.getByText("On the beta, I think Thursday still works").waitFor({ timeout: 5_000 })
