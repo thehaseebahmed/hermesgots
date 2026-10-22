@@ -24,7 +24,13 @@ export interface DictationTake {
   /** What the take has heard so far; empty for the chunked implementation. */
   transcript: DictationTranscript
   recordingSince: () => number | null
-  start: () => Promise<void>
+  /**
+   * Where a take that came back was left, for a restore: the composer inserts its text there, so it
+   * lands where it was begun rather than at the end of the draft.
+   */
+  anchor: () => number | null
+  /** `caret` is where the field's caret was, kept with the take so a restore can put it back. */
+  start: (caret?: number | null) => Promise<void>
   finish: () => Promise<string | null>
   retry: () => Promise<string | null>
   cancel: () => void
@@ -44,7 +50,9 @@ export function useDictation(
 ): DictationTake {
   const answer = usePluginFeature(config, DICTATION_STREAM)
   const chunked = useChunkedDictation(config, hint, key)
-  const stream = useStreamDictation(config, hint, vocabulary)
+  const stream = useStreamDictation(config, hint, key, vocabulary)
+  // A take kept by the device is offered by the implementation that made it, whatever the host
+  // advertises now: a restored take is transcribed through the batch route either way.
   if (chunked.status !== "idle") return chunked
   if (stream.status !== "idle") return stream
   return answer === "yes" ? stream : chunked

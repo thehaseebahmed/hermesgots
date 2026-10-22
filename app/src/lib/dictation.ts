@@ -10,8 +10,9 @@ import {
 import { DICTATION_INFO_MS } from "@/lib/freshness"
 import { createSignal } from "@/lib/store"
 import { connectionKey } from "@/lib/connection"
-import { db, type DictationPiece } from "@/lib/db"
+import { db, type DictationPiece, type SavedDictation } from "@/lib/db"
 import { EMPTY_TRANSCRIPT } from "@/lib/dictation-transcript"
+import { RESTORED, SAVE_MS, keptAudio, keeper, type KeptTake } from "@/lib/dictation-kept"
 import {
   getDictationInfo,
   transcribeClip,
@@ -88,8 +89,6 @@ const SHORT_PAUSE_MS = 350
 // Loudness (RMS of the wave, 0 to 1) under which the mic counts as quiet.
 export const QUIET_MIN = 0.012
 export const QUIET_MAX = 0.05
-const SAVE_MS = 2000
-const RESTORED = "This recording hasn't been transcribed yet."
 /** A stop event that hasn't come by now isn't coming: the take goes with what it flushed. */
 export const STOP_MS = 1500
 /** A live track whose recorder has sent nothing by now is a dead one: silence still encodes. */
@@ -150,6 +149,8 @@ interface Recording {
 interface Session {
   key?: string
   pieces: DictationPiece[]
+  /** Where the caret was when the take began, so a kept take lands where it was left. */
+  caret?: number
   recording: Recording | null
   upload: AbortController | null
   draining: Promise<boolean> | null
@@ -160,13 +161,20 @@ interface Session {
   stopping: Promise<void> | null
   /** Cancelled or done: nothing more is kept. */
   closed: boolean
+  /** Read back from the device after a reload: no longer live, so it is asked for whole. */
+  restored?: boolean
   saving: Promise<unknown>
   saveTimer?: number
 }
 
-const newSession = (key: string | undefined, pieces: DictationPiece[] = []): Session => ({
+const newSession = (
+  key: string | undefined,
+  pieces: DictationPiece[] = [],
+  caret?: number,
+): Session => ({
   key,
   pieces,
+  caret,
   recording: null,
   upload: null,
   draining: null,
@@ -202,10 +210,67 @@ function save(session: Session, now = false) {
   const pieces = [...session.pieces.map((piece) => ({ ...piece })), ...live]
   session.saving = session.saving
     .then(async () => {
-      if (pieces.length) await db.dictations.put({ id: key, pieces, at: Date.now() })
+      if (pieces.length)
+        await db.dictations.put({
+          id: key,
+          pieces,
+          at: Date.now(),
+          kind: "pieces",
+          caret: session.caret,
+        })
       else await db.dictations.delete(key)
     })
     .catch(() => undefined)
+}
+
+/** Writes a take to the device under its composer's key, or deletes it. */
+export function keptStore(key: string) {
+  return (take: KeptTake | null) =>
+    take
+      ? db.dictations.put({
+          id: key,
+          pieces: take.pieces,
+          caret: take.caret,
+          at: Date.now(),
+          kind: "stream",
+        })
+      : db.dictations.delete(key)
+}
+
+/** The writer a streaming take uses to keep its audio, no more often than every `SAVE_MS`. */
+export function keptKeeper(key: string | undefined) {
+  return keeper(key, key ? keptStore(key) : () => Promise.resolve())
+}
+
+/** A take kept by an earlier visit, if there is one. */
+export async function readKept(key: string): Promise<SavedDictation | undefined> {
+  return db.dictations.get(key).catch(() => undefined)
+}
+
+/**
+ * The text of a take that is no longer live: its audio goes to the batch route in one piece, so a
+ * host that can't stream still answers it, with the words it already had as its prompt. Bounded by
+ * the same wait a whole clip always had for a cold host.
+ */
+export async function keptText(
+  config: HermesConfig,
+  pieces: DictationPiece[],
+  hint: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const before = joinText(...pieces.map((piece) => piece.text ?? ""))
+  const audio = keptAudio(pieces)
+  if (!audio) return before
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), TRANSCRIBE_MS)
+  const stop = () => controller.abort()
+  signal?.addEventListener("abort", stop, { once: true })
+  try {
+    return joinText(before, await transcribeClip(config, audio, hint, before, controller.signal))
+  } finally {
+    window.clearTimeout(timer)
+    signal?.removeEventListener("abort", stop)
+  }
 }
 
 /** A take that ended stops transcribing: whatever is in flight is dropped. */
@@ -448,9 +513,9 @@ export function useChunkedDictation(config: HermesConfig, hint: string, key?: st
     [openSegment],
   )
 
-  const start = useCallback(async () => {
+  const start = async (caret?: number | null) => {
     if (session.current || !canRecord()) return
-    const current = newSession(latest.current.key)
+    const current = newSession(latest.current.key, [], caret ?? undefined)
     session.current = current
     setError(null)
     setStatus("listening")
@@ -497,7 +562,7 @@ export function useChunkedDictation(config: HermesConfig, hint: string, key?: st
       void end(recording)
       if (session.current === current) setLevels(null)
     }, MAX_MS)
-  }, [fail, monitor, openSegment, showIdle])
+  }
 
   /** Waits for every piece's text: the whole of it, or null with the recording kept for `retry`. */
   const settle = useCallback(
@@ -520,6 +585,42 @@ export function useChunkedDictation(config: HermesConfig, hint: string, key?: st
       return null
     },
     [drain, showFailure, showIdle],
+  )
+
+  /**
+   * Asks for a take that came back: it is no longer live, so the batch route hears it in one piece
+   * and its text settles as any other take's does.
+   */
+  const replay = useCallback(
+    async (current: Session) => {
+      setStatus("transcribing")
+      setLevels(null)
+      setError(null)
+      const controller = new AbortController()
+      current.upload = controller
+      try {
+        const text = await keptText(
+          latest.current.config,
+          current.pieces,
+          latest.current.hint,
+          controller.signal,
+        )
+        if (current.upload !== controller) return null
+        forget(current)
+        session.current = null
+        showIdle()
+        return text
+      } catch (failure) {
+        if (current.upload !== controller) return null
+        current.error = failure
+        showFailure(failure)
+        void readDictationInfo(latest.current.config, true)
+        return null
+      } finally {
+        if (current.upload === controller) current.upload = null
+      }
+    },
+    [showFailure, showIdle],
   )
 
   const cancel = useCallback(() => {
@@ -570,22 +671,22 @@ export function useChunkedDictation(config: HermesConfig, hint: string, key?: st
       cancel()
       return ""
     }
+    if (current.restored) return replay(current)
     return settle(current)
-  }, [cancel, settle])
+  }, [cancel, replay, settle])
 
-  // A recording left unfinished (another chat, the screen closed) is kept for when it's back.
+  // A recording left unfinished (another chat, the screen closed) is kept for when it's back. The
+  // slices of a take heard while it was spoken are the streaming hook's, and it offers those.
   useEffect(() => {
     let live = true
     if (key)
-      void db.dictations
-        .get(key)
-        .catch(() => undefined)
-        .then((saved) => {
-          if (!live || session.current || !saved?.pieces.length) return
-          session.current = newSession(key, saved.pieces)
-          setError(RESTORED)
-          setStatus("failed")
-        })
+      void readKept(key).then((saved) => {
+        if (!live || session.current || !saved?.pieces.length || saved.kind === "stream") return
+        session.current = newSession(key, saved.pieces, saved.caret)
+        session.current.restored = true
+        setError(RESTORED)
+        setStatus("failed")
+      })
     return () => {
       live = false
       const current = session.current
@@ -612,6 +713,8 @@ export function useChunkedDictation(config: HermesConfig, hint: string, key?: st
     transcript: EMPTY_TRANSCRIPT,
     /** When the recorder started, for a hold that ends before the mic was granted. */
     recordingSince: () => session.current?.recording?.startedAt ?? null,
+    /** Where a take that came back was left, so its text lands where it began. */
+    anchor: () => session.current?.caret ?? null,
     start,
     finish,
     retry,

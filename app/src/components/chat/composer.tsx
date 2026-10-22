@@ -356,6 +356,8 @@ export function Composer({
   }
 
   const retryDictation = async () => {
+    // A take that came back is put where it was left: the caret it began at, kept with it.
+    dictationAt.current ??= dictation.anchor()
     const heard = await dictation.retry()
     if (heard) placeDictation(heard)
   }
@@ -364,7 +366,7 @@ export function Composer({
     dictationAt.current = textarea.current?.selectionStart ?? null
     dictationSends.current = false
     dictation
-      .start()
+      .start(dictationAt.current)
       .catch((error: unknown) =>
         toast.error(error instanceof Error ? error.message : "Couldn't start the microphone."),
       )

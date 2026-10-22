@@ -21,10 +21,14 @@ import {
   STOP_MS,
   TAKEN,
   canRecord,
+  keptKeeper,
+  keptText,
   micError,
+  readKept,
   recordingType,
   type DictationStatus,
 } from "@/lib/dictation"
+import { RESTORED, type Keeper } from "@/lib/dictation-kept"
 import {
   EMPTY_TRANSCRIPT,
   hear,
@@ -34,6 +38,7 @@ import {
   type DictationAnswer,
   type DictationTranscript,
 } from "@/lib/dictation-transcript"
+import type { DictationPiece } from "@/lib/db"
 import { WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import {
   HermesError,
@@ -61,6 +66,10 @@ interface Slice {
 }
 
 interface TakeSession {
+  /** The composer's draft key: the take's audio is kept on the device under it. */
+  key?: string
+  /** Where the caret was when the take began, so a kept take lands where it was left. */
+  caret?: number
   /** The host's take, once it has answered; null while a cold host is still loading its model. */
   take: string | null
   /** Resolves when the take opened or failed, so Stop can wait for a cold host instead of losing it. */
@@ -76,7 +85,15 @@ interface TakeSession {
   running: Promise<void> | null
   upload: AbortController | null
   closed: boolean
+  /** Whether its audio still belongs on the device: no once its text is in, or it was let go. */
+  keeping: boolean
   failure: string | null
+  /** The take's audio as the device holds it: one piece per slice, none of them transcribed. */
+  kept: DictationPiece[]
+  /** Writes `kept` to the device no more often than every 2 s. */
+  keeper: Keeper
+  /** Read back from the device after a reload: no longer live, so the batch route hears it whole. */
+  restored: boolean
   /** Whether the meter has heard speech at all, so a silent take doesn't close phrases. */
   heard: boolean
   quietSince: number | null
@@ -85,6 +102,42 @@ interface TakeSession {
   /** Whether this pause has been marked already, so one pause closes one phrase. */
   pauseMarked: boolean
   startedAt: number
+}
+
+function newTake(
+  key: string | undefined,
+  caret?: number,
+  kept: DictationPiece[] = [],
+): TakeSession {
+  return {
+    key,
+    caret,
+    take: null,
+    asking: Promise.resolve(),
+    stream: null,
+    recorder: null,
+    slices: 0,
+    queue: [],
+    running: null,
+    upload: null,
+    closed: false,
+    keeping: true,
+    failure: null,
+    kept,
+    keeper: keptKeeper(key),
+    restored: false,
+    heard: false,
+    quietSince: null,
+    pauseNext: false,
+    pauseMarked: false,
+    startedAt: Date.now(),
+  }
+}
+
+/** Holds a slice of the take for the device, written at the pace the keeper writes at. */
+function keepSlice(current: TakeSession, blob: Blob) {
+  current.kept.push({ blob, text: null })
+  void current.keeper.keep({ pieces: [...current.kept], caret: current.caret })
 }
 
 /** Whether the host no longer has this take: it expired, was cancelled, or never existed. */
@@ -143,7 +196,12 @@ function within(promise: Promise<unknown>, ms: number) {
 }
 
 /** A dictation the bot's host hears as it is spoken, one slice at a time. */
-export function useStreamDictation(config: HermesConfig, hint: string, vocabulary: string[] = []) {
+export function useStreamDictation(
+  config: HermesConfig,
+  hint: string,
+  key?: string,
+  vocabulary: string[] = [],
+) {
   const [status, setStatus] = useState<DictationStatus>("idle")
   const [levels, setLevels] = useState<number[] | null>(null)
   const [startedAt, setStartedAt] = useState<number | null>(null)
@@ -151,9 +209,9 @@ export function useStreamDictation(config: HermesConfig, hint: string, vocabular
   const [transcript, setTranscript] = useState<DictationTranscript>(EMPTY_TRANSCRIPT)
   const session = useRef<TakeSession | null>(null)
   const heard = useRef<DictationTranscript>(EMPTY_TRANSCRIPT)
-  const latest = useRef({ config, hint, vocabulary })
+  const latest = useRef({ config, hint, key, vocabulary })
   useEffect(() => {
-    latest.current = { config, hint, vocabulary }
+    latest.current = { config, hint, key, vocabulary }
   })
 
   const show = useCallback((next: DictationTranscript) => {
@@ -176,6 +234,9 @@ export function useStreamDictation(config: HermesConfig, hint: string, vocabular
     current.closed = true
     current.upload?.abort()
     current.upload = null
+    // What the take recorded is kept before the mic goes, its tail included: the recorder flushes
+    // the last slice on the way out, so the row is written after it.
+    void stopRecording(current).then(() => current.keeper.flush())
     release(current)
     setLevels(null)
     setError(message)
@@ -234,31 +295,17 @@ export function useStreamDictation(config: HermesConfig, hint: string, vocabular
       current.upload?.abort()
       current.upload = null
       release(current)
+      // Its text is in: nothing is left to keep on the device.
+      void current.keeper.drop()
       if (session.current === current) session.current = null
       showIdle()
     },
     [showIdle],
   )
 
-  const start = useCallback(async () => {
+  const start = async (caret?: number | null) => {
     if (session.current || !canRecord()) return
-    const current: TakeSession = {
-      take: null,
-      asking: Promise.resolve(),
-      stream: null,
-      recorder: null,
-      slices: 0,
-      queue: [],
-      running: null,
-      upload: null,
-      closed: false,
-      failure: null,
-      heard: false,
-      quietSince: null,
-      pauseNext: false,
-      pauseMarked: false,
-      startedAt: Date.now(),
-    }
+    const current = newTake(latest.current.key, caret ?? undefined)
     session.current = current
     setError(null)
     setLevels(null)
@@ -318,7 +365,10 @@ export function useStreamDictation(config: HermesConfig, hint: string, vocabular
     current.stream = stream
     current.recorder = recorder
     recorder.ondataavailable = (event) => {
-      if (!event.data.size || current.closed) return
+      if (!event.data.size) return
+      // The audio is what survives the app: every slice is held, at the pace the keeper writes at.
+      keepSlice(current, event.data)
+      if (current.closed) return
       window.clearTimeout(current.watch)
       current.slices += 1
       current.queue.push({ blob: event.data, pause: current.pauseNext })
@@ -384,7 +434,7 @@ export function useStreamDictation(config: HermesConfig, hint: string, vocabular
     } catch {
       // Without a meter the take still goes; phrases then close only where the user stops.
     }
-  }, [fail, pump, show, showIdle])
+  }
 
   /**
    * Ends the take and returns what was heard: `""` when there's nothing to put in the field, null
@@ -436,6 +486,8 @@ export function useStreamDictation(config: HermesConfig, hint: string, vocabular
       current.upload = null
       void stopRecording(current)
       release(current)
+      // Discarded: the take leaves nothing on the device.
+      void current.keeper.drop()
       if (current.take) {
         void cancelDictationTake(
           latest.current.config,
@@ -447,10 +499,44 @@ export function useStreamDictation(config: HermesConfig, hint: string, vocabular
     showIdle()
   }, [showIdle])
 
+  /**
+   * Asks for a take that came back: it is no longer live, so the batch route hears it whole. That
+   * is also what a host without streaming would need, so one path serves both.
+   */
+  const replay = useCallback(
+    async (current: TakeSession) => {
+      current.failure = null
+      setError(null)
+      setStatus("transcribing")
+      setLevels(null)
+      const controller = new AbortController()
+      current.upload = controller
+      try {
+        const text = await keptText(
+          latest.current.config,
+          current.kept,
+          latest.current.hint,
+          controller.signal,
+        )
+        if (session.current !== current || current.upload !== controller) return null
+        clear(current)
+        return text
+      } catch (failure) {
+        if (session.current !== current || current.upload !== controller) return null
+        fail(current, reason(failure, "Couldn't transcribe the recording."))
+        return null
+      } finally {
+        if (current.upload === controller) current.upload = null
+      }
+    },
+    [clear, fail],
+  )
+
   /** Asks the host for what it heard after a take that couldn't be finished, and returns it. */
   const retry = useCallback(async () => {
     const current = session.current
     if (!current) return null
+    if (current.restored) return replay(current)
     const take = current.take
     if (!take) {
       const text = transcriptText(heard.current)
@@ -481,10 +567,29 @@ export function useStreamDictation(config: HermesConfig, hint: string, vocabular
       fail(current, reason(failure, "Couldn't finish the dictation."))
       return null
     }
-  }, [cancel, clear, fail, show])
+  }, [cancel, clear, fail, replay, show])
 
-  // A take abandoned before it ends inserts nothing, and the host is told to let it go. Kept takes
-  // are the next ticket's: this one drops the audio rather than pretending to hold it.
+  // A take the app was killed in the middle of is offered again, with Retry and Discard: its
+  // slices are on the device, and the batch route can still hear them whole.
+  useEffect(() => {
+    let live = true
+    if (key)
+      void readKept(key).then((saved) => {
+        if (!live || session.current || !saved?.pieces.length || saved.kind !== "stream") return
+        const current = newTake(key, saved.caret, saved.pieces)
+        current.restored = true
+        current.startedAt = saved.at
+        session.current = current
+        setError(RESTORED)
+        setStatus("failed")
+      })
+    return () => {
+      live = false
+    }
+  }, [key])
+
+  // A take let go before it ends (another chat, the screen closed) keeps what it recorded: the row
+  // is written before the host is told to forget the take, so reopening the composer offers it.
   useEffect(
     () => () => {
       const current = session.current
@@ -492,7 +597,8 @@ export function useStreamDictation(config: HermesConfig, hint: string, vocabular
       if (!current) return
       current.closed = true
       current.upload?.abort()
-      void stopRecording(current)
+      current.upload = null
+      void stopRecording(current).then(() => current.keeper.flush())
       release(current)
       if (current.take) {
         void cancelDictationTake(
@@ -513,6 +619,8 @@ export function useStreamDictation(config: HermesConfig, hint: string, vocabular
     transcript,
     /** When the recording started, for a hold that ends before the mic was granted. */
     recordingSince: () => session.current?.startedAt ?? null,
+    /** Where a take that came back was left, so its text lands where it began. */
+    anchor: () => (session.current?.restored ? (session.current.caret ?? null) : null),
     start,
     finish,
     retry,
