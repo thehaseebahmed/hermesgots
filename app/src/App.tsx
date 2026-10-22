@@ -32,6 +32,7 @@ const MeetingsPage = lazy(() =>
 const MeetingPage = lazy(() =>
   import("@/routes/meetings").then((m) => ({ default: m.MeetingPage })),
 )
+const TopicPage = lazy(() => import("@/routes/meetings").then((m) => ({ default: m.TopicPage })))
 const ResearchPage = lazy(() =>
   import("@/routes/research").then((m) => ({ default: m.ResearchPage })),
 )
@@ -108,6 +109,7 @@ function AppRoutes() {
         <Route path="projects/:profileId/:projectId" element={<ProjectPage />} />
         <Route path="meetings" element={<MeetingsPage />} />
         <Route path="meetings/:id" element={<MeetingPage />} />
+        <Route path="meetings/:id/topics/:topic" element={<TopicPage />} />
         <Route path="routines" element={<RoutinesPage />} />
         <Route path="research" element={<ResearchPage />} />
         <Route path="research/:id" element={<MissionPage />} />

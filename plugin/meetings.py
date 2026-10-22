@@ -682,11 +682,132 @@ def write_notes(lines: List[Dict[str, Any]]) -> Dict[str, Any]:
     return check(merged, lines)
 
 
+_TOPIC_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "topics": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "start": {"type": "string"},
+                    "end": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "quote": {"type": "string"},
+                    "quote_at": {"type": "string"},
+                },
+                "required": ["title", "start", "end", "summary", "quote", "quote_at"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["topics"],
+    "additionalProperties": False,
+}
+TOPICS_SYSTEM = (
+    "You split a meeting transcript, whose lines start with a [mm:ss] stamp, into the topics it "
+    "covered, in order. Each topic is a stretch of the meeting about one thing: a short title, the "
+    "stamps of its first and last lines (copied exactly without brackets, e.g. 12:04), one or two "
+    "sentences about what was said, and one short quote copied word for word from a line inside it "
+    "with that line's stamp as quote_at (empty strings when no line quotes well). Topics do not "
+    "overlap. Use only what the transcript says, and never invent a name. Return {count} topics."
+)
+MAX_TOPIC_TITLE = 100
+MAX_TOPIC_SUMMARY = 400
+MAX_QUOTE = 200
+
+
+def seconds_of(value: str) -> int:
+    """The second a transcript stamp (12:04, or 1:02:04) names."""
+    total = 0
+    for part in str(value).split(":"):
+        total = total * 60 + int(part)
+    return total
+
+
+def check_topics(raw: Dict[str, Any], lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The model's topics held to the transcript: a topic whose first stamp the transcript doesn't
+    have is dropped, an end that isn't a stamp of it falls back to the line before the next topic,
+    topics run in order without overlap, and a quote stays only when the line it names says it."""
+    by_stamp = {stamp(line["at"]): line for line in lines}
+    if not by_stamp:
+        return []
+    entries = []
+    for entry in raw.get("topics") or []:
+        if not isinstance(entry, dict):
+            continue
+        title = " ".join(str(entry.get("title") or "").split())[:MAX_TOPIC_TITLE]
+        start = _cite(entry.get("start"))
+        if not title or start not in by_stamp:
+            continue
+        end = _cite(entry.get("end"))
+        entries.append((seconds_of(start), end if end in by_stamp else None, title, entry))
+    entries.sort(key=lambda item: item[0])
+    entries = [item for index, item in enumerate(entries) if index == 0 or item[0] != entries[index - 1][0]]
+    last = max(line["at"] for line in lines)
+    topics: List[Dict[str, Any]] = []
+    for index, (begin, end, title, entry) in enumerate(entries):
+        following = entries[index + 1][0] if index + 1 < len(entries) else None
+        finish = seconds_of(end) if end else (following if following is not None else last)
+        if following is not None:
+            finish = min(finish, following)
+        topic: Dict[str, Any] = {
+            "title": title,
+            "start": begin,
+            "end": max(finish, begin),
+            "summary": " ".join(str(entry.get("summary") or "").split())[:MAX_TOPIC_SUMMARY],
+        }
+        quote = " ".join(str(entry.get("quote") or "").split())[:MAX_QUOTE]
+        at = _cite(entry.get("quote_at"))
+        if quote and at in by_stamp and begin <= seconds_of(at) <= topic["end"]:
+            if quote.lower().strip(".,!?\"' ") in by_stamp[at]["text"].lower():
+                topic["quote"] = {"text": quote, "at": seconds_of(at)}
+        topics.append(topic)
+    return topics
+
+
+def write_topics(lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The meeting's topics, one call per section of the transcript. Best effort: a meeting whose
+    topics can't be written still has its notes, and the app draws no topic bar for it."""
+    pieces = sections(lines)
+    count = "3 to 8" if len(pieces) == 1 else "2 to 4"
+    llm = getattr(ctx, "llm", None)
+    if llm is None:
+        return []
+    found: List[Dict[str, Any]] = []
+    for piece in pieces:
+        system = TOPICS_SYSTEM.replace("{count}", count)
+        try:
+            result = llm.complete_structured(
+                instructions=system,
+                input=[{"type": "text", "text": piece}],
+                json_schema=_TOPIC_SCHEMA,
+                system_prompt=system,
+                max_tokens=3000,
+                temperature=0.2,
+                purpose="memento.meetings.topics",
+            )
+        except Exception:
+            continue
+        parsed = getattr(result, "parsed", None)
+        if isinstance(parsed, dict):
+            found.extend(check_topics(parsed, lines)[:12])
+    topics = check_topics(
+        {"topics": [{**t, "start": stamp(t["start"]), "end": stamp(t["end"]),
+                     "quote": (t.get("quote") or {}).get("text", ""),
+                     "quote_at": stamp(t["quote"]["at"]) if t.get("quote") else ""} for t in found]},
+        lines,
+    )
+    return topics
+
+
 def _write(path: Path, meeting_id: str) -> None:
     found = _need(path, meeting_id)
     if not found["transcript"]:
         raise MeetingError("There is no transcript to write notes from.")
     notes = write_notes(found["transcript"])
+    notes["topics"] = write_topics(found["transcript"])
     _update(path, meeting_id, stage="ready", notes=json.dumps(notes), error=None)
     _tell(path, "meeting_done", meeting_id, found["title"])
 

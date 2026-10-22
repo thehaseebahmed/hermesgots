@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
-import { Navigate, useNavigate, useParams } from "react-router"
+import { Navigate, useNavigate, useParams, useSearchParams } from "react-router"
 import {
   ArrowLeftIcon,
   AudioLinesIcon,
   CheckIcon,
+  ChevronRightIcon,
   ClipboardCopyIcon,
   DiamondIcon,
   EllipsisIcon,
@@ -69,11 +70,13 @@ import {
   length,
   matchesMeeting,
   meetingLine,
+  momentsOf,
   NOTE_SECTIONS,
   parseTranscript,
   removeMeeting,
   retryMeeting,
   toMarkdown,
+  topicAt,
   useMeeting,
   useMeetingBot,
   useMeetingBots,
@@ -84,9 +87,12 @@ import {
   type Listed,
   type Meeting,
   type MeetingProject,
+  type Moment,
+  type MomentKind,
   type NoteItem,
   type Notes,
   type NoteSection,
+  type Topic,
 } from "@/lib/meetings"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
@@ -952,6 +958,7 @@ export function MeetingPage() {
 function MeetingView() {
   const { id = "" } = useParams()
   const { meeting } = useMeeting(id)
+  const navigate = useNavigate()
   const { up } = useNav()
   const beside = Boolean(useMeetingsPane())
   const now = useNow()
@@ -989,7 +996,17 @@ function MeetingView() {
         />
         <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 pt-2 pb-8">
           {meeting.stage === "ready" && !isFailed(meeting) ? (
-            meeting.notes ? (
+            meeting.notes?.topics.length ? (
+              <RecapView
+                meeting={meeting}
+                notes={meeting.notes}
+                onOpen={(topic, at) =>
+                  navigate(
+                    `/meetings/${meeting.id}/topics/${topic.id}${at === undefined ? "" : `?at=${at}`}`,
+                  )
+                }
+              />
+            ) : meeting.notes ? (
               <Tabs value={tab} onValueChange={(value) => setTab(value as string)}>
                 <TabsList>
                   <TabsTrigger value="notes">Notes</TabsTrigger>
@@ -1290,5 +1307,339 @@ function TranscriptView({
         </li>
       ))}
     </ol>
+  )
+}
+
+/** Each topic's colour, in order, from the theme's status tokens. */
+const TONES = [
+  { span: "bg-info/45", dot: "bg-info" },
+  { span: "bg-success/45", dot: "bg-success" },
+  { span: "bg-warning/50", dot: "bg-warning" },
+  { span: "bg-merged/40", dot: "bg-merged" },
+]
+const tone = (index: number) => TONES[index % TONES.length]
+
+const MOMENT_LOOK: Record<MomentKind, { icon: LucideIcon; color: string; title: string }> = {
+  decision: { icon: DiamondIcon, color: "text-merged", title: "Decisions" },
+  action: { icon: CheckIcon, color: "text-primary", title: "To do" },
+  open: { icon: FlagIcon, color: "text-warning", title: "Left open" },
+}
+
+function MomentIcon({ kind, className }: { kind: MomentKind; className?: string }) {
+  const { icon: Icon, color } = MOMENT_LOOK[kind]
+  return (
+    <Icon
+      aria-hidden
+      className={cn("size-4 shrink-0", color, kind === "decision" && "fill-current", className)}
+    />
+  )
+}
+
+/** "3 decisions, 2 to do and 1 open." */
+function tally(moments: Moment[]) {
+  const count = (kind: MomentKind) => moments.filter((m) => m.kind === kind).length
+  const parts = [
+    count("decision") && `${count("decision")} decision${count("decision") === 1 ? "" : "s"}`,
+    count("action") && `${count("action")} to do`,
+    count("open") && `${count("open")} left open`,
+  ].filter(Boolean) as string[]
+  if (!parts.length) return ""
+  return `${parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0]}.`
+}
+
+/** The bot's summary, the meeting laid out in time, what came of it and its topics. */
+function RecapView({
+  meeting,
+  notes,
+  onOpen,
+}: {
+  meeting: Meeting
+  notes: Notes
+  onOpen: (topic: Topic, at?: number) => void
+}) {
+  const moments = momentsOf(notes)
+  const seek = (at: number) => onOpen(topicAt(notes.topics, at), at)
+  return (
+    <>
+      <div className="flex gap-3">
+        <BotAvatar botId={meeting.bot.botId} />
+        <div className="min-w-0 flex-1 pt-0.5">
+          <p className="text-sm font-semibold">{meeting.bot.name}</p>
+          <p className="text-[15px] leading-relaxed">
+            {notes.summary} {tally(moments)}
+          </p>
+        </div>
+      </div>
+
+      <Timeline meeting={meeting} topics={notes.topics} moments={moments} onOpen={onOpen} />
+
+      <MomentsCard moments={moments} onSeek={seek} />
+
+      <section className="flex flex-col gap-1">
+        <h2 className="px-1 pb-1 text-sm font-medium text-muted-foreground">Topics</h2>
+        {notes.topics.map((topic, index) => (
+          <TopicRow
+            key={topic.id}
+            topic={topic}
+            index={index}
+            moments={moments.filter(
+              (m) => m.at !== undefined && topicAt(notes.topics, m.at).id === topic.id,
+            )}
+            onOpen={() => onOpen(topic)}
+          />
+        ))}
+      </section>
+    </>
+  )
+}
+
+/** The meeting laid out in time: its topics as spans, its moments pinned where they happened. */
+function Timeline({
+  meeting,
+  topics,
+  moments,
+  onOpen,
+}: {
+  meeting: Meeting
+  topics: Topic[]
+  moments: Moment[]
+  onOpen: (topic: Topic, at?: number) => void
+}) {
+  const total = Math.max(meeting.duration, topics.at(-1)?.end ?? 0, 1)
+  const placed = moments.filter((m) => m.at !== undefined)
+  return (
+    <section className="rounded-3xl border bg-card px-4 pt-3 pb-3" aria-label="Timeline">
+      <div className="relative h-12">
+        {placed.map((moment) => (
+          <button
+            key={moment.id}
+            type="button"
+            onClick={() => onOpen(topicAt(topics, moment.at!), moment.at)}
+            aria-label={`${moment.text}, at ${clock(moment.at!)}`}
+            className="absolute top-0 flex size-6 -translate-x-1/2 items-center justify-center rounded-full after:absolute after:-inset-2.5 hover:bg-muted"
+            style={{ left: `${(moment.at! / total) * 100}%` }}
+          >
+            <MomentIcon kind={moment.kind} className="size-3.5" />
+          </button>
+        ))}
+        <div className="absolute inset-x-0 bottom-0 flex h-5 gap-0.5">
+          {topics.map((topic, index) => (
+            <button
+              key={topic.id}
+              type="button"
+              onClick={() => onOpen(topic)}
+              aria-label={topic.title}
+              className={cn(
+                "h-full rounded-md transition-opacity hover:opacity-80",
+                tone(index).span,
+              )}
+              style={{ flexGrow: Math.max(1, topic.end - topic.start), flexBasis: 0 }}
+            />
+          ))}
+        </div>
+      </div>
+      <div className="mt-2 flex justify-between text-xs text-muted-foreground tabular-nums">
+        <span>0:00</span>
+        <span>{clock(total / 2)}</span>
+        <span>{clock(total)}</span>
+      </div>
+    </section>
+  )
+}
+
+/** What was decided, what's to do and what's left open. */
+function MomentsCard({ moments, onSeek }: { moments: Moment[]; onSeek: (at: number) => void }) {
+  const kinds = (Object.keys(MOMENT_LOOK) as MomentKind[]).filter((kind) =>
+    moments.some((m) => m.kind === kind),
+  )
+  if (!kinds.length) return null
+  return (
+    <div className="divide-y overflow-hidden rounded-3xl border bg-card">
+      {kinds.map((kind) => (
+        <section key={kind} className="flex flex-col gap-2 px-4 py-3.5">
+          <h2
+            className={cn(
+              "flex items-center gap-1.5 text-xs font-bold tracking-wide uppercase",
+              MOMENT_LOOK[kind].color,
+            )}
+          >
+            <MomentIcon kind={kind} className="size-3.5" />
+            {MOMENT_LOOK[kind].title}
+          </h2>
+          <ul className="flex flex-col gap-2">
+            {moments
+              .filter((m) => m.kind === kind)
+              .map((moment) => (
+                <li key={moment.id} className="leading-relaxed">
+                  {moment.text}
+                  {moment.owner && (
+                    <span className="ml-1.5 text-sm text-muted-foreground">({moment.owner})</span>
+                  )}
+                  {moment.at !== undefined ? (
+                    <Stamp at={moment.at} onSeek={onSeek} />
+                  ) : (
+                    <Unsourced />
+                  )}
+                </li>
+              ))}
+          </ul>
+        </section>
+      ))}
+    </div>
+  )
+}
+
+function TopicRow({
+  topic,
+  index,
+  moments,
+  onOpen,
+}: {
+  topic: Topic
+  index: number
+  moments: Moment[]
+  onOpen: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="flex w-full gap-3 rounded-3xl px-3 py-3 text-left transition-colors hover:bg-muted"
+    >
+      <span className={cn("w-1.5 shrink-0 rounded-full", tone(index).dot)} />
+      <span className="flex min-w-0 flex-1 flex-col gap-1">
+        <span className="flex items-baseline gap-2">
+          <span className="min-w-0 flex-1 font-semibold">{topic.title}</span>
+          <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+            {clock(topic.start)} · {length(topic.end - topic.start)}
+          </span>
+        </span>
+        <span className="text-sm leading-relaxed text-muted-foreground">{topic.summary}</span>
+        {moments.length > 0 && (
+          <span className="mt-1 flex flex-wrap gap-1.5">
+            {moments.map((m) => (
+              <span
+                key={m.id}
+                className="inline-flex h-6 max-w-full items-center gap-1 rounded-lg bg-muted px-2 text-xs font-medium"
+              >
+                <MomentIcon kind={m.kind} className="size-3" />
+                <span className="truncate">{m.text}</span>
+              </span>
+            ))}
+          </span>
+        )}
+      </span>
+      <ChevronRightIcon className="mt-0.5 size-4 shrink-0 self-center text-muted-foreground" />
+    </button>
+  )
+}
+
+/** A topic of a meeting: its summary and quote, and its part of the transcript. */
+export function TopicPage() {
+  return (
+    <Gate>
+      <TopicScreen />
+    </Gate>
+  )
+}
+
+function TopicScreen() {
+  const { id = "", topic: topicId = "" } = useParams()
+  const { meeting } = useMeeting(id)
+  const topic = meeting?.notes?.topics.find((t) => t.id === topicId)
+  useRememberOpened("meetings", meeting?.id)
+  if (!meeting?.notes || !topic) return <Gone />
+  return <TopicView key={topic.id} meeting={meeting} notes={meeting.notes} topic={topic} />
+}
+
+function TopicView({ meeting, notes, topic }: { meeting: Meeting; notes: Notes; topic: Topic }) {
+  const navigate = useNavigate()
+  const { up } = useNav()
+  const [params] = useSearchParams()
+  const from = params.get("at")
+  const [position, setPosition] = useState(() => (from === null ? undefined : Number(from)))
+  const [tab, setTab] = useState(from === null ? "summary" : "transcript")
+  const back = useCallback(() => up(`/meetings/${meeting.id}`), [up, meeting.id])
+  useEffect(() => setBackGuard(() => (back(), true)), [back])
+
+  const index = notes.topics.indexOf(topic)
+  const next = notes.topics[index + 1]
+  const last = index === notes.topics.length - 1
+  const lines = meeting.transcript.filter(
+    (l) => l.at >= topic.start && (last ? l.at <= topic.end : l.at < topic.end),
+  )
+  const inTopic = momentsOf(notes).filter(
+    (m) =>
+      m.at !== undefined && m.at >= topic.start && (last ? m.at <= topic.end : m.at < topic.end),
+  )
+  const seek = (at: number) => {
+    setPosition(at)
+    setTab("transcript")
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <Header
+          leading={<BackButton onClick={back} label={`Back to ${meeting.title}`} />}
+          title={<h1 className="truncate text-base font-semibold tracking-tight">{topic.title}</h1>}
+          subtitle={`Topic ${index + 1} of ${notes.topics.length} · ${clock(topic.start)} to ${clock(topic.end)}`}
+        />
+        <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 pb-8">
+          <Tabs value={tab} onValueChange={(value) => setTab(value as string)}>
+            <TabsList>
+              <TabsTrigger value="summary">Summary</TabsTrigger>
+              <TabsTrigger value="transcript">Transcript</TabsTrigger>
+            </TabsList>
+            <TabsContent value="summary" className="flex flex-col gap-5 pt-5">
+              <p className="text-[17px] leading-relaxed">{topic.summary}</p>
+              {topic.quote && (
+                <button
+                  type="button"
+                  onClick={() => seek(topic.quote!.at)}
+                  className="flex flex-col gap-1 border-l-[3px] border-merged py-0.5 pl-4 text-left"
+                >
+                  <span className="text-lg leading-snug">“{topic.quote.text}”</span>
+                  <span className="text-sm text-muted-foreground tabular-nums">
+                    {clock(topic.quote.at)}
+                  </span>
+                </button>
+              )}
+              {inTopic.length > 0 && (
+                <ul className="flex flex-col gap-2.5">
+                  {inTopic.map((m) => (
+                    <li key={m.id} className="flex gap-2.5 leading-relaxed">
+                      <MomentIcon kind={m.kind} className="mt-1" />
+                      <span className="min-w-0">
+                        {m.text}
+                        <Stamp at={m.at!} onSeek={seek} />
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </TabsContent>
+            <TabsContent value="transcript" className="pt-3">
+              <TranscriptView lines={lines} focus={position} />
+            </TabsContent>
+          </Tabs>
+          {next && (
+            <Button
+              variant="outline"
+              className="mt-8 h-12 justify-between rounded-full px-5"
+              onClick={() =>
+                navigate(`/meetings/${meeting.id}/topics/${next.id}`, {
+                  replace: true,
+                  state: { quiet: true },
+                })
+              }
+            >
+              <span className="truncate">Next: {next.title}</span>
+              <ChevronRightIcon data-icon="inline-end" />
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }

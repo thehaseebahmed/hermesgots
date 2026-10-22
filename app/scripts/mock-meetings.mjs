@@ -39,6 +39,28 @@ const item = (text, ats, extra = {}) => ({
 })
 
 const NOTES = {
+  topics: [
+    {
+      title: "Beta date",
+      start: 4,
+      end: 139,
+      summary: "Thursday holds if the freeze is Tuesday, and the Android build still needs real phones.",
+      quote: { text: "Thursday still works if we freeze on Tuesday", at: 21 },
+    },
+    {
+      title: "Sidebar",
+      start: 140,
+      end: 243,
+      summary: "Research stays where it moved; no sidebar changes before the beta.",
+      quote: { text: "No more changes to the sidebar before the beta", at: 205 },
+    },
+    {
+      title: "Push",
+      start: 244,
+      end: 402,
+      summary: "A finished run does not notify by default, and the registry status page is open.",
+    },
+  ],
   summary:
     "The team kept the beta on Thursday with a freeze on Tuesday, left the sidebar alone until after it, and turned push for a finished run off by default.",
   key_points: [

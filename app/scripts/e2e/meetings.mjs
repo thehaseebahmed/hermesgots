@@ -126,7 +126,10 @@ for (const [width, dark] of [
         .first()
         .waitFor({ timeout: 5_000 })
       await shot("3-progress")
-      await page.getByText("A finished run does not push by default.").waitFor({ timeout: 20_000 })
+      await page.getByText("Beta date").first().waitFor({ timeout: 20_000 })
+      assert.ok(await page.getByRole("region", { name: "Timeline" }).isVisible(), "the timeline")
+      assert.ok(await page.getByRole("heading", { name: "Topics" }).isVisible(), "the topics")
+      assert.ok(await page.getByText("3 decisions, 3 to do and 1 left open.").isVisible(), "the tally")
       assert.ok(await page.getByText("Unsourced").first().isVisible(), "a bullet with no source")
       assert.ok(await page.getByText("(Owner not stated)").first().isVisible(), "no invented owner")
       await shot("4-notes")
@@ -168,17 +171,10 @@ for (const [width, dark] of [
         timeout: 10_000,
       })
       // The meeting it replaces stays on screen while the pane slides: wait until only one is left.
-      await page.waitForFunction(
-        () =>
-          document.body.innerText.split("A finished run does not push by default.").length === 2,
-        undefined,
-        { timeout: 20_000 },
-      )
+      await page.waitForFunction(() => document.body.innerText.split("Beta date").length === 2, undefined, {
+        timeout: 20_000,
+      })
       pass(`${width}: a meeting recorded in the app is sent and written up`)
-
-      await page.getByRole("button", { name: "Show 0:21 in the transcript" }).first().click()
-      await page.getByText("On the beta, I think Thursday still works").waitFor({ timeout: 5_000 })
-      await shot("5-transcript")
 
       // From 1280px the list stays beside the meeting, with the open one marked.
       const search = page.getByRole("searchbox", { name: "Search meetings" })
@@ -193,6 +189,23 @@ for (const [width, dark] of [
         `${width}: ${width >= 1280 ? "the list stays beside the meeting" : "the meeting replaces the list"}`,
       )
 
+      // A cited time opens its topic's transcript at that line, and a topic row opens the topic.
+      await page.getByRole("button", { name: "Show 0:21 in the transcript" }).first().click()
+      await page.getByText("On the beta, I think Thursday still works").waitFor({ timeout: 5_000 })
+      assert.ok(await page.getByText("Topic 1 of 3").isVisible(), "the topic's place in the meeting")
+      assert.equal(
+        await page.getByText("Right, the sidebar").count(),
+        0,
+        "only the topic's own lines",
+      )
+      await shot("5-transcript")
+      await page.getByRole("button", { name: /^Next: Sidebar/ }).click()
+      await page.getByText("Topic 2 of 3").waitFor({ timeout: 5_000 })
+      await page.getByRole("tab", { name: "Transcript" }).click()
+      await page.getByText("Then let's keep it").waitFor({ timeout: 5_000 })
+      await shot("5c-topic")
+      await page.getByRole("button", { name: /^Back to / }).click()
+
       // A step that fails says why, and Try again carries on from it.
       await toList()
       const flaky = `flaky-${width}`
@@ -204,7 +217,7 @@ for (const [width, dark] of [
         .waitFor({ timeout: 20_000 })
       await shot("6-failed")
       await page.getByRole("button", { name: "Try again" }).click()
-      await page.getByText("A finished run does not push by default.").waitFor({ timeout: 20_000 })
+      await page.getByText("Beta date").first().waitFor({ timeout: 20_000 })
       pass(`${width}: a failed meeting runs again`)
 
       // An upload nothing is finishing: the page that was sending it is gone.
