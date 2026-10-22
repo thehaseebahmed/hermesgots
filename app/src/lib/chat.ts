@@ -1314,8 +1314,8 @@ export async function sendFromMain(
     routing.delete(conversationId)
     if (controllers.has(conversationId)) {
       // A reply started while the host decided: this goes after it.
-      await db.messages.delete(held.id)
       await steerOrQueue(conversationId, content, sent, options.steer)
+      await db.messages.delete(held.id)
     } else {
       await sendMessage(conversationId, text, { queuedId: held.id, attachments: sent })
     }

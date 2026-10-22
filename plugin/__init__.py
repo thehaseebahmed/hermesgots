@@ -1741,7 +1741,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                         files,
                         body.get("body"),
                     )
-                    follow_queue(request, started["session_id"], path)
                     # Main shows a marker where the message went; it never entered Main's session.
                     await record_move(
                         path, key, session_id, text, started["thread"], started["session_id"],
@@ -1751,6 +1750,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     answer = {"object": "memento.triage", "decision": triage.NEW, **started}
                 except Exception:
                     logger.debug("memento: triage couldn't open a thread", exc_info=True)
+                # Outside the try: the thread and its queued message exist by now, and a failure
+                # here must not tell the app to send the message to Main as well.
+                if answer["decision"] == triage.NEW:
+                    try:
+                        follow_queue(request, answer["session_id"], path)
+                    except Exception:
+                        logger.debug("memento: triage couldn't follow a new thread", exc_info=True)
             elif found["decision"] == triage.THREAD:
                 try:
                     delivered = await triage.deliver(
