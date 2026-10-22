@@ -55,6 +55,14 @@
   --syntax-title: oklch(0.5 0.17 300);
   --syntax-attr: oklch(0.55 0.13 60);
   --syntax-comment: oklch(0.556 0 0);
+
+  /* A chart's series, in order. Five hues at a similar lightness, so the series stay apart by
+     colour rather than by weight in a chart 224px tall. */
+  --chart-1: oklch(0.55 0.15 150);
+  --chart-2: oklch(0.62 0.16 55);
+  --chart-3: oklch(0.52 0.14 255);
+  --chart-4: oklch(0.58 0.16 310);
+  --chart-5: oklch(0.62 0.12 195);
 }
 
 .dark {
@@ -101,6 +109,12 @@
   --syntax-title: oklch(0.75 0.13 300);
   --syntax-attr: oklch(0.8 0.12 70);
   --syntax-comment: oklch(0.6 0 0);
+
+  --chart-1: oklch(0.72 0.16 150);
+  --chart-2: oklch(0.76 0.15 55);
+  --chart-3: oklch(0.7 0.13 255);
+  --chart-4: oklch(0.74 0.15 310);
+  --chart-5: oklch(0.76 0.11 195);
 }
 
 @theme inline {

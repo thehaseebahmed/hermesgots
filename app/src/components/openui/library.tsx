@@ -12,10 +12,11 @@ import { z } from "zod/v4"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Card as CardSurface, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
+import { Chart } from "./chart.tsx"
 import { OPENUI_ROOT } from "./root.ts"
 
 const child: z.ZodType<SubComponentOf<unknown>> = z.lazy(() =>
-  z.union([Card.ref, Table.ref, List.ref, Callout.ref]),
+  z.union([Card.ref, Table.ref, List.ref, Callout.ref, Chart.ref]),
 )
 
 const stackProps = z.object({ children: z.array(child) })
@@ -44,7 +45,7 @@ const TONES = {
 const Stack = defineComponent({
   name: OPENUI_ROOT,
   props: stackProps,
-  description: "A column of blocks, drawn in order.",
+  description: "A column of blocks.",
   component: ({ props, renderNode }: ComponentRenderProps<z.infer<typeof stackProps>>) => (
     <div className="w-full min-w-0 space-y-3">
       {props.children.map((node, i) => (
@@ -57,7 +58,7 @@ const Stack = defineComponent({
 const Card = defineComponent({
   name: "Card",
   props: cardProps,
-  description: "A titled card: body is one paragraph, children draw beneath it.",
+  description: "Titled card: paragraph, then children.",
   component: ({ props, renderNode }: ComponentRenderProps<z.infer<typeof cardProps>>) => (
     <CardSurface size="sm">
       <CardHeader>
@@ -78,7 +79,7 @@ const Card = defineComponent({
 const Table = defineComponent({
   name: "Table",
   props: tableProps,
-  description: "A table of plain-text cells, with an optional caption.",
+  description: "Plain-text cells, optional caption.",
   component: ({ props }: ComponentRenderProps<z.infer<typeof tableProps>>) => (
     <div className="w-full overflow-x-auto">
       <table className="w-full text-sm">
@@ -113,7 +114,7 @@ const Table = defineComponent({
 const List = defineComponent({
   name: "List",
   props: listProps,
-  description: "A list of items, each a label with an optional detail.",
+  description: "Label and optional detail.",
   component: ({ props }: ComponentRenderProps<z.infer<typeof listProps>>) => {
     const items = props.items.map((item, i) => (
       <li key={i} className="my-1">
@@ -132,7 +133,7 @@ const List = defineComponent({
 const Callout = defineComponent({
   name: "Callout",
   props: calloutProps,
-  description: "A one-line aside: info, warn or good.",
+  description: "A one-line aside: info, warn, good.",
   component: ({ props }: ComponentRenderProps<z.infer<typeof calloutProps>>) => {
     const { Icon, className } = TONES[props.tone]
     return (
@@ -145,7 +146,7 @@ const Callout = defineComponent({
 })
 
 export const library = createLibrary({
-  components: [Stack, Card, Table, List, Callout],
+  components: [Stack, Card, Table, List, Callout, Chart],
   root: OPENUI_ROOT,
 })
 export const parser = createParser(library.toJSONSchema(), OPENUI_ROOT)

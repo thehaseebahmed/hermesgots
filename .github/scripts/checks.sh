@@ -41,6 +41,9 @@ app() {
   # `pnpm build` is `pnpm typecheck && vite build`, and `typecheck` has run above: the tsconfigs
   # emit nothing, so a second pass would only check the same code again.
   gate pnpm exec vite build
+  # Recharts belongs in the chart's own lazy chunk and never in the chat route's entry chunk, so the
+  # assertion runs over the build above; unwired it could not have failed.
+  gate node scripts/check-openui-chunks.mjs
 }
 
 plugin() {
