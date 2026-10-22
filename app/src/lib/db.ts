@@ -82,6 +82,8 @@ export interface Profile {
   modelChoice?: ModelChoice
   /** The last few models picked on this bot, newest first, for switching back quickly. */
   recentModels?: ModelChoice[]
+  /** The names and words its dictation is written with, sent with the start of every take. Synced. */
+  vocabulary?: string[]
   /** The linked host that registered it; unset for a bot added by hand before linking. */
   hostId?: string
   /** Its pushes are muted: nothing it says reaches any device. Synced; the plugin holds the mute. */

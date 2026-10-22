@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BOTS } from "@/components/bots"
+import { DictationTab } from "@/components/bot-dictation-tab"
 import {
   DefaultModelSetting,
   DelegationModelSetting,
@@ -56,6 +57,8 @@ import { connectionKey } from "@/lib/connection"
 import { formatRelative } from "@/lib/format"
 import { botTabOf, botTabPath, type BotTab } from "@/lib/bot-tabs"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
+import { DICTATION_STREAM } from "@/lib/dictation-take"
+import { usePluginFeature } from "@/lib/features"
 import { checkHealth, getPluginVersion, listModels } from "@/lib/hermes"
 import { useMcpFeatureAnswers } from "@/lib/mcps"
 import { setDefaultModel } from "@/lib/model-info"
@@ -178,13 +181,14 @@ function RemoveBot({ profile, onDeleted }: { profile: Profile; onDeleted?: () =>
 }
 
 /**
- * A bot's settings, in three tabs of its own screen — General, Models and MCP — with the tab held in
- * the URL, so each is a history entry of its own and back walks the way it was opened.
+ * A bot's settings, in tabs of its own screen — General, Models, Dictation and MCP — with the tab
+ * held in the URL, so each is a history entry of its own and back walks the way it was opened.
  *
  * General is what the bot is and how it is reached, the model it answers with is on Models with the
- * default and the fallbacks it falls back to, and MCP is its servers. The MCP tab exists only where
- * the bot's plugin advertises that it can list them, so a bot on an older plugin has two tabs and a
- * URL into a third lands on General rather than on a screen that can't draw.
+ * default and the fallbacks it falls back to, Dictation is the words its dictation is written with,
+ * and MCP is its servers. Dictation and MCP exist only where the bot's plugin advertises that it
+ * can stream a take or list servers, so a bot on an older plugin has two tabs and a URL into one it
+ * doesn't have lands on General rather than on a screen that can't draw.
  *
  * A linked bot's address and key come from its host and aren't shown; a bot added by hand before
  * linking keeps its own.
@@ -210,7 +214,10 @@ export function BotEditor({
   // list them, and a Host that hasn't answered yet shows General rather than flashing a tab away.
   const answers = useMcpFeatureAnswers(profile)
   const mcpServers = answers.list === "yes"
-  const shown: BotTab = tab === "mcps" && !mcpServers ? "general" : tab
+  // Dictation's words follow the same rule, on the feature that says the host can hear a take.
+  const streams = usePluginFeature(profile, DICTATION_STREAM)
+  const shown: BotTab =
+    (tab === "mcps" && !mcpServers) || (tab === "dictation" && streams !== "yes") ? "general" : tab
 
   // Local drafts so typing isn't fighting the live query; persisted on every change.
   const [name, setName] = useState(profile.name)
@@ -228,7 +235,9 @@ export function BotEditor({
   useEffect(() => {
     if (tab === "mcps" && answers.list === "no")
       void navigate(`/settings/bots/${profile.id}`, { replace: true })
-  }, [tab, answers.list, navigate, profile.id])
+    if (tab === "dictation" && streams === "no")
+      void navigate(`/settings/bots/${profile.id}`, { replace: true })
+  }, [tab, answers.list, streams, navigate, profile.id])
 
   // One read of the host's model list, for both the tab's own open and General's Test connection.
   const readModels = useCallback(
@@ -303,6 +312,7 @@ export function BotEditor({
       <TabsList>
         <TabsTrigger value="general">General</TabsTrigger>
         <TabsTrigger value="models">Models</TabsTrigger>
+        {streams === "yes" && <TabsTrigger value="dictation">Dictation</TabsTrigger>}
         {mcpServers && <TabsTrigger value="mcps">MCP</TabsTrigger>}
       </TabsList>
 
@@ -515,6 +525,12 @@ export function BotEditor({
           <FallbackModelsSetting profile={profile} />
         </FieldGroup>
       </TabsContent>
+
+      {streams === "yes" && (
+        <TabsContent value="dictation">
+          <DictationTab profile={profile} />
+        </TabsContent>
+      )}
 
       {mcpServers && (
         <TabsContent value="mcps">
