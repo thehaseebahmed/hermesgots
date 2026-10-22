@@ -123,6 +123,7 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 
+import { handleMeetings } from "./mock-meetings.mjs"
 import { handleResearch } from "./mock-research.mjs"
 
 // Two real turns whose tool rows rendered in the wrong place (from session exports), replayed by
@@ -474,6 +475,8 @@ const PLUGIN = process.env.MOCK_NO_PLUGIN !== "1"
 // MOCK_RESEARCH_WRITERS=off a host that doesn't let a mission be rewritten with another model.
 const RESEARCH = process.env.MOCK_RESEARCH !== "0"
 const RESEARCH_WRITERS = process.env.MOCK_RESEARCH_WRITERS !== "off"
+// The meetings feature (mock-meetings.mjs); MOCK_MEETINGS=0 serves a plugin from before it.
+const MEETINGS = process.env.MOCK_MEETINGS !== "0"
 // A bot's MCP servers, as the plugin's read reports them: each with Gots' own state word, the source
 // it comes from, and the Host's own reason on a failed one. Every word the screen renders has a row.
 // MOCK_MCP=off is a Hermes whose plugin can't offer them at all: no route and no `mcps` feature.
@@ -2833,6 +2836,7 @@ http
           "afk_pipeline",
           ...(TRIAGE !== "off" ? ["triage", "moves"] : []),
           ...(RESEARCH ? ["research", "research_followup", "research_rewrite", "research_compare"] : []),
+          ...(MEETINGS ? ["meetings"] : []),
           ...(MCPS
             ? [
                 "mcps",
@@ -2869,6 +2873,13 @@ http
       RESEARCH &&
       !profile &&
       (await handleResearch(req, res, url.pathname, { json, readBody, noteEvent }))
+    )
+      return
+    if (
+      PLUGIN &&
+      MEETINGS &&
+      !profile &&
+      (await handleMeetings(req, res, url.pathname, { json, readBody, noteEvent }))
     )
       return
     // The workflow library: presets first and read-only, the account's own rows rewritten in place.

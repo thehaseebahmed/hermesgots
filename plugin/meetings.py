@@ -3,15 +3,19 @@
 A meeting goes uploading → transcribing → writing → ready, and runs on the host so it carries on
 with the app closed:
 
-- **Upload.** Audio comes in parts of at most 5 minutes, each its own request, since the API server
-  refuses bodies over 10 MB. A part is kept on disk under ``$HERMES_HOME/memento/meetings/<id>/``
-  with the second it starts at. ``finish`` says every part is in and starts the transcription.
-  A transcript the user already has skips all of that: the app parses it and posts the lines.
-- **Transcribe.** One part at a time, in order, on the host's faster-whisper like dictation
-  (``dictation.py``), each with the end of the text before it as Whisper's prompt. Segments carry the
-  meeting-level second they start at, the part's start plus the segment's own. When the loaded model
-  can't be reached for segments, a part is one segment at its start. A part's audio is deleted once its
-  text is saved, so the recording leaves the host as the transcript lands.
+- **Upload.** The recording comes in byte chunks of the one file, in order, each its own request,
+  since the API server refuses bodies over 10 MB. A chunk is not audio on its own (a slice of an m4a
+  has no header), so nothing decodes a chunk: ``finish`` says every chunk is in and starts the
+  transcription, which joins them into the file first. The chunks are kept on disk under
+  ``$HERMES_HOME/memento/meetings/<id>/``. A transcript the user already has skips all of that: the
+  app parses it and posts the lines.
+- **Transcribe.** The host decodes the joined file once (faster-whisper's own decoder, 16 kHz mono)
+  and cuts it into windows of at most 5 minutes, which are the meeting's parts from then on. One
+  window at a time, in order, on the host's faster-whisper like dictation (``dictation.py``), each
+  with the end of the text before it as Whisper's prompt. Segments carry the meeting-level second
+  they start at, the window's start plus the segment's own. When the loaded model can't be reached for
+  segments, a window is one segment at its start. The recording leaves the host as the transcript
+  lands.
 - **Write.** One fixed template (summary, key points, decisions, action items, open questions),
   written by the profile's own model (``ctx.llm``, no override) from the transcript alone, in
   sections merged by a second call when the transcript is long. Every bullet cites the transcript
@@ -32,6 +36,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import math
 import re
 import shutil
 import sqlite3
@@ -46,10 +51,14 @@ from .store import connect
 
 logger = logging.getLogger(__name__)
 
-# A part is at most 5 minutes of audio, a meeting at most 3 hours.
+# A window of audio is at most 5 minutes, a meeting at most 3 hours.
 PART_SECONDS = 300
 MAX_SECONDS = 3 * 60 * 60
-MAX_PARTS = MAX_SECONDS // PART_SECONDS
+SAMPLE_RATE = 16000
+# A recording arrives in chunks of at most dictation.MAX_BYTES; three hours of a high bit rate fits.
+MAX_CHUNKS = 64
+# What a window's row says its content type is, once the joined file is cut into windows.
+WINDOW = "window"
 MAX_TITLE = 120
 MAX_LINES = 20000
 MAX_LINE = 4000
@@ -172,9 +181,9 @@ def create(
         row = ("transcript", "writing", 0, json.dumps(lines), lines[-1]["at"])
     else:
         if isinstance(parts, bool) or not isinstance(parts, int) or parts < 1:
-            raise MeetingError("Say how many parts the recording has.")
-        if parts > MAX_PARTS:
-            raise MeetingError("The recording is longer than 3 hours.", 413)
+            raise MeetingError("Say how many chunks the recording has.")
+        if parts > MAX_CHUNKS:
+            raise MeetingError("The recording is too large.", 413)
         reason = available()
         if reason:
             raise MeetingError(reason, 501)
@@ -263,20 +272,18 @@ def _need(path: Path, meeting_id: str) -> Dict[str, Any]:
 
 
 def add_part(
-    path: Path, meeting_id: str, n: int, start: int, data: bytes, content_type: Optional[str]
+    path: Path, meeting_id: str, n: int, data: bytes, content_type: Optional[str]
 ) -> Dict[str, Any]:
-    """Keeps part ``n`` of an audio meeting, replacing one sent before (a retry after a drop)."""
+    """Keeps chunk ``n`` of an audio meeting, replacing one sent before (a retry after a drop)."""
     found = _need(path, meeting_id)
     if found["kind"] != "audio" or found["stage"] != "uploading":
         raise MeetingError("This meeting isn't taking audio.", 409)
     if not 0 <= n < found["parts"]:
-        raise MeetingError("That part isn't one of the meeting's.", 400)
-    if start < 0 or start > MAX_SECONDS:
-        raise MeetingError("That part starts outside the meeting.", 400)
+        raise MeetingError("That chunk isn't one of the meeting's.", 400)
     if not data:
-        raise MeetingError("The part is empty.", 400)
+        raise MeetingError("The chunk is empty.", 400)
     if len(data) > dictation.MAX_BYTES:
-        raise MeetingError("The part is too large.", 413)
+        raise MeetingError("The chunk is too large.", 413)
     where = folder(path, meeting_id)
     where.mkdir(parents=True, exist_ok=True)
     for old in where.glob(f"part-{n}.*"):
@@ -290,7 +297,7 @@ def add_part(
                VALUES (?, ?, ?, ?, ?, 0, NULL)
                ON CONFLICT (meeting_id, n) DO UPDATE SET start = excluded.start,
                    content_type = excluded.content_type, size = excluded.size, done = 0, segments = NULL""",
-            (meeting_id, n, start, content_type, len(data)),
+            (meeting_id, n, 0, content_type, len(data)),
         )
     finally:
         conn.close()
@@ -305,7 +312,7 @@ def finish(path: Path, meeting_id: str) -> Dict[str, Any]:
         raise MeetingError("This meeting isn't taking audio.", 409)
     if found["parts_stored"] < found["parts"]:
         missing = found["parts"] - found["parts_stored"]
-        raise MeetingError(f"{missing} of the {found['parts']} parts haven't arrived.", 409)
+        raise MeetingError(f"{missing} of the {found['parts']} chunks haven't arrived.", 409)
     _update(path, meeting_id, stage="transcribing", error=None)
     return _need(path, meeting_id)
 
@@ -334,8 +341,29 @@ def remove(path: Path, meeting_id: str) -> Optional[Dict[str, Any]]:
     return found
 
 
-def _segments(file: Path, offset: int, context: str) -> List[Dict[str, Any]]:
-    """What a part says, as segments at meeting-level seconds. Raises DictationError when the host can't."""
+def _decode(file: Path) -> Any:
+    """The recording as 16 kHz mono samples, by faster-whisper's own decoder (PyAV, bundled with it)."""
+    from faster_whisper.audio import decode_audio
+
+    return decode_audio(str(file), sampling_rate=SAMPLE_RATE)
+
+
+def _wav(window: Any, file: Path) -> None:
+    """A window of samples as a 16-bit mono WAV, for the whole-file fallback."""
+    import array
+    import wave
+
+    pcm = array.array("h", (int(max(-1.0, min(1.0, float(x))) * 32767) for x in window))
+    with wave.open(str(file), "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(SAMPLE_RATE)
+        out.writeframes(pcm.tobytes())
+
+
+def _segments(window: Any, offset: int, context: str, scratch: Path) -> List[Dict[str, Any]]:
+    """What a window of samples says, as segments at meeting-level seconds. Raises DictationError
+    when the host can't."""
     state = dictation.info()
     if not state.get("ready"):
         raise dictation.DictationError(state.get("reason") or "Transcription is off on the host.", 409)
@@ -350,9 +378,7 @@ def _segments(file: Path, offset: int, context: str) -> List[Dict[str, Any]]:
         try:
             model = loader(name, local)
             language = tt._resolve_stt_language("local", cfg) or None
-            found, _info = model.transcribe(
-                str(file), initial_prompt=prompt or None, language=language, vad_filter=True
-            )
+            found, _info = model.transcribe(window, initial_prompt=prompt or None, language=language, vad_filter=True)
             out = []
             for segment in found:
                 text = " ".join(str(segment.text).split())
@@ -360,8 +386,12 @@ def _segments(file: Path, offset: int, context: str) -> List[Dict[str, Any]]:
                     out.append({"at": offset + int(segment.start), "text": text})
             return out
         except Exception:
-            logger.debug("memento: segments unavailable, transcribing the part whole", exc_info=True)
-    result = tt._transcribe_local(str(file), name, prompt=prompt or None)
+            logger.debug("memento: segments unavailable, transcribing the window whole", exc_info=True)
+    _wav(window, scratch)
+    try:
+        result = tt._transcribe_local(str(scratch), name, prompt=prompt or None)
+    finally:
+        scratch.unlink(missing_ok=True)
     if not isinstance(result, dict):
         raise dictation.DictationError("Transcription failed.")
     if not result.get("success"):
@@ -373,7 +403,72 @@ def _segments(file: Path, offset: int, context: str) -> List[Dict[str, Any]]:
     return [] if not text or dictation._hallucination(text) else [{"at": offset, "text": text}]
 
 
+def _assemble(path: Path, meeting_id: str) -> Path:
+    """The recording's chunks joined into the one file, once; the chunks go as they are joined."""
+    where = folder(path, meeting_id)
+    joined = sorted(where.glob("audio.*"))
+    if joined:
+        return joined[0]
+    conn = _open(path)
+    try:
+        rows = conn.execute(
+            "SELECT n, content_type FROM meeting_parts WHERE meeting_id = ? ORDER BY n", (meeting_id,)
+        ).fetchall()
+    finally:
+        conn.close()
+    if not rows:
+        raise MeetingError("The recording is gone from the host; upload it again.")
+    chunks = []
+    for row in rows:
+        found = sorted(where.glob(f"part-{row['n']}.*"))
+        if not found:
+            raise MeetingError(f"Chunk {row['n'] + 1} is gone from the host; upload the recording again.")
+        chunks.append(found[0])
+    target = where / f"audio{dictation.suffix_for(rows[0]['content_type'])}"
+    partial = where / "audio.partial"
+    with partial.open("wb") as out:
+        for chunk in chunks:
+            out.write(chunk.read_bytes())
+    partial.rename(target)
+    for chunk in chunks:
+        chunk.unlink(missing_ok=True)
+    return target
+
+
+def _prepare(path: Path, meeting_id: str) -> Any:
+    """The recording as samples, with its parts now the windows it is cut into."""
+    try:
+        audio = _decode(_assemble(path, meeting_id))
+    except MeetingError:
+        raise
+    except Exception as error:
+        raise MeetingError(f"The recording couldn't be read: {error}") from error
+    seconds = len(audio) / SAMPLE_RATE
+    if seconds > MAX_SECONDS:
+        raise MeetingError("The recording is longer than 3 hours.", 413)
+    count = max(1, math.ceil(seconds / PART_SECONDS))
+    conn = _open(path)
+    try:
+        types = [row["content_type"] for row in conn.execute(
+            "SELECT content_type FROM meeting_parts WHERE meeting_id = ?", (meeting_id,)
+        )]
+        if not types or any(kind != WINDOW for kind in types):
+            conn.execute("DELETE FROM meeting_parts WHERE meeting_id = ?", (meeting_id,))
+            conn.executemany(
+                """INSERT INTO meeting_parts (meeting_id, n, start, content_type, size, done, segments)
+                   VALUES (?, ?, ?, ?, 0, 0, NULL)""",
+                [(meeting_id, n, n * PART_SECONDS, WINDOW) for n in range(count)],
+            )
+            conn.execute("UPDATE meetings SET parts = ? WHERE id = ?", (count, meeting_id))
+    finally:
+        conn.close()
+    events.note("meetings", meeting_id, path, True)
+    return audio
+
+
 def _transcribe(path: Path, meeting_id: str) -> None:
+    with _transcribing:
+        audio = _prepare(path, meeting_id)
     conn = _open(path)
     try:
         parts = conn.execute(
@@ -383,16 +478,15 @@ def _transcribe(path: Path, meeting_id: str) -> None:
     finally:
         conn.close()
     context = ""
+    scratch = folder(path, meeting_id) / "window.wav"
     for part in parts:
         if part["done"]:
             kept = json.loads(part["segments"] or "[]")
             context = dictation.clean_context(" ".join(s["text"] for s in kept) or context)
             continue
-        files = sorted(folder(path, meeting_id).glob(f"part-{part['n']}.*"))
-        if not files:
-            raise MeetingError(f"Part {part['n'] + 1} is gone from the host; upload the recording again.")
+        first = part["start"] * SAMPLE_RATE
         with _transcribing:
-            segments = _segments(files[0], part["start"], context)
+            segments = _segments(audio[first : first + PART_SECONDS * SAMPLE_RATE], part["start"], context, scratch)
         conn = _open(path)
         try:
             conn.execute(
@@ -401,7 +495,6 @@ def _transcribe(path: Path, meeting_id: str) -> None:
             )
         finally:
             conn.close()
-        files[0].unlink(missing_ok=True)
         context = dictation.clean_context(" ".join(s["text"] for s in segments) or context)
         events.note("meetings", meeting_id, path, True)
     conn = _open(path)

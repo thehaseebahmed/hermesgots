@@ -26,7 +26,7 @@ export interface Settings {
   developer?: boolean
   /** The bot-first layout: bots in the sidebar, each chat a thread in its bot. Developer, local. */
   botThreads?: boolean
-  /** Meetings: record or add a meeting and read its notes (a design mock). Developer, local. */
+  /** Meetings: add a recording or transcript and read the host's notes. Developer, local. */
   meetings?: boolean
   /** AFK's workflow library: a project's Workflow row, its library and its editor. Developer, local. */
   afkWorkflows?: boolean
