@@ -3,6 +3,7 @@ import { ArrowUpIcon, RotateCwIcon, SquareIcon, XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { keyboardClick, type DictationStatus } from "@/lib/dictation"
+import { hearing, transcriptText, type DictationTranscript } from "@/lib/dictation-transcript"
 
 const IDLE_BARS = Array<number>(32).fill(0)
 
@@ -24,11 +25,40 @@ function Elapsed({ since }: { since: number }) {
   )
 }
 
+/**
+ * The take's words, newest at the bottom, scrolling within a few lines rather than growing. It is
+ * not a live region: a screen reader reads it on request, so a take is never announced word by word.
+ */
+function Transcript({ transcript }: { transcript: DictationTranscript }) {
+  const box = useRef<HTMLDivElement>(null)
+  const text = transcriptText(transcript)
+  useEffect(() => {
+    const element = box.current
+    if (element) element.scrollTop = element.scrollHeight
+  }, [text, transcript.behind])
+  return (
+    <div
+      ref={box}
+      role="region"
+      aria-label="Dictation"
+      aria-live="off"
+      className="max-h-[4.5rem] overflow-y-auto px-3 pt-2 pb-0.5 text-sm leading-snug"
+    >
+      {transcript.preparing && !text && (
+        <span className="text-muted-foreground motion-safe:animate-pulse">Preparing…</span>
+      )}
+      {text && <p className="break-words whitespace-pre-wrap">{text}</p>}
+      {transcript.behind && <p className="pt-0.5 text-xs text-muted-foreground">Behind</p>}
+    </div>
+  )
+}
+
 export function VoiceBar({
   status,
   levels,
   startedAt,
   error,
+  transcript,
   onCancel,
   onStop,
   onSend,
@@ -38,6 +68,8 @@ export function VoiceBar({
   levels: number[] | null
   startedAt: number | null
   error: string | null
+  /** What the take has heard so far; absent for the chunked implementation, which has no words yet. */
+  transcript?: DictationTranscript
   onCancel: () => void
   onStop: () => void
   onSend: () => void
@@ -62,71 +94,78 @@ export function VoiceBar({
   return (
     <div
       onPointerDownCapture={() => (pressed.current = true)}
-      className="flex items-center gap-2 rounded-[1.75rem] border border-input bg-background p-1.5 shadow-lg shadow-black/5 dark:bg-input/30"
+      className="flex flex-col rounded-[1.75rem] border border-input bg-background shadow-lg shadow-black/5 dark:bg-input/30"
     >
-      <Button
-        type="button"
-        variant="secondary"
-        className="size-11 rounded-full"
-        onClick={pressedHere(onCancel)}
-        aria-label={status === "failed" ? "Discard" : "Cancel"}
-      >
-        <XIcon />
-      </Button>
-      {status === "failed" ? (
-        <>
-          <p
-            className="line-clamp-2 min-w-0 flex-1 px-1 text-sm leading-tight text-destructive"
-            role="alert"
-            title={error ?? undefined}
-          >
-            {error ?? "Couldn't transcribe the recording."}
-          </p>
-          <Button type="button" className="h-11 rounded-full px-4" onClick={pressedHere(onRetry)}>
-            <RotateCwIcon />
-            Retry
-          </Button>
-        </>
-      ) : (
-        <>
-          <div
-            className="flex h-11 min-w-0 flex-1 items-center justify-center gap-[3px] overflow-hidden"
-            aria-live="polite"
-          >
-            {transcribing ? (
-              <span className="animate-pulse text-sm text-muted-foreground">Transcribing…</span>
-            ) : (
-              (levels ?? IDLE_BARS).map((level, index) => (
-                <span
-                  key={index}
-                  className="w-[3px] shrink-0 rounded-full bg-foreground transition-[height] duration-75"
-                  style={{ height: `${4 + level * 28}px` }}
-                />
-              ))
-            )}
-          </div>
-          {startedAt !== null && !transcribing && <Elapsed since={startedAt} />}
-          <Button
-            type="button"
-            variant="secondary"
-            className="size-11 rounded-full"
-            onClick={pressedHere(onStop)}
-            disabled={transcribing}
-            aria-label="Stop"
-          >
-            <SquareIcon className="fill-current" />
-          </Button>
-          <Button
-            type="button"
-            className="size-11 rounded-full"
-            onClick={pressedHere(onSend)}
-            disabled={transcribing}
-            aria-label="Send"
-          >
-            <ArrowUpIcon />
-          </Button>
-        </>
+      {status !== "failed" && transcript && hearing(transcript) && (
+        <Transcript transcript={transcript} />
       )}
+      <div className="flex items-center gap-2 p-1.5">
+        <Button
+          type="button"
+          variant="secondary"
+          className="size-11 rounded-full"
+          onClick={pressedHere(onCancel)}
+          aria-label={status === "failed" ? "Discard" : "Cancel"}
+        >
+          <XIcon />
+        </Button>
+        {status === "failed" ? (
+          <>
+            <p
+              className="line-clamp-2 min-w-0 flex-1 px-1 text-sm leading-tight text-destructive"
+              role="alert"
+              title={error ?? undefined}
+            >
+              {error ?? "Couldn't transcribe the recording."}
+            </p>
+            <Button type="button" className="h-11 rounded-full px-4" onClick={pressedHere(onRetry)}>
+              <RotateCwIcon />
+              Retry
+            </Button>
+          </>
+        ) : (
+          <>
+            <div
+              className="flex h-11 min-w-0 flex-1 items-center justify-center gap-[3px] overflow-hidden"
+              aria-live="polite"
+            >
+              {transcribing ? (
+                <span className="text-sm text-muted-foreground motion-safe:animate-pulse">
+                  Transcribing…
+                </span>
+              ) : (
+                (levels ?? IDLE_BARS).map((level, index) => (
+                  <span
+                    key={index}
+                    className="w-[3px] shrink-0 rounded-full bg-foreground transition-[height] duration-75"
+                    style={{ height: `${4 + level * 28}px` }}
+                  />
+                ))
+              )}
+            </div>
+            {startedAt !== null && !transcribing && <Elapsed since={startedAt} />}
+            <Button
+              type="button"
+              variant="secondary"
+              className="size-11 rounded-full"
+              onClick={pressedHere(onStop)}
+              disabled={transcribing}
+              aria-label="Stop"
+            >
+              <SquareIcon className="fill-current" />
+            </Button>
+            <Button
+              type="button"
+              className="size-11 rounded-full"
+              onClick={pressedHere(onSend)}
+              disabled={transcribing}
+              aria-label="Send"
+            >
+              <ArrowUpIcon />
+            </Button>
+          </>
+        )}
+      </div>
     </div>
   )
 }

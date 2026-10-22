@@ -38,10 +38,10 @@ import {
   canRecord,
   joinText,
   keyboardClick,
-  useDictation,
   useDictationInfo,
   type DictationAvailability,
 } from "@/lib/dictation"
+import { useDictation } from "@/lib/dictation-take"
 import {
   SEND_COMMANDS,
   hoistItem,
@@ -393,6 +393,7 @@ export function Composer({
           levels={dictation.levels}
           startedAt={dictation.startedAt}
           error={dictation.error}
+          transcript={dictation.transcript}
           onCancel={dictation.cancel}
           onStop={() => void endDictation(false)}
           onSend={() => void endDictation(true)}

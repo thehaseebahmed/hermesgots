@@ -11,6 +11,7 @@ import { DICTATION_INFO_MS } from "@/lib/freshness"
 import { createSignal } from "@/lib/store"
 import { connectionKey } from "@/lib/connection"
 import { db, type DictationPiece } from "@/lib/db"
+import { EMPTY_TRANSCRIPT } from "@/lib/dictation-transcript"
 import {
   getDictationInfo,
   transcribeClip,
@@ -73,29 +74,29 @@ export function useDictationInfo(config: HermesConfig) {
 }
 
 /** The longest recording; at 24 kbps it stays far under the API server's 10 MB body limit. */
-const MAX_MS = 10 * 60 * 1000
+export const MAX_MS = 10 * 60 * 1000
 const MIN_MS = 300
 /** A cold host may load (or first download) its model inside this request. */
 const TRANSCRIBE_MS = 120_000
 const TYPES = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4", "audio/webm"]
-const BARS = 32
-const SAMPLE_MS = 50
+export const BARS = 32
+export const SAMPLE_MS = 50
 const PIECE_MS = 6000
 const PAUSE_MS = 700
 const LONG_PIECE_MS = 25_000
 const SHORT_PAUSE_MS = 350
 // Loudness (RMS of the wave, 0 to 1) under which the mic counts as quiet.
-const QUIET_MIN = 0.012
-const QUIET_MAX = 0.05
+export const QUIET_MIN = 0.012
+export const QUIET_MAX = 0.05
 const SAVE_MS = 2000
 const RESTORED = "This recording hasn't been transcribed yet."
 /** A stop event that hasn't come by now isn't coming: the take goes with what it flushed. */
-const STOP_MS = 1500
+export const STOP_MS = 1500
 /** A live track whose recorder has sent nothing by now is a dead one: silence still encodes. */
-const SILENT_MS = 2500
-const STOPPED = "The recording stopped."
-const TAKEN = "The microphone is in use by another app."
-const SILENT = "The microphone isn't picking up any sound."
+export const SILENT_MS = 2500
+export const STOPPED = "The recording stopped."
+export const TAKEN = "The microphone is in use by another app."
+export const SILENT = "The microphone isn't picking up any sound."
 
 /** A click from Enter or Space: no pointer made it (a touch's click can also have no detail). */
 export function keyboardClick(event: MouseEvent) {
@@ -107,11 +108,11 @@ export const canRecord = () =>
   typeof window.MediaRecorder === "function" &&
   Boolean(navigator.mediaDevices?.getUserMedia)
 
-function recordingType() {
+export function recordingType() {
   return TYPES.find((type) => MediaRecorder.isTypeSupported?.(type))
 }
 
-function micError(error: unknown, otherwise: string) {
+export function micError(error: unknown, otherwise: string) {
   const name = error instanceof DOMException ? error.name : ""
   if (name === "NotAllowedError" || name === "SecurityError") return "Microphone access is blocked."
   if (name === "NotFoundError") return "No microphone found."
@@ -259,7 +260,12 @@ function stopSegments(recording: Recording) {
   )
 }
 
-export function useDictation(config: HermesConfig, hint: string, key?: string) {
+/**
+ * The chunked implementation: a recording cut at the user's pauses, each piece sent once it has
+ * ended. Kept as it was for a host that doesn't advertise `dictation_stream`, which is why nothing
+ * below here knows about a live transcript — `transcript` is always empty.
+ */
+export function useChunkedDictation(config: HermesConfig, hint: string, key?: string) {
   const [status, setStatus] = useState<DictationStatus>("idle")
   const [levels, setLevels] = useState<number[] | null>(null)
   const [startedAt, setStartedAt] = useState<number | null>(null)
@@ -603,6 +609,7 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
     levels,
     startedAt,
     error,
+    transcript: EMPTY_TRANSCRIPT,
     /** When the recorder started, for a hold that ends before the mic was granted. */
     recordingSince: () => session.current?.recording?.startedAt ?? null,
     start,
