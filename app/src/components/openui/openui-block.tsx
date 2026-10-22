@@ -1,7 +1,9 @@
-import { memo, useEffect, useRef, useState } from "react"
+import { memo, useEffect, useRef } from "react"
 import { Renderer } from "@openuidev/react-lang"
 
 import { Markdown } from "@/components/chat/markdown"
+import { INFO } from "@/lib/openui-block.ts"
+import type { InterfaceDraw } from "@/lib/openui-thread.ts"
 import { noteFailure } from "@/lib/report"
 
 import { library, parser } from "./library.tsx"
@@ -10,7 +12,7 @@ type Props = {
   source: string
   open: boolean
   streaming: boolean
-  draw: "interface" | "patch" | "orphan"
+  draw: InterfaceDraw["kind"]
 }
 
 type Answer = "draw" | "code" | "nothing"
@@ -49,27 +51,19 @@ function fenced(source: string) {
   let length = 3
   for (const run of source.match(/`+/g) ?? []) length = Math.max(length, run.length + 1)
   const fence = "`".repeat(length)
-  return `${fence}openui-lang\n${source}\n${fence}`
+  return `${fence}${INFO}\n${source}\n${fence}`
 }
 
-/**
- * One `openui-lang` block of a reply: the interface drawn from the component library while the
- * source holds together, and the model's own source as code when it does not.
- */
 function OpenUIBlock(props: Props) {
   const { answer, failure } = gate(props)
-  const [latched, setLatched] = useState(false)
   const noted = useRef(false)
-  // A settled `code` latches, once: Lang is append-only, so a block that broke cannot un-break.
   useEffect(() => {
     if (noted.current || props.streaming || answer !== "code") return
     noted.current = true
-    setLatched(true)
     noteFailure("openui block", failure)
   }, [props.streaming, answer, failure])
-  const shown = latched ? "code" : answer
-  if (shown === "nothing") return null
-  if (shown === "code")
+  if (answer === "nothing") return null
+  if (answer === "code")
     return <Markdown className="px-1 text-[15px] leading-relaxed">{fenced(props.source)}</Markdown>
   return (
     <Renderer.Root response={props.source} library={library} isStreaming={props.streaming}>

@@ -14,7 +14,6 @@ import { Card as CardSurface, CardContent, CardHeader, CardTitle } from "@/compo
 
 import { OPENUI_ROOT } from "./root.ts"
 
-/** One nested block: a child component's node, drawn through `renderNode`. */
 const child: z.ZodType<SubComponentOf<unknown>> = z.lazy(() =>
   z.union([Card.ref, Table.ref, List.ref, Callout.ref]),
 )
@@ -43,7 +42,7 @@ const TONES = {
 }
 
 const Stack = defineComponent({
-  name: "Stack",
+  name: OPENUI_ROOT,
   props: stackProps,
   description: "A column of blocks, drawn in order.",
   component: ({ props, renderNode }: ComponentRenderProps<z.infer<typeof stackProps>>) => (

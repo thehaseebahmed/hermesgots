@@ -214,6 +214,31 @@ test("a patch in a later reply changes the earlier interface and draws nothing w
   assert.equal(seen.fallbacks(), 0, "a patch that applied is no fallback")
 })
 
+test("a patch that repairs a broken interface draws it again", async () => {
+  const broken = ["# id: sales", "root = Stack([c])", 'c = Chart("sales")'].join("\n")
+  const patch = ["# id: sales", 'c = Card("Fixed")'].join("\n")
+  const live = reply("live", "The fix.", { createdAt: 3 })
+  const seen = await screen(
+    [ask("Show the card."), reply("first", `The card:\n\n${block(broken)}`), live],
+    async () => {
+      await drawn(() => Boolean(codeOf(replyRow("The card:"))), "the fallback")
+      assert.equal(cardOf(replyRow("The card:")), null, "the broken interface draws as code")
+      await store({ content: `The fix.\n\n${block(patch)}` })
+      await drawn(
+        () =>
+          replyRow("The card:")?.querySelector("[data-slot=card-title]")?.textContent === "Fixed",
+        "the repaired interface",
+      )
+      const earlier = replyRow("The card:")
+      assert.ok(earlier, "the earlier reply is still a row of the thread")
+      assert.equal(codeOf(earlier), null, "the fallback it drew is gone")
+      assert.ok(cardOf(earlier), "and the interface draws again")
+      assert.equal(cardOf(replyRow("The fix.")), null, "the patch draws nothing where it sits")
+    },
+  )
+  assert.equal(seen.fallbacks(), 1, "the failure was noted once, before the repair")
+})
+
 test("an orphan patch draws as the fenced source", async () => {
   const kept = ["# id: sales", "root = Stack([c])", 'c = Card("Kept")'].join("\n")
   const ghost = ["# id: ghost", 'c = Card("Phantom")'].join("\n")
