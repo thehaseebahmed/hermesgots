@@ -17,12 +17,14 @@ import {
 import type { Message, ToolEvent } from "@/lib/db"
 import type { DelegatedAgent, HermesConfig } from "@/lib/hermes"
 import { toMessages } from "@/lib/history"
+import { useDraws } from "@/lib/openui-draws"
 import { activityOf } from "@/lib/tools"
 import { connectionKey } from "@/lib/connection"
 import { cn } from "@/lib/utils"
 
 const RECENT_ROWS = 40
 const STEPS = 2
+const NO_ROWS: Message[] = []
 
 const agentTitle = (goal: string) => `Sub-Agent: ${agentName(goal)}`
 
@@ -170,6 +172,7 @@ function AgentCard({ agent, source }: { agent: DelegatedAgent; source: AgentsSou
 /** Everything one delegated agent did, followed while it works. */
 function AgentView({ agent, server }: { agent: DelegatedAgent; server: HermesConfig }) {
   const { messages, failed } = useTranscript(server, agent, 500)
+  const draws = useDraws(messages ?? NO_ROWS)
   const end = useRef<HTMLDivElement>(null)
   const loaded = messages !== undefined
   useEffect(() => {
@@ -196,7 +199,12 @@ function AgentView({ agent, server }: { agent: DelegatedAgent; server: HermesCon
           <p className="px-2 text-sm text-muted-foreground">Nothing yet.</p>
         )}
         {messages?.map((message) => (
-          <MessageItem key={message.id} message={message} showStats={false} />
+          <MessageItem
+            key={message.id}
+            message={message}
+            showStats={false}
+            blocks={draws.get(message.id)}
+          />
         ))}
         <div ref={end} />
       </div>

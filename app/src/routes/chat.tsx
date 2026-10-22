@@ -100,6 +100,7 @@ import {
 import {
   DEFAULT_SETTINGS,
   type Attachment,
+  type Message,
   type ModelChoice,
   createConversation,
   db,
@@ -130,6 +131,7 @@ import { useStagedPipeline } from "@/lib/afk-workflows"
 import { modelChanges } from "@/lib/model-changes"
 import { fullModel, hostChoice, useModelInfo } from "@/lib/model-info"
 import { syncContextWindow, useModelCatalog } from "@/lib/models"
+import { useDraws } from "@/lib/openui-draws"
 import {
   effectiveProvider,
   limitNotice,
@@ -152,6 +154,8 @@ import { DEFAULT_BOT_ID } from "@/components/bots"
 import { useBotThreads } from "@/lib/threads"
 import { draftKey } from "@/lib/drafts"
 import { AgentsContext, DELEGATE_TOOL, useSessionAgents } from "@/lib/agents"
+
+const NO_ROWS: Message[] = []
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
@@ -324,6 +328,8 @@ export function ChatPage() {
       }
     />
   )
+  // What each row of the thread draws as an interface, folded once per thread state.
+  const draws = useDraws(thread ?? NO_ROWS)
   // Only a run can be steered, and only on a Hermes that has the route.
   const [steerRoute, setSteerRoute] = useState<{ baseUrl: string; ok: boolean }>()
   const runId = streaming?.runId
@@ -845,6 +851,7 @@ export function ChatPage() {
                           showStats
                           busy={busy}
                           showThinking={!session}
+                          blocks={draws.get(message.id)}
                         />
                       </MessageScrollerItem>
                     )
