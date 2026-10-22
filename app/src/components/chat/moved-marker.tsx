@@ -1,5 +1,5 @@
 import { Link } from "react-router"
-import { ChevronRightIcon, Undo2Icon } from "lucide-react"
+import { MessagesSquareIcon, Undo2Icon } from "lucide-react"
 
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import type { Move } from "@/lib/hermes"
@@ -26,28 +26,48 @@ export function MovedMarker({
           {move.text}
         </BubbleContent>
       </Bubble>
-      {/* The bot's reply, a line like a tool group's: the title in full, Undo right under it. */}
-      <div className="flex flex-col items-start text-sm text-muted-foreground">
-        <Link
-          to={`/c/${move.threadId}`}
-          state={{ bot: profileId }}
-          aria-label={`Moved${title ? ` to ${title}` : ""}`}
-          className="flex min-h-11 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-        >
-          <span className="min-w-0">Moved to{title ? ` \u201c${title}\u201d` : ""}</span>
-          <ChevronRightIcon className="size-4 shrink-0" />
-        </Link>
-        {move.undoable && onUndo && (
-          <button
-            type="button"
-            onClick={() => onUndo(move)}
-            className="-mt-2 flex min-h-11 items-center gap-1 font-medium text-info outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-          >
-            <Undo2Icon className="size-4" />
-            Undo
-          </button>
+      {/* The bot's reply, a line like a tool group's: only the thread's name is a link. */}
+      <p className="min-h-11 py-3 text-sm leading-5 text-muted-foreground">
+        Moved to
+        {title ? (
+          <>
+            {" \u201c"}
+            <Link
+              to={`/c/${move.threadId}`}
+              state={{ bot: profileId }}
+              className="font-medium text-info underline-offset-2 outline-none hover:underline focus-visible:underline"
+            >
+              <MessagesSquareIcon className="mr-1 inline size-3.5 align-[-2px]" />
+              {title}
+            </Link>
+            {"\u201d"}
+          </>
+        ) : (
+          <>
+            {" "}
+            <Link
+              to={`/c/${move.threadId}`}
+              state={{ bot: profileId }}
+              className="font-medium text-info underline-offset-2 hover:underline"
+            >
+              a thread
+            </Link>
+          </>
         )}
-      </div>
+        {move.undoable && onUndo && (
+          <>
+            {" \u00b7 "}
+            <button
+              type="button"
+              onClick={() => onUndo(move)}
+              className="inline-flex items-center gap-1 font-medium text-info underline-offset-2 outline-none hover:underline focus-visible:underline"
+            >
+              <Undo2Icon className="size-3.5" />
+              Undo
+            </button>
+          </>
+        )}
+      </p>
     </div>
   )
 }

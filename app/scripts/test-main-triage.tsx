@@ -320,7 +320,7 @@ test("tapping a marker opens its thread", async () => {
     </MemoryRouter>,
   )
   assert.match(html, /href="\/c\/t1"/)
-  assert.match(html, /Moved to \u201cTrip to Lisbon\u201d/)
+  assert.match(html, /Moved to \u201c.*Trip to Lisbon.*\u201d/)
   // The message itself is drawn as the user's bubble, with the line under it.
   assert.ok(html.indexOf("more on Lisbon") < html.indexOf("Moved to"))
 })
