@@ -377,3 +377,153 @@ test("an open block in a reply that has stopped draws as the fenced source", asy
   )
   assert.equal(seen.fallbacks(), 1, "noted once at the console's verbose level")
 })
+
+const series = (name: string, points: [string, number][]) =>
+  `{ name: "${name}", points: [${points.map(([x, y]) => `{ x: "${x}", y: ${y} }`).join(", ")}] }`
+
+const chart = (kind: string, list: string, ...rest: string[]) =>
+  `c = Chart("${kind}", [${list}]${rest.length ? `, ${rest.map((r) => `"${r}"`).join(", ")}` : ""})`
+
+const SUMMARY = "Sales rose from 10 in Q1 to 25 in Q2."
+
+const surfaceOf = (row: Element | undefined) => row?.querySelector("[role=img]")
+
+/**
+ * jsdom has no layout, so Recharts measures a box of nothing and draws nothing. The chart's own box
+ * reports the width the screen under test gives it; every other element keeps jsdom's empty rect.
+ */
+function chartBox(width: number) {
+  const original = Element.prototype.getBoundingClientRect
+  Element.prototype.getBoundingClientRect = function (this: Element) {
+    const box = original.call(this)
+    if (!this.closest("[data-slot=chart]")) return box
+    return { ...box, width, height: 224, right: width, bottom: 224, x: 0, y: 0 } as DOMRect
+  }
+  return () => {
+    Element.prototype.getBoundingClientRect = original
+  }
+}
+
+const SCROLLER = /overflow-(x-|y-)?(auto|scroll)/
+
+test("a chart draws at phone and tablet widths, its summary the text alternative", async () => {
+  const source = [
+    "# id: trend",
+    "root = Stack([c])",
+    chart(
+      "bar",
+      series("Sales", [
+        ["Q1", 10],
+        ["Q2", 25],
+      ]),
+      "Quarter",
+      "Revenue",
+      SUMMARY,
+    ),
+  ].join("\n")
+  for (const width of [390, 768]) {
+    const restore = chartBox(width)
+    try {
+      const seen = await screen(
+        [ask("Chart the quarter."), reply("reply", `Here is the trend.\n\n${block(source)}`)],
+        async () => {
+          const row = () => replyRow("Here is the trend")
+          await drawn(() => Boolean(row()?.querySelector("svg")), `the chart at ${width}px`)
+          const reply = row()
+          assert.ok(reply, "the reply is a row of the thread")
+          assert.ok(reply.querySelector("svg"), `the chart draws, as SVG, at ${width}px`)
+          assert.equal(reply.querySelectorAll("pre").length, 0, "no <pre> left behind")
+          assert.equal(reply.querySelectorAll("[data-md-code]").length, 0, "and no code block")
+          const surface = surfaceOf(reply)
+          assert.ok(surface, "the chart is one image to a reader")
+          assert.equal(surface.getAttribute("role"), "img", "with the image role")
+          assert.equal(surface.getAttribute("aria-label"), SUMMARY, "and its summary as the label")
+          const box = reply.querySelector("[data-slot=chart]")
+          assert.ok(box, "the chart has a frame of its own")
+          assert.match(box.getAttribute("class") ?? "", /w-full/, "as wide as the bubble")
+          for (let node: Element | null = box; node && node !== reply; node = node.parentElement)
+            assert.doesNotMatch(
+              node.getAttribute("class") ?? "",
+              SCROLLER,
+              "nothing between the chart and the reply scrolls inside itself",
+            )
+          assert.match(reply.textContent ?? "", /Here is the trend/, "the text before draws")
+          assert.doesNotMatch(reply.textContent ?? "", /openui-lang/, "the fence draws nothing")
+        },
+      )
+      assert.equal(seen.fallbacks(), 0, `the chart drew at ${width}px: nothing was noted`)
+    } finally {
+      restore()
+    }
+  }
+})
+
+test("a chart with no summary draws as the fenced source, never as a picture", async () => {
+  const source = [
+    "# id: trend",
+    "root = Stack([c])",
+    chart(
+      "bar",
+      series("Sales", [
+        ["Q1", 10],
+        ["Q2", 25],
+      ]),
+    ),
+  ].join("\n")
+  const seen = await screen(
+    [ask("Chart it."), reply("reply", `The chart:\n\n${block(source)}`)],
+    async () => {
+      await drawn(() => Boolean(codeOf(replyRow("The chart:"))), "the fallback")
+      const row = replyRow("The chart:")
+      assert.ok(row, "the reply is a row of the thread")
+      const code = codeOf(row)
+      assert.ok(code, "a chart no one could hear draws as code")
+      assert.equal(labelOf(code), "openui-lang", "with the fence's language label")
+      assert.match(code.textContent ?? "", /Chart\("bar"/, "as the model wrote it")
+      assert.equal(row.querySelectorAll("[data-slot=chart]").length, 0, "and no chart")
+      assert.equal(
+        row.querySelectorAll(".recharts-surface").length,
+        0,
+        "nothing of the plotting library",
+      )
+      assert.equal(Boolean(surfaceOf(row)), false, "nor a surface to label")
+      await settle()
+    },
+  )
+  assert.equal(seen.fallbacks(), 1, "noted once at the console's verbose level")
+})
+
+test("a pie chart draws its slices, one per point", async () => {
+  const source = [
+    "# id: share",
+    "root = Stack([c])",
+    chart(
+      "pie",
+      series("Share", [
+        ["Phone", 60],
+        ["Tablet", 40],
+      ]),
+      "",
+      "",
+      "Phone carries most.",
+    ),
+  ].join("\n")
+  const restore = chartBox(390)
+  try {
+    const seen = await screen(
+      [ask("Chart the split."), reply("reply", `The split:\n\n${block(source)}`)],
+      async () => {
+        const sectors = () => replyRow("The split:")?.querySelectorAll(".recharts-sector")
+        await drawn(() => (sectors()?.length ?? 0) === 2, "the pie")
+        const row = replyRow("The split:")
+        assert.ok(row, "the reply is a row of the thread")
+        assert.equal(sectors()?.length, 2, "one sector per point")
+        assert.equal(row.querySelectorAll(".recharts-bar-rectangle").length, 0, "and no bars")
+        assert.equal(surfaceOf(row)?.getAttribute("aria-label"), "Phone carries most.")
+      },
+    )
+    assert.equal(seen.fallbacks(), 0, "the pie drew: nothing was noted")
+  } finally {
+    restore()
+  }
+})
