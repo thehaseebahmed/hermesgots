@@ -9,7 +9,7 @@ type Fence = { char: string; length: number }
 const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/
 const LIST_ITEM = /^( *)([*+-]|[0-9]{1,9}[.)])( +|$)/
 const ID = /^# id: ([a-z0-9-]{1,40})$/
-const INFO = "openui-lang"
+export const INFO = "openui-lang"
 
 function fenceOf(line: string) {
   const match = FENCE.exec(line.replace(/\r$/, ""))

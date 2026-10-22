@@ -1,4 +1,4 @@
-import { Fragment, memo, useState, type ReactNode } from "react"
+import { Fragment, Suspense, lazy, memo, useMemo, useState, type ReactNode } from "react"
 import {
   AlertCircleIcon,
   ClockIcon,
@@ -27,17 +27,54 @@ import { removeQueued, sendQueued } from "@/lib/chat"
 import type { Attachment, Message, ToolEvent } from "@/lib/db"
 import { describeActivity, formatDuration } from "@/lib/format"
 import { mediaImages } from "@/lib/media-tags"
+import { openuiParts } from "@/lib/openui-block.ts"
+import type { InterfaceDraw, ThreadBlock } from "@/lib/openui-thread.ts"
 import { thoughtSpan } from "@/lib/thinking"
 import { cn } from "@/lib/utils"
 import { useReveal } from "@/lib/reveal"
 import { isPlanApproval } from "@/lib/workspace"
 
+const OpenUIBlock = lazy(() => import("@/components/openui/openui-block"))
+
+type RowBlock = {
+  at: number
+  end: number
+  source: string
+  id?: string
+  open: boolean
+  streaming: boolean
+  draw: InterfaceDraw["kind"]
+}
+
 type Part =
   | { kind: "text"; at: number; text: string }
   | { kind: "media"; at: number; paths: string[] }
+  | { kind: "openui"; at: number; block: RowBlock }
   | { kind: "tools"; tools: ToolEvent[] }
   | { kind: "clarify"; tool: ToolEvent }
   | { kind: "agent"; tool: ToolEvent }
+
+function rowBlocks(content: string, blocks: ThreadBlock[] | undefined, streaming: boolean) {
+  const parts = openuiParts(content)
+  const spans: RowBlock[] = []
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i]
+    if (part.kind !== "openui") continue
+    const draw = blocks?.find((block) => block.at === part.at)?.draw
+    if (!draw) continue
+    const span: RowBlock = {
+      at: part.at,
+      end: parts[i + 1]?.at ?? content.length,
+      source: draw.kind === "interface" ? draw.source : part.source,
+      open: part.open,
+      streaming,
+      draw: draw.kind,
+    }
+    if (part.id !== undefined) span.id = part.id
+    spans.push(span)
+  }
+  return spans
+}
 
 /**
  * Interleaves a slice of the reply (starting at `start`) with the tools run during it. A clarify
@@ -45,25 +82,37 @@ type Part =
  * delegation (the agent it started), and the images a reply sends together — only whitespace
  * between their `MEDIA:<path>` tags — are one gallery part.
  */
-function toParts(content: string, tools: ToolEvent[], start: number): Part[] {
+function toParts(content: string, tools: ToolEvent[], start: number, spans: RowBlock[]): Part[] {
   const end = start + content.length
   const parts: Part[] = []
   let cursor = start
+  const emit = (from: number, to: number) => {
+    const text = content.slice(from - start, to - start)
+    if (!text.trim()) return
+    for (const part of mediaImages(text)) {
+      if (part.kind === "text") {
+        if (part.text.trim()) parts.push({ kind: "text", at: from + part.at, text: part.text })
+      } else parts.push({ kind: "media", at: from + part.at, paths: part.paths })
+    }
+  }
   const pushText = (to: number) => {
-    const text = content.slice(cursor - start, to - start)
-    if (text.trim())
-      for (const part of mediaImages(text)) {
-        if (part.kind === "text") {
-          if (part.text.trim()) parts.push({ kind: "text", at: cursor + part.at, text: part.text })
-        } else parts.push({ kind: "media", at: cursor + part.at, paths: part.paths })
-      }
+    let from = cursor
+    for (const span of spans) {
+      if (span.end <= from || span.at >= to) continue
+      if (span.at > from) emit(from, Math.min(span.at, to))
+      if (span.at >= from && span.at >= start && span.at < end)
+        parts.push({ kind: "openui", at: span.at, block: span })
+      from = Math.max(from, Math.min(span.end, to))
+    }
+    if (to > from) emit(from, to)
     cursor = to
   }
   const sorted = [...tools].sort(
     (a, b) => (a.contentOffset ?? 0) - (b.contentOffset ?? 0) || a.startedAt - b.startedAt,
   )
   for (const tool of sorted) {
-    const at = tool.contentOffset ?? cursor
+    let at = tool.contentOffset ?? cursor
+    for (const span of spans) if (at >= span.at && at < span.end) at = Math.min(span.end, end)
     if (at > cursor) pushText(at)
     const last = parts.at(-1)
     if (tool.tool === "clarify") parts.push({ kind: "clarify", tool })
@@ -232,6 +281,8 @@ function StatusLine({ text }: { text: string }) {
 interface MessageItemProps {
   message: Message
   showStats: boolean
+  /** What the thread's interface fold drew for this reply's blocks, by their offsets. */
+  blocks?: ThreadBlock[]
   /** Whether a reply is streaming in this chat, so queued messages know they'll go on their own. */
   busy?: boolean
   showThinking?: boolean
@@ -245,11 +296,16 @@ interface MessageItemProps {
 export const MessageItem = memo(function MessageItem({
   message,
   showStats,
+  blocks,
   busy,
   showThinking = true,
 }: MessageItemProps) {
   // Replies type out a word at a time, however Hermes delivers them.
   const content = useReveal(message.role === "assistant" ? message.content : "")
+  const spans = useMemo(
+    () => rowBlocks(message.content, blocks, message.status === "streaming"),
+    [message.content, blocks, message.status],
+  )
   const revealing = content.length < message.content.length && message.role === "assistant"
   // The turn failed: a user message whose send never got there, or a reply that errored instead of
   // answering. The one kept in the thread waits to be sent again; the other says so plainly.
@@ -405,6 +461,7 @@ export const MessageItem = memo(function MessageItem({
           content.slice(segment.start, segment.end),
           segment.tools,
           segment.start,
+          spans,
         )
         return (
           <Fragment key={breaks[i - 1]?.key ?? "start"}>
@@ -427,13 +484,16 @@ export const MessageItem = memo(function MessageItem({
 
 /**
  * A live query hands back fresh objects on every write, so a streaming reply would re-render the
- * whole thread with each token. Only a message whose stored value changed renders again.
+ * whole thread with each token. Only a message whose stored value changed renders again — and the
+ * fold's draws, which hold each interface's resolved source, compared the same way by value.
  */
 function sameMessage(a: MessageItemProps, b: MessageItemProps) {
   for (const key of Object.keys({ ...a, ...b }) as (keyof MessageItemProps)[]) {
-    if (key !== "message" && a[key] !== b[key]) return false
+    if (key !== "message" && key !== "blocks" && a[key] !== b[key]) return false
   }
-  return a.message === b.message || JSON.stringify(a.message) === JSON.stringify(b.message)
+  if (a.message !== b.message && JSON.stringify(a.message) !== JSON.stringify(b.message))
+    return false
+  return a.blocks === b.blocks || JSON.stringify(a.blocks) === JSON.stringify(b.blocks)
 }
 
 function AssistantRow({
@@ -467,6 +527,15 @@ function AssistantRow({
             </div>
           ) : part.kind === "media" ? (
             <MediaTag key={part.at} conversationId={conversationId} paths={part.paths} />
+          ) : part.kind === "openui" ? (
+            <Suspense key={part.at} fallback={null}>
+              <OpenUIBlock
+                source={part.block.source}
+                open={part.block.open}
+                streaming={part.block.streaming}
+                draw={part.block.draw}
+              />
+            </Suspense>
           ) : (
             <Markdown key={part.at} className="px-1 text-[15px] leading-relaxed">
               {part.text}
