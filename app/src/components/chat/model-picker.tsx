@@ -173,7 +173,7 @@ export function ModelPicker({
         {top && !drilled ? (
           <section className="flex flex-col gap-2">
             <h3 className="px-1 text-sm text-muted-foreground">Providers</h3>
-            <ModelList className={PROVIDER_ROWS}>
+            <ModelList>
               {sorted.map((p) => {
                 return (
                   <ModelOption
@@ -454,17 +454,10 @@ function modelDetail(
   )
 }
 
-// Four provider rows (each 3.5rem, `PROVIDER_ROW`) and the list's padding: a host with more
-// providers scrolls inside the list rather than pushing the Default and Recent rows off the picker.
-const PROVIDER_ROWS = "max-h-[14.5rem] overflow-y-auto overscroll-contain"
 const PROVIDER_ROW = "min-h-14"
 
-function ModelList({ children, className }: { children: ReactNode; className?: string }) {
-  return (
-    <div className={cn("flex flex-col overflow-hidden rounded-2xl bg-muted/60 p-1", className)}>
-      {children}
-    </div>
-  )
+function ModelList({ children }: { children: ReactNode }) {
+  return <div className="flex flex-col overflow-hidden rounded-2xl bg-muted/60 p-1">{children}</div>
 }
 
 function ModelOption({
