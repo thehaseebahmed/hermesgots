@@ -786,7 +786,7 @@ export function ChatPage() {
         }
       />
 
-      {hasMessages || moved.trailing.length ? (
+      {hasMessages || (thread && moved.trailing.length) ? (
         <MessageScrollerProvider autoScroll defaultScrollPosition="end">
           <MessageScroller className="flex-1">
             <MessageScrollerViewport aria-label="Messages">
