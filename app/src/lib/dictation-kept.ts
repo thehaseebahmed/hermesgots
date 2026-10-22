@@ -55,6 +55,9 @@ export function keeper(
   let writing: Promise<unknown> = Promise.resolve()
   let held: KeptTake | null = null
   let holding = false
+  // Dropped is the end of the keeper: a slice its recorder sends as it stops must not re-arm one
+  // that was just dropped, or a cancelled take would write itself back to the device.
+  let dropped = false
 
   const flush = () => {
     if (timer !== undefined) clearTimeout(timer)
@@ -68,7 +71,7 @@ export function keeper(
   }
 
   const keep = (take: KeptTake, now = false) => {
-    if (!id) return writing
+    if (!id || dropped) return writing
     held = take
     holding = true
     if (now) return flush()
@@ -77,6 +80,7 @@ export function keeper(
   }
 
   const drop = () => {
+    dropped = true
     holding = false
     held = null
     if (timer !== undefined) clearTimeout(timer)
