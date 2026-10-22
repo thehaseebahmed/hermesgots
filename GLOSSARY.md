@@ -318,7 +318,7 @@ The words of a dictation the host has settled on: two windows agreed on them and
 _Avoid_: partial, interim, stable prefix, live text
 
 **Cleanup**:
-The pass that tidies a finished phrase — fillers, punctuation, casing, numbers, a spoken list as a list — without rewording it.
+The pass that tidies a finished phrase — fillers, punctuation, casing, numbers, a spoken list as a list — without rewording it. It runs on the bot's own model as the phrase finishes, bounded, and a cleanup that misses its budget, fails or comes back much longer or shorter than the phrase leaves the phrase as the host heard it.
 _Avoid_: polish, post-processing, formatting, correction
 
 **Vocabulary**:
