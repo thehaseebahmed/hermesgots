@@ -40,7 +40,7 @@ function host({
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input)).pathname
     if (path.endsWith("/api/plugins/memento/info"))
-      return json({ features, triage: { writers: { model: allowed, provider: allowed } } })
+      return json({ features, research: { writers: { model: allowed, provider: allowed } } })
     if (path.endsWith("/api/plugins/memento/triage-model")) {
       if (!features.includes("triage_model")) return json({ error: { message: "Not Found" } }, 404)
       if (init?.method === "POST") {

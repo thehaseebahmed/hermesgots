@@ -2841,7 +2841,6 @@ http
           reason: null,
           writers: { model: RESEARCH_WRITERS, provider: RESEARCH_WRITERS },
         },
-        triage: { writers: { model: RESEARCH_WRITERS, provider: RESEARCH_WRITERS } },
         dictation:
           DICTATION === "off"
             ? {

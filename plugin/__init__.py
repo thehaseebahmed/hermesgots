@@ -340,8 +340,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # Whether the host lets a mission be written with another model than the profile's.
                     "writers": await asyncio.to_thread(research.llm_gate),
                 },
-                # Whether a triage model can be picked: the same host permission as Research's.
-                "triage": {"writers": await asyncio.to_thread(research.llm_gate)},
             }
         )
 

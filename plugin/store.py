@@ -8,8 +8,10 @@ missions with their evidence ledgers (``research.py``)."""
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
+from typing import Any, Optional
 
 SCHEMA_VERSION = 34
 
@@ -35,6 +37,38 @@ def connect(path: Path) -> sqlite3.Connection:
             conn.close()
             raise
     return conn
+
+
+def get_setting(path: Path, key: str) -> Optional[Any]:
+    """A value kept in ``host_settings`` (JSON), or None when it isn't there."""
+    if not path.exists():
+        return None
+    conn = connect(path)
+    try:
+        row = conn.execute("SELECT value FROM host_settings WHERE key = ?", (key,)).fetchone()
+    finally:
+        conn.close()
+    try:
+        return json.loads(row[0]) if row else None
+    except ValueError:
+        return None
+
+
+def put_setting(path: Path, key: str, value: Optional[Any]) -> None:
+    """Keeps ``value`` (JSON) under ``key`` in ``host_settings``; None removes it."""
+    if value is None and not path.exists():
+        return
+    conn = connect(path)
+    try:
+        if value is None:
+            conn.execute("DELETE FROM host_settings WHERE key = ?", (key,))
+        else:
+            conn.execute(
+                "INSERT OR REPLACE INTO host_settings (key, value) VALUES (?, ?)",
+                (key, json.dumps(value)),
+            )
+    finally:
+        conn.close()
 
 
 def _version(conn: sqlite3.Connection) -> int:

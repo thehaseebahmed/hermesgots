@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 
 import type { ModelChoice } from "@/lib/db"
-import { getTriageModel, getTriageWriters, setTriageModel } from "@/lib/hermes"
+import { getResearchWriters, getTriageModel, setTriageModel } from "@/lib/hermes"
 import { useHostRecord, type HostRoute } from "@/lib/host-record"
 import { noteFailure } from "@/lib/report"
 
@@ -21,8 +21,8 @@ export function useTriageModel(profile?: { baseUrl: string; apiKey: string } | n
   useEffect(() => {
     if (!supported) return
     let cancelled = false
-    void getTriageWriters({ baseUrl, apiKey })
-      .then((allowed) => !cancelled && setWithheld(!allowed))
+    void getResearchWriters({ baseUrl, apiKey })
+      .then((writers) => !cancelled && setWithheld(!(writers.model && writers.provider)))
       .catch((error: unknown) => noteFailure("Reading the host's model permission", error))
     return () => {
       cancelled = true

@@ -1079,13 +1079,6 @@ export async function setTriageModel(
   return pickOf((await response.json())?.triage_model)
 }
 
-/** Whether the host lets Gots pick a model for a call (`info`'s `triage.writers`). */
-export async function getTriageWriters(config: HermesConfig) {
-  const response = await request(`${pluginRoot(config.baseUrl)}/info`, { headers: headers(config) })
-  const writers = (await response.json())?.triage?.writers
-  return Boolean(writers?.model) && Boolean(writers?.provider)
-}
-
 export async function checkHealth(config: HermesConfig) {
   const response = await request(`${serverRoot(config.baseUrl)}/health`, {
     headers: headers(config),
@@ -1494,7 +1487,8 @@ export async function researchAction(
   return (await response.json())?.mission as Record<string, unknown> | undefined
 }
 
-/** Whether the host lets a mission be written with another model (`info`'s `research.writers`). */
+/** Whether the host lets Gots pick the model of a call (`info`'s `research.writers`): a Research
+ * rewrite, a judge, a bot's triage model. */
 export async function getResearchWriters(config: HermesConfig) {
   const response = await request(`${pluginRoot(config.baseUrl)}/info`, { headers: headers(config) })
   const writers = (await response.json())?.research?.writers

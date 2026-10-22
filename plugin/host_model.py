@@ -73,32 +73,26 @@ def clean_delegation(body: Any) -> Optional[Dict[str, str]]:
     clears it — ``{"delegation": null}`` — so every delegated task inherits the bot's own model.
     ValueError names what an entry is missing, or that the key itself is absent: a body that says
     nothing about the delegation model is a client bug, not a request to clear what the bot has."""
-    if not isinstance(body, dict):
-        raise ValueError("Body must be a JSON object")
-    if "delegation" not in body:
-        raise ValueError("Body needs a delegation key: an object, or null to clear it")
-    value = body["delegation"]
-    if value is None:
-        return None
-    if not isinstance(value, dict):
-        raise ValueError("delegation must be an object")
-    provider, model = _pair(value, "Delegation needs a provider", "Delegation needs a model")
-    return {"provider": provider, "model": model}
+    return _slot(body, "delegation", "Delegation")
 
 
 def clean_triage_model(body: Any) -> Optional[Dict[str, str]]:
-    """``{"provider", "model"}`` from a ``{"triage_model": {...}}`` body, or None for a body that
-    clears it so the bot's own model decides. A body with no such key is a client bug, not a clear."""
+    """``clean_delegation`` for ``{"triage_model": ...}``: None clears it, so the bot's own model
+    decides."""
+    return _slot(body, "triage_model", "Triage model")
+
+
+def _slot(body: Any, key: str, label: str) -> Optional[Dict[str, str]]:
     if not isinstance(body, dict):
         raise ValueError("Body must be a JSON object")
-    if "triage_model" not in body:
-        raise ValueError("Body needs a triage_model key: an object, or null to clear it")
-    value = body["triage_model"]
+    if key not in body:
+        raise ValueError(f"Body needs a {key} key: an object, or null to clear it")
+    value = body[key]
     if value is None:
         return None
     if not isinstance(value, dict):
-        raise ValueError("triage_model must be an object")
-    provider, model = _pair(value, "Triage model needs a provider", "Triage model needs a model")
+        raise ValueError(f"{key} must be an object")
+    provider, model = _pair(value, f"{label} needs a provider", f"{label} needs a model")
     return {"provider": provider, "model": model}
 
 
@@ -133,7 +127,7 @@ def _custom_providers(cfg: Dict[str, Any]) -> Any:
         return cfg.get("custom_providers")
 
 
-def _switch(cfg: Dict[str, Any], provider: str, model: str) -> Any:
+def check_pick(cfg: Dict[str, Any], provider: str, model: str) -> Any:
     """Hermes's own check of a pick, as a messaging ``/model`` runs it: its route resolution, then
     its validation. ValueError carrying Hermes's reason when it refuses."""
     from hermes_cli.model_switch import switch_model
@@ -161,7 +155,7 @@ def set_main(config_path: Path, provider: str, model: str) -> Dict[str, str]:
     from hermes_cli.model_switch import persist_model_selection
 
     cfg = _load_gateway_config(config_path=config_path) or {}
-    result = _switch(cfg, provider, model)
+    result = check_pick(cfg, provider, model)
     persist_model_selection(result, config_path)
     return {"provider": result.target_provider, "model": result.new_model}
 
@@ -184,7 +178,7 @@ def set_fallbacks(config_path: Path, entries: List[Dict[str, str]]) -> List[Dict
     for entry in entries:
         kept = _kept(stored, entry)
         if kept is None:
-            resolved.append(_routed(_switch(cfg, entry["provider"], entry["model"]), stored))
+            resolved.append(_routed(check_pick(cfg, entry["provider"], entry["model"]), stored))
         else:
             resolved.append(kept)
     # ``None`` removes the key: a bot with no fallbacks keeps no empty list behind it. The legacy key
@@ -230,7 +224,7 @@ def set_delegation(config_path: Path, pick: Optional[Dict[str, str]]) -> Optiona
         # Hermes resolved it when it went in, so there is nothing left to check, and checking again
         # would spend a live provider probe on a pick that hasn't moved.
         return stored
-    routed = _switch(cfg, pick["provider"], pick["model"])
+    routed = check_pick(cfg, pick["provider"], pick["model"])
     resolved = {"provider": routed.target_provider, "model": routed.new_model}
     atomic_roundtrip_yaml_update(config_path, DELEGATION_SECTION, {**rest, **resolved})
     return resolved

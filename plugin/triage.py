@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import chats, host_model, outbox, research
-from .store import connect
+from .store import get_setting, put_setting
 from .sessions import MEMENTO_ID_PREFIX
 
 logger = logging.getLogger(__name__)
@@ -172,19 +172,7 @@ class Withheld(Exception):
 
 def read_model(path: Path) -> Optional[Dict[str, str]]:
     """The triage model this bot's host holds, or None when the bot's own model decides."""
-    if not path.exists():
-        return None
-    import json
-
-    conn = connect(path)
-    try:
-        row = conn.execute("SELECT value FROM host_settings WHERE key = ?", (MODEL_KEY,)).fetchone()
-    finally:
-        conn.close()
-    try:
-        held = json.loads(row[0]) if row else None
-    except ValueError:
-        return None
+    held = get_setting(path, MODEL_KEY)
     if not isinstance(held, dict):
         return None
     provider, model = held.get("provider"), held.get("model")
@@ -203,15 +191,8 @@ def set_model(
     model, and a refusal is a ValueError with its reason; a refused or withheld pick writes nothing,
     and a pick already held isn't checked again.
     """
-    import json
-
     if pick is None:
-        if path.exists():
-            conn = connect(path)
-            try:
-                conn.execute("DELETE FROM host_settings WHERE key = ?", (MODEL_KEY,))
-            finally:
-                conn.close()
+        put_setting(path, MODEL_KEY, None)
         return None
     if not (gate.get("model") and gate.get("provider")):
         raise Withheld(
@@ -222,16 +203,9 @@ def set_model(
     from gateway.run import _load_gateway_config
 
     cfg = _load_gateway_config(config_path=config_path) or {}
-    routed = host_model._switch(cfg, pick["provider"], pick["model"])
+    routed = host_model.check_pick(cfg, pick["provider"], pick["model"])
     resolved = {"provider": routed.target_provider, "model": routed.new_model}
-    conn = connect(path)
-    try:
-        conn.execute(
-            "INSERT OR REPLACE INTO host_settings (key, value) VALUES (?, ?)",
-            (MODEL_KEY, json.dumps(resolved)),
-        )
-    finally:
-        conn.close()
+    put_setting(path, MODEL_KEY, resolved)
     return resolved
 
 
@@ -264,10 +238,12 @@ def decide(
         try:
             result = llm.complete_structured(**ask, **(model or {}))
         except Exception as error:
-            name = type(error).__name__
-            if not (model and ("Trust" in name or "Override" in name or "Denied" in name)):
+            if not (model and research.override_refused(error)):
                 raise
-            # The host took the permission back after the pick: the bot's own model decides.
+            # The host took the permission back after the pick: the bot's own model decides, if
+            # there is time left for it.
+            if deadline is not None and time.monotonic() > deadline:
+                return None
             result = llm.complete_structured(**ask)
     except Exception:
         logger.debug("memento: triage's model call failed", exc_info=True)
