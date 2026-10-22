@@ -31,7 +31,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
-from . import dictation, dictation_cleanup
+from . import dictation, dictation_cleanup, speech
 
 # The audio a rolling window covers, and the least time between two decodes.
 WINDOW_S = 4.0
@@ -542,24 +542,27 @@ def start(
     hint: str = "",
     vocabulary: Sequence[str] = (),
     cleanup_model: Optional[Dict[str, str]] = None,
+    speech_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """Opens a take for a profile: waits for the host's model, then answers whether it is ready.
 
-    This is the one call of a take that may wait — a cold host loads its model inside it — and the
-    voice bar says the take is preparing until it answers. The bot's vocabulary rides in here and
-    is carried by the take, into every window's prompt and into each finished phrase's cleanup.
-    ``cleanup_model`` is that cleanup's model where the bot has picked one (the Dictation tab's
-    field, #295); without one the bot's own model tidies every phrase.
+    This is the one call of a take that may wait — a cold host loads its model inside it, and a
+    model it doesn't have downloads inside it too — and the voice bar says the take is preparing
+    until it answers. The bot's vocabulary rides in here and is carried by the take, into every
+    window's prompt and into each finished phrase's cleanup. ``cleanup_model`` is that cleanup's
+    model where the bot has picked one and the host allows one (the Dictation tab's field, #295);
+    without one the bot's own model tidies every phrase. ``speech_path`` is where the host keeps
+    the model that last loaded, so a pick that won't load falls back to it with a warning instead
+    of costing the take.
     """
     state = dictation.info()
     if not state.get("ready"):
         raise dictation.DictationError(state.get("reason") or "Dictation is off on the host.", 409)
-    warmed = dictation.warm()
-    if warmed.get("error"):
-        raise dictation.DictationError(f"The host couldn't load its speech model: {warmed['error']}", 502)
     tt = dictation._tools()
     cfg = dictation._local_config(tt)
-    model = dictation._model_name(tt, cfg)
+    wanted = dictation._model_name(tt, cfg)
+    played = speech.play(wanted, dictation.warm, speech_path)
+    model = played["model"]
     language = str(state.get("language") or "")
     take = Take(
         transcriber(tt, model, language),
@@ -571,4 +574,7 @@ def start(
         cleanup_model=cleanup_model,
     )
     takes.open(profile, take)
-    return {"take": take.id, "ready": True, "model": model, "language": language}
+    answer = {"take": take.id, "ready": True, "model": model, "language": language}
+    if played.get("warning"):
+        answer["warning"] = played["warning"]
+    return answer

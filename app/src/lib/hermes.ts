@@ -1080,6 +1080,34 @@ export async function setTriageModel(
   return pickOf((await response.json())?.triage_model)
 }
 
+/**
+ * The host's speech settings (`speech.py`): its speech model, the models a pick can be made from
+ * with their size and speed, the last pick that didn't load, and the model a phrase's cleanup runs
+ * on. The app reads the fields it draws; `speech.ts` is the shape.
+ */
+export async function getSpeechSettings(config: HermesConfig, signal?: AbortSignal) {
+  const response = await request(`${pluginRoot(config.baseUrl)}/speech`, {
+    headers: headers(config),
+    signal,
+  })
+  return ((await response.json())?.speech ?? null) as Record<string, unknown> | null
+}
+
+/** Writes the speech fields that moved, and answers the host's whole record as it now stands. */
+export async function setSpeechSettings(
+  config: HermesConfig,
+  patch: { model?: string; cleanup_model?: { provider: string; model: string } | null },
+  signal?: AbortSignal,
+) {
+  const response = await request(`${pluginRoot(config.baseUrl)}/speech`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify(patch),
+    signal,
+  })
+  return ((await response.json())?.speech ?? null) as Record<string, unknown> | null
+}
+
 export async function checkHealth(config: HermesConfig) {
   const response = await request(`${serverRoot(config.baseUrl)}/health`, {
     headers: headers(config),

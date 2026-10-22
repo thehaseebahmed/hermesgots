@@ -56,6 +56,7 @@ from . import (
     prompt_builder,
     repos,
     research,
+    speech,
     triage,
     sessions,
     skill_catalog,
@@ -329,6 +330,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # window in dictation_stream.py. Advertised beside the batch clip so an app
                     # that predates it keeps recording pieces exactly as it does today.
                     "dictation_stream",
+                    # The host's speech model, and the model a phrase's cleanup runs on: the
+                    # Dictation tab's picker and its one-line override (speech.py). Advertised
+                    # apart from dictation_stream, so an older plugin offers the words alone.
+                    "speech_model",
                     "usage",
                     "research",
                     "research_followup",
@@ -1665,10 +1670,21 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # The bot's vocabulary rides on the one call that opens a take, so a word removed in the
         # app is gone from the next take and a word added is there from it.
         vocabulary = body.get("vocabulary") if body else None
+        # The cleanup model is read here, once per take, from the host's own settings: a pick made
+        # while a take runs lands on the next one, and one the host no longer allows is dropped.
+        path = store_path()
+        gate = await asyncio.to_thread(research.llm_gate)
+        cleanup_model = await asyncio.to_thread(speech.applied_cleanup, path, gate)
         try:
             # The one call of a take that may wait: a cold host loads its model inside it.
             started = await asyncio.to_thread(
-                dictation_stream.start, dictation_takes, dictation_profile(), hint, vocabulary
+                dictation_stream.start,
+                dictation_takes,
+                dictation_profile(),
+                hint,
+                vocabulary,
+                cleanup_model,
+                path,
             )
         except (dictation.DictationError, dictation_stream.TakeError) as error:
             return _error(web, str(error), error.status)
@@ -1756,6 +1772,67 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/dictation/take/{{take_id}}/audio", dictation_slice)
     app.router.add_post(f"{PREFIX}/dictation/take/{{take_id}}/stop", dictation_take_stop)
     app.router.add_post(f"{PREFIX}/dictation/take/{{take_id}}/cancel", dictation_take_cancel)
+
+    # The host's speech model, and the model a finished phrase's cleanup runs on (speech.py). The
+    # model is Hermes's own `stt.local.model`, written through its round-trip YAML writer; the
+    # cleanup pick is the bot's, kept in the host's settings store and read at the start of each
+    # take, so it survives a plugin restart.
+    async def get_speech(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        config_path = host_config_path()
+        path = store_path()
+        gate = await asyncio.to_thread(research.llm_gate)
+        scope = profile_scope()
+
+        def run() -> Dict[str, Any]:
+            with scope():
+                return speech.read(config_path, path, gate)
+
+        try:
+            payload = await asyncio.to_thread(run)
+        except Exception:
+            logger.warning("memento: couldn't read the host's speech settings", exc_info=True)
+            return _error(web, "Couldn't read the host's speech settings.", 502)
+        return web.json_response({"object": "memento.speech", "speech": payload})
+
+    async def set_speech(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if not body or "model" not in body and "cleanup_model" not in body:
+            return _error(web, "Body needs a model or a cleanup_model.", 400)
+        config_path = host_config_path()
+        path = store_path()
+        scope = profile_scope()
+        gate = await asyncio.to_thread(research.llm_gate)
+
+        def run() -> Dict[str, Any]:
+            with scope():
+                if "model" in body:
+                    speech.set_model(config_path, body.get("model"))
+                if "cleanup_model" in body:
+                    speech.set_cleanup(path, body.get("cleanup_model"), gate, config_path)
+                return speech.read(config_path, path, gate)
+
+        try:
+            payload = await asyncio.to_thread(run)
+        except speech.Withheld as error:
+            return _error(web, str(error), 403)
+        except ValueError as error:
+            # Hermes's own reason, or ours, on a model it can't hear: nothing was written.
+            return _error(web, str(error), 400)
+        except ImportError:
+            return _error(web, "This Hermes version can't read speech settings from here.", 501)
+        except Exception as error:
+            logger.warning("memento: couldn't save the speech settings", exc_info=True)
+            return _error(web, f"The host couldn't save the speech setting: {error}", 502)
+        return web.json_response({"object": "memento.speech", "speech": payload})
+
+    app.router.add_get(f"{PREFIX}/speech", get_speech)
+    app.router.add_post(f"{PREFIX}/speech", set_speech)
 
     async def queue_response(session_id: str, path: Path) -> "web.Response":
         found = await asyncio.to_thread(outbox.read, path, session_id)

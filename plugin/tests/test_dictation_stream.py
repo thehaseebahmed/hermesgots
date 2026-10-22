@@ -7,10 +7,12 @@ decode that fails reads, and how a slow host paces itself. No model, no audio, n
 
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
-from plugin import dictation, dictation_cleanup, dictation_stream
+from plugin import dictation, dictation_cleanup, dictation_stream, speech
 from plugin.tests.test_dictation import hermes
 from plugin.tests.test_dictation_cleanup import FakeLlm
 
@@ -658,6 +660,28 @@ class StartTest(unittest.TestCase):
             started = dictation_stream.start(profiles, "haseeb", "Gots", [])
         heard = profiles.get("haseeb", started["take"])
         self.assertIsNone(heard._clean.model)
+
+    def test_a_pick_that_will_not_load_falls_back_to_the_model_that_did(self) -> None:
+        # The host's config names "small"; the last take ran on "base". The pick stays in the file
+        # for the next app read, and this take is heard on base with a warning, not failed.
+        _, patch = hermes()
+        profiles = dictation_stream.Takes()
+
+        def warm(model=None):
+            if model == "small":
+                return {"warmed": False, "error": "the model's file is corrupt"}
+            return {"warmed": True, "model": model}
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "memento.db"
+            speech.play("base", lambda model: {"warmed": True}, path)
+            with patch, mock.patch.object(dictation, "warm", warm):
+                started = dictation_stream.start(profiles, "haseeb", "Gots", [], None, path)
+        self.assertEqual(started["model"], "base")
+        self.assertEqual(started["warning"]["model"], "small")
+        self.assertIn("corrupt", started["warning"]["reason"])
+        heard = profiles.get("haseeb", started["take"])
+        self.assertEqual(heard.model, "base")
 
     def test_a_host_that_cannot_dictate_refuses_the_take(self) -> None:
         _, patch = hermes(_load_stt_config=lambda: {"enabled": False})

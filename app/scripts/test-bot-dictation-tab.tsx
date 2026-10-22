@@ -1,7 +1,8 @@
 /**
  * A bot's Dictation tab: the words it is written with, added and removed on the screen and written
- * straight into the bot's own record — and the tab itself, which exists only where the bot's host
- * advertises that it can hear a take, and lands on General where it can't.
+ * straight into the bot's own record; the host's speech model and the model cleanup runs on, which
+ * are the host's own settings rather than the bot's; and the tab itself, which exists only where the
+ * bot's host advertises that it can hear a take, and lands on General where it can't.
  *
  * Each case names its own connection: what a host answered about its features is remembered for the
  * connection, so a host that answers differently needs a server of its own.
@@ -26,14 +27,52 @@ import {
   type,
 } from "./component-kit.tsx"
 
-/** A host whose plugin answers `info` with these features, and nothing else. */
-function host(features: string[]) {
-  const fetch = async (input: RequestInfo | URL) => {
+/** What the host answered about its speech settings, as `GET speech` would send it. */
+const speech = (patch: Record<string, unknown> = {}) => ({
+  model: "small",
+  models: [
+    { name: "base", size_mb: 145, speed: 16, slow_on_cpu: false, downloaded: true, in_use: false, downloading: false },
+    { name: "small", size_mb: 484, speed: 6, slow_on_cpu: false, downloaded: true, in_use: true, downloading: false },
+    { name: "large-v3", size_mb: 3090, speed: 0.6, slow_on_cpu: true, downloaded: false, in_use: false, downloading: false },
+  ],
+  warning: null,
+  cleanup: { model: null, allowed: true, reason: null },
+  ...patch,
+})
+
+type Speech = ReturnType<typeof speech>
+
+/**
+ * A host whose plugin answers `info` with these features, and its speech settings where it is given
+ * any. A write is answered with `next` (or what it was sent) so a test can watch the list move; a
+ * `refuse` is the plugin's own reason for the write it won't take.
+ */
+function host(
+  features: string[],
+  options: { speech?: Speech; next?: Speech; refuse?: string; writers?: { model: boolean; provider: boolean } } = {},
+) {
+  const calls: { path: string; method: string; body: unknown }[] = []
+  const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input)).pathname
-    if (path.endsWith("/api/plugins/memento/info")) return json({ features })
+    const method = init?.method ?? "GET"
+    if (path.endsWith("/api/plugins/memento/info"))
+      return json({
+        features,
+        research: { writers: options.writers ?? { model: true, provider: true } },
+      })
+    if (path.endsWith("/api/plugins/memento/speech")) {
+      if (method === "POST") {
+        const body = init?.body ? JSON.parse(String(init.body)) : undefined
+        calls.push({ path, method, body })
+        if (options.refuse) return json({ error: { message: options.refuse } }, 400)
+        return json({ speech: options.next ?? options.speech })
+      }
+      if (!options.speech) return json({}, 404)
+      return json({ speech: options.speech })
+    }
     return json({}, 404)
   }
-  return fetch as unknown as typeof globalThis.fetch
+  return { fetch: fetch as unknown as typeof globalThis.fetch, calls }
 }
 
 /** The editor over this device's own record, as the settings screen mounts it. */
@@ -65,12 +104,25 @@ const chip = (word: string) => find(`[aria-label="Remove ${word}"]`)
 const add = () => click(findAll("button").find((one) => one.textContent?.trim() === "Add") ?? null)
 
 /** Seeds this device's bot, and a host of `name` whose plugin advertises `features`. */
-async function seed(name: string, features: string[], patch = {}) {
+async function seed(
+  name: string,
+  features: string[],
+  patch = {},
+  options: Parameters<typeof host>[1] = {},
+) {
   await seedSettings()
   await db.profiles.clear()
   await db.profiles.put(botProfile(name, patch))
-  globalThis.fetch = host(features)
+  const server = host(features, options)
+  globalThis.fetch = server.fetch
+  return server.calls
 }
+
+/** A model's row on the tab, as the user picks it: by the name that starts its text. */
+const modelRow = (name: string) =>
+  findAll('[aria-label="Speech models"] button').find((row) =>
+    row.textContent?.trim().startsWith(name),
+  ) ?? null
 
 test("a host that streams a take has a Dictation tab, and it holds the bot's words", async () => {
   await seed("streaming", ["dictation", "dictation_stream"], { vocabulary: ["Haseeb"] })
@@ -121,5 +173,98 @@ test("a word removed from the tab leaves the record", async () => {
     assert.equal(chip("Haseeb"), null, "the word is gone from the tab")
     assert.deepEqual((await db.profiles.get("bot-1"))?.vocabulary, ["Gots"])
     assert.ok(chip("Gots"), "the words beside it stay")
+  })
+})
+
+test("the tab lists the host's speech models with their size, speed and which is in use", async () => {
+  await seed("speech-list", ["dictation_stream", "speech_model"], {}, { speech: speech() })
+  await mount(editor("/settings/bots/bot-1/dictation"), async () => {
+    const base = modelRow("base")
+    assert.match(base?.textContent ?? "", /145 MB/, "the download is named")
+    assert.match(base?.textContent ?? "", /16× realtime/, "and the speed it is weighed on")
+    assert.equal(base?.getAttribute("aria-pressed"), "false")
+    assert.match(modelRow("small")?.textContent ?? "", /In use/)
+    assert.equal(modelRow("small")?.getAttribute("aria-pressed"), "true", "the one in play reads as chosen")
+    assert.match(modelRow("large-v3")?.textContent ?? "", /Too slow on a CPU/)
+    assert.match(modelRow("large-v3")?.textContent ?? "", /Not on this host/)
+  })
+})
+
+test("a model picked on the tab is written to the host, and the list says which is in use", async () => {
+  const chosen = speech({ model: "base" })
+  chosen.models = chosen.models.map((row) => ({
+    ...row,
+    in_use: row.name === "base",
+  }))
+  const calls = await seed(
+    "speech-pick",
+    ["dictation_stream", "speech_model"],
+    {},
+    { speech: speech(), next: chosen },
+  )
+  await mount(editor("/settings/bots/bot-1/dictation"), async () => {
+    await click(modelRow("base"))
+    assert.deepEqual(calls[0]?.body, { model: "base" }, "one field, the model that moved")
+    assert.equal(modelRow("base")?.getAttribute("aria-pressed"), "true")
+    assert.match(modelRow("base")?.textContent ?? "", /In use/)
+    assert.equal(modelRow("small")?.getAttribute("aria-pressed"), "false")
+  })
+})
+
+test("a model the host refuses leaves the old one in place and shows the host's reason", async () => {
+  const calls = await seed(
+    "speech-refuse",
+    ["dictation_stream", "speech_model"],
+    {},
+    {
+      speech: speech(),
+      refuse: "Couldn't write config.yaml: the file is read-only.",
+    },
+  )
+  await mount(editor("/settings/bots/bot-1/dictation"), async () => {
+    await click(modelRow("base"))
+    assert.deepEqual(calls[0]?.body, { model: "base" })
+    assert.equal(modelRow("small")?.getAttribute("aria-pressed"), "true", "the old model stays")
+    assert.match(find("[role=\"alert\"]")?.textContent ?? "", /read-only/, "the host's own sentence")
+  })
+})
+
+test("a pick that would download says so, and the warning a failed load left is shown", async () => {
+  await seed(
+    "speech-warning",
+    ["dictation_stream", "speech_model"],
+    {},
+    { speech: speech({ warning: { model: "large-v3", reason: "it could not be downloaded" } }) },
+  )
+  await mount(editor("/settings/bots/bot-1/dictation"), async () => {
+    const warning = findAll("div").find((node) =>
+      node.textContent?.includes("large-v3 didn't load"),
+    )
+    assert.ok(warning, "the model that failed is named")
+    assert.match(warning?.textContent ?? "", /heard on small/)
+    assert.match(warning?.textContent ?? "", /could not be downloaded/)
+  })
+})
+
+test("cleanup's model is offered where the host allows it, and explained where it doesn't", async () => {
+  await seed("cleanup-allowed", ["dictation_stream", "speech_model"], {}, { speech: speech() })
+  await mount(editor("/settings/bots/bot-1/dictation"), async () => {
+    assert.ok(find("#cleanup-model"), "the one-line override is on the tab")
+    assert.match(find("#cleanup-model")?.textContent ?? "", /Default/)
+  })
+})
+
+test("a host that withholds the model-override permission says so instead of offering it", async () => {
+  const reason = "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable memento`."
+  await seed(
+    "cleanup-denied",
+    ["dictation_stream", "speech_model"],
+    {},
+    { speech: speech({ cleanup: { model: null, allowed: false, reason } }) },
+  )
+  await mount(editor("/settings/bots/bot-1/dictation"), async () => {
+    assert.equal(find("#cleanup-model"), null, "a pick the host would ignore is not offered")
+    assert.match(text(), /doesn't let Gots pick the model/)
+    assert.match(text(), /hermes plugins enable memento/)
   })
 })
