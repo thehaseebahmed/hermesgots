@@ -40,16 +40,24 @@ const globals = {
   getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
   requestAnimationFrame: (callback) => setTimeout(() => callback(Date.now()), 0),
   cancelAnimationFrame: (handle) => clearTimeout(handle),
-  matchMedia: (query) => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addEventListener() {},
-    removeEventListener() {},
-    addListener() {},
-    removeListener() {},
-    dispatchEvent: () => false,
-  }),
+  // jsdom has no layout, so the only width a screen can ask about is the window's: a `min-width`
+  // query answers from it (read live, since a module captures the list at import), and anything
+  // else reads as off — a phone with no hover and no reduced-motion preference.
+  matchMedia: (query) => {
+    const min = /\(min-width:\s*(\d+)px\)/.exec(query)
+    return {
+      get matches() {
+        return min ? dom.window.innerWidth >= Number(min[1]) : false
+      },
+      media: query,
+      onchange: null,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+      dispatchEvent: () => false,
+    }
+  },
 }
 
 for (const [name, value] of Object.entries(globals))
@@ -90,5 +98,13 @@ dom.window.HTMLElement.prototype.scrollIntoView = () => {}
 dom.window.HTMLElement.prototype.setPointerCapture = () => {}
 dom.window.HTMLElement.prototype.releasePointerCapture = () => {}
 dom.window.HTMLElement.prototype.hasPointerCapture = () => false
+// jsdom implements no Web Animations, and the shell's panes ask an element to animate as they open.
+dom.window.HTMLElement.prototype.animate = () => ({
+  finished: Promise.resolve(),
+  cancel() {},
+  finish() {},
+  play() {},
+  pause() {},
+})
 
 register("./component-loader.mjs", import.meta.url)

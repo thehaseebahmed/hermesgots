@@ -231,32 +231,87 @@ export function useBotSummaries(): BotSummary[] | undefined {
   }))
 }
 
+/** The thread a bot's third pane reopens: the last one this device opened for that bot. */
+const lastThreadKey = (profileId: string) => `memento:last-thread:${profileId}`
+
+/**
+ * What a bot's third pane holds while the route is Main: the thread this device opened last for
+ * that bot, and how many threads the bot has at all. A remembered thread that is gone, or is one of
+ * another bot's, is no thread of this pane's — Main alone is better than the wrong chat.
+ */
+async function lastOpened(profileId: string) {
+  const threads = await db.conversations
+    .where("[profileId+updatedAt]")
+    .between([profileId, -Infinity], [profileId, Infinity])
+    .filter((chat) => !chat.projectId && !chat.main)
+    .count()
+  let last: string | undefined
+  try {
+    const id = localStorage.getItem(lastThreadKey(profileId))
+    const found = id ? await db.conversations.get(id) : undefined
+    if (found && found.profileId === profileId && !found.projectId && !found.main) last = found.id
+  } catch {
+    // Storage can be blocked; the pane then has Main alone.
+  }
+  return { last, threads }
+}
+
 export interface BotPane {
   profileId: string
-  /** The thread open beside Main. */
+  /** The thread the route itself is, when it is one of the bot's threads. */
   thread?: string
+  /** The thread the third pane reopens while the route is Main: this bot's last one opened here. */
+  last?: string
+  /** Whether the bot has a thread at all, since a bot with none gets the pane's empty state. */
+  threads: boolean
 }
 
 /**
- * With bot threads on, from `xl` Main stays on screen beside the thread it opened, as a pane to its
- * left, the way a project does beside its sessions. Main is the pane; a thread picked from it swaps
- * in place on the right.
+ * With bot threads on, the sidebar, Main and a thread are three panes from `xl`, as a project stays
+ * beside its sessions: the thread the route is, else the one this device opened last for that bot,
+ * so looking at Main never costs the thread beside it. A bot with no thread yet keeps the pane and
+ * says so in it, and a thread that is gone or belongs to another bot leaves it closed. Main is the
+ * pane, so a thread picked there swaps in place on the right.
  */
 export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
   const large = useXLarge()
   const { pathname, state } = useLocation()
   const chat = matchPath("/c/:id", pathname)?.params.id
   const main = chat ? mainThreadProfile(chat) : undefined
-  const read = useLiveQuery(
-    async () => ({ chat, found: chat ? ((await db.conversations.get(chat)) ?? null) : null }),
-    [chat],
-  )
   const hint = (state as { bot?: string } | null)?.bot
-  if (!large || !enabled || !chat) return undefined
-  if (main) return { profileId: main }
-  const found = read?.chat === chat ? read.found : undefined
-  if (found) return found.projectId ? undefined : { profileId: found.profileId, thread: chat }
-  // Still loading: go by what the link said.
-  if (found === undefined && hint) return { profileId: hint, thread: chat }
-  return undefined
+  // Only a wide screen with the switch on has a third pane to fill, so only it pays for the count.
+  const read = useLiveQuery(async () => {
+    if (!chat) return undefined
+    const found = (await db.conversations.get(chat)) ?? null
+    if (!main || !large || !enabled) return { chat, found, last: undefined, threads: undefined }
+    return { chat, found, ...(await lastOpened(main)) }
+  }, [chat, main, large, enabled])
+  const found = read && read.chat === chat ? read.found : undefined
+  // The bot this pane is for, and the thread the route itself is, if it is one of the bot's.
+  let profileId: string | undefined
+  let thread: string | undefined
+  if (main) {
+    profileId = main
+  } else if (found && !found.projectId) {
+    profileId = found.profileId
+    thread = chat
+  } else if (found === undefined && hint) {
+    // Still loading: go by what the link said.
+    profileId = hint
+    thread = chat
+  }
+  // The pane reopens a bot's threads where this device last left them.
+  useEffect(() => {
+    if (!profileId || !thread) return
+    try {
+      localStorage.setItem(lastThreadKey(profileId), thread)
+    } catch {
+      // As above: the pane opens on Main alone.
+    }
+  }, [profileId, thread])
+
+  if (!large || !enabled || !profileId) return undefined
+  if (thread) return { profileId, thread, threads: true }
+  // Nothing remembered yet reads as no thread to show, never as a bot without threads.
+  return { profileId, last: read?.last, threads: read?.threads !== 0 }
 }

@@ -21,10 +21,16 @@ went, with the host's own undo.
   with no card carrying the move (`bot-threads` on `triage-thread`).
 - `threads-widths` — the cards, the day heading and the moved line still draw at tablet width in
   dark mode (`bot-threads`).
+- `threads-panes` — from 1280px the sidebar, Main and a thread are three columns: the thread the
+  route is, else the one this device opened last for that bot, so Main never stands alone
+  (`test-bot-pane`). A bot with no thread yet keeps the third column and reads `No threads yet` in it.
 
 ## How to get to it (user POV)
 
 - Open a bot from the sidebar's chat list: its chat is Main, the threads drawn as cards inside it.
+- On a laptop (1280px or wider), open one of that bot's threads and come back to Main: the sidebar,
+  Main and that thread stand side by side, and the thread stays in the third column while Main is
+  looked at.
 - A bot's old thread list address, `/b/<botId>`, lands on that same Main (and on home where the
   switch is off).
 - A card's "View thread" link, or the card's opener text itself.
@@ -71,6 +77,18 @@ Preconditions:
   card, Main's day heading and the moved line still draw, and the move's Undo is still there.
   Proof: `PASS: on a tablet in dark mode Main still draws its cards, its heading and the move's
   line` and `bot-threads-tablet-dark.png`.
+- **Three columns on a laptop.** Drive the app at 1440px with the switch on (a drive on
+  `app/scripts/e2e/lib.mjs`'s `flow` takes `{ viewport: { width: 1440, height: 900 } }`, turns the
+  switch on with `db.settings.update("settings", { developer: true, botThreads: true })` and seeds a
+  thread through `db.conversations.bulkPut`). Open that thread, then go back to the bot's Main. The
+  sidebar, Main and the thread stand side by side, Main is drawn once beside the thread rather than
+  twice, and both headers carry their bot's picture. `pnpm test` (from `app/`) holds the same
+  contract without a browser, in `scripts/test-bot-pane.tsx`'s `a thread opened for a bot is the one
+  its pane keeps`: the header titles are `Main` and the thread's. Proof: a `shot` of the three
+  columns at 1440px, taken between opening the thread and leaving it.
+- **A bot with no threads.** Open a brand-new bot's Main at 1440px. The third column stands at its
+  width and reads `No threads yet`, beside Main rather than in place of it. Proof: `pnpm test`'s
+  `a bot with no threads keeps the pane and says so`, and a `shot` of the same screen.
 - **Proof of a whole pass.** Keep the run's `PASS:` transcript and the `bot-threads-*.png` shots in
   `$GOTS_VERIFY_ARTIFACTS/<run-id>`; they name the feature id and the entry point (the bot's chat).
 
@@ -88,5 +106,11 @@ Preconditions:
 - A marker's Undo is offered only while the thread it moved into has not replied. Once it replies
   the control is gone; do not wait for it later in a drive.
 - The sidebar's bot row previews what Main last said. Where Main has said nothing that preview
-  reads `No threads yet`, which describes the preview alone — the header's own subtitle at zero
-  threads is `No threads`. Assert the one you mean.
+  reads `No threads yet`, the third pane of a bot with no threads reads the same line, and the
+  header's own subtitle at zero threads is `No threads`. Assert the one you mean, from its column.
+- The third pane's thread is this device's memory (`localStorage`, `memento:last-thread:<bot id>`),
+  not the host's: a fresh browser profile shows Main alone until a thread of that bot has been
+  opened in it, and a drive that only seeds threads through Dexie sees two columns. Opening one
+  thread is what fills the third.
+- The third pane exists only from 1280px. At 390px and 768px a bot's chats are one screen, and a
+  check for three columns there fails on the window, not on the feature.

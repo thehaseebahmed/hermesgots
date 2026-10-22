@@ -64,7 +64,8 @@ commands, and observable proof.
   and a reply that survives a reload.
 - [Bot threads](./threads.md) covers a bot opening on Main with its threads as cards at their start
   times, opening a card and sending from one, `/thread`, a message that opens a thread, one moved
-  into an older thread, and the cards at tablet width in the dark theme.
+  into an older thread, the cards at tablet width in the dark theme, and the three columns a laptop
+  keeps — Main beside the thread last opened for that bot, or the line that says it has none.
 - [Approvals and questions](./approvals.md) covers what waits on the user: approvals in the sidebar
   and Code, allowing them, missed ones, and questions answered across reloads.
 - [MCP servers](./mcp-servers.md) covers a Bot's MCP tab: rows and health, gating, adding from the

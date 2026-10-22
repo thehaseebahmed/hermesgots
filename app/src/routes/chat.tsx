@@ -705,7 +705,7 @@ export function ChatPage({ chatId }: { chatId?: string } = {}) {
   const wide = useWide()
   const beside = Boolean(useCodePane()) && Boolean(session)
   useRememberOpened("code", session?.id)
-  // Beside its bot the header drops the picture, so the reply count sits under the title instead.
+  // A thread beside Main says how many replies it has under its title.
   const replyCount = messages?.filter((m) => m.role === "assistant").length ?? 0
   const repliesLine =
     mainPath && xl && replyCount
@@ -920,8 +920,8 @@ export function ChatPage({ chatId }: { chatId?: string } = {}) {
         botId={profile?.botId}
         muted={Boolean(conversation?.muted || profile?.muted)}
         centered={centered}
-        // Beside its bot, a thread already shows the picture.
-        showBot={!session && !unstarted && !(mainPath && xl)}
+        // A chat is with its bot, so its picture stays — a session's header is a place in a project.
+        showBot={!session && !unstarted}
         actions={actions}
         leading={
           mainPath ? (
