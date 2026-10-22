@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 35
+SCHEMA_VERSION = 36
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -449,4 +449,33 @@ def _migrate(conn: sqlite3.Connection) -> None:
         ):
             if column not in move_columns:
                 conn.execute(f"ALTER TABLE main_moves ADD COLUMN {column} {kind}")
+        # v36: meetings and their audio parts, uploaded in pieces and transcribed on the host (meetings.py).
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS meetings (
+                   id TEXT PRIMARY KEY,
+                   profile TEXT,
+                   title TEXT NOT NULL,
+                   project_id TEXT,
+                   kind TEXT NOT NULL,
+                   stage TEXT NOT NULL,
+                   parts INTEGER NOT NULL DEFAULT 0,
+                   error TEXT,
+                   transcript TEXT NOT NULL DEFAULT '[]',
+                   duration INTEGER NOT NULL DEFAULT 0,
+                   created_at INTEGER NOT NULL,
+                   updated_at INTEGER NOT NULL
+               )"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS meeting_parts (
+                   meeting_id TEXT NOT NULL,
+                   n INTEGER NOT NULL,
+                   start INTEGER NOT NULL,
+                   content_type TEXT,
+                   size INTEGER NOT NULL,
+                   done INTEGER NOT NULL DEFAULT 0,
+                   segments TEXT,
+                   PRIMARY KEY (meeting_id, n)
+               )"""
+        )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

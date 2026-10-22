@@ -35,6 +35,7 @@ from . import (
     context,
     delegation,
     dictation,
+    meetings,
     events,
     findings,
     gate,
@@ -177,6 +178,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     delegation.wire(adapter)
     # Research missions' researchers record their claims; see research.py.
     research.wire(adapter)
+    meetings.wire(adapter)
 
     async def daily_cleanup(_app: Any):
         from hermes_constants import get_hermes_home
@@ -199,6 +201,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             asyncio.ensure_future(alerts.run(home)),
             # Research missions write up once their researcher stops; see research.py.
             asyncio.ensure_future(research.run(home)),
+            # A recording left half-transcribed by a restart carries on; see meetings.py.
+            asyncio.ensure_future(meetings.run(home)),
             # Projects left to work their own tasks are swept for work while the host runs; see
             # afk.py. A sweep is woken when one is turned on and when a session finishes.
             asyncio.ensure_future(afk.run(adapter)),
@@ -324,6 +328,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "research_followup",
                     "research_rewrite",
                     "research_compare",
+                    "meetings",
                     "community",
                     # A message sent from Main is sorted into a thread by the host; see triage.py.
                     *(["triage", "moves", "triage_model"] if triage.available() is None else []),
@@ -2105,6 +2110,111 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 logger.debug("memento: couldn't stop the researcher of %s", mission_id, exc_info=True)
         return web.json_response({"object": "memento.research.removed", "removed": True})
 
+    async def meeting_view(path: Path, meeting_id: str) -> "web.Response":
+        found = await asyncio.to_thread(meetings.meeting, path, meeting_id)
+        if found is None:
+            return _error(web, "No such meeting.", 404)
+        return web.json_response({"object": "memento.meeting", "meeting": found})
+
+    async def list_meetings(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        path = store_path()
+        await asyncio.to_thread(meetings.resume, path)
+        rows = await asyncio.to_thread(meetings.meetings, path, request_profile())
+        return web.json_response(
+            {"object": "memento.meetings", "meetings": rows, "unavailable": meetings.available()}
+        )
+
+    async def create_meeting(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        try:
+            found = await asyncio.to_thread(
+                meetings.create,
+                store_path(),
+                request_profile(),
+                body.get("title"),
+                body.get("project_id"),
+                body.get("parts"),
+                body.get("transcript"),
+            )
+        except meetings.MeetingError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "memento.meeting", "meeting": found}, status=201)
+
+    async def get_meeting(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        return await meeting_view(store_path(), request.match_info["meeting_id"])
+
+    async def meeting_part(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            n, start = int(request.query.get("n", "")), int(request.query.get("start", "0"))
+        except ValueError:
+            return _error(web, "n and start must be whole numbers.", 400)
+        try:
+            data = await request.read()
+        except web.HTTPRequestEntityTooLarge:
+            return _error(web, "The part is too large.", 413)
+        try:
+            found = await asyncio.to_thread(
+                meetings.add_part,
+                store_path(),
+                request.match_info["meeting_id"],
+                n,
+                start,
+                data,
+                request.headers.get("content-type"),
+            )
+        except meetings.MeetingError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "memento.meeting", "meeting": found})
+
+    async def meeting_step(request: "web.Request", step) -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        path, meeting_id = store_path(), request.match_info["meeting_id"]
+        try:
+            found = await asyncio.to_thread(step, path, meeting_id)
+        except meetings.MeetingError as error:
+            return _error(web, str(error), error.status)
+        if found["stage"] == "transcribing" and not found["error"]:
+            meetings.spawn(path, meeting_id)
+        return web.json_response({"object": "memento.meeting", "meeting": found})
+
+    async def finish_meeting(request: "web.Request") -> "web.Response":
+        return await meeting_step(request, meetings.finish)
+
+    async def retry_meeting(request: "web.Request") -> "web.Response":
+        return await meeting_step(request, meetings.retry)
+
+    async def remove_meeting(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        found = await asyncio.to_thread(meetings.remove, store_path(), request.match_info["meeting_id"])
+        if found is None:
+            return _error(web, "No such meeting.", 404)
+        return web.json_response({"object": "memento.meeting.removed", "removed": True})
+
+    app.router.add_get(f"{PREFIX}/meetings", list_meetings)
+    app.router.add_post(f"{PREFIX}/meetings", create_meeting)
+    app.router.add_get(f"{PREFIX}/meetings/{{meeting_id}}", get_meeting)
+    app.router.add_post(f"{PREFIX}/meetings/{{meeting_id}}/parts", meeting_part)
+    app.router.add_post(f"{PREFIX}/meetings/{{meeting_id}}/finish", finish_meeting)
+    app.router.add_post(f"{PREFIX}/meetings/{{meeting_id}}/retry", retry_meeting)
+    app.router.add_post(f"{PREFIX}/meetings/{{meeting_id}}/remove", remove_meeting)
     app.router.add_get(f"{PREFIX}/research", list_research)
     app.router.add_post(f"{PREFIX}/research", create_research)
     app.router.add_get(f"{PREFIX}/research/{{mission_id}}", get_research)
