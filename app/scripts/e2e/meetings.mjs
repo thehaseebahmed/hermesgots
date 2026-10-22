@@ -131,7 +131,7 @@ for (const [width, dark] of [
       assert.ok(await page.getByRole("heading", { name: "Topics" }).isVisible(), "the topics")
       assert.ok(await page.getByText("3 decisions, 3 to do and 1 left open.").isVisible(), "the tally")
       assert.ok(await page.getByText("Unsourced").first().isVisible(), "a bullet with no source")
-      assert.ok(await page.getByText("(Owner not stated)").first().isVisible(), "no invented owner")
+      assert.ok(await page.getByText("Owner not stated").first().isVisible(), "no invented owner")
       await shot("4-notes")
       pass(`${width}: a recording is sent, transcribed and written up`)
 
@@ -237,6 +237,36 @@ for (const [width, dark] of [
       })
       await page.getByText(/Unfinished recording/).waitFor({ state: "detached", timeout: 5_000 })
       pass(`${width}: a recording the page left behind is offered and sent`)
+
+      // An action item in a meeting filed under a project starts a session there, its text waiting
+      // in the composer.
+      await toList()
+      await page.getByRole("button", { name: "New meeting" }).first().click()
+      await page.getByRole("tab", { name: "Upload" }).click()
+      await page.locator("input[type=file]").first().setInputFiles({
+        name: `filed-${width}.wav`,
+        mimeType: "audio/wav",
+        buffer: silence(),
+      })
+      await page.locator("#meeting-project").click()
+      await page.getByRole("option").nth(1).click()
+      await add()
+      await page.getByText("Beta date").first().waitFor({ timeout: 20_000 })
+      await page.getByRole("button", { name: /^Start a session: Get two people/ }).click()
+      await page.waitForURL((url) => /^\/c\//.test(url.pathname), { timeout: 10_000 })
+      await page.getByRole("textbox").first().waitFor({ timeout: 10_000 })
+      await page.waitForFunction(
+        () =>
+          [...document.querySelectorAll("textarea")].some((t) =>
+            t.value.includes("Get two people to install the APK this week."),
+          ),
+        undefined,
+        { timeout: 10_000 },
+      )
+      await shot("5e-start")
+      pass(`${width}: an action item starts a session with its text in the composer`)
+      await page.goBack()
+      await page.getByText("Beta date").first().waitFor({ timeout: 10_000 })
 
       // A step that fails says why, and Try again carries on from it.
       await toList()

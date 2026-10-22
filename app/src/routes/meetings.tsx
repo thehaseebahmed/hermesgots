@@ -13,6 +13,7 @@ import {
   FileTextIcon,
   FlagIcon,
   FolderIcon,
+  GitBranchIcon,
   ListIcon,
   MenuIcon,
   MicIcon,
@@ -59,8 +60,10 @@ import {
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { db } from "@/lib/db"
+import { createConversation, db } from "@/lib/db"
+import { startBlocked } from "@/lib/code"
 import { canRecord } from "@/lib/dictation"
+import { draftKey, flushDrafts, saveDraft } from "@/lib/drafts"
 import { formatRelative } from "@/lib/format"
 import {
   forgetRecording,
@@ -103,6 +106,7 @@ import {
   type Topic,
 } from "@/lib/meetings"
 import { setBackGuard } from "@/lib/native"
+import { useAllProjects } from "@/lib/projects"
 import { useNav } from "@/lib/nav"
 import {
   itemToOpen,
@@ -1441,7 +1445,7 @@ function RecapView({
 
       <Timeline meeting={meeting} topics={notes.topics} moments={moments} onOpen={onOpen} />
 
-      <MomentsCard moments={moments} onSeek={seek} />
+      <MomentsCard meeting={meeting} moments={moments} onSeek={seek} />
 
       <section className="flex flex-col gap-1">
         <h2 className="px-1 pb-1 text-sm font-medium text-muted-foreground">Topics</h2>
@@ -1516,7 +1520,15 @@ function Timeline({
 }
 
 /** What was decided, what's to do and what's left open. */
-function MomentsCard({ moments, onSeek }: { moments: Moment[]; onSeek: (at: number) => void }) {
+function MomentsCard({
+  meeting,
+  moments,
+  onSeek,
+}: {
+  meeting: Meeting
+  moments: Moment[]
+  onSeek: (at: number) => void
+}) {
   const kinds = (Object.keys(MOMENT_LOOK) as MomentKind[]).filter((kind) =>
     moments.some((m) => m.kind === kind),
   )
@@ -1537,23 +1549,85 @@ function MomentsCard({ moments, onSeek }: { moments: Moment[]; onSeek: (at: numb
           <ul className="flex flex-col gap-2">
             {moments
               .filter((m) => m.kind === kind)
-              .map((moment) => (
-                <li key={moment.id} className="leading-relaxed">
-                  {moment.text}
-                  {moment.owner && (
-                    <span className="ml-1.5 text-sm text-muted-foreground">({moment.owner})</span>
-                  )}
-                  {moment.at !== undefined ? (
-                    <Stamp at={moment.at} onSeek={onSeek} />
-                  ) : (
-                    <Unsourced />
-                  )}
-                </li>
-              ))}
+              .map((moment) =>
+                kind === "action" ? (
+                  <ActionRow key={moment.id} meeting={meeting} moment={moment} onSeek={onSeek} />
+                ) : (
+                  <li key={moment.id} className="leading-relaxed">
+                    {moment.text}
+                    {moment.at !== undefined ? (
+                      <Stamp at={moment.at} onSeek={onSeek} />
+                    ) : (
+                      <Unsourced />
+                    )}
+                  </li>
+                ),
+              )}
           </ul>
         </section>
       ))}
     </div>
+  )
+}
+
+/**
+ * An action item, which can start a session in the meeting's project with the action as its
+ * first message, left in the composer for the user to read and send.
+ */
+function ActionRow({
+  meeting,
+  moment,
+  onSeek,
+}: {
+  meeting: Meeting
+  moment: Moment
+  onSeek: (at: number) => void
+}) {
+  const navigate = useNavigate()
+  const bots = useMeetingBots()
+  const projects = useAllProjects()
+  const profile = bots.find((b) => b.id === meeting.profileId)
+  const project = projects.get(meeting.connection)?.find((p) => p.id === meeting.projectId)
+  const blocked = !profile?.apiKey || !project || Boolean(startBlocked(project))
+  const [starting, setStarting] = useState(false)
+  const start = async () => {
+    if (!profile || !project) return
+    setStarting(true)
+    try {
+      const session = await createConversation(profile.id, {
+        title: "Draft session",
+        projectId: project.id,
+      })
+      saveDraft(draftKey(session.id), `${moment.text}\n\nFrom the meeting "${meeting.title}".`)
+      await flushDrafts()
+      navigate(`/c/${session.id}`, { state: { project, code: true } })
+    } catch (error) {
+      toast.error(message(error, "Couldn't start a session."))
+      setStarting(false)
+    }
+  }
+  return (
+    <li className="flex items-center gap-3 rounded-2xl bg-muted/70 py-2.5 pr-2.5 pl-3.5">
+      <span className="min-w-0 flex-1">
+        <span className="block leading-snug font-medium">{moment.text}</span>
+        <span className="mt-0.5 flex flex-wrap items-center text-xs text-muted-foreground">
+          {moment.owner}
+          {moment.at !== undefined ? <Stamp at={moment.at} onSeek={onSeek} /> : <Unsourced />}
+        </span>
+      </span>
+      {meeting.projectId && (
+        <Button
+          size="sm"
+          className="h-9 shrink-0 rounded-full"
+          aria-label={`Start a session: ${moment.text}`}
+          disabled={blocked || starting}
+          onClick={() => void start()}
+        >
+          <GitBranchIcon data-icon="inline-start" />
+          Start
+        </Button>
+      )}
+    </li>
   )
 }
 
