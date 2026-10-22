@@ -105,7 +105,18 @@ def settled(first: Sequence[str], second: Sequence[str]) -> List[str]:
     return agree(first, second)[:-1]
 
 
-def newly_committed(committed: Sequence[str], stable: Sequence[str]) -> List[str]:
+def _near(first: str, second: str) -> bool:
+    """Whether one word may be the other one heard mid-word: the same, or one a prefix of the other."""
+    return first == second or (
+        len(first) >= 2
+        and len(second) >= 2
+        and (first.startswith(second) or second.startswith(first))
+    )
+
+
+def newly_committed(
+    committed: Sequence[str], stable: Sequence[str], *, revise_head: bool = False
+) -> List[str]:
     """The words of ``stable`` past what the take already committed.
 
     ``stable`` is a window's settled text, a run of the take's words ending at its end. Where that
@@ -114,15 +125,22 @@ def newly_committed(committed: Sequence[str], stable: Sequence[str]) -> List[str
     and only what comes after the last committed word is new. A window that only re-heard words the
     take already committed, with its frontier revised so the run stops short of their end, adds
     nothing: a word is committed once, so it is shown once and never taken away again.
+
+    ``revise_head`` is for a phrase's close, whose audio begins at the previous close's overlap: its
+    first word is often a fragment of a word already committed. There a leading word that is
+    ``_near`` a committed one, with the run continuing exactly behind it, is that committed word
+    heard again — it is dropped too, so nothing appears twice and no committed word moves.
     """
     known = list(committed)
     fresh = list(stable)
     if not fresh:
         return []
     began, matched = len(known), 0
-    # The window cannot be covering words older than the most its audio could hold, so the search
-    # starts there; of two equally long runs, the later one is where the window is.
-    for at in range(max(0, len(known) - _HEARD_WORDS), len(known)):
+    # The window cannot be covering words older than the most its audio could hold, and a run is
+    # never longer than ``stable`` itself — which is what a phrase's close needs, its whole text
+    # passed at once; of two equally long runs, the later one is where the window is.
+    search = range(max(0, len(known) - max(_HEARD_WORDS, len(fresh))), len(known))
+    for at in search:
         size = 0
         while size < len(fresh) and at + size < len(known) and known[at + size] == fresh[size]:
             size += 1
@@ -130,7 +148,22 @@ def newly_committed(committed: Sequence[str], stable: Sequence[str]) -> List[str
             began, matched = at, size
             if size == len(fresh):
                 break
-    return fresh[max(0, len(known) - began) :]
+    if matched or not revise_head:
+        return fresh[max(0, len(known) - began) :]
+    # The close's head: a fragment of a committed word, with its run continuing exactly behind it.
+    for at in search:
+        if not _near(fresh[0], known[at]):
+            continue
+        size = 0
+        while (
+            size + 1 < len(fresh)
+            and at + size + 1 < len(known)
+            and known[at + size + 1] == fresh[size + 1]
+        ):
+            size += 1
+        if size >= 1 and size + 1 >= matched:
+            matched = size + 1
+    return fresh[matched:]
 
 
 class Decoder:
@@ -382,7 +415,7 @@ class Take:
         tail = self._samples[self._phrase_from :]
         if tail:
             text = self._transcribe(tail, self._prompt())
-            fresh = newly_committed(self._committed, str(text or "").split())
+            fresh = newly_committed(self._committed, str(text or "").split(), revise_head=True)
             self._committed.extend(fresh)
             self._phrase_words.extend(fresh)
         phrase: Optional[Dict[str, Any]] = None
@@ -394,6 +427,10 @@ class Take:
             self._phrases.append(phrase)
         self._phrase_words = []
         self._phrase_from = max(0, len(self._samples) - int(OVERLAP_S * self.rate))
+        # The buffer is let go up to the overlap the next phrase begins at: a long take holds only
+        # what its next decode needs, not every second it has heard.
+        del self._samples[: self._phrase_from]
+        self._phrase_from = 0
         self._previous = []
         self._decoded_at = self._clock()
         return {"words": "", "phrases": [phrase] if phrase else [], "behind": self._behind}

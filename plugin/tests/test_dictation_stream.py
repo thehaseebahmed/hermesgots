@@ -192,6 +192,32 @@ class NewlyCommittedTest(unittest.TestCase):
             ["five", "six"],
         )
 
+    def test_a_close_that_re_hears_a_long_run_still_adds_only_what_follows(self) -> None:
+        # A phrase's close passes its whole text at once, and a long phrase's first words sit far
+        # behind the committed end: the run must still be found, or every word is said twice.
+        known = [f"w{index}" for index in range(100)]
+        stable = [f"w{index}" for index in range(20, 120)]
+        self.assertEqual(
+            dictation_stream.newly_committed(known, stable),
+            [f"w{index}" for index in range(100, 120)],
+        )
+
+    def test_a_close_whose_first_word_is_a_fragment_commits_only_what_follows(self) -> None:
+        # The close's audio begins at the previous close's overlap, so its first word is often a
+        # committed word heard mid-word ("an" for "and"): that word again, not a new one.
+        self.assertEqual(
+            dictation_stream.newly_committed(
+                ["and", "then"], ["an", "then", "more"], revise_head=True
+            ),
+            ["more"],
+        )
+
+    def test_a_hop_keeps_the_exact_rule_the_close_alone_relaxes(self) -> None:
+        self.assertEqual(
+            dictation_stream.newly_committed(["and", "then"], ["an", "then", "more"]),
+            ["an", "then", "more"],
+        )
+
 
 class WindowTest(unittest.TestCase):
     def test_a_word_is_committed_once_windows_after_it_have_stopped_moving_it(self) -> None:
@@ -328,6 +354,16 @@ class PhraseTest(unittest.TestCase):
         heard, _, clock = take(Scripted([]))
         clock.advance(SLICE_S)
         self.assertEqual(heard.add(b"opus", pause=True)["phrases"], [])
+
+
+    def test_a_closed_phrase_lets_its_audio_go_keeping_only_the_next_overlap(self) -> None:
+        scripted = Scripted(["hello there my friend", "hello there my friend"])
+        heard, _, clock = take(scripted)
+        push(heard, clock, count=8, pause=True)
+        # A long take holds only what its next decode needs: the overlap the next phrase begins at.
+        self.assertLessEqual(
+            heard.buffered, int(dictation_stream.OVERLAP_S * heard.rate) + len(slice_samples())
+        )
 
 
 class CleanupTest(unittest.TestCase):
