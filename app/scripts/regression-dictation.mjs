@@ -377,7 +377,11 @@ try {
         moments.some((text) => text.includes("um Let us")),
         `the words arrive as the host heard them (${JSON.stringify(moments)})`,
       )
-      for (const text of moments.filter((seen) => seen.includes("Let us ship")))
+      // The phrase arrives tidied, and from that moment it is what the bar keeps saying: a phrase
+      // is cleaned once, before it is committed, so it is never shown twice or tidied again.
+      const tidied = moments.findIndex((text) => text.includes("Let us ship 25 things."))
+      assert.ok(tidied >= 0, `the phrase arrived tidied (${JSON.stringify(moments)})`)
+      for (const text of moments.slice(tidied))
         assert.ok(
           text.includes("Let us ship 25 things."),
           `"${text}" keeps the phrase the host tidied`,
