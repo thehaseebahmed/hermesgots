@@ -1,4 +1,4 @@
-package app.memento;
+package app.gots;
 
 import android.content.Intent;
 import android.database.Cursor;

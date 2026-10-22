@@ -178,6 +178,13 @@ jobs:
             exit 1
           fi
           rm -f "$RUNNER_TEMP/firebase.raw"
+          # The package moved from app.memento to app.gots. google-services.json without a client for the
+          # new package fails the Gradle plugin, so such a build ships with push off until the secret is
+          # updated with the new Firebase app.
+          if ! jq -e '.client[]? | select(.client_info.android_client_info.package_name == "app.gots")' "$out" > /dev/null 2>&1; then
+            rm -f "$out"
+            echo "::warning::FIREBASE_GOOGLE_SERVICES has no app.gots client, so this build has push off. Register app.gots in Firebase and update the secret."
+          fi
 
       - name: Build signed release APK
         working-directory: app/android

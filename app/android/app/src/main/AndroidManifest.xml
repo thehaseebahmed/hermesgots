@@ -24,7 +24,7 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="memento" android:host="auth" />
+                <data android:scheme="gots" android:host="auth" />
             </intent-filter>
 
             <!-- Text, links and images shared from other apps open the share screen. -->

@@ -1,10 +1,10 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace = "app.memento"
+    namespace = "app.gots"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "app.memento"
+        applicationId "app.gots"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode((System.getenv("ANDROID_VERSION_CODE") ?: "1") as int)

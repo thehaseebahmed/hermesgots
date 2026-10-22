@@ -104,6 +104,13 @@ jobs:
             exit 1
           fi
           rm -f "$RUNNER_TEMP/firebase.raw"
+          # The package moved from app.memento to app.gots. google-services.json without a client for the
+          # new package fails the Gradle plugin, so such a build ships with push off until the secret is
+          # updated with the new Firebase app.
+          if ! jq -e '.client[]? | select(.client_info.android_client_info.package_name == "app.gots")' "$out" > /dev/null 2>&1; then
+            rm -f "$out"
+            echo "::warning::FIREBASE_GOOGLE_SERVICES has no app.gots client, so this build has push off. Register app.gots in Firebase and update the secret."
+          fi
 
       - name: Build web assets and sync them into the Android project
         run: |
@@ -160,13 +167,15 @@ jobs:
           FIREBASE_TESTER_GROUPS: ${{ vars.FIREBASE_TESTER_GROUPS || 'testers' }}
           REF_NAME: ${{ github.ref_name }}
         run: |
-          # Without an explicit id, take the app.memento app's id from google-services.json.
-          app_id="$FIREBASE_APP_ID"
-          if [ -z "$app_id" ] && [ -f android/app/google-services.json ]; then
-            app_id=$(jq -r '[.client[] | select(.client_info.android_client_info.package_name == "app.memento") | .client_info.mobilesdk_app_id][0] // empty' android/app/google-services.json)
+          # The app.gots app's id from google-services.json, else the FIREBASE_APP_ID variable (which
+          # must then be the app.gots app's, not the old app.memento one).
+          app_id=""
+          if [ -f android/app/google-services.json ]; then
+            app_id=$(jq -r '[.client[] | select(.client_info.android_client_info.package_name == "app.gots") | .client_info.mobilesdk_app_id][0] // empty' android/app/google-services.json)
           fi
+          [ -z "$app_id" ] && app_id="$FIREBASE_APP_ID"
           if [ -z "$app_id" ]; then
-            echo "::error::Set the FIREBASE_APP_ID variable, or the FIREBASE_GOOGLE_SERVICES secret with an app.memento client"
+            echo "::error::Set the FIREBASE_APP_ID variable to the app.gots app's id, or the FIREBASE_GOOGLE_SERVICES secret with an app.gots client"
             exit 1
           fi
           export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/firebase-distribution.json"

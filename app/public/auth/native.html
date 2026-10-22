@@ -64,13 +64,13 @@
     <main>
       <img src="/favicon.png" alt="" />
       <p id="error" hidden></p>
-      <p><a id="open" href="memento://auth" hidden>Open Gots</a></p>
+      <p><a id="open" href="gots://auth" hidden>Open Gots</a></p>
     </main>
     <script>
       const params = new URLSearchParams(location.hash.slice(1))
       if (params.get("access_token")) {
         const link = document.getElementById("open")
-        link.href = "memento://auth#" + location.hash.slice(1)
+        link.href = "gots://auth#" + location.hash.slice(1)
         link.hidden = false
         history.replaceState(null, "", location.pathname)
         location.href = link.href
