@@ -301,8 +301,10 @@ export function useStreamDictation(
       void cancelDictationTake(latest.current.config, take, AbortSignal.timeout(CANCEL_MS)).catch(
         () => undefined,
       )
-    // Its audio goes too: the words it heard are in the composer, and the rest is not wanted.
-    void stopRecording(current).then(() => current.keeper.drop())
+    // Its audio goes too: the words it heard are in the composer, and the rest is not wanted — but
+    // not on a restored take, whose recording is the device's copy: dropping it would cost the user
+    // the recording on one failed attempt, and Retry must still have something to ask with.
+    if (!current.restored) void stopRecording(current).then(() => current.keeper.drop())
     release(current)
     setLevels(null)
     setFailure(failed)
@@ -458,32 +460,41 @@ export function useStreamDictation(
       return
     }
 
-    const recorder = new MediaRecorder(stream, {
-      mimeType: recordingType(),
-      audioBitsPerSecond: 24_000,
-    })
-    current.stream = stream
-    current.recorder = recorder
-    recorder.ondataavailable = (event) => {
-      if (!event.data.size) return
-      // The audio is what survives the app: every slice is held, at the pace the keeper writes at.
-      keepSlice(current, event.data)
-      if (current.closed) return
-      window.clearTimeout(current.watch)
-      current.slices += 1
-      current.queue.push({ blob: event.data, pause: current.pauseNext })
-      current.pauseNext = false
-      void pump(current)
-    }
-    recorder.onerror = (event) => {
-      const error = (event as Event & { error?: unknown }).error
+    let recorder: MediaRecorder
+    try {
+      recorder = new MediaRecorder(stream, {
+        mimeType: recordingType(),
+        audioBitsPerSecond: 24_000,
+      })
+      current.stream = stream
+      current.recorder = recorder
+      recorder.ondataavailable = (event) => {
+        if (!event.data.size) return
+        // The audio is what survives the app: every slice is held, at the pace the keeper writes at.
+        keepSlice(current, event.data)
+        if (current.closed) return
+        window.clearTimeout(current.watch)
+        current.slices += 1
+        current.queue.push({ blob: event.data, pause: current.pauseNext })
+        current.pauseNext = false
+        void pump(current)
+      }
+      recorder.onerror = (event) => {
+        const error = (event as Event & { error?: unknown }).error
+        fail(current, microphoneFailure(micError(error, STOPPED), blockedMicrophone(error)))
+      }
+      // A recorder that has sent nothing by now is dead, not quiet: silence still encodes.
+      current.watch = window.setTimeout(() => {
+        if (!current.slices) fail(current, microphoneFailure(SILENT))
+      }, SILENT_MS)
+      recorder.start(SLICE_MS)
+    } catch (error) {
+      // A recorder that cannot exist or cannot start ends the take here: nothing is left holding
+      // the microphone or the profile's one take, which is what "release what you take" means.
+      stream.getTracks().forEach((track) => track.stop())
       fail(current, microphoneFailure(micError(error, STOPPED), blockedMicrophone(error)))
+      return
     }
-    // A recorder that has sent nothing by now is dead, not quiet: silence still encodes.
-    current.watch = window.setTimeout(() => {
-      if (!current.slices) fail(current, microphoneFailure(SILENT))
-    }, SILENT_MS)
-    recorder.start(SLICE_MS)
     // Another app taking the mic, or the device revoking it, ends the track under the recorder.
     stream
       .getAudioTracks()
@@ -554,10 +565,11 @@ export function useStreamDictation(
       // A second Stop, or a Send behind one, while the take is ending does nothing more.
       if (current.finishing) return current.finishing
       const run = (async () => {
+        // Stop waits for a cold host to open the take, so what was said while it loaded isn't lost:
+        // the wait is the ending's, and the cold start has a bound of its own (START_MS).
+        await current.asking.catch(() => undefined)
         const deadline = Date.now() + waitMs
         const left = () => Math.max(0, deadline - Date.now())
-        // Stop waits for a cold host to open the take, so what was said while it loaded isn't lost.
-        await current.asking.catch(() => undefined)
         // A take that failed while it waited (a refused start, a model that didn't load) has
         // already ended: its words are in the composer and the bar holds the reason.
         if (session.current !== current || current.failure) return null
