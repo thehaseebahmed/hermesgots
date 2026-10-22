@@ -1360,6 +1360,8 @@ export async function triageMessage(
     text: string
     run: Record<string, unknown>
     attachments: { name: string; type: string; size: number; path?: string }[]
+    /** Whether a message for a thread that is mid-reply steers it, else it waits in that thread's queue. */
+    steer?: boolean
   },
   signal?: AbortSignal,
 ): Promise<Triage> {
@@ -1373,6 +1375,7 @@ export async function triageMessage(
         text: item.text,
         body: item.run,
         attachments: item.attachments,
+        steer: item.steer === true,
       }),
       signal,
     },

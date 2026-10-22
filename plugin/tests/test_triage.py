@@ -5,6 +5,7 @@ Run: python3 -m unittest plugin.tests.test_triage -v
 
 from __future__ import annotations
 
+import asyncio
 import json
 import tempfile
 import unittest
@@ -366,3 +367,105 @@ class TriageModelTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Adapter:
+    def __init__(self):
+        self._run_statuses = {}
+
+    def run(self, run_id, status, at, session="s1", **extra):
+        self._run_statuses[run_id] = {
+            "run_id": run_id,
+            "session_id": session,
+            "status": status,
+            "created_at": at,
+            "updated_at": at,
+            **extra,
+        }
+
+
+class DeliveryTests(unittest.TestCase):
+    """A message triaged to a thread meets that thread's run: steered, queued, or left in Main."""
+
+    def setUp(self):
+        self.home = Path(tempfile.mkdtemp())
+        self.path = db_path(self.home)
+        self.adapter = Adapter()
+        self.posted = []
+
+        async def post(adapter, profile, path, request, authorization=None, idempotency_key=None):
+            self.posted.append((path, request))
+            return {"run_id": f"run_{len(self.posted)}"}
+
+        for target, value in (
+            (outbox, mock.patch.object(outbox, "post", post)),
+            (outbox, mock.patch.object(outbox, "session_ids", mock.AsyncMock(return_value={"s1"}))),
+        ):
+            value.start()
+            self.addCleanup(value.stop)
+        self.found = {"decision": "thread", "thread": "t1", "session_id": "s1", "model_choice": None}
+        self.body = {"model": "m", "provider": "p", "input": [{"role": "user", "content": "more"}], "session_id": "main"}
+
+    def deliver(self, steer, files=()):
+        return asyncio.run(
+            triage.deliver(
+                self.adapter, self.path, None, self.found, "more", list(files), self.body, steer
+            )
+        )
+
+    def test_a_running_thread_is_steered_when_the_setting_says_so(self):
+        self.adapter.run("r1", "running", 1)
+        delivered = self.deliver(steer=True)
+        self.assertTrue(delivered["steered"])
+        self.assertEqual(self.posted, [("/v1/runs/r1/steer", {"input": "more"})])
+        self.assertEqual(outbox.read(self.path, "s1")["items"], [])
+
+    def test_a_running_thread_queues_when_the_setting_says_queue(self):
+        self.adapter.run("r1", "running", 1)
+        delivered = self.deliver(steer=False)
+        self.assertFalse(delivered["steered"])
+        self.assertEqual(self.posted, [])
+        self.assertEqual([i["id"] for i in outbox.read(self.path, "s1")["items"]], [delivered["item"]["id"]])
+
+    def test_a_waiting_thread_queues_even_when_steering(self):
+        self.adapter.run("r1", "waiting_for_approval", 1)
+        delivered = self.deliver(steer=True)
+        self.assertFalse(delivered["steered"])
+        self.assertEqual(self.posted, [])
+        self.assertEqual(len(outbox.read(self.path, "s1")["items"]), 1)
+
+    def test_files_cant_steer_so_they_queue(self):
+        self.adapter.run("r1", "running", 1)
+        files = [{"name": "a.pdf", "type": "application/pdf", "size": 3, "path": "/h/a.pdf"}]
+        delivered = self.deliver(steer=True, files=files)
+        self.assertFalse(delivered["steered"])
+        self.assertEqual(self.posted, [])
+
+    def test_a_refused_steer_leaves_the_message_queued(self):
+        self.adapter.run("r1", "running", 1)
+
+        async def refuse(*args, **kwargs):
+            raise outbox.StartError("conflict", True)
+
+        with mock.patch.object(outbox, "post", refuse):
+            delivered = self.deliver(steer=True)
+        self.assertFalse(delivered["steered"])
+        self.assertEqual(len(outbox.read(self.path, "s1")["items"]), 1)
+
+    def test_a_stopped_thread_keeps_the_message_in_main(self):
+        self.adapter.run("r1", "cancelled", 1)
+        self.assertIsNone(self.deliver(steer=True))
+        self.assertEqual(outbox.read(self.path, "s1")["items"], [])
+
+    def test_a_queued_message_reaches_its_thread_with_no_app_connected(self):
+        self.adapter.run("r1", "running", 1)
+        delivered = self.deliver(steer=False)
+        self.assertEqual(self.posted, [])
+        self.adapter.run("r1", "completed", 1)
+        asyncio.run(outbox.tick(self.adapter, "s1", None, self.path))
+        path, request = self.posted[-1]
+        self.assertEqual(path, "/v1/runs")
+        self.assertEqual(request["session_id"], "s1")
+        self.assertEqual(request["input"], self.body["input"])
+        self.assertEqual(outbox.read(self.path, "s1")["items"], [])
+        self.assertIsNotNone(delivered["item"]["id"])

@@ -625,6 +625,31 @@ export function ChatPage() {
     for (const error of errors) toast.error(error)
   }
 
+  // Said after the message went, so a failure to say so is not a failure to send.
+  const announceMove = async (moved: { threadId: string; created: boolean } | undefined) => {
+    try {
+      if (moved?.created) {
+        // The host made the thread, so this device learns of it with the chat list.
+        void syncNow()
+        toast.success("Started a new thread")
+      } else if (moved) {
+        const thread = await db.conversations.get(moved.threadId)
+        toast.success(`Sent to ${thread?.title ?? "a thread"}`)
+      }
+    } catch {
+      // The message is where it belongs either way.
+    }
+  }
+
+  // Main's messages are triaged even while its reply runs, so one for another thread goes there at
+  // once; the rest steer or queue behind the reply.
+  const sendMidReply = (id: string, steer: boolean, text: string, attachments: Attachment[] = []) =>
+    sendFromMain(id, text, attachments, { steer })
+      .then(announceMove)
+      .catch((error: unknown) => {
+        toast.error(error instanceof Error ? error.message : "Couldn't send your message.")
+      })
+
   const send = async (text: string, attachments: Attachment[] = []) => {
     try {
       let conversationId = id
@@ -640,17 +665,9 @@ export function ChatPage() {
       }
       if (session?.draftAt) void updateConversation(conversationId, { draftAt: undefined })
       // Main's messages are triaged by the host first; a thread and a new chat never are.
-      const moved = conversation?.main
-        ? await sendFromMain(conversationId, text, attachments)
-        : await sendMessage(conversationId, text, { attachments })
-      if (moved?.created) {
-        // The host made the thread, so this device learns of it with the chat list.
-        void syncNow()
-        toast.success("Started a new thread")
-      } else if (moved) {
-        const thread = await db.conversations.get(moved.threadId)
-        toast.success(`Sent to ${thread?.title ?? "a thread"}`)
-      }
+      if (conversation?.main)
+        await announceMove(await sendFromMain(conversationId, text, attachments))
+      else await sendMessage(conversationId, text, { attachments })
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't send your message.")
       throw error
@@ -946,11 +963,21 @@ export function ChatPage() {
             onDraft={onDraft}
             onSend={send}
             onQueue={(text, attachments) =>
-              id ? queueMessage(id, text, attachments) : send(text, attachments)
+              id
+                ? conversation?.main
+                  ? sendMidReply(id, false, text, attachments)
+                  : queueMessage(id, text, attachments)
+                : send(text, attachments)
             }
             steerByDefault={resolved.steerByDefault}
             canSteer={steerable}
-            onSteer={(text) => (id ? steerText(id, text) : send(text))}
+            onSteer={(text) =>
+              id
+                ? conversation?.main
+                  ? sendMidReply(id, true, text)
+                  : steerText(id, text)
+                : send(text)
+            }
             filesAvailable={Boolean(profile?.apiKey)}
             imagesAvailable={profile?.imageInput !== false}
             onStop={() => id && stopMessage(id)}

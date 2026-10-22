@@ -10,7 +10,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { MemoryRouter } from "react-router"
 
 import { MovedMarker } from "@/components/chat/moved-marker"
-import { sendFromMain, settleRouting } from "@/lib/chat"
+import { sendFromMain, settleRouting, stopMessage } from "@/lib/chat"
 import { db, mainThreadId, type Message } from "@/lib/db"
 import { moveMarks, refreshMoves, undoMove } from "@/lib/moves"
 import { TRIAGE_MS } from "@/lib/freshness"
@@ -23,6 +23,15 @@ type Answer = "stay" | "thread" | "new" | "fail" | "hang"
 
 /** One host: what it advertises, how triage answers, and every request it was sent. */
 const uploads: string[] = []
+/** Hosts whose runs never answer, so a reply started on them stays running. */
+const hangingRuns = new Set<string>()
+const hung = new Set<() => void>()
+
+/** Ends every run a host left hanging, so the reply that waited on it settles. */
+function endRuns() {
+  for (const end of hung) end()
+  hung.clear()
+}
 
 function host(name: string, triage: Answer, features: string[] = ["queue", "triage", "moves"]) {
   const seen: { path: string; body: any }[] = []
@@ -62,6 +71,14 @@ function host(name: string, triage: Answer, features: string[] = ["queue", "tria
       })
     }
     // The run is refused, so a send ends at once; that it was posted is what the tests read.
+    if (url.pathname.endsWith("/v1/runs") && init?.method === "POST" && hangingRuns.has(name))
+      return new Promise<Response>((_, reject) => {
+        const keep = setInterval(() => {}, 100)
+        hung.add(() => {
+          clearInterval(keep)
+          reject(new DOMException("stopped", "AbortError"))
+        })
+      })
     if (url.pathname.endsWith("/v1/runs") && init?.method === "POST")
       return json({ error: { message: "stopped here" } }, 500)
     return json({})
@@ -365,4 +382,46 @@ test("undoing a move asks the host, then reads the markers again", async () => {
   assert.deepEqual(calls, [`POST ${MAIN_SESSION}/moves/m1/undo`])
   const [after] = (await db.conversations.get(MAIN))?.moves ?? []
   assert.deepEqual([after.undone, after.undoable], [true, false])
+})
+
+test("a Main send while Main's reply runs is triaged at once and moves without waiting", async () => {
+  await seed("route-busy-move")
+  hangingRuns.add("route-busy-move")
+  const seen = host("route-busy-move", "stay")
+  void sendFromMain(MAIN, "first")
+  await until(async () => runsFor(seen, MAIN_SESSION).length === 1, "Main's reply to run")
+  const busy = host("route-busy-move", "thread")
+  busy.push(...seen)
+  assert.deepEqual(await sendFromMain(MAIN, "more on Lisbon", [], { steer: true }), {
+    threadId: "t1",
+    created: false,
+  })
+  const ask = triaged(busy).find((r) => r.body.text === "more on Lisbon")
+  assert.equal(ask?.body.steer, true, "the user's setting rides along for the thread")
+  assert.ok(!(await messagesOf(MAIN)).some((m) => m.content === "more on Lisbon"))
+  stopMessage(MAIN)
+  endRuns()
+  await until(
+    async () => !(await messagesOf(MAIN)).some((m) => m.status === "streaming"),
+    "Main's reply to stop",
+  )
+})
+
+test("a Main send that stays while Main's reply runs waits queued in Main", async () => {
+  await seed("route-busy-stay")
+  hangingRuns.add("route-busy-stay")
+  const seen = host("route-busy-stay", "stay")
+  void sendFromMain(MAIN, "first")
+  await until(async () => runsFor(seen, MAIN_SESSION).length === 1, "Main's reply to run")
+  assert.equal(await sendFromMain(MAIN, "and this"), undefined)
+  assert.equal(triaged(seen).filter((r) => r.body.text === "and this").length, 1)
+  const held = (await messagesOf(MAIN)).filter((m) => m.content === "and this")
+  assert.equal(held.length, 1)
+  assert.equal(held[0].status, "queued")
+  stopMessage(MAIN)
+  endRuns()
+  await until(
+    async () => !(await messagesOf(MAIN)).some((m) => m.status === "streaming"),
+    "Main's reply to stop",
+  )
 })
