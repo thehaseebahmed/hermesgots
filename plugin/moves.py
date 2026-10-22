@@ -187,5 +187,5 @@ def take_from_transcript(home: Path, session_id: str, text: str, since_ms: int =
                 "DELETE FROM messages WHERE session_id = ? AND id >= ?", (session_id, id_)
             ).rowcount
     except sqlite3.Error:
-        logger.debug("memento: couldn't take a moved message out of %s", session_id, exc_info=True)
+        logger.debug("gots: couldn't take a moved message out of %s", session_id, exc_info=True)
         return 0

@@ -63,7 +63,7 @@ def read(home: Path, session_id: str) -> Optional[List[Dict[str, Any]]]:
                 current = parent_id
                 walked.append(current)
     except sqlite3.Error:
-        logger.debug("memento: couldn't read a chat's compactions", exc_info=True)
+        logger.debug("gots: couldn't read a chat's compactions", exc_info=True)
         return None
     found.sort(key=lambda item: item["at"])
     sizes = _sizes(home, [item["session"] for item in found])
@@ -86,7 +86,7 @@ def _sizes(home: Path, sessions: List[str]) -> Dict[str, Dict[str, int]]:
             sessions,
         ).fetchall()
     except sqlite3.Error:
-        logger.debug("memento: couldn't read context sizes", exc_info=True)
+        logger.debug("gots: couldn't read context sizes", exc_info=True)
         return {}
     finally:
         if conn is not None:

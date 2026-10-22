@@ -91,12 +91,12 @@ def run(tree: str, command: str) -> int:
             start_new_session=True,
         )
     except OSError:
-        logger.warning("memento: the gate's command couldn't run: %s", command, exc_info=True)
+        logger.warning("gots: the gate's command couldn't run: %s", command, exc_info=True)
         return 1
     try:
         return process.wait(timeout=GATE_TIMEOUT_S)
     except subprocess.TimeoutExpired:
-        logger.warning("memento: the gate's command timed out after %ss: %s", GATE_TIMEOUT_S, command)
+        logger.warning("gots: the gate's command timed out after %ss: %s", GATE_TIMEOUT_S, command)
         _end(process)
         return TIMED_OUT
 
@@ -110,7 +110,7 @@ def _end(process: "subprocess.Popen[bytes]") -> None:
     try:
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
-        logger.warning("memento: the gate's command won't die: %s", process.pid)
+        logger.warning("gots: the gate's command won't die: %s", process.pid)
 
 
 def _asked(commands: Any) -> Optional[List[Dict[str, str]]]:
@@ -211,7 +211,7 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
             break
     sessions.set_pipeline(path, record["session_id"], pipeline.gated(staged, results))
     logger.info(
-        "memento: %s ran its gate: %s",
+        "gots: %s ran its gate: %s",
         record["session_id"],
         ", ".join(f"{one['command']} → {one['code']}" for one in results),
     )
@@ -225,10 +225,10 @@ def register(ctx: Any) -> bool:
         return False
     try:
         return register_tool(
-            name=TOOL, toolset="memento", schema=SCHEMA, handler=handle, emoji="🚧"
+            name=TOOL, toolset="gots", schema=SCHEMA, handler=handle, emoji="🚧"
         ) is not False
     except Exception:
-        logger.warning("memento: couldn't register the afk_gate tool", exc_info=True)
+        logger.warning("gots: couldn't register the afk_gate tool", exc_info=True)
         return False
 
 

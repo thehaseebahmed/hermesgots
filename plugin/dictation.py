@@ -172,7 +172,7 @@ def transcribe(
     parts = (configured if isinstance(configured, str) else "", hint, context)
     prompt = " ".join(p for p in parts if p).strip()
     started = time.monotonic()
-    fd, path = tempfile.mkstemp(prefix="memento-dictation-", suffix=suffix_for(content_type))
+    fd, path = tempfile.mkstemp(prefix="gots-dictation-", suffix=suffix_for(content_type))
     try:
         with os.fdopen(fd, "wb") as file:
             file.write(data)

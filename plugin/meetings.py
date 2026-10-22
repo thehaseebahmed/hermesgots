@@ -7,7 +7,7 @@ with the app closed:
   since the API server refuses bodies over 10 MB. A chunk is not audio on its own (a slice of an m4a
   has no header), so nothing decodes a chunk: ``finish`` says every chunk is in and starts the
   transcription, which joins them into the file first. The chunks are kept on disk under
-  ``$HERMES_HOME/memento/meetings/<id>/``. A transcript the user already has skips all of that: the
+  ``$HERMES_HOME/gots/meetings/<id>/``. A transcript the user already has skips all of that: the
   app parses it and posts the lines.
 - **Transcribe.** The host decodes the joined file once (faster-whisper's own decoder, 16 kHz mono)
   and cuts it into windows of at most 5 minutes, which are the meeting's parts from then on. One
@@ -100,7 +100,7 @@ def _scope(profile: Optional[str]):
     try:
         return enter(profile)
     except Exception:
-        logger.debug("memento: couldn't enter profile %s", profile, exc_info=True)
+        logger.debug("gots: couldn't enter profile %s", profile, exc_info=True)
         return contextlib.nullcontext()
 
 
@@ -386,7 +386,7 @@ def _segments(window: Any, offset: int, context: str, scratch: Path) -> List[Dic
                     out.append({"at": offset + int(segment.start), "text": text})
             return out
         except Exception:
-            logger.debug("memento: segments unavailable, transcribing the window whole", exc_info=True)
+            logger.debug("gots: segments unavailable, transcribing the window whole", exc_info=True)
     _wav(window, scratch)
     try:
         result = tt._transcribe_local(str(scratch), name, prompt=prompt or None)
@@ -855,13 +855,13 @@ def spawn(path: Path, meeting_id: str) -> None:
         except (MeetingError, dictation.DictationError) as error:
             _fail(path, meeting_id, str(error))
         except Exception as error:
-            logger.warning("memento: meeting %s failed", meeting_id, exc_info=True)
+            logger.warning("gots: meeting %s failed", meeting_id, exc_info=True)
             _fail(path, meeting_id, f"Something went wrong: {error}")
         finally:
             with _lock:
                 _running.discard(key)
 
-    threading.Thread(target=go, name=f"memento-meeting-{meeting_id}", daemon=True).start()
+    threading.Thread(target=go, name=f"gots-meeting-{meeting_id}", daemon=True).start()
 
 
 def _fail(path: Path, meeting_id: str, message: str) -> None:
@@ -871,7 +871,7 @@ def _fail(path: Path, meeting_id: str, message: str) -> None:
             _update(path, meeting_id, error=message)
             _tell(path, "meeting_failed", meeting_id, found["title"])
     except Exception:
-        logger.debug("memento: couldn't record the failure of %s", meeting_id, exc_info=True)
+        logger.debug("gots: couldn't record the failure of %s", meeting_id, exc_info=True)
 
 
 def resume(path: Path) -> None:
@@ -895,4 +895,4 @@ async def run(home: Path) -> None:
     try:
         await asyncio.to_thread(resume, db_path(home))
     except Exception:
-        logger.debug("memento: couldn't resume meetings", exc_info=True)
+        logger.debug("gots: couldn't resume meetings", exc_info=True)

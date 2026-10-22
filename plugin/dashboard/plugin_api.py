@@ -1,4 +1,4 @@
-"""Gots dashboard plugin backend, mounted at /api/plugins/memento/ on the dashboard."""
+"""Gots dashboard plugin backend, mounted at /api/plugins/gots/ on the dashboard."""
 
 from __future__ import annotations
 
@@ -41,7 +41,11 @@ def _ledger() -> Dict[str, Any]:
 
 def _chats() -> Dict[str, Any]:
     # Same file as ../chats.py; this module loads on its own, so it can't import that one.
-    path = Path(get_hermes_home()) / "memento" / "memento.db"
+    home = Path(get_hermes_home())
+    # The data folder moved from memento/ to gots/; ../paths.py does the move, this file can't import it.
+    path = home / "gots" / "gots.db"
+    if not path.exists():
+        path = home / "memento" / "memento.db"
     if not path.exists():
         return {"exists": False, "chats": 0}
     with sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=2) as conn:
@@ -54,13 +58,14 @@ def _enabled() -> bool | None:
         from hermes_cli.plugins_cmd import _get_disabled_set, _get_enabled_set
     except ImportError:
         return None
-    return "memento" in _get_enabled_set() and "memento" not in _get_disabled_set()
+    enabled, disabled = _get_enabled_set(), _get_disabled_set()
+    return "gots" in enabled and "gots" not in disabled
 
 
 def _link() -> Any:
     """``../link.py``, loaded under a stand-in package: Hermes imports this file on its own, so it
     can't import its siblings, and link.py only needs the package for ``VERSION``."""
-    package = "hermes_dashboard_plugin_memento_pkg"
+    package = "hermes_dashboard_plugin_gots_pkg"
     loaded = sys.modules.get(f"{package}.link")
     if loaded:
         return loaded
@@ -163,25 +168,25 @@ def status() -> Dict[str, Any]:
     except sqlite3.Error as error:
         chats = {"exists": True, "chats": None, "error": str(error)}
     return {
-        "name": "memento",
+        "name": "gots",
         "version": _version(),
         "enabled": _enabled(),
         "ledger": ledger,
         "chats": chats,
         "routes": [
-            "/api/plugins/memento/info",
-            "/api/plugins/memento/cron/runs",
-            "/api/plugins/memento/chats",
-            "/api/plugins/memento/projects",
-            "/api/plugins/memento/github",
-            "/api/plugins/memento/github/repos",
-            "/api/plugins/memento/runs/live",
-            "/api/plugins/memento/sessions/{session_id}/label",
-            "/api/plugins/memento/sessions/{session_id}/context",
-            "/api/plugins/memento/sessions/{session_id}/todos",
-            "/api/plugins/memento/sessions/{session_id}/workspace",
-            "/api/plugins/memento/sessions/{session_id}/workspace/remove",
-            "/api/plugins/memento/sessions/{session_id}/mode",
-            "/api/plugins/memento/sessions/{session_id}/prs",
+            "/api/plugins/gots/info",
+            "/api/plugins/gots/cron/runs",
+            "/api/plugins/gots/chats",
+            "/api/plugins/gots/projects",
+            "/api/plugins/gots/github",
+            "/api/plugins/gots/github/repos",
+            "/api/plugins/gots/runs/live",
+            "/api/plugins/gots/sessions/{session_id}/label",
+            "/api/plugins/gots/sessions/{session_id}/context",
+            "/api/plugins/gots/sessions/{session_id}/todos",
+            "/api/plugins/gots/sessions/{session_id}/workspace",
+            "/api/plugins/gots/sessions/{session_id}/workspace/remove",
+            "/api/plugins/gots/sessions/{session_id}/mode",
+            "/api/plugins/gots/sessions/{session_id}/prs",
         ],
     }

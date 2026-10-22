@@ -1,7 +1,7 @@
 """Projects whose GitHub repos are still being cloned, or whose clone failed.
 
 Creating a project answers at once and clones on a background thread, so it carries on with the app
-closed. Until every repo is in, the project is a row in ``memento.db``'s ``project_clones``, not in
+closed. Until every repo is in, the project is a row in ``gots.db``'s ``project_clones``, not in
 Hermes's ``projects.db``: a project there is always whole, so a session can never get a worktree in
 only some of its repos. The last clone creates the real project and drops the row. A failed clone
 removes the folder and keeps the row with its error until the user retries or removes it. A restart
@@ -166,7 +166,7 @@ def start(hermes_home: Path, name: Any, description: Any, repos: Any) -> Dict[st
 
 def spawn(hermes_home: Path, slug: str) -> None:
     # A thread of its own: a clone can take minutes and shouldn't hold one of the loop's workers.
-    threading.Thread(target=run, args=(hermes_home, slug), name=f"memento-clone-{slug}", daemon=True).start()
+    threading.Thread(target=run, args=(hermes_home, slug), name=f"gots-clone-{slug}", daemon=True).start()
 
 
 def _finish(hermes_home: Path, clone: Dict[str, Any], cancel: threading.Event) -> None:
@@ -224,7 +224,7 @@ def run(hermes_home: Path, slug: str) -> None:
     except ImportError:
         _fail(hermes_home, slug, "This Hermes version has no Projects.")
     except Exception:
-        logger.exception("memento: creating project %s failed", slug)
+        logger.exception("gots: creating project %s failed", slug)
         _fail(hermes_home, slug, "Couldn't create the project.")
     finally:
         with _lock:

@@ -564,15 +564,15 @@ def register(ctx: Any) -> bool:
     if not callable(register_tool):
         return False
     try:
-        current = register_tool(name=TOOL, toolset="memento", schema=SCHEMA, handler=handle, emoji="🚀") is not False
+        current = register_tool(name=TOOL, toolset="gots", schema=SCHEMA, handler=handle, emoji="🚀") is not False
         legacy = register_tool(
-            name=LEGACY_TOOL, toolset="memento", schema=LEGACY_SCHEMA, handler=handle_legacy, emoji="🚀"
+            name=LEGACY_TOOL, toolset="gots", schema=LEGACY_SCHEMA, handler=handle_legacy, emoji="🚀"
         ) is not False
         if not legacy:
-            logger.warning("memento: couldn't register the open_pull_request redirect stub")
+            logger.warning("gots: couldn't register the open_pull_request redirect stub")
         return current
     except Exception:
-        logger.warning("memento: couldn't register the pull_request tools", exc_info=True)
+        logger.warning("gots: couldn't register the pull_request tools", exc_info=True)
         return False
 
 
@@ -580,7 +580,7 @@ def wire(adapter: Any) -> bool:
     """Wires the tools into every agent the API server builds."""
     current = tools_common.wire_tool(adapter, TOOL, SCHEMA, "pull_request")
     if not tools_common.wire_tool(adapter, LEGACY_TOOL, LEGACY_SCHEMA, "open_pull_request"):
-        logger.warning("memento: couldn't wire the open_pull_request redirect stub")
+        logger.warning("gots: couldn't wire the open_pull_request redirect stub")
     return current
 
 

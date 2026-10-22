@@ -255,7 +255,7 @@ def _held_task_stage(hermes_home: Path, found: Dict[str, Any]) -> HeldStage:
     try:
         stored = sessions.pipeline_of(db_path(hermes_home), session_id)
     except Exception:
-        logger.debug("memento: couldn't read the stage of %s", session_id, exc_info=True)
+        logger.debug("gots: couldn't read the stage of %s", session_id, exc_info=True)
         return HeldStage(None, None)
     record = pipeline.read(stored)
     return HeldStage(pipeline.stage(record), pipeline.stage_name(record))
@@ -351,7 +351,7 @@ def release(
         try:
             github.release_claim(str(held["repo"]), int(held["number"]), tasks.CLAIM_LABEL, auth)
         except (github.GitHubError, KeyError, TypeError, ValueError) as error:
-            logger.warning("memento: couldn't release %s on GitHub", held, exc_info=True)
+            logger.warning("gots: couldn't release %s on GitHub", held, exc_info=True)
             if row_holds_this_task:
                 _refuse(hermes_home, project_id, str(error))
     if row_holds_this_task:
@@ -388,7 +388,7 @@ def holding_project(hermes_home: Path, session_id: str) -> Optional[str]:
             None,
         )
     except (sqlite3.Error, OSError):
-        logger.warning("memento: couldn't read AFK's hold for %s", session_id, exc_info=True)
+        logger.warning("gots: couldn't read AFK's hold for %s", session_id, exc_info=True)
         return None
 
 
@@ -635,7 +635,7 @@ async def start(
             "auto",
         )
     except Exception:
-        logger.warning("memento: AFK couldn't make a session for %s", issue, exc_info=True)
+        logger.warning("gots: AFK couldn't make a session for %s", issue, exc_info=True)
         await asyncio.to_thread(release, hermes_home, project_id)
         return
     try:
@@ -647,7 +647,7 @@ async def start(
         record = {**record, "pipeline": began.snapshot}
         started = await _post(adapter, hermes_home, run_body(record, task, began.prompt))
     except Exception as error:
-        logger.warning("memento: AFK couldn't start the session for %s: %s", issue, error)
+        logger.warning("gots: AFK couldn't start the session for %s: %s", issue, error)
         await asyncio.to_thread(release, hermes_home, project_id)
         return
     try:
@@ -656,13 +656,13 @@ async def start(
         # The run is going and nothing else can show it: name the session, which is all a reader of
         # the log has to find it with.
         logger.error(
-            "memento: AFK started %s in %s but couldn't publish it to the app",
+            "gots: AFK started %s in %s but couldn't publish it to the app",
             issue,
             session_id,
             exc_info=True,
         )
     logger.info(
-        "memento: AFK is working %s in %s (run %s)", issue, session_id, started.get("run_id")
+        "gots: AFK is working %s in %s (run %s)", issue, session_id, started.get("run_id")
     )
 
 
@@ -740,7 +740,7 @@ def sweep_all(hermes_home: Path) -> List[Tuple[str, Dict[str, Any]]]:
                 skills=skills,
             )
         except Exception:
-            logger.warning("memento: couldn't sweep AFK's project %s", project_id, exc_info=True)
+            logger.warning("gots: couldn't sweep AFK's project %s", project_id, exc_info=True)
             continue
         if task is not None:
             claimed.append((project_id, task))
@@ -760,13 +760,13 @@ async def sweep_homes(adapter: Any) -> None:
         try:
             claimed = await asyncio.to_thread(sweep_all, one)
         except Exception:
-            logger.warning("memento: AFK couldn't sweep the home at %s", one, exc_info=True)
+            logger.warning("gots: AFK couldn't sweep the home at %s", one, exc_info=True)
             continue
         for project_id, task in claimed:
             try:
                 await start(adapter, one, project_id, task)
             except Exception:
-                logger.warning("memento: AFK couldn't start %s's task", project_id, exc_info=True)
+                logger.warning("gots: AFK couldn't start %s's task", project_id, exc_info=True)
 
 
 async def run(adapter: Any) -> None:
@@ -779,7 +779,7 @@ async def run(adapter: Any) -> None:
         try:
             await sweep_homes(adapter)
         except Exception:
-            logger.warning("memento: AFK's sweep failed", exc_info=True)
+            logger.warning("gots: AFK's sweep failed", exc_info=True)
         try:
             await asyncio.wait_for(_event.wait(), SWEEP_SECONDS)
         except asyncio.TimeoutError:
@@ -839,7 +839,7 @@ def after_run(
             _free(home, project_id)
         wake()
     except Exception:
-        logger.debug("memento: couldn't wake AFK's sweep", exc_info=True)
+        logger.debug("gots: couldn't wake AFK's sweep", exc_info=True)
 
 
 def _stage_end(
@@ -906,7 +906,7 @@ def _start_stage(hermes_home: Path, record: Dict[str, Any]) -> None:
     name = pipeline.stage_name(pipeline.read(record.get("pipeline"))) or ""
     if not isinstance(task, dict) or loop is None:
         logger.warning(
-            "memento: AFK can't start the \"%s\" stage of %s (no task held or no loop)",
+            "gots: AFK can't start the \"%s\" stage of %s (no task held or no loop)",
             name,
             record.get("session_id"),
         )
@@ -928,14 +928,14 @@ async def work_stage(
         started = await _post(adapter, hermes_home, stage_body(record, task))
     except Exception as error:
         logger.warning(
-            "memento: AFK couldn't start %s's \"%s\" stage for %s: %s", issue, name, record["session_id"], error
+            "gots: AFK couldn't start %s's \"%s\" stage for %s: %s", issue, name, record["session_id"], error
         )
         project_id = str(record.get("project_id") or "")
         if project_id and holding_project(hermes_home, record["session_id"]) == project_id:
             _stall(hermes_home, project_id, STAGE_FAILED.format(name=name))
         return
     logger.info(
-        "memento: AFK is working %s's \"%s\" stage in %s (run %s)",
+        "gots: AFK is working %s's \"%s\" stage in %s (run %s)",
         issue,
         name,
         record["session_id"],
@@ -959,7 +959,7 @@ def _unshipped(hermes_home: Path, record: Dict[str, Any]) -> Optional[str]:
                 return None
     except Exception:
         logger.debug(
-            "memento: couldn't ask GitHub whether %s shipped", record.get("session_id"), exc_info=True
+            "gots: couldn't ask GitHub whether %s shipped", record.get("session_id"), exc_info=True
         )
         return None
     return NO_PULL_REQUEST
@@ -995,7 +995,7 @@ def _profile_skills(hermes_home: Path) -> Optional[set]:
             for skill in skill_catalog.read(link.profile_name(hermes_home))
         }
     except Exception:
-        logger.debug("memento: couldn't read this bot's skills", exc_info=True)
+        logger.debug("gots: couldn't read this bot's skills", exc_info=True)
         return None
 
 
@@ -1236,7 +1236,7 @@ def _update(hermes_home: Path, project_id: str, **fields: Any) -> None:
         )
         if cursor.rowcount == 0:
             # The project's row went away under the sweep (removed, or forgotten with the project).
-            logger.warning("memento: AFK had no row for project %s to record", project_id)
+            logger.warning("gots: AFK had no row for project %s to record", project_id)
     finally:
         conn.close()
 

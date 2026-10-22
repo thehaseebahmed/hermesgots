@@ -40,7 +40,7 @@ def wire(adapter: Any) -> bool:
         try:
             equip(agent)
         except Exception:
-            logger.debug("memento: couldn't keep an agent's delegations in its turn", exc_info=True)
+            logger.debug("gots: couldn't keep an agent's delegations in its turn", exc_info=True)
         return agent
 
     adapter._create_agent = create_agent
@@ -132,7 +132,7 @@ def children(hermes_home: Path, session_id: str, live: Collection[str]) -> List[
                 found.append(_child(row, tip, running))
             return found
     except sqlite3.Error:
-        logger.debug("memento: couldn't read %s's delegations", session_id, exc_info=True)
+        logger.debug("gots: couldn't read %s's delegations", session_id, exc_info=True)
         return []
 
 

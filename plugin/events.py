@@ -1,6 +1,6 @@
 """What changed on this Hermes server, for the app's live stream (``GET .../events``).
 
-Hooks and the plugin's own background work note a change as a small row in ``memento.db``: a chat's
+Hooks and the plugin's own background work note a change as a small row in ``gots.db``: a chat's
 session moved on (a model call, a tool, a turn ending), the chat list merged something new, a run
 started, ended or began waiting on the user, or a project's clone changed. Rows carry no message
 text; the app reacts by fetching what it already fetches. Writing them to the database rather than holding them
@@ -71,7 +71,7 @@ def note(kind: str, session_id: Optional[str] = None, path: Optional[Path] = Non
             path = db_path(Path(get_hermes_home()))
         _write(path, kind, session_id)
     except Exception:
-        logger.debug("memento: couldn't note a %s change", kind, exc_info=True)
+        logger.debug("gots: couldn't note a %s change", kind, exc_info=True)
         return
     wake()
 

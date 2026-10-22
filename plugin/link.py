@@ -1,13 +1,13 @@
 """Links a Hermes profile to a Gots account, so it shows up in the app as a bot by itself.
 
-``hermes memento link <code> --site <app URL>`` claims a link code the app minted, which gives this
+``hermes gots link <code> --site <app URL>`` claims a link code the app minted, which gives this
 profile a host token. The profile's bot record (name, URL, API key) is sealed to the account's inbox
 key before it leaves (ECIES on P-256, the same scheme as ``openFromInbox`` in the app's ``vault.ts``),
 so the registry passes it along without being able to read it. The gateway then re-publishes the
 record when it changes and checks in every 10 minutes (``run``). Everything is best effort: a
 registry that can't be reached only means the app's copy is a little stale.
 
-State lives in ``$HERMES_HOME/memento/link.json`` (0600), per profile.
+State lives in ``$HERMES_HOME/gots/link.json`` (0600), per profile.
 """
 
 from __future__ import annotations
@@ -116,7 +116,7 @@ def call(
         data=None if body is None else json.dumps(body).encode(),
         headers={
             "Content-Type": "application/json",
-            "User-Agent": "memento-plugin",
+            "User-Agent": "gots-plugin",
             **({"Authorization": f"Bearer {token}"} if token else {}),
         },
     )
@@ -138,7 +138,9 @@ def call(
 
 
 def state_path(home: Path) -> Path:
-    return home / "memento" / "link.json"
+    from .paths import data_dir
+
+    return data_dir(home) / "link.json"
 
 
 def load_state(home: Path) -> Dict[str, Any]:
@@ -287,7 +289,7 @@ def check_in(home: Path, *, process_env: bool) -> Optional[str]:
             state["revoked"] = True
             save_state(home, state)
             return "removed in Gots"
-        logger.debug("memento: check-in failed for %s: %s", home, error)
+        logger.debug("gots: check-in failed for %s: %s", home, error)
         return str(error)
 
 
@@ -302,7 +304,7 @@ def served_homes(adapter: Any) -> List[Path]:
 
             homes += [Path(home) for _, home in profiles_to_serve(multiplex=True)]
         except Exception:
-            logger.debug("memento: couldn't list served profiles", exc_info=True)
+            logger.debug("gots: couldn't list served profiles", exc_info=True)
     seen: set[Path] = set()
     return [home for home in homes if not (home.resolve() in seen or seen.add(home.resolve()))]
 
@@ -317,7 +319,7 @@ async def run(adapter: Any) -> None:
                 # Only the process's own profile may fall back to the process environment.
                 await asyncio.to_thread(check_in, home, process_env=home == first)
             except Exception:
-                logger.debug("memento: check-in crashed for %s", home, exc_info=True)
+                logger.debug("gots: check-in crashed for %s", home, exc_info=True)
         await asyncio.sleep(HEARTBEAT_SECONDS)
 
 
@@ -478,10 +480,10 @@ def cmd_link(args: Any) -> int:
     try:
         if is_linked(state):
             print("This profile is already linked. To link it to another account, run "
-                  "`hermes memento unlink` first.")
+                  "`hermes gots unlink` first.")
         else:
             if not args.code:
-                print("Paste the link code from Gots: hermes memento link <code> --site <url>")
+                print("Paste the link code from Gots: hermes gots link <code> --site <url>")
                 return 2
             state = claim(home, state, args.code, site)
 
@@ -568,8 +570,14 @@ def cmd_status(args: Any) -> int:
     return 0 if result == "linked" else 1
 
 
+def _cmd_migrate(args: Any) -> int:
+    from .migrate import cmd_migrate
+
+    return cmd_migrate(args)
+
+
 def setup_cli(parser: Any) -> None:
-    commands = parser.add_subparsers(dest="memento_command")
+    commands = parser.add_subparsers(dest="gots_command")
     link = commands.add_parser("link", help="Link this profile to your Gots account")
     link.add_argument("code", nargs="?", help="The link code from the app")
     link.add_argument("--site", help="The address you open Gots at")
@@ -580,4 +588,7 @@ def setup_cli(parser: Any) -> None:
     unlink.set_defaults(func=cmd_unlink)
     status = commands.add_parser("status", help="Show whether this profile is linked")
     status.set_defaults(func=cmd_status)
+    migrate = commands.add_parser("migrate", help="Move this profile's data and config over from the old memento name")
+    migrate.add_argument("--dry-run", action="store_true", help="Show what would change and change nothing")
+    migrate.set_defaults(func=_cmd_migrate)
     parser.set_defaults(func=lambda args: (parser.print_help(), 2)[1])

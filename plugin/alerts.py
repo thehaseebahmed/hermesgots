@@ -75,7 +75,7 @@ def turn_finished(**kwargs: Any) -> None:
         ):
             push.notify("run_done", session_id, path)
     except Exception:
-        logger.debug("memento: couldn't tell a turn's end", exc_info=True)
+        logger.debug("gots: couldn't tell a turn's end", exc_info=True)
 
 
 def _finished_recently(row: Dict[str, Any], now: float) -> bool:
@@ -147,7 +147,7 @@ def check(hermes_home: Path, now: Optional[int] = None) -> None:
         try:
             look()
         except Exception:
-            logger.warning("memento: looking for news to push failed", exc_info=True)
+            logger.warning("gots: looking for news to push failed", exc_info=True)
 
 
 async def run(hermes_home: Path) -> None:

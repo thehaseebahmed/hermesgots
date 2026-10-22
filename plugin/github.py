@@ -125,7 +125,7 @@ def _fetch(
             "Accept": "application/vnd.github+json",
             **({"Authorization": f"Bearer {auth}"} if auth else {}),
             **({"Content-Type": "application/json"} if data is not None else {}),
-            "User-Agent": "memento-hermes-plugin",
+            "User-Agent": "gots-hermes-plugin",
             "X-GitHub-Api-Version": "2022-11-28",
         },
     )
@@ -245,7 +245,7 @@ def _unlabel(repo: str, number: int, label: str, auth: Optional[str]) -> None:
     try:
         _take_label(repo, number, label, auth)
     except GitHubError:
-        logger.warning("memento: couldn't take %s off %s#%s", label, repo, number, exc_info=True)
+        logger.warning("gots: couldn't take %s off %s#%s", label, repo, number, exc_info=True)
 
 
 def _take_label(repo: str, number: int, label: str, auth: Optional[str]) -> None:

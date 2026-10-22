@@ -1,4 +1,4 @@
-"""``$HERMES_HOME/memento/memento.db``: the chat list (``chats.py``), context use (``context.py``) and
+"""``$HERMES_HOME/gots/gots.db``: the chat list (``chats.py``), context use (``context.py``) and
 the models each chat's calls ran on (``model_changes.py``), project sessions (``sessions.py``),
 projects still cloning (``clones.py``), repos being added to or removed from a project (``repos.py``),
 pinned projects (``projects.py``), merged pull requests (``merges.py``), a project's AFK switch
@@ -14,6 +14,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Optional
 
+from .paths import data_dir, db_file
+
 logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 37
@@ -21,7 +23,7 @@ SCHEMA_VERSION = 37
 
 def db_path(hermes_home: Path) -> Path:
     # Outside the plugin's own folder, so `hermes plugins update` never touches it.
-    return hermes_home / "memento" / "memento.db"
+    return db_file(data_dir(hermes_home))
 
 
 def connect(path: Path) -> sqlite3.Connection:
@@ -54,7 +56,7 @@ def get_setting(path: Path, key: str) -> Optional[Any]:
     try:
         return json.loads(row[0]) if row else None
     except ValueError:
-        logger.debug("memento: the %s setting isn't valid JSON", key)
+        logger.debug("gots: the %s setting isn't valid JSON", key)
         return None
 
 

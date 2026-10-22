@@ -69,7 +69,10 @@ from .store import db_path
 
 logger = logging.getLogger(__name__)
 
-PREFIX = "/api/plugins/memento"
+PREFIX = "/api/plugins/gots"
+# The routes' old home. Served as well for one release, so an app that hasn't updated yet (a cached
+# PWA, an APK not reinstalled) keeps working while the hosts move over; the next release drops it.
+LEGACY_PREFIX = "/api/plugins/memento"
 # Gots shows 24 runs per job.
 DEFAULT_PER_JOB = 24
 MAX_PER_JOB = 200
@@ -122,8 +125,18 @@ def _error(web: Any, message: str, status: int):
     return web.json_response({"error": {"message": message}}, status=status)
 
 
+def mirror_legacy_prefix(app: Any) -> None:
+    """Serve every route again at ``LEGACY_PREFIX/...`` for apps that still call the old name."""
+    for route in list(app.router.routes()):
+        path = route.resource.canonical if route.resource else ""
+        if route.method == "HEAD" or not path.startswith(PREFIX + "/"):
+            continue
+        app.router.add_route(route.method, LEGACY_PREFIX + path[len(PREFIX) :], route.handler)
+
+
 def mirror_for_profiles(app: Any, web: Any) -> None:
-    """Serve every route again at ``PREFIX/p/{profile}/...`` for bots at ``/p/<profile>``.
+    """Serve every route again at ``PREFIX/p/{profile}/...`` for bots at ``/p/<profile>``
+    (and at ``LEGACY_PREFIX/p/{profile}/...``, see ``mirror_legacy_prefix``).
 
     Hermes registers a catch-all for ``/p/{profile}/...`` before plugin routes, so the natural
     ``/p/<profile>/api/plugins/...`` can't be reached. A path with ``{profile}`` inside the plugin's
@@ -133,7 +146,7 @@ def mirror_for_profiles(app: Any, web: Any) -> None:
     try:
         from gateway.platforms.api_server import _api_request_profile
     except ImportError:
-        logger.warning("memento: this Hermes can't scope routes by profile; /p/<profile> bots stay off")
+        logger.warning("gots: this Hermes can't scope routes by profile; /p/<profile> bots stay off")
         return
 
     def scoped(handler: Any):
@@ -148,11 +161,13 @@ def mirror_for_profiles(app: Any, web: Any) -> None:
 
     for route in list(app.router.routes()):
         path = route.resource.canonical if route.resource else ""
-        if route.method == "HEAD" or not path.startswith(PREFIX + "/"):
+        if route.method == "HEAD":
             continue
-        app.router.add_route(
-            route.method, f"{PREFIX}/p/{{profile}}{path[len(PREFIX):]}", scoped(route.handler)
-        )
+        for prefix in (PREFIX, LEGACY_PREFIX):
+            if path.startswith(prefix + "/"):
+                app.router.add_route(
+                    route.method, f"{prefix}/p/{{profile}}{path[len(prefix):]}", scoped(route.handler)
+                )
 
 
 def _wire_api_server(app: Any, adapter: Any) -> None:
@@ -190,7 +205,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             await asyncio.to_thread(clones.resume, home)
             await asyncio.to_thread(repos.resume, home)
         except Exception:
-            logger.debug("memento: couldn't resume project clones", exc_info=True)
+            logger.debug("gots: couldn't resume project clones", exc_info=True)
         tasks = [
             asyncio.ensure_future(cleanup.run_daily(adapter, home)),
             # Linked profiles keep their bot record current in the Gots registry; see link.py.
@@ -214,7 +229,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     try:
         app.cleanup_ctx.append(daily_cleanup)
     except RuntimeError:
-        logger.warning("memento: the API server already started; no daily cleanup until restart")
+        logger.warning("gots: the API server already started; no daily cleanup until restart")
 
     def unauthorized(request: "web.Request"):
         # The API server's own Bearer check, so the routes take the same key as /v1. Fail closed if
@@ -230,7 +245,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         try:
             from hermes_cli.plugins import get_plugin_manager
 
-            loaded = getattr(get_plugin_manager(), "_plugins", {}).get("memento")
+            plugins = getattr(get_plugin_manager(), "_plugins", {})
+            loaded = plugins.get("gots") or plugins.get("memento")
             return bool(loaded and loaded.enabled and not loaded.error)
         except Exception:
             return True
@@ -268,7 +284,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         ]
         return web.json_response(
             {
-                "name": "memento",
+                "name": "gots",
                 "version": VERSION,
                 "features": [
                     "cron_runs",
@@ -718,7 +734,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             try:
                 session_id = await asyncio.to_thread(resolve, session_id) or session_id
             except Exception:
-                logger.debug("memento: couldn't resolve session %s", session_id, exc_info=True)
+                logger.debug("gots: couldn't resolve session %s", session_id, exc_info=True)
         found = await asyncio.to_thread(context.read, path, session_id) or {}
         changes = await asyncio.to_thread(model_changes.read, path, session_id, asked_id)
         # The profile's home is read on the loop thread, where its scope is visible.
@@ -783,7 +799,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 try:
                     session_id = await asyncio.to_thread(resolve, session_id) or session_id
                 except Exception:
-                    logger.debug("memento: couldn't resolve session %s", session_id, exc_info=True)
+                    logger.debug("gots: couldn't resolve session %s", session_id, exc_info=True)
             found = await asyncio.to_thread(todos.read, db, session_id)
         # Never a 404 for an unknown session: the app reads a 404 as a missing plugin.
         return web.json_response(
@@ -1269,7 +1285,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             try:
                 sessions.answer_waiting(request.match_info["session_id"])
             except Exception:
-                logger.debug("memento: answering waiting approvals failed", exc_info=True)
+                logger.debug("gots: answering waiting approvals failed", exc_info=True)
         return await workspace_response(record)
 
     async def remove_workspace(request: "web.Request") -> "web.Response":
@@ -1315,7 +1331,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             try:
                 await asyncio.to_thread(merges.check, home, {request.match_info["session_id"]})
             except Exception:
-                logger.debug("memento: resolving a merged session failed", exc_info=True)
+                logger.debug("gots: resolving a merged session failed", exc_info=True)
         return web.json_response({"object": "memento.prs", "prs": prs})
 
     async def session_library(request: "web.Request") -> "web.Response":
@@ -1360,7 +1376,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             if await asyncio.to_thread(afk.release_session, home, record):
                 afk.wake()
         except Exception:
-            logger.warning("memento: couldn't release a closed session's task", exc_info=True)
+            logger.warning("gots: couldn't release a closed session's task", exc_info=True)
         # Before the branches go: a tree whose commits are only on its remote branch can still go.
         try:
             removed = await asyncio.to_thread(sessions.remove, path, record["session_id"])
@@ -1387,12 +1403,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 sessions.waiting, adapter, store_path(), home, owned=owned, roots=roots
             )
         except Exception:
-            logger.debug("memento: reading waiting sessions failed", exc_info=True)
+            logger.debug("gots: reading waiting sessions failed", exc_info=True)
             waiting = {}
         try:
             host_side = await asyncio.to_thread(afk.stalled, home, live)
         except Exception:
-            logger.debug("memento: reading stalled AFK sessions failed", exc_info=True)
+            logger.debug("gots: reading stalled AFK sessions failed", exc_info=True)
             host_side = {}
         for session_id, reason in host_side.items():
             waiting.setdefault(session_id, reason)
@@ -1553,7 +1569,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except ValueError as exc:
             return _error(web, str(exc), 400)
         except OSError:
-            logger.warning("memento: couldn't save an attachment", exc_info=True)
+            logger.warning("gots: couldn't save an attachment", exc_info=True)
             return _error(web, "Couldn't save the file on the server.", 500)
         return web.json_response(
             {"object": "memento.attachment", "name": saved.name, "path": str(saved), "size": len(data)}
@@ -1584,7 +1600,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             except dictation.DictationError as error:
                 return _error(web, str(error), error.status)
             except Exception:
-                logger.warning("memento: dictation failed", exc_info=True)
+                logger.warning("gots: dictation failed", exc_info=True)
                 return _error(web, "Transcription failed.", 502)
         return web.json_response({"object": "memento.dictation", **result})
 
@@ -1699,7 +1715,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 thread_session=thread_session, item=item, new=new, body=body.get("body"), files=files,
             )
         except Exception:
-            logger.debug("memento: couldn't record a move", exc_info=True)
+            logger.debug("gots: couldn't record a move", exc_info=True)
 
     async def triage_message(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1754,14 +1770,14 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     events.note("session", session_id, path, True)
                     answer = {"object": "memento.triage", "decision": triage.NEW, **started}
                 except Exception:
-                    logger.debug("memento: triage couldn't open a thread", exc_info=True)
+                    logger.debug("gots: triage couldn't open a thread", exc_info=True)
                 # Outside the try: the thread and its queued message exist by now, and a failure
                 # here must not tell the app to send the message to Main as well.
                 if answer["decision"] == triage.NEW:
                     try:
                         follow_queue(request, answer["session_id"], path)
                     except Exception:
-                        logger.debug("memento: triage couldn't follow a new thread", exc_info=True)
+                        logger.debug("gots: triage couldn't follow a new thread", exc_info=True)
             elif found["decision"] == triage.THREAD:
                 try:
                     delivered = await triage.deliver(
@@ -1867,7 +1883,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     outbox.add, path, session_id, request_profile(), move["text"], move["files"], run
                 )
             except Exception:
-                logger.debug("memento: couldn't queue an undone move on Main", exc_info=True)
+                logger.debug("gots: couldn't queue an undone move on Main", exc_info=True)
                 if taken is not None:
                     await asyncio.to_thread(outbox.put_back, path, taken)
                 return _error(web, "Couldn't put the message back in Main.", 500)
@@ -2107,7 +2123,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     authorization=request.headers.get("Authorization"),
                 )
             except outbox.StartError:
-                logger.debug("memento: couldn't stop the researcher of %s", mission_id, exc_info=True)
+                logger.debug("gots: couldn't stop the researcher of %s", mission_id, exc_info=True)
         return web.json_response({"object": "memento.research.removed", "removed": True})
 
     async def meeting_view(path: Path, meeting_id: str) -> "web.Response":
@@ -2227,8 +2243,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/rewrite", research_rewrite)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/retry", research_retry)
     app.router.add_post(f"{PREFIX}/research/{{mission_id}}/remove", remove_research)
+    mirror_legacy_prefix(app)
     mirror_for_profiles(app, web)
-    logger.info("memento: serving %s on the API server", PREFIX)
+    logger.info("gots: serving %s (and %s) on the API server", PREFIX, LEGACY_PREFIX)
 
 
 def register(ctx) -> None:
@@ -2263,10 +2280,17 @@ def register(ctx) -> None:
     register_cli = getattr(ctx, "register_cli_command", None)
     if register_cli is not None:
         register_cli(
-            name="memento",
+            name="gots",
             help="Link this profile to the Gots app",
             setup_fn=link.setup_cli,
-            description="hermes memento link <code> --site <url>, unlink or status",
+            description="hermes gots link <code> --site <url>, unlink, status or migrate",
+        )
+        # The old command, for the one release the old routes stay.
+        register_cli(
+            name="memento",
+            help="The old name of `hermes gots`",
+            setup_fn=link.setup_cli,
+            description="hermes memento is now hermes gots",
         )
     ship.register(ctx)
     gate.register(ctx)
@@ -2276,6 +2300,6 @@ def register(ctx) -> None:
     meetings.register(ctx)
     register_handler = getattr(ctx, "register_platform_handler", None)
     if register_handler is None:
-        logger.warning("memento: this Hermes version can't add API server routes; update Hermes")
+        logger.warning("gots: this Hermes version can't add API server routes; update Hermes")
         return
     register_handler("api_server", _wire_api_server)

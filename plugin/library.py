@@ -230,7 +230,7 @@ def library_roots(hermes_home: Path) -> List[Path]:
             projects = pdb.list_projects(conn, include_archived=True)
         return [library_root(project) for project in projects]
     except Exception:
-        logger.debug("memento: couldn't read projects' library folders", exc_info=True)
+        logger.debug("gots: couldn't read projects' library folders", exc_info=True)
         return []
 
 
@@ -310,10 +310,10 @@ def register(ctx: Any) -> bool:
         return False
     try:
         return register_tool(
-            name=TOOL, toolset="memento", schema=SCHEMA, handler=handle, emoji="🗂️"
+            name=TOOL, toolset="gots", schema=SCHEMA, handler=handle, emoji="🗂️"
         ) is not False
     except Exception:
-        logger.warning("memento: couldn't register the library_add tool", exc_info=True)
+        logger.warning("gots: couldn't register the library_add tool", exc_info=True)
         return False
 
 

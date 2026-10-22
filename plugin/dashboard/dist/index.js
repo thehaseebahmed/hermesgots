@@ -34,7 +34,7 @@
   }
 
   function post(path, body) {
-    return SDK.fetchJSON("/api/plugins/memento/" + path, {
+    return SDK.fetchJSON("/api/plugins/gots/" + path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body || {}),
@@ -59,7 +59,7 @@
     )
   }
 
-  // Links this profile to a Gots account with a code from the app, like `hermes memento link`.
+  // Links this profile to a Gots account with a code from the app, like `hermes gots link`.
   function LinkCard() {
     var linkState = useState(null)
     var link = linkState[0]
@@ -79,7 +79,7 @@
     }
 
     useEffect(function () {
-      SDK.fetchJSON("/api/plugins/memento/link")
+      SDK.fetchJSON("/api/plugins/gots/link")
         .then(load)
         .catch(function (reason) {
           errorState[1](message(reason))
@@ -168,21 +168,21 @@
         link.revoked &&
           h("p", { className: "text-sm text-muted-foreground" }, "Removed in Gots. Link it again with a new code."),
         h(Field, {
-          id: "memento-code",
+          id: "gots-code",
           label: "Link code",
           placeholder: "mk_…",
           value: codeState[0],
           onChange: codeState[1],
         }),
         h(Field, {
-          id: "memento-site",
+          id: "gots-site",
           label: "Gots address",
           placeholder: "https://…",
           value: siteState[0],
           onChange: siteState[1],
         }),
         h(Field, {
-          id: "memento-url",
+          id: "gots-url",
           label: "API server URL your phone reaches",
           value: urlState[0],
           onChange: urlState[1],
@@ -213,7 +213,7 @@
     )
   }
 
-  function MementoPage() {
+  function GotsPage() {
     var state = useState(null)
     var status = state[0]
     var setStatus = state[1]
@@ -222,7 +222,7 @@
     var setError = errorState[1]
 
     useEffect(function () {
-      SDK.fetchJSON("/api/plugins/memento/status")
+      SDK.fetchJSON("/api/plugins/gots/status")
         .then(setStatus)
         .catch(function (reason) {
           setError(String((reason && reason.message) || reason))
@@ -270,7 +270,7 @@
             "p",
             { className: "pt-3 text-sm text-muted-foreground" },
             "Run ",
-            h("code", null, "hermes plugins enable memento"),
+            h("code", null, "hermes plugins enable gots"),
             ", then ",
             h("code", null, "hermes gateway restart"),
             ".",
@@ -291,5 +291,5 @@
     )
   }
 
-  window.__HERMES_PLUGINS__.register("memento", MementoPage)
+  window.__HERMES_PLUGINS__.register("gots", GotsPage)
 })()

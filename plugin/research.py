@@ -121,7 +121,7 @@ def available() -> Optional[str]:
 
 def llm_gate() -> Dict[str, bool]:
     """Whether the host config lets this plugin pick the provider and model of a model call
-    (``plugins.entries.memento.llm.allow_*_override``). A call on the profile's own model needs
+    (``plugins.entries.gots.llm.allow_*_override``). A call on the profile's own model needs
     neither, so both flags are False until the user grants them."""
     allowed = {"model": False, "provider": False}
     if getattr(ctx, "llm", None) is None:
@@ -129,14 +129,16 @@ def llm_gate() -> Dict[str, bool]:
     try:
         from hermes_cli.config import load_config
 
-        entry = ((load_config().get("plugins") or {}).get("entries") or {}).get("memento") or {}
+        entries = (load_config().get("plugins") or {}).get("entries") or {}
+        # The grants moved from `memento` to `gots`; a host that hasn't run `hermes gots migrate` has them under the old key.
+        entry = entries.get("gots") or entries.get("memento") or {}
         llm = entry.get("llm") or {}
         allowed = {
             "model": bool(llm.get("allow_model_override")),
             "provider": bool(llm.get("allow_provider_override")),
         }
     except Exception:
-        logger.debug("memento: couldn't read the plugin's llm trust flags", exc_info=True)
+        logger.debug("gots: couldn't read the plugin's llm trust flags", exc_info=True)
     return allowed
 
 
@@ -477,7 +479,7 @@ def pick_model(body: Dict[str, Any]) -> Optional[Dict[str, str]]:
     allowed = llm_gate()
     if not allowed["model"] or (provider and not allowed["provider"]):
         raise ResearchError(
-            "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable memento`.", 403
+            "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable gots`.", 403
         )
     return {"provider": provider, "model": model} if provider else {"model": model}
 
@@ -717,7 +719,7 @@ def _structured(purpose: str, system: str, instructions: str, text: str, schema:
             name = type(error).__name__
             if options and ("Trust" in name or "Override" in name or "Denied" in name):
                 raise ResearchError(
-                    f"{error} Allow it with `hermes plugins enable memento`, or pick Default.", 403
+                    f"{error} Allow it with `hermes plugins enable gots`, or pick Default.", 403
                 ) from None
             raise ResearchError(f"The model call failed: {error}", 502) from None
         parsed = getattr(result, "parsed", None)
@@ -1159,9 +1161,9 @@ def register(plugin_ctx: Any) -> bool:
     if not callable(register_tool):
         return False
     try:
-        return register_tool(name=TOOL, toolset="memento", schema=SCHEMA, handler=handle, emoji="📌") is not False
+        return register_tool(name=TOOL, toolset="gots", schema=SCHEMA, handler=handle, emoji="📌") is not False
     except Exception:
-        logger.warning("memento: couldn't register the claim_add tool", exc_info=True)
+        logger.warning("gots: couldn't register the claim_add tool", exc_info=True)
         return False
 
 
@@ -1181,7 +1183,7 @@ def wire(api_adapter: Any) -> bool:
             try:
                 tools_common.equip_tool(agent, TOOL, SCHEMA)
             except Exception:
-                logger.debug("memento: couldn't add the claim_add tool to an agent", exc_info=True)
+                logger.debug("gots: couldn't add the claim_add tool to an agent", exc_info=True)
         return agent
 
     api_adapter._create_agent = create_agent
@@ -1438,7 +1440,7 @@ def _replan(found: Dict[str, Any], questions: List[str]) -> List[str]:
     try:
         answer = _structured("replan", REPLAN_SYSTEM, instructions, text, REPLAN_SCHEMA, 1500, found.get("writer"))
     except ResearchError:
-        logger.debug("memento: couldn't plan %s again", found["id"], exc_info=True)
+        logger.debug("gots: couldn't plan %s again", found["id"], exc_info=True)
         return fallback
     points = [_clip(point, MAX_POINT) for point in answer.get("outline") or [] if isinstance(point, str)]
     points = list(dict.fromkeys(point for point in points if point))[:MAX_OUTLINE]
@@ -1525,7 +1527,7 @@ def _suggest(path: Path, mission_id: str) -> None:
     try:
         answer = _structured("suggest", SUGGEST_SYSTEM, instructions, text, SUGGEST_SCHEMA, 800)
     except ResearchError:
-        logger.debug("memento: no follow-up suggestions for %s", mission_id, exc_info=True)
+        logger.debug("gots: no follow-up suggestions for %s", mission_id, exc_info=True)
         return
     covered = {point.casefold() for point in found["outline"]}
     questions = [_clip(q, MAX_POINT) for q in answer.get("questions") or [] if isinstance(q, str)]
@@ -1810,7 +1812,7 @@ def _scope(profile: Optional[str]):
     try:
         return enter(profile)
     except Exception:
-        logger.debug("memento: couldn't enter profile %s", profile, exc_info=True)
+        logger.debug("gots: couldn't enter profile %s", profile, exc_info=True)
         return contextlib.nullcontext()
 
 
@@ -1852,13 +1854,13 @@ def spawn(path: Path, mission_id: str, profile: Optional[str] = None) -> None:
         except ResearchError as error:
             _fail(path, mission_id, str(error))
         except Exception as error:
-            logger.warning("memento: research mission %s failed", mission_id, exc_info=True)
+            logger.warning("gots: research mission %s failed", mission_id, exc_info=True)
             _fail(path, mission_id, f"Something went wrong: {error}")
         finally:
             with _lock:
                 _running.discard(key)
 
-    threading.Thread(target=go, name=f"memento-research-{mission_id}", daemon=True).start()
+    threading.Thread(target=go, name=f"gots-research-{mission_id}", daemon=True).start()
 
 
 def _fail(path: Path, mission_id: str, message: str) -> None:
@@ -1867,7 +1869,7 @@ def _fail(path: Path, mission_id: str, message: str) -> None:
             _update(path, mission_id, busy=None, error=message)
             _tell(path, "research_failed", mission_id)
     except Exception:
-        logger.debug("memento: couldn't record the failure of %s", mission_id, exc_info=True)
+        logger.debug("gots: couldn't record the failure of %s", mission_id, exc_info=True)
 
 
 def watch(path: Path, mission_id: str, profile: Optional[str]) -> None:
@@ -1927,7 +1929,7 @@ def _record_researcher(path: Path, mission_id: str) -> None:
                 (f"{SESSION_PREFIX}{mission_id}",),
             ).fetchone()
     except sqlite3.Error:
-        logger.debug("memento: couldn't read mission %s's researcher", mission_id, exc_info=True)
+        logger.debug("gots: couldn't read mission %s's researcher", mission_id, exc_info=True)
         return
     if row and row[0]:
         _update(path, mission_id, researcher={"provider": row[1] or "", "model": row[0]})
@@ -1999,13 +2001,13 @@ async def run(home: Path) -> None:
     try:
         await asyncio.to_thread(resume, db_path(home))
     except Exception:
-        logger.debug("memento: couldn't resume research missions", exc_info=True)
+        logger.debug("gots: couldn't resume research missions", exc_info=True)
     while True:
         await asyncio.sleep(MONITOR_SECONDS)
         try:
             moved = await asyncio.to_thread(_check_watched)
         except Exception:
-            logger.debug("memento: watching research missions failed", exc_info=True)
+            logger.debug("gots: watching research missions failed", exc_info=True)
             continue
         for path, mission_id, profile in moved:
             spawn(path, mission_id, profile)

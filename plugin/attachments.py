@@ -12,6 +12,8 @@ import re
 import shutil
 from pathlib import Path
 
+from .paths import data_dir
+
 # The API server's request cap is 10 MB (``MAX_REQUEST_BYTES``); the app keeps under this.
 MAX_BYTES = 9 * 1024 * 1024
 MAX_NAME = 120
@@ -23,7 +25,7 @@ _UNSAFE = re.compile(r"[^\w.\-() ]+")
 def folder(hermes_home: Path, session_id: str) -> Path:
     if not _SESSION_ID.fullmatch(session_id) or session_id.strip(".") == "":
         raise ValueError("Invalid session id")
-    return hermes_home / "memento" / "attachments" / session_id
+    return data_dir(hermes_home) / "attachments" / session_id
 
 
 def clean_name(name: str) -> str:

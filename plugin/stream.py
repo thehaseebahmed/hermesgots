@@ -112,7 +112,7 @@ async def serve(
                     chat_session, home, session_id
                 )
             except Exception:
-                logger.debug("memento: couldn't follow session %s", session_id, exc_info=True)
+                logger.debug("gots: couldn't follow session %s", session_id, exc_info=True)
                 return session_id
         return chat_sessions[session_id]
 

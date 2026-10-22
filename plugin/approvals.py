@@ -39,7 +39,7 @@ def settled(**kwargs: Any) -> None:
         if isinstance(run_id, str) and run_id and not _still_waiting(run_id):
             announce(run_id, str(choice or "timeout"))
     except Exception:
-        logger.debug("memento: couldn't settle an approval", exc_info=True)
+        logger.debug("gots: couldn't settle an approval", exc_info=True)
 
 
 def announce(run_id: str, choice: str) -> bool:

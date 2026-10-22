@@ -53,7 +53,7 @@ def record(**kwargs: Any) -> None:
     try:
         _record(kwargs)
     except Exception:
-        logger.debug("memento: couldn't count community usage", exc_info=True)
+        logger.debug("gots: couldn't count community usage", exc_info=True)
 
 
 def _record(kwargs: Dict[str, Any]) -> None:
@@ -159,5 +159,5 @@ def sync(home: Path, state: Dict[str, Any], call: Any) -> None:
         call(site, "POST", "report", token=token, body=body, function="community")
         state["community"] = {"hash": digest, "at": int(time.time())}
     except Exception:
-        logger.debug("memento: community report failed", exc_info=True)
+        logger.debug("gots: community report failed", exc_info=True)
 

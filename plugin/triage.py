@@ -201,7 +201,7 @@ def set_model(
         return read_model(path)
     if not (gate.get("model") and gate.get("provider")):
         raise Withheld(
-            "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable memento`."
+            "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable gots`."
         )
     from gateway.run import _load_gateway_config
 
@@ -245,12 +245,12 @@ def decide(
                 raise
             # The picked model failed (retired, no credentials, or the host took the override
             # permission back): the bot's own model decides, if there is time left for it.
-            logger.debug("memento: the triage model failed, using the bot's own", exc_info=True)
+            logger.debug("gots: the triage model failed, using the bot's own", exc_info=True)
             if deadline is not None and time.monotonic() > deadline:
                 return None
             result = llm.complete_structured(**ask)
     except Exception:
-        logger.debug("memento: triage's model call failed", exc_info=True)
+        logger.debug("gots: triage's model call failed", exc_info=True)
         return None
     parsed = getattr(result, "parsed", None)
     if not isinstance(parsed, dict):
@@ -365,7 +365,7 @@ def discard(path: Path, chat_id: str) -> None:
     try:
         chats.merge(path, {chat_id: {"at": int(time.time() * 1000) + 1, "deleted": True}})
     except Exception:
-        logger.debug("memento: triage couldn't take back a thread", exc_info=True)
+        logger.debug("gots: triage couldn't take back a thread", exc_info=True)
 
 
 # Answers already given, by the id the app sent with the message: a request the app repeats after a
@@ -448,5 +448,5 @@ def triage(
             "model_choice": value.get("modelChoice"),
         }
     except Exception:
-        logger.debug("memento: triage failed", exc_info=True)
+        logger.debug("gots: triage failed", exc_info=True)
         return {"decision": MAIN}

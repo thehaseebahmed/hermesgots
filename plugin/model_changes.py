@@ -46,7 +46,7 @@ def record(**kwargs: Any) -> None:
     try:
         _record(kwargs)
     except Exception:
-        logger.debug("memento: couldn't record model change", exc_info=True)
+        logger.debug("gots: couldn't record model change", exc_info=True)
 
 
 def _record(kwargs: Dict[str, Any]) -> None:
@@ -106,7 +106,7 @@ def read(path: Path, session_id: str, also: Optional[str] = None) -> Optional[Li
             ids,
         ).fetchall()
     except Exception:
-        logger.debug("memento: couldn't read model changes", exc_info=True)
+        logger.debug("gots: couldn't read model changes", exc_info=True)
         return None
     finally:
         if conn is not None:

@@ -119,7 +119,7 @@ def read(db: Any, session_id: str) -> Optional[Dict[str, Any]]:
     try:
         history = load(session_id, include_ancestors=True)
     except Exception:
-        logger.debug("memento: couldn't load session %s", session_id, exc_info=True)
+        logger.debug("gots: couldn't load session %s", session_id, exc_info=True)
         return None
     for index in range(len(history) - 1, -1, -1):
         message = history[index]
@@ -153,7 +153,7 @@ def wire(adapter: Any) -> bool:
     has no ``_create_agent`` seam."""
     original = getattr(adapter, "_create_agent", None)
     if not callable(original):
-        logger.warning("memento: this Hermes has no _create_agent; the todo_list tool may be missing")
+        logger.warning("gots: this Hermes has no _create_agent; the todo_list tool may be missing")
         return False
 
     def create_agent(*args: Any, **kwargs: Any) -> Any:
@@ -161,7 +161,7 @@ def wire(adapter: Any) -> bool:
         try:
             equip(agent)
         except Exception:
-            logger.debug("memento: couldn't add the todo_list tool to an agent", exc_info=True)
+            logger.debug("gots: couldn't add the todo_list tool to an agent", exc_info=True)
         return agent
 
     adapter._create_agent = create_agent
@@ -189,6 +189,6 @@ def tool_definition() -> Optional[Dict[str, Any]]:
 
             _definition = {"type": "function", "function": TODO_SCHEMA}
         except Exception:
-            logger.debug("memento: no todo_list tool definition", exc_info=True)
+            logger.debug("gots: no todo_list tool definition", exc_info=True)
             _definition = False
     return _definition or None

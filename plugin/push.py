@@ -380,10 +380,10 @@ def _relay(path: Path, kind: str, category: str, session_id: str, extra: Dict[st
                 time.sleep(RELAY_RETRY_SECONDS)
                 continue
             # 503: the site has no Firebase key. Not worth a retry.
-            logger.warning("memento: the registry wouldn't push (%s)", error)
+            logger.warning("gots: the registry wouldn't push (%s)", error)
             return
     if isinstance(answer, dict) and not answer.get("sent") and answer.get("failed"):
-        logger.warning("memento: the registry couldn't deliver the push (%s)", answer)
+        logger.warning("gots: the registry couldn't deliver the push (%s)", answer)
 
 
 def reachable(path: Path) -> bool:
@@ -409,7 +409,7 @@ def _deliver(path: Path, kind: str, category: str, session_id: str, extra: Optio
             # The browser dropped the subscription (or the user revoked it).
             unsubscribe(path, row["endpoint"])
         elif status is None or status >= 300:
-            logger.debug("memento: push to %s answered %s", urllib.parse.urlsplit(row["endpoint"]).netloc, status)
+            logger.debug("gots: push to %s answered %s", urllib.parse.urlsplit(row["endpoint"]).netloc, status)
     _relay(path, kind, category, session_id, extra)
 
 
@@ -468,10 +468,10 @@ def notify(
         if not reachable(path):
             return
         threading.Thread(
-            target=_run, args=(path, kind, session_id, title), name="memento-push", daemon=True
+            target=_run, args=(path, kind, session_id, title), name="gots-push", daemon=True
         ).start()
     except Exception:
-        logger.debug("memento: couldn't send a push", exc_info=True)
+        logger.debug("gots: couldn't send a push", exc_info=True)
 
 
 BOT_ID = re.compile(r"^[a-z0-9-]{1,32}$")
@@ -609,4 +609,4 @@ def _run(path: Path, kind: str, session_id: str, title: Optional[str] = None) ->
         message = {"title": _short(title), "bot": bot(path)}
         _deliver(path, kind, category_of(kind, project), session_id, {k: v for k, v in message.items() if v})
     except Exception:
-        logger.debug("memento: a push failed", exc_info=True)
+        logger.debug("gots: a push failed", exc_info=True)
