@@ -6,7 +6,7 @@ import { app, assert, flow, mock, pass, settled } from "./lib.mjs"
 
 /** Moves the mock's account to `percent` for every later read; "" puts it back to the env's figure. */
 const accountAt = (percent) =>
-  fetch(`${mock}/api/plugins/memento/usage?percent=${encodeURIComponent(percent)}`).then((r) =>
+  fetch(`${mock}/api/plugins/gots/usage?percent=${encodeURIComponent(percent)}`).then((r) =>
     r.json(),
   )
 

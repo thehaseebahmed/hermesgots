@@ -93,11 +93,11 @@ export async function mintLinkCode(): Promise<LinkCode> {
 /** The commands that install the plugin and link a profile with `code`. */
 export function linkCommands(code: string) {
   return `hermes plugins install thehaseebahmed/memento/plugin --enable
-hermes memento link ${code} --site ${siteUrl()}`
+hermes gots link ${code} --site ${siteUrl()}`
 }
 
 export function linkProfileCommand(code: string) {
-  return `hermes -p <name> memento link ${code} --site ${siteUrl()}`
+  return `hermes -p <name> gots link ${code} --site ${siteUrl()}`
 }
 
 /** Turns a bot on or off on every device. */

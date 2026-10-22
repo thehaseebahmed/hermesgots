@@ -168,7 +168,61 @@ function headers(config: HermesConfig, extra?: Record<string, string>) {
   return h
 }
 
+const PLUGIN_ROUTES = "/api/plugins/gots/"
+const LEGACY_PLUGIN_ROUTES = "/api/plugins/memento/"
+
+/** Servers whose plugin still answers only at its old name, `/api/plugins/memento`. */
+const legacyServers = new Set<string>()
+
+function pluginServer(url: string) {
+  const at = url.indexOf(PLUGIN_ROUTES)
+  return at < 0 ? null : url.slice(0, at)
+}
+
+/**
+ * A request for the plugin's routes. The plugin was called memento before it was Gots, and for one
+ * release it answers at both names. A host that hasn't updated has no route at the new name (a 404,
+ * or none of Hermes's CORS headers, which fails with no status), so when one fails that way the old
+ * name's `info` is asked: only if it answers as the old plugin is the request sent again there, and
+ * the server remembered as old until it says it is called gots. A request that failed on a host that
+ * really is the new plugin is never sent twice.
+ */
 async function request(url: string, init: RequestInit) {
+  const server = pluginServer(url)
+  if (server === null) return send(url, init)
+  const legacy = server + LEGACY_PLUGIN_ROUTES + url.slice(server.length + PLUGIN_ROUTES.length)
+  if (legacyServers.has(server)) return send(legacy, init)
+  try {
+    return await send(url, init)
+  } catch (error) {
+    if (!(error instanceof HermesError) || (error.status !== undefined && error.status !== 404))
+      throw error
+    if (!(await answersAsOldPlugin(server, init.headers, init.signal))) throw error
+    legacyServers.add(server)
+    return send(legacy, init)
+  }
+}
+
+async function answersAsOldPlugin(
+  server: string,
+  headers: HeadersInit | undefined,
+  signal: AbortSignal | null | undefined,
+) {
+  try {
+    const response = await send(`${server}${LEGACY_PLUGIN_ROUTES}info`, { headers, signal })
+    return (await response.json())?.name === "memento"
+  } catch {
+    return false
+  }
+}
+
+/** The plugin says what it is called in `info`; a host that has updated drops the old-name fallback. */
+function noteInfoName(url: string, name: unknown) {
+  const server = pluginServer(url)
+  if (server !== null && name === "gots") legacyServers.delete(server)
+}
+
+async function send(url: string, init: RequestInit) {
   let response: Response
   try {
     response = await fetch(url, init)
@@ -1222,7 +1276,7 @@ export interface CronExecutionRun extends CronExecution {
   delivery_outcome?: string | null
 }
 
-const PLUGIN_ROOT = "/api/plugins/memento"
+const PLUGIN_ROOT = "/api/plugins/gots"
 
 /**
  * Where the Gots Hermes plugin serves its routes for this bot. Hermes registers its catch-all
@@ -1249,6 +1303,7 @@ export async function getPluginVersion(config: HermesConfig): Promise<string | n
       headers: headers(config),
     })
     const body = await response.json()
+    noteInfoName(`${pluginRoot(config.baseUrl)}/info`, body?.name)
     return typeof body?.version === "string" && body.version ? body.version : null
   } catch {
     return null
@@ -1264,7 +1319,9 @@ export async function getPluginFeatures(
     headers: headers(config),
     signal,
   })
-  const features: unknown = (await response.json())?.features
+  const info = await response.json()
+  noteInfoName(`${pluginRoot(config.baseUrl)}/info`, info?.name)
+  const features: unknown = info?.features
   return Array.isArray(features) ? features.filter((f): f is string => typeof f === "string") : []
 }
 

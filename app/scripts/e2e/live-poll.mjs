@@ -7,7 +7,7 @@ await flow("live-poll", async ({ page, seed, shot }) => {
   await seed([{ id: "e2e-poll", title: "Poll check", projectId: "p_1a2b3c4d" }])
   const reads = []
   page.on("request", (request) => {
-    if (request.url().includes("/api/plugins/memento/runs/live")) reads.push(Date.now())
+    if (request.url().includes("/api/plugins/gots/runs/live")) reads.push(Date.now())
   })
   await page.goto(`${app}/c/e2e-poll`)
   await page.getByRole("region", { name: "Today" }).waitFor({ timeout: 15_000 })

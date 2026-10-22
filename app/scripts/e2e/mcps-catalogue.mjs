@@ -17,7 +17,7 @@ const run = async ({ page, profileId, shot, until }) => {
   // Every add the app sent: browsing the Catalogue may send none.
   const adds = []
   page.on("request", (request) => {
-    if (new URL(request.url()).pathname === "/api/plugins/memento/mcp/install") adds.push(1)
+    if (new URL(request.url()).pathname === "/api/plugins/gots/mcp/install") adds.push(1)
   })
 
   await page.goto(`${app}${screen}`)

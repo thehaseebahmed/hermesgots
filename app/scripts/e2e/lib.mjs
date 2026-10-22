@@ -346,7 +346,7 @@ export const compress = (session, child) =>
  * projects are told apart in the mock's list.
  */
 export async function makeProject(until, name) {
-  const created = await fetch(`${mock}/api/plugins/memento/projects`, {
+  const created = await fetch(`${mock}/api/plugins/gots/projects`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: `${name} ${runId()}`, repos: ["mock-user/memento"] }),
@@ -354,7 +354,7 @@ export async function makeProject(until, name) {
   const pending = await created.json()
   const ready = await until(
     async () => {
-      const listed = await (await fetch(`${mock}/api/plugins/memento/projects`)).json()
+      const listed = await (await fetch(`${mock}/api/plugins/gots/projects`)).json()
       const found = listed.projects.find((project) => project.slug === pending.slug)
       return found?.status === "ready" ? found : null
     },

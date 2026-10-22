@@ -16,7 +16,7 @@ const run = async ({ page, profileId, shot, until }) => {
   // A host with no GitHub account can't read or claim a task, so the switch is off and out of reach
   // and the reason sits under it — once: the frontier's own refusal is the same answer, and the sheet
   // doesn't say it twice.
-  await page.route("**/api/plugins/memento/projects/*/afk", (route) =>
+  await page.route("**/api/plugins/gots/projects/*/afk", (route) =>
     route.request().method() === "GET"
       ? route.fulfill({
           status: 200,
@@ -25,7 +25,7 @@ const run = async ({ page, profileId, shot, until }) => {
         })
       : route.continue(),
   )
-  await page.route("**/api/plugins/memento/projects/*/tasks", (route) =>
+  await page.route("**/api/plugins/gots/projects/*/tasks", (route) =>
     route.request().method() === "GET"
       ? route.fulfill({
           status: 409,
@@ -59,13 +59,13 @@ const run = async ({ page, profileId, shot, until }) => {
     "no spinner under the reason",
   )
   await shot("no-github")
-  await page.unroute("**/api/plugins/memento/projects/*/afk")
-  await page.unroute("**/api/plugins/memento/projects/*/tasks")
+  await page.unroute("**/api/plugins/gots/projects/*/afk")
+  await page.unroute("**/api/plugins/gots/projects/*/tasks")
 
   // A plugin that lists a project's tasks but never advertised the switch offers no switch at all:
   // the row is left out rather than carrying a line about what a plugin can't do, as the MCP screen
   // leaves out a control a Bot's Hermes can't offer.
-  await page.route("**/api/plugins/memento/info", async (route) => {
+  await page.route("**/api/plugins/gots/info", async (route) => {
     if (route.request().method() !== "GET") return route.continue()
     const response = await route.fetch()
     const body = await response.json()
@@ -88,11 +88,11 @@ const run = async ({ page, profileId, shot, until }) => {
     "the row says so rather than explaining the plugin",
   )
   await shot("no-switch")
-  await page.unroute("**/api/plugins/memento/info")
+  await page.unroute("**/api/plugins/gots/info")
 
   // A project already left to work keeps its switch when its reason comes back: turning it off is
   // still the user's to do, so the reason sits under the switch rather than in place of it.
-  await page.route("**/api/plugins/memento/projects/*/afk", (route) =>
+  await page.route("**/api/plugins/gots/projects/*/afk", (route) =>
     route.request().method() === "GET"
       ? route.fulfill({
           status: 200,
@@ -102,7 +102,7 @@ const run = async ({ page, profileId, shot, until }) => {
       : route.continue(),
   )
   await page.getByRole("button", { name: "Close" }).click()
-  await page.unroute("**/api/plugins/memento/info")
+  await page.unroute("**/api/plugins/gots/info")
   await openAfk(page, screen)
   await page.getByRole("switch", { name: "Work on its own" }).waitFor({ timeout: 15_000 })
   assert.equal(
@@ -118,7 +118,7 @@ const run = async ({ page, profileId, shot, until }) => {
   assert.equal(await page.getByText("Turned on", { exact: true }).count(), 1, "reading its state")
   assert.equal(await page.getByText(NO_GITHUB, { exact: true }).count(), 1, "and says why under it")
   await shot("on-with-reason")
-  await page.unroute("**/api/plugins/memento/projects/*/afk")
+  await page.unroute("**/api/plugins/gots/projects/*/afk")
 
   // The one 409 this flow provokes on purpose is the frontier's refusal; the browser logs it as a
   // failed resource, which is the assertion above passing rather than the app misbehaving.

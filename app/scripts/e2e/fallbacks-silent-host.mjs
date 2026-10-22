@@ -7,12 +7,12 @@ await flow("fallbacks-silent-host", async ({ page, profileId, until, shot }) => 
   const field = page.getByRole("group", { name: "Fallback models" })
   // The host's own record, so an answer it gave can be told from a pick the app made.
   const hosted = async () => {
-    const response = await fetch(`${mock}/api/plugins/memento/fallbacks`)
+    const response = await fetch(`${mock}/api/plugins/gots/fallbacks`)
     return (await response.json()).fallbacks
   }
 
   // A dev's mock may be holding another run's fallbacks, so start from none.
-  await fetch(`${mock}/api/plugins/memento/fallbacks`, {
+  await fetch(`${mock}/api/plugins/gots/fallbacks`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ fallbacks: [] }),
@@ -23,7 +23,7 @@ await flow("fallbacks-silent-host", async ({ page, profileId, until, shot }) => 
   await add.waitFor({ timeout: 15_000 })
 
   // Reads are answered as usual; the write is left hanging, as a host that took it and stalled.
-  await page.route("**/api/plugins/memento/fallbacks", (route) =>
+  await page.route("**/api/plugins/gots/fallbacks", (route) =>
     route.request().method() === "POST" ? new Promise(() => {}) : route.continue(),
   )
 

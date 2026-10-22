@@ -27,7 +27,7 @@ await flow("model-switch", async ({ page, seed, send, lastReply, until, shot }) 
       const { db } = await import("/src/lib/db.ts")
       return (await db.conversations.get(chat))?.hermesSessionId
     }, id)
-    const response = await fetch(`${mock}/api/plugins/memento/sessions/${session}/context`)
+    const response = await fetch(`${mock}/api/plugins/gots/sessions/${session}/context`)
     return (await response.json()).model_changes ?? []
   }
   const stored = async (id) =>

@@ -11,7 +11,7 @@ const STAGES = [
 ]
 
 const choose = (projectId, critique) =>
-  fetch(`${mock}/api/plugins/memento/projects/${projectId}/afk`, {
+  fetch(`${mock}/api/plugins/gots/projects/${projectId}/afk`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ build_skill: critique.length ? "plan" : null, critique_skills: critique }),

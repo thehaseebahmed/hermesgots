@@ -8,7 +8,7 @@ import { app, assert, flow, mock, pass, runId } from "./lib.mjs"
 
 /** A project the mock has finished cloning, so its screen offers the options menu; answers its id. */
 async function makeProject(until) {
-  const created = await fetch(`${mock}/api/plugins/memento/projects`, {
+  const created = await fetch(`${mock}/api/plugins/gots/projects`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: `AFK ${runId()}`, repos: ["mock-user/memento"] }),
@@ -16,7 +16,7 @@ async function makeProject(until) {
   const pending = await created.json()
   const ready = await until(
     async () => {
-      const listed = await (await fetch(`${mock}/api/plugins/memento/projects`)).json()
+      const listed = await (await fetch(`${mock}/api/plugins/gots/projects`)).json()
       const found = listed.projects.find((project) => project.slug === pending.slug)
       return found?.status === "ready" ? found : null
     },
@@ -75,7 +75,7 @@ const run = async ({ page, profileId, shot, until }) => {
   await shot("tasks")
 
   // A plugin that can't read a project's tasks has no row, rather than one that could only fail.
-  await page.route("**/api/plugins/memento/info", async (route) => {
+  await page.route("**/api/plugins/gots/info", async (route) => {
     if (route.request().method() !== "GET") return route.continue()
     const response = await route.fetch()
     const body = await response.json()
@@ -89,11 +89,11 @@ const run = async ({ page, profileId, shot, until }) => {
   await page.getByRole("menuitem").first().waitFor({ timeout: 15_000 })
   assert.equal(await page.getByRole("menuitem", { name: "AFK" }).count(), 0, "no AFK row")
   await shot("no-row")
-  await page.unroute("**/api/plugins/memento/info")
+  await page.unroute("**/api/plugins/gots/info")
 
   // A Host whose GitHub refuses says why, in place of a list.
   const REFUSAL = "No GitHub account on the server."
-  await page.route("**/api/plugins/memento/projects/*/tasks", (route) => {
+  await page.route("**/api/plugins/gots/projects/*/tasks", (route) => {
     if (route.request().method() !== "GET") return route.continue()
     return route.fulfill({
       status: 409,
@@ -106,7 +106,7 @@ const run = async ({ page, profileId, shot, until }) => {
   await page.getByRole("menuitem", { name: "AFK" }).click()
   await page.getByText(REFUSAL, { exact: true }).waitFor({ timeout: 15_000 })
   await shot("refused")
-  await page.unroute("**/api/plugins/memento/projects/*/tasks")
+  await page.unroute("**/api/plugins/gots/projects/*/tasks")
 
   // The one 409 this flow provokes on purpose is the refusal; the browser logs it as a failed
   // resource, which is the assertion above passing rather than the app misbehaving.

@@ -19,8 +19,8 @@ const run = async ({ page, profileId, shot, until }) => {
   })
   page.on("request", (request) => {
     const path = new URL(request.url()).pathname
-    if (path === "/api/plugins/memento/mcp") reads.push(1)
-    if (request.method() === "DELETE" && path.startsWith("/api/plugins/memento/mcp/"))
+    if (path === "/api/plugins/gots/mcp") reads.push(1)
+    if (request.method() === "DELETE" && path.startsWith("/api/plugins/gots/mcp/"))
       removals.push(decodeURIComponent(path.split("/").pop()))
   })
   // One server's own sheet, opened by tapping its name, on its Config tab.

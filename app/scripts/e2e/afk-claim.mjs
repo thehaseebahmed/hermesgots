@@ -48,7 +48,7 @@ const run = async ({ page, profileId, shot, until }) => {
   await shot("reloaded")
 
   // GitHub refusing leaves the switch on and its reason in the pop-up; nothing turns itself off.
-  await page.route("**/api/plugins/memento/projects/*/afk", (route) => {
+  await page.route("**/api/plugins/gots/projects/*/afk", (route) => {
     if (route.request().method() !== "GET") return route.continue()
     return route.fulfill({
       status: 200,
@@ -73,7 +73,7 @@ const run = async ({ page, profileId, shot, until }) => {
   )
   assert.equal(await page.locator("[data-working]").count(), 0, "and holds no task to name")
   await shot("refused")
-  await page.unroute("**/api/plugins/memento/projects/*/afk")
+  await page.unroute("**/api/plugins/gots/projects/*/afk")
 
   assert.deepEqual(errors, [], `no console error (${errors.join("; ")})`)
 }

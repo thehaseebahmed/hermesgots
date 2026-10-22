@@ -2,32 +2,32 @@
 // as gateway/platforms/api_server*.py: chat.completion.chunk frames plus the named SSE events
 // `hermes.tool.progress`, `hermes.status` and `approval.request`, and answers approvals on
 // POST /v1/runs/{id}/approval. Mention "clean" or "delete" in a message to trigger an approval.
-// Cron jobs live on /api/jobs, and their past runs on GET /api/plugins/memento/cron/runs, like a
+// Cron jobs live on /api/jobs, and their past runs on GET /api/plugins/gots/cron/runs, like a
 // Hermes with the Gots plugin (MOCK_NO_PLUGIN=1 leaves it out). As on Hermes, the plugin isn't
-// served under /p/<profile>/ (a profile's bot reaches it at /api/plugins/memento/p/<profile>/..., where
+// served under /p/<profile>/ (a profile's bot reaches it at /api/plugins/gots/p/<profile>/..., where
 // the chat list and the project list are the profile's own and the rest is shared), and an unknown
 // route's 404 carries no CORS headers.
-// The plugin also keeps the chat list (GET and POST /api/plugins/memento/chats, newer record wins) and
-// labels a chat as Gots's on POST /api/plugins/memento/sessions/{id}/label. Its
-// GET /api/plugins/memento/sessions/{id}/context reports a keyed session's latest model call, and
-// GET /api/plugins/memento/skills serves the composer's `/` menu (three skills, no profile scope),
-// and GET /api/plugins/memento/mcp the Bot's MCP servers the Bot's editor lists in its MCP tab (name, state,
+// The plugin also keeps the chat list (GET and POST /api/plugins/gots/chats, newer record wins) and
+// labels a chat as Gots's on POST /api/plugins/gots/sessions/{id}/label. Its
+// GET /api/plugins/gots/sessions/{id}/context reports a keyed session's latest model call, and
+// GET /api/plugins/gots/skills serves the composer's `/` menu (three skills, no profile scope),
+// and GET /api/plugins/gots/mcp the Bot's MCP servers the Bot's editor lists in its MCP tab (name, state,
 // source, and the Host's own reason on a failed one; MOCK_MCP=off is a Hermes whose plugin can't).
-// GET /api/plugins/memento/usage?provider=… serves two windows (Session + Weekly) whose
+// GET /api/plugins/gots/usage?provider=… serves two windows (Session + Weekly) whose
 // used_percent is MOCK_USAGE_PERCENT (default 94 so the composer banner shows; 0 → no windows), and
 // one Ollama Cloud account's monthly allowance with a purchased-credits detail when the provider is
 // ollama-cloud (the picker lists that provider too). A read carrying &percent=N sets that figure for
 // every later read — and &percent= clears it — so a flow can move an account from approaching to
 // out without restarting the mock.
-// Images the agent returns come from GET /api/plugins/memento/media?path=… (a .png path, unless it
+// Images the agent returns come from GET /api/plugins/gots/media?path=… (a .png path, unless it
 // names something missing), and saying "image" has the agent answer with a MEDIA tag: one for the
 // chart it serves and one for a file that isn't there.
 // The Library tab reads a project's filed files from GET projects/{id}/library (every session's,
 // merged by folder) and a session's own from GET sessions/{id}/library (the outputs pill counts
 // them); tapping a file opens it from GET library/file?path=… (a .png or .md path).
-// It lists Hermes Projects on GET /api/plugins/memento/projects. GET /api/plugins/memento/github and
+// It lists Hermes Projects on GET /api/plugins/gots/projects. GET /api/plugins/gots/github and
 // github/repos stand in for the host's GitHub account (MOCK_NO_GITHUB=1 leaves it signed out), and
-// POST /api/plugins/memento/projects answers at once with a project that clones its repos in the
+// POST /api/plugins/gots/projects answers at once with a project that clones its repos in the
 // background (1.5s each; a repo named like `fail` fails it, as does MOCK_FAIL_CLONE=1), and
 // POST projects/{id}, projects/{id}/retry and projects/{id}/remove edit (name, description,
 // archived, pinned), retry and delete one. POST projects/{id}/repos clones another repo in (4s; a
@@ -46,7 +46,7 @@
 // readable on GET /api/sessions/{id}. Sessions are keyed by X-Hermes-Session-Id when a key is sent,
 // and their transcripts page back from GET /api/sessions/{id}/messages?order=latest&limit&offset.
 // Say "plan" and the agent keeps a todo list with its todo_list tool as it works, which the plugin's
-// GET /api/plugins/memento/sessions/{id}/todos reads back from a keyed session's transcript.
+// GET /api/plugins/gots/sessions/{id}/todos reads back from a keyed session's transcript.
 // Turns also run on POST /v1/runs, whose events replay from GET /v1/runs/{id}/events?last_seq=N and
 // which keep going when the client drops, unlike a chat completion. Say "long" for a slow reply, and
 // "fail" for a tool call that fails, or "fail the turn" for a run that ends with an error instead of
@@ -60,7 +60,7 @@
 // paced, as a run's `reasoning.available` events or a completion's `reasoning_content` deltas. Say
 // "stall" as well and the turn then holds 2.5s with nothing else on the wire.
 // Project sessions get a worktree in each of the project's repos on
-// POST /api/plugins/memento/sessions/{id}/workspace (GET reads it back, POST …/mode changes the
+// POST /api/plugins/gots/sessions/{id}/workspace (GET reads it back, POST …/mode changes the
 // permission mode, POST …/workspace/remove removes the trees unless a turn mentioned "commit"). In
 // plan mode the agent reads a little, writes a structured plan, leaves it pending and the workspace
 // names the file the plugin would have saved it to (plan_file). Every session also gets a library
@@ -74,23 +74,23 @@
 // checks while "pending" runs them for a while before they pass. POST …/close (delete or discard)
 // closes them and removes the trees like …/workspace/remove. MOCK_PRS_FAIL=1 (or
 // POST /__mock/prs { fail }) is a host that can't reach GitHub: …/prs answers an error rather than
-// a list, so the app keeps the pull requests it already knows. GET /api/plugins/memento/runs/live lists the sessions with
+// a list, so the app keeps the pull requests it already knows. GET /api/plugins/gots/runs/live lists the sessions with
 // a run in flight, and why each one waiting on the user waits. …/sessions/{id}/queue holds what
 // the app queued and starts it when the session's run ends, like plugin/outbox.py. The agent asks the user questions
 // with Hermes's clarify tool, which the plugin serves on runs: say "ask" for one, or "ask five" for
 // five (plan mode asks before planning), the run carries
-// `clarify.request` and waits, and POST /api/plugins/memento/runs/{id}/clarify answers it. POST
+// `clarify.request` and waits, and POST /api/plugins/gots/runs/{id}/clarify answers it. POST
 // /__mock/clarify ends every pending question with no answer, like a window that closed on the user.
 // POST /v1/runs/{id}/steer hands a running turn more from the user: like Hermes, it lands as a
 // `display_kind: "steer"` user row after the next tool result, and one still unread when the turn
 // ends comes back as the run's `pending_steer`. Say "long" for a turn with a tool call every few steps.
-// POST /api/plugins/memento/sessions/{id}/attachments saves an attached file under the temp dir, and a
+// POST /api/plugins/gots/sessions/{id}/attachments saves an attached file under the temp dir, and a
 // message that carries attachments (inline images, `<attachment>` lines) gets a reply naming them.
-// POST /api/plugins/memento/dictation turns a recorded clip into a fixed sentence after a moment, like
+// POST /api/plugins/gots/dictation turns a recorded clip into a fixed sentence after a moment, like
 // plugin/dictation.py with faster-whisper; MOCK_DICTATION=off reports it unavailable (the mic hides)
 // and MOCK_DICTATION=fail answers every clip with an error. GET /__mock/dictation lists the clips it
 // was sent (size, type, hint and the text before each), for the regression script.
-// GET /api/plugins/memento/workflows lists the workflow library (presets first, read-only), POST
+// GET /api/plugins/gots/workflows lists the workflow library (presets first, read-only), POST
 // adds one, POST to its id rewrites one of the account's own — forking a preset into a copy — and DELETE takes
 // one away; each answers the whole list. A project names the workflow its work runs under through
 // POST projects/{id}/afk { workflow_id }, and its answer carries that workflow and the name of the
@@ -101,7 +101,7 @@
 // own records: it stalls the project's held task at a stage, and writes the pipeline on the session
 // that task is worked in — the stage the pill reads, the gate's answer, a pull request a finished
 // pipeline opened — which is what drives each state without a real build.
-// GET /api/plugins/memento/mcp lists the bot's MCP servers and …/mcp/catalogue the Catalogue Hermes
+// GET /api/plugins/gots/mcp lists the bot's MCP servers and …/mcp/catalogue the Catalogue Hermes
 // offers, each entry marked as the bot's servers have it (and `needs_config` where it declares
 // values); GET …/mcp/catalogue/{name} is one entry with the values it declares. GET …/mcp/{name} is
 // one server's block (or `mcpBlockRefusal`'s error), POST …/mcp/{name}/config rewrites it, and
@@ -112,7 +112,7 @@
 // address. The features it advertises follow its route set (`mcps`, `mcps_write`, `mcps_remove`,
 // `mcps_catalogue`, `mcps_add`, `mcps_access`, `mcps_config`, `mcps_tools`); with MOCK_MCP=off a
 // plugin that has none of them. POST /__mock/mcp puts back every server a flow removed.
-// Research missions (GET and POST /api/plugins/memento/research, …/research/{id} and its actions)
+// Research missions (GET and POST /api/plugins/gots/research, …/research/{id} and its actions)
 // live in mock-research.mjs.
 //
 //   pnpm mock            # then point Settings at http://localhost:8642/v1
@@ -471,6 +471,7 @@ function jobRecord(job) {
 }
 
 const PLUGIN = process.env.MOCK_NO_PLUGIN !== "1"
+const OLD_PLUGIN = process.env.MOCK_OLD_PLUGIN === "1"
 // Research missions (mock-research.mjs); MOCK_RESEARCH=0 serves a plugin without them, and
 // MOCK_RESEARCH_WRITERS=off a host that doesn't let a mission be rewritten with another model.
 const RESEARCH = process.env.MOCK_RESEARCH !== "0"
@@ -2324,7 +2325,7 @@ const configuredModel = (key) => (key ? `mock-model-${key}` : HOST_DEFAULT_MODEL
 const hostModel = (key) => hostModels.get(key ?? "")?.model ?? configuredModel(key)
 const hostProvider = (key) => hostModels.get(key ?? "")?.provider ?? null
 // The profile a request is for, from its `/p/<name>/` segment (the default profile has none). The
-// plugin's own routes carry it after `/api/plugins/memento`, so it is matched anywhere in the path.
+// plugin's own routes carry it after `/api/plugins/gots`, so it is matched anywhere in the path.
 const PROFILE_PATH = /(?:^|\/)p\/([^/]+)(?=\/)/
 const profileOf = (req) => PROFILE_PATH.exec(req.url ?? "")?.[1] ?? ""
 // The fallback models the plugin's `fallbacks` route recorded, per profile.
@@ -2707,13 +2708,18 @@ http
   .createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`)
     if (req.method === "OPTIONS") return res.writeHead(200, cors).end()
+    // The plugin serves /api/plugins/gots and, for one release, the old /api/plugins/memento too.
+    // MOCK_OLD_PLUGIN=1 is a host that hasn't updated: only the old name answers.
+    if (OLD_PLUGIN && url.pathname.startsWith("/api/plugins/gots/"))
+      return json(res, 404, { error: { message: "Not found" } })
+    url.pathname = url.pathname.replace(/^\/api\/plugins\/memento(?=\/)/, "/api/plugins/gots")
     // Like a gateway with multiplex_profiles: other profiles live under /p/<profile>/.
     const profile = PROFILE_PATH.exec(url.pathname)?.[1]
     if (profile) url.pathname = url.pathname.slice(profile.length + 3)
     // The plugin's own prefix carries the profile, since Hermes's /p/<profile>/ catch-all comes first.
-    const pluginProfile = /^\/api\/plugins\/memento\/p\/([^/]+)(?=\/)/.exec(url.pathname)?.[1]
+    const pluginProfile = /^\/api\/plugins\/gots\/p\/([^/]+)(?=\/)/.exec(url.pathname)?.[1]
     if (pluginProfile)
-      url.pathname = `/api/plugins/memento${url.pathname.slice(pluginProfile.length + 23)}`
+      url.pathname = `/api/plugins/gots${url.pathname.slice(pluginProfile.length + 20)}`
     if (url.pathname === "/health") return json(res, 200, { status: "ok", platform: "mock-hermes" })
     if (url.pathname === "/v1/models") {
       // Named profiles advertise their name as the model id.
@@ -2792,7 +2798,7 @@ http
       }
       return json(res, 200, { job: jobRecord(job) })
     }
-    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/info") {
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/info") {
       return json(res, 200, {
         name: "memento",
         version: PLUGIN_VERSION,
@@ -2885,7 +2891,7 @@ http
     // The workflow library: presets first and read-only, the account's own rows rewritten in place.
     // A write answers the whole list, which is what the sheet draws; an update of a preset forks it
     // into a copy (`workflows.save`), since a preset's body belongs to the plugin's version.
-    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/workflows") {
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/workflows") {
       if (req.method === "GET")
         return json(res, 200, { object: "memento.workflows", workflows: workflows() })
       if (req.method === "POST") {
@@ -2907,7 +2913,7 @@ http
       }
       return json(res, 405, { error: { message: "That method isn't routed." } })
     }
-    const workflowRoute = /^\/api\/plugins\/memento\/workflows\/([^/]+)$/.exec(url.pathname)
+    const workflowRoute = /^\/api\/plugins\/gots\/workflows\/([^/]+)$/.exec(url.pathname)
     if (PLUGIN && !profile && workflowRoute) {
       const id = decodeURIComponent(workflowRoute[1])
       const found = workflows().find((entry) => entry.id === id)
@@ -2942,7 +2948,7 @@ http
       }
       return json(res, 405, { error: { message: "That method isn't routed." } })
     }
-    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/skills") {
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/skills") {
       return json(res, 200, {
         object: "list",
         data: [
@@ -2966,20 +2972,20 @@ http
     }
     // The Bot's MCP servers for a screen of its own. The `/p/<profile>` copy lands here too, since
     // the plugin's prefix carries the profile and is stripped just above.
-    if (PLUGIN && MCPS && !profile && url.pathname === "/api/plugins/memento/mcp") {
+    if (PLUGIN && MCPS && !profile && url.pathname === "/api/plugins/gots/mcp") {
       return json(res, 200, { object: { servers: mcpRows() } })
     }
     // Hermes's Catalogue for that same screen's Add action: every entry Hermes offers, each marked
     // with whether this bot already has it. A read only — nothing is added by it, and no value an
     // entry declares is answered.
-    if (PLUGIN && MCPS && !profile && url.pathname === "/api/plugins/memento/mcp/catalogue") {
+    if (PLUGIN && MCPS && !profile && url.pathname === "/api/plugins/gots/mcp/catalogue") {
       return json(res, 200, { object: { entries: mcpCatalogue() } })
     }
     // One of those entries with the values it declares, for the form its pick opens: what each is
     // called, whether it is required and secret, the default it pins and — for a value this bot
     // already holds — that it is set, never the value. An entry the Catalogue has no such name for
     // answers the plugin's own refusal.
-    const mcpEntry = url.pathname.match(/^\/api\/plugins\/memento\/mcp\/catalogue\/([^/]+)$/)
+    const mcpEntry = url.pathname.match(/^\/api\/plugins\/gots\/mcp\/catalogue\/([^/]+)$/)
     if (PLUGIN && MCPS && !profile && mcpEntry && req.method === "GET") {
       const entry = mcpCatalogueEntry(decodeURIComponent(mcpEntry[1]))
       if (!entry)
@@ -2997,7 +3003,7 @@ http
       PLUGIN &&
       MCPS &&
       !profile &&
-      url.pathname === "/api/plugins/memento/mcp/install" &&
+      url.pathname === "/api/plugins/gots/mcp/install" &&
       req.method === "POST"
     ) {
       const { name, values } = await readBody(req)
@@ -3010,7 +3016,7 @@ http
     // with a loopback redirect, and a second tap answers the same URL instead of invalidating the
     // one a user may already be pasting into a browser. A server that doesn't use access, or isn't
     // there, answers the plugin's own refusal.
-    const mcpAccess = url.pathname.match(/^\/api\/plugins\/memento\/mcp\/([^/]+)\/access$/)
+    const mcpAccess = url.pathname.match(/^\/api\/plugins\/gots\/mcp\/([^/]+)\/access$/)
     if (PLUGIN && MCPS && !profile && mcpAccess && req.method === "POST") {
       const name = decodeURIComponent(mcpAccess[1])
       const server = mcpRows().find((row) => row.name === name)
@@ -3039,7 +3045,7 @@ http
     // server, after which its row reads on. A paste with no flow, or for another flow, is refused
     // with the plugin's own sentence.
     const mcpCallback = url.pathname.match(
-      /^\/api\/plugins\/memento\/mcp\/([^/]+)\/access\/callback$/,
+      /^\/api\/plugins\/gots\/mcp\/([^/]+)\/access\/callback$/,
     )
     if (PLUGIN && MCPS && !profile && mcpCallback && req.method === "POST") {
       const name = decodeURIComponent(mcpCallback[1])
@@ -3079,7 +3085,7 @@ http
     // Flipping one of those servers on or off. The write lands on the row the app renders back, and
     // the mock's own list follows it so a later read agrees. A server a Hermes plugin provides can't
     // be changed and answers the plugin's own refusal; the state a toggle lands in is the flag.
-    const mcpEnabled = url.pathname.match(/^\/api\/plugins\/memento\/mcp\/([^/]+)\/enabled$/)
+    const mcpEnabled = url.pathname.match(/^\/api\/plugins\/gots\/mcp\/([^/]+)\/enabled$/)
     if (PLUGIN && MCPS && !profile && mcpEnabled && req.method === "POST") {
       const name = decodeURIComponent(mcpEnabled[1])
       const { enabled } = await readBody(req)
@@ -3097,7 +3103,7 @@ http
     // Taking one away, the way the plugin's own DELETE does: the server goes and the answer is what
     // the bot has left, so the app's list is the mock's own and not the row it guessed was gone. A
     // server a Hermes plugin provides, or one that isn't there, answers the plugin's own refusal.
-    const mcpRemove = url.pathname.match(/^\/api\/plugins\/memento\/mcp\/([^/]+)$/)
+    const mcpRemove = url.pathname.match(/^\/api\/plugins\/gots\/mcp\/([^/]+)$/)
     if (PLUGIN && MCPS && !profile && mcpRemove && req.method === "DELETE") {
       const name = decodeURIComponent(mcpRemove[1])
       const server = mcpWritableServer(res, name)
@@ -3109,7 +3115,7 @@ http
     // environment names it declares with the prompt each one's entry writes — never a value, only
     // whether the bot holds one. A server a Hermes plugin provides is read like any other and says
     // it isn't editable, which is what the screen draws from.
-    const mcpDetail = url.pathname.match(/^\/api\/plugins\/memento\/mcp\/([^/]+)$/)
+    const mcpDetail = url.pathname.match(/^\/api\/plugins\/gots\/mcp\/([^/]+)$/)
     if (PLUGIN && MCPS && !profile && mcpDetail && req.method === "GET") {
       const name = decodeURIComponent(mcpDetail[1])
       const server = mcpServerRow(res, name)
@@ -3120,7 +3126,7 @@ http
     // values into the bot's environment, and the answer is what the bot has now. A server a Hermes
     // plugin provides, an http block with no address and a stdio one with no command each answer
     // with their own sentence and change nothing.
-    const mcpConfigWrite = url.pathname.match(/^\/api\/plugins\/memento\/mcp\/([^/]+)\/config$/)
+    const mcpConfigWrite = url.pathname.match(/^\/api\/plugins\/gots\/mcp\/([^/]+)\/config$/)
     if (PLUGIN && MCPS && !profile && mcpConfigWrite && req.method === "POST") {
       const name = decodeURIComponent(mcpConfigWrite[1])
       const server = mcpWritableServer(res, name)
@@ -3151,7 +3157,7 @@ http
       PLUGIN &&
       MCPS &&
       !profile &&
-      url.pathname === "/api/plugins/memento/mcp/custom" &&
+      url.pathname === "/api/plugins/gots/mcp/custom" &&
       req.method === "POST"
     ) {
       const body = await readBody(req)
@@ -3193,7 +3199,7 @@ http
     }
     // One server's tools: Hermes's schema cache on a GET (a read that connects nothing), and the
     // probe on a POST — a connect, a list and a disconnect, which is why only a tap asks for it.
-    const mcpTools = url.pathname.match(/^\/api\/plugins\/memento\/mcp\/([^/]+)\/tools$/)
+    const mcpTools = url.pathname.match(/^\/api\/plugins\/gots\/mcp\/([^/]+)\/tools$/)
     if (PLUGIN && MCPS && !profile && mcpTools && (req.method === "GET" || req.method === "POST")) {
       const name = decodeURIComponent(mcpTools[1])
       if (!mcpServerRow(res, name)) return
@@ -3208,7 +3214,7 @@ http
       PLUGIN &&
       !profile &&
       req.method === "POST" &&
-      url.pathname === "/api/plugins/memento/push"
+      url.pathname === "/api/plugins/gots/push"
     ) {
       const { subscription, device, vapid_key, subject, categories } = await readBody(req)
       if (
@@ -3227,7 +3233,7 @@ http
       PLUGIN &&
       !profile &&
       req.method === "POST" &&
-      url.pathname === "/api/plugins/memento/push/mute"
+      url.pathname === "/api/plugins/gots/push/mute"
     ) {
       const { muted, bot } = await readBody(req)
       if (typeof muted !== "boolean") return json(res, 400, { error: { message: "Missing muted" } })
@@ -3240,13 +3246,13 @@ http
       PLUGIN &&
       !profile &&
       req.method === "POST" &&
-      url.pathname === "/api/plugins/memento/push/remove"
+      url.pathname === "/api/plugins/gots/push/remove"
     ) {
       const { endpoint } = await readBody(req)
       pushSubscriptions.delete(endpoint)
       return json(res, 200, { object: "memento.push", subscribed: false })
     }
-    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/media") {
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/media") {
       const path = url.searchParams.get("path") ?? ""
       if (/\.png$/i.test(path) && !/missing/i.test(path)) {
         res.writeHead(200, { "Content-Type": "image/png", ...cors })
@@ -3254,7 +3260,7 @@ http
       }
       return json(res, 404, { error: { message: "No such image." } })
     }
-    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/library/file") {
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/library/file") {
       // A filed file for opening it: an image as png bytes, markdown as text, anything else as
       // an octet-stream the browser downloads.
       const path = url.searchParams.get("path") ?? ""
@@ -3268,11 +3274,11 @@ http
       }
       return json(res, 404, { error: { message: "No such file." } })
     }
-    if (PLUGIN && EVENTS && !profile && url.pathname === "/api/plugins/memento/events") {
+    if (PLUGIN && EVENTS && !profile && url.pathname === "/api/plugins/gots/events") {
       const since = url.searchParams.get("since")
       return streamEvents(req, res, pluginProfile ?? "", since === null ? undefined : Number(since))
     }
-    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/cron/runs") {
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/cron/runs") {
       const perJob = Math.max(1, Math.min(Number(url.searchParams.get("per_job") ?? 24) || 24, 200))
       const jobs = Object.fromEntries(
         cronJobs().map((job) => [
@@ -3289,7 +3295,7 @@ http
       PLUGIN &&
       !profile &&
       req.method === "POST" &&
-      url.pathname === "/api/plugins/memento/model"
+      url.pathname === "/api/plugins/gots/model"
     ) {
       const { provider, model } = await readBody(req)
       if (
@@ -3312,7 +3318,7 @@ http
         model: model.trim(),
       })
     }
-    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/fallbacks") {
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/fallbacks") {
       const key = pluginProfile ?? ""
       if (req.method === "GET") {
         return json(res, 200, {
@@ -3343,7 +3349,7 @@ http
         return json(res, 200, { object: "memento.fallbacks", fallbacks: saved })
       }
     }
-    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/delegation") {
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/delegation") {
       const key = pluginProfile ?? ""
       if (req.method === "GET") {
         return json(res, 200, {
@@ -3370,7 +3376,7 @@ http
         return json(res, 200, { object: "memento.delegation", delegation: null })
       }
     }
-    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/triage-model") {
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/triage-model") {
       const key = pluginProfile ?? ""
       if (req.method === "GET") {
         return json(res, 200, {
@@ -3391,7 +3397,7 @@ http
             return json(res, 403, {
               error: {
                 message:
-                  "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable memento`.",
+                  "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable gots`.",
               },
             })
           }
@@ -3404,14 +3410,14 @@ http
         return json(res, 200, { object: "memento.triage_model", triage_model: null })
       }
     }
-    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/github") {
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/github") {
       return json(
         res,
         200,
         GITHUB ? { connected: true, source: "gh", login: "mock-user" } : { connected: false },
       )
     }
-    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/github/repos") {
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/github/repos") {
       if (!GITHUB) return json(res, 409, { error: { message: "No GitHub account on the server." } })
       return json(res, 200, { object: "memento.github.repos", repos: githubRepos })
     }
@@ -3419,7 +3425,7 @@ http
       PLUGIN &&
       !profile &&
       req.method === "POST" &&
-      url.pathname === "/api/plugins/memento/projects"
+      url.pathname === "/api/plugins/gots/projects"
     ) {
       const { name, description, repos = [] } = await readBody(req)
       if (!String(name ?? "").trim())
@@ -3462,7 +3468,7 @@ http
       return json(res, 202, { object: "memento.project", ...project })
     }
     const projectRoute =
-      /^\/api\/plugins\/memento\/projects\/([^/]+)(\/remove|\/retry|\/repos|\/repos\/remove|\/usage|\/library|\/tasks|\/afk)?$/.exec(
+      /^\/api\/plugins\/gots\/projects\/([^/]+)(\/remove|\/retry|\/repos|\/repos\/remove|\/usage|\/library|\/tasks|\/afk)?$/.exec(
         url.pathname,
       )
     if (PLUGIN && !profile && projectRoute?.[2] === "/library") {
@@ -3730,13 +3736,13 @@ http
         found.pinned_at = pinned ? (found.pinned_at ?? Math.floor(Date.now() / 1000)) : null
       return json(res, 200, { object: "memento.project", id: found.id })
     }
-    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/projects") {
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/projects") {
       return json(res, 200, {
         object: "memento.projects",
         projects: pluginProfile ? [] : mockProjects(),
       })
     }
-    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/chats") {
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/chats") {
       const key = pluginProfile ?? ""
       if (!pluginChatLists.has(key)) pluginChatLists.set(key, key ? new Map() : pluginChats)
       const chatList = pluginChatLists.get(key)
@@ -3756,7 +3762,7 @@ http
       }
       return json(res, 200, { object: "memento.chats", chats: Object.fromEntries(chatList) })
     }
-    const sessionLabel = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/label$/.exec(url.pathname)
+    const sessionLabel = /^\/api\/plugins\/gots\/sessions\/([^/]+)\/label$/.exec(url.pathname)
     if (PLUGIN && !profile && req.method === "POST" && sessionLabel) {
       const id = decodeURIComponent(sessionLabel[1])
       if (!chatTitles.has(id)) return json(res, 404, { error: { message: "Session not found" } })
@@ -3764,7 +3770,7 @@ http
       labelledSessions.set(id, source)
       return json(res, 200, { id, source })
     }
-    const sessionContext = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/context$/.exec(
+    const sessionContext = /^\/api\/plugins\/gots\/sessions\/([^/]+)\/context$/.exec(
       url.pathname,
     )
     if (PLUGIN && !profile && req.method === "GET" && sessionContext) {
@@ -3783,7 +3789,7 @@ http
         compactions: compactions.get(id) ?? [],
       })
     }
-    const usageRoute = /^\/api\/plugins\/memento\/usage$/.exec(url.pathname)
+    const usageRoute = /^\/api\/plugins\/gots\/usage$/.exec(url.pathname)
     if (PLUGIN && !profile && req.method === "GET" && usageRoute) {
       const provider = url.searchParams.get("provider") || ""
       // A flow can move the account with `?percent=N`; the app's own reads (no percent) then serve
@@ -3834,7 +3840,7 @@ http
           : []
       return json(res, 200, { object: "memento.usage", provider, plan: "Pro", windows })
     }
-    const sessionTodos = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/todos$/.exec(url.pathname)
+    const sessionTodos = /^\/api\/plugins\/gots\/sessions\/([^/]+)\/todos$/.exec(url.pathname)
     if (PLUGIN && !profile && req.method === "GET" && sessionTodos) {
       const id = decodeURIComponent(sessionTodos[1])
       const row = (transcripts.get(id) ?? []).findLast(
@@ -3851,7 +3857,7 @@ http
         progress: todos ? progressOf(todos) : null,
       })
     }
-    const sessionAgents = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/agents$/.exec(url.pathname)
+    const sessionAgents = /^\/api\/plugins\/gots\/sessions\/([^/]+)\/agents$/.exec(url.pathname)
     if (PLUGIN && !profile && req.method === "GET" && sessionAgents) {
       const id = decodeURIComponent(sessionAgents[1])
       return json(res, 200, {
@@ -3860,7 +3866,7 @@ http
         agents: delegations.get(id) ?? [],
       })
     }
-    const clarifyRoute = /^\/api\/plugins\/memento\/runs\/([^/]+)\/clarify$/.exec(url.pathname)
+    const clarifyRoute = /^\/api\/plugins\/gots\/runs\/([^/]+)\/clarify$/.exec(url.pathname)
     if (PLUGIN && !profile && req.method === "POST" && clarifyRoute) {
       const pending = pendingClarifies.get(clarifyRoute[1])
       const { clarify_id, answers, outcome } = await readBody(req)
@@ -3894,7 +3900,7 @@ http
       PLUGIN &&
       !profile &&
       req.method === "POST" &&
-      url.pathname === "/api/plugins/memento/dictation/warm"
+      url.pathname === "/api/plugins/gots/dictation/warm"
     ) {
       return json(res, 200, {
         object: "memento.dictation_warm",
@@ -3906,7 +3912,7 @@ http
       PLUGIN &&
       !profile &&
       req.method === "POST" &&
-      url.pathname === "/api/plugins/memento/dictation"
+      url.pathname === "/api/plugins/gots/dictation"
     ) {
       const data = await readRaw(req)
       if (!data.length) return json(res, 400, { error: { message: "The recording is empty." } })
@@ -3929,7 +3935,7 @@ http
         ms: 700,
       })
     }
-    const attachmentRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/attachments$/.exec(
+    const attachmentRoute = /^\/api\/plugins\/gots\/sessions\/([^/]+)\/attachments$/.exec(
       url.pathname,
     )
     if (PLUGIN && !profile && req.method === "POST" && attachmentRoute) {
@@ -3949,7 +3955,7 @@ http
         size: data.length,
       })
     }
-    const movesRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/moves$/.exec(url.pathname)
+    const movesRoute = /^\/api\/plugins\/gots\/sessions\/([^/]+)\/moves$/.exec(url.pathname)
     if (PLUGIN && !profile && TRIAGE !== "off" && req.method === "GET" && movesRoute)
       return json(res, 200, {
         object: "memento.moves",
@@ -3960,7 +3966,7 @@ http
           }),
         ),
       })
-    const undoRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/moves\/([^/]+)\/undo$/.exec(
+    const undoRoute = /^\/api\/plugins\/gots\/sessions\/([^/]+)\/moves\/([^/]+)\/undo$/.exec(
       url.pathname,
     )
     if (PLUGIN && !profile && TRIAGE !== "off" && req.method === "POST" && undoRoute) {
@@ -3994,7 +4000,7 @@ http
       setTimeout(() => pumpQueue(id), 50)
       return json(res, 200, { object: "memento.move.undone", undone: true })
     }
-    const triageRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/triage$/.exec(url.pathname)
+    const triageRoute = /^\/api\/plugins\/gots\/sessions\/([^/]+)\/triage$/.exec(url.pathname)
     if (PLUGIN && !profile && TRIAGE !== "off" && req.method === "POST" && triageRoute) {
       const id = decodeURIComponent(triageRoute[1])
       const { id: askId, text, attachments, body } = await readBody(req)
@@ -4074,7 +4080,7 @@ http
       })
     }
     const queueRoute =
-      /^\/api\/plugins\/memento\/sessions\/([^/]+)\/queue(?:\/([^/]+)\/(remove|send|steer))?$/.exec(
+      /^\/api\/plugins\/gots\/sessions\/([^/]+)\/queue(?:\/([^/]+)\/(remove|send|steer))?$/.exec(
         url.pathname,
       )
     if (PLUGIN && !profile && queueRoute) {
@@ -4150,7 +4156,7 @@ http
         text: item.text,
       })
     }
-    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/runs/live") {
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/runs/live") {
       const sessions = {}
       const run_ids = {}
       for (const [runId, run] of runs.entries()) {
@@ -4334,7 +4340,7 @@ http
       return json(res, 200, { ok: true, session, child })
     }
     const sessionRoute =
-      /^\/api\/plugins\/memento\/sessions\/([^/]+)\/(workspace|workspace\/remove|mode|prs|library|close)$/.exec(
+      /^\/api\/plugins\/gots\/sessions\/([^/]+)\/(workspace|workspace\/remove|mode|prs|library|close)$/.exec(
         url.pathname,
       )
     if (PLUGIN && !profile && sessionRoute) {

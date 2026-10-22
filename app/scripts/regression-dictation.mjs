@@ -259,7 +259,7 @@ try {
   // While the host is asked, the mic is greyed out and does nothing.
   {
     const page = await open(mock, { width: 390, height: 844 })
-    await page.route("**/api/plugins/memento/info", async (route) => {
+    await page.route("**/api/plugins/gots/info", async (route) => {
       await new Promise((resolve) => setTimeout(resolve, 3000))
       await route.continue().catch(() => {})
     })

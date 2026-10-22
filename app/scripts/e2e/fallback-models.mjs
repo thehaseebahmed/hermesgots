@@ -5,7 +5,7 @@ import { app, assert, flow, mock, pass } from "./lib.mjs"
 await flow("fallback-models", async ({ page, profileId, until, shot, held }) => {
   // The host's own record, which is what the screen must be writing.
   const hosted = async () => {
-    const response = await fetch(`${mock}/api/plugins/memento/fallbacks`)
+    const response = await fetch(`${mock}/api/plugins/gots/fallbacks`)
     return (await response.json()).fallbacks
   }
   // The picker is a dialog over the settings screen, where a row for the same model may already be
@@ -21,12 +21,12 @@ await flow("fallback-models", async ({ page, profileId, until, shot, held }) => 
   // and not only against how the rows look.
   const writes = []
   page.on("request", (request) => {
-    if (request.method() === "POST" && request.url().endsWith("/api/plugins/memento/fallbacks"))
+    if (request.method() === "POST" && request.url().endsWith("/api/plugins/gots/fallbacks"))
       writes.push(request.url())
   })
 
   // A dev's mock may be holding another run's fallbacks, so start from none.
-  await fetch(`${mock}/api/plugins/memento/fallbacks`, {
+  await fetch(`${mock}/api/plugins/gots/fallbacks`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ fallbacks: [] }),
@@ -39,7 +39,7 @@ await flow("fallback-models", async ({ page, profileId, until, shot, held }) => 
 
   // A pick is written whole, so while it is on its way the rows are greyed out and the heading says
   // so: a second pick can't overlap the one already going out.
-  const write = await held("**/api/plugins/memento/fallbacks")
+  const write = await held("**/api/plugins/gots/fallbacks")
   write.hold()
   await add.click()
   await pick("gpt-5-mini", "openai/gpt-5-mini")

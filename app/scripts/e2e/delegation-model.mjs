@@ -2,7 +2,7 @@ import { app, assert, flow, mock, pass } from "./lib.mjs"
 
 await flow("delegation-model", async ({ page, profileId, until, shot, held }) => {
   const hosted = async () => {
-    const response = await fetch(`${mock}/api/plugins/memento/delegation`)
+    const response = await fetch(`${mock}/api/plugins/gots/delegation`)
     return (await response.json()).delegation
   }
   // The picker is a dialog over the settings screen, where a row for the same model may already be
@@ -19,12 +19,12 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
   // host and not only against how the field looks.
   const writes = []
   page.on("request", (request) => {
-    if (request.method() === "POST" && request.url().endsWith("/api/plugins/memento/delegation"))
+    if (request.method() === "POST" && request.url().endsWith("/api/plugins/gots/delegation"))
       writes.push(request.url())
   })
 
   // A dev's mock may be holding another run's pick, so start from none.
-  await fetch(`${mock}/api/plugins/memento/delegation`, {
+  await fetch(`${mock}/api/plugins/gots/delegation`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ delegation: null }),
@@ -37,7 +37,7 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
   await shot("inherited")
 
   // A pick is written whole, so while it is on its way the field is greyed out and says so.
-  const write = await held("**/api/plugins/memento/delegation")
+  const write = await held("**/api/plugins/gots/delegation")
   write.hold()
   await opener.click()
   await pick("gpt-5-mini", "openai/gpt-5-mini")
@@ -68,7 +68,7 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
   assert.equal(writes.length, 2, "the clear is a write of its own")
   await shot("cleared")
 
-  await page.route("**/api/plugins/memento/info", async (route) => {
+  await page.route("**/api/plugins/gots/info", async (route) => {
     const info = await (await route.fetch()).json()
     await route.fulfill({
       json: { ...info, features: info.features.filter((name) => name !== "delegation_model") },

@@ -23,8 +23,8 @@ const run = async ({ page, profileId, shot }) => {
   })
   // The plugin's own `info`, read through and answered with the named features left out.
   const gate = async (...without) => {
-    await page.unroute("**/api/plugins/memento/info")
-    await page.route("**/api/plugins/memento/info", async (route) => {
+    await page.unroute("**/api/plugins/gots/info")
+    await page.route("**/api/plugins/gots/info", async (route) => {
       // The browser's CORS preflight for the same URL is left alone; only the answer is rewritten.
       if (route.request().method() !== "GET") return route.continue()
       const response = await route.fetch()
@@ -62,7 +62,7 @@ const run = async ({ page, profileId, shot }) => {
   // No tab is only an answer once the host's has come back: before it, there is none either.
   const answered = page.waitForResponse(
     (response) =>
-      response.url().includes("/api/plugins/memento/info") && response.request().method() === "GET",
+      response.url().includes("/api/plugins/gots/info") && response.request().method() === "GET",
   )
   await page.goto(`${app}${editor}`)
   await page.getByRole("button", { name: "Test connection" }).waitFor({ timeout: 15_000 })

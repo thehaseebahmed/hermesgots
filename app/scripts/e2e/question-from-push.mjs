@@ -55,7 +55,7 @@ await flow("question-from-push", async ({ page, seed, shot }) => {
 
   // A chat started on another device that hasn't reached this one yet.
   // The chat list answers slowly, as a host over a tunnel does: the link has to wait for it.
-  await page.route("**/api/plugins/memento/chats", async (route) => {
+  await page.route("**/api/plugins/gots/chats", async (route) => {
     await new Promise((done) => setTimeout(done, 2500))
     await route.continue().catch(() => {})
   })
@@ -73,14 +73,14 @@ await flow("question-from-push", async ({ page, seed, shot }) => {
       updatedAt: now,
     },
   }
-  const saved = await fetch(`${mock}/api/plugins/memento/chats`, {
+  const saved = await fetch(`${mock}/api/plugins/gots/chats`, {
     method: "POST",
     headers: auth,
     body: JSON.stringify({ chats: { [fresh]: record } }),
   })
   assert.equal(saved.status, 200, "the other device's chat list reaches the host")
   await openFromPush(freshSession, fresh)
-  await page.unroute("**/api/plugins/memento/chats")
+  await page.unroute("**/api/plugins/gots/chats")
   await shot("fresh")
   pass("a question in a chat not on this device yet opens it once synced")
 })

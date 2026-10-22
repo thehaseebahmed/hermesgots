@@ -31,7 +31,7 @@ const run = async ({ page, profileId, shot, until }) => {
   // and what a secret is typed as must be what reaches the Host.
   const adds = []
   page.on("request", (request) => {
-    if (new URL(request.url()).pathname !== "/api/plugins/memento/mcp/install") return
+    if (new URL(request.url()).pathname !== "/api/plugins/gots/mcp/install") return
     adds.push(JSON.parse(request.postData() ?? "{}"))
   })
 

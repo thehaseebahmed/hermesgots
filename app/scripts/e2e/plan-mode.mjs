@@ -75,7 +75,7 @@ await flow(
     )
     const headers = { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }
     const host = (path) =>
-      fetch(`${mock}/api/plugins/memento${path}`, { headers }).then((response) => response.json())
+      fetch(`${mock}/api/plugins/gots${path}`, { headers }).then((response) => response.json())
     const workspace = () => host(`/sessions/${sessionA}/workspace`)
     const row = (id) =>
       page.evaluate(async (conversationId) => {

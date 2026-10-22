@@ -102,7 +102,7 @@ const run = async ({ page, until, shot }) => {
   await composer.fill("/")
   await menu.waitFor({ timeout: 10_000 })
   const asked = plugin.length
-  await page.route("**/api/plugins/memento/**", (route) => route.abort())
+  await page.route("**/api/plugins/gots/**", (route) => route.abort())
   await composer.fill("")
   await composer.fill("/")
   await until(() => plugin.length > asked, 10_000, "a read behind the second open")
@@ -121,12 +121,12 @@ const run = async ({ page, until, shot }) => {
   await composer.fill("still /pl")
   await menu.getByRole("option", { name: /\/plan\b/ }).waitFor({ timeout: 10_000 })
   await shot("cached")
-  await page.unroute("**/api/plugins/memento/**")
+  await page.unroute("**/api/plugins/gots/**")
 
   // A read runs behind every open and its answer replaces what the page held: a skill installed a
   // moment ago appears without a reload.
   let listed = [...FIXTURE]
-  await page.route("**/api/plugins/memento/skills*", (route) =>
+  await page.route("**/api/plugins/gots/skills*", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",

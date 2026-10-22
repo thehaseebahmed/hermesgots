@@ -31,7 +31,7 @@ const RECORDS = {
   },
 }
 
-const afkPath = (projectId) => `${mock}/api/plugins/memento/projects/${projectId}/afk`
+const afkPath = (projectId) => `${mock}/api/plugins/gots/projects/${projectId}/afk`
 
 const post = (path, body) =>
   fetch(path, {
@@ -324,7 +324,7 @@ const olderPlugin = async ({ page, until, shot }) => {
     "the critique is chosen",
   )
   await workOn(until, projectId)
-  await page.route("**/api/plugins/memento/info", async (route) => {
+  await page.route("**/api/plugins/gots/info", async (route) => {
     if (route.request().method() !== "GET") return route.continue()
     const response = await route.fetch()
     const body = await response.json()
@@ -359,7 +359,7 @@ const olderPlugin = async ({ page, until, shot }) => {
     "a plugin that doesn't advertise the pipeline draws no pill",
   )
   await shot("without-feature")
-  await page.unroute("**/api/plugins/memento/info")
+  await page.unroute("**/api/plugins/gots/info")
   assert.deepEqual(errors, [], `no console error (${errors.join("; ")})`)
 }
 

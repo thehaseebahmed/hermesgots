@@ -746,11 +746,11 @@ function makeFormat(m, note) {
 
 /** Answers a research route, or returns false for any other path. */
 export async function handleResearch(req, res, path, { json, readBody, noteEvent }) {
-  if (!path.startsWith("/api/plugins/memento/research")) return false
+  if (!path.startsWith("/api/plugins/gots/research")) return false
   const note = (id) => noteEvent("research", id)
   const answer = (m) => json(res, 200, { object: "memento.research.mission", mission: full(m) })
   const fail = (status, message) => json(res, status, { error: { message } })
-  if (path === "/api/plugins/memento/research") {
+  if (path === "/api/plugins/gots/research") {
     if (req.method === "GET") {
       const list = [...missions.values()].sort((a, b) => b.created_at - a.created_at).map(summary)
       json(res, 200, { object: "memento.research", missions: list, unavailable: null })
@@ -774,7 +774,7 @@ export async function handleResearch(req, res, path, { json, readBody, noteEvent
     json(res, 202, { object: "memento.research.mission", mission: full(m) })
     return true
   }
-  const match = /^\/api\/plugins\/memento\/research\/([^/]+)(?:\/(\w+))?$/.exec(path)
+  const match = /^\/api\/plugins\/gots\/research\/([^/]+)(?:\/(\w+))?$/.exec(path)
   const m = match && missions.get(decodeURIComponent(match[1]))
   if (!m) return fail(404, "No such mission."), true
   const action = match[2]
@@ -821,7 +821,7 @@ export async function handleResearch(req, res, path, { json, readBody, noteEvent
         if (!kinds.length || kinds.some((k) => !SOURCE_KINDS.includes(k))) return fail(400, "Pick the kinds of source."), true
         const judge = body.judge?.model ? { provider: body.judge.provider ?? "", model: body.judge.model } : null
         if (judge && !WRITERS)
-          return fail(403, "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable memento`."), true
+          return fail(403, "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable gots`."), true
         m.ledger = { sources: [], claims: [] }
         m.outputs = {}
         change(m, { source_kinds: kinds, judge, stage: "reading", written: 0, formats: [], error: null }, note)
@@ -866,7 +866,7 @@ export async function handleResearch(req, res, path, { json, readBody, noteEvent
       if ((moved(["delivered"]) && !failedRewrite) || m.making) return fail(409, "The mission isn't delivered yet."), true
       const model = typeof body.model === "string" && body.model ? { provider: body.provider ?? "", model: body.model } : null
       if (model && !WRITERS)
-        return fail(403, "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable memento`."), true
+        return fail(403, "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable gots`."), true
       if (!m.revisions.length) revise(m, "first")
       change(m, { writer: model, pending: { reason: "rewrite", model }, suggestions: [], stage: "drafting", error: null }, note)
       write(m, note)

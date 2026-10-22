@@ -770,7 +770,7 @@ export function TriageModelSetting({ profile }: { profile: Profile }) {
       {record.withheld && (
         <Banner>
           This host doesn't let Gots pick the model. Allow it with{" "}
-          <code className="font-mono text-[13px]">hermes plugins enable memento</code>.
+          <code className="font-mono text-[13px]">hermes plugins enable gots</code>.
         </Banner>
       )}
     </HostModelField>

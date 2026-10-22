@@ -14,7 +14,7 @@ const OFFERED = ["github-pr-workflow", "log-triage", "plan"]
 
 /** The host's `info` answered without these features: a plugin from before they were added. */
 async function withoutFeatures(page, ...missing) {
-  await page.route("**/api/plugins/memento/info", async (route) => {
+  await page.route("**/api/plugins/gots/info", async (route) => {
     if (route.request().method() !== "GET") return route.continue()
     const response = await route.fetch()
     const body = await response.json()
@@ -107,7 +107,7 @@ const choosing = async ({ page, profileId, shot, until }) => {
 
   // The write landed on this project alone: another's AFK row is the one it always was.
   const neighbour = await (
-    await fetch(`${mock}/api/plugins/memento/projects/${other}/afk`)
+    await fetch(`${mock}/api/plugins/gots/projects/${other}/afk`)
   ).json()
   assert.equal(neighbour.build_skill, null, "another project builds by nothing")
   assert.deepEqual(neighbour.critique_skills, [], "and critiques by nothing")
@@ -117,7 +117,7 @@ const choosing = async ({ page, profileId, shot, until }) => {
     [{ critique_skills: [] }, "a body naming one of the two"],
     [{ on: true, build_skill: null, critique_skills: [] }, "a body naming both"],
   ]) {
-    const refused = await fetch(`${mock}/api/plugins/memento/projects/${project}/afk`, {
+    const refused = await fetch(`${mock}/api/plugins/gots/projects/${project}/afk`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -177,7 +177,7 @@ const olderPlugin = async ({ page, profileId, shot, until }) => {
     15_000,
     "the switch to read off",
   )
-  await page.unroute("**/api/plugins/memento/info")
+  await page.unroute("**/api/plugins/gots/info")
 
   assert.deepEqual(errors, [], `no console error (${errors.join("; ")})`)
 }

@@ -16,6 +16,7 @@ const MOCKS = {
   polling: { port: 18643, env: { MOCK_NO_EVENTS: "1" } },
   legacy: { port: 18644, env: { MOCK_BLOCK_RUN_EVENTS: "1" } },
   "no-dictation": { port: 18645, env: { MOCK_DICTATION: "off" } },
+  "old-plugin": { port: 18646, env: { MOCK_OLD_PLUGIN: "1" } },
 }
 const APP_PORT = 15173
 
@@ -251,6 +252,12 @@ const FLOWS = {
     script: "e2e/stream-writes.mjs",
     about:
       "A streaming reply is written in batches: at most 6 writes a second on the mock (main wrote 7.5)",
+  },
+  "old-plugin": {
+    script: "e2e/old-plugin.mjs",
+    mock: "old-plugin",
+    about:
+      "A host whose plugin still answers at /api/plugins/memento is asked there after the first miss, and the chat still sends and syncs",
   },
   "idle-requests": {
     script: "e2e/idle-requests.mjs",

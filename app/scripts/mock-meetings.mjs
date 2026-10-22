@@ -138,11 +138,11 @@ async function run(m, note) {
 }
 
 export async function handleMeetings(req, res, path, { json, readBody, noteEvent }) {
-  if (!path.startsWith("/api/plugins/memento/meetings")) return false
+  if (!path.startsWith("/api/plugins/gots/meetings")) return false
   const note = (id) => noteEvent("meetings", id)
   const fail = (status, message) => json(res, status, { error: { message } })
   const answer = (m) => json(res, 200, { object: "memento.meeting", meeting: view(m, true) })
-  if (path === "/api/plugins/memento/meetings") {
+  if (path === "/api/plugins/gots/meetings") {
     if (req.method === "GET") {
       const rows = [...meetings.values()].sort((a, b) => b.created_at - a.created_at)
       json(res, 200, {
@@ -195,7 +195,7 @@ export async function handleMeetings(req, res, path, { json, readBody, noteEvent
     json(res, 201, { object: "memento.meeting", meeting: view(m, true) })
     return true
   }
-  const match = /^\/api\/plugins\/memento\/meetings\/([^/]+)(?:\/(\w+))?$/.exec(path)
+  const match = /^\/api\/plugins\/gots\/meetings\/([^/]+)(?:\/(\w+))?$/.exec(path)
   const m = match && meetings.get(decodeURIComponent(match[1]))
   if (!m) return (fail(404, "No such meeting."), true)
   const action = match[2]

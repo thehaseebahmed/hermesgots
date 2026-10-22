@@ -24,7 +24,7 @@ const run = async ({ page, profileId, shot, until }) => {
   })
   page.on("request", (request) => {
     const path = new URL(request.url()).pathname
-    if (path === "/api/plugins/memento/mcp") reads.push(1)
+    if (path === "/api/plugins/gots/mcp") reads.push(1)
     if (request.method() === "POST" && path.endsWith("/access")) starts.push(path)
     if (request.method() === "POST" && path.endsWith("/access/callback")) callbacks.push(path)
   })
@@ -122,12 +122,12 @@ const run = async ({ page, profileId, shot, until }) => {
     assert.ok(starts.length >= 2, `both openings reached the plugin (${starts.length} starts)`)
     assert.deepEqual(
       [...new Set(starts.map((path) => decodeURIComponent(path)))],
-      ["/api/plugins/memento/mcp/notion/access"],
+      ["/api/plugins/gots/mcp/notion/access"],
       "every start named the server on the plugin's own route",
     )
     assert.deepEqual(
       [...new Set(callbacks.map((path) => decodeURIComponent(path)))],
-      ["/api/plugins/memento/mcp/notion/access/callback"],
+      ["/api/plugins/gots/mcp/notion/access/callback"],
       "both pastes went to the plugin's own callback route",
     )
     const opened = reads.length
@@ -197,14 +197,14 @@ const run = async ({ page, profileId, shot, until }) => {
     )
     assert.deepEqual(
       [...new Set(starts.map((path) => decodeURIComponent(path)))].sort(),
-      ["/api/plugins/memento/mcp/notion/access", "/api/plugins/memento/mcp/sentry/access"],
+      ["/api/plugins/gots/mcp/notion/access", "/api/plugins/gots/mcp/sentry/access"],
       "both servers were started on the plugin's own route",
     )
     assert.deepEqual(
       [...new Set(callbacks.map((path) => decodeURIComponent(path)))].sort(),
       [
-        "/api/plugins/memento/mcp/notion/access/callback",
-        "/api/plugins/memento/mcp/sentry/access/callback",
+        "/api/plugins/gots/mcp/notion/access/callback",
+        "/api/plugins/gots/mcp/sentry/access/callback",
       ],
       "both pasted addresses went to the plugin's own callback route",
     )

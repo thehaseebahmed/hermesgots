@@ -22,7 +22,7 @@ const run = async ({ page, profileId, shot, until }) => {
       errors.push(message.text())
   })
   page.on("request", (request) => {
-    if (new URL(request.url()).pathname !== "/api/plugins/memento/mcp/custom") return
+    if (new URL(request.url()).pathname !== "/api/plugins/gots/mcp/custom") return
     writes.push(JSON.parse(request.postData() ?? "{}"))
   })
   const sheet = () => page.getByRole("dialog")
