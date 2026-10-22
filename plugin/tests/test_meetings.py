@@ -319,9 +319,48 @@ class MeetingsTest(unittest.TestCase):
         done = self.written(
             lines, *([piece] * parts), notes("Whole.", decisions=[{"text": "Go", "cites": ["0:00", "1:00"]}])
         )
-        self.assertEqual(len(self.llm.calls), parts + 1)
+        written = [c for c in self.llm.calls if c["purpose"] != "memento.meetings.topics"]
+        self.assertEqual(len(written), parts + 1)
         self.assertEqual(done["notes"]["summary"], "Whole.")
         self.assertEqual(done["notes"]["decisions"][0]["cites"], ["0:00", "1:00"])
+
+    def topic(self, title, start, end, summary="Said.", quote="", quote_at=""):
+        return {"title": title, "start": start, "end": end, "summary": summary, "quote": quote, "quote_at": quote_at}
+
+    def test_topics_are_held_to_the_transcript(self):
+        lines = [
+            {"at": 0, "text": "Let's start with the beta date."},
+            {"at": 60, "text": "Thursday works if we freeze Tuesday."},
+            {"at": 120, "text": "Now the sidebar."},
+            {"at": 200, "text": "Keep it as it is."},
+        ]
+        raw = {"topics": [
+            self.topic("Sidebar", "2:00", "9:99", quote="Keep it", quote_at="3:20"),
+            self.topic("Beta", "0:00", "2:00", quote="Thursday works", quote_at="1:00"),
+            self.topic("Invented", "50:00", "51:00"),
+            self.topic("Overlap", "0:00", "1:00"),
+            self.topic("", "1:00", "2:00"),
+        ]}
+        topics = meetings.check_topics(raw, lines)
+        self.assertEqual([t["title"] for t in topics], ["Beta", "Sidebar"])
+        self.assertEqual((topics[0]["start"], topics[0]["end"]), (0, 120))
+        self.assertEqual(topics[0]["quote"], {"text": "Thursday works", "at": 60})
+        # An end that is not a stamp of the transcript falls to the last line.
+        self.assertEqual((topics[1]["start"], topics[1]["end"]), (120, 200))
+        self.assertEqual(topics[1]["quote"], {"text": "Keep it", "at": 200})
+
+    def test_a_quote_the_line_does_not_say_is_dropped(self):
+        lines = [{"at": 0, "text": "Hello there"}, {"at": 30, "text": "Goodbye"}]
+        raw = {"topics": [self.topic("All", "0:00", "0:30", quote="We agreed to ship", quote_at="0:30")]}
+        self.assertNotIn("quote", meetings.check_topics(raw, lines)[0])
+
+    def test_the_notes_carry_the_topics_and_survive_a_topic_failure(self):
+        lines = [{"at": 0, "text": "Alpha"}, {"at": 90, "text": "Beta"}]
+        done = self.written(lines, notes("S."), {"topics": [self.topic("A", "0:00", "1:30")]})
+        self.assertEqual([t["title"] for t in done["notes"]["topics"]], ["A"])
+        again = self.written(lines, notes("S."), ValueError("bad"))
+        self.assertEqual(again["stage"], "ready")
+        self.assertEqual(again["notes"]["topics"], [])
 
     def test_a_model_that_never_answers_in_shape_fails_the_meeting(self):
         found = meetings.create(self.path, None, "Sync", None, None, [{"at": 0, "text": "x"}])

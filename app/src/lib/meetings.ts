@@ -43,8 +43,34 @@ export interface NoteItem {
   owner?: string
 }
 
+/** A stretch of the meeting about one thing: a chapter of its timeline. */
+export interface Topic {
+  id: string
+  title: string
+  /** Seconds from the start of the meeting. */
+  start: number
+  end: number
+  summary: string
+  quote?: { text: string; at: number }
+}
+
+/** What a moment of the meeting was: something decided, to do, or left open. */
+export type MomentKind = "decision" | "action" | "open"
+
+/** A note pinned to the second it rests on. */
+export interface Moment {
+  id: string
+  kind: MomentKind
+  text: string
+  /** Unset when the host found no line that supports it. */
+  at?: number
+  owner?: string
+}
+
 export interface Notes {
   summary: string
+  /** Empty when the host couldn't write them; the app then shows the notes as sections. */
+  topics: Topic[]
   keyPoints: NoteItem[]
   decisions: NoteItem[]
   actions: NoteItem[]
@@ -107,6 +133,28 @@ function toItem(raw: unknown, index: number, group: string): NoteItem {
   }
 }
 
+function toTopics(raw: unknown): Topic[] {
+  return list(raw).flatMap((entry, index) => {
+    const topic = (entry ?? {}) as Record<string, unknown>
+    const quote = (topic.quote ?? undefined) as Record<string, unknown> | undefined
+    const start = Number(topic.start)
+    const end = Number(topic.end)
+    if (!text(topic.title) || !Number.isFinite(start) || !Number.isFinite(end)) return []
+    return [
+      {
+        id: `t${index}`,
+        title: text(topic.title),
+        start,
+        end,
+        summary: text(topic.summary),
+        ...(quote && text(quote.text) && Number.isFinite(Number(quote.at))
+          ? { quote: { text: text(quote.text), at: Number(quote.at) } }
+          : {}),
+      },
+    ]
+  })
+}
+
 function toNotes(raw: unknown): Notes | undefined {
   if (!raw || typeof raw !== "object") return undefined
   const notes = raw as Record<string, unknown>
@@ -114,6 +162,7 @@ function toNotes(raw: unknown): Notes | undefined {
     list(notes[key]).map((entry, index) => toItem(entry, index, group))
   return {
     summary: text(notes.summary),
+    topics: toTopics(notes.topics),
     keyPoints: items("key_points", "p"),
     decisions: items("decisions", "d"),
     actions: items("action_items", "a"),
@@ -559,4 +608,25 @@ export function toMarkdown(meeting: Meeting) {
     return `## ${title}\n\n${body}`
   })
   return [`# ${meeting.title}`, `## Summary\n\n${notes.summary}`, ...sections].join("\n\n") + "\n"
+}
+
+/** The topic that holds `seconds`. */
+export const topicAt = (topics: Topic[], seconds: number) =>
+  topics.findLast((t) => t.start <= seconds) ?? topics[0]
+
+/** The notes' decisions, actions and open questions, each pinned to the first line it cites. */
+export function momentsOf(notes: Notes): Moment[] {
+  const pin = (kind: MomentKind, items: NoteItem[]): Moment[] =>
+    items.map((item) => ({
+      id: item.id,
+      kind,
+      text: item.text,
+      at: item.cites[0],
+      ...(item.owner ? { owner: item.owner } : {}),
+    }))
+  return [
+    ...pin("decision", notes.decisions),
+    ...pin("action", notes.actions),
+    ...pin("open", notes.questions),
+  ]
 }
