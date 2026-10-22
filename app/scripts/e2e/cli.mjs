@@ -389,15 +389,25 @@ const [command, ...rest] = args
 const logs = join(tmpdir(), "memento-e2e-logs")
 const started = []
 const up = async (url) => {
-  try {
-    return (await fetch(url, { signal: AbortSignal.timeout(1000) })).status < 500
-  } catch {
-    return false
+  // One server, both families: Vite without `--host` binds `::1` alone while a `localhost` that
+  // resolves to 127.0.0.1 never reaches it. Try each name a local server can be on, port kept, and
+  // answer the one that serves so the caller's URL names it.
+  const at = new URL(url)
+  for (const host of ["127.0.0.1", "localhost", "[::1]"]) {
+    try {
+      at.hostname = host
+      const response = await fetch(at, { signal: AbortSignal.timeout(1000) })
+      if (response.status < 500) return host
+    } catch {
+      // That family isn't answering; try the next.
+    }
   }
+  return null
 }
 async function serve(name, port, command, args, env = {}) {
-  const url = `http://localhost:${port}`
-  if (await up(`${url}${name === "app" ? "" : "/health"}`)) return url
+  const hosted = await up(`http://127.0.0.1:${port}${name === "app" ? "" : "/health"}`)
+  if (hosted) return `http://${hosted}:${port}`
+  const url = `http://127.0.0.1:${port}`
   mkdirSync(logs, { recursive: true })
   const log = openSync(join(logs, `${name}.log`), "w")
   const child = spawn(command, args, {
@@ -416,7 +426,9 @@ async function serve(name, port, command, args, env = {}) {
 }
 const serveApp = () =>
   appUrl ??
-  serve("app", APP_PORT, "pnpm", ["exec", "vite", "--port", `${APP_PORT}`, "--strictPort"])
+  // Bound to 127.0.0.1 so the URL every probe and flow uses reaches it whatever `localhost` means
+  // here (the e2e-testing skill's gotcha).
+  serve("app", APP_PORT, "pnpm", ["exec", "vite", "--port", `${APP_PORT}`, "--strictPort", "--host", "127.0.0.1"])
 const serveMock = (name) =>
   serve(`mock-${name}`, MOCKS[name].port, "node", ["scripts/mock-hermes.mjs"], MOCKS[name].env)
 function stopStarted() {
