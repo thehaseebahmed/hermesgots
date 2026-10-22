@@ -34,10 +34,8 @@ import { cn } from "@/lib/utils"
 import { useReveal } from "@/lib/reveal"
 import { isPlanApproval } from "@/lib/workspace"
 
-// The block pulls the renderer, zod and the library: a lazy chunk, the way the markdown renderer is.
 const OpenUIBlock = lazy(() => import("@/components/openui/openui-block"))
 
-/** One block of one reply, as the row draws it: where it sits, where it ends, and what it draws. */
 type RowBlock = {
   at: number
   end: number
@@ -56,13 +54,6 @@ type Part =
   | { kind: "clarify"; tool: ToolEvent }
   | { kind: "agent"; tool: ToolEvent }
 
-/**
- * The reply's spans: its `openui-lang` parts zipped to the fold's draws by `at`, over the stored
- * text so the offsets hold however much of the reply is revealed. An interface draws the fold's
- * resolved source (every patch that names its id already merged in), a patch or an orphan the
- * block's own body, and a part the fold has no entry for is dropped — its text stays text and draws
- * as the code the markdown renderer draws a fence as.
- */
 function rowBlocks(content: string, blocks: ThreadBlock[] | undefined, streaming: boolean) {
   const parts = openuiParts(content)
   const spans: RowBlock[] = []
@@ -104,7 +95,6 @@ function toParts(content: string, tools: ToolEvent[], start: number, spans: RowB
       } else parts.push({ kind: "media", at: from + part.at, paths: part.paths })
     }
   }
-  // A span's text is suppressed, never clipped into text: its place draws the block, not its fence.
   const pushText = (to: number) => {
     let from = cursor
     for (const span of spans) {
@@ -122,7 +112,6 @@ function toParts(content: string, tools: ToolEvent[], start: number, spans: RowB
   )
   for (const tool of sorted) {
     let at = tool.contentOffset ?? cursor
-    // A tool's offset can land inside a block's fence; it draws after the block, not within it.
     for (const span of spans) if (at >= span.at && at < span.end) at = Math.min(span.end, end)
     if (at > cursor) pushText(at)
     const last = parts.at(-1)

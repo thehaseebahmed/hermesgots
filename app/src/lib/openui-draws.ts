@@ -14,14 +14,12 @@ import type { ThreadBlock, ThreadRow } from "./openui-thread.ts"
 
 type Fold = typeof import("./openui-thread.ts").resolveInterfaces
 
-/** What the hook answers until the fold's chunk lands: nothing draws yet. */
 const EMPTY: Map<string, ThreadBlock[]> = new Map()
 
 export function useDraws(rows: ThreadRow[]): Map<string, ThreadBlock[]> {
   const [fold, setFold] = useState<Fold>()
   useEffect(() => {
     if (fold) return
-    // The fold reads assistant rows alone, so only those may ask for its module.
     if (!rows.some((row) => row.role === "assistant" && carriesBlock(row.content))) return
     void import("./openui-thread.ts").then(
       (module) => setFold(() => module.resolveInterfaces),

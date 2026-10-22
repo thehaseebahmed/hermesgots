@@ -328,7 +328,6 @@ export function ChatPage() {
       }
     />
   )
-  // What each row of the thread draws as an interface, folded once per thread state.
   const draws = useDraws(thread ?? NO_ROWS)
   // Only a run can be steered, and only on a Hermes that has the route.
   const [steerRoute, setSteerRoute] = useState<{ baseUrl: string; ok: boolean }>()

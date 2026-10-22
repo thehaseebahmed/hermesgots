@@ -42,7 +42,6 @@ const components: ComponentProps<typeof ReactMarkdown>["components"] = {
   pre: ({ children }) => <>{children}</>,
   img: ({ src, alt }) => <MediaImage src={typeof src === "string" ? src : ""} alt={alt} />,
   code({ className, children }) {
-    // A fence's language can carry a hyphen (`openui-lang`), so the label keeps the whole word.
     const match = /language-([\w-]+)/.exec(className ?? "")
     const text = String(children ?? "")
     if (match || text.includes("\n")) {

@@ -33,14 +33,12 @@ function host(transcript: unknown[] = []) {
   }) as unknown as typeof fetch
 }
 
-/** The fold's chunk, the block's, and the renderer that draws a fallback's code. */
 async function warm() {
   await import("@/lib/openui-thread.ts")
   await import("@/components/openui/openui-block")
   await import("@/components/chat/markdown-renderer")
 }
 
-/** The block's fence around its body, the wire format the model writes. */
 const block = (body: string) => ["```openui-lang", body, "```"].join("\n")
 
 const ask = (content: string): Message => ({
@@ -69,13 +67,8 @@ const replyRow = (needle: string) =>
   )
 const codeOf = (row: Element | undefined) => row?.querySelector("div[data-md-code]")
 const cardOf = (row: Element | undefined) => row?.querySelector("[data-slot=card]")
-/**
- * A code block's language label: the label slot carries the fence's own language, so a fence the
- * model wrote as `openui-lang` says exactly that.
- */
 const labelOf = (code: Element) => code.querySelector("span")?.textContent
 
-/** Polls until `check` holds, letting every lazy chunk, live read and typing frame land. */
 async function drawn(check: () => boolean, what: string) {
   await until(async () => {
     await settle()
@@ -83,7 +76,6 @@ async function drawn(check: () => boolean, what: string) {
   }, what)
 }
 
-/** What the console's verbose level says about fallbacks, counted for one test. */
 function watch() {
   const notes: string[] = []
   const original = console.debug
@@ -112,7 +104,6 @@ async function screen(messages: Message[], body: () => Promise<void>) {
   return seen
 }
 
-/** A stored reply changing the way a stream changes it: one write, one live read. */
 async function store(patch: Partial<Message>) {
   await act(async () => {
     await db.messages.update("live", patch)
@@ -306,9 +297,6 @@ test("a streaming reply shows nothing until a root parses, then the interface fi
   const control = `A card first.\n\n${block(["root = Stack([c])", 'c = Card("Control")'].join("\n"))}`
   const live = reply("live", "On it.", { createdAt: 3 })
   const seen = await screen([ask("Draw it live."), reply("control", control), live], async () => {
-    // The control's card is the signal that both lazy chunks have landed and the fold has run. The
-    // reply turns streaming in one stored write, the way a stream arrives — a reply left streaming
-    // while this device is away is reconciled to stopped, so it can never start that way here.
     await drawn(() => text().includes("Control"), "the control interface")
     await store({ content: "On it.\n\n```openui-lang\nroot =", status: "streaming" })
     const row = () => replyRow("On it.")
