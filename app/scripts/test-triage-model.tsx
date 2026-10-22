@@ -138,6 +138,14 @@ test("a host that withholds the override says so", async () => {
   })
 })
 
+test("an info icon names what the model is for", async () => {
+  await seedSettings()
+  globalThis.fetch = host().fetch
+  await mount(<TriageModelSetting profile={botProfile("triage-hint")} />, async () => {
+    assert.ok(find('[aria-label="About the triage model"]'), "the info icon sits by the label")
+  })
+})
+
 test("a host that allows it shows no warning", async () => {
   await seedSettings()
   globalThis.fetch = host().fetch
