@@ -301,6 +301,14 @@ _Avoid_: voice input, speech-to-text, transcription, STT, voice typing
 The strip that holds the composer's place during a dictation: the words heard so far, how loud the room is, and Stop, Send and Cancel.
 _Avoid_: recorder, overlay, dictation sheet, mic sheet
 
+**Take**:
+One dictation heard by its bot's host while it is spoken, from the call that opens it to the answer that closes it. One take at a time per bot.
+_Avoid_: session, stream, job, recording
+
+**Slice**:
+The audio a take sends in one request: about 250 ms of its one recording, carrying the pause the app heard in it.
+_Avoid_: chunk, piece, frame, part
+
 **Phrase**:
 One stretch of a dictation between two pauses: the unit that finishes, is cleaned up, and stops changing.
 _Avoid_: chunk, piece, segment, utterance
