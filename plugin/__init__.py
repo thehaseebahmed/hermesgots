@@ -2161,20 +2161,19 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if denied is not None:
             return denied
         try:
-            n, start = int(request.query.get("n", "")), int(request.query.get("start", "0"))
+            n = int(request.query.get("n", ""))
         except ValueError:
-            return _error(web, "n and start must be whole numbers.", 400)
+            return _error(web, "n must be a whole number.", 400)
         try:
             data = await request.read()
         except web.HTTPRequestEntityTooLarge:
-            return _error(web, "The part is too large.", 413)
+            return _error(web, "The chunk is too large.", 413)
         try:
             found = await asyncio.to_thread(
                 meetings.add_part,
                 store_path(),
                 request.match_info["meeting_id"],
                 n,
-                start,
                 data,
                 request.headers.get("content-type"),
             )

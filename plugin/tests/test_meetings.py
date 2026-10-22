@@ -1,9 +1,9 @@
-"""Tests for meetings (``plugin/meetings.py``): uploads in parts, their transcription on the host and
-the notes written from the transcript.
+"""Tests for meetings (``plugin/meetings.py``): a recording uploaded in chunks, joined and cut into
+windows on the host, their transcription and the notes written from the transcript.
 
-Hermes's transcription module isn't on a test run's path, so each test stands in for it (as
-``test_dictation`` does) and asserts this module's own rules: part limits, meeting-level timestamps,
-resuming, and what a failure leaves behind.
+Hermes's transcription module and the decoder aren't on a test run's path, so each test stands in
+for them (as ``test_dictation`` does) and asserts this module's own rules: chunk limits,
+meeting-level timestamps, resuming, and what a failure leaves behind.
 """
 
 from __future__ import annotations
@@ -29,8 +29,8 @@ def with_model(tt, per_part):
     calls = []
 
     class Model:
-        def transcribe(self, path, **kwargs):
-            calls.append({"path": path, **kwargs})
+        def transcribe(self, window, **kwargs):
+            calls.append({"window": window, **kwargs})
             return iter(per_part.pop(0)), types.SimpleNamespace()
 
     tt._get_or_load_local_model = lambda name, cfg: Model()
@@ -69,14 +69,18 @@ class MeetingsTest(unittest.TestCase):
         self.addCleanup(self.dir.cleanup)
         self.path = Path(self.dir.name) / "memento" / "memento.db"
 
-    def audio(self, parts=2):
+    def audio(self, chunks=2, seconds=400):
+        """A host that decodes any recording to ``seconds`` of silence: two 5-minute windows by default."""
         tt, patch = hermes()
         patch.start()
         self.addCleanup(patch.stop)
-        return tt, meetings.create(self.path, None, "Standup", None, parts)
+        decoder = mock.patch.object(meetings, "_decode", lambda file: bytes(seconds * meetings.SAMPLE_RATE))
+        decoder.start()
+        self.addCleanup(decoder.stop)
+        return tt, meetings.create(self.path, None, "Standup", None, chunks)
 
-    def upload(self, meeting_id, n, start, data=b"audio"):
-        return meetings.add_part(self.path, meeting_id, n, start, data, "audio/webm")
+    def upload(self, meeting_id, n, data=b"audio"):
+        return meetings.add_part(self.path, meeting_id, n, data, "audio/webm")
 
     def test_a_transcript_goes_straight_to_the_notes(self):
         found = meetings.create(
@@ -92,13 +96,28 @@ class MeetingsTest(unittest.TestCase):
             with self.assertRaises(meetings.MeetingError):
                 meetings.create(self.path, None, "T", None, None, bad)
 
-    def test_the_length_limit_is_three_hours(self):
+    def test_the_size_limit_is_a_chunk_count(self):
         _, patch = hermes()
         with patch:
-            meetings.create(self.path, None, "T", None, meetings.MAX_PARTS)
+            meetings.create(self.path, None, "T", None, meetings.MAX_CHUNKS)
             with self.assertRaises(meetings.MeetingError) as raised:
-                meetings.create(self.path, None, "T", None, meetings.MAX_PARTS + 1)
+                meetings.create(self.path, None, "T", None, meetings.MAX_CHUNKS + 1)
         self.assertEqual(raised.exception.status, 413)
+
+    def test_a_recording_over_three_hours_fails_once_decoded(self):
+        tt, found = self.audio(1, seconds=meetings.MAX_SECONDS + 1)
+        self.upload(found["id"], 0)
+        meetings.finish(self.path, found["id"])
+        with self.assertRaisesRegex(meetings.MeetingError, "longer than 3 hours"):
+            meetings._transcribe(self.path, found["id"])
+
+    def test_a_recording_the_decoder_cannot_read_fails_with_why(self):
+        tt, found = self.audio(1)
+        self.upload(found["id"], 0)
+        meetings.finish(self.path, found["id"])
+        with mock.patch.object(meetings, "_decode", side_effect=ValueError("no moov atom")):
+            with self.assertRaisesRegex(meetings.MeetingError, "couldn't be read: no moov atom"):
+                meetings._transcribe(self.path, found["id"])
 
     def test_a_host_that_cannot_transcribe_refuses_audio(self):
         _, patch = hermes(is_stt_enabled=lambda cfg: False)
@@ -106,34 +125,34 @@ class MeetingsTest(unittest.TestCase):
             meetings.create(self.path, None, "T", None, 1)
         self.assertEqual(raised.exception.status, 501)
 
-    def test_finish_waits_for_every_part(self):
+    def test_finish_waits_for_every_chunk(self):
         _, found = self.audio(2)
-        self.upload(found["id"], 0, 0)
-        with self.assertRaisesRegex(meetings.MeetingError, "1 of the 2 parts"):
+        self.upload(found["id"], 0)
+        with self.assertRaisesRegex(meetings.MeetingError, "1 of the 2 chunks"):
             meetings.finish(self.path, found["id"])
-        self.upload(found["id"], 1, 300)
+        self.upload(found["id"], 1)
         self.assertEqual(meetings.finish(self.path, found["id"])["stage"], "transcribing")
 
-    def test_a_part_outside_the_meeting_is_refused(self):
+    def test_a_chunk_outside_the_meeting_is_refused(self):
         _, found = self.audio(1)
         for n in (-1, 1):
             with self.assertRaises(meetings.MeetingError):
-                self.upload(found["id"], n, 0)
+                self.upload(found["id"], n)
         with self.assertRaises(meetings.MeetingError):
-            meetings.add_part(self.path, found["id"], 0, 0, b"", "audio/webm")
+            meetings.add_part(self.path, found["id"], 0, b"", "audio/webm")
 
-    def test_a_part_sent_again_replaces_the_first(self):
+    def test_a_chunk_sent_again_replaces_the_first(self):
         _, found = self.audio(1)
-        self.upload(found["id"], 0, 0, b"one")
-        self.upload(found["id"], 0, 0, b"two")
+        self.upload(found["id"], 0, b"one")
+        self.upload(found["id"], 0, b"two")
         files = list(meetings.folder(self.path, found["id"]).glob("part-0.*"))
         self.assertEqual([f.read_bytes() for f in files], [b"two"])
 
     def test_segments_carry_the_meeting_level_second(self):
         tt, found = self.audio(2)
         with_model(tt, [[Segment(1.2, " Hello "), Segment(8, "there")], [Segment(3, "Back")]])
-        self.upload(found["id"], 0, 0)
-        self.upload(found["id"], 1, 300)
+        self.upload(found["id"], 0)
+        self.upload(found["id"], 1)
         meetings.finish(self.path, found["id"])
         meetings._transcribe(self.path, found["id"])
         done = meetings.meeting(self.path, found["id"])
@@ -145,23 +164,43 @@ class MeetingsTest(unittest.TestCase):
         self.assertEqual(done["duration"], 303)
         self.assertFalse(meetings.folder(self.path, found["id"]).exists())
 
+    def test_the_chunks_are_joined_in_order_and_cut_into_windows(self):
+        tt, found = self.audio(2, seconds=700)
+        seen = {}
+
+        def decode(file):
+            seen["bytes"] = Path(file).read_bytes()
+            seen["name"] = Path(file).name
+            return bytes(700 * meetings.SAMPLE_RATE)
+
+        with_model(tt, [[], [], []])
+        self.upload(found["id"], 1, b"-two")
+        self.upload(found["id"], 0, b"one")
+        meetings.finish(self.path, found["id"])
+        with mock.patch.object(meetings, "_decode", decode), self.assertRaises(meetings.MeetingError):
+            meetings._transcribe(self.path, found["id"])
+        self.assertEqual(seen, {"bytes": b"one-two", "name": "audio.webm"})
+        windows = meetings.meeting(self.path, found["id"])
+        self.assertEqual((windows["parts"], windows["parts_done"]), (3, 3))
+        self.assertEqual([len(call["window"]) for call in tt.calls], [300 * 16000, 300 * 16000, 100 * 16000])
+
     def test_each_part_is_prompted_with_the_text_before_it(self):
         tt, found = self.audio(2)
         with_model(tt, [[Segment(0, "We ship Friday")], [Segment(0, "ok")]])
-        self.upload(found["id"], 0, 0)
-        self.upload(found["id"], 1, 300)
+        self.upload(found["id"], 0)
+        self.upload(found["id"], 1)
         meetings.finish(self.path, found["id"])
         meetings._transcribe(self.path, found["id"])
         self.assertIsNone(tt.calls[0]["initial_prompt"])
         self.assertEqual(tt.calls[1]["initial_prompt"], "We ship Friday")
 
-    def test_a_part_is_one_segment_when_the_model_cannot_be_reached(self):
-        tt, found = self.audio(1)
+    def test_a_window_is_one_segment_when_the_model_cannot_be_reached(self):
+        tt, found = self.audio(1, seconds=100)
         tt._get_or_load_local_model = mock.Mock(side_effect=RuntimeError("no model"))
-        self.upload(found["id"], 0, 600)
+        self.upload(found["id"], 0)
         meetings.finish(self.path, found["id"])
         meetings._transcribe(self.path, found["id"])
-        self.assertEqual(meetings.meeting(self.path, found["id"])["transcript"], [{"at": 600, "text": "Hello there."}])
+        self.assertEqual(meetings.meeting(self.path, found["id"])["transcript"], [{"at": 0, "text": "Hello there."}])
 
     def test_a_failed_part_keeps_the_ones_done_and_retry_resumes(self):
         tt, found = self.audio(2)
@@ -179,8 +218,8 @@ class MeetingsTest(unittest.TestCase):
         results = iter([{"success": False, "error": "boom"}])
         real = tt._transcribe_local
         tt._transcribe_local = lambda path, model, prompt=None: next(results, None) or real(path, model, prompt=prompt)
-        self.upload(found["id"], 0, 0)
-        self.upload(found["id"], 1, 300)
+        self.upload(found["id"], 0)
+        self.upload(found["id"], 1)
         meetings.finish(self.path, found["id"])
         with self.assertRaisesRegex(Exception, "boom"):
             meetings._transcribe(self.path, found["id"])
@@ -193,9 +232,9 @@ class MeetingsTest(unittest.TestCase):
         self.assertEqual([line["text"] for line in done["transcript"]], ["One", "Two"])
 
     def test_a_recording_nobody_spoke_in_fails(self):
-        tt, found = self.audio(1)
+        tt, found = self.audio(1, seconds=100)
         with_model(tt, [[]])
-        self.upload(found["id"], 0, 0)
+        self.upload(found["id"], 0)
         meetings.finish(self.path, found["id"])
         with self.assertRaisesRegex(meetings.MeetingError, "Nobody could be heard"):
             meetings._transcribe(self.path, found["id"])
@@ -207,7 +246,7 @@ class MeetingsTest(unittest.TestCase):
 
     def test_resume_continues_meetings_that_were_transcribing(self):
         _, found = self.audio(1)
-        self.upload(found["id"], 0, 0)
+        self.upload(found["id"], 0)
         meetings.finish(self.path, found["id"])
         with mock.patch.object(meetings, "spawn") as spawn:
             meetings.resume(self.path)
@@ -216,7 +255,7 @@ class MeetingsTest(unittest.TestCase):
 
     def test_remove_deletes_the_meeting_and_its_audio(self):
         _, found = self.audio(1)
-        self.upload(found["id"], 0, 0)
+        self.upload(found["id"], 0)
         self.assertIsNotNone(meetings.remove(self.path, found["id"]))
         self.assertIsNone(meetings.meeting(self.path, found["id"]))
         self.assertFalse(meetings.folder(self.path, found["id"]).exists())
