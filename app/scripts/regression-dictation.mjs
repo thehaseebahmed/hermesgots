@@ -65,6 +65,9 @@ function speech() {
 }
 
 const clips = async () => (await (await fetch(`${mock}/__mock/dictation`)).json()).clips
+/** The clips a streaming host was sent: its own mock, since the two hosts keep separate lists. */
+const streamClips = async () =>
+  (await (await fetch(`${streamMock}/__mock/dictation`)).json()).clips
 
 const PHONE = { width: 390, height: 844 }
 
@@ -365,6 +368,10 @@ try {
         0,
         "the filler the host heard is not what the user reads",
       )
+      assert.equal(
+        await page.evaluate(async () => (await import("/src/lib/db.ts")).db.dictations.count()),
+        0,
+        "a take that ended keeps nothing on the device",      )
       await shot(page, `${label}-11-heard`)
       // Read at two moments: a phrase the bar has shown keeps its text — it arrives tidied and is
       // cleaned once — so the words still open are the only thing that changes under the reader.
@@ -403,6 +410,53 @@ try {
       await page.getByRole("button", { name: "Cancel" }).click()
       await mic.waitFor()
       assert.equal(await composer.inputValue(), "")
+      await page.close()
+    }
+
+    // A take the app was killed in the middle of is kept on the device, offered again after the
+    // reload, and asked for whole through the batch route — which is all a host that can't stream
+    // needs — then put where it began, with the draft that was around it.
+    {
+      const page = await open(streamMock, PHONE)
+      await page.waitForLoadState("networkidle").catch(() => {})
+      const composer = page.getByRole("textbox").last()
+      const mic = page.getByRole("button", { name: "Voice", exact: true })
+      await composer.fill("Before after")
+      // After "Before ": where the take begins, and so where its words go when it comes back.
+      await composer.evaluate((field) => field.setSelectionRange(7, 7))
+      const before = (await streamClips()).length
+      await mic.click()
+      await page.getByRole("region", { name: "Dictation" }).waitFor()
+      // The slices are kept on the device as they are made, which is what a reload must find.
+      for (let kept = false, end = Date.now() + 10_000; !kept; await page.waitForTimeout(100)) {
+        kept = await page.evaluate(async () => {
+          const { db } = await import("/src/lib/db.ts")
+          const rows = await db.dictations.toArray()
+          return rows.some(
+            (row) => row.kind === "stream" && row.pieces.some((piece) => piece.blob.size > 0),
+          )
+        })
+        assert.ok(kept || Date.now() < end, "the take is kept on the device")
+      }
+      await page.reload()
+      await page.getByText("hasn't been transcribed yet").waitFor()
+      await shot(page, "phone-light-12-kept-take")
+      await page.getByRole("button", { name: "Retry" }).click()
+      await page.getByRole("button", { name: "Voice", exact: true }).waitFor({ timeout: 15_000 })
+      assert.equal(
+        await page.getByRole("textbox").last().inputValue(),
+        `Before ${SENTENCE} after`,
+        "the take's words go where it began, with the draft around them",
+      )
+      const asked = (await streamClips()).slice(before)
+      assert.equal(asked.length, 1, "a restored take is asked for whole, not slice by slice")
+      assert.match(asked[0].type, /^audio\/webm/, "the slices went as the one recording they were")
+      assert.equal(asked[0].context ?? null, null, "nothing was heard before it")
+      assert.equal(
+        await page.evaluate(async () => (await import("/src/lib/db.ts")).db.dictations.count()),
+        0,
+        "its text is in, so it is not kept again",
+      )
       await page.close()
     }
   }
