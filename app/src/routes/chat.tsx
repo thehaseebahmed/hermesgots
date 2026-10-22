@@ -636,6 +636,12 @@ export function ChatPage() {
     }
   }
 
+  // Main's messages are triaged even while its reply runs, so one for another thread goes there at once.
+  const sendMidReply =
+    (steer: boolean) =>
+    (text: string, attachments: Attachment[] = []) =>
+      sendFromMain(id!, text, attachments, { steer }).then(announceMove)
+
   const send = async (text: string, attachments: Attachment[] = []) => {
     try {
       let conversationId = id
@@ -651,7 +657,8 @@ export function ChatPage() {
       }
       if (session?.draftAt) void updateConversation(conversationId, { draftAt: undefined })
       // Main's messages are triaged by the host first; a thread and a new chat never are.
-      if (conversation?.main) announceMove(await sendFromMain(conversationId, text, attachments))
+      if (conversation?.main)
+        await announceMove(await sendFromMain(conversationId, text, attachments))
       else await sendMessage(conversationId, text, { attachments })
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't send your message.")
@@ -947,12 +954,10 @@ export function ChatPage() {
             draftKey={draftKey(id)}
             onDraft={onDraft}
             onSend={send}
-            // Main's messages are triaged even while its reply runs, so one for another thread
-            // goes there at once.
             onQueue={(text, attachments) =>
               id
                 ? conversation?.main
-                  ? sendFromMain(id, text, attachments, { steer: false }).then(announceMove)
+                  ? sendMidReply(false)(text, attachments)
                   : queueMessage(id, text, attachments)
                 : send(text, attachments)
             }
@@ -961,7 +966,7 @@ export function ChatPage() {
             onSteer={(text) =>
               id
                 ? conversation?.main
-                  ? sendFromMain(id, text, [], { steer: true }).then(announceMove)
+                  ? sendMidReply(true)(text)
                   : steerText(id, text)
                 : send(text)
             }

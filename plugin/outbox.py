@@ -475,7 +475,9 @@ async def steer(
         await asyncio.to_thread(put_back, path, row)
         return None, ("Only text can steer a reply.", 409)
     try:
-        await post(adapter, profile, f"/v1/runs/{run_id}/steer", {"input": row["text"]}, authorization=authorization)
+        await post(
+            adapter, profile, f"/v1/runs/{run_id}/steer", {"input": row["text"]}, authorization=authorization
+        )
     except StartError as error:
         await asyncio.to_thread(put_back, path, row)
         return None, (str(error), 409 if error.permanent else 502)

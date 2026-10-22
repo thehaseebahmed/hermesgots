@@ -1259,11 +1259,11 @@ export async function sendFromMain(
     (await hostQueue(host.config)) &&
     (await hasPluginFeature(host.config, "triage"))
   if (!host || !triaged) {
-    if (content && (routing.has(conversationId) || controllers.has(conversationId))) {
-      if (options.steer && !attachments.length && !routing.has(conversationId))
-        await steerText(conversationId, content)
-      else await queueMessage(conversationId, text, attachments)
-    } else await sendMessage(conversationId, text, { attachments })
+    if (routing.has(conversationId) && content)
+      await queueMessage(conversationId, text, attachments)
+    else if (content && controllers.has(conversationId))
+      await steerOrQueue(conversationId, content, attachments, options.steer)
+    else await sendMessage(conversationId, text, { attachments })
     return undefined
   }
   routing.add(conversationId)
@@ -1315,8 +1315,7 @@ export async function sendFromMain(
     if (controllers.has(conversationId)) {
       // A reply started while the host decided: this goes after it.
       await db.messages.delete(held.id)
-      if (options.steer && !sent.length) await steerText(conversationId, content)
-      else await queueMessage(conversationId, content, sent)
+      await steerOrQueue(conversationId, content, sent, options.steer)
     } else {
       await sendMessage(conversationId, text, { queuedId: held.id, attachments: sent })
     }
@@ -1331,6 +1330,18 @@ export async function sendFromMain(
         .filter((m) => m.status === "routing")
         .delete()
   }
+}
+
+/** A message sent mid-reply: a steer when asked to and it is text alone, else queued. */
+function steerOrQueue(
+  conversationId: string,
+  content: string,
+  attachments: Attachment[],
+  steer?: boolean,
+) {
+  return steer && !attachments.length
+    ? steerText(conversationId, content)
+    : queueMessage(conversationId, content, attachments)
 }
 
 /** Chats whose Main message is being triaged on this page. */
