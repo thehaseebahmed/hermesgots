@@ -381,22 +381,28 @@ test("an open block in a reply that has stopped draws as the fenced source", asy
 const series = (name: string, points: [string, number][]) =>
   `{ name: "${name}", points: [${points.map(([x, y]) => `{ x: "${x}", y: ${y} }`).join(", ")}] }`
 
-const chart = (kind: string, list: string, ...rest: string[]) =>
-  `c = Chart("${kind}", [${list}]${rest.length ? `, ${rest.map((r) => `"${r}"`).join(", ")}` : ""})`
+const chartCall = (kind: string, list: string, ...labels: string[]) =>
+  `Chart("${kind}", [${list}]${labels.map((label) => `, "${label}"`).join("")})`
+
+const chart = (kind: string, list: string, ...labels: string[]) =>
+  `c = ${chartCall(kind, list, ...labels)}`
 
 const SUMMARY = "Sales rose from 10 in Q1 to 25 in Q2."
 
 const surfaceOf = (row: Element | undefined) => row?.querySelector("[role=img]")
 
 /**
- * jsdom has no layout, so Recharts measures a box of nothing and draws nothing. The chart's own box
- * reports the width the screen under test gives it; every other element keeps jsdom's empty rect.
+ * jsdom has no layout, so Recharts measures a box of nothing and draws nothing. The elements
+ * `mine` picks report the width the screen under test gives them; every other element keeps
+ * jsdom's empty rect.
  */
-function chartBox(width: number) {
+const insideChart = (element: Element) => Boolean(element.closest("[data-slot=chart]"))
+
+function chartBox(width: number, mine = insideChart) {
   const original = Element.prototype.getBoundingClientRect
   Element.prototype.getBoundingClientRect = function (this: Element) {
     const box = original.call(this)
-    if (!this.closest("[data-slot=chart]")) return box
+    if (!mine(this)) return box
     return { ...box, width, height: 224, right: width, bottom: 224, x: 0, y: 0 } as DOMRect
   }
   return () => {
@@ -409,17 +415,8 @@ function chartBox(width: number) {
  * measured at the chart's own, the plot area would be left with none and no bar or curve would
  * draw at all.
  */
-function measuredChart(width: number) {
-  const original = Element.prototype.getBoundingClientRect
-  Element.prototype.getBoundingClientRect = function (this: Element) {
-    const box = original.call(this)
-    if (!this.matches("[data-slot=chart], .recharts-responsive-container")) return box
-    return { ...box, width, height: 224, right: width, bottom: 224, x: 0, y: 0 } as DOMRect
-  }
-  return () => {
-    Element.prototype.getBoundingClientRect = original
-  }
-}
+const measuredChart = (width: number) =>
+  chartBox(width, (element) => element.matches("[data-slot=chart], .recharts-responsive-container"))
 
 const SCROLLER = /overflow-(x-|y-)?(auto|scroll)/
 
@@ -622,7 +619,7 @@ test("a bar is drawn with rounded corners, a line as a curve, an area with a fai
     ["Q3", 18],
   ])
   const marks = (kind: string, summary: string) =>
-    `${kind} = Chart("${kind}", [${points}], "", "", "${summary}")`
+    `${kind} = ${chartCall(kind, points, "", "", summary)}`
   const source = [
     "# id: marks",
     "root = Stack([bar, line, area])",

@@ -50,9 +50,7 @@ function configOf(kind: ChartProps["kind"], columns: Column[]): ChartConfig {
   return Object.fromEntries(
     columns.map((column, i) => [
       column.key,
-      kind === "pie"
-        ? { label: column.label }
-        : { label: column.label, theme: { light: colour(i), dark: colour(i) } },
+      kind === "pie" ? { label: column.label } : { label: column.label, color: colour(i) },
     ]),
   )
 }
@@ -62,8 +60,7 @@ function configOf(kind: ChartProps["kind"], columns: Column[]): ChartConfig {
  * missing point stays null and draws as a gap rather than a drop to zero.
  */
 function rowsOf(series: ChartSeries[], columns: Column[]) {
-  const xs: string[] = []
-  for (const s of series) for (const p of s.points) if (!xs.includes(p.x)) xs.push(p.x)
+  const xs = [...new Set(series.flatMap((s) => s.points.map((p) => p.x)))]
   return xs.map((x) => {
     const row: Record<string, string | number | null> = { x }
     series.forEach((s, i) => (row[columns[i].key] = s.points.find((p) => p.x === x)?.y ?? null))
