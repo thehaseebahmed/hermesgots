@@ -35,6 +35,8 @@ import type { Attachment } from "@/lib/db"
 import { flushDrafts, loadDraft, saveDraft, useDraftText } from "@/lib/drafts"
 import type { HermesConfig } from "@/lib/hermes"
 import {
+  SEND_WAIT_MS,
+  STOP_WAIT_MS,
   canRecord,
   joinText,
   keyboardClick,
@@ -351,7 +353,10 @@ export function Composer({
 
   const endDictation = async (send: boolean) => {
     dictationSends.current = send
-    const heard = await dictation.finish()
+    // A Send waits short for the tail and sends what the bar already has when it misses; a Stop is
+    // the user asking for the whole take, so it waits longer. Neither holds the composer past its
+    // wait: a wedged host ends in what the take already heard (ADR 0016).
+    const heard = await dictation.finish(send ? SEND_WAIT_MS : STOP_WAIT_MS)
     if (heard) placeDictation(heard)
   }
 

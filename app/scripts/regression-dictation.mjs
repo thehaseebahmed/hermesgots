@@ -14,6 +14,9 @@ const offMock = process.env.OFF_MOCK_URL
 const streamMock = process.env.STREAM_MOCK_URL
 const shots = process.env.SHOTS_DIR
 const SENTENCE = "Let's ship the dictation feature today."
+// The whole take the streaming mock hears and then closes at Stop: the phrase it tidied, and the
+// tail phrase its cleanup left as it heard it.
+const TAKE = "Let us ship 25 things. and then two more items"
 // Long enough for the stop a dead recorder never sends (STOP_MS) plus the state to render.
 const FAILED_MS = 2500
 const fakeMic = ["--no-sandbox", "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"]
@@ -66,8 +69,9 @@ function speech() {
 
 const clips = async () => (await (await fetch(`${mock}/__mock/dictation`)).json()).clips
 /** The clips a streaming host was sent: its own mock, since the two hosts keep separate lists. */
-const streamClips = async () =>
-  (await (await fetch(`${streamMock}/__mock/dictation`)).json()).clips
+const streamClips = async () => (await (await fetch(`${streamMock}/__mock/dictation`)).json()).clips
+/** The takes a streaming host holds: one it has stopped or cancelled is no longer there. */
+const takeState = async () => await (await fetch(`${streamMock}/__mock/dictation-take`)).json()
 
 const PHONE = { width: 390, height: 844 }
 
@@ -197,12 +201,18 @@ try {
     const before = (await clips()).length
     await page.getByRole("button", { name: "Voice", exact: true }).click()
     await page.getByRole("button", { name: "Stop" }).waitFor()
-    // How long this recording runs: the fake microphone speaks three phrases, and two of them are cut
-    // and sent before Stop, the third with it.
-    await page.waitForTimeout(19_000)
+    // The fake microphone plays its file in real time, so where the take begins in it moves with the
+    // machine: wait for the second piece to be cut and sent rather than for a wall-clock moment.
+    for (let end = Date.now() + 30_000; (await clips()).length - before < 2;) {
+      assert.ok(Date.now() < end, "two pieces were cut at the pauses before Stop")
+      await page.waitForTimeout(100)
+    }
     const sent = (await clips()).slice(before)
     assert.equal(sent.length, 2, "two pieces sent before Stop")
     assert.equal(sent[1].context, SENTENCE, "the second piece carries on from the first")
+    // A recorder flushes its first chunk a second in, so let the third phrase's piece hold some audio
+    // before Stop closes it: the piece still open is the one that goes with Stop.
+    await page.waitForTimeout(1500)
     await page.getByRole("button", { name: "Stop" }).click()
     await page.getByRole("button", { name: "Voice", exact: true }).waitFor()
     const all = (await clips()).slice(before)
@@ -371,7 +381,8 @@ try {
       assert.equal(
         await page.evaluate(async () => (await import("/src/lib/db.ts")).db.dictations.count()),
         0,
-        "a take that ended keeps nothing on the device",      )
+        "a take that ended keeps nothing on the device",
+      )
       await shot(page, `${label}-11-heard`)
       // Read at two moments: a phrase the bar has shown keeps its text — it arrives tidied and is
       // cleaned once — so the words still open are the only thing that changes under the reader.
@@ -402,7 +413,7 @@ try {
       assert.ok(heard.slices.length > 1, "the take was sent slice by slice")
       assert.equal(heard.peak, 1, "one slice in flight at a time")
 
-      // Cancelled: nothing is inserted, and the mic is back.
+      // Cancelled: nothing is inserted, nothing is kept, and the mic is back.
       await composer.fill("")
       await mic.click()
       await page.getByRole("button", { name: "Stop" }).waitFor()
@@ -410,6 +421,28 @@ try {
       await page.getByRole("button", { name: "Cancel" }).click()
       await mic.waitFor()
       assert.equal(await composer.inputValue(), "")
+      assert.deepEqual((await takeState()).takes, [], "a cancelled take is dropped on the host")
+      assert.equal(
+        await page.evaluate(async () => (await import("/src/lib/db.ts")).db.dictations.count()),
+        0,
+        "a cancelled take keeps nothing on the device",
+      )
+
+      // Send mid-take: the tail is waited for, and the take goes out as one message.
+      await mic.click()
+      await bar.getByText("Let us ship 25 things.").waitFor({ timeout: 15_000 })
+      await bar.getByText("and then two more items").waitFor({ timeout: 15_000 })
+      await shot(page, `${label}-13-sending`)
+      await page.getByRole("button", { name: "Send" }).click()
+      await page.getByText(TAKE).first().waitFor({ timeout: 15_000 })
+      await mic.waitFor({ timeout: 15_000 })
+      assert.equal(
+        await page.getByRole("textbox").last().inputValue(),
+        "",
+        "the take went out as the message, not into the field as well",
+      )
+      assert.deepEqual((await takeState()).takes, [], "the send finished the take on the host")
+      await shot(page, `${label}-14-sent`)
       await page.close()
     }
 

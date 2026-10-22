@@ -31,7 +31,12 @@ export interface DictationTake {
   anchor: () => number | null
   /** `caret` is where the field's caret was, kept with the take so a restore can put it back. */
   start: (caret?: number | null) => Promise<void>
-  finish: () => Promise<string | null>
+  /**
+   * Ends the take and answers what to put in the field. `waitMs` is how long the tail is waited for
+   * before the take is abandoned to what it already has: a Send waits short and a Stop longer
+   * (`SEND_WAIT_MS` / `STOP_WAIT_MS`), so a slow host never holds the composer.
+   */
+  finish: (waitMs?: number) => Promise<string | null>
   retry: () => Promise<string | null>
   cancel: () => void
 }

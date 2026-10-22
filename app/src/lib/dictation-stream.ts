@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react"
 
+import { connectionKey } from "@/lib/connection"
 import {
   BARS,
   MAX_MS,
@@ -19,16 +20,20 @@ import {
   SILENT_MS,
   STOPPED,
   STOP_MS,
+  STOP_WAIT_MS,
   TAKEN,
+  TAKE_RUNNING,
   canRecord,
   keptKeeper,
   keptText,
   micError,
   readKept,
   recordingType,
+  within,
   type DictationStatus,
 } from "@/lib/dictation"
 import { RESTORED, type Keeper } from "@/lib/dictation-kept"
+import { holdTake, releaseTake } from "@/lib/dictation-lock"
 import {
   EMPTY_TRANSCRIPT,
   hear,
@@ -55,8 +60,6 @@ const SLICE_MS = 250
 const PHRASE_PAUSE_MS = 700
 /** A cold host loads, or first downloads, its model inside the start call, as a clip did. */
 const START_MS = 120_000
-/** The slices still waiting when Stop lands are sent before the tail is asked for. */
-const DRAIN_MS = 10_000
 const CANCEL_MS = 5_000
 const TOO_LONG = "The bot took too long to hear the dictation."
 
@@ -66,6 +69,10 @@ interface Slice {
 }
 
 interface TakeSession {
+  /** The profile this take holds: one take at a time is one per profile. */
+  profile: string
+  /** The profile's microphone, held from the start of the take to its end. */
+  lock: symbol | null
   /** The composer's draft key: the take's audio is kept on the device under it. */
   key?: string
   /** Where the caret was when the take began, so a kept take lands where it was left. */
@@ -74,6 +81,10 @@ interface TakeSession {
   take: string | null
   /** Resolves when the take opened or failed, so Stop can wait for a cold host instead of losing it. */
   asking: Promise<void>
+  /** The tail's request, so a Cancel during it drops the answer rather than reading it. */
+  ending: AbortController | null
+  /** The ending in flight: a second Stop (or a Send behind one) does nothing more. */
+  finishing: Promise<string | null> | null
   stream: MediaStream | null
   recorder: MediaRecorder | null
   audio?: AudioContext
@@ -105,15 +116,20 @@ interface TakeSession {
 }
 
 function newTake(
+  profile: string,
   key: string | undefined,
   caret?: number,
   kept: DictationPiece[] = [],
 ): TakeSession {
   return {
+    profile,
+    lock: null,
     key,
     caret,
     take: null,
     asking: Promise.resolve(),
+    ending: null,
+    finishing: null,
     stream: null,
     recorder: null,
     slices: 0,
@@ -151,6 +167,35 @@ function reason(failure: unknown, otherwise: string) {
   return otherwise
 }
 
+/** Whether an ending's answer is one to abandon on rather than to keep the take for: the wait ran
+ * out, or the host no longer has the take at all. */
+function abandoned(failure: unknown) {
+  return (failure instanceof DOMException && failure.name === "AbortError") || ended(failure)
+}
+
+type Tail = { answer: DictationAnswer } | { failed: unknown } | null
+
+/**
+ * The tail's answer, the reason it failed, or null when the wait ran out. The request is raced
+ * rather than merely aborted, so the bound holds even on a host that never answers and a transport
+ * that never gives up on a dead connection.
+ */
+function tailWithin(asking: Promise<DictationAnswer>, ms: number): Promise<Tail> {
+  return Promise.race([
+    asking.then(
+      (answer): Tail => ({ answer }),
+      (failed): Tail => ({ failed }),
+    ),
+    new Promise<null>((done) => window.setTimeout(done, Math.max(1, ms))),
+  ])
+}
+
+/** Gives the profile's microphone back: every path that ends a take comes through here once. */
+function letGo(current: TakeSession) {
+  releaseTake(current.profile, current.lock)
+  current.lock = null
+}
+
 function release(recording: TakeSession) {
   window.clearInterval(recording.meter)
   window.clearTimeout(recording.cap)
@@ -186,13 +231,6 @@ function stopRecording(recording: TakeSession) {
       done()
     }
   })
-}
-
-function within(promise: Promise<unknown>, ms: number) {
-  return Promise.race([
-    promise.catch(() => undefined),
-    new Promise((done) => window.setTimeout(done, ms)),
-  ])
 }
 
 /** A dictation the bot's host hears as it is spoken, one slice at a time. */
@@ -234,6 +272,8 @@ export function useStreamDictation(
     current.closed = true
     current.upload?.abort()
     current.upload = null
+    // A take that died is over as far as the microphone goes, Retry or not.
+    letGo(current)
     // What the take recorded is kept before the mic goes, its tail included: the recorder flushes
     // the last slice on the way out, so the row is written after it.
     void stopRecording(current).then(() => current.keeper.flush())
@@ -289,11 +329,16 @@ export function useStreamDictation(
     [fail, show],
   )
 
+  /** Ends a take whose text is in: the mic goes, its kept audio goes, and the bar gives way. */
   const clear = useCallback(
     (current: TakeSession) => {
       current.closed = true
       current.upload?.abort()
       current.upload = null
+      // A tail being waited for is dropped: its answer must not arrive as words after the end.
+      current.ending?.abort()
+      current.ending = null
+      letGo(current)
       release(current)
       // Its text is in: nothing is left to keep on the device.
       void current.keeper.drop()
@@ -303,9 +348,31 @@ export function useStreamDictation(
     [showIdle],
   )
 
+  /**
+   * Lets a take go with what it already has: the host forgets it rather than decoding a tail nobody
+   * is waiting for, nothing is kept on the device, and the words committed so far are the take.
+   */
+  const abandon = useCallback(
+    (current: TakeSession) => {
+      const take = current.take
+      current.take = null
+      clear(current)
+      if (take)
+        void cancelDictationTake(latest.current.config, take, AbortSignal.timeout(CANCEL_MS)).catch(
+          () => undefined,
+        )
+    },
+    [clear],
+  )
+
   const start = async (caret?: number | null) => {
     if (session.current || !canRecord()) return
-    const current = newTake(latest.current.key, caret ?? undefined)
+    const profile = connectionKey(latest.current.config)
+    const lock = holdTake(profile)
+    // One take at a time per profile: the host hears one, and the microphone belongs to it.
+    if (!lock) throw new Error(TAKE_RUNNING)
+    const current = newTake(profile, latest.current.key, caret ?? undefined)
+    current.lock = lock
     session.current = current
     setError(null)
     setLevels(null)
@@ -350,6 +417,7 @@ export function useStreamDictation(
         session.current = null
         showIdle()
       }
+      letGo(current)
       throw new Error(micError(failure, "Couldn't start the microphone."))
     }
     // Cancelled while the mic was asked for.
@@ -438,44 +506,86 @@ export function useStreamDictation(
 
   /**
    * Ends the take and returns what was heard: `""` when there's nothing to put in the field, null
-   * when the host couldn't finish it (the bar keeps the words, and Retry asks again).
+   * when the take ended under us and nothing should be inserted.
+   *
+   * `waitMs` is how long the tail is waited for — a Send waits short, a Stop longer (ADR 0016) —
+   * and it covers the slices still queued as well as the tail phrase itself. A tail that misses it
+   * is abandoned rather than waited on: the words the host already committed are the take, so what
+   * the user saw in the bar is what lands, none of it lost and none of it twice.
    */
-  const finish = useCallback(async () => {
-    const current = session.current
-    if (!current) return ""
-    // Stop waits for a cold host to open the take, so what was said while it loaded isn't lost.
-    await current.asking.catch(() => undefined)
-    if (session.current !== current) return null
-    setStatus("transcribing")
-    setLevels(null)
-    setError(null)
-    await stopRecording(current)
-    // Everything still queued is sent before the tail is asked for.
-    await within(pump(current), DRAIN_MS)
-    if (session.current !== current) return null
-    const take = current.take
-    if (!take) {
-      // The host let the take go before Stop: what it already committed is still what was said.
-      const text = transcriptText(heard.current)
-      clear(current)
-      return text
-    }
-    try {
-      const answer = await stopDictationTake(
-        latest.current.config,
-        take,
-        AbortSignal.timeout(WRITE_TIMEOUT_MS),
-      )
-      const final = hear(heard.current, answer)
-      show(final)
-      const text = transcriptText(final)
-      clear(current)
-      return text
-    } catch (failure) {
-      fail(current, reason(failure, "Couldn't finish the dictation."))
-      return null
-    }
-  }, [clear, fail, pump, show])
+  const finish = useCallback(
+    (waitMs = STOP_WAIT_MS) => {
+      const current = session.current
+      if (!current) return Promise.resolve("")
+      // A second Stop, or a Send behind one, while the take is ending does nothing more.
+      if (current.finishing) return current.finishing
+      const run = (async () => {
+        const deadline = Date.now() + waitMs
+        const left = () => Math.max(0, deadline - Date.now())
+        // Stop waits for a cold host to open the take, so what was said while it loaded isn't lost.
+        await current.asking.catch(() => undefined)
+        if (session.current !== current) return null
+        setStatus("transcribing")
+        setLevels(null)
+        setError(null)
+        await stopRecording(current)
+        if (session.current !== current) return null
+        // Everything still queued is sent before the tail is asked for, inside what is left of it.
+        await within(pump(current), left())
+        if (session.current !== current) return null
+        const take = current.take
+        if (!take) {
+          // The host let the take go before Stop: what it already committed is still what was said.
+          const text = transcriptText(heard.current)
+          clear(current)
+          return text
+        }
+        const controller = new AbortController()
+        current.ending = controller
+        const timer = window.setTimeout(() => controller.abort(), Math.max(1, left()))
+        try {
+          const tail = await tailWithin(
+            stopDictationTake(latest.current.config, take, controller.signal),
+            left(),
+          )
+          // Cancelled, or let go, while the tail was asked for: its answer inserts nothing.
+          if (session.current !== current) return null
+          if (!tail) {
+            // The wait is up: what the host already committed is the take, and the host is told to
+            // stop decoding the tail nobody is waiting for.
+            const text = transcriptText(heard.current)
+            abandon(current)
+            return text
+          }
+          if ("failed" in tail) {
+            if (abandoned(tail.failed)) {
+              // The host no longer has the take: what it committed is still what was said.
+              const text = transcriptText(heard.current)
+              abandon(current)
+              return text
+            }
+            fail(current, reason(tail.failed, "Couldn't finish the dictation."))
+            return null
+          }
+          const final = hear(heard.current, tail.answer)
+          show(final)
+          const text = transcriptText(final)
+          clear(current)
+          return text
+        } finally {
+          window.clearTimeout(timer)
+          if (current.ending === controller) current.ending = null
+        }
+      })()
+      current.finishing = run
+      const ended = () => {
+        if (current.finishing === run) current.finishing = null
+      }
+      void run.then(ended, ended)
+      return run
+    },
+    [abandon, clear, fail, pump, show],
+  )
 
   const cancel = useCallback(() => {
     const current = session.current
@@ -484,6 +594,11 @@ export function useStreamDictation(
       current.closed = true
       current.upload?.abort()
       current.upload = null
+      // A tail being waited for is let go too: a take cancelled inserts nothing, even if the host
+      // answers the stop it was already asked for.
+      current.ending?.abort()
+      current.ending = null
+      letGo(current)
       void stopRecording(current)
       release(current)
       // Discarded: the take leaves nothing on the device.
@@ -576,7 +691,12 @@ export function useStreamDictation(
     if (key)
       void readKept(key).then((saved) => {
         if (!live || session.current || !saved?.pieces.length || saved.kind !== "stream") return
-        const current = newTake(key, saved.caret, saved.pieces)
+        const current = newTake(
+          connectionKey(latest.current.config),
+          key,
+          saved.caret,
+          saved.pieces,
+        )
         current.restored = true
         current.startedAt = saved.at
         session.current = current
@@ -598,6 +718,10 @@ export function useStreamDictation(
       current.closed = true
       current.upload?.abort()
       current.upload = null
+      current.ending?.abort()
+      current.ending = null
+      // A take let go keeps its microphone no longer than it keeps its audio.
+      letGo(current)
       void stopRecording(current).then(() => current.keeper.flush())
       release(current)
       if (current.take) {
