@@ -60,6 +60,9 @@ export async function flow(name, body, { viewport = { width: 1440, height: 900 }
   }
   try {
     await page.goto(app)
+    // The module graph finishes after the load event; a second navigation during it exhausts the
+    // browser's pending-request cap, and the new page then fetches nothing at all.
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {})
     const profileId = await setUpBot(page)
     await body({ page, profileId, shot, ...helpers(page) })
   } catch (error) {
