@@ -48,6 +48,7 @@ The CLI reuses any server that is already up, so after `pnpm e2e up` each run st
 | 18645 | Mock `no-dictation`: `MOCK_DICTATION=off` |
 | 18646 | Mock `triage-new`: `MOCK_TRIAGE=new`, so triage opens a new thread |
 | 18647 | Mock `triage-thread`: `MOCK_TRIAGE=thread`, so triage sends into the newest plain thread |
+| 18648 | Mock `stream`: `MOCK_DICTATION_STREAM=on`, a plugin that hears a dictation while it is spoken |
 
 A `--jobs N` sweep runs N lanes at once: lane n takes the mock ports 18642 + 4n (its own mock
 state) and every lane drives the one app on 15173. `pnpm e2e down` stops every lane's servers.

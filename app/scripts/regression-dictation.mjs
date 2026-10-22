@@ -10,6 +10,8 @@ import { launch, settleNav } from "./e2e/lib.mjs"
 const app = process.env.APP_URL ?? "http://localhost:15173"
 const mock = process.env.MOCK_URL ?? "http://localhost:18642"
 const offMock = process.env.OFF_MOCK_URL
+// A host that advertises `dictation_stream`: it hears the take while the user talks.
+const streamMock = process.env.STREAM_MOCK_URL
 const shots = process.env.SHOTS_DIR
 const SENTENCE = "Let's ship the dictation feature today."
 // Long enough for the stop a dead recorder never sends (STOP_MS) plus the state to render.
@@ -19,7 +21,15 @@ const browser = await launch(chromium, true, fakeMic.slice(1))
 
 function speech() {
   const rate = 48000
-  const parts = [[0.5, 0], [7, 1], [1.5, 0], [7, 1], [1.5, 0], [4, 1], [3, 0]]
+  const parts = [
+    [0.5, 0],
+    [7, 1],
+    [1.5, 0],
+    [7, 1],
+    [1.5, 0],
+    [4, 1],
+    [3, 0],
+  ]
   const total = parts.reduce((sum, [seconds]) => sum + Math.round(seconds * rate), 0)
   const wav = Buffer.alloc(44 + total * 2)
   wav.write("RIFF", 0)
@@ -95,7 +105,11 @@ async function open(server, viewport, colorScheme = "light", on = browser, touch
   await page.evaluate(async (server) => {
     const { db } = await import("/src/lib/db.ts")
     const profile = (await db.profiles.toArray())[0]
-    await db.profiles.update(profile.id, { name: "Test bot", baseUrl: `${server}/v1`, apiKey: "mock-key" })
+    await db.profiles.update(profile.id, {
+      name: "Test bot",
+      baseUrl: `${server}/v1`,
+      apiKey: "mock-key",
+    })
     await db.settings.put({ id: "settings", activeProfileId: profile.id, onboarded: true })
   }, server)
   await page.goto(app)
@@ -190,7 +204,10 @@ try {
     await page.getByRole("button", { name: "Voice", exact: true }).waitFor()
     const all = (await clips()).slice(before)
     assert.equal(all.length, 3)
-    assert.equal(await page.getByRole("textbox").last().inputValue(), Array(3).fill(SENTENCE).join(" "))
+    assert.equal(
+      await page.getByRole("textbox").last().inputValue(),
+      Array(3).fill(SENTENCE).join(" "),
+    )
     await talker.close()
   }
 
@@ -202,7 +219,11 @@ try {
     await mic.click()
     await page.getByRole("button", { name: "Stop" }).waitFor()
     await page.getByRole("button", { name: "Retry" }).waitFor({ timeout: FAILED_MS })
-    assert.equal(await page.getByText("Transcribing…").count(), 0, "no transcribing that never ends")
+    assert.equal(
+      await page.getByText("Transcribing…").count(),
+      0,
+      "no transcribing that never ends",
+    )
     await page.getByText("The recording stopped.").waitFor()
     await shot(page, "phone-light-9-recorder-failed")
 
@@ -232,7 +253,11 @@ try {
     await page.waitForTimeout(1500)
     await page.evaluate(() => window.__mic.getAudioTracks()[0].dispatchEvent(new Event("ended")))
     await page.getByRole("button", { name: "Retry" }).waitFor({ timeout: FAILED_MS })
-    assert.equal(await page.getByText("Transcribing…").count(), 0, "no transcribing that never ends")
+    assert.equal(
+      await page.getByText("Transcribing…").count(),
+      0,
+      "no transcribing that never ends",
+    )
     await page.getByText("The microphone is in use by another app.").waitFor()
     await shot(page, "phone-light-10-track-ended")
     await retried(page)
@@ -288,6 +313,42 @@ try {
     await page.getByText(words).waitFor()
     await shot(page, `phone-light-8-${label}`)
     assert.equal(await page.getByRole("button", { name: "Voice", exact: true }).count(), 0)
+    await page.close()
+  }
+  // A host that hears the take while it is spoken: the bar says it is preparing, then fills with
+  // the words as they arrive, says it is behind once, and Stop puts the whole take in the field.
+  if (streamMock) {
+    const page = await open(streamMock, { width: 390, height: 844 })
+    await page.waitForLoadState("networkidle").catch(() => {})
+    const composer = page.getByRole("textbox").last()
+    const mic = page.getByRole("button", { name: "Voice", exact: true })
+    // The bar's transcript: a labelled region a screen reader can read, never a live one.
+    const bar = page.getByRole("region", { name: "Dictation" })
+
+    await composer.fill("Note:")
+    await mic.click()
+    await bar.getByText("Preparing…").waitFor()
+    await shot(page, "phone-light-9-preparing")
+    const words = bar.getByText("Let us ship the dictation")
+    await words.waitFor({ timeout: 15_000 })
+    await bar.getByText("Behind").waitFor()
+    assert.equal(await bar.getAttribute("aria-live"), "off", "the transcript is read on request")
+    await shot(page, "phone-light-10-hearing")
+
+    await page.getByRole("button", { name: "Stop" }).click()
+    await mic.waitFor({ timeout: 15_000 })
+    // The take lands where the caret was, and the tail phrase closed at Stop is part of it.
+    assert.equal(await composer.inputValue(), "Note: Let us ship the dictation feature today.")
+    await shot(page, "phone-light-11-heard")
+
+    // Cancelled: nothing is inserted, and the mic is back.
+    await composer.fill("")
+    await mic.click()
+    await page.getByRole("button", { name: "Stop" }).waitFor()
+    await page.waitForTimeout(900)
+    await page.getByRole("button", { name: "Cancel" }).click()
+    await mic.waitFor()
+    assert.equal(await composer.inputValue(), "")
     await page.close()
   }
   console.log("dictation: ok")

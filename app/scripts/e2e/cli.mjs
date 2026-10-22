@@ -22,6 +22,7 @@ const MOCKS = {
   "no-dictation": { port: MOCK_BASE + 3, env: { MOCK_DICTATION: "off" } },
   "triage-new": { port: MOCK_BASE + 4, env: { MOCK_TRIAGE: "new" } },
   "triage-thread": { port: MOCK_BASE + 5, env: { MOCK_TRIAGE: "thread" } },
+  stream: { port: MOCK_BASE + 6, env: { MOCK_DICTATION_STREAM: "on" } },
 }
 // The app is shared: lanes drive it in separate browsers and one Vite serves them all.
 const APP_PORT = Number(process.env.E2E_APP_PORT ?? 15173)
@@ -331,8 +332,9 @@ const FLOWS = {
   },
   dictation: {
     script: "regression-dictation.mjs",
-    extra: { OFF_MOCK_URL: "no-dictation" },
-    about: "Dictation pieces, retries, the kept recording, and no mic where the host can't",
+    extra: { OFF_MOCK_URL: "no-dictation", STREAM_MOCK_URL: "stream" },
+    about:
+      "Dictation pieces, retries, the kept recording, a take heard while it is spoken, and no mic where the host can't",
   },
   drafts: {
     script: "regression-drafts.mjs",

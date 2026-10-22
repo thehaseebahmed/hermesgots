@@ -90,6 +90,11 @@
 // plugin/dictation.py with faster-whisper; MOCK_DICTATION=off reports it unavailable (the mic hides)
 // and MOCK_DICTATION=fail answers every clip with an error. GET /__mock/dictation lists the clips it
 // was sent (size, type, hint and the text before each), for the regression script.
+// MOCK_DICTATION_STREAM=on is a plugin that advertises `dictation_stream` and hears a take while it is
+// spoken: POST dictation/take opens one after a moment (so the bar says "Preparing…"), each slice at
+// dictation/take/{take}/audio answers the next words of a fixed sentence, and the third slice closes a
+// phrase and says it is behind. Off by default, so every other flow sees the chunked host it expects.
+// GET /__mock/dictation-take lists the slices a take was sent.
 // GET /api/plugins/memento/workflows lists the workflow library (presets first, read-only), POST
 // adds one, POST to its id rewrites one of the account's own — forking a preset into a copy — and DELETE takes
 // one away; each answers the whole list. A project names the workflow its work runs under through
@@ -2300,6 +2305,25 @@ async function streamCompletion(req, res, body) {
 const runs = new Map()
 const PLUGIN_VERSION = process.env.MOCK_PLUGIN_VERSION || "0.29.1"
 const DICTATION = process.env.MOCK_DICTATION ?? "on"
+// A plugin that hears a take while it is spoken (plugin/dictation_stream.py), off by default: the
+// mock's dictation otherwise answers a clip, which is what every other flow expects of it.
+const DICTATION_STREAM = process.env.MOCK_DICTATION_STREAM === "on"
+// What a take hears, one answer per slice: the words it commits and the phrases it closes. The third
+// slice closes the phrase its words had been part of and says the host is behind; an answer that
+// closes a phrase carries no words of its own, because the phrase holds them.
+const TAKE_ANSWERS = [
+  { words: "Let", phrases: [] },
+  { words: "us ship", phrases: [] },
+  {
+    words: "",
+    phrases: [{ id: 1, text: "Let us ship the dictation" }],
+    behind: true,
+  },
+  { words: " feature", phrases: [] },
+]
+const TAKE_TAIL = { words: "", phrases: [{ id: 2, text: "feature today." }], behind: false }
+const dictationTakes = new Map()
+const dictationSlices = []
 // plugin/moves.py: the messages triage moved out of each Main session, for its Moved markers.
 const moves = new Map()
 // plugin/triage.py: MOCK_TRIAGE=off hides the feature, "new" opens a new thread, "thread" continues
@@ -2464,9 +2488,15 @@ function moveUndoable({ target, item, undone }) {
   if (queue?.items.some((i) => i.id === item)) return true
   const sent = queue?.sent.find((i) => i.id === item)
   const status = sent && runs.get(sent.run_id)?.status
-  return ["queued", "running", "waiting_for_approval", "stopping", "cancelled", "failed", "interrupted"].includes(
-    status,
-  )
+  return [
+    "queued",
+    "running",
+    "waiting_for_approval",
+    "stopping",
+    "cancelled",
+    "failed",
+    "interrupted",
+  ].includes(status)
 }
 
 function pumpQueue(sessionId) {
@@ -2838,6 +2868,7 @@ http
           "skills",
           "queue",
           "dictation",
+          ...(DICTATION_STREAM ? ["dictation_stream"] : []),
           "afk",
           "afk_switch",
           "afk_skills",
@@ -2845,7 +2876,9 @@ http
           "afk_prompt",
           "afk_pipeline",
           ...(TRIAGE !== "off" ? ["triage", "moves"] : []),
-          ...(RESEARCH ? ["research", "research_followup", "research_rewrite", "research_compare"] : []),
+          ...(RESEARCH
+            ? ["research", "research_followup", "research_rewrite", "research_compare"]
+            : []),
           ...(MEETINGS ? ["meetings", "meetings_ask"] : []),
           ...(MCPS
             ? [
@@ -3523,13 +3556,17 @@ http
         const prompting = "prompt" in body
         if (!switching && !choosing && !picking && !prompting)
           return json(res, 400, {
-            error: { message: "on, workflow_id, prompt, build_skill or critique_skills is needed." },
+            error: {
+              message: "on, workflow_id, prompt, build_skill or critique_skills is needed.",
+            },
           })
         // One write, one shape: the switch wakes the sweep, so a body naming two could write one and
         // be refused, leaving half of it written (`afk.write_from`).
         if ([switching, choosing, picking, prompting].filter(Boolean).length > 1)
           return json(res, 400, {
-            error: { message: "A write names either on or the skills, or a workflow, or a prompt." },
+            error: {
+              message: "A write names either on or the skills, or a workflow, or a prompt.",
+            },
           })
         if (switching && typeof body.on !== "boolean")
           return json(res, 400, { error: { message: "on must be true or false." } })
@@ -3939,6 +3976,59 @@ http
         ms: 700,
       })
     }
+    if (PLUGIN && !profile && DICTATION_STREAM && req.method === "POST") {
+      if (url.pathname === "/api/plugins/memento/dictation/take") {
+        await readRaw(req)
+        if (DICTATION === "off")
+          return json(res, 409, {
+            error: { message: "faster-whisper isn't installed on the host." },
+          })
+        // A cold host loads its model inside this call, which is what "Preparing…" is for.
+        await new Promise((resolve) => setTimeout(resolve, 600))
+        if (DICTATION === "fail")
+          return json(res, 502, { error: { message: "The host's speech model didn't load." } })
+        const take = `dt_mock_${dictationTakes.size + 1}`
+        dictationTakes.set(take, { answers: TAKE_ANSWERS.length })
+        return json(res, 200, {
+          object: "memento.dictation_take",
+          take,
+          ready: true,
+          model: "base",
+          language: "en",
+        })
+      }
+      const takeRoute =
+        /^\/api\/plugins\/memento\/dictation\/take\/([^/]+)\/(audio|stop|cancel)$/.exec(
+          url.pathname,
+        )
+      if (takeRoute) {
+        const [, take, action] = takeRoute
+        if (!dictationTakes.has(take))
+          return json(res, 410, { error: { message: "This dictation has ended." } })
+        if (action === "cancel") {
+          dictationTakes.delete(take)
+          return json(res, 200, { object: "memento.dictation_cancel", cancelled: true })
+        }
+        if (action === "stop") {
+          dictationTakes.delete(take)
+          return json(res, 200, { object: "memento.dictation_stop", take, ...TAKE_TAIL })
+        }
+        const data = await readRaw(req)
+        if (!data.length) return json(res, 400, { error: { message: "The recording is empty." } })
+        const held = dictationTakes.get(take)
+        dictationSlices.push({
+          bytes: data.length,
+          type: req.headers["content-type"],
+          pause: url.searchParams.get("pause") === "1",
+        })
+        const answer = TAKE_ANSWERS[TAKE_ANSWERS.length - held.answers] ?? {
+          words: "",
+          phrases: [],
+        }
+        held.answers = Math.max(0, held.answers - 1)
+        return json(res, 200, { object: "memento.dictation_audio", take, behind: false, ...answer })
+      }
+    }
     const attachmentRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/attachments$/.exec(
       url.pathname,
     )
@@ -3979,7 +4069,9 @@ http
       if (!move) return json(res, 404, { error: { message: "No such move." } })
       if (move.undone) return json(res, 200, { object: "memento.move.undone", undone: true })
       if (!moveUndoable(move))
-        return json(res, 409, { error: { message: "The thread has already replied to this message." } })
+        return json(res, 409, {
+          error: { message: "The thread has already replied to this message." },
+        })
       const queue = queueOf(move.target)
       const waiting = queue.items.findIndex((item) => item.id === move.item)
       if (waiting >= 0) queue.items.splice(waiting, 1)
@@ -3987,7 +4079,8 @@ http
         const sent = queue.sent.findIndex((item) => item.id === move.item)
         const [gone] = sent >= 0 ? queue.sent.splice(sent, 1) : []
         const run = gone && runs.get(gone.run_id)
-        if (run && ["running", "waiting_for_approval"].includes(run.status)) run.status = "cancelled"
+        if (run && ["running", "waiting_for_approval"].includes(run.status))
+          run.status = "cancelled"
       }
       move.undone = true
       // Back in Main without a second triage, as the plugin queues it.
@@ -4024,7 +4117,9 @@ http
       const thread = entries
         .filter(([cid, e]) => {
           const v = e.value
-          return v && !e.deleted && cid !== mainEntry?.[0] && !v.main && !v.projectId && !v.discardedAt
+          return (
+            v && !e.deleted && cid !== mainEntry?.[0] && !v.main && !v.projectId && !v.discardedAt
+          )
         })
         .sort((a, b) => (b[1].value.updatedAt ?? 0) - (a[1].value.updatedAt ?? 0))[0]
       if (!["thread", "new"].includes(TRIAGE) || !mainEntry || !Array.isArray(body?.input))
@@ -4240,7 +4335,8 @@ http
         // off that record, so a record from before workflows moves with it.
         if (stage) {
           setAfkStage(projectId, stage)
-          if (record?.pipeline && !Array.isArray(record.pipeline.stages)) record.pipeline.stage = stage
+          if (record?.pipeline && !Array.isArray(record.pipeline.stages))
+            record.pipeline.stage = stage
         }
         // Dev only: the record the session's own strip draws — each stage, a gate's answer, a
         // reason — and the pull request a finished pipeline opened.
@@ -4280,6 +4376,9 @@ http
     }
     if (url.pathname === "/__mock/dictation" && req.method === "GET") {
       return json(res, 200, { clips: dictationClips })
+    }
+    if (url.pathname === "/__mock/dictation-take" && req.method === "GET") {
+      return json(res, 200, { slices: dictationSlices, takes: [...dictationTakes.keys()] })
     }
     // Dev only: POST { outcome } ends every pending approval without the app. "timeout" is a host
     // with the plugin (the run says so and carries on); "lost" one without it, which keeps the
