@@ -318,38 +318,42 @@ try {
   // A host that hears the take while it is spoken: the bar says it is preparing, then fills with
   // the words as they arrive, says it is behind once, and Stop puts the whole take in the field.
   if (streamMock) {
-    const page = await open(streamMock, { width: 390, height: 844 })
-    await page.waitForLoadState("networkidle").catch(() => {})
-    const composer = page.getByRole("textbox").last()
-    const mic = page.getByRole("button", { name: "Voice", exact: true })
-    // The bar's transcript: a labelled region a screen reader can read, never a live one.
-    const bar = page.getByRole("region", { name: "Dictation" })
+    for (const [label, viewport, scheme] of [
+      ["phone-light", { width: 390, height: 844 }, "light"],
+      ["tablet-dark", { width: 820, height: 1180 }, "dark"],
+    ]) {
+      const page = await open(streamMock, viewport, scheme)
+      await page.waitForLoadState("networkidle").catch(() => {})
+      const composer = page.getByRole("textbox").last()
+      const mic = page.getByRole("button", { name: "Voice", exact: true })
+      // The bar's transcript: a labelled region a screen reader can read, never a live one.
+      const bar = page.getByRole("region", { name: "Dictation" })
 
-    await composer.fill("Note:")
-    await mic.click()
-    await bar.getByText("Preparing…").waitFor()
-    await shot(page, "phone-light-9-preparing")
-    const words = bar.getByText("Let us ship the dictation")
-    await words.waitFor({ timeout: 15_000 })
-    await bar.getByText("Behind").waitFor()
-    assert.equal(await bar.getAttribute("aria-live"), "off", "the transcript is read on request")
-    await shot(page, "phone-light-10-hearing")
+      await composer.fill("Note:")
+      await mic.click()
+      await bar.getByText("Preparing…").waitFor()
+      await shot(page, `${label}-9-preparing`)
+      await bar.getByText("Let us ship the dictation").waitFor({ timeout: 15_000 })
+      await bar.getByText("Behind").waitFor()
+      assert.equal(await bar.getAttribute("aria-live"), "off", "the transcript is read on request")
+      await shot(page, `${label}-10-hearing`)
 
-    await page.getByRole("button", { name: "Stop" }).click()
-    await mic.waitFor({ timeout: 15_000 })
-    // The take lands where the caret was, and the tail phrase closed at Stop is part of it.
-    assert.equal(await composer.inputValue(), "Note: Let us ship the dictation feature today.")
-    await shot(page, "phone-light-11-heard")
+      await page.getByRole("button", { name: "Stop" }).click()
+      await mic.waitFor({ timeout: 15_000 })
+      // The take lands where the caret was, and the tail phrase closed at Stop is part of it.
+      assert.equal(await composer.inputValue(), "Note: Let us ship the dictation feature today.")
+      await shot(page, `${label}-11-heard`)
 
-    // Cancelled: nothing is inserted, and the mic is back.
-    await composer.fill("")
-    await mic.click()
-    await page.getByRole("button", { name: "Stop" }).waitFor()
-    await page.waitForTimeout(900)
-    await page.getByRole("button", { name: "Cancel" }).click()
-    await mic.waitFor()
-    assert.equal(await composer.inputValue(), "")
-    await page.close()
+      // Cancelled: nothing is inserted, and the mic is back.
+      await composer.fill("")
+      await mic.click()
+      await page.getByRole("button", { name: "Stop" }).waitFor()
+      await page.waitForTimeout(900)
+      await page.getByRole("button", { name: "Cancel" }).click()
+      await mic.waitFor()
+      assert.equal(await composer.inputValue(), "")
+      await page.close()
+    }
   }
   console.log("dictation: ok")
 } finally {
