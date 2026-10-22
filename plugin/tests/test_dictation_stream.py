@@ -329,21 +329,21 @@ class PhraseTest(unittest.TestCase):
 
 
 class CleanupTest(unittest.TestCase):
-    """A finished phrase is tidied before it is committed, once, and the take carries on either way."""
+    """A finished phrase is tidied before it is committed, once, and the take goes on after it."""
 
     def test_a_finished_phrase_is_committed_as_its_tidied_text(self) -> None:
         tidy = Tidy("Hello there, my friend.")
         heard, _, clock = take(Scripted(["um hello there my friend"] * 6), clean=tidy)
         push(heard, clock, count=5)
         answer = heard.add(b"opus", pause=True)
-        self.assertEqual([phrase["text"] for phrase in answer["phrases"]], ["Hello there, my friend."])
+        self.assertEqual(
+            [phrase["text"] for phrase in answer["phrases"]], ["Hello there, my friend."]
+        )
         # The model is asked to tidy the phrase as the host heard it, and the words it heard are
         # still the words the take committed: a phrase's tidying is what the user reads, not a
         # rewrite of what was said.
         self.assertEqual(tidy.calls, ["um hello there my friend"])
-        self.assertEqual(
-            heard.committed, ["um", "hello", "there", "my", "friend"]
-        )
+        self.assertEqual(heard.committed, ["um", "hello", "there", "my", "friend"])
 
     def test_the_tail_phrase_is_tidied_before_stop_answers_with_it(self) -> None:
         # The phrase that closes at Stop is the one the user waits for, so it is tidied inside the

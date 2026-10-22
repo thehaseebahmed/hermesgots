@@ -147,14 +147,7 @@ test("a word the windows are still arguing about is never shown and then correct
   ])
   assert.deepEqual(
     seen.map((moment) => moment.text),
-    [
-      "",
-      "we ship",
-      "we ship",
-      "we ship the boat",
-      "we ship the boat",
-      "we ship the boat today",
-    ],
+    ["", "we ship", "we ship", "we ship the boat", "we ship the boat", "we ship the boat today"],
   )
   assertOnlyAdds(seen)
 })

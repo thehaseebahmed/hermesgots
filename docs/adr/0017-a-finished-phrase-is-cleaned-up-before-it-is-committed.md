@@ -37,10 +37,10 @@ late is worse than one that did not arrive.
 - Cleanup's instructions carry the bot's vocabulary, so a name the host heard as a common word is
   corrected to the word the user means. The decoder's prompt carries it too; the two together are why
   the vocabulary is worth a settings surface.
-- The bound is two seconds (`dictation_cleanup.DEADLINE_S`), kept by the host on a thread of its own,
-  because the plugin's model access takes no timeout: the phrase is committed when the budget is up
-  whatever the model is still doing. The app's own wait on the answer that carries the phrase is
-  longer, so a cleanup is never what a slice times out on.
+- The bound is two seconds (`dictation_cleanup.DEADLINE_S`), kept by the host on a thread of its
+  own, because the plugin's model access takes no timeout: the phrase is committed when the budget
+  is up whatever the model is still doing. The app's own wait on the answer that carries the phrase
+  is longer, so a cleanup is never what a slice times out on.
 - "Much longer or shorter" is measured in words: an answer that loses more than half the phrase or
   adds more than half again is discarded, with a word of slack each way so a short phrase whose
   number became a digit — "twenty five" is 25 — is still a tidying.

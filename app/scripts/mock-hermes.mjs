@@ -93,9 +93,9 @@
 // MOCK_DICTATION_STREAM=on is a plugin that advertises `dictation_stream` and hears a take while it is
 // spoken: POST dictation/take opens one after a moment (so the bar says "Preparing…"), each slice at
 // dictation/take/{take}/audio answers the next words of a fixed sentence, and the third slice closes a
-// phrase — tidied, as a finished phrase's cleanup leaves it — and says it is behind. The tail phrase
-// closes at Stop with its cleanup failed, so it reads as the host heard it. Off by default, so every
-// other flow sees the chunked host it expects.
+// phrase — tidied, as a finished phrase's cleanup leaves it — and says it is behind. The tail
+// phrase closes at Stop with its cleanup failed, so it reads as the host heard it. Off by default,
+// so every other flow sees the chunked host it expects.
 // GET /__mock/dictation-take lists the slices a take was sent, and `peak`, the most that were ever
 // being answered at once (1 when the app keeps one request in flight).
 // GET /api/plugins/memento/workflows lists the workflow library (presets first, read-only), POST
@@ -2315,7 +2315,8 @@ const DICTATION_STREAM = process.env.MOCK_DICTATION_STREAM === "on"
 // words arrive as the host heard them, filler and spoken number and all; a closed phrase arrives
 // already tidied, because a finished phrase gets one bounded cleanup on the bot's own model before
 // it is committed (#290, ADR 0017). The third slice closes the first phrase and says the host is
-// behind; an answer that closes a phrase carries no words of its own, because the phrase holds them.
+// behind; an answer that closes a phrase carries no words of its own, because the phrase holds
+// them.
 const TAKE_ANSWERS = [
   { words: "um Let us", phrases: [] },
   { words: " ship the dictation", phrases: [] },
@@ -2327,7 +2328,8 @@ const TAKE_ANSWERS = [
   { words: " and then two more items", phrases: [] },
 ]
 // The tail phrase, which closes at Stop. Its cleanup failed, so it is committed exactly as the host
-// heard it — no capital, no full stop, the number still in words — which is what a take falls back to.
+// heard it — no capital, no full stop, the number still in words — which is what a take falls back
+// to.
 const TAKE_TAIL = {
   words: "",
   phrases: [{ id: 2, text: "and then two more items" }],

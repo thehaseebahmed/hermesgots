@@ -49,8 +49,8 @@ INSTRUCTIONS = (
     "Tidy the phrase in the input and answer {\"text\": \"<the tidied phrase>\"} as one JSON "
     "object, with no other key and no other text.\n"
     "Take out the fillers: \"um\", \"uh\", \"er\" and \"erm\" are gone wherever they fall. Keep "
-    "every other word. \"Like\" stays where it compares one thing with another, and a word repeated "
-    "on purpose stays repeated.\n"
+    "every other word. \"Like\" stays where it compares one thing with another, and a word "
+    "repeated on purpose stays repeated.\n"
     "Repair punctuation, capitalisation and spacing: a capital at the start of a sentence, a full "
     "stop at its end, one space between words.\n"
     "Write a number or a date that was spoken as digits: \"twenty five\" reads 25, \"the third of "
@@ -144,7 +144,7 @@ def complete(
 
 
 class Cleaner:
-    """A take's cleanup: one bounded call per finished phrase, and the phrase as heard when it fails.
+    """A take's cleanup: one bounded call per finished phrase, and the phrase as heard if it fails.
 
     A ``Cleaner`` answers the text to commit, so a caller never has to decide what a failed cleanup
     means: it is the phrase itself. ``vocabulary`` is the bot's words, spelled as the user spells

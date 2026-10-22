@@ -64,7 +64,9 @@ class InstructionsTest(unittest.TestCase):
         self.assertIn("each line", rules)
 
     def test_the_vocabulary_is_spelled_as_it_is_listed(self) -> None:
-        self.assertIn("vocabulary exactly as the vocabulary spells it", dictation_cleanup.INSTRUCTIONS)
+        self.assertIn(
+            "vocabulary exactly as the vocabulary spells it", dictation_cleanup.INSTRUCTIONS
+        )
 
     def test_the_phrase_is_never_reworded_or_answered(self) -> None:
         rules = dictation_cleanup.INSTRUCTIONS
@@ -82,7 +84,8 @@ class InstructionsTest(unittest.TestCase):
         with patch:
             dictation_cleanup.Cleaner(["Gots", "DeepSeek"])("gots ships it")
         self.assertEqual(
-            llm.calls[0]["input"], [{"type": "text", "text": "Vocabulary: Gots DeepSeek\nPhrase: gots ships it"}]
+            llm.calls[0]["input"],
+            [{"type": "text", "text": "Vocabulary: Gots DeepSeek\nPhrase: gots ships it"}],
         )
 
     def test_a_take_with_no_words_asks_without_a_vocabulary_line(self) -> None:
