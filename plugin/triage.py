@@ -321,6 +321,45 @@ def start_thread(
     return {"thread": chat_id, "session_id": session_id, "item": item}
 
 
+async def deliver(
+    adapter: Any,
+    path: Path,
+    profile: Optional[str],
+    found: Dict[str, Any],
+    text: str,
+    files: List[Dict[str, Any]],
+    body: Any,
+    steer: bool,
+    authorization: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Queues the message on the thread triage chose, steering it into a reply running there when
+    ``steer`` (the user's setting) says so and it is text alone; ``{ thread, session_id, item, steered }``.
+
+    A thread waiting on the user, or a message with files, queues behind it, and a refused steer
+    leaves the message queued. A thread whose last run was stopped waits for its user to send again,
+    and a message put behind that would sit unseen, so that is None and the message stays in Main.
+    Raises ``ValueError`` for a run body the queue refuses.
+    """
+    thread = found["session_id"]
+    # The thread runs on its own model, not Main's.
+    run_body = body
+    if isinstance(run_body, dict):
+        run_body = {k: v for k, v in run_body.items() if k not in ("model", "provider")}
+        choice = found.get("model_choice")
+        if isinstance(choice, dict) and choice.get("model") and choice.get("provider"):
+            run_body["model"], run_body["provider"] = choice["model"], choice["provider"]
+    run = outbox.clean_body(thread, run_body)
+    runs = outbox.session_runs(adapter, await outbox.session_ids(adapter, thread))
+    resumed = (await asyncio.to_thread(outbox.read, path, thread))["resumed_at"]
+    if outbox.state(runs, resumed) == "paused":
+        return None
+    item = await asyncio.to_thread(outbox.add, path, thread, profile, text, files, run)
+    steered = None
+    if steer and not files:
+        steered, _ = await outbox.steer(adapter, profile, path, thread, item["id"], authorization)
+    return {"thread": found["thread"], "session_id": thread, "item": item, "steered": steered is not None}
+
+
 def discard(path: Path, chat_id: str) -> None:
     """Takes back a thread whose first message never got queued, as a tombstone every device keeps."""
     try:

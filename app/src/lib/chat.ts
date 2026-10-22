@@ -1238,11 +1238,16 @@ async function queueOnHost(
  * answers in time that it belongs to an older thread or opens a new one, where the plugin has then
  * queued it. A timeout, a failure or a bot without the feature is just a send to Main. Returns the
  * thread it moved to, and whether the host made that thread for it.
+ *
+ * It is triaged while Main's own reply runs too, so a message for another thread goes there at once
+ * and only one that stays waits in Main, steering the reply or queued as `steer` says (a thread that
+ * is mid-reply takes it the same way).
  */
 export async function sendFromMain(
   conversationId: string,
   text: string,
   attachments: Attachment[] = [],
+  options: { steer?: boolean } = {},
 ): Promise<{ threadId: string; created: boolean } | undefined> {
   const content = text.trim()
   const host = await hostOf(conversationId)
@@ -1250,14 +1255,15 @@ export async function sendFromMain(
   const triaged =
     host?.conversation.main &&
     content &&
-    !controllers.has(conversationId) &&
     !routing.has(conversationId) &&
     (await hostQueue(host.config)) &&
     (await hasPluginFeature(host.config, "triage"))
   if (!host || !triaged) {
-    if (routing.has(conversationId) && content)
-      await queueMessage(conversationId, text, attachments)
-    else await sendMessage(conversationId, text, { attachments })
+    if (content && (routing.has(conversationId) || controllers.has(conversationId))) {
+      if (options.steer && !attachments.length && !routing.has(conversationId))
+        await steerText(conversationId, content)
+      else await queueMessage(conversationId, text, attachments)
+    } else await sendMessage(conversationId, text, { attachments })
     return undefined
   }
   routing.add(conversationId)
@@ -1291,7 +1297,7 @@ export async function sendFromMain(
         triageMessage(
           host.config,
           host.conversation.hermesSessionId,
-          { id: held.id, text: content, run, attachments: files },
+          { id: held.id, text: content, run, attachments: files, steer: options.steer },
           AbortSignal.timeout(ms),
         )
       // A dropped answer is asked for again under the same id: the host answers it as it did
@@ -1309,7 +1315,8 @@ export async function sendFromMain(
     if (controllers.has(conversationId)) {
       // A reply started while the host decided: this goes after it.
       await db.messages.delete(held.id)
-      await queueMessage(conversationId, content, sent)
+      if (options.steer && !sent.length) await steerText(conversationId, content)
+      else await queueMessage(conversationId, content, sent)
     } else {
       await sendMessage(conversationId, text, { queuedId: held.id, attachments: sent })
     }

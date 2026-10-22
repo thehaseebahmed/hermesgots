@@ -1752,38 +1752,28 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 except Exception:
                     logger.debug("memento: triage couldn't open a thread", exc_info=True)
             elif found["decision"] == triage.THREAD:
-                thread = found["session_id"]
                 try:
-                    # The thread runs on its own model, not Main's.
-                    run_body = body.get("body")
-                    if isinstance(run_body, dict):
-                        run_body = {k: v for k, v in run_body.items() if k not in ("model", "provider")}
-                        choice = found.get("model_choice")
-                        if isinstance(choice, dict) and choice.get("model") and choice.get("provider"):
-                            run_body["model"], run_body["provider"] = choice["model"], choice["provider"]
-                    run = outbox.clean_body(thread, run_body)
-                    # A thread whose last run was stopped waits for its user to send again, and a
-                    # message put behind that would sit unseen.
-                    runs = outbox.session_runs(adapter, await outbox.session_ids(adapter, thread))
-                    resumed = (await asyncio.to_thread(outbox.read, path, thread))["resumed_at"]
-                    if outbox.state(runs, resumed) != "paused":
-                        item = await asyncio.to_thread(
-                            outbox.add, path, thread, request_profile(), text, files, run
-                        )
-                        follow_queue(request, thread, path)
-                        await record_move(
-                            path, key, session_id, text, found["thread"], thread, item["id"], body, files
-                        )
-                        events.note("session", session_id, path, True)
-                        answer = {
-                            "object": "memento.triage",
-                            "decision": triage.THREAD,
-                            "thread": found["thread"],
-                            "session_id": thread,
-                            "item": item,
-                        }
+                    delivered = await triage.deliver(
+                        adapter,
+                        path,
+                        request_profile(),
+                        found,
+                        text,
+                        files,
+                        body.get("body"),
+                        body.get("steer") is True,
+                        request.headers.get("Authorization"),
+                    )
                 except ValueError:
-                    pass
+                    delivered = None
+                if delivered is not None:
+                    follow_queue(request, found["session_id"], path)
+                    await record_move(
+                        path, key, session_id, text, found["thread"], found["session_id"],
+                        delivered["item"]["id"], body, files,
+                    )
+                    events.note("session", session_id, path, True)
+                    answer = {"object": "memento.triage", "decision": triage.THREAD, **delivered}
             triage.remember(memo, answer)
         return web.json_response(answer)
 
@@ -1918,33 +1908,18 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return denied
         session_id = request.match_info["session_id"]
         path = store_path()
-        runs = outbox.session_runs(adapter, await outbox.session_ids(adapter, session_id))
-        running = [run for run in runs if run.get("status") == "running" and run.get("run_id")]
-        if not running:
-            return _error(web, "The reply isn't running, so it can't be steered.", 409)
-        run_id = max(running, key=lambda run: float(run.get("created_at") or 0))["run_id"]
-        row = await asyncio.to_thread(outbox.take, path, session_id, request.match_info["item_id"])
-        if row is None:
-            return _error(web, "That message isn't waiting any more.", 404)
-        if row["attachments"] or not row["text"].strip():
-            await asyncio.to_thread(outbox.put_back, path, row)
-            return _error(web, "Only text can steer a reply.", 409)
-        try:
-            await outbox.post(
-                adapter,
-                request_profile(),
-                f"/v1/runs/{run_id}/steer",
-                {"input": row["text"]},
-                authorization=request.headers.get("Authorization"),
-            )
-        except outbox.StartError as error:
-            await asyncio.to_thread(outbox.put_back, path, row)
-            return _error(web, str(error), 409 if error.permanent else 502)
-        # A steer the agent never reads comes back when the run ends; see outbox.tick.
-        follow_queue(request, session_id, path)
-        return web.json_response(
-            {"object": "memento.queue.steered", "id": row["id"], "run_id": run_id, "text": row["text"]}
+        steered, failed = await outbox.steer(
+            adapter,
+            request_profile(),
+            path,
+            session_id,
+            request.match_info["item_id"],
+            request.headers.get("Authorization"),
         )
+        if failed is not None:
+            return _error(web, failed[0], failed[1])
+        follow_queue(request, session_id, path)
+        return web.json_response(steered)
 
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/queue", get_queue)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/queue", add_queued)

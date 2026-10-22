@@ -453,6 +453,36 @@ async def post(adapter: Any, profile: Optional[str], path: str, body: Dict[str, 
         raise StartError(f"Couldn't reach the API server: {error}", False) from error
 
 
+async def steer(
+    adapter: Any,
+    profile: Optional[str],
+    path: Path,
+    session_id: str,
+    item_id: str,
+    authorization: Optional[str] = None,
+) -> Tuple[Optional[Dict[str, Any]], Optional[Tuple[str, int]]]:
+    """Hands a waiting item to the session's running reply: ``(steered, None)``, else
+    ``(None, (reason, status))`` with the item still waiting where it was."""
+    runs = session_runs(adapter, await session_ids(adapter, session_id))
+    running = [run for run in runs if run.get("status") == "running" and run.get("run_id")]
+    if not running:
+        return None, ("The reply isn't running, so it can't be steered.", 409)
+    run_id = max(running, key=lambda run: float(run.get("created_at") or 0))["run_id"]
+    row = await asyncio.to_thread(take, path, session_id, item_id)
+    if row is None:
+        return None, ("That message isn't waiting any more.", 404)
+    if row["attachments"] or not row["text"].strip():
+        await asyncio.to_thread(put_back, path, row)
+        return None, ("Only text can steer a reply.", 409)
+    try:
+        await post(adapter, profile, f"/v1/runs/{run_id}/steer", {"input": row["text"]}, authorization=authorization)
+    except StartError as error:
+        await asyncio.to_thread(put_back, path, row)
+        return None, (str(error), 409 if error.permanent else 502)
+    # A steer the agent never reads comes back when the run ends; see tick.
+    return {"object": "memento.queue.steered", "id": row["id"], "run_id": run_id, "text": row["text"]}, None
+
+
 async def tick(adapter: Any, session_id: str, profile: Optional[str], path: Path) -> None:
     ids = await session_ids(adapter, session_id)
     runs = session_runs(adapter, ids)
