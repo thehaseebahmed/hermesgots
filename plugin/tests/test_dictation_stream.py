@@ -481,7 +481,9 @@ class VocabularyTest(unittest.TestCase):
         self.assertEqual(heard.phrases[-1]["text"], "Gots ships it")
 
     def test_the_host_s_prompt_comes_first_and_the_heard_tail_last(self) -> None:
-        scripted = Scripted(["hello there", "hello there friend"])
+        # Two words are settled by the time the frontier is weighed, which is the tail the next
+        # window is prompted with (the frontier word itself waits for the window after it).
+        scripted = Scripted(["hello there friend", "hello there friend how"])
         heard, _, clock = take(scripted, hint="Gots, the chat", vocabulary=["Haseeb"], window_s=1.0)
         push(heard, clock, count=8)
         prompt = scripted.calls[-1]["prompt"]
@@ -489,7 +491,7 @@ class VocabularyTest(unittest.TestCase):
         self.assertTrue(prompt.endswith("hello there"))
 
     def test_a_take_with_no_words_prompts_as_it_did_before(self) -> None:
-        scripted = Scripted(["hello there", "hello there friend"])
+        scripted = Scripted(["hello there friend", "hello there friend how"])
         heard, _, clock = take(scripted, hint="Gots")
         push(heard, clock, count=8)
         self.assertTrue(scripted.calls[-1]["prompt"].startswith("Gots hello there"))
