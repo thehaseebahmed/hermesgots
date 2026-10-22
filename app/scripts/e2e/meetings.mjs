@@ -206,6 +206,38 @@ for (const [width, dark] of [
       await shot("5c-topic")
       await page.getByRole("button", { name: /^Back to / }).click()
 
+      // A page closed mid-meeting keeps what was recorded, and offers to send it.
+      await toList()
+      const mic = () =>
+        page.evaluate(() => {
+          navigator.mediaDevices.getUserMedia = async () => {
+            const context = new AudioContext()
+            const tone = context.createOscillator()
+            const out = context.createMediaStreamDestination()
+            tone.connect(out)
+            tone.start()
+            return out.stream
+          }
+        })
+      await mic()
+      await page.getByRole("button", { name: "New meeting" }).click()
+      await page.getByRole("button", { name: "Start recording" }).click()
+      await page.waitForFunction(
+        () => /^0:(0[6-9]|[1-5]\d)$/.test(document.querySelector("[role=timer]")?.textContent ?? ""),
+        undefined,
+        { timeout: 15_000 },
+      )
+      await page.reload()
+      await page.getByText(/Unfinished recording/).waitFor({ timeout: 10_000 })
+      await shot("5d-unfinished")
+      const known = page.url()
+      await page.getByRole("button", { name: "Send", exact: true }).click()
+      await page.waitForURL((url) => /\/meetings\/m_/.test(url.pathname) && url.href !== known, {
+        timeout: 10_000,
+      })
+      await page.getByText(/Unfinished recording/).waitFor({ state: "detached", timeout: 5_000 })
+      pass(`${width}: a recording the page left behind is offered and sent`)
+
       // A step that fails says why, and Try again carries on from it.
       await toList()
       const flaky = `flaky-${width}`

@@ -453,6 +453,24 @@ export interface SavedDictation {
   at: number
 }
 
+/**
+ * A meeting being recorded in the app, kept on the device as it records (a chunk every few
+ * seconds), so a page closed mid-meeting loses at most the last few seconds. It goes once the host
+ * has the recording, or when the user discards it.
+ */
+export interface SavedMeetingRecording {
+  id: string
+  profileId: string
+  projectId?: string
+  /** The recorder's MIME type, without parameters. */
+  type: string
+  chunks: Blob[]
+  /** How long it has run, with the pauses left out. */
+  ms: number
+  startedAt: number
+  at: number
+}
+
 /** The models.dev catalog cached on this device: the registry, its ETag and when it was fetched. */
 export interface ModelsDevCatalog {
   id: "catalog"
@@ -504,6 +522,7 @@ export const db = new Dexie("memento") as Dexie & {
   overallRankings: EntityTable<OverallRankings, "id">
   dictations: EntityTable<SavedDictation, "id">
   skills: EntityTable<CachedSkills, "id">
+  meetingRecordings: EntityTable<SavedMeetingRecording, "id">
 }
 
 db.version(1).stores({
@@ -683,6 +702,9 @@ db.version(17).upgrade((tx) =>
     }),
 )
 
+// v18: a meeting recorded in the app is kept on the device while it records.
+db.version(18).stores({ meetingRecordings: "id" })
+
 db.on("populate", (tx) => seedProfile(tx))
 
 export async function getSettings(): Promise<Settings> {
@@ -784,6 +806,7 @@ export async function deleteProfile(id: string, { remote = false, last = false }
     db.drafts,
     db.dictations,
     db.skills,
+    db.meetingRecordings,
   ]
   return db.transaction("rw", tables, async () => {
     const alone = (await db.profiles.count()) <= 1
@@ -795,6 +818,7 @@ export async function deleteProfile(id: string, { remote = false, last = false }
     const keys = [...ids.map((chat) => `c:${chat}`), `new:${id}`]
     await db.drafts.bulkDelete(keys)
     await db.dictations.bulkDelete(keys)
+    await db.meetingRecordings.filter((recording) => recording.profileId === id).delete()
     // The bot's own device state, keyed by its server: a twin bot sharing the connection refills it.
     if (profile) await db.skills.delete(connectionKey(profile))
     await db.conversations.bulkDelete(ids)
@@ -906,6 +930,7 @@ export async function clearAllData() {
     db.drafts,
     db.dictations,
     db.skills,
+    db.meetingRecordings,
   ]
   await db.transaction("rw", tables, async () => {
     await Promise.all(tables.map((table) => table.clear()))
