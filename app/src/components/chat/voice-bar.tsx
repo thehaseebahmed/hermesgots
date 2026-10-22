@@ -3,6 +3,7 @@ import { ArrowUpIcon, RotateCwIcon, SquareIcon, XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { keyboardClick, type DictationStatus } from "@/lib/dictation"
+import { failureLine, type DictationFailure } from "@/lib/dictation-failure"
 import { hearing, transcriptText, type DictationTranscript } from "@/lib/dictation-transcript"
 
 const IDLE_BARS = Array<number>(32).fill(0)
@@ -57,7 +58,7 @@ export function VoiceBar({
   status,
   levels,
   startedAt,
-  error,
+  failure,
   transcript,
   onCancel,
   onStop,
@@ -67,7 +68,8 @@ export function VoiceBar({
   status: Exclude<DictationStatus, "idle">
   levels: number[] | null
   startedAt: number | null
-  error: string | null
+  /** Why the take failed, with what to try: the bar's one line while it is failed. */
+  failure: DictationFailure | null
   /** What the take has heard so far; absent for the chunked implementation, which has no words yet. */
   transcript?: DictationTranscript
   onCancel: () => void
@@ -84,15 +86,21 @@ export function VoiceBar({
   }, [onCancel])
 
   const transcribing = status === "transcribing"
+  const failed = status === "failed"
   // The bar takes the mic's place under the finger, so the tap that started recording ends with a
   // click on whatever button sits there now; only a press that began on the bar counts.
   const pressed = useRef(false)
   const pressedHere = (action: () => void) => (event: MouseEvent) => {
     if (pressed.current || keyboardClick(event)) action()
   }
+  // Closing a failed take discards a recording only when one is still held; a take that already
+  // put its words in the field has nothing left to discard, so its button only dismisses the line.
+  const closing = failed ? (failure?.discard ? "Discard" : "Dismiss") : "Cancel"
 
   return (
     <div
+      role="group"
+      aria-label="Dictation take"
       onPointerDownCapture={() => (pressed.current = true)}
       className="flex flex-col rounded-[1.75rem] border border-input bg-background shadow-lg shadow-black/5 dark:bg-input/30"
     >
@@ -105,23 +113,32 @@ export function VoiceBar({
           variant="secondary"
           className="size-11 rounded-full"
           onClick={pressedHere(onCancel)}
-          aria-label={status === "failed" ? "Discard" : "Cancel"}
+          aria-label={closing}
         >
           <XIcon />
         </Button>
-        {status === "failed" ? (
+        {failed ? (
           <>
-            <p
-              className="line-clamp-2 min-w-0 flex-1 px-1 text-sm leading-tight text-destructive"
-              role="alert"
-              title={error ?? undefined}
-            >
-              {error ?? "Couldn't transcribe the recording."}
-            </p>
-            <Button type="button" className="h-11 rounded-full px-4" onClick={pressedHere(onRetry)}>
-              <RotateCwIcon />
-              Retry
-            </Button>
+            <div className="min-w-0 flex-1 px-1">
+              <p
+                className="line-clamp-2 text-sm leading-tight text-destructive"
+                role="alert"
+                title={failure ? failureLine(failure) : undefined}
+              >
+                {failure?.message ?? "Couldn't transcribe the recording."}
+              </p>
+              {failure?.advice && (
+                <p className="line-clamp-1 text-xs leading-tight text-muted-foreground">
+                  {failure.advice}
+                </p>
+              )}
+            </div>
+            {failure?.retry !== false && (
+              <Button type="button" className="h-11 rounded-full px-4" onClick={pressedHere(onRetry)}>
+                <RotateCwIcon />
+                Retry
+              </Button>
+            )}
           </>
         ) : (
           <>

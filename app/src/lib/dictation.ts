@@ -11,6 +11,13 @@ import { DICTATION_INFO_MS } from "@/lib/freshness"
 import { createSignal } from "@/lib/store"
 import { connectionKey } from "@/lib/connection"
 import { db, type DictationPiece, type SavedDictation } from "@/lib/db"
+import {
+  blockedMicrophone,
+  clipFailure,
+  failure as failureOf,
+  microphoneFailure,
+  type DictationFailure,
+} from "@/lib/dictation-failure"
 import { RESTORED, SAVE_MS, keptAudio, keeper, type KeptTake } from "@/lib/dictation-kept"
 import { holdTake, releaseTake } from "@/lib/dictation-lock"
 import { EMPTY_TRANSCRIPT } from "@/lib/dictation-transcript"
@@ -178,7 +185,7 @@ interface Session {
   finishing: Promise<string | null> | null
   error: unknown
   /** Why the take itself died (the recorder errored, the track ended): Retry still sends its phrases. */
-  failure: Error | null
+  failure: DictationFailure | null
   /** The recorders still closing after the take died; a retry waits for them. */
   stopping: Promise<void> | null
   /** Cancelled or done: nothing more is kept. */
@@ -371,36 +378,36 @@ function stopSegments(recording: Recording) {
  * ended. Kept as it was for a host that doesn't advertise `dictation_stream`, which is why nothing
  * below here knows about a live transcript — `transcript` is always empty.
  */
-export function useChunkedDictation(config: HermesConfig, hint: string, key?: string) {
+export function useChunkedDictation(
+  config: HermesConfig,
+  hint: string,
+  key?: string,
+  onCommitted?: (text: string) => void,
+) {
   const [status, setStatus] = useState<DictationStatus>("idle")
   const [levels, setLevels] = useState<number[] | null>(null)
   const [startedAt, setStartedAt] = useState<number | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [failure, setFailure] = useState<DictationFailure | null>(null)
   const session = useRef<Session | null>(null)
-  const latest = useRef({ config, hint, key })
+  const latest = useRef({ config, hint, key, onCommitted })
   useEffect(() => {
-    latest.current = { config, hint, key }
+    latest.current = { config, hint, key, onCommitted }
   })
 
   const showIdle = useCallback(() => {
     setStatus("idle")
     setLevels(null)
     setStartedAt(null)
-    setError(null)
+    setFailure(null)
   }, [])
 
-  /** Sends each piece still without text, in order, each after the text before it. */
-  const showFailure = useCallback((failure: unknown) => {
-    setError(
-      failure instanceof DOMException && failure.name === "AbortError"
-        ? "The bot took too long to transcribe."
-        : failure instanceof Error
-          ? failure.message
-          : "Couldn't transcribe the recording.",
-    )
+  /** The take's failure, as the bar says it: what failed, and what to try. */
+  const showFailure = useCallback((failed: DictationFailure) => {
+    setFailure(failed)
     setStatus("failed")
   }, [])
 
+  /** Sends each piece still without text, in order, each after the text before it. */
   const drain = useCallback((current: Session) => {
     const run = async () => {
       for (;;) {
@@ -438,9 +445,9 @@ export function useChunkedDictation(config: HermesConfig, hint: string, key?: st
 
   /** Ends a take whose recorder died, keeping the phrases already cut so Retry can send them. */
   const fail = useCallback(
-    (current: Session, recording: Recording, message: string) => {
+    (current: Session, recording: Recording, failed: DictationFailure) => {
       if (session.current !== current || current.recording !== recording || current.stopping) return
-      current.failure = new Error(message)
+      current.failure = failed
       current.recording = null
       current.stopping = end(recording)
       stopUpload(current)
@@ -448,7 +455,8 @@ export function useChunkedDictation(config: HermesConfig, hint: string, key?: st
       releaseTake(current.profile, current.lock)
       current.lock = null
       setLevels(null)
-      showFailure(current.failure)
+      // Its recording is still on the device for Retry, so closing this failure is a real discard.
+      showFailure({ ...failed, discard: true })
     },
     [showFailure],
   )
@@ -492,14 +500,19 @@ export function useChunkedDictation(config: HermesConfig, hint: string, key?: st
       }
       recorder.onstop = close
       recorder.onerror = (event) => {
-        fail(current, recording, micError((event as Event & { error?: unknown }).error, STOPPED))
+        const error = (event as Event & { error?: unknown }).error
+        fail(
+          current,
+          recording,
+          microphoneFailure(micError(error, STOPPED), blockedMicrophone(error)),
+        )
         close()
       }
       recording.segments.push(segment)
       recorder.start(1000)
       // A recorder that has sent nothing by now is dead, not quiet: silence still encodes.
       segment.watch = window.setTimeout(() => {
-        if (!segment.chunks.length) fail(current, recording, SILENT)
+        if (!segment.chunks.length) fail(current, recording, microphoneFailure(SILENT))
       }, SILENT_MS)
       return segment
     },
@@ -566,7 +579,7 @@ export function useChunkedDictation(config: HermesConfig, hint: string, key?: st
     const current = newSession(profile, latest.current.key, [], caret ?? undefined)
     current.lock = lock
     session.current = current
-    setError(null)
+    setFailure(null)
     setStatus("listening")
     void warmDictation(latest.current.config).catch(() => {})
     let stream: MediaStream
@@ -606,7 +619,9 @@ export function useChunkedDictation(config: HermesConfig, hint: string, key?: st
     // Another app taking the mic, or the device revoking it, ends the track under the recorder.
     stream
       .getAudioTracks()
-      .forEach((track) => track.addEventListener("ended", () => fail(current, recording, TAKEN)))
+      .forEach((track) =>
+        track.addEventListener("ended", () => fail(current, recording, microphoneFailure(TAKEN))),
+      )
     setStartedAt(recording.startedAt)
     // Past the cap the recording stops growing; Stop or Send still turns it into text.
     recording.cap = window.setTimeout(() => {
@@ -626,7 +641,7 @@ export function useChunkedDictation(config: HermesConfig, hint: string, key?: st
     async (current: Session, deadline?: number) => {
       setStatus("transcribing")
       setLevels(null)
-      setError(null)
+      setFailure(null)
       if (current.stopping) await current.stopping
       const draining = drain(current)
       const done =
@@ -650,7 +665,16 @@ export function useChunkedDictation(config: HermesConfig, hint: string, key?: st
         showIdle()
         return text
       }
-      showFailure(current.error ?? current.failure)
+      // A clip the host couldn't finish ends the take, and the words that are already in stay the
+      // user's: they go to the composer, and only the audio still without text waits for Retry.
+      const heard = current.pieces.filter((piece) => piece.text !== null)
+      if (heard.length) {
+        const text = joinText(...heard.map((piece) => piece.text ?? ""))
+        current.pieces = current.pieces.filter((piece) => piece.text === null)
+        save(current, true)
+        if (text) latest.current.onCommitted?.(text)
+      }
+      showFailure(current.error !== null ? clipFailure(current.error) : (current.failure ?? clipFailure(undefined)))
       // The host may have lost faster-whisper since; ask again so the mic hides if so.
       void readDictationInfo(latest.current.config, true)
       return null
@@ -666,7 +690,7 @@ export function useChunkedDictation(config: HermesConfig, hint: string, key?: st
     async (current: Session) => {
       setStatus("transcribing")
       setLevels(null)
-      setError(null)
+      setFailure(null)
       const controller = new AbortController()
       current.upload = controller
       try {
@@ -684,7 +708,7 @@ export function useChunkedDictation(config: HermesConfig, hint: string, key?: st
       } catch (failure) {
         if (current.upload !== controller) return null
         current.error = failure
-        showFailure(failure)
+        showFailure(clipFailure(failure))
         void readDictationInfo(latest.current.config, true)
         return null
       } finally {
@@ -780,7 +804,8 @@ export function useChunkedDictation(config: HermesConfig, hint: string, key?: st
           saved.caret,
         )
         session.current.restored = true
-        setError(RESTORED)
+        session.current.failure = failureOf("clip", RESTORED, { discard: true })
+        setFailure(session.current.failure)
         setStatus("failed")
       })
     return () => {
@@ -808,7 +833,7 @@ export function useChunkedDictation(config: HermesConfig, hint: string, key?: st
     status,
     levels,
     startedAt,
-    error,
+    failure,
     transcript: EMPTY_TRANSCRIPT,
     /** When the recorder started, for a hold that ends before the mic was granted. */
     recordingSince: () => session.current?.recording?.startedAt ?? null,

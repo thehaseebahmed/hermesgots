@@ -6,6 +6,7 @@
  * Both are mounted — a hook can't be chosen conditionally — and only the one being used ever hears
  * a `start`.
  */
+import type { DictationFailure } from "@/lib/dictation-failure"
 import type { DictationTranscript } from "@/lib/dictation-transcript"
 import { useChunkedDictation, type DictationStatus } from "@/lib/dictation"
 import { useStreamDictation } from "@/lib/dictation-stream"
@@ -20,7 +21,8 @@ export interface DictationTake {
   status: DictationStatus
   levels: number[] | null
   startedAt: number | null
-  error: string | null
+  /** Why the take failed, with what to try: the bar's one line while it is failed. */
+  failure: DictationFailure | null
   /** What the take has heard so far; empty for the chunked implementation. */
   transcript: DictationTranscript
   recordingSince: () => number | null
@@ -45,17 +47,19 @@ export interface DictationTake {
  * Dictation for this bot. The implementation is picked when a take starts — a live take keeps the
  * one it began on — and anything but a clear `yes` is the chunked one, which is what a host with no
  * answer, or an older plugin, has always had. `vocabulary` is the bot's words, which only the
- * streaming take can use: it rides on the call that opens a take.
+ * streaming take can use: it rides on the call that opens a take. `onCommitted` is how a take that
+ * fails hands back the words it had already heard, so a failure never takes them away.
  */
 export function useDictation(
   config: HermesConfig,
   hint: string,
   key?: string,
   vocabulary?: string[],
+  onCommitted?: (text: string) => void,
 ): DictationTake {
   const answer = usePluginFeature(config, DICTATION_STREAM)
-  const chunked = useChunkedDictation(config, hint, key)
-  const stream = useStreamDictation(config, hint, key, vocabulary)
+  const chunked = useChunkedDictation(config, hint, key, onCommitted)
+  const stream = useStreamDictation(config, hint, key, vocabulary, onCommitted)
   // A take kept by the device is offered by the implementation that made it, whatever the host
   // advertises now: a restored take is transcribed through the batch route either way.
   if (chunked.status !== "idle") return chunked

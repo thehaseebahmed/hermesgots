@@ -32,6 +32,15 @@ import {
   within,
   type DictationStatus,
 } from "@/lib/dictation"
+import {
+  blockedMicrophone,
+  clipFailure,
+  failure as failureOf,
+  microphoneFailure,
+  startFailure,
+  takeFailure,
+  type DictationFailure,
+} from "@/lib/dictation-failure"
 import { RESTORED, type Keeper } from "@/lib/dictation-kept"
 import { holdTake, releaseTake } from "@/lib/dictation-lock"
 import {
@@ -61,7 +70,6 @@ const PHRASE_PAUSE_MS = 700
 /** A cold host loads, or first downloads, its model inside the start call, as a clip did. */
 const START_MS = 120_000
 const CANCEL_MS = 5_000
-const TOO_LONG = "The bot took too long to hear the dictation."
 
 interface Slice {
   blob: Blob
@@ -98,7 +106,10 @@ interface TakeSession {
   closed: boolean
   /** Whether its audio still belongs on the device: no once its text is in, or it was let go. */
   keeping: boolean
-  failure: string | null
+  /** Why the take ended when it wasn't the user who ended it. */
+  failure: DictationFailure | null
+  /** Whether the words it had committed were already handed to the composer, so once only. */
+  handed: boolean
   /** The take's audio as the device holds it: one piece per slice, none of them transcribed. */
   kept: DictationPiece[]
   /** Writes `kept` to the device no more often than every 2 s. */
@@ -139,6 +150,7 @@ function newTake(
     closed: false,
     keeping: true,
     failure: null,
+    handed: false,
     kept,
     keeper: keptKeeper(key),
     restored: false,
@@ -159,12 +171,6 @@ function keepSlice(current: TakeSession, blob: Blob) {
 /** Whether the host no longer has this take: it expired, was cancelled, or never existed. */
 function ended(failure: unknown) {
   return failure instanceof HermesError && (failure.status === 404 || failure.status === 410)
-}
-
-function reason(failure: unknown, otherwise: string) {
-  if (failure instanceof DOMException && failure.name === "AbortError") return TOO_LONG
-  if (failure instanceof Error && failure.message) return failure.message
-  return otherwise
 }
 
 /** Whether an ending's answer is one to abandon on rather than to keep the take for: the wait ran
@@ -239,17 +245,18 @@ export function useStreamDictation(
   hint: string,
   key?: string,
   vocabulary: string[] = [],
+  onCommitted?: (text: string) => void,
 ) {
   const [status, setStatus] = useState<DictationStatus>("idle")
   const [levels, setLevels] = useState<number[] | null>(null)
   const [startedAt, setStartedAt] = useState<number | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [failure, setFailure] = useState<DictationFailure | null>(null)
   const [transcript, setTranscript] = useState<DictationTranscript>(EMPTY_TRANSCRIPT)
   const session = useRef<TakeSession | null>(null)
   const heard = useRef<DictationTranscript>(EMPTY_TRANSCRIPT)
-  const latest = useRef({ config, hint, key, vocabulary })
+  const latest = useRef({ config, hint, key, vocabulary, onCommitted })
   useEffect(() => {
-    latest.current = { config, hint, key, vocabulary }
+    latest.current = { config, hint, key, vocabulary, onCommitted }
   })
 
   const show = useCallback((next: DictationTranscript) => {
@@ -261,25 +268,44 @@ export function useStreamDictation(
     setStatus("idle")
     setLevels(null)
     setStartedAt(null)
-    setError(null)
+    setFailure(null)
     show(EMPTY_TRANSCRIPT)
   }, [show])
 
-  /** Ends a take that can't go on, keeping what the host already heard so Retry can ask for it. */
-  const fail = useCallback((current: TakeSession, message: string) => {
+  /**
+   * Ends a take that can't go on. What the host already committed goes to the composer before the
+   * bar changes, so a failure never takes back the words the user has read; the rest of the take is
+   * let go — microphone, the host's take and the audio on the device — so nothing is left held.
+   * Retry afterwards is a fresh take from the same place.
+   */
+  const fail = useCallback((current: TakeSession, failed: DictationFailure) => {
     if (session.current !== current || current.failure) return
-    current.failure = message
+    current.failure = failed
     current.closed = true
     current.upload?.abort()
     current.upload = null
+    // A tail being waited for is let go too: a failed take inserts nothing more.
+    current.ending?.abort()
+    current.ending = null
     // A take that died is over as far as the microphone goes, Retry or not.
     letGo(current)
-    // What the take recorded is kept before the mic goes, its tail included: the recorder flushes
-    // the last slice on the way out, so the row is written after it.
-    void stopRecording(current).then(() => current.keeper.flush())
+    const committed = transcriptText(heard.current)
+    if (committed && !current.handed) {
+      current.handed = true
+      latest.current.onCommitted?.(committed)
+    }
+    // The host is told to forget the take: nothing of it is waited for any more.
+    const take = current.take
+    current.take = null
+    if (take)
+      void cancelDictationTake(latest.current.config, take, AbortSignal.timeout(CANCEL_MS)).catch(
+        () => undefined,
+      )
+    // Its audio goes too: the words it heard are in the composer, and the rest is not wanted.
+    void stopRecording(current).then(() => current.keeper.drop())
     release(current)
     setLevels(null)
-    setError(message)
+    setFailure(failed)
     setStatus("failed")
   }, [])
 
@@ -305,14 +331,9 @@ export function useStreamDictation(
             show(hear(heard.current, answer))
           } catch (failure) {
             if (current.closed || session.current !== current) return
-            // The host let the take go (it went quiet, or its model fell over): nothing more to
-            // send, and what it already heard is still on the bar.
-            if (ended(failure)) {
-              current.take = null
-              current.closed = true
-              return
-            }
-            fail(current, reason(failure, "Couldn't hear the recording."))
+            // A slice the host refused, or a take it has let go, ends the take: the words it
+            // already committed stay, and the bar says what happened rather than going quiet.
+            fail(current, takeFailure(failure, "host"))
             return
           } finally {
             window.clearTimeout(timer)
@@ -374,7 +395,7 @@ export function useStreamDictation(
     const current = newTake(profile, latest.current.key, caret ?? undefined)
     current.lock = lock
     session.current = current
-    setError(null)
+    setFailure(null)
     setLevels(null)
     setStatus("listening")
     show(openingTranscript())
@@ -390,14 +411,25 @@ export function useStreamDictation(
       asking.signal,
     )
       .then((opened) => {
-        if (session.current !== current) return
+        if (session.current !== current) {
+          // The host opened the take after the user let it go — a Cancel while the start was in
+          // flight: it is told to forget the take rather than hold it until it expires.
+          void cancelDictationTake(
+            latest.current.config,
+            opened.take,
+            AbortSignal.timeout(CANCEL_MS),
+          ).catch(() => undefined)
+          return
+        }
         current.take = opened.take
         show(settled(heard.current))
         void pump(current)
       })
       .catch((failure) => {
         if (session.current !== current) return
-        fail(current, reason(failure, "Couldn't start the dictation."))
+        // A refused take, or a model that didn't load, ends here: the bar says which rather than
+        // sitting on "Preparing…" while the user talks to nothing.
+        fail(current, startFailure(failure))
       })
       .finally(() => window.clearTimeout(cold))
 
@@ -420,8 +452,8 @@ export function useStreamDictation(
       letGo(current)
       throw new Error(micError(failure, "Couldn't start the microphone."))
     }
-    // Cancelled while the mic was asked for.
-    if (session.current !== current) {
+    // Cancelled, or failed, while the mic was asked for: the stream is not this take's to keep.
+    if (session.current !== current || current.failure) {
       stream.getTracks().forEach((track) => track.stop())
       return
     }
@@ -443,17 +475,19 @@ export function useStreamDictation(
       current.pauseNext = false
       void pump(current)
     }
-    recorder.onerror = (event) =>
-      fail(current, micError((event as Event & { error?: unknown }).error, STOPPED))
+    recorder.onerror = (event) => {
+      const error = (event as Event & { error?: unknown }).error
+      fail(current, microphoneFailure(micError(error, STOPPED), blockedMicrophone(error)))
+    }
     // A recorder that has sent nothing by now is dead, not quiet: silence still encodes.
     current.watch = window.setTimeout(() => {
-      if (!current.slices) fail(current, SILENT)
+      if (!current.slices) fail(current, microphoneFailure(SILENT))
     }, SILENT_MS)
     recorder.start(SLICE_MS)
     // Another app taking the mic, or the device revoking it, ends the track under the recorder.
     stream
       .getAudioTracks()
-      .forEach((track) => track.addEventListener("ended", () => fail(current, TAKEN)))
+      .forEach((track) => track.addEventListener("ended", () => fail(current, microphoneFailure(TAKEN))))
     setStartedAt(current.startedAt)
     // Past the cap the recording stops growing; Stop still sends what was heard.
     current.cap = window.setTimeout(() => void stopRecording(current), MAX_MS)
@@ -524,15 +558,17 @@ export function useStreamDictation(
         const left = () => Math.max(0, deadline - Date.now())
         // Stop waits for a cold host to open the take, so what was said while it loaded isn't lost.
         await current.asking.catch(() => undefined)
-        if (session.current !== current) return null
+        // A take that failed while it waited (a refused start, a model that didn't load) has
+        // already ended: its words are in the composer and the bar holds the reason.
+        if (session.current !== current || current.failure) return null
         setStatus("transcribing")
         setLevels(null)
-        setError(null)
+        setFailure(null)
         await stopRecording(current)
-        if (session.current !== current) return null
+        if (session.current !== current || current.failure) return null
         // Everything still queued is sent before the tail is asked for, inside what is left of it.
         await within(pump(current), left())
-        if (session.current !== current) return null
+        if (session.current !== current || current.failure) return null
         const take = current.take
         if (!take) {
           // The host let the take go before Stop: what it already committed is still what was said.
@@ -564,7 +600,7 @@ export function useStreamDictation(
               abandon(current)
               return text
             }
-            fail(current, reason(tail.failed, "Couldn't finish the dictation."))
+            fail(current, takeFailure(tail.failed, "host"))
             return null
           }
           const final = hear(heard.current, tail.answer)
@@ -621,7 +657,7 @@ export function useStreamDictation(
   const replay = useCallback(
     async (current: TakeSession) => {
       current.failure = null
-      setError(null)
+      setFailure(null)
       setStatus("transcribing")
       setLevels(null)
       const controller = new AbortController()
@@ -638,7 +674,7 @@ export function useStreamDictation(
         return text
       } catch (failure) {
         if (session.current !== current || current.upload !== controller) return null
-        fail(current, reason(failure, "Couldn't transcribe the recording."))
+        fail(current, clipFailure(failure))
         return null
       } finally {
         if (current.upload === controller) current.upload = null
@@ -647,42 +683,20 @@ export function useStreamDictation(
     [clear, fail],
   )
 
-  /** Asks the host for what it heard after a take that couldn't be finished, and returns it. */
-  const retry = useCallback(async () => {
+  /**
+   * A failed take has ended — its words are in the composer and its audio is gone — so Retry is a
+   * fresh take from the same place, not a second attempt at one nothing is holding. A take the app
+   * was killed in the middle of is a recording on the device instead, and is asked for whole.
+   */
+  const retry = async () => {
     const current = session.current
-    if (!current) return null
+    if (!current || !current.failure) return null
     if (current.restored) return replay(current)
-    const take = current.take
-    if (!take) {
-      const text = transcriptText(heard.current)
-      cancel()
-      return text
-    }
-    current.failure = null
-    setError(null)
-    setStatus("transcribing")
-    try {
-      const answer = await stopDictationTake(
-        latest.current.config,
-        take,
-        AbortSignal.timeout(WRITE_TIMEOUT_MS),
-      )
-      const final = hear(heard.current, answer)
-      show(final)
-      const text = transcriptText(final)
-      clear(current)
-      return text
-    } catch (failure) {
-      // The host let the take go: what it had already committed is still the take.
-      if (ended(failure)) {
-        const text = transcriptText(heard.current)
-        clear(current)
-        return text
-      }
-      fail(current, reason(failure, "Couldn't finish the dictation."))
-      return null
-    }
-  }, [cancel, clear, fail, replay, show])
+    const caret = current.caret
+    cancel()
+    await start(caret)
+    return null
+  }
 
   // A take the app was killed in the middle of is offered again, with Retry and Discard: its
   // slices are on the device, and the batch route can still hear them whole.
@@ -699,8 +713,9 @@ export function useStreamDictation(
         )
         current.restored = true
         current.startedAt = saved.at
+        current.failure = failureOf("clip", RESTORED, { discard: true })
         session.current = current
-        setError(RESTORED)
+        setFailure(current.failure)
         setStatus("failed")
       })
     return () => {
@@ -739,7 +754,7 @@ export function useStreamDictation(
     status,
     levels,
     startedAt,
-    error,
+    failure,
     transcript,
     /** When the recording started, for a hold that ends before the mic was granted. */
     recordingSince: () => session.current?.startedAt ?? null,
