@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from "react"
 
 import { OPENUI_ROOT } from "@/components/openui/root.ts"
-import { carriesBlock } from "@/lib/openui-block.ts"
+import { mayCarryBlock } from "@/lib/openui-block.ts"
 import { quietly } from "@/lib/report"
 
 import type { ThreadBlock, ThreadRow } from "./openui-thread.ts"
@@ -20,7 +20,7 @@ export function useDraws(rows: ThreadRow[]): Map<string, ThreadBlock[]> {
   const [fold, setFold] = useState<Fold>()
   useEffect(() => {
     if (fold) return
-    if (!rows.some((row) => row.role === "assistant" && carriesBlock(row.content))) return
+    if (!rows.some((row) => row.role === "assistant" && mayCarryBlock(row.content))) return
     void import("./openui-thread.ts").then(
       (module) => setFold(() => module.resolveInterfaces),
       quietly("the interface fold"),
