@@ -1,4 +1,6 @@
-export type LocalCommand = "new" | "settings"
+export type LocalCommand = "new" | "thread" | "settings"
+/** The command that starts a chat on purpose: `/thread` where threads are a thing, `/new` where not. */
+export type StartCommand = Extract<LocalCommand, "new" | "thread">
 /** Commands that carry the message after them, while a reply runs. */
 export type SendMode = "steer" | "queue"
 
@@ -6,10 +8,26 @@ export type SlashItem =
   | { kind: "command"; name: LocalCommand | SendMode; description: string }
   | { kind: "skill"; name: string; description?: string | null; category?: string | null }
 
-export const LOCAL_COMMANDS: SlashItem[] = [
-  { kind: "command", name: "new", description: "Start a new chat" },
-  { kind: "command", name: "settings", description: "Open settings" },
-]
+export const startCommand = (threads: boolean): StartCommand => (threads ? "thread" : "new")
+
+/**
+ * Whether a command takes the rest of the message as its own: `/thread` does, since that text opens
+ * the thread it starts.
+ */
+export const carriesMessage = (name: string) => name === "thread"
+
+export function localCommands(threads: boolean): SlashItem[] {
+  return [
+    {
+      kind: "command",
+      name: startCommand(threads),
+      description: threads ? "Start a thread" : "Start a new chat",
+    },
+    { kind: "command", name: "settings", description: "Open settings" },
+  ]
+}
+
+export const LOCAL_COMMANDS: SlashItem[] = localCommands(false)
 
 /** Offered only while a reply runs, when there is something to steer or wait for. */
 export const SEND_COMMANDS: SlashItem[] = [
@@ -25,11 +43,17 @@ export function sendMode(text: string): { mode: SendMode; text: string } | null 
   return match ? { mode: match[1] as SendMode, text: (match[2] ?? "").trim() } : null
 }
 
-export function localCommand(text: string): LocalCommand | null {
-  const name = text.trim().slice(1)
-  return text.trim().startsWith("/") && LOCAL_COMMANDS.some((c) => c.name === name)
-    ? (name as LocalCommand)
-    : null
+export function localCommand(
+  text: string,
+  threads = false,
+): { command: LocalCommand; text: string } | null {
+  const match = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text.trim())
+  if (!match) return null
+  const [, name, rest = ""] = match
+  const command = localCommands(threads).find((item) => item.name === name)
+  if (!command) return null
+  if (rest.trim() && !carriesMessage(name)) return null
+  return { command: name as LocalCommand, text: rest.trim() }
 }
 
 const isSpace = (char: string | undefined) => char === undefined || /\s/.test(char)
@@ -64,20 +88,15 @@ export function slashToken(text: string, caret: number): SlashToken | null {
   return { start, end, query, alone }
 }
 
-/**
- * Commands by name prefix — and only when the token is the whole message, the shape `localCommand`
- * matches on, so the menu never offers one that running would drop the rest of the message for
- * (`/steer` and `/queue` carry text instead and are hoisted with it, like a skill) — then the
- * skills, in tiers: an exact name, a name the query starts, a name that contains it, a fuzzy name,
- * a category, a description. Ties keep their order.
- */
+/** The commands the token matches, then the skills it matches, best first. */
 export function rankSlashItems(items: SlashItem[], token: SlashToken): SlashItem[] {
   const query = token.query.toLowerCase()
-  const commands = token.alone
-    ? items.filter(
-        (item) => item.kind === "command" && (!query || item.name.toLowerCase().startsWith(query)),
-      )
-    : []
+  const commands = items.filter(
+    (item) =>
+      item.kind === "command" &&
+      (!query || item.name.toLowerCase().startsWith(query)) &&
+      (token.alone || (carriesMessage(item.name) && token.start === 0)),
+  )
   const skills = items.filter((item): item is SkillItem => item.kind === "skill")
   if (!query) return [...commands, ...skills]
   const ranked = skills

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { Link, useLocation, useNavigate, useParams } from "react-router"
+import { Link, matchPath, useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
 import {
   ArchiveXIcon,
@@ -25,6 +25,7 @@ import {
   SEND_CAUGHT_UP_MS,
 } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
+import { threadCount, threadsLine } from "@/lib/bot-chrome"
 import { repoCap, sessionSubtitle } from "@/lib/repo-line"
 import { useBreakReminderEligibility } from "@/components/break-reminder-context"
 import { ApprovalCard } from "@/components/chat/approval-card"
@@ -33,7 +34,9 @@ import { ChatHeader } from "@/components/chat/chat-header"
 import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
 import { Compacted, ModelChange } from "@/components/chat/model-change"
+import { DayHeading } from "@/components/chat/day-heading"
 import { MovedMarker } from "@/components/chat/moved-marker"
+import { ThreadCard } from "@/components/chat/thread-card"
 import { prLabel } from "@/components/chat/pr-look"
 import { PipelinePill, PipelineSheet } from "@/components/chat/pipeline"
 import { PrPill } from "@/components/chat/pr-pill"
@@ -105,12 +108,19 @@ import {
   createConversation,
   db,
   deleteConversation,
+  ensureMainThread,
   getActiveProfile,
   getMessages,
+  mainThreadId,
+  mainThreadProfile,
+  setActiveProfile,
   updateConversation,
 } from "@/lib/db"
 import { compactionMarks } from "@/lib/compactions"
-import { moveMarks, undoMove } from "@/lib/moves"
+import { dayOf } from "@/lib/days"
+import { moveMarks, openedThread } from "@/lib/move-marks"
+import { undoMove } from "@/lib/moves"
+import { drawnThreadIds, threadCards } from "@/lib/thread-cards"
 import { serverConfig } from "@/lib/connection"
 import { describeActivity } from "@/lib/format"
 import { supportsSteer, type HermesProject, type Move } from "@/lib/hermes"
@@ -126,7 +136,7 @@ import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { syncNow } from "@/lib/sync"
-import { setThreadMuted } from "@/lib/push"
+import { setBotMuted, setThreadMuted } from "@/lib/push"
 import { useStagedPipeline } from "@/lib/afk-workflows"
 import { modelChanges } from "@/lib/model-changes"
 import { fullModel, hostChoice, useModelInfo } from "@/lib/model-info"
@@ -150,12 +160,18 @@ import {
   type RepoRef,
 } from "@/lib/workspace"
 import { useReadyLine } from "@/lib/greeting"
+import { SUGGESTIONS } from "@/lib/suggestions"
 import { DEFAULT_BOT_ID } from "@/components/bots"
-import { useBotThreads } from "@/lib/threads"
+import { useBotThreads, useNow, useThreads, type Thread } from "@/lib/threads"
 import { draftKey } from "@/lib/drafts"
 import { AgentsContext, DELEGATE_TOOL, useSessionAgents } from "@/lib/agents"
 
 const NO_ROWS: Message[] = []
+
+type FlowEntry =
+  | { kind: "heading"; day: string; at: number }
+  | { kind: "card"; thread: Thread }
+  | { kind: "message"; message: Message }
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
@@ -206,6 +222,36 @@ function EmptyState({
   )
 }
 
+function MainEmptyState({
+  botId,
+  id,
+  onSend,
+}: {
+  botId?: string
+  /** Main itself, so its line is the one it keeps. */
+  id?: string
+  onSend: (text: string) => Promise<void>
+}) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 pt-24 pb-8 text-center">
+      <Bot id={botId} animate className="size-24" />
+      <ReadyLine botId={botId} id={id} />
+      <div className="flex max-w-md flex-wrap justify-center gap-2">
+        {SUGGESTIONS.map((text) => (
+          <Button
+            key={text}
+            variant="outline"
+            className="h-auto min-h-10 rounded-full whitespace-normal"
+            onClick={() => void onSend(text).catch(() => {})}
+          >
+            {text}
+          </Button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 /** An approval or question card temporarily replaces the composer; once answered, follow the reply again. */
 function FollowAfterApproval({ pending }: { pending: boolean }) {
   const { scrollToEnd } = useMessageScroller()
@@ -228,8 +274,10 @@ function FollowOnSend({ lastUserId }: { lastUserId?: string }) {
   return null
 }
 
-export function ChatPage() {
-  const { id } = useParams()
+export function ChatPage({ chatId }: { chatId?: string } = {}) {
+  const params = useParams()
+  const { pathname } = useLocation()
+  const id = chatId ?? params.id
   // A message left routing by a page that closed mid-triage was never sent.
   useEffect(() => {
     if (id) void settleRouting(id)
@@ -237,6 +285,7 @@ export function ChatPage() {
   const navigate = useNavigate()
   const { root, up } = useNav()
   const settings = useLiveQuery(() => db.settings.get("settings"), [])
+  const botThreads = useBotThreads()
   const found = useLiveQuery(
     async () => (id ? ((await db.conversations.get(id)) ?? null) : undefined),
     [id],
@@ -284,6 +333,40 @@ export function ChatPage() {
       ],
     [messages],
   )
+  const threadList = useThreads(
+    botThreads && conversation?.main ? conversation.profileId : undefined,
+  )
+  const cards = useMemo(
+    () =>
+      botThreads && conversation?.main ? threadCards(thread ?? NO_ROWS, threadList) : undefined,
+    [botThreads, conversation?.main, thread, threadList],
+  )
+  const threadsDrawnAsCards = useMemo(() => drawnThreadIds(cards), [cards])
+  const now = useNow()
+  const flow = useMemo(() => {
+    const entries: FlowEntry[] = []
+    let day: string | undefined
+    const heading = (at: number) => {
+      if (!cards) return
+      const label = dayOf(at, now)
+      if (label === day) return
+      day = label
+      entries.push({ kind: "heading", day: label, at })
+    }
+    for (const message of thread ?? NO_ROWS) {
+      for (const card of cards?.before.get(message.id) ?? []) {
+        heading(card.chat.createdAt)
+        entries.push({ kind: "card", thread: card })
+      }
+      heading(message.createdAt)
+      entries.push({ kind: "message", message })
+    }
+    for (const card of cards?.trailing ?? []) {
+      heading(card.chat.createdAt)
+      entries.push({ kind: "card", thread: card })
+    }
+    return entries
+  }, [cards, thread, now])
   // Where this chat's model changed, as the host recorded it: the divider each turn below carries.
   const changes = useMemo(
     () => modelChanges(thread ?? [], conversation?.modelChanges),
@@ -295,9 +378,17 @@ export function ChatPage() {
     [thread, conversation?.compactions],
   )
   const moved = useMemo(
-    () => moveMarks(thread ?? [], conversation?.moves),
-    [thread, conversation?.moves],
+    () => moveMarks(thread ?? [], conversation?.moves, threadsDrawnAsCards),
+    [thread, conversation?.moves, threadsDrawnAsCards],
   )
+  const moveThatOpenedThread = useMemo(() => {
+    const found = new Map<string, Move>()
+    for (const move of conversation?.moves ?? []) {
+      const threadId = openedThread(move)
+      if (threadId) found.set(threadId, move)
+    }
+    return found
+  }, [conversation?.moves])
   // One query for every moved-to thread's title, not one per marker: a write to any conversation
   // re-runs a live query.
   const movedIds = useMemo(
@@ -311,21 +402,20 @@ export function ChatPage() {
       ),
     [movedIds],
   )
+  const undoMoveOutMain = (move: Move) =>
+    id &&
+    void undoMove(id, move.id)
+      .then(() => refreshQueue(id))
+      .catch((error) =>
+        toast.error(error instanceof Error ? error.message : "Couldn't undo the move"),
+      )
   const moveMarker = (move: Move) => (
     <MovedMarker
       key={move.id}
       move={move}
       title={movedTitles?.get(move.threadId)}
       profileId={conversation?.profileId ?? ""}
-      onUndo={(m) =>
-        id &&
-        void undoMove(id, m.id)
-          // The host queued the message on Main: show it there as the marker goes.
-          .then(() => refreshQueue(id))
-          .catch((error) =>
-            toast.error(error instanceof Error ? error.message : "Couldn't undo the move"),
-          )
-      }
+      onUndo={undoMoveOutMain}
     />
   )
   const draws = useDraws(thread ?? NO_ROWS)
@@ -466,7 +556,8 @@ export function ChatPage() {
   // when this tab comes back, and now and then while it's on screen.
   const updatedAt = conversation?.updatedAt
   const hasMessages = (messages?.length ?? 0) > 0
-  const unstarted = configured && !hasMessages && !loadingHistory
+  const hasCards = Boolean(cards && (cards.before.size || cards.trailing.length))
+  const unstarted = configured && !hasMessages && !hasCards && !loadingHistory
   // The agents this chat's agent delegated to, for their cards in the thread.
   const delegations = messages
     ?.flatMap((m) => m.tools ?? [])
@@ -537,10 +628,26 @@ export function ChatPage() {
       ? projectRepos(project)
       : []
 
+  const mainOf = conversation?.main ? conversation.profileId : undefined
+  useEffect(() => {
+    if (mainOf) void setActiveProfile(mainOf)
+  }, [mainOf])
+
+  const mainOwner = id ? mainThreadProfile(id) : undefined
   // A deleted (or unknown) conversation id falls back to a fresh chat.
   useEffect(() => {
-    if (id && conversation === null) root("/")
-  }, [id, conversation, root])
+    if (!id || conversation !== null) return
+    if (mainOwner) {
+      if (botThreads === undefined) return
+      if (botThreads) {
+        void db.profiles
+          .get(mainOwner)
+          .then((owner) => (owner ? ensureMainThread(mainOwner) : root("/")))
+        return
+      }
+    }
+    root("/")
+  }, [id, conversation, root, botThreads, mainOwner])
 
   // A session that was never sent anything isn't kept; typed text is the user's to keep or drop.
   const draftRef = useRef("")
@@ -585,10 +692,13 @@ export function ChatPage() {
       else await deleteConversation(left)
     })()
   }, [id])
-  // With bot threads on, a chat is a thread of its bot, which it goes back to.
-  const botThreads = useBotThreads()
-  const botPath =
-    botThreads && conversation && !session ? `/b/${conversation.profileId}` : undefined
+  const isMain = Boolean(conversation?.main)
+  const routeChat = matchPath("/c/:id", pathname)?.params.id
+  const openThread = chatId && routeChat !== id ? routeChat : undefined
+  const mainPath =
+    botThreads && conversation && !session && !isMain
+      ? `/c/${mainThreadId(conversation.profileId)}`
+      : undefined
   // From `xl` a thread opens beside its bot, which it closes to. A session opens beside Code's list
   // where there's room, and is then a top-level screen with nothing to go back to.
   const xl = useXLarge()
@@ -598,16 +708,16 @@ export function ChatPage() {
   // Beside its bot the header drops the picture, so the reply count sits under the title instead.
   const replyCount = messages?.filter((m) => m.role === "assistant").length ?? 0
   const repliesLine =
-    botPath && xl && replyCount
+    mainPath && xl && replyCount
       ? `${replyCount} ${replyCount === 1 ? "reply" : "replies"}`
       : undefined
   useEffect(() => {
-    if (!botPath) return
+    if (!mainPath) return
     return setBackGuard(() => {
-      up(botPath)
+      up(mainPath)
       return true
     })
-  }, [botPath, up])
+  }, [mainPath, up])
   // A session sits under Code, unless it's beside it; a plain chat is top-level, so back leaves the
   // app.
   useEffect(() => {
@@ -679,6 +789,19 @@ export function ChatPage() {
     }
   }
 
+  const startThread = async (text: string, attachments: Attachment[] = []) => {
+    if (!profile || !conversation?.main) return
+    try {
+      const thread = await createConversation(profile.id, { modelChoice })
+      navigate(`/c/${thread.id}`, { state: { bot: profile.id } })
+      if (text.trim() || attachments.length) await sendMessage(thread.id, text, { attachments })
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't start the thread.")
+      throw error
+    }
+  }
+
+  const mainChrome = Boolean(botThreads && isMain && profile)
   const actions = conversation && (
     <div className="flex items-center gap-2">
       {wide && configured && <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />}
@@ -689,7 +812,7 @@ export function ChatPage() {
               variant="outline"
               size="icon-lg"
               className="size-11 rounded-full bg-background/80 backdrop-blur"
-              aria-label="Chat options"
+              aria-label={mainChrome ? "Bot options" : "Chat options"}
             />
           }
         >
@@ -715,42 +838,58 @@ export function ChatPage() {
             <PencilIcon />
             {session ? "Edit" : "Rename"}
           </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() => void setThreadMuted(conversation.id, !conversation.muted)}
-          >
-            {conversation.muted ? <BellIcon /> : <BellOffIcon />}
-            {conversation.muted ? "Unmute notifications" : "Mute notifications"}
-          </DropdownMenuItem>
-          {session &&
-            !session.discardedAt &&
-            (session.resolvedAt ? (
-              <DropdownMenuItem
-                onClick={() => updateConversation(session.id, { resolvedAt: undefined })}
-              >
-                <RotateCcwIcon />
-                Reopen
-              </DropdownMenuItem>
-            ) : (
-              <DropdownMenuItem
-                onClick={() => updateConversation(session.id, { resolvedAt: Date.now() })}
-              >
-                <CheckIcon />
-                Resolve
-              </DropdownMenuItem>
-            ))}
-          {!conversation.main && (
+          {mainChrome && profile ? (
             <>
-              <DropdownMenuSeparator />
-              {session && !session.discardedAt && (
-                <DropdownMenuItem onClick={() => setDiscarding(true)}>
-                  <ArchiveXIcon />
-                  Discard
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem variant="destructive" onClick={() => setDeleting(true)}>
-                <Trash2Icon />
-                Delete
+              <DropdownMenuItem onClick={() => void setBotMuted(profile.id, !profile.muted)}>
+                {profile.muted ? <BellIcon /> : <BellOffIcon />}
+                {profile.muted ? "Unmute notifications" : "Mute notifications"}
               </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => root("/settings/bots")}>
+                <SettingsIcon />
+                Bot settings
+              </DropdownMenuItem>
+            </>
+          ) : (
+            <>
+              <DropdownMenuItem
+                onClick={() => void setThreadMuted(conversation.id, !conversation.muted)}
+              >
+                {conversation.muted ? <BellIcon /> : <BellOffIcon />}
+                {conversation.muted ? "Unmute notifications" : "Mute notifications"}
+              </DropdownMenuItem>
+              {session &&
+                !session.discardedAt &&
+                (session.resolvedAt ? (
+                  <DropdownMenuItem
+                    onClick={() => updateConversation(session.id, { resolvedAt: undefined })}
+                  >
+                    <RotateCcwIcon />
+                    Reopen
+                  </DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem
+                    onClick={() => updateConversation(session.id, { resolvedAt: Date.now() })}
+                  >
+                    <CheckIcon />
+                    Resolve
+                  </DropdownMenuItem>
+                ))}
+              {!conversation.main && (
+                <>
+                  <DropdownMenuSeparator />
+                  {session && !session.discardedAt && (
+                    <DropdownMenuItem onClick={() => setDiscarding(true)}>
+                      <ArchiveXIcon />
+                      Discard
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem variant="destructive" onClick={() => setDeleting(true)}>
+                    <Trash2Icon />
+                    Delete
+                  </DropdownMenuItem>
+                </>
+              )}
             </>
           )}
         </DropdownMenuContent>
@@ -760,6 +899,7 @@ export function ChatPage() {
 
   // A session is a place in a project, not a conversation with a bot, so its header is centred.
   const centered = Boolean(session)
+  const mainLine = botThreads && isMain ? threadsLine(threadCount(threadList)) : undefined
   let subtitle: string | undefined
   if (!unstarted)
     subtitle = session
@@ -769,7 +909,7 @@ export function ChatPage() {
           names: sessionRepos.map((repo) => repo.name),
           cap: repoCap({ wide, xlarge: xl }),
         })
-      : activity || repliesLine
+      : activity || mainLine || repliesLine
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -781,15 +921,15 @@ export function ChatPage() {
         muted={Boolean(conversation?.muted || profile?.muted)}
         centered={centered}
         // Beside its bot, a thread already shows the picture.
-        showBot={!session && !unstarted && !(botPath && xl)}
+        showBot={!session && !unstarted && !(mainPath && xl)}
         actions={actions}
         leading={
-          botPath ? (
+          mainPath ? (
             <Button
               variant="outline"
               size="icon-lg"
               className="size-11 rounded-full bg-background/80 backdrop-blur"
-              onClick={() => up(botPath)}
+              onClick={() => up(mainPath)}
               aria-label={xl ? "Close thread" : `Back to ${profile?.name ?? "bot"}`}
             >
               {xl ? <XIcon /> : <ArrowLeftIcon />}
@@ -811,7 +951,7 @@ export function ChatPage() {
         }
       />
 
-      {hasMessages || (thread && moved.trailing.length) ? (
+      {hasMessages || hasCards || (thread && moved.trailing.length) ? (
         <MessageScrollerProvider autoScroll defaultScrollPosition="end">
           <MessageScroller className="flex-1">
             <MessageScrollerViewport aria-label="Messages">
@@ -836,7 +976,23 @@ export function ChatPage() {
                   </Button>
                 )}
                 <AgentsContext.Provider value={agentsSource}>
-                  {thread!.map((message) => {
+                  {flow.map((entry) => {
+                    if (entry.kind === "heading")
+                      return <DayHeading key={`day-${entry.at}`} day={entry.day} />
+                    if (entry.kind === "card")
+                      return (
+                        <ThreadCard
+                          key={`card-${entry.thread.chat.id}`}
+                          thread={entry.thread}
+                          botId={profile?.botId}
+                          profileId={conversation?.profileId ?? ""}
+                          open={entry.thread.chat.id === openThread}
+                          beside={Boolean(openThread)}
+                          move={moveThatOpenedThread.get(entry.thread.chat.id)}
+                          onUndo={undoMoveOutMain}
+                        />
+                      )
+                    const message = entry.message
                     const change = changes.get(message.id)
                     return (
                       <MessageScrollerItem key={message.id} messageId={message.id}>
@@ -869,6 +1025,8 @@ export function ChatPage() {
         <div className="flex flex-1 items-center justify-center">
           <Spinner className="size-6" />
         </div>
+      ) : conversation?.main && botThreads && configured ? (
+        <MainEmptyState botId={profile?.botId} id={conversation?.id} onSend={send} />
       ) : (
         <EmptyState
           botId={profile?.botId}
@@ -987,7 +1145,12 @@ export function ChatPage() {
             filesAvailable={Boolean(profile?.apiKey)}
             imagesAvailable={profile?.imageInput !== false}
             onStop={() => id && stopMessage(id)}
-            onCommand={(command) => root(command === "new" ? (botPath ?? "/") : "/settings")}
+            main={Boolean(botThreads && isMain)}
+            onCommand={(command, message) =>
+              command === "thread"
+                ? startThread(message?.text ?? "", message?.attachments ?? [])
+                : root(command === "new" ? (mainPath ?? "/") : "/settings")
+            }
             connection={serverConfig(profile)}
             botName={profile?.name}
             dictationHint={[
@@ -1133,7 +1296,7 @@ export function ChatPage() {
                 }
                 setDeleting(false)
                 if (codePath) up(codePath)
-                else root(botPath ?? "/")
+                else root(mainPath ?? "/")
               }}
             >
               Delete

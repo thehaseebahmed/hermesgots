@@ -20,6 +20,8 @@ const MOCKS = {
   polling: { port: MOCK_BASE + 1, env: { MOCK_NO_EVENTS: "1" } },
   legacy: { port: MOCK_BASE + 2, env: { MOCK_BLOCK_RUN_EVENTS: "1" } },
   "no-dictation": { port: MOCK_BASE + 3, env: { MOCK_DICTATION: "off" } },
+  "triage-new": { port: MOCK_BASE + 4, env: { MOCK_TRIAGE: "new" } },
+  "triage-thread": { port: MOCK_BASE + 5, env: { MOCK_TRIAGE: "thread" } },
 }
 // The app is shared: lanes drive it in separate browsers and one Vite serves them all.
 const APP_PORT = Number(process.env.E2E_APP_PORT ?? 15173)
@@ -339,6 +341,12 @@ const FLOWS = {
   "draft-mode-sync": {
     script: "e2e/draft-mode-sync.mjs",
     about: "A composer draft and a picked mode sync through the plugin's chat record",
+  },
+  "bot-threads": {
+    script: "e2e/bot-threads.mjs",
+    extra: { TRIAGE_NEW_MOCK_URL: "triage-new", TRIAGE_THREAD_MOCK_URL: "triage-thread" },
+    about:
+      "A bot opens Main, its threads are cards where they began, /thread with text opens a thread, and triage's answers read as a card with Undo or a Moved marker",
   },
   submission: {
     script: "regression-submission.mjs",

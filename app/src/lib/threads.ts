@@ -7,6 +7,8 @@ import {
   db,
   getSettings,
   listEnabledProfiles,
+  mainThreadId,
+  mainThreadProfile,
   saveSettings,
   type BotSort,
   type Conversation,
@@ -15,7 +17,7 @@ import {
 import { useXLarge } from "@/lib/media"
 import { useWaiting, type WaitingReason } from "@/lib/waiting"
 
-/** How many of a bot's newest threads its screen lists. */
+/** How many of a bot's newest threads its screen lists, and Main draws as cards. */
 const THREADS = 50
 
 /** The time, moved on each minute, for "5 min ago" labels. */
@@ -50,6 +52,16 @@ export interface Thread {
 }
 
 const line = (text?: string) => text?.replace(/\s+/g, " ").trim() || undefined
+
+async function latestLine(conversationId: string) {
+  const newest = await db.messages
+    .where("[conversationId+createdAt]")
+    .between([conversationId, Dexie.minKey], [conversationId, Dexie.maxKey])
+    .reverse()
+    .filter((message) => Boolean(message.content.trim()))
+    .first()
+  return line(newest?.content)
+}
 
 /**
  * A bot's chats as threads, oldest started first so the newest sits at the bottom by the composer.
@@ -131,6 +143,9 @@ export interface BotSummary {
   bot: Profile
   /** Its newest thread. */
   latest?: Conversation
+  /** Its Main thread, once this device has opened it. */
+  main?: Conversation
+  preview?: string
   /** Threads waiting on the user. */
   waiting: number
 }
@@ -148,7 +163,7 @@ export function useBotSort(): [BotSort, (sort: BotSort) => void] {
   return [sort, (botSort) => void saveSettings({ botSort })]
 }
 
-const active = (summary: BotSummary) => summary.latest?.updatedAt ?? -Infinity
+const active = (summary: BotSummary) => (summary.main ?? summary.latest)?.updatedAt ?? -Infinity
 const byRecent = (a: BotSummary, b: BotSummary) => active(b) - active(a)
 const byName = (a: BotSummary, b: BotSummary) =>
   a.bot.name.localeCompare(b.bot.name, undefined, { sensitivity: "base", numeric: true })
@@ -166,7 +181,10 @@ export function sortBots(bots: BotSummary[], sort: BotSort): BotSummary[] {
   return sorted
 }
 
-/** Every bot that's turned on, with its newest thread, for the sidebar, in the order linked. */
+/**
+ * Every bot that's turned on, with its newest thread and — once this device has opened it — its
+ * Main thread and the line it last said, for the sidebar, in the order linked.
+ */
 export function useBotSummaries(): BotSummary[] | undefined {
   const live = useWaiting()
   const rows = useLiveQuery(async () => {
@@ -199,40 +217,43 @@ export function useBotSummaries(): BotSummary[] | undefined {
             )
             .map((m) => m!.conversationId),
         )
-        return { bot, chats, local }
+        const main = await db.conversations.get(mainThreadId(bot.id))
+        return { bot, chats, local, main, preview: main ? await latestLine(main.id) : undefined }
       }),
     )
   }, [])
-  return rows?.map(({ bot, chats, local }) => ({
+  return rows?.map(({ bot, chats, local, main, preview }) => ({
     bot,
     latest: chats[0],
+    main,
+    preview,
     waiting: chats.filter((c) => local.has(c.id) || live[c.hermesSessionId]).length,
   }))
 }
 
 export interface BotPane {
   profileId: string
-  /** The thread open beside the bot. */
+  /** The thread open beside Main. */
   thread?: string
 }
 
 /**
- * With bot threads on, from `xl` a bot stays on screen while one of its threads is open, as a pane
- * to its left, the way a project does beside its sessions.
+ * With bot threads on, from `xl` Main stays on screen beside the thread it opened, as a pane to its
+ * left, the way a project does beside its sessions. Main is the pane; a thread picked from it swaps
+ * in place on the right.
  */
 export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
   const large = useXLarge()
   const { pathname, state } = useLocation()
-  const bot = matchPath("/b/:profileId", pathname)?.params.profileId
   const chat = matchPath("/c/:id", pathname)?.params.id
+  const main = chat ? mainThreadProfile(chat) : undefined
   const read = useLiveQuery(
     async () => ({ chat, found: chat ? ((await db.conversations.get(chat)) ?? null) : null }),
     [chat],
   )
   const hint = (state as { bot?: string } | null)?.bot
-  if (!large || !enabled) return undefined
-  if (bot) return { profileId: bot }
-  if (!chat) return undefined
+  if (!large || !enabled || !chat) return undefined
+  if (main) return { profileId: main }
   const found = read?.chat === chat ? read.found : undefined
   if (found) return found.projectId ? undefined : { profileId: found.profileId, thread: chat }
   // Still loading: go by what the link said.

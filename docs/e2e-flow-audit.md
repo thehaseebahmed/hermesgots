@@ -17,20 +17,20 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **65 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 65 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **66 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 66 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --- | --- |
 | stay | 8 |
-| component | 52 |
+| component | 53 |
 | plugin | 2 |
 | delete | 3 |
-| **total** | **65** |
+| **total** | **66** |
 
-Of those 65, 59 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 58 distinct files there) and 6 point at the older
+Of those 66, 60 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 59 distinct files there) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -39,7 +39,7 @@ Two things in that arithmetic did not hold, and both are checkable:
 - Its clauses name **59** keys — 53 pointing at `app/scripts/e2e/` and 6 at the older
   `regression-*.mjs` — and its sixtieth is `todos-legacy` counted a second time, as "one registry
   key reusing another's script" rather than as the 53rd of the first group, which it already is.
-  Today's 59 keys under `app/scripts/e2e/`, less the six that arrived since, are those 53.
+  Today's 60 keys under `app/scripts/e2e/`, less the seven that arrived since, are those 53.
 - It left out goal mode's two keys, `goal-wizard` and `goal-pill`, which the registry still held
   when the plan was written: the commit before they left, `8a4e842^` (#282's `1b98896`, merged
   before the plan), carries 61 keys. Both went with goal mode (#296), so that omission costs
@@ -47,11 +47,13 @@ Two things in that arithmetic did not hold, and both are checkable:
 
 Six keys have arrived since: five are components by the same rule — `delegation-model` (#318),
 `afk-skills` (#327), `afk-stage` (#328), `pipeline-pill` (#330) and `afk-prompt` (#359) — and the
-sixth, `thinking-line` (#368), is the only stay among them, for what no lower tier can watch. So
-the registry holds 59 + 6 = **65** keys, the component verdicts are the plan's 48 less the key it
-counted twice, plus those five: **52**, and the stays are the plan's 7 plus the one: **8**. #299's
-own criterion still says 48; the 52 above supersedes it for the reason just given, and nothing
-else in the ticket's split moves.
+sixth, `thinking-line` (#368), is the only stay among them, for what no lower tier can watch. A
+seventh, `bot-threads` (#422), is a component by the same rule as the five: every rule it walks —
+a card's place in Main, `/thread` with text, the marker a moved message keeps — is a component
+test's, and what the browser adds is that they compose. So the registry holds 59 + 7 = **66** keys,
+the component verdicts are the plan's 48 less the key it counted twice, plus those six: **53**, and
+the stays are the plan's 7 plus the one: **8**. #299's own criterion still says 48; the 53 above
+supersedes it for the reason just given, and nothing else in the ticket's split moves.
 
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
 a key with no row here, a row with no key, a verdict outside the four, a count in the table above
@@ -61,12 +63,12 @@ an argument this page has to carry, never a default (ADR 0019).
 Check any of it in one line:
 
 ```bash
-grep -c '^| `' docs/e2e-flow-audit.md                           # 65 rows, one per registry key
+grep -c '^| `' docs/e2e-flow-audit.md                           # 66 rows, one per registry key
 grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 8
-grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 52
+grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 53
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 3
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
-cd app && pnpm -s e2e list | wc -l                             # 65 keys in the registry
+cd app && pnpm -s e2e list | wc -l                             # 66 keys in the registry
 git show 8a4e842^:app/scripts/e2e/cli.mjs |
   sed -n '/^const FLOWS = {/,/^}$/p' | grep -c '^  [a-z"-]*: {'  # 61, before goal mode left
 ```
@@ -218,10 +220,19 @@ Three keys: the fallback list, the subagent model, and a write the host never an
 | `delegation-model` | component | The subagent model is recorded as the host's delegation model, cleared back to inherit, the field greyed while a write is on its way, and no field at all without the feature. | A picker and one write: the fallbacks' shape, on another field. | A component test asserts the write, the clear as its own write, the saving state, and no field without the feature. |
 | `fallbacks-silent-host` | component | A host that takes a fallback write and never answers it: the field is given up on and comes back rather than staying greyed out with a save that never lands. | A timeout, which fake timers assert at no wall-clock cost. | A component test with fake timers asserts the field returns after the write's timeout. |
 
+### A bot's Main thread and its cards — #415
+
+One key, the only one that walks the whole feature: #417–#421 each brought their own tests, and
+#422 is the ticket whose job is the flow.
+
+| Key | Verdict | What it asserts today | Why it moves | What replaces it |
+| --- | --- | --- | --- | --- |
+| `bot-threads` | component | A bot opens its Main from home; its threads are cards at their start times, the first between the messages written either side of it and the last closing the flow; a card opens its thread and back returns to Main; `/thread` with text opens a thread holding that message, whose card is back on Main at its start and drawn without a marker. Then, on a mock answering `MOCK_TRIAGE=new`, the message leaves Main as its new thread's card carrying Undo and no marker; on one answering `MOCK_TRIAGE=thread` it keeps the Moved marker, linking the older thread it went to, with no card carrying the move. Last, at tablet width with the dark theme, a card, Main's day heading and the Moved line still draw, and the move's Undo is still there. | Every rule it walks is a component test's — a card's place in Main (#417), the marker and the triage-opened card's Undo (#419), `/thread` and the name the switch picks (#420) — and none of them needs a browser's layout. What the flow adds is that they compose: a real route change, a real reload onto the mock's chat list, and the mock's own triage and moves answering a send. | `app/scripts/test-main-cards.tsx`, `test-card-undo.tsx`, `test-main-triage.tsx` and `test-slash.mjs` carry the rules, and #417–#421 landed them green. The flow stays in the registry as the one proof the path holds end to end, which no component test mounts. |
+
 ## The eight that stay, and why only a browser can assert each
 
 Every one of these earns its browser by a mechanism no lower tier reproduces, and a stay is
-replaced by itself. They are what the end-to-end registry holds once the other 57 keys leave
+replaced by itself. They are what the end-to-end registry holds once the other 58 keys leave
 (#314).
 
 | Key | Verdict | What it asserts today | Why only a browser can assert it |
@@ -237,7 +248,7 @@ replaced by itself. They are what the end-to-end registry holds once the other 5
 
 ## The coverage a demotion leaves with no home
 
-The 57 keys that leave — 52 demoted, 3 deleted as duplicates, 2 moved to the plugin — take away
+The 58 keys that leave — 53 demoted, 3 deleted as duplicates, 2 moved to the plugin — take away
 the assertion of things a component test cannot see: geometry, real timers and real capture, and a
 reload with a live stream. Four of those have a home: the two request budgets and the write rate
 stay with `live-poll`, `idle-requests` and `stream-writes`, and the real reload stays with

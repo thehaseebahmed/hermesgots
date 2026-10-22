@@ -4,7 +4,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { Navigate, Route, Routes, useParams } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
-import { getActiveProfile } from "@/lib/db"
+import { getActiveProfile, mainThreadId } from "@/lib/db"
 import { useLaunchRestore, useRecordLastChat } from "@/lib/launch"
 import { warmCatalog } from "@/lib/models"
 import { warmRankings } from "@/lib/rankings"
@@ -69,15 +69,14 @@ function ThemeColor() {
   return null
 }
 
-/** A new chat, or with bot threads on, the active bot, where a new thread starts. */
-function Home() {
+export function Home() {
   const botThreads = useBotThreads()
   const active = useLiveQuery(
     async () => (botThreads ? ((await getActiveProfile()) ?? null) : null),
     [botThreads],
   )
   if (botThreads === undefined || (botThreads && active === undefined)) return null
-  return active ? <Navigate to={`/b/${active.id}`} replace /> : <ChatPage />
+  return active ? <Navigate to={`/c/${mainThreadId(active.id)}`} replace /> : <ChatPage />
 }
 
 /** A project's old address, from before projects had a place of their own. */

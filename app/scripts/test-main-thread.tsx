@@ -1,8 +1,3 @@
-/**
- * A bot's Main thread, over a seeded device database: made once on its screen's first open, one
- * record however often or from wherever it is asked for, led with in the list while project
- * sessions stay out, and with no Delete or Discard in its menu or in the data layer.
- */
 import assert from "node:assert/strict"
 import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
@@ -10,6 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router"
 import { ChatPage } from "@/routes/chat"
 import { BotThreadsPage } from "@/routes/bot-threads"
 import { db, deleteConversation, ensureMainThread, mainThreadId } from "@/lib/db"
+import { useThreads } from "@/lib/threads"
 import {
   botProfile,
   click,
@@ -19,7 +15,7 @@ import {
   mount,
   seedSettings,
   settle,
-  text,
+  until,
 } from "./component-kit.tsx"
 
 const bot = botProfile("main-thread", { id: "bot-1", name: "Mainly" })
@@ -48,11 +44,12 @@ const botScreen = (
   <MemoryRouter initialEntries={["/b/bot-1"]}>
     <Routes>
       <Route path="b/:profileId" element={<BotThreadsPage />} />
+      <Route path="c/:id" element={<ChatPage />} />
     </Routes>
   </MemoryRouter>
 )
 
-test("opening the bot's screen makes its Main thread once", async () => {
+test("the bot's old address opens Main, which is made once", async () => {
   await seed()
   globalThis.fetch = async () => json({})
   await mount(botScreen, async () => {
@@ -75,14 +72,28 @@ test("asking from two places yields one record, and a synced one is kept", async
   assert.equal((await ensureMainThread(bot.id)).title, "Renamed elsewhere")
 })
 
-test("Main leads the list, chats are threads beside it and sessions are not", async () => {
+function ThreadNames({ profileId }: { profileId: string }) {
+  const threads = useThreads(profileId)
+  return (
+    <p data-threads>{threads?.map((one) => (one.chat.main ? "Main" : one.chat.title)).join("|")}</p>
+  )
+}
+
+const threadsShown = () => document.querySelector("[data-threads]")?.textContent ?? ""
+
+test("a bot's chats are its threads, Main first, and project sessions are not", async () => {
   await seed([{ id: "c1" }, { id: "s1", projectId: "p" }])
-  await mount(botScreen, async () => {
-    const shown = text()
-    assert.ok(shown.includes("Chat c1"), "an existing chat shows as a thread")
-    assert.ok(!shown.includes("A session"), "a project session does not")
-    assert.ok(shown.indexOf("Main") < shown.indexOf("Chat c1"), "Main comes first")
-  })
+  await ensureMainThread(bot.id)
+  await mount(
+    <MemoryRouter>
+      <ThreadNames profileId={bot.id} />
+    </MemoryRouter>,
+    async () => {
+      await until(async () => threadsShown().includes("Chat c1"), "the bot's threads")
+      assert.ok(threadsShown().startsWith("Main"), "Main comes first")
+      assert.ok(!threadsShown().includes("A session"), "a project session is not a thread")
+    },
+  )
 })
 
 test("Main has no Delete or Discard, in its menu or in the data layer", async () => {
@@ -97,10 +108,13 @@ test("Main has no Delete or Discard, in its menu or in the data layer", async ()
       </Routes>
     </MemoryRouter>,
     async () => {
-      await click(find('[aria-label="Chat options"]'))
+      await click(find('[aria-label="Bot options"]'))
       await settle()
       const items = findAll('[role="menuitem"]').map((item) => item.textContent)
-      assert.ok(items.some((label) => label?.includes("Rename")), "the menu opened")
+      assert.ok(
+        items.some((label) => label?.includes("Bot settings")),
+        "the menu opened",
+      )
       assert.ok(!items.some((label) => /Delete|Discard/.test(label ?? "")))
     },
   )

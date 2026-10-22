@@ -33,8 +33,9 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Separator } from "@/components/ui/separator"
 import Dexie from "dexie"
+import { previewLine } from "@/lib/bot-chrome"
 import type { BotSort, Message } from "@/lib/db"
-import { db } from "@/lib/db"
+import { db, mainThreadId } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useMeetingsEnabled } from "@/lib/meetings"
 import { useNav } from "@/lib/nav"
@@ -255,51 +256,54 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
         </div>
       )}
       <ul className={cn("flex flex-col gap-0.5", collapsed && "items-center")}>
-        {bots?.map(({ bot, latest, waiting }) => (
-          <li key={bot.id}>
-            <RootLink
-              to={`/b/${bot.id}`}
-              onClick={onNavigate}
-              aria-label={collapsed ? bot.name : undefined}
-              className={({ isActive }) =>
-                collapsed
-                  ? railClass({ isActive: isActive || owner === bot.id })
-                  : cn(rowClass({ isActive: isActive || owner === bot.id }), "min-h-14 py-2")
-              }
-            >
-              <Bot id={bot.botId} className="size-9" />
-              {!collapsed && (
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-baseline gap-2">
-                    <span className="min-w-0 flex-1 truncate font-medium">{bot.name}</span>
-                    {bot.muted && (
-                      <BellOffIcon
-                        className="size-3.5 shrink-0 text-muted-foreground"
-                        aria-label="Muted"
-                      />
-                    )}
-                    {latest && (
-                      <span className="shrink-0 text-xs font-normal text-muted-foreground">
-                        {formatRelative(latest.updatedAt, now)}
-                      </span>
-                    )}
-                  </span>
-                  <span className="flex items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate text-xs font-normal text-muted-foreground">
-                      {latest?.title ?? "No threads yet"}
+        {bots?.map(({ bot, latest, main, preview, waiting }) => {
+          const age = (main ?? latest)?.updatedAt
+          return (
+            <li key={bot.id}>
+              <RootLink
+                to={`/c/${mainThreadId(bot.id)}`}
+                onClick={onNavigate}
+                aria-label={collapsed ? bot.name : undefined}
+                className={({ isActive }) =>
+                  collapsed
+                    ? railClass({ isActive: isActive || owner === bot.id })
+                    : cn(rowClass({ isActive: isActive || owner === bot.id }), "min-h-14 py-2")
+                }
+              >
+                <Bot id={bot.botId} className="size-9" />
+                {!collapsed && (
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-baseline gap-2">
+                      <span className="min-w-0 flex-1 truncate font-medium">{bot.name}</span>
+                      {bot.muted && (
+                        <BellOffIcon
+                          className="size-3.5 shrink-0 text-muted-foreground"
+                          aria-label="Muted"
+                        />
+                      )}
+                      {age && (
+                        <span className="shrink-0 text-xs font-normal text-muted-foreground">
+                          {formatRelative(age, now)}
+                        </span>
+                      )}
                     </span>
-                    {waiting > 0 && (
-                      <span className="shrink-0 rounded-full bg-warning/15 px-1.5 text-xs leading-5 font-semibold text-warning tabular-nums">
-                        {waiting}
-                        <span className="sr-only"> waiting for you</span>
+                    <span className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate text-xs font-normal text-muted-foreground">
+                        {previewLine({ main: Boolean(main), line: preview, latest: latest?.title })}
                       </span>
-                    )}
+                      {waiting > 0 && (
+                        <span className="shrink-0 rounded-full bg-warning/15 px-1.5 text-xs leading-5 font-semibold text-warning tabular-nums">
+                          {waiting}
+                          <span className="sr-only"> waiting for you</span>
+                        </span>
+                      )}
+                    </span>
                   </span>
-                </span>
-              )}
-            </RootLink>
-          </li>
-        ))}
+                )}
+              </RootLink>
+            </li>
+          )
+        })}
         <li>
           <RootLink
             to="/settings/bots?link=1"

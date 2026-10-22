@@ -3999,6 +3999,15 @@ http
         created_at: Date.now(),
         body: move.body,
       })
+      if (move.new) {
+        const left = queueOf(move.target)
+        if (!left.items.length && !left.sent.length) {
+          const key = pluginProfile ?? ""
+          const chatList = pluginChatLists.get(key) ?? pluginChats
+          chatList.set(move.thread, { at: Date.now() + 1, deleted: true })
+          noteEvent("chats", undefined, key)
+        }
+      }
       noteEvent("session", id)
       noteEvent("session", move.target)
       setTimeout(() => pumpQueue(id), 50)
@@ -4066,6 +4075,8 @@ http
           thread: made ? made.id : thread[0],
           at: Date.now(),
           undone: false,
+          // As plugin/moves.py records it: the host opened this thread for the message.
+          new: Boolean(made),
           target,
           item: item.id,
           body: { ...(body ?? {}), session_id: id },

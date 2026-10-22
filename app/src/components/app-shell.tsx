@@ -15,12 +15,14 @@ import { CrashBoundary } from "@/components/crash-screen"
 import { KeyboardShortcuts } from "@/components/keyboard-shortcuts"
 import { DrawerContext } from "@/components/drawer-context"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
+import { mainThreadId } from "@/lib/db"
 import { useLarge, useWide } from "@/lib/media"
 import { depth } from "@/lib/nav"
 import { useCodePane, useMeetingsPane, useProjectsPane, useResearchPane } from "@/lib/pane"
 import { useSidebarCollapsed } from "@/lib/sidebar"
 import { useBotPane, useBotThreads } from "@/lib/threads"
 import { cn } from "@/lib/utils"
+import { ChatPage } from "@/routes/chat"
 
 /**
  * A list kept on screen beside what it opened: a bot beside its thread (from `xl`), or Code's
@@ -42,9 +44,6 @@ function screenOf(path: string, large: boolean, pane: ListPane | undefined) {
   return large && path.startsWith("/settings") ? "/settings" : path
 }
 
-const BotThreadsPage = lazy(() =>
-  import("@/routes/bot-threads").then((m) => ({ default: m.BotThreadsPage })),
-)
 const MeetingsPane = lazy(() =>
   import("@/routes/meetings").then((m) => ({ default: m.MeetingsPane })),
 )
@@ -141,9 +140,9 @@ export function AppShell({ children }: { children?: ReactNode }) {
   const research = useResearchPane()
   const pane: ListPane | undefined = bot
     ? {
-        screen: `/b/${bot.profileId}`,
+        screen: `/c/${mainThreadId(bot.profileId)}`,
         open: Boolean(bot.thread),
-        node: <BotThreadsPage key={bot.profileId} profileId={bot.profileId} thread={bot.thread} />,
+        node: <ChatPage key={bot.profileId} chatId={mainThreadId(bot.profileId)} />,
       }
     : code
       ? { screen: "/code", open: code.open, node: <CodePane pane={code} /> }

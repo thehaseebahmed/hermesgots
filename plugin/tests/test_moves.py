@@ -213,6 +213,36 @@ class UndoTests(unittest.TestCase):
         self.assertEqual([m["id"] for m in moves.read(old, "main-s")], ["m0"])
 
 
+class ServedMoveTests(unittest.TestCase):
+    def setUp(self):
+        self.path = db_path(Path(tempfile.mkdtemp()))
+
+    def test_the_served_move_says_whether_it_opened_the_thread(self):
+        moves.record(self.path, "m1", "main-s", "plan my move", "t1", new=True)
+        moves.record(self.path, "m2", "main-s", "more on Lisbon", "t2")
+        served = [moves.public(move, True) for move in moves.read(self.path, "main-s")]
+        self.assertEqual([(move["id"], move["new"]) for move in served], [("m1", True), ("m2", False)])
+
+    def test_a_served_move_is_the_move_and_nothing_of_the_hosts(self):
+        moves.record(
+            self.path, "m1", "main-s", "plan my move", "t1",
+            thread_session="memento-t1", item="q_1", new=True, body={"a": 1}
+        )
+        served = moves.public(moves.get(self.path, "main-s", "m1"), True)
+        self.assertEqual(
+            served,
+            {
+                "id": "m1",
+                "text": "plan my move",
+                "thread": "t1",
+                "at": served["at"],
+                "undone": False,
+                "undoable": True,
+                "new": True,
+            },
+        )
+
+
 class RemoveSentTests(unittest.TestCase):
     def test_a_sent_item_is_forgotten_and_a_waiting_one_is_not(self):
         from plugin import outbox

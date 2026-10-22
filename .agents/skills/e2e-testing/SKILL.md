@@ -46,6 +46,8 @@ The CLI reuses any server that is already up, so after `pnpm e2e up` each run st
 | 18643 | Mock `polling`: `MOCK_NO_EVENTS=1`, polling like an older plugin |
 | 18644 | Mock `legacy`: `MOCK_BLOCK_RUN_EVENTS=1`, Hermes v2026.9.24's blocked run stream |
 | 18645 | Mock `no-dictation`: `MOCK_DICTATION=off` |
+| 18646 | Mock `triage-new`: `MOCK_TRIAGE=new`, so triage opens a new thread |
+| 18647 | Mock `triage-thread`: `MOCK_TRIAGE=thread`, so triage sends into the newest plain thread |
 
 A `--jobs N` sweep runs N lanes at once: lane n takes the mock ports 18642 + 4n (its own mock
 state) and every lane drives the one app on 15173. `pnpm e2e down` stops every lane's servers.
@@ -59,6 +61,7 @@ elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` l
 | Flow | Checks |
 |---|---|
 | `chat-message` | A new chat sends its message, gets the whole reply, and shows in Recents |
+| `bot-threads` | A bot opens its Main, its threads are cards where they began, `/thread` with text opens a thread with that message, back returns to its card, and triage's two answers read as a card with Undo or a Moved marker with its link |
 | `thinking-line` | A turn told to think out loud and stall shows its working line before any reasoning, with no thinking line yet; once the mock's four pieces stream the working line stands down while the line reads Thinking…, open over them, no tool run and no answer begun; the first answer token folds it to Thought for 7s, and a reload reads a bare Thought, folded, over the reasoning it still holds |
 | `approval` | A project session waiting on an approval shows in the sidebar's Waiting for input and its project's Waiting on you. Both move it to Idle once it's allowed |
 | `reattach` | A reply still streaming when the page reloads picks its run up again and finishes |

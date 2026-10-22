@@ -1399,6 +1399,8 @@ export interface Move {
   undone: boolean
   /** Whether Undo is still offered: the thread's reply to this message hasn't finished. */
   undoable: boolean
+  /** Whether the host opened this thread for the message, so its card stands where the marker would. */
+  new: boolean
 }
 
 const movesRoot = (config: HermesConfig, sessionId: string) =>
@@ -1436,6 +1438,8 @@ function readMoves(value: unknown): Move[] {
       at: row.at,
       undone: Boolean(row.undone),
       undoable: Boolean(row.undoable),
+      // An older host doesn't say, and every move it recorded joined an existing thread.
+      new: Boolean(row.new),
     })
   }
   return found
