@@ -5,80 +5,111 @@ import Base from "../layouts/Base.astro"
 const slides = [
   {
     tag: "Chat",
-    title: "Chats that actually do things.",
-    body: "Your Hermes agent runs commands, edits files and asks before anything risky. Approve it from the couch.",
-    chips: ["Live tool cards", "Allow once or always", "Deny with a tap"],
+    title: "Replies that are interfaces.",
+    body: "An agent's answer doesn't have to be a wall of text. Gots can draw it as a real interface, with tables, forms and buttons you use in place, so a decision is a tap and a result is something you can work with. Run as many bots as you like, each keeping its threads in order.",
+    chips: ["Multiple Bots", "Smart Threads", "Interactive Replies"],
     shot: "approve",
     bot: "gem",
     glow: "var(--usage-input)",
   },
   {
-    tag: "Away",
-    title: "Close the app. It keeps going.",
-    body: "Ask for something, put your phone down, and come back to it done. The work runs on your Hermes host, so queued messages, steering and pushes all happen with Gots closed.",
-    chips: ["Queue and steer", "Pushes when it needs you", "Waiting for input"],
-    shot: "away",
-    bot: "orbi",
-    glow: "var(--usage-cache-write)",
-  },
-  {
     tag: "Code",
-    title: "Code from your pocket.",
-    body: "Point a project at your GitHub repos. Every session works in its own git worktree, opens its own pull request, and tidies itself up when it merges.",
-    chips: ["Accept edits, Auto or Plan", "Checks at a glance", "A library of what it made"],
+    title: "Work that ends in a pull request.",
+    body: "Every session gets a worktree of its own and opens a draft pull request. Leave AFK on and your host works through the issues you've labelled while you're away: it builds, runs your tests itself, and never merges.",
+    chips: ["AFK Mode", "Output Library", "Skill Management"],
     shot: "code",
     bot: "hex",
     glow: "var(--usage-cache-read)",
   },
   {
+    tag: "Research",
+    title: "Answers with receipts.",
+    body: "A mission reads the web and writes a guide where each sentence points to its source. The host re-checks every quote and flags anything unsourced, and you can have another model write it again to compare.",
+    chips: ["Structured", "Multi Model Analysis"],
+    shot: "research",
+    bot: "stella",
+    glow: "var(--usage-cache-write)",
+  },
+  {
+    tag: "Meetings",
+    title: "The meeting, without the minutes.",
+    body: "Hand over a recording or a transcript and the bot returns what was decided and what's yours to do, with a timeline to check it against.",
+    chips: ["Smart Summary", "Transcription", "Action Items", "Smart Hand-offs"],
+    bot: "penny",
+    glow: "var(--primary)",
+  },
+  {
     tag: "Routines",
-    title: "Routines with a pulse.",
-    body: "Every scheduled job across your bots, with its last 24 runs as little bars. See what failed, when it runs next, then run it now, pause it or bring it back.",
-    chips: ["Run history", "Failing at the top", "Run now"],
+    title: "Scheduled work that shows its work.",
+    body: "Every routine across your bots, with its recent runs as little bars. When one starts failing it rises to the top, and your phone hears about it before you go looking.",
+    chips: ["Run History", "Failure Alerts"],
     shot: "routines",
     bot: "tri",
     glow: "var(--usage-output)",
   },
   {
-    tag: "Everywhere",
-    title: "Share it. Say it. Done.",
-    body: "Send links and images from any app straight into a chat. Talk instead of typing: your host's own Whisper model turns it into text, with no cloud speech service in between.",
-    chips: ["Share sheet", "Dictation on your host", "Photos and files"],
-    shot: "share",
-    bot: "penny",
-    glow: "var(--primary)",
+    tag: "Community",
+    title: "See how you stack up.",
+    body: "Find out which providers and models people are really using this week or this month, and where your own tokens put you. It's opt-in, and you can leave whenever you like.",
+    chips: [],
+    shot: "community",
+    cta: { href: "/community", label: "See the leaderboard" },
+    bot: "bloom",
+    glow: "var(--merged)",
+  },
+  {
+    tag: "Yours",
+    title: "Your host. Your keys.",
+    body: "Gots is a window onto a Hermes agent you run yourself. Your chats and keys stay with you, and settings sync end-to-end encrypted, so the server only ever holds ciphertext.",
+    chips: [],
+    shot: "bots",
+    bot: "cubby",
+    glow: "var(--usage-input)",
   },
 ]
 
 const extras = [
-  "Research missions",
+  "Photos and files",
+  "Share sheet",
+  "Dictation on your host",
   "Per-chat model picker",
-  "Todo pills",
-  "Encrypted sync",
-  "Eight bots",
+  "MCP servers",
   "Notifications by type",
   "Light and dark",
-  "Bring your own Hermes",
+  "Eight bots",
+  "Todo pills",
 ]
 
 const coming = [
   {
-    bot: "bloom",
-    status: "In the works",
-    title: "Community leaderboard",
-    body: "Tokens used today, this week and this month. Joins at setup, with your GitHub name. Switch it off any time, and climb.",
+    bot: "penny",
+    status: "Next up",
+    title: "Voice Call",
+    body: "Ring a bot and talk it through, or let it ring you when something is waiting on you.",
   },
   {
-    bot: "penny",
-    status: "In the works",
-    title: "Model picks",
-    body: "Model combinations that work well for coding, recommended by people who ran them.",
+    bot: "gem",
+    status: "Wishlist",
+    title: "Raycast Integration",
+    body: "Ask your bots from the launcher, without opening an app.",
+  },
+  {
+    bot: "bloom",
+    status: "Wishlist",
+    title: "Speech-to-Text anywhere",
+    body: "Dictate into any app on your computer, transcribed by your own Hermes host.",
   },
   {
     bot: "cubby",
-    status: "Try it early",
-    title: "Bot threads",
-    body: "Each bot as one chat, with its threads laid out like a group chat.",
+    status: "Wishlist",
+    title: "Phone Integration",
+    body: "Let your bots see your calendar, contacts and more, only when you allow it.",
+  },
+  {
+    bot: "orbi",
+    status: "Wishlist",
+    title: "Bot-to-Bot Communication",
+    body: "Your bots hand work to each other, even when they live on different hosts.",
   },
   {
     bot: "stella",
@@ -111,7 +142,7 @@ const floaters = [
 
 <Base
   title="Gots: Hermes Bots that got your back"
-  description="Gots gives you Hermes Bots that got your back. Chat, code, research and schedule with your Hermes Agent from your phone, and come back to find it done."
+  description="Gots gives you Hermes Bots that got your back. Code, research and more with your Hermes Agent from your phone, and come back to find it done."
 >
   <main>
     <section class="lp-hero" data-hero>
@@ -120,12 +151,11 @@ const floaters = [
           Hermes Bots that<br />got your <em>back!</em>
         </h1>
         <p class="lede-xl" data-reveal="rise" style="--d:180ms">
-          Gots is the playful companion for your Hermes Agent: chat, code, research and schedule from your phone. Ask for something, close the app, and
-          come back later to find it done.
+          Ask for something, close Gots, and come back to find it done. Your Hermes agent keeps working on your own host, and your phone gets a push when it needs you.
         </p>
         <div class="cta" data-reveal="rise" style="--d:280ms">
-          <a class="btn" href="#waitlist">Join the waiting list</a>
-          <a class="btn btn-ghost" href="#pricing">Self-host it</a>
+          <a class="btn" href="#features">See what it does</a>
+          <a class="btn btn-ghost" href="#coming">What's cooking</a>
         </div>
       </div>
 
@@ -154,9 +184,12 @@ const floaters = [
                   <span class="tag">{s.tag}</span>
                   <h2>{s.title}</h2>
                   <p>{s.body}</p>
-                  <ul class="chips">
-                    {s.chips.map((chip) => <li>{chip}</li>)}
-                  </ul>
+                  {s.chips.length > 0 && (
+                    <ul class="chips">
+                      {s.chips.map((chip) => <li>{chip}</li>)}
+                    </ul>
+                  )}
+                  {s.cta && <a class="btn btn-ghost" href={s.cta.href}>{s.cta.label}</a>}
                 </article>
               ))
             }
@@ -172,7 +205,13 @@ const floaters = [
               {
                 slides.map((s, i) => (
                   <div class="slide" data-i={i}>
-                    <Phone shot={s.shot} alt={s.title} />
+                    {s.shot ? (
+                      <Phone shot={s.shot} alt={s.title} />
+                    ) : (
+                      <div class="phone-fill soon-screen">
+                        <img src={`/bots/${s.bot}.png`} alt="" width="96" height="96" />
+                      </div>
+                    )}
                   </div>
                 ))
               }
@@ -243,34 +282,35 @@ const floaters = [
         <h2 class="section-title" data-reveal="rise">Two ways in. Both simple.</h2>
 
         <div class="plans">
-          <article class="plan" data-reveal="rise">
-            <span class="tag">Self-host</span>
-            <p class="price">Free</p>
-            <p class="plan-lede">Run it on your own Hermes host. Your chats, runs and keys stay with you.</p>
-            <pre class="code"><code>hermes plugins install thehaseebahmed/memento/plugin --enable
-hermes gateway restart</code></pre>
-            <ul class="ticks">
-              <li>Every feature on this page</li>
-              <li>Open source, MIT licensed</li>
-              <li>End-to-end encrypted sync</li>
-            </ul>
-          </article>
-
-          <article id="waitlist" class="plan plan-featured" data-reveal="rise" style="--d:120ms">
+          <article id="waitlist" class="plan plan-featured" data-reveal="rise">
             <span class="tag">Hosted</span>
             <p class="price">Waiting list</p>
             <p class="plan-lede">
               Gots, run for you. Leave your email and you're first in when the doors open.
             </p>
-            <form class="waitlist" data-waitlist>
+            <form class="waitlist" name="waitlist" method="POST" action="/" data-netlify="true" netlify-honeypot="bot-field" data-waitlist>
+              <input type="hidden" name="form-name" value="waitlist" />
+              <p class="sr-only"><label>Leave this empty <input name="bot-field" tabindex="-1" autocomplete="off" /></label></p>
               <label class="sr-only" for="email">Email</label>
               <input id="email" type="email" name="email" placeholder="you@example.com" required autocomplete="email" />
               <button class="btn" type="submit">Count me in</button>
               <p class="thanks" role="status">You're on the list. We'll be in touch.</p>
+              <p class="form-error" role="alert">That didn't go through. Try again in a moment.</p>
             </form>
             <ul class="ticks">
               <li>One email when your spot opens</li>
               <li>First look at new features</li>
+            </ul>
+          </article>
+
+          <article class="plan" data-reveal="rise" style="--d:120ms">
+            <span class="tag">Self-host</span>
+            <p class="price">Free</p>
+            <p class="plan-lede">Run it on your own Hermes host. Your chats, runs and keys stay with you.</p>
+            <ul class="ticks">
+              <li>Every feature in the app</li>
+              <li>Open source, MIT licensed</li>
+              <li>End-to-end encrypted sync</li>
             </ul>
           </article>
         </div>

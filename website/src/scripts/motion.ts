@@ -77,8 +77,24 @@ for (const element of stories) {
 }
 
 document.querySelectorAll<HTMLFormElement>("[data-waitlist]").forEach((form) => {
-  form.addEventListener("submit", (event) => {
+  form.addEventListener("submit", async (event) => {
     event.preventDefault()
-    form.classList.add("is-done")
+    form.classList.remove("is-failed")
+    const button = form.querySelector("button")
+    if (button) button.disabled = true
+    try {
+      const body = new URLSearchParams(new FormData(form) as unknown as Record<string, string>)
+      const res = await fetch(form.action, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+      })
+      if (!res.ok) throw new Error(String(res.status))
+      form.classList.add("is-done")
+    } catch {
+      form.classList.add("is-failed")
+    } finally {
+      if (button) button.disabled = false
+    }
   })
 })
