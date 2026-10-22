@@ -12,7 +12,7 @@ import { MemoryRouter } from "react-router"
 import { MovedMarker } from "@/components/chat/moved-marker"
 import { sendFromMain, settleRouting } from "@/lib/chat"
 import { db, mainThreadId, type Message } from "@/lib/db"
-import { moveMarks, refreshMoves } from "@/lib/moves"
+import { moveMarks, refreshMoves, undoMove } from "@/lib/moves"
 import { TRIAGE_MS } from "@/lib/freshness"
 import { botProfile, json, seedSettings, until } from "./component-kit.tsx"
 
@@ -272,7 +272,7 @@ test("a move is read back from the host and leaves a marker, a stay leaves none"
   host("route-marks", "stay")
   await refreshMoves(MAIN)
   assert.equal((await db.conversations.get(MAIN))?.moves, undefined)
-  const move = { id: "m1", text: "more on Lisbon", thread: "t1", at: 10, undone: false }
+  const move = { id: "m1", text: "more on Lisbon", thread: "t1", at: 10, undone: false, undoable: true }
   const fetchWith = globalThis.fetch
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input instanceof Request ? input.url : input))
@@ -280,7 +280,7 @@ test("a move is read back from the host and leaves a marker, a stay leaves none"
   }) as typeof fetch
   await refreshMoves(MAIN)
   assert.deepEqual((await db.conversations.get(MAIN))?.moves, [
-    { id: "m1", text: "more on Lisbon", threadId: "t1", at: 10, undone: false },
+    { id: "m1", text: "more on Lisbon", threadId: "t1", at: 10, undone: false, undoable: true },
   ])
   await refreshMoves("t1")
   assert.equal((await db.conversations.get("t1"))?.moves, undefined)
@@ -292,10 +292,10 @@ test("markers sit in time order among Main's messages, and an undone move has no
   const marks = moveMarks(
     [at("a", 5), at("b", 20), at("c", 30)],
     [
-      { id: "m1", text: "x", threadId: "t1", at: 10, undone: false },
-      { id: "m2", text: "y", threadId: "t1", at: 15, undone: false },
-      { id: "m3", text: "z", threadId: "t1", at: 99, undone: false },
-      { id: "m4", text: "w", threadId: "t1", at: 12, undone: true },
+      { id: "m1", text: "x", threadId: "t1", at: 10, undone: false, undoable: true },
+      { id: "m2", text: "y", threadId: "t1", at: 15, undone: false, undoable: true },
+      { id: "m3", text: "z", threadId: "t1", at: 99, undone: false, undoable: true },
+      { id: "m4", text: "w", threadId: "t1", at: 12, undone: true, undoable: false },
     ],
   )
   assert.deepEqual(
@@ -313,13 +313,56 @@ test("tapping a marker opens its thread", async () => {
   const html = renderToStaticMarkup(
     <MemoryRouter>
       <MovedMarker
-        move={{ id: "m1", text: "more on Lisbon", threadId: "t1", at: 10, undone: false }}
+        move={{ id: "m1", text: "more on Lisbon", threadId: "t1", at: 10, undone: false, undoable: true }}
         title="Trip to Lisbon"
         profileId="bot-1"
       />
     </MemoryRouter>,
   )
   assert.match(html, /href="\/c\/t1"/)
-  assert.match(html, /Moved to Trip to Lisbon/)
-  assert.match(html, /more on Lisbon/)
+  assert.match(html, /Moved to \u201c.*Trip to Lisbon.*\u201d/)
+  // The message itself is drawn as the user's bubble, with the line under it.
+  assert.ok(html.indexOf("more on Lisbon") < html.indexOf("Moved to"))
+})
+
+test("Undo shows on a fresh marker and goes once the thread has replied", () => {
+  const render = (undoable: boolean) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <MovedMarker
+          move={{ id: "m1", text: "more on Lisbon", threadId: "t1", at: 10, undone: false, undoable }}
+          profileId="bot-1"
+          onUndo={() => undefined}
+        />
+      </MemoryRouter>,
+    )
+  assert.match(render(true), />Undo</)
+  assert.doesNotMatch(render(false), /Undo/)
+})
+
+test("undoing a move asks the host, then reads the markers again", async () => {
+  await seed("route-undo")
+  host("route-undo", "stay")
+  const fetchWith = globalThis.fetch
+  const calls: string[] = []
+  let undone = false
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input instanceof Request ? input.url : input))
+    if (url.pathname.endsWith("/moves/m1/undo")) {
+      calls.push(`${init?.method} ${url.pathname.split("/sessions/")[1]}`)
+      undone = true
+      return json({ undone: true })
+    }
+    if (url.pathname.endsWith("/moves"))
+      return json({
+        moves: [{ id: "m1", text: "more", thread: "t1", at: 10, undone, undoable: !undone }],
+      })
+    return fetchWith(input, init)
+  }) as typeof fetch
+  await refreshMoves(MAIN)
+  assert.equal((await db.conversations.get(MAIN))?.moves?.[0].undoable, true)
+  await undoMove(MAIN, "m1")
+  assert.deepEqual(calls, [`POST ${MAIN_SESSION}/moves/m1/undo`])
+  const [after] = (await db.conversations.get(MAIN))?.moves ?? []
+  assert.deepEqual([after.undone, after.undoable], [true, false])
 })

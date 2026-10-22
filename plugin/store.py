@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 34
+SCHEMA_VERSION = 35
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -437,4 +437,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    value TEXT NOT NULL
                )"""
         )
+        # v35: what Undo needs of a move: its thread's session and queued item, whether the move
+        # opened the thread, and the message as Main would have run it.
+        move_columns = {row[1] for row in conn.execute("PRAGMA table_info(main_moves)")}
+        for column, kind in (
+            ("thread_session", "TEXT"),
+            ("item", "TEXT"),
+            ("new", "INTEGER NOT NULL DEFAULT 0"),
+            ("main_body", "TEXT"),
+            ("files", "TEXT"),
+        ):
+            if column not in move_columns:
+                conn.execute(f"ALTER TABLE main_moves ADD COLUMN {column} {kind}")
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

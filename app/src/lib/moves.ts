@@ -1,7 +1,7 @@
 import { connectionKey, serverConfig } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { db, type Message } from "@/lib/db"
-import { getMoves, hasPluginFeature, type Move } from "@/lib/hermes"
+import { getMoves, hasPluginFeature, postMoveUndo, type Move } from "@/lib/hermes"
 import { tracked } from "@/lib/tracked"
 
 /** Bots whose plugin has no moves route (an older plugin). */
@@ -30,6 +30,21 @@ export async function refreshMoves(conversationId: string) {
   if (JSON.stringify(conversation.moves ?? []) === JSON.stringify(moves)) return
   // Not through updateConversation: this is local, so it mustn't move the sync clock.
   await db.conversations.update(conversationId, { moves })
+}
+
+/**
+ * Takes a moved message back. The host does it all (stops the thread's reply, removes the message,
+ * sends it to Main without asking again), so this only asks and then reads the markers again; a
+ * refusal (the thread already replied) is the caller's to show, and the read still drops the button.
+ */
+export async function undoMove(conversationId: string, moveId: string) {
+  const found = await tracked(conversationId)
+  if (!found?.conversation.main) return
+  try {
+    await postMoveUndo(serverConfig(found.profile), found.conversation.hermesSessionId, moveId)
+  } finally {
+    await refreshMoves(conversationId)
+  }
 }
 
 export interface MoveMarks {

@@ -1394,15 +1394,29 @@ export interface Move {
   threadId: string
   at: number
   undone: boolean
+  /** Whether Undo is still offered: the thread's reply to this message hasn't finished. */
+  undoable: boolean
 }
+
+const movesRoot = (config: HermesConfig, sessionId: string) =>
+  `${pluginRoot(config.baseUrl)}/sessions/${encodeURIComponent(sessionId)}/moves`
 
 /** The messages triage moved out of a Main thread, oldest first. */
 export async function getMoves(config: HermesConfig, sessionId: string): Promise<Move[]> {
-  const response = await request(
-    `${pluginRoot(config.baseUrl)}/sessions/${encodeURIComponent(sessionId)}/moves`,
-    { headers: headers(config), signal: AbortSignal.timeout(READ_TIMEOUT_MS) },
-  )
+  const response = await request(movesRoot(config, sessionId), {
+    headers: headers(config),
+    signal: AbortSignal.timeout(READ_TIMEOUT_MS),
+  })
   return readMoves((await response.json())?.moves)
+}
+
+/** Takes a moved message back: the host stops the thread's reply, and sends it to Main untriaged. */
+export async function postMoveUndo(config: HermesConfig, sessionId: string, moveId: string) {
+  await request(`${movesRoot(config, sessionId)}/${encodeURIComponent(moveId)}/undo`, {
+    method: "POST",
+    headers: headers(config),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
 }
 
 function readMoves(value: unknown): Move[] {
@@ -1418,6 +1432,7 @@ function readMoves(value: unknown): Move[] {
       threadId: row.thread,
       at: row.at,
       undone: Boolean(row.undone),
+      undoable: Boolean(row.undoable),
     })
   }
   return found
