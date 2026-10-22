@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { useLiveQuery } from "dexie-react-hooks"
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router"
 import {
   ArrowLeftIcon,
@@ -58,9 +59,16 @@ import {
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { db } from "@/lib/db"
 import { canRecord } from "@/lib/dictation"
 import { formatRelative } from "@/lib/format"
-import { useMeetingRecorder, type Recorded } from "@/lib/meeting-recorder"
+import {
+  forgetRecording,
+  isRecording,
+  recordingFile,
+  useMeetingRecorder,
+  type Recorded,
+} from "@/lib/meeting-recorder"
 import {
   addRecording,
   addTranscript,
@@ -230,6 +238,61 @@ function useSwap() {
   return (to: string) => navigate(to, { replace: swap })
 }
 
+/** A meeting recorded in the app that never reached the host: the page closed, or the send failed. */
+function Unfinished() {
+  const go = useSwap()
+  const bots = useMeetingBots()
+  const saved = useLiveQuery(
+    async () => (await db.meetingRecordings.toArray()).sort((a, b) => b.at - a.at),
+    [],
+  )
+  const [sending, setSending] = useState(false)
+  const recording = saved?.find((r) => !isRecording(r.id) && r.chunks.length)
+  if (!recording) return null
+  const profile = bots.find((b) => b.id === recording.profileId)
+  const send = async () => {
+    if (!profile) return
+    setSending(true)
+    try {
+      const file = recordingFile(recording)
+      const meeting = await addRecording(profile, {
+        title: file.name.replace(/\.[^.]+$/, ""),
+        projectId: recording.projectId,
+        file,
+      })
+      void forgetRecording(recording.id)
+      go(`/meetings/${meeting.id}`)
+    } catch (error) {
+      toast.error(message(error, "Couldn't add the meeting."))
+    } finally {
+      setSending(false)
+    }
+  }
+  return (
+    <Banner
+      action={
+        <span className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 rounded-full"
+            onClick={() => void forgetRecording(recording.id)}
+          >
+            Discard
+          </Button>
+          {profile && (
+            <Button size="sm" className="h-9 rounded-full" disabled={sending} onClick={send}>
+              Send
+            </Button>
+          )}
+        </span>
+      }
+    >
+      Unfinished recording, {length(Math.floor(recording.ms / 1000))} long
+    </Banner>
+  )
+}
+
 function MeetingsList({ pane }: { pane?: PaneState }) {
   const openDrawer = useOpenDrawer()
   const open = useSwap()
@@ -287,6 +350,7 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
         {reason && <Banner>{reason}</Banner>}
+        <Unfinished />
         {meetings.length > 0 && (
           <div className="flex flex-col gap-3">
             <ItemSearch value={query} onChange={setQuery} label="Search meetings" />
@@ -725,7 +789,7 @@ function RecordForm({ target, onAdded }: { target: Target; onAdded: () => void }
   const [confirming, setConfirming] = useState(false)
   const [saving, setSaving] = useState(false)
   const save = useCallback(
-    async ({ file }: Recorded) => {
+    async ({ id, file }: Recorded) => {
       if (!profile) return
       setOpen(false)
       setSaving(true)
@@ -735,10 +799,13 @@ function RecordForm({ target, onAdded }: { target: Target; onAdded: () => void }
           projectId: project,
           file,
         })
+        void forgetRecording(id)
         onAdded()
         go(`/meetings/${meeting.id}`)
       } catch (error) {
-        toast.error(message(error, "Couldn't add the meeting."))
+        toast.error(
+          message(error, "Couldn't add the meeting. The recording is kept on this device."),
+        )
       } finally {
         setSaving(false)
       }
@@ -750,7 +817,8 @@ function RecordForm({ target, onAdded }: { target: Target; onAdded: () => void }
   const unavailable = !canRecord() ? "This browser can't record." : noAudio
 
   const begin = async () => {
-    setOpen(await recorder.start())
+    if (!profile) return
+    setOpen(await recorder.start({ profileId: profile.id, projectId: project }))
   }
 
   return (
