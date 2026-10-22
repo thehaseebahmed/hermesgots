@@ -1153,6 +1153,7 @@ export function ChatPage({ chatId }: { chatId?: string } = {}) {
             }
             connection={serverConfig(profile)}
             botName={profile?.name}
+            dictationWords={profile?.vocabulary}
             dictationHint={[
               conversation?.title,
               project?.name,

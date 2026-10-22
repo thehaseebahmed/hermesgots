@@ -2422,16 +2422,22 @@ function takeAnswer(raw: unknown): DictationTakeAnswer {
 /**
  * Opens a take on the host — a dictation heard while it is spoken — and waits for its speech model.
  * The one request of a take that may wait, so the caller bounds it generously and says "Preparing…".
+ * The bot's vocabulary rides in it, which is how the words reach the decoder's prompt; only the
+ * words a take was started with bias it.
  */
 export async function startDictationTake(
   config: HermesConfig,
   hint: string,
+  vocabulary: string[] = [],
   signal?: AbortSignal,
 ): Promise<DictationTakeStart> {
   const response = await request(`${pluginRoot(config.baseUrl)}/dictation/take`, {
     method: "POST",
     headers: headers(config),
-    body: JSON.stringify(hint ? { hint } : {}),
+    body: JSON.stringify({
+      ...(hint ? { hint } : {}),
+      ...(vocabulary.length ? { vocabulary } : {}),
+    }),
     signal,
   })
   const body = await response.json()

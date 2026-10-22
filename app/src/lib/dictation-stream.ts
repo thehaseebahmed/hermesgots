@@ -143,7 +143,7 @@ function within(promise: Promise<unknown>, ms: number) {
 }
 
 /** A dictation the bot's host hears as it is spoken, one slice at a time. */
-export function useStreamDictation(config: HermesConfig, hint: string) {
+export function useStreamDictation(config: HermesConfig, hint: string, vocabulary: string[] = []) {
   const [status, setStatus] = useState<DictationStatus>("idle")
   const [levels, setLevels] = useState<number[] | null>(null)
   const [startedAt, setStartedAt] = useState<number | null>(null)
@@ -151,9 +151,9 @@ export function useStreamDictation(config: HermesConfig, hint: string) {
   const [transcript, setTranscript] = useState<DictationTranscript>(EMPTY_TRANSCRIPT)
   const session = useRef<TakeSession | null>(null)
   const heard = useRef<DictationTranscript>(EMPTY_TRANSCRIPT)
-  const latest = useRef({ config, hint })
+  const latest = useRef({ config, hint, vocabulary })
   useEffect(() => {
-    latest.current = { config, hint }
+    latest.current = { config, hint, vocabulary }
   })
 
   const show = useCallback((next: DictationTranscript) => {
@@ -269,7 +269,12 @@ export function useStreamDictation(config: HermesConfig, hint: string) {
     // user is speaking to load. The slices wait for it: nothing is sent before the host has a take.
     const asking = new AbortController()
     const cold = window.setTimeout(() => asking.abort(), START_MS)
-    current.asking = startDictationTake(latest.current.config, latest.current.hint, asking.signal)
+    current.asking = startDictationTake(
+      latest.current.config,
+      latest.current.hint,
+      latest.current.vocabulary,
+      asking.signal,
+    )
       .then((opened) => {
         if (session.current !== current) return
         current.take = opened.take

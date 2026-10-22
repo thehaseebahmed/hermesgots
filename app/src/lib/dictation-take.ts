@@ -33,12 +33,18 @@ export interface DictationTake {
 /**
  * Dictation for this bot. The implementation is picked when a take starts — a live take keeps the
  * one it began on — and anything but a clear `yes` is the chunked one, which is what a host with no
- * answer, or an older plugin, has always had.
+ * answer, or an older plugin, has always had. `vocabulary` is the bot's words, which only the
+ * streaming take can use: it rides on the call that opens a take.
  */
-export function useDictation(config: HermesConfig, hint: string, key?: string): DictationTake {
+export function useDictation(
+  config: HermesConfig,
+  hint: string,
+  key?: string,
+  vocabulary?: string[],
+): DictationTake {
   const answer = usePluginFeature(config, DICTATION_STREAM)
   const chunked = useChunkedDictation(config, hint, key)
-  const stream = useStreamDictation(config, hint)
+  const stream = useStreamDictation(config, hint, vocabulary)
   if (chunked.status !== "idle") return chunked
   if (stream.status !== "idle") return stream
   return answer === "yes" ? stream : chunked

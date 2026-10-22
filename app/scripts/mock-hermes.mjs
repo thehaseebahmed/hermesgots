@@ -2325,6 +2325,9 @@ const TAKE_ANSWERS = [
 const TAKE_TAIL = { words: "", phrases: [{ id: 2, text: "feature today." }], behind: false }
 const dictationTakes = new Map()
 const dictationSlices = []
+// The vocabulary each take was opened with, kept after the take ends so a flow can read what the
+// app sent: the words a bot's dictation is written with ride on the call that opens a take.
+const dictationStarts = []
 // Audio slices are answered after a moment, like a host decoding, and the most that were ever being
 // answered at once is how a test sees that the app keeps one request in flight.
 const SLICE_MS = 150
@@ -3984,7 +3987,10 @@ http
     }
     if (PLUGIN && !profile && DICTATION_STREAM && req.method === "POST") {
       if (url.pathname === "/api/plugins/memento/dictation/take") {
-        await readRaw(req)
+        const body = await readBody(req).catch(() => ({}))
+        const vocabulary = Array.isArray(body?.vocabulary)
+          ? body.vocabulary.filter((word) => typeof word === "string" && word.trim())
+          : []
         if (DICTATION === "off")
           return json(res, 409, {
             error: { message: "faster-whisper isn't installed on the host." },
@@ -3994,7 +4000,8 @@ http
         if (DICTATION === "fail")
           return json(res, 502, { error: { message: "The host's speech model didn't load." } })
         const take = `dt_mock_${dictationTakes.size + 1}`
-        dictationTakes.set(take, { answers: TAKE_ANSWERS.length })
+        dictationTakes.set(take, { answers: TAKE_ANSWERS.length, vocabulary })
+        dictationStarts.push({ take, vocabulary })
         return json(res, 200, {
           object: "memento.dictation_take",
           take,
@@ -4038,8 +4045,20 @@ http
           words: "",
           phrases: [],
         }
+        // A host biased by its prompt hears a listed name spelled as it was listed: the take's
+        // first words are the bot's own, before the sentence it would otherwise have heard.
+        const words =
+          held.answers === TAKE_ANSWERS.length && held.vocabulary.length
+            ? [held.vocabulary.join(" "), answer.words].filter(Boolean).join(" ")
+            : answer.words
         held.answers = Math.max(0, held.answers - 1)
-        return json(res, 200, { object: "memento.dictation_audio", take, behind: false, ...answer })
+        return json(res, 200, {
+          object: "memento.dictation_audio",
+          take,
+          behind: false,
+          ...answer,
+          words,
+        })
       }
     }
     const attachmentRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/attachments$/.exec(
@@ -4395,6 +4414,9 @@ http
         slices: dictationSlices,
         takes: [...dictationTakes.keys()],
         peak: dictationPeak,
+        // What each take was opened with, kept after it ends: the words the bot's dictation is
+        // written with, as they reached the host.
+        starts: dictationStarts,
       })
     }
     // Dev only: POST { outcome } ends every pending approval without the app. "timeout" is a host

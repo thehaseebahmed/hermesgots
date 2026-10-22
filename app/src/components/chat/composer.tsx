@@ -72,6 +72,7 @@ export function Composer({
   connection,
   botName = "Hermes",
   dictationHint,
+  dictationWords,
   model,
   session,
   filesAvailable,
@@ -99,6 +100,8 @@ export function Composer({
   botName?: string
   /** Names the chat may mention (its title, a project's repos), to help the host hear them. */
   dictationHint?: string
+  /** The bot's vocabulary: the names and words its dictation is written with. */
+  dictationWords?: string[]
   /** The model pill, beside the `+` button. */
   model?: ReactNode
   /** A project session: its permission mode, picked in the `+` menu. */
@@ -174,7 +177,12 @@ export function Composer({
   const lastEscape = useRef<number | null>(null)
   const listId = useId()
   const dictationInfo = useDictationInfo(connection)
-  const dictation = useDictation(connection, joinText(botName, dictationHint ?? ""), draftKey)
+  const dictation = useDictation(
+    connection,
+    joinText(botName, dictationHint ?? ""),
+    draftKey,
+    dictationWords,
+  )
   const canDictate = dictationInfo?.status === "ready" && canRecord()
   // Where the cursor was when dictation started, and whether the clip goes into the text or is sent.
   const dictationAt = useRef<number | null>(null)
