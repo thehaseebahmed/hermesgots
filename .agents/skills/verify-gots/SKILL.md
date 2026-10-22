@@ -122,8 +122,22 @@ the helpers:
 
 Drive through the UI: buttons, links, roles and names — `getByRole("button", { name: "Allow once" })`,
 `getByRole("navigation", { name: "Recents" })`, `getByRole("region", { name: "Waiting on you" })` —
-not coordinates or tab order. The composer is `getByRole("textbox").last()`. When a selector stops
-matching, check whether the app renamed it before blaming the change.
+not coordinates or tab order. The composer is `getByRole("textbox").last()`, or
+`page.getByLabel("Message")`, which also holds while the `/` menu is open (the textbox role flips
+to `combobox` there). When a selector stops matching, check whether the app renamed it before
+blaming the change.
+
+Typed input has two traps: `fill(text)` with the text a field already holds fires no input event,
+so React never sees a change; and a synthetic `fill` can be undone when the app's own state
+re-renders. Edit with `press("Control+a")` then `type(text)`, and poll the field's own value before
+asserting what follows. A menu's panel can be visible while its rows are still loading — assert on
+the rows (`until` an option's count), not the panel.
+
+Prove a new assertion bites before trusting it: reintroduce the defect it covers in one line, run
+the flow, and require it to fail at exactly that assertion's message — then revert. A flow that
+passes against the mutation is testing the mock, not the app. Where a flow would pass on either
+side of a refactor that moves a calculation, prove the source: `page.route` the read and answer a
+payload the app could not compute itself, then assert the stored value and the rendered label.
 
 The mock behaves like a Hermes with the Gots plugin and is steered by words in a message:
 `clean up` asks for an approval, `ask` asks a question, `long` streams slowly, `plan` keeps a todo
@@ -152,6 +166,13 @@ Proof standards:
 - Mocks only where a production boundary already isolates the system — here, the Hermes host.
 - When the safe path is a dry-run or test mode, verify what it actually skips by observing (files,
   network, git refs), not by trusting its name.
+- Capture each state to its own named file in the call that makes it (the harness's capture
+  overwrites one path per call), and look at it with the vision tool before calling the state
+  proven. Avoid `page.reload()` between captures in a thread-starved container — every load
+  refetches every Vite module and a couple of reloads exhaust it (`net::ERR_INSUFFICIENT_RESOURCES`);
+  toggle the `dark` class on `<html>` and `setViewportSize` live instead. A capture a sandboxed run
+  wrote under `/tmp` is invisible to the host-side library tool (`No such file`): copy it under the
+  workspace's `files/<session>/` and file that copy.
 
 Each drive ends with `PASS: …` lines per step; a failure saves `<flow>-failed.png` and the run ends
 `FAILED: <flows>`. Server logs are in `$TMPDIR/memento-e2e-logs/`. Keep, per run: the flow's PNGs,

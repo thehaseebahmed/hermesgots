@@ -219,6 +219,14 @@ Projects, attach it to your reply, or describe what it shows. Never commit scree
 - A regression that seeds a fixed chat id — `regression-submission.mjs` uses `overlap-test` — reads
   that session's transcript off the mock, so it passes only against a mock that hasn't served it
   before. Restart the mock between runs of one.
+- Locate the composer by its label, not its role: the textarea is `role="combobox"` while the `/`
+  menu is open and `role="textbox"` when it isn't, so `getByRole("textbox")` hangs in one state
+  after a `fill("/")` opened the menu. `page.getByLabel("Message")` holds across both.
+- Never run `prettier --write` over `app/scripts/` — the format gate covers `src/` only, and the
+  mock, the flows and the node tests are deliberately unformatted (the mock's long single-line
+  object literals). One run turns a three-line edit into a diff of thousands of lines: revert with
+  `git checkout --` and re-apply by hand. Read a `prettier --check scripts/...` warning as
+  expected, not as a failing gate.
 - A Vite started without `--host` binds `::1` alone while a `localhost` that resolves to
   127.0.0.1 never reaches it. The CLI starts its own app on `--host 127.0.0.1` and its readiness
   probe tries `127.0.0.1`, `localhost` and `[::1]`, answering with the name that serves — so
