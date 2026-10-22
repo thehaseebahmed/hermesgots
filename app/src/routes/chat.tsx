@@ -315,9 +315,12 @@ export function ChatPage() {
       profileId={conversation?.profileId ?? ""}
       onUndo={(m) =>
         id &&
-        void undoMove(id, m.id).catch((error) =>
-          toast.error(error instanceof Error ? error.message : "Couldn't undo the move"),
-        )
+        void undoMove(id, m.id)
+          // The host queued the message on Main: show it there as the marker goes.
+          .then(() => refreshQueue(id))
+          .catch((error) =>
+            toast.error(error instanceof Error ? error.message : "Couldn't undo the move"),
+          )
       }
     />
   )

@@ -321,7 +321,8 @@ test("tapping a marker opens its thread", async () => {
   )
   assert.match(html, /href="\/c\/t1"/)
   assert.match(html, /Moved to Trip to Lisbon/)
-  assert.match(html, /more on Lisbon/)
+  // The message itself is drawn as the user's bubble, with the line under it.
+  assert.ok(html.indexOf("more on Lisbon") < html.indexOf("Moved to Trip to Lisbon"))
 })
 
 test("Undo shows on a fresh marker and goes once the thread has replied", () => {
