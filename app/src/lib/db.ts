@@ -18,6 +18,8 @@ export interface Settings {
   steerByDefault?: boolean
   /** Reminds phone users to put the app away while a bot chat or code session runs. On by default. */
   breakReminders?: boolean
+  /** Alt+1 to Alt+9 start a new chat with the bot added in that place. Off by default. */
+  navShortcuts?: boolean
   /** The clock on this device's copy of the appearance record: a change made here, or one pulled. */
   appearanceAt?: number
   /** Shows the Developer section in Settings (tapping the version five times). */
@@ -56,7 +58,7 @@ export interface Settings {
  * since next-themes keeps it on the device. Sync carries them as the `settings` document's one
  * record and the fingerprint watches them, so this list is the one place that says what syncs.
  */
-export const APPEARANCE_FIELDS = ["steerByDefault", "breakReminders"] as const
+export const APPEARANCE_FIELDS = ["steerByDefault", "breakReminders", "navShortcuts"] as const
 
 /** Those switches as sync reads them, present rather than optional, so a read needs no fallback. */
 export type Appearance = Required<Pick<Settings, (typeof APPEARANCE_FIELDS)[number]>>
@@ -480,6 +482,7 @@ export const DEFAULT_SETTINGS: Settings & Appearance = {
   id: "settings",
   steerByDefault: false,
   breakReminders: true,
+  navShortcuts: false,
 }
 
 export const DEFAULT_PROFILE = {

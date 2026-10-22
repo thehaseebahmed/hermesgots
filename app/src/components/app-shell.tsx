@@ -12,6 +12,7 @@ import { Outlet, useLocation, useNavigationType } from "react-router"
 import { ConversationList } from "@/components/conversation-list"
 import { BreakReminderProvider } from "@/components/break-reminder-provider"
 import { CrashBoundary } from "@/components/crash-screen"
+import { KeyboardShortcuts } from "@/components/keyboard-shortcuts"
 import { DrawerContext } from "@/components/drawer-context"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { useLarge, useWide } from "@/lib/media"
@@ -159,6 +160,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
 
   return (
     <BreakReminderProvider>
+      <KeyboardShortcuts />
       <DrawerContext.Provider value={() => setOpen(true)}>
         <div className="flex h-dvh overflow-hidden bg-background">
           {/* Not mounted on phones, where the drawer holds the list, so its queries don't run twice. */}
