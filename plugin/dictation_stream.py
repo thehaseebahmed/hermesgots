@@ -43,9 +43,33 @@ _HEARD_WORDS = 32
 # A take that hears no audio for this long is dropped and its buffer let go.
 QUIET_S = 15.0
 SAMPLE_RATE = 16000
+# A bot's vocabulary is a short list, so the decoder's prompt stays inside the tokens Whisper keeps.
+MAX_VOCABULARY = 50
+MAX_WORD = 40
 
 Transcriber = Callable[[Sequence[float], str], str]
 Decoder = Callable[[bytes, bool], List[float]]
+
+
+def clean_vocabulary(words: Any) -> List[str]:
+    """A bot's words as a take keeps them: one line each, once each, and a short list.
+
+    The spelling is kept exactly as the user wrote it — that is the whole point of the list — while
+    two words differing only in case are one word, so "Gots" and "gots" can't both bias the prompt.
+    """
+    kept: List[str] = []
+    seen = set()
+    for raw in words if isinstance(words, (list, tuple)) else ():
+        if not isinstance(raw, str):
+            continue
+        word = " ".join(raw.split())[:MAX_WORD]
+        if not word or word.casefold() in seen:
+            continue
+        seen.add(word.casefold())
+        kept.append(word)
+        if len(kept) >= MAX_VOCABULARY:
+            break
+    return kept
 
 
 class TakeError(Exception):
@@ -177,6 +201,7 @@ class Take:
         *,
         clock: Callable[[], float] = time.monotonic,
         hint: str = "",
+        vocabulary: Sequence[str] = (),
         language: str = "",
         model: str = "",
         window_s: float = WINDOW_S,
@@ -186,6 +211,9 @@ class Take:
     ) -> None:
         self.id = f"dt-{uuid.uuid4().hex[:12]}"
         self.hint = hint
+        # The bot's words, kept on the take rather than only in the prompt: a finished phrase is
+        # cleaned up against the same list (#290), so both readers share the one list.
+        self.vocabulary = clean_vocabulary(vocabulary)
         self.language = language
         self.model = model
         self.window_s = window_s
@@ -304,11 +332,14 @@ class Take:
     def _prompt(self) -> str:
         """What the host heard so far in front of the window, so names and casing carry.
 
-        The bot's vocabulary joins this prompt where a bot has one (#294); the seam is here, and
-        nothing reads it yet.
+        The host's own prompt comes first, then the bot's vocabulary, then the tail of what was
+        already said: Whisper reads the prompt as the words just before the window, which is why
+        the committed text is last. The vocabulary biases the spelling of the words the user cares
+        about, and the same list is what a finished phrase is cleaned up against (#290).
         """
         tail = " ".join(self._committed[-_PROMPT_WORDS:])
-        return " ".join(part for part in (self.hint, tail) if part)
+        words = " ".join(self.vocabulary)
+        return " ".join(part for part in (self.hint, words, tail) if part)
 
     def _window(self) -> List[float]:
         return self._samples[-int(self.window_s * self.rate) :]
@@ -490,8 +521,8 @@ def start(
     """Opens a take for a profile: waits for the host's model, then answers whether it is ready.
 
     This is the one call of a take that may wait — a cold host loads its model inside it — and the
-    voice bar says the take is preparing until it answers. A vocabulary the bot carries joins the
-    decoder's prompt in #294; it is accepted and unused here so the wire shape need not move.
+    voice bar says the take is preparing until it answers. The bot's vocabulary rides in here and
+    is carried by the take, into every window's prompt and, later, into cleanup's instructions.
     """
     state = dictation.info()
     if not state.get("ready"):
@@ -507,6 +538,7 @@ def start(
         transcriber(tt, model, language),
         Decoder(),
         hint=dictation.clean_hint(hint),
+        vocabulary=vocabulary,
         language=language,
         model=model,
     )

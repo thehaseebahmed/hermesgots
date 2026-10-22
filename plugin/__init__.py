@@ -1661,10 +1661,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return denied
         body = await json_body(request)
         hint = dictation.clean_hint(body.get("hint") if body else None)
+        # The bot's vocabulary rides on the one call that opens a take, so a word removed in the
+        # app is gone from the next take and a word added is there from it.
+        vocabulary = body.get("vocabulary") if body else None
         try:
             # The one call of a take that may wait: a cold host loads its model inside it.
             started = await asyncio.to_thread(
-                dictation_stream.start, dictation_takes, dictation_profile(), hint
+                dictation_stream.start, dictation_takes, dictation_profile(), hint, vocabulary
             )
         except (dictation.DictationError, dictation_stream.TakeError) as error:
             return _error(web, str(error), error.status)

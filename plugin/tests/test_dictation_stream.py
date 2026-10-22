@@ -455,6 +455,68 @@ class FailureTest(unittest.TestCase):
         self.assertEqual([phrase["text"] for phrase in answer["phrases"]], ["hello there"])
 
 
+class VocabularyTest(unittest.TestCase):
+    """A bot's words reaching the decoder's prompt: every window, spelled as listed."""
+
+    def test_every_window_of_a_take_carries_the_bot_s_words(self) -> None:
+        scripted = Scripted(["hello there", "hello there my friend", "hello there my friend how"])
+        heard, _, clock = take(scripted, vocabulary=["Gots", "DeepSeek"])
+        push(heard, clock, count=5)
+        heard.add(b"opus", pause=True)
+        heard.stop()
+        self.assertGreaterEqual(len(scripted.calls), 4)
+        for call in scripted.calls:
+            self.assertIn("Gots DeepSeek", call["prompt"])
+
+    def test_a_listed_name_is_heard_as_it_is_spelled(self) -> None:
+        # A decoder that leans on its prompt, as Whisper does: with the name in front of it, it
+        # writes the name; without it, it hears the common word. This is the spelling promise with
+        # a scripted model in place of a real one.
+        def leaning(samples, prompt):
+            return "Gots ships it" if "Gots" in prompt else "gots ships it"
+
+        heard, _, clock = take(leaning, vocabulary=["Gots"])
+        push(heard, clock, count=5)
+        heard.add(b"opus", pause=True)
+        self.assertEqual(heard.phrases[-1]["text"], "Gots ships it")
+
+    def test_the_host_s_prompt_comes_first_and_the_heard_tail_last(self) -> None:
+        scripted = Scripted(["hello there", "hello there friend"])
+        heard, _, clock = take(scripted, hint="Gots, the chat", vocabulary=["Haseeb"], window_s=1.0)
+        push(heard, clock, count=8)
+        prompt = scripted.calls[-1]["prompt"]
+        self.assertTrue(prompt.startswith("Gots, the chat Haseeb"))
+        self.assertTrue(prompt.endswith("hello there"))
+
+    def test_a_take_with_no_words_prompts_as_it_did_before(self) -> None:
+        scripted = Scripted(["hello there", "hello there friend"])
+        heard, _, clock = take(scripted, hint="Gots")
+        push(heard, clock, count=8)
+        self.assertTrue(scripted.calls[-1]["prompt"].startswith("Gots hello there"))
+
+
+class CleanVocabularyTest(unittest.TestCase):
+    def test_a_word_is_one_line(self) -> None:
+        self.assertEqual(dictation_stream.clean_vocabulary(["  Foo \n bar "]), ["Foo bar"])
+
+    def test_a_word_the_list_already_holds_is_not_added_again(self) -> None:
+        self.assertEqual(dictation_stream.clean_vocabulary(["Gots", "gots", "GOTS"]), ["Gots"])
+
+    def test_the_list_is_capped(self) -> None:
+        many = [f"word{index}" for index in range(dictation_stream.MAX_VOCABULARY + 20)]
+        self.assertEqual(len(dictation_stream.clean_vocabulary(many)), dictation_stream.MAX_VOCABULARY)
+
+    def test_anything_that_is_not_a_list_of_words_is_no_vocabulary(self) -> None:
+        self.assertEqual(dictation_stream.clean_vocabulary(None), [])
+        self.assertEqual(dictation_stream.clean_vocabulary("Gots"), [])
+        self.assertEqual(dictation_stream.clean_vocabulary([1, "", "  ", None, "Gots"]), ["Gots"])
+
+    def test_a_word_carries_no_more_than_the_cap(self) -> None:
+        self.assertEqual(
+            len(dictation_stream.clean_vocabulary(["x" * 200])[0]), dictation_stream.MAX_WORD
+        )
+
+
 class StartTest(unittest.TestCase):
     def test_a_take_reports_the_host_s_model_and_language(self) -> None:
         _, patch = hermes()
@@ -465,6 +527,19 @@ class StartTest(unittest.TestCase):
         self.assertEqual((started["model"], started["language"]), ("small", "en"))
         self.assertTrue(started["take"].startswith("dt-"))
         self.assertIs(profiles.get("haseeb", started["take"]).__class__, dictation_stream.Take)
+
+    def test_a_take_carries_the_words_the_start_was_given(self) -> None:
+        _, patch = hermes()
+        profiles = dictation_stream.Takes()
+        with patch:
+            started = dictation_stream.start(
+                profiles, "haseeb", "Gots", ["Gots", " gots ", "DeepSeek"]
+            )
+        heard = profiles.get("haseeb", started["take"])
+        # The take holds the list once each, spelled as the user wrote it, for both the prompt and
+        # the cleanup a finished phrase will get.
+        self.assertEqual(heard.vocabulary, ["Gots", "DeepSeek"])
+        self.assertIn("Gots DeepSeek", heard._prompt())
 
     def test_a_host_that_cannot_dictate_refuses_the_take(self) -> None:
         _, patch = hermes(_load_stt_config=lambda: {"enabled": False})
