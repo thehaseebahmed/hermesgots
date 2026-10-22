@@ -5,8 +5,8 @@ import assert from "node:assert/strict"
 import { mkdirSync } from "node:fs"
 
 export { assert }
-export const app = process.env.APP_URL ?? "http://localhost:15173"
-export const mock = process.env.MOCK_URL ?? "http://localhost:18642"
+export const app = process.env.APP_URL ?? "http://127.0.0.1:15173"
+export const mock = process.env.MOCK_URL ?? "http://127.0.0.1:18642"
 const shots = process.env.SHOTS_DIR
 const headed = process.env.E2E_HEADED === "1"
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? "playwright")

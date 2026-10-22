@@ -7,17 +7,22 @@ import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { laneOf, MAX_LANES } from "./lanes.mjs"
+
 const here = dirname(fileURLToPath(import.meta.url))
 const appDir = resolve(here, "../..")
 
-// Mocks by what they leave out; each runs on its own port so flows can mix them.
+// Mocks by what they leave out; each runs on its own port so flows can mix them. A parallel lane
+// takes its own set (E2E_MOCK_BASE + its four), so lanes never share mock state.
+const MOCK_BASE = Number(process.env.E2E_MOCK_BASE ?? 18642)
 const MOCKS = {
-  live: { port: 18642, env: {} },
-  polling: { port: 18643, env: { MOCK_NO_EVENTS: "1" } },
-  legacy: { port: 18644, env: { MOCK_BLOCK_RUN_EVENTS: "1" } },
-  "no-dictation": { port: 18645, env: { MOCK_DICTATION: "off" } },
+  live: { port: MOCK_BASE, env: {} },
+  polling: { port: MOCK_BASE + 1, env: { MOCK_NO_EVENTS: "1" } },
+  legacy: { port: MOCK_BASE + 2, env: { MOCK_BLOCK_RUN_EVENTS: "1" } },
+  "no-dictation": { port: MOCK_BASE + 3, env: { MOCK_DICTATION: "off" } },
 }
-const APP_PORT = 15173
+// The app is shared: lanes drive it in separate browsers and one Vite serves them all.
+const APP_PORT = Number(process.env.E2E_APP_PORT ?? 15173)
 
 // `script` is relative to app/scripts; `mock` the one MOCK_URL points at (live by default);
 // `alsoPolling` runs it again on the polling mock under `all`; `extra` adds more mock URLs.
@@ -360,6 +365,8 @@ Options:
   --height <px>        shot: the window's height (default 844 under 768px wide, else 900)
   --dark               shot: dark mode
   --out <file>         shot: the file to write (default: <shots>/shot-<path>-<width>.png)
+  --jobs <n>           Run the flows in <n> parallel lanes (2-${MAX_LANES}); each lane takes its own
+                       mock ports (base + 4 per lane) and they share the app
   --keep               Leave the servers running afterwards (the next run reuses them)`
 
 const args = process.argv.slice(2)
@@ -380,6 +387,7 @@ const appUrl = option("--app")
 const width = Number(option("--width") ?? 1440)
 const height = Number(option("--height") ?? (width < 768 ? 844 : 900))
 const out = option("--out")
+const jobs = Number(option("--jobs") ?? 1)
 const dark = flag("--dark")
 const polling = flag("--polling")
 const keep = flag("--keep")
@@ -389,15 +397,25 @@ const [command, ...rest] = args
 const logs = join(tmpdir(), "memento-e2e-logs")
 const started = []
 const up = async (url) => {
-  try {
-    return (await fetch(url, { signal: AbortSignal.timeout(1000) })).status < 500
-  } catch {
-    return false
+  // One server, both families: Vite without `--host` binds `::1` alone while a `localhost` that
+  // resolves to 127.0.0.1 never reaches it. Try each name a local server can be on, port kept, and
+  // answer the one that serves so the caller's URL names it.
+  const at = new URL(url)
+  for (const host of ["127.0.0.1", "localhost", "[::1]"]) {
+    try {
+      at.hostname = host
+      const response = await fetch(at, { signal: AbortSignal.timeout(1000) })
+      if (response.status < 500) return host
+    } catch {
+      // That family isn't answering; try the next.
+    }
   }
+  return null
 }
 async function serve(name, port, command, args, env = {}) {
-  const url = `http://localhost:${port}`
-  if (await up(`${url}${name === "app" ? "" : "/health"}`)) return url
+  const hosted = await up(`http://127.0.0.1:${port}${name === "app" ? "" : "/health"}`)
+  if (hosted) return `http://${hosted}:${port}`
+  const url = `http://127.0.0.1:${port}`
   mkdirSync(logs, { recursive: true })
   const log = openSync(join(logs, `${name}.log`), "w")
   const child = spawn(command, args, {
@@ -416,7 +434,9 @@ async function serve(name, port, command, args, env = {}) {
 }
 const serveApp = () =>
   appUrl ??
-  serve("app", APP_PORT, "pnpm", ["exec", "vite", "--port", `${APP_PORT}`, "--strictPort"])
+  // Bound to 127.0.0.1 so the URL every probe and flow uses reaches it whatever `localhost` means
+  // here (the e2e-testing skill's gotcha).
+  serve("app", APP_PORT, "pnpm", ["exec", "vite", "--port", `${APP_PORT}`, "--strictPort", "--host", "127.0.0.1"])
 const serveMock = (name) =>
   serve(`mock-${name}`, MOCKS[name].port, "node", ["scripts/mock-hermes.mjs"], MOCKS[name].env)
 function stopStarted() {
@@ -430,7 +450,9 @@ function stopStarted() {
   }
 }
 function stopAll() {
-  const ports = [APP_PORT, ...Object.values(MOCKS).map((mock) => mock.port)]
+  // Every lane's mock ports too: `down` also stops a sweep this CLI ran in parallel (lane n takes
+  // MOCK_BASE + 4n, up to MAX_LANES lanes).
+  const ports = [APP_PORT, ...Array.from({ length: 4 * MAX_LANES }, (_, index) => MOCK_BASE + index)]
   spawnSync("fuser", ["-k", ...ports.map((port) => `${port}/tcp`)], { stdio: "ignore" })
 }
 
@@ -502,12 +524,61 @@ async function shot(path) {
   }
 }
 
+/**
+ * Runs one lane of a parallel sweep: this CLI again with its own lane number and mock ports, its
+ * output forwarded a line at a time behind `[lane/lanes]`. Lanes share the app and stop only the
+ * servers they started. Answers the lane's exit code and its captured output.
+ */
+function laneRun(lane, lanes, argv) {
+  return new Promise((done) => {
+    const forwards = [
+      ...argv,
+      "--shots",
+      shots,
+      ...(appUrl ? ["--app", appUrl] : []),
+      ...(polling ? ["--polling"] : []),
+      ...(keep ? ["--keep"] : []),
+      ...(headed ? ["--headed"] : []),
+    ]
+    const child = spawn(process.execPath, [join(here, "cli.mjs"), ...forwards], {
+      cwd: appDir,
+      env: {
+        ...process.env,
+        E2E_LANE: String(lane),
+        E2E_LANES: String(lanes),
+        E2E_MOCK_BASE: String(MOCK_BASE + lane * 4),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    let out = ""
+    const forward = (stream) => {
+      let pending = ""
+      stream.on("data", (chunk) => {
+        pending += chunk
+        const lines = pending.split("\n")
+        pending = lines.pop()
+        for (const line of lines) {
+          out += `${line}\n`
+          console.log(`[${lane + 1}/${lanes}] ${line}`)
+        }
+      })
+    }
+    forward(child.stdout)
+    forward(child.stderr)
+    child.on("exit", (code) => done({ lane: lane + 1, code: code ?? 1, out }))
+  })
+}
+
 process.on("SIGINT", () => {
   stopStarted()
   process.exit(130)
 })
 
 try {
+  if (!Number.isInteger(jobs) || jobs < 1 || jobs > MAX_LANES)
+    throw new Error(`--jobs is 1-${MAX_LANES}, not ${jobs}`)
+  if (jobs > 1 && command !== "all" && !FLOWS[command])
+    throw new Error("--jobs runs flows (one or more, or all), nothing else")
   if (!command || command === "help" || command === "--help") {
     console.log(HELP)
   } else if (command === "list") {
@@ -527,22 +598,51 @@ try {
     if (!rest[0]?.startsWith("/")) throw new Error("shot needs a path in the app, like /code")
     await shot(rest[0])
   } else {
-    const names = command === "all" ? Object.keys(FLOWS) : [command, ...rest]
-    const unknown = names.filter((name) => !FLOWS[name])
+    const swept = command === "all" ? Object.keys(FLOWS) : [command, ...rest]
+    const unknown = swept.filter((name) => !FLOWS[name])
     if (unknown.length) throw new Error(`No flow named ${unknown.join(", ")}; see pnpm e2e list`)
-    const failed = []
-    for (const name of names) {
-      const mock = polling && !FLOWS[name].mock ? "polling" : (FLOWS[name].mock ?? "live")
-      failed.push(await runFlow(name, mock))
-      if (command === "all" && FLOWS[name].alsoPolling && !polling)
-        failed.push(await runFlow(name, "polling"))
+    // A lane runs its own slice of the sweep (round-robin over registry order) and its own mocks;
+    // every lane drives the one shared app.
+    const names = laneOf(
+      swept,
+      Number(process.env.E2E_LANES ?? 1),
+      Number(process.env.E2E_LANE ?? 0),
+    )
+    if (jobs > 1) {
+      await serveApp()
+      const lanes = await Promise.all(
+        Array.from({ length: jobs }, (_, lane) => laneRun(lane, jobs, args)),
+      )
+      console.log(`\nScreenshots: ${shots}\nServer logs: ${logs}`)
+      const failures = lanes.flatMap((lane) =>
+        [...lane.out.matchAll(/^FAILED: (.+)$/gm)].flatMap((match) => match[1].split(", ")),
+      )
+      const crashed = lanes.filter((lane) => lane.code !== 0 && !/^FAILED: /m.test(lane.out))
+      const passed = lanes.reduce(
+        (count, lane) => count + Number(lane.out.match(/^All (\d+) passed$/m)?.[1] ?? 0),
+        0,
+      )
+      if (failures.length || crashed.length) {
+        if (failures.length) console.log(`FAILED: ${failures.join(", ")}`)
+        for (const lane of crashed)
+          console.log(`FAILED: lane ${lane.lane} of ${jobs} exited ${lane.code} with no summary`)
+        process.exitCode = 1
+      } else console.log(`All ${passed} passed across ${jobs} lanes`)
+    } else {
+      const failed = []
+      for (const name of names) {
+        const mock = polling && !FLOWS[name].mock ? "polling" : (FLOWS[name].mock ?? "live")
+        failed.push(await runFlow(name, mock))
+        if (command === "all" && FLOWS[name].alsoPolling && !polling)
+          failed.push(await runFlow(name, "polling"))
+      }
+      const failures = failed.filter(Boolean)
+      console.log(`\nScreenshots: ${shots}\nServer logs: ${logs}`)
+      if (failures.length) {
+        console.log(`FAILED: ${failures.join(", ")}`)
+        process.exitCode = 1
+      } else console.log(`All ${failed.length} passed`)
     }
-    const failures = failed.filter(Boolean)
-    console.log(`\nScreenshots: ${shots}\nServer logs: ${logs}`)
-    if (failures.length) {
-      console.log(`FAILED: ${failures.join(", ")}`)
-      process.exitCode = 1
-    } else console.log(`All ${failed.length} passed`)
   }
 } catch (error) {
   console.error(error.message)

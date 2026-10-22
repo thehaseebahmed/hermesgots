@@ -25,6 +25,7 @@ pnpm e2e list                     # every flow, one line each
 pnpm e2e chat-message             # one flow
 pnpm e2e approval reattach        # several
 pnpm e2e all                      # every flow, only when asked (nightly CI runs it on main)
+pnpm e2e all --jobs 4             # the same, in 4 lanes at once (each lane its own mocks)
 pnpm e2e approval --polling       # on the mock without its change stream, so the app polls
 pnpm e2e live-poll --app http://localhost:15174   # against an app already running (say main's)
 pnpm e2e shot /code --width 390 --dark            # a screenshot of any screen (below)
@@ -45,6 +46,9 @@ The CLI reuses any server that is already up, so after `pnpm e2e up` each run st
 | 18643 | Mock `polling`: `MOCK_NO_EVENTS=1`, polling like an older plugin |
 | 18644 | Mock `legacy`: `MOCK_BLOCK_RUN_EVENTS=1`, Hermes v2026.9.24's blocked run stream |
 | 18645 | Mock `no-dictation`: `MOCK_DICTATION=off` |
+
+A `--jobs N` sweep runs N lanes at once: lane n takes the mock ports 18642 + 4n (its own mock
+state) and every lane drives the one app on 15173. `pnpm e2e down` stops every lane's servers.
 
 The CLI looks for Playwright in `app/node_modules`, then globally (`npm root -g`). If it's
 elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` loads without
@@ -215,9 +219,23 @@ Projects, attach it to your reply, or describe what it shows. Never commit scree
 - A regression that seeds a fixed chat id — `regression-submission.mjs` uses `overlap-test` — reads
   that session's transcript off the mock, so it passes only against a mock that hasn't served it
   before. Restart the mock between runs of one.
-- A Vite started without `--host` binds `::1` alone, while the readiness probe in
-  `app/scripts/e2e/cli.mjs` polls `http://localhost:<port>` with Node's `fetch`, which reaches it
-  over IPv4 — so the probe loops for its full 60s and reports `app didn't start on <port>` against a
-  server that is up (`curl http://localhost:<port>` and `curl http://[::1]:<port>` both answer in
-  that same container). Start the app with `--host 127.0.0.1` and pass `--app
-  http://127.0.0.1:<port>`, or `--host 0.0.0.0` when the port is published out of a container.
+- Locate the composer by its label, not its role: the textarea is `role="combobox"` while the `/`
+  menu is open and `role="textbox"` when it isn't, so `getByRole("textbox")` hangs in one state
+  after a `fill("/")` opened the menu. `page.getByLabel("Message")` holds across both.
+- Never run `prettier --write` over `app/scripts/` — the format gate covers `src/` only, and the
+  mock, the flows and the node tests are deliberately unformatted (the mock's long single-line
+  object literals). One run turns a three-line edit into a diff of thousands of lines: revert with
+  `git checkout --` and re-apply by hand. Read a `prettier --check scripts/...` warning as
+  expected, not as a failing gate.
+- A Vite started without `--host` binds `::1` alone while a `localhost` that resolves to
+  127.0.0.1 never reaches it. The CLI starts its own app on `--host 127.0.0.1` and its readiness
+  probe tries `127.0.0.1`, `localhost` and `[::1]`, answering with the name that serves — so
+  `pnpm e2e up` works either way. An app started elsewhere still needs the match: `--host
+  127.0.0.1` and `--app http://127.0.0.1:<port>`, or `--host 0.0.0.0` when the port is published
+  out of a container.
+- A lane costs a browser — roughly 150 threads plus its mocks. On a box whose cgroup caps threads
+  (`pids.max`), too many lanes show up as browsers dying (`Target crashed`, `SIGTRAP`,
+  `pthread_create: Resource temporarily unavailable`) or pages failing every module load with
+  `net::ERR_INSUFFICIENT_RESOURCES`, which reads as flaky flows. That is the cap, not the flow:
+  size `--jobs` to the box (`.agents/skills/verify-gots/doctor.sh` reports the budget), and re-run
+  a flow that flaked under contention serially — report it, don't rerun until green.

@@ -66,10 +66,12 @@ jobs:
           npx -y playwright@1.63.0 install --with-deps chromium
 
       # Screenshots and server logs land under the runner's temp, where the upload finds them.
+      # Four lanes: each takes its own mocks and they share the app, so the sweep is the same work
+      # in about a quarter of the wall time the serial run took (about 40 minutes).
       - name: Run every flow
         if: steps.moved.outputs.run == 'true'
         working-directory: app
-        run: TMPDIR="$RUNNER_TEMP" pnpm e2e all
+        run: TMPDIR="$RUNNER_TEMP" pnpm e2e all --jobs 4
 
       - name: Upload screenshots and server logs
         if: failure() && steps.moved.outputs.run == 'true'
