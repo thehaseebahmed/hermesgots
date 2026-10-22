@@ -18,7 +18,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from . import (
     afk,
@@ -1683,6 +1683,15 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         follow_queue(request, session_id, path)
         return web.json_response({"object": "memento.queued", "item": item})
 
+    async def record_move(
+        path, key, session_id, text, thread, thread_session, item, body, files, new=False
+    ) -> None:
+        # Main shows a marker where the message went; it never entered Main's session.
+        await asyncio.to_thread(
+            moves.record, path, key, session_id, text, thread,
+            thread_session=thread_session, item=item, new=new, body=body.get("body"), files=files,
+        )
+
     async def triage_message(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -1730,18 +1739,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     )
                     follow_queue(request, started["session_id"], path)
                     # Main shows a marker where the message went; it never entered Main's session.
-                    await asyncio.to_thread(
-                        moves.record,
-                        path,
-                        key,
-                        session_id,
-                        text,
-                        started["thread"],
-                        thread_session=started["session_id"],
-                        item=started["item"]["id"],
-                        new=True,
-                        body=body.get("body"),
-                        files=files,
+                    await record_move(
+                        path, key, session_id, text, started["thread"], started["session_id"],
+                        started["item"]["id"], body, files, new=True,
                     )
                     events.note("session", session_id, path, True)
                     answer = {"object": "memento.triage", "decision": triage.NEW, **started}
@@ -1767,17 +1767,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                             outbox.add, path, thread, request_profile(), text, files, run
                         )
                         follow_queue(request, thread, path)
-                        await asyncio.to_thread(
-                            moves.record,
-                            path,
-                            key,
-                            session_id,
-                            text,
-                            found["thread"],
-                            thread_session=thread,
-                            item=item["id"],
-                            body=body.get("body"),
-                            files=files,
+                        await record_move(
+                            path, key, session_id, text, found["thread"], thread, item["id"], body, files
                         )
                         events.note("session", session_id, path, True)
                         answer = {
@@ -1792,26 +1783,34 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             triage.remember(memo, answer)
         return web.json_response(answer)
 
-    async def move_phase(path: Path, move: Dict[str, Any]) -> str:
-        """Where the thread is with a moved message, read from its queued item and the run it started."""
-        if not move.get("thread_session") or not move.get("item"):
-            return moves.REPLIED
-        found = await asyncio.to_thread(outbox.read, path, move["thread_session"])
-        item = next((i for i in found["items"] + found["sent"] if i["id"] == move["item"]), None)
-        statuses = getattr(adapter, "_run_statuses", None)
-        status = statuses.get(item["run_id"]) if item and item.get("run_id") and isinstance(statuses, dict) else None
-        return moves.phase(item, status if isinstance(status, dict) else None)
+    async def move_phases(path: Path, found: List[Dict[str, Any]]) -> Dict[str, Tuple[str, Any]]:
+        """Each open move's ``(phase, outbox item)``: one outbox read per thread, not per move."""
+        threads = {m["thread_session"] for m in found if m["thread_session"] and m["item"]}
+        reads = {t: await asyncio.to_thread(outbox.read, path, t) for t in threads}
+        statuses = getattr(adapter, "_run_statuses", None) or {}
+        phases = {}
+        for move in found:
+            read = reads.get(move["thread_session"])
+            item = read and next((i for i in read["items"] + read["sent"] if i["id"] == move["item"]), None)
+            phases[move["id"]] = (moves.phase(item, statuses.get(item and item.get("run_id"))), item)
+        return phases
 
     async def get_moves(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
             return denied
-        path, session_id = store_path(), request.match_info["session_id"]
-        found = await asyncio.to_thread(moves.read, path, session_id)
-        for move in found:
-            full = await asyncio.to_thread(moves.get, path, session_id, move["id"])
-            move["undoable"] = bool(full) and moves.undoable(full, await move_phase(path, full))
-        return web.json_response({"object": "memento.moves", "moves": found})
+        path = store_path()
+        found = await asyncio.to_thread(moves.read, path, request.match_info["session_id"])
+        phases = await move_phases(path, [m for m in found if not m["undone"]])
+        return web.json_response(
+            {
+                "object": "memento.moves",
+                "moves": [
+                    moves.public(m, m["id"] in phases and moves.undoable(m, phases[m["id"]][0]))
+                    for m in found
+                ],
+            }
+        )
 
     async def undo_move(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1823,15 +1822,18 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "No such move.", 404)
         if move["undone"]:
             return web.json_response({"object": "memento.move.undone", "undone": True})
-        where = await move_phase(path, move)
+        where, item = (await move_phases(path, [move]))[key]
         if not moves.undoable(move, where):
             return _error(web, "The thread has already replied to this message.", 409)
+        try:
+            # Built first, so a body the host refuses leaves the message where it is.
+            run = outbox.clean_body(session_id, move["body"])
+        except ValueError as error:
+            return _error(web, str(error), 400)
         thread_session = move["thread_session"]
         if where == moves.QUEUED:
             await asyncio.to_thread(outbox.remove, path, thread_session, move["item"])
         else:
-            found = await asyncio.to_thread(outbox.read, path, thread_session)
-            item = next(i for i in found["sent"] if i["id"] == move["item"])
             if where == moves.RUNNING:
                 try:
                     await outbox.post(
@@ -1848,13 +1850,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if move["new"]:
             # The thread existed only for this message.
             await asyncio.to_thread(triage.discard, path, move["thread"])
-        try:
-            run = outbox.clean_body(session_id, move["body"])
-            await asyncio.to_thread(
-                outbox.add, path, session_id, request_profile(), move["text"], move["files"], run
-            )
-        except ValueError as error:
-            return _error(web, str(error), 400)
+        await asyncio.to_thread(outbox.add, path, session_id, request_profile(), move["text"], move["files"], run)
         await asyncio.to_thread(moves.mark_undone, path, key)
         follow_queue(request, session_id, path)
         events.note("session", session_id, path, True)

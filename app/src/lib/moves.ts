@@ -1,7 +1,7 @@
 import { connectionKey, serverConfig } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { db, type Message } from "@/lib/db"
-import { getMoves, hasPluginFeature, undoMove as postUndo, type Move } from "@/lib/hermes"
+import { getMoves, hasPluginFeature, postMoveUndo, type Move } from "@/lib/hermes"
 import { tracked } from "@/lib/tracked"
 
 /** Bots whose plugin has no moves route (an older plugin). */
@@ -41,7 +41,7 @@ export async function undoMove(conversationId: string, moveId: string) {
   const found = await tracked(conversationId)
   if (!found?.conversation.main) return
   try {
-    await postUndo(serverConfig(found.profile), found.conversation.hermesSessionId, moveId)
+    await postMoveUndo(serverConfig(found.profile), found.conversation.hermesSessionId, moveId)
   } finally {
     await refreshMoves(conversationId)
   }

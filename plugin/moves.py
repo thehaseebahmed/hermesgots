@@ -67,50 +67,56 @@ def record(
         conn.close()
 
 
-def read(path: Path, session_id: str) -> List[Dict[str, Any]]:
+def _select(path: Path, session_id: str, key: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Moves oldest first, each with what Undo needs, or just the one ``key`` names."""
     if not path.exists():
         return []
     conn = connect(path)
     try:
         rows = conn.execute(
-            """SELECT id, text, thread, at, undone FROM main_moves
-               WHERE session_id = ? ORDER BY at DESC, rowid DESC LIMIT ?""",
-            (session_id, MAX_MOVES),
+            """SELECT id, text, thread, at, undone, thread_session, item, new, main_body, files
+               FROM main_moves WHERE session_id = ? AND (? IS NULL OR id = ?)
+               ORDER BY at DESC, rowid DESC LIMIT ?""",
+            (session_id, key, key, MAX_MOVES),
         ).fetchall()
     finally:
         conn.close()
     return [
-        {"id": id_, "text": text, "thread": thread, "at": at, "undone": bool(undone)}
-        for id_, text, thread, at, undone in reversed(rows)
+        {
+            "id": id_,
+            "text": text,
+            "thread": thread,
+            "at": at,
+            "undone": bool(undone),
+            "thread_session": thread_session,
+            "item": item,
+            "new": bool(new),
+            "body": json.loads(main_body) if main_body else None,
+            "files": json.loads(files) if files else [],
+        }
+        for id_, text, thread, at, undone, thread_session, item, new, main_body, files in reversed(rows)
     ]
+
+
+def read(path: Path, session_id: str) -> List[Dict[str, Any]]:
+    return _select(path, session_id)
 
 
 def get(path: Path, session_id: str, key: str) -> Optional[Dict[str, Any]]:
     """One move with what Undo needs, or None."""
-    if not path.exists():
-        return None
-    conn = connect(path)
-    try:
-        row = conn.execute(
-            """SELECT id, text, thread, thread_session, item, new, main_body, files, undone
-               FROM main_moves WHERE id = ? AND session_id = ?""",
-            (key, session_id),
-        ).fetchone()
-    finally:
-        conn.close()
-    if row is None:
-        return None
-    id_, text, thread, thread_session, item, new, main_body, files, undone = row
+    found = _select(path, session_id, key)
+    return found[0] if found else None
+
+
+def public(move: Dict[str, Any], undoable_now: bool) -> Dict[str, Any]:
+    """What the app is told of a move: no session, queue item or body, which are the host's."""
     return {
-        "id": id_,
-        "text": text,
-        "thread": thread,
-        "thread_session": thread_session,
-        "item": item,
-        "new": bool(new),
-        "body": json.loads(main_body) if main_body else None,
-        "files": json.loads(files) if files else [],
-        "undone": bool(undone),
+        "id": move["id"],
+        "text": move["text"],
+        "thread": move["thread"],
+        "at": move["at"],
+        "undone": move["undone"],
+        "undoable": undoable_now,
     }
 
 
@@ -153,16 +159,16 @@ def take_from_transcript(home: Path, session_id: str, text: str) -> int:
         return 0
     try:
         with closing(sqlite3.connect(state, timeout=2, isolation_level=None)) as conn:
-            rows = conn.execute(
-                """SELECT id, content FROM messages WHERE session_id = ? AND role = 'user'
-                   ORDER BY id DESC LIMIT 20""",
-                (session_id,),
-            ).fetchall()
-            first = next((id_ for id_, content in rows if isinstance(content, str) and text in content), None)
+            first = conn.execute(
+                """SELECT id FROM messages
+                   WHERE session_id = ? AND role = 'user' AND instr(content, ?) > 0
+                   ORDER BY id DESC LIMIT 1""",
+                (session_id, text),
+            ).fetchone()
             if first is None:
                 return 0
             return conn.execute(
-                "DELETE FROM messages WHERE session_id = ? AND id >= ?", (session_id, first)
+                "DELETE FROM messages WHERE session_id = ? AND id >= ?", (session_id, first[0])
             ).rowcount
     except sqlite3.Error:
         logger.debug("memento: couldn't take a moved message out of %s", session_id, exc_info=True)

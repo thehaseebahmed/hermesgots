@@ -2451,7 +2451,9 @@ function moveUndoable({ target, item, undone }) {
   if (queue?.items.some((i) => i.id === item)) return true
   const sent = queue?.sent.find((i) => i.id === item)
   const status = sent && runs.get(sent.run_id)?.status
-  return ["running", "waiting_for_approval", "cancelled", "failed", "interrupted"].includes(status)
+  return ["queued", "running", "waiting_for_approval", "stopping", "cancelled", "failed", "interrupted"].includes(
+    status,
+  )
 }
 
 function pumpQueue(sessionId) {
