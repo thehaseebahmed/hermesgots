@@ -86,6 +86,57 @@ class AgreeTest(unittest.TestCase):
         self.assertEqual(dictation_stream.agree(["a"], ["b"]), [])
         self.assertEqual(dictation_stream.agree(["a", "b"], ["a", "b"]), ["a", "b"])
 
+    def test_windows_that_share_nothing_agree_on_nothing(self) -> None:
+        self.assertEqual(dictation_stream.agree(["let", "us", "ship"], ["so", "then"]), [])
+
+    def test_a_repeated_phrase_is_agreed_word_for_word(self) -> None:
+        # A repeat is words, not a set: the rule must not fold "no no no" into one "no".
+        self.assertEqual(
+            dictation_stream.agree(["no", "no", "no", "more"], ["no", "no", "no", "more"]),
+            ["no", "no", "no", "more"],
+        )
+
+    def test_a_revision_of_only_the_last_word_agrees_short_of_it(self) -> None:
+        self.assertEqual(
+            dictation_stream.agree(
+                ["let", "us", "ship", "the", "boat"], ["let", "us", "ship", "the", "bait"]
+            ),
+            ["let", "us", "ship", "the"],
+        )
+
+
+class SettledTest(unittest.TestCase):
+    def test_the_newest_word_two_windows_agree_on_is_held_back(self) -> None:
+        self.assertEqual(dictation_stream.settled(["a", "b"], ["a", "b", "c"]), ["a"])
+        self.assertEqual(dictation_stream.settled(["a"], ["a", "b"]), [])
+        self.assertEqual(dictation_stream.settled([], ["a", "b"]), [])
+
+    def test_windows_that_share_nothing_settle_nothing(self) -> None:
+        self.assertEqual(dictation_stream.settled(["let", "us"], ["so", "then"]), [])
+
+    def test_a_repeated_phrase_settles_all_but_its_last_word(self) -> None:
+        self.assertEqual(
+            dictation_stream.settled(
+                ["go", "go", "go", "go", "and"], ["go", "go", "go", "go", "and"]
+            ),
+            ["go", "go", "go", "go"],
+        )
+
+    def test_a_revision_of_the_last_word_holds_the_agreement_before_it(self) -> None:
+        # The word the two guesses part on is held back, and so is the word before it, which is the
+        # one the newer window was still weighing: only what both had well behind the frontier
+        # settles, which is why "the" waits a window even though both guesses had it.
+        self.assertEqual(
+            dictation_stream.settled(
+                ["we", "ship", "the", "boat"], ["we", "ship", "the", "bait"]
+            ),
+            ["we", "ship"],
+        )
+        self.assertEqual(
+            dictation_stream.settled(["we", "ship", "the"], ["we", "ship", "it"]), ["we"]
+        )
+        self.assertEqual(dictation_stream.settled(["we", "ship"], ["we", "ship", "the"]), ["we"])
+
 
 class NewlyCommittedTest(unittest.TestCase):
     def test_a_stable_text_that_starts_at_the_committed_words_adds_what_follows(self) -> None:
@@ -104,16 +155,76 @@ class NewlyCommittedTest(unittest.TestCase):
         self.assertEqual(dictation_stream.newly_committed(["a", "b"], ["a", "b"]), [])
         self.assertEqual(dictation_stream.newly_committed([], ["a", "b"]), ["a", "b"])
 
+    def test_a_window_that_only_re_heard_committed_words_adds_nothing(self) -> None:
+        # The model revised the frontier word, so the run the window holds stops inside what the
+        # take already committed. Committing it again would show the words a second time.
+        self.assertEqual(dictation_stream.newly_committed(["a", "b", "c", "d"], ["a", "b"]), [])
+        self.assertEqual(
+            dictation_stream.newly_committed(
+                ["let", "us", "ship", "the"], ["let", "us", "ship", "the"]
+            ),
+            [],
+        )
+
+    def test_a_window_that_starts_inside_the_committed_words_adds_only_what_follows(self) -> None:
+        self.assertEqual(
+            dictation_stream.newly_committed(
+                ["one", "two", "three", "four"], ["three", "four", "five", "six"]
+            ),
+            ["five", "six"],
+        )
+
 
 class WindowTest(unittest.TestCase):
-    def test_the_words_two_windows_agree_on_are_the_words_committed(self) -> None:
+    def test_a_word_is_committed_once_windows_after_it_have_stopped_moving_it(self) -> None:
         scripted = Scripted(["hello there", "hello there my friend", "hello there my friend how"])
         heard, _, clock = take(scripted)
         answers = push(heard, clock, count=6)
-        # The first window has nothing to agree with, so it commits nothing; each later one commits
-        # only the words it shares with the one before it.
-        self.assertEqual([answer["words"] for answer in answers], ["", "", "", "hello there", "", "my friend"])
-        self.assertEqual(heard.committed, ["hello", "there", "my", "friend"])
+        # The first window has nothing to agree with. The newest word two windows agree on is held
+        # back, so "hello" arrives only once a third window still has it, and "there my" with the
+        # next: the frontier word never reaches the bar while it can still move.
+        self.assertEqual(
+            [answer["words"] for answer in answers], ["", "", "", "hello", "", "there my"]
+        )
+        self.assertEqual(heard.committed, ["hello", "there", "my"])
+
+    def test_a_word_the_take_has_committed_is_never_taken_back(self) -> None:
+        # The model revises "dictation" into "dictionary" once it has heard more of the sentence.
+        # What the take already committed does not move: it only ever adds words after it.
+        scripted = Scripted(
+            [
+                "let us ship the dictation",
+                "let us ship the dictation today",
+                "let us ship the dictionary today",
+                "let us ship the dictionary today",
+            ]
+        )
+        heard, _, clock = take(scripted)
+        seen = [heard.committed]
+        for _ in range(8):
+            clock.advance(SLICE_S)
+            heard.add(b"opus")
+            seen.append(heard.committed)
+        for before, after in zip(seen, seen[1:]):
+            self.assertEqual(after[: len(before)], before, after)
+        self.assertEqual(heard.committed[:4], ["let", "us", "ship", "the"])
+
+    def test_a_phrase_s_close_commits_the_words_the_windows_were_holding_back(self) -> None:
+        scripted = Scripted(
+            [
+                "let us ship the dictation",
+                "let us ship the dictation today",
+                "let us ship the dictation today",
+            ]
+        )
+        heard, _, clock = take(scripted)
+        push(heard, clock, count=4)
+        self.assertEqual(heard.committed, ["let", "us", "ship", "the"])
+        answer = heard.add(b"opus", pause=True)
+        self.assertEqual(
+            [phrase["text"] for phrase in answer["phrases"]], ["let us ship the dictation today"]
+        )
+        self.assertEqual(heard.committed, ["let", "us", "ship", "the", "dictation", "today"])
 
     def test_a_slice_with_no_new_window_answers_without_asking_the_model(self) -> None:
         scripted = Scripted(["hello there"] * 5)
@@ -125,12 +236,14 @@ class WindowTest(unittest.TestCase):
         self.assertEqual(answer, {"words": "", "phrases": [], "behind": False})
 
     def test_the_window_is_the_last_few_seconds_and_carries_what_was_heard_before_it(self) -> None:
-        scripted = Scripted(["hello there", "hello there friend"])
+        scripted = Scripted(["hello there", "hello there friend", "hello there friend of mine"])
         heard, _, clock = take(scripted, hint="Gots", window_s=1.0)
         push(heard, clock, count=8)
         # A one-second window is 16000 samples of the take's 8 slices, never the whole take.
         self.assertLessEqual(len(scripted.calls[-1]["samples"]), RATE + 1)
         self.assertTrue(scripted.calls[-1]["prompt"].startswith("Gots"))
+        # The prompt carries the words already committed, so names and casing follow them.
+        self.assertEqual(heard.committed, ["hello", "there"])
         self.assertTrue(scripted.calls[-1]["prompt"].endswith("hello there"))
 
 
@@ -165,6 +278,33 @@ class PhraseTest(unittest.TestCase):
         answer = heard.add(b"opus", pause=True)
         self.assertEqual([phrase["text"] for phrase in answer["phrases"]], ["how are you today"])
         self.assertEqual(heard.phrases[0], last)
+
+    def test_two_phrases_meet_without_losing_or_doubling_the_words_between_them(self) -> None:
+        # The second phrase's audio starts a fraction of a second before the pause, so its decode
+        # hears a word of the first one again. The take's text is the sentence once: nothing lost
+        # at the boundary and nothing said twice.
+        scripted = Scripted(
+            [
+                "let us ship the dictation",
+                "let us ship the dictation",
+                "let us ship the dictation",
+                "dictation today",
+                "dictation today and then some",
+            ]
+        )
+        heard, _, clock = take(scripted)
+        push(heard, clock, count=4)
+        heard.add(b"opus", pause=True)
+        push(heard, clock, count=3)
+        heard.add(b"opus", pause=True)
+        self.assertEqual(
+            [phrase["text"] for phrase in heard.phrases],
+            ["let us ship the dictation", "today and then some"],
+        )
+        self.assertEqual(
+            " ".join(phrase["text"] for phrase in heard.phrases),
+            "let us ship the dictation today and then some",
+        )
 
     def test_a_pause_with_nothing_new_closes_no_phrase(self) -> None:
         heard, _, clock = take(Scripted([]))

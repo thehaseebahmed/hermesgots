@@ -9,9 +9,10 @@ Faster-whisper still does the hearing, through Hermes's own local path, so the h
 prompt and its anti-hallucination rules all still apply. Every Hermes internal is read with
 ``getattr``: one that moves only means dictation is off.
 
-The rule that decides what is committed is ``newly_committed`` over ``agree``: the words the two
-most recent windows agree on, past what is already committed. Both are plain functions over lists
-of words, which is what lets the promise be tested without a model or a microphone.
+The rule that decides what is committed is ``newly_committed`` over ``settled``: the words the two
+most recent windows agree on, short of the newest — the frontier word is held back until a later
+window still has it — and past what is already committed. All plain functions over lists of words,
+which is what lets the promise be tested without a model or a microphone.
 """
 
 from __future__ import annotations
@@ -35,6 +36,10 @@ HOP_S = 0.5
 MIN_WINDOW_S = 0.4
 # Kept from the phrase just closed, so the next one doesn't begin mid-word.
 OVERLAP_S = 0.3
+# The most words a window's audio can hold: eight a second over the window's few seconds. Words
+# older than this cannot be in the window, so a commit never looks further back than they are.
+_HEARD_WORDS = 32
+
 # A take that hears no audio for this long is dropped and its buffer let go.
 QUIET_S = 15.0
 SAMPLE_RATE = 16000
@@ -61,18 +66,43 @@ def agree(first: Sequence[str], second: Sequence[str]) -> List[str]:
     return out
 
 
+def settled(first: Sequence[str], second: Sequence[str]) -> List[str]:
+    """The words two windows agree on, short of the newest: a frontier word can still be revised.
+
+    The last word the windows agree on is the one the newer window was still weighing — the word
+    after it is where the two guesses part — so it is held back until a later window still has it
+    too. That is what makes a word the user has read a word that will not move (ADR 0016). Nothing
+    is stranded by the wait: a phrase's close hears that phrase's audio whole and commits its tail.
+    """
+    return agree(first, second)[:-1]
+
+
 def newly_committed(committed: Sequence[str], stable: Sequence[str]) -> List[str]:
     """The words of ``stable`` past what the take already committed.
 
-    ``stable`` is a window's stable text. While the window still covers words already committed it
-    starts with their tail, so the overlap is dropped; once the window has rolled past them it
-    starts after them, and everything in it is new. Either way a word is committed once.
+    ``stable`` is a window's settled text, a run of the take's words ending at its end. Where that
+    run begins is found by matching its first words against the committed words wherever they sit —
+    a window rolls forward as the take goes, so it may start before them, inside them or past them —
+    and only what comes after the last committed word is new. A window that only re-heard words the
+    take already committed, with its frontier revised so the run stops short of their end, adds
+    nothing: a word is committed once, so it is shown once and never taken away again.
     """
-    overlap = min(len(committed), len(stable))
-    for size in range(overlap, 0, -1):
-        if list(committed[-size:]) == list(stable[:size]):
-            return list(stable[size:])
-    return list(stable)
+    known = list(committed)
+    fresh = list(stable)
+    if not fresh:
+        return []
+    began, matched = len(known), 0
+    # The window cannot be covering words older than the most its audio could hold, so the search
+    # starts there; of two equally long runs, the later one is where the window is.
+    for at in range(max(0, len(known) - _HEARD_WORDS), len(known)):
+        size = 0
+        while size < len(fresh) and at + size < len(known) and known[at + size] == fresh[size]:
+            size += 1
+        if size > matched or (size and size == matched and at > began):
+            began, matched = at, size
+            if size == len(fresh):
+                break
+    return fresh[max(0, len(known) - began) :]
 
 
 class Decoder:
@@ -289,7 +319,9 @@ class Take:
         text = self._transcribe(window, self._prompt())
         took = self._clock() - started
         words = str(text or "").split()
-        stable = agree(self._previous, words)
+        # Only what this window and the one before it both still hold, and not the word at their
+        # frontier: that one can still be revised, so it waits for the next window (ADR 0016).
+        stable = settled(self._previous, words)
         self._previous = words
         fresh = newly_committed(self._committed, stable)
         self._committed.extend(fresh)
@@ -302,7 +334,11 @@ class Take:
         return {"words": " ".join(fresh), "phrases": [], "behind": self._behind}
 
     def _close_phrase(self) -> Dict[str, Any]:
-        """Hears the phrase's remaining audio whole, and closes it with the words it holds."""
+        """Hears the phrase's remaining audio whole, and closes it with the words it holds.
+
+        This decode is the phrase's own audio rather than a window over it, so it is final: all of
+        it is committed, including the frontier word the windows were still holding back.
+        """
         tail = self._samples[self._phrase_from :]
         if tail:
             text = self._transcribe(tail, self._prompt())
