@@ -86,6 +86,22 @@ def clean_delegation(body: Any) -> Optional[Dict[str, str]]:
     return {"provider": provider, "model": model}
 
 
+def clean_triage_model(body: Any) -> Optional[Dict[str, str]]:
+    """``{"provider", "model"}`` from a ``{"triage_model": {...}}`` body, or None for a body that
+    clears it so the bot's own model decides. A body with no such key is a client bug, not a clear."""
+    if not isinstance(body, dict):
+        raise ValueError("Body must be a JSON object")
+    if "triage_model" not in body:
+        raise ValueError("Body needs a triage_model key: an object, or null to clear it")
+    value = body["triage_model"]
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("triage_model must be an object")
+    provider, model = _pair(value, "Triage model needs a provider", "Triage model needs a model")
+    return {"provider": provider, "model": model}
+
+
 def _entry(value: Any, number: int) -> Dict[str, str]:
     """One fallback off the wire, named by its place in the list so a refusal says which."""
     if not isinstance(value, dict):

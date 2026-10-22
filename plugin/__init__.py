@@ -605,23 +605,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         denied = unauthorized(request)
         if denied is not None:
             return denied
-        body = await json_body(request)
-        if not isinstance(body, dict) or "triage_model" not in body:
-            return _error(
-                web, "Body needs a triage_model key: an object, or null to clear it", 400
-            )
-        value = body["triage_model"]
-        pick = None
-        if value is not None:
-            if not isinstance(value, dict):
-                return _error(web, "triage_model must be an object", 400)
-            try:
-                provider, model = host_model._pair(
-                    value, "Triage model needs a provider", "Triage model needs a model"
-                )
-            except ValueError as error:
-                return _error(web, str(error), 400)
-            pick = {"provider": provider, "model": model}
+        try:
+            pick = host_model.clean_triage_model(await json_body(request))
+        except ValueError as error:
+            return _error(web, str(error), 400)
         config_path = host_config_path()
         scope = profile_scope()
         path = store_path()
