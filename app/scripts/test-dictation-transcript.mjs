@@ -76,3 +76,80 @@ test("an answer of an unknown shape changes nothing", () => {
   const odd = hear(settled(openingTranscript()), { phrases: [{ id: "nope", text: 3 }] })
   assert.deepEqual(odd.phrases, [])
 })
+
+const words = (text) => text.split(/\s+/).filter(Boolean)
+
+/** What the bar showed after each of the take's answers, the first moment before any of them. */
+function moments(answers) {
+  let take = settled(openingTranscript())
+  const seen = [transcriptText(take)]
+  for (const answer of answers) {
+    take = hear(take, answer)
+    seen.push(transcriptText(take))
+  }
+  return seen
+}
+
+/** The bar's promise: what it showed earlier is the start of what it shows later, word for word. */
+function assertOnlyAdds(seen) {
+  for (const [at, earlier] of seen.slice(0, -1).entries()) {
+    const later = seen[at + 1]
+    assert.ok(later.startsWith(earlier), `"${later}" starts with "${earlier}"`)
+    assert.deepEqual(
+      words(later).slice(0, words(earlier).length),
+      words(earlier),
+      `"${later}" keeps every word of "${earlier}" in place`,
+    )
+  }
+}
+
+test("the bar shows a word once and never takes it back", () => {
+  // Answers a host holding the commit rule sends: it holds the newest word until a later window
+  // still has it, an empty answer is a window whose frontier was revised (nothing to add), and a
+  // phrase's close commits the tail whole. Nothing the bar showed before is replaced or removed.
+  const seen = moments([
+    { words: "let us" },
+    { words: " ship" },
+    { words: "" },
+    { words: "", phrases: [phrase(1, "let us ship the dictation")] },
+    { words: " today" },
+    { words: "", phrases: [phrase(2, "today and then some")] },
+  ])
+  assertOnlyAdds(seen)
+  assert.equal(
+    seen.at(-1),
+    "let us ship the dictation today and then some",
+    "the take is what was said, either side of both pauses",
+  )
+})
+
+test("a word the windows are still arguing about is never shown and then corrected", () => {
+  // The host sends nothing while its two windows disagree, so the bar goes quiet rather than
+  // showing a guess it would have to take back — and it picks up again when they agree.
+  const seen = moments([
+    { words: "we ship" },
+    { words: "" },
+    { words: " the boat" },
+    { words: "" },
+    { words: " today" },
+  ])
+  assert.deepEqual(seen, [
+    "",
+    "we ship",
+    "we ship",
+    "we ship the boat",
+    "we ship the boat",
+    "we ship the boat today",
+  ])
+  assertOnlyAdds(seen)
+})
+
+test("a phrase said twice is shown twice", () => {
+  const seen = moments([
+    { words: "no no" },
+    { words: "", phrases: [phrase(1, "no no")] },
+    { words: "", phrases: [phrase(2, "no no")] },
+  ])
+  assert.equal(seen.at(-1), "no no no no")
+  assertOnlyAdds(seen)
+})
