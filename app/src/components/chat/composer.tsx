@@ -55,6 +55,7 @@ import {
   type LocalCommand,
   type SlashItem,
 } from "@/lib/slash"
+import { isDoubleEscape, isInterrupt } from "@/lib/keys"
 import { useSkills } from "@/lib/skills"
 import { randomId } from "@/lib/utils"
 
@@ -164,6 +165,8 @@ export function Composer({
   // Where a pick wants the caret, placed once the new text is in the field.
   const caretWanted = useRef<number | null>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
+  // When the last Escape that had nothing else to close was pressed, for the double that clears.
+  const lastEscape = useRef<number | null>(null)
   const listId = useId()
   const dictationInfo = useDictationInfo(connection)
   const dictation = useDictation(connection, joinText(botName, dictationHint ?? ""), draftKey)
@@ -404,7 +407,28 @@ export function Composer({
     if (menuOpen && event.key === "Escape") {
       event.preventDefault()
       setDismissed(true)
+      lastEscape.current = null
       return
+    }
+    const field = event.currentTarget
+    if (isInterrupt(event.nativeEvent, busy, field.selectionStart !== field.selectionEnd)) {
+      event.preventDefault()
+      onStop()
+      return
+    }
+    if (event.key === "Escape") {
+      const now = Date.now()
+      if (isDoubleEscape(lastEscape.current, now) && value) {
+        event.preventDefault()
+        lastEscape.current = null
+        // Deleting through the field keeps its own undo, which setting the value would drop.
+        field.select()
+        if (!document.execCommand("delete")) setValue("")
+        return
+      }
+      lastEscape.current = now
+    } else if (event.key !== "Shift" && event.key !== "Control" && event.key !== "Alt") {
+      lastEscape.current = null
     }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault()

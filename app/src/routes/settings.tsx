@@ -34,6 +34,7 @@ import {
   SunIcon,
   TrophyIcon,
   TelescopeIcon,
+  KeyboardIcon,
   TimerIcon,
   UserIcon,
   WorkflowIcon,
@@ -810,6 +811,14 @@ function AppearanceSettings() {
           subtitle="Remind me to put the phone away while a task runs"
           checked={chatSettings?.breakReminders ?? DEFAULT_SETTINGS.breakReminders}
           onCheckedChange={(checked) => saveAppearance({ breakReminders: checked })}
+        />
+        <SwitchRow
+          id="nav-shortcuts"
+          icon={KeyboardIcon}
+          title="Navigation shortcuts"
+          subtitle="Alt+1 to Alt+9 start a new chat with that bot"
+          checked={chatSettings?.navShortcuts ?? DEFAULT_SETTINGS.navShortcuts}
+          onCheckedChange={(checked) => saveAppearance({ navShortcuts: checked })}
         />
       </Group>
     </>

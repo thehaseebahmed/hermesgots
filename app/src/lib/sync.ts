@@ -456,13 +456,14 @@ async function syncBots(key: CryptoKey) {
  * defaults `DEFAULT_SETTINGS` holds are what a device that never touched them pushes.
  */
 async function localAppearance(): Promise<Doc<Appearance>> {
-  const { appearanceAt, steerByDefault, breakReminders } = await getSettings()
+  const { appearanceAt, steerByDefault, breakReminders, navShortcuts } = await getSettings()
   return {
     appearance: {
       at: appearanceAt ?? 0,
       value: {
         steerByDefault: steerByDefault ?? DEFAULT_SETTINGS.steerByDefault,
         breakReminders: breakReminders ?? DEFAULT_SETTINGS.breakReminders,
+        navShortcuts: navShortcuts ?? DEFAULT_SETTINGS.navShortcuts,
       },
     },
   }
