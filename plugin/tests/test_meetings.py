@@ -1,4 +1,5 @@
-"""Tests for meetings (``plugin/meetings.py``): uploads in parts and their transcription on the host.
+"""Tests for meetings (``plugin/meetings.py``): uploads in parts, their transcription on the host and
+the notes written from the transcript.
 
 Hermes's transcription module isn't on a test run's path, so each test stands in for it (as
 ``test_dictation`` does) and asserts this module's own rules: part limits, meeting-level timestamps,
@@ -36,8 +37,34 @@ def with_model(tt, per_part):
     tt.calls = calls
 
 
+class FakeLlm:
+    """A host model whose ``complete_structured`` answers the next entry of ``answers``."""
+
+    def __init__(self, *answers):
+        self.answers = list(answers)
+        self.calls = []
+
+    def complete_structured(self, **kwargs):
+        self.calls.append(kwargs)
+        answer = self.answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return types.SimpleNamespace(parsed=answer)
+
+
+def notes(summary="Short.", **sections):
+    return {"summary": summary, "key_points": [], "decisions": [], "action_items": [], "open_questions": [], **sections}
+
+
 class MeetingsTest(unittest.TestCase):
     def setUp(self):
+        self.llm = FakeLlm()
+        patcher = mock.patch.object(meetings, "ctx", types.SimpleNamespace(llm=self.llm))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        pusher = mock.patch.object(meetings.push, "notify")
+        self.notify = pusher.start()
+        self.addCleanup(pusher.stop)
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
         self.path = Path(self.dir.name) / "memento" / "memento.db"
@@ -51,11 +78,11 @@ class MeetingsTest(unittest.TestCase):
     def upload(self, meeting_id, n, start, data=b"audio"):
         return meetings.add_part(self.path, meeting_id, n, start, data, "audio/webm")
 
-    def test_a_transcript_is_ready_for_notes_at_once(self):
+    def test_a_transcript_goes_straight_to_the_notes(self):
         found = meetings.create(
             self.path, None, " Weekly  sync ", "p1", None, [{"at": 5, "text": "Second"}, {"at": 0, "text": "First"}]
         )
-        self.assertEqual(found["stage"], "transcribed")
+        self.assertEqual(found["stage"], "writing")
         self.assertEqual(found["title"], "Weekly sync")
         self.assertEqual([line["text"] for line in found["transcript"]], ["First", "Second"])
         self.assertEqual(found["duration"], 5)
@@ -108,9 +135,9 @@ class MeetingsTest(unittest.TestCase):
         self.upload(found["id"], 0, 0)
         self.upload(found["id"], 1, 300)
         meetings.finish(self.path, found["id"])
-        meetings._job(self.path, found["id"])
+        meetings._transcribe(self.path, found["id"])
         done = meetings.meeting(self.path, found["id"])
-        self.assertEqual(done["stage"], "transcribed")
+        self.assertEqual(done["stage"], "writing")
         self.assertEqual(
             done["transcript"],
             [{"at": 1, "text": "Hello"}, {"at": 8, "text": "there"}, {"at": 303, "text": "Back"}],
@@ -124,7 +151,7 @@ class MeetingsTest(unittest.TestCase):
         self.upload(found["id"], 0, 0)
         self.upload(found["id"], 1, 300)
         meetings.finish(self.path, found["id"])
-        meetings._job(self.path, found["id"])
+        meetings._transcribe(self.path, found["id"])
         self.assertIsNone(tt.calls[0]["initial_prompt"])
         self.assertEqual(tt.calls[1]["initial_prompt"], "We ship Friday")
 
@@ -133,7 +160,7 @@ class MeetingsTest(unittest.TestCase):
         tt._get_or_load_local_model = mock.Mock(side_effect=RuntimeError("no model"))
         self.upload(found["id"], 0, 600)
         meetings.finish(self.path, found["id"])
-        meetings._job(self.path, found["id"])
+        meetings._transcribe(self.path, found["id"])
         self.assertEqual(meetings.meeting(self.path, found["id"])["transcript"], [{"at": 600, "text": "Hello there."}])
 
     def test_a_failed_part_keeps_the_ones_done_and_retry_resumes(self):
@@ -156,12 +183,12 @@ class MeetingsTest(unittest.TestCase):
         self.upload(found["id"], 1, 300)
         meetings.finish(self.path, found["id"])
         with self.assertRaisesRegex(Exception, "boom"):
-            meetings._job(self.path, found["id"])
+            meetings._transcribe(self.path, found["id"])
         meetings._fail(self.path, found["id"], "boom")
         failed = meetings.meeting(self.path, found["id"])
         self.assertEqual((failed["error"], failed["parts_done"], failed["stage"]), ("boom", 1, "transcribing"))
         meetings.retry(self.path, found["id"])
-        meetings._job(self.path, found["id"])
+        meetings._transcribe(self.path, found["id"])
         done = meetings.meeting(self.path, found["id"])
         self.assertEqual([line["text"] for line in done["transcript"]], ["One", "Two"])
 
@@ -171,7 +198,7 @@ class MeetingsTest(unittest.TestCase):
         self.upload(found["id"], 0, 0)
         meetings.finish(self.path, found["id"])
         with self.assertRaisesRegex(meetings.MeetingError, "Nobody could be heard"):
-            meetings._job(self.path, found["id"])
+            meetings._transcribe(self.path, found["id"])
 
     def test_retry_needs_a_failure(self):
         _, found = self.audio(1)
@@ -200,6 +227,82 @@ class MeetingsTest(unittest.TestCase):
         meetings.create(self.path, "b", "B", None, None, [{"at": 0, "text": "x"}])
         self.assertEqual([m["title"] for m in meetings.meetings(self.path, "a")], ["A"])
         self.assertEqual(len(meetings.meetings(self.path)), 2)
+
+    def test_a_host_without_model_calls_refuses_a_meeting(self):
+        with mock.patch.object(meetings, "ctx", types.SimpleNamespace(llm=None)):
+            with self.assertRaises(meetings.MeetingError) as raised:
+                meetings.create(self.path, None, "T", None, None, [{"at": 0, "text": "x"}])
+        self.assertEqual(raised.exception.status, 501)
+
+    def written(self, lines, *answers):
+        found = meetings.create(self.path, None, "Sync", None, None, lines)
+        self.llm.answers.extend(answers)
+        meetings._job(self.path, found["id"])
+        return meetings.meeting(self.path, found["id"])
+
+    def test_notes_keep_the_stamps_the_transcript_has_and_mark_the_rest(self):
+        lines = [{"at": 0, "text": "Ana: ship Friday"}, {"at": 724, "text": "Budget is fixed"}]
+        done = self.written(
+            lines,
+            notes(
+                key_points=[
+                    {"text": "Ship Friday", "cites": ["[0:00]", "99:99"]},
+                    {"text": "Budget is fixed", "cites": ["12:04"]},
+                    {"text": "Invented", "cites": ["50:00"]},
+                    {"text": "", "cites": ["0:00"]},
+                ],
+                action_items=[
+                    {"text": "Send the plan", "owner": "Ana", "cites": ["0:00"]},
+                    {"text": "Book a room", "owner": "Zed", "cites": ["0:00"]},
+                ],
+            ),
+        )
+        self.assertEqual(done["stage"], "ready")
+        points = done["notes"]["key_points"]
+        self.assertEqual([(p["text"], p["cites"], p["unsourced"]) for p in points], [
+            ("Ship Friday", ["0:00"], False),
+            ("Budget is fixed", ["12:04"], False),
+            ("Invented", [], True),
+        ])
+        self.assertEqual([a["owner"] for a in done["notes"]["action_items"]], ["Ana", meetings.NO_OWNER])
+        self.notify.assert_called_once()
+        self.assertEqual(self.notify.call_args.args[0], "meeting_done")
+
+    def test_stamps_run_to_hours_after_the_first(self):
+        self.assertEqual([meetings.stamp(s) for s in (0, 724, 3724)], ["0:00", "12:04", "1:02:04"])
+
+    def test_a_long_transcript_is_written_in_sections_and_merged(self):
+        text = "word " * 780
+        lines = [{"at": i * 60, "text": text} for i in range(8)]
+        self.assertGreater(len(meetings.sections(lines)), 1)
+        piece = notes("Part.", decisions=[{"text": "Go", "cites": ["0:00"]}])
+        parts = len(meetings.sections(lines))
+        done = self.written(
+            lines, *([piece] * parts), notes("Whole.", decisions=[{"text": "Go", "cites": ["0:00", "1:00"]}])
+        )
+        self.assertEqual(len(self.llm.calls), parts + 1)
+        self.assertEqual(done["notes"]["summary"], "Whole.")
+        self.assertEqual(done["notes"]["decisions"][0]["cites"], ["0:00", "1:00"])
+
+    def test_a_model_that_never_answers_in_shape_fails_the_meeting(self):
+        found = meetings.create(self.path, None, "Sync", None, None, [{"at": 0, "text": "x"}])
+        self.llm.answers.extend([ValueError("bad"), ValueError("bad")])
+        with self.assertRaises(meetings.MeetingError):
+            meetings._job(self.path, found["id"])
+        meetings._fail(self.path, found["id"], "bad")
+        failed = meetings.meeting(self.path, found["id"])
+        self.assertEqual((failed["stage"], failed["error"]), ("writing", "bad"))
+        self.assertEqual(self.notify.call_args.args[0], "meeting_failed")
+        meetings.retry(self.path, found["id"])
+        self.llm.answers.append(notes("Fine."))
+        meetings._job(self.path, found["id"])
+        self.assertEqual(meetings.meeting(self.path, found["id"])["stage"], "ready")
+
+    def test_resume_continues_a_meeting_that_was_writing(self):
+        found = meetings.create(self.path, None, "Sync", None, None, [{"at": 0, "text": "x"}])
+        with mock.patch.object(meetings, "spawn") as spawn:
+            meetings.resume(self.path)
+        spawn.assert_called_once_with(self.path, found["id"])
 
 
 if __name__ == "__main__":

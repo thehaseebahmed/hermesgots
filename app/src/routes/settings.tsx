@@ -407,6 +407,8 @@ const CATEGORY_ICONS: Record<PushCategory, LucideIcon> = {
   research_input: ClipboardCheckIcon,
   research_done: BookOpenCheckIcon,
   research_failed: CircleAlertIcon,
+  meeting_done: CircleCheckIcon,
+  meeting_failed: CircleAlertIcon,
 }
 
 const FEATURE_ICONS: Record<PushFeature, LucideIcon> = {
@@ -414,6 +416,7 @@ const FEATURE_ICONS: Record<PushFeature, LucideIcon> = {
   code: CodeXmlIcon,
   routines: TimerIcon,
   research: TelescopeIcon,
+  meetings: AudioLinesIcon,
 }
 
 /**

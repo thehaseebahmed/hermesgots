@@ -1,7 +1,7 @@
-"""Meetings (``meetings/...``): a recording turned into a transcript on the host.
+"""Meetings (``meetings/...``): a recording turned into a transcript and notes on the host.
 
-A meeting goes uploading → transcribing → transcribed (the notes come in a later step), and runs on
-the host so it carries on with the app closed:
+A meeting goes uploading → transcribing → writing → ready, and runs on the host so it carries on
+with the app closed:
 
 - **Upload.** Audio comes in parts of at most 5 minutes, each its own request, since the API server
   refuses bodies over 10 MB. A part is kept on disk under ``$HERMES_HOME/memento/meetings/<id>/``
@@ -12,7 +12,16 @@ the host so it carries on with the app closed:
   meeting-level second they start at, the part's start plus the segment's own. When the loaded model
   can't be reached for segments, a part is one segment at its start. A part's audio is deleted once its
   text is saved, so the recording leaves the host as the transcript lands.
-- **Resume.** A restart continues a meeting in ``transcribing`` from its first part not yet done.
+- **Write.** One fixed template (summary, key points, decisions, action items, open questions),
+  written by the profile's own model (``ctx.llm``, no override) from the transcript alone, in
+  sections merged by a second call when the transcript is long. Every bullet cites the transcript
+  lines it rests on as ``[12:04]`` stamps; the check is code, not trust: a stamp the transcript
+  doesn't have is dropped, and a bullet left with none is kept but marked ``unsourced``. An action
+  item's owner is kept only if the transcript says that name, else it reads "Owner not stated".
+- **Tell.** A push when the notes are ready (``meeting_done``) and when a step fails
+  (``meeting_failed``).
+- **Resume.** A restart continues a meeting in ``transcribing`` from its first part not yet done, and
+  one in ``writing`` from the transcript it saved.
 
 Every Hermes internal here is read with ``getattr``: one that moves only means transcription fails
 with a reason.
@@ -23,6 +32,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import re
 import shutil
 import sqlite3
 import threading
@@ -31,7 +41,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import dictation, events
+from . import dictation, events, push
 from .store import connect
 
 logger = logging.getLogger(__name__)
@@ -46,14 +56,27 @@ MAX_LINE = 4000
 
 # The API server adapter, kept by wire() so a job can enter the profile that owns the meeting.
 adapter: Any = None
+# The plugin context, kept by register() for ctx.llm.
+ctx: Any = None
 
-STAGES = ("uploading", "transcribing", "transcribed")
+STAGES = ("uploading", "transcribing", "writing", "ready")
+# How much transcript one notes call reads; a longer one is written in sections and merged.
+NOTES_CHARS = 24000
+MAX_ITEMS = 25
+MAX_ITEM = 500
+NO_OWNER = "Owner not stated"
+SECTIONS = ("key_points", "decisions", "action_items", "open_questions")
 
 
 class MeetingError(Exception):
     def __init__(self, message: str, status: int = 400) -> None:
         super().__init__(message)
         self.status = status
+
+
+def register(plugin_ctx: Any) -> None:
+    global ctx
+    ctx = plugin_ctx
 
 
 def wire(api_adapter: Any) -> None:
@@ -86,8 +109,15 @@ def folder(path: Path, meeting_id: str) -> Path:
     return path.parent / "meetings" / meeting_id
 
 
+def no_notes() -> Optional[str]:
+    """Why this host can't write notes, else None."""
+    if getattr(ctx, "llm", None) is None:
+        return "This Hermes can't make the model calls the notes need. Update Hermes."
+    return None
+
+
 def available() -> Optional[str]:
-    """Why this host can't transcribe a recording, else None. A transcript needs nothing."""
+    """Why this host can't transcribe a recording, else None."""
     state = dictation.info()
     return None if state.get("ready") else str(state.get("reason") or "Transcription is off on the host.")
 
@@ -129,14 +159,17 @@ def create(
     parts: Any = None,
     transcript: Any = None,
 ) -> Dict[str, Any]:
-    """A new meeting: waiting for ``parts`` of audio, or ready for notes when given a transcript."""
+    """A new meeting: waiting for ``parts`` of audio, or going straight to notes when given a transcript."""
     title = _clean_title(title)
     project = str(project_id)[:200] if project_id else None
     now = _now()
     meeting_id = f"m_{uuid.uuid4().hex[:16]}"
+    reason = no_notes()
+    if reason:
+        raise MeetingError(reason, 501)
     if transcript is not None:
         lines = _lines(transcript)
-        row = ("transcript", "transcribed", 0, json.dumps(lines), lines[-1]["at"])
+        row = ("transcript", "writing", 0, json.dumps(lines), lines[-1]["at"])
     else:
         if isinstance(parts, bool) or not isinstance(parts, int) or parts < 1:
             raise MeetingError("Say how many parts the recording has.")
@@ -180,6 +213,7 @@ def _view(conn: sqlite3.Connection, row: sqlite3.Row, full: bool) -> Dict[str, A
     }
     if full:
         found["transcript"] = json.loads(row["transcript"] or "[]")
+        found["notes"] = json.loads(row["notes"]) if row["notes"] else None
     return found
 
 
@@ -339,7 +373,7 @@ def _segments(file: Path, offset: int, context: str) -> List[Dict[str, Any]]:
     return [] if not text or dictation._hallucination(text) else [{"at": offset, "text": text}]
 
 
-def _job(path: Path, meeting_id: str) -> None:
+def _transcribe(path: Path, meeting_id: str) -> None:
     conn = _open(path)
     try:
         parts = conn.execute(
@@ -382,10 +416,206 @@ def _job(path: Path, meeting_id: str) -> None:
     if not lines:
         raise MeetingError("Nobody could be heard in the recording.")
     lines.sort(key=lambda line: line["at"])
-    _update(
-        path, meeting_id, stage="transcribed", transcript=json.dumps(lines), duration=lines[-1]["at"], error=None
-    )
+    _update(path, meeting_id, stage="writing", transcript=json.dumps(lines), duration=lines[-1]["at"], error=None)
     shutil.rmtree(folder(path, meeting_id), ignore_errors=True)
+
+
+# --- notes --------------------------------------------------------------------------------------
+
+
+def stamp(seconds: int) -> str:
+    """A meeting-level second as the transcript shows it: 12:04, or 1:02:04 from the first hour."""
+    minutes, secs = divmod(max(0, int(seconds)), 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
+
+def _cite(value: Any) -> Optional[str]:
+    match = re.fullmatch(r"\[?\s*(\d+:\d{2}(?::\d{2})?)\s*\]?", str(value).strip())
+    return match.group(1) if match else None
+
+
+def sections(lines: List[Dict[str, Any]]) -> List[str]:
+    """The transcript as ``[12:04] text`` lines, cut into pieces one call can read."""
+    out: List[str] = []
+    current: List[str] = []
+    size = 0
+    for line in lines:
+        text = f"[{stamp(line['at'])}] {line['text']}"
+        if current and size + len(text) > NOTES_CHARS:
+            out.append("\n".join(current))
+            current, size = [], 0
+        current.append(text)
+        size += len(text) + 1
+    if current:
+        out.append("\n".join(current))
+    return out
+
+
+_ITEM = {
+    "type": "object",
+    "properties": {
+        "text": {"type": "string"},
+        "cites": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["text", "cites"],
+    "additionalProperties": False,
+}
+NOTES_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string"},
+        "key_points": {"type": "array", "items": _ITEM},
+        "decisions": {"type": "array", "items": _ITEM},
+        "action_items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "owner": {"type": "string"},
+                    "cites": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["text", "owner", "cites"],
+                "additionalProperties": False,
+            },
+        },
+        "open_questions": {"type": "array", "items": _ITEM},
+    },
+    "required": ["summary", "key_points", "decisions", "action_items", "open_questions"],
+    "additionalProperties": False,
+}
+
+NOTES_SYSTEM = (
+    "You write meeting notes from a transcript whose lines start with a [mm:ss] stamp. Use only what "
+    "the transcript says. The speakers are not labelled: never guess who said something, and never "
+    "invent a name; name a person only when the transcript does. Return summary (three to five "
+    "sentences), key_points, decisions, action_items (owner is the person the transcript says will "
+    "do it, or an empty string) and open_questions. Use an empty list for a section with nothing in "
+    "it. Every item's cites lists the stamps of the transcript lines it rests on, copied exactly "
+    "without brackets, e.g. 12:04. An item needs at least one. Keep each item to one sentence."
+)
+MERGE_SYSTEM = (
+    "You merge meeting notes written from consecutive parts of one transcript into one set. Remove "
+    "repeats, keep every distinct decision and action item, rewrite the summary as three to five "
+    "sentences about the whole meeting, and keep each item's cites exactly as given. Never add "
+    "anything that is not in the parts, and never invent a name."
+)
+
+
+def _structured(system: str, text: str, purpose: str) -> Dict[str, Any]:
+    llm = getattr(ctx, "llm", None)
+    if llm is None:
+        raise MeetingError(no_notes() or "No model.", 501)
+    problem = ""
+    for _attempt in range(2):
+        try:
+            result = llm.complete_structured(
+                instructions=system,
+                input=[{"type": "text", "text": text}],
+                json_schema=NOTES_SCHEMA,
+                system_prompt=system,
+                max_tokens=4000,
+                temperature=0.2,
+                purpose=f"memento.meetings.{purpose}",
+            )
+        except ValueError as error:
+            problem = str(error)
+            continue
+        except Exception as error:
+            raise MeetingError(f"The model call failed: {error}", 502) from None
+        parsed = getattr(result, "parsed", None)
+        if isinstance(parsed, dict):
+            return parsed
+        problem = "The model didn't answer in the shape asked for."
+    raise MeetingError(problem, 502)
+
+
+def check(raw: Dict[str, Any], lines: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The model's notes held to the transcript: a stamp the transcript doesn't have is dropped, an
+    item left with none is kept and marked unsourced, and an owner the transcript never says is
+    replaced. The summary is the model's words."""
+    valid = {stamp(line["at"]) for line in lines}
+    spoken = " ".join(line["text"] for line in lines).lower()
+    notes: Dict[str, Any] = {"summary": " ".join(str(raw.get("summary") or "").split())}
+    for section in SECTIONS:
+        items = []
+        for entry in (raw.get(section) or [])[:MAX_ITEMS]:
+            if not isinstance(entry, dict):
+                continue
+            text = " ".join(str(entry.get("text") or "").split())[:MAX_ITEM]
+            if not text:
+                continue
+            seen: List[str] = []
+            for cite in entry.get("cites") or []:
+                found = _cite(cite)
+                if found in valid and found not in seen:
+                    seen.append(found)
+            item: Dict[str, Any] = {"text": text, "cites": seen, "unsourced": not seen}
+            if section == "action_items":
+                owner = " ".join(str(entry.get("owner") or "").split())
+                item["owner"] = owner if owner and owner.lower() in spoken else NO_OWNER
+            items.append(item)
+        notes[section] = items
+    return notes
+
+
+def _written(raw: Dict[str, Any]) -> str:
+    """Notes as text, for the merge call to read."""
+    out = [f"Summary: {raw.get('summary', '')}"]
+    for section in SECTIONS:
+        out.append(section.replace("_", " ").title() + ":")
+        for item in raw.get(section) or []:
+            owner = f" (owner: {item['owner']})" if item.get("owner") and item["owner"] != NO_OWNER else ""
+            cites = ", ".join(item.get("cites") or [])
+            out.append(f"- {item['text']}{owner} [cites: {cites}]")
+    return "\n".join(out)
+
+
+def write_notes(lines: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The meeting's notes from its transcript: one call, or one per section and a merge."""
+    pieces = sections(lines)
+    parts = []
+    for index, piece in enumerate(pieces):
+        where = f"Part {index + 1} of {len(pieces)} of the transcript.\n\n" if len(pieces) > 1 else ""
+        raw = _structured(NOTES_SYSTEM, where + piece, "notes")
+        # Each part is held to its own stamps first so the merge only sees ones that exist.
+        parts.append(check(raw, lines))
+    if len(parts) == 1:
+        return parts[0]
+    merged = _structured(
+        MERGE_SYSTEM, "\n\n".join(f"Part {i + 1}\n{_written(part)}" for i, part in enumerate(parts)), "merge"
+    )
+    return check(merged, lines)
+
+
+def _write(path: Path, meeting_id: str) -> None:
+    found = _need(path, meeting_id)
+    if not found["transcript"]:
+        raise MeetingError("There is no transcript to write notes from.")
+    notes = write_notes(found["transcript"])
+    _update(path, meeting_id, stage="ready", notes=json.dumps(notes), error=None)
+    _tell(path, "meeting_done", meeting_id, found["title"])
+
+
+def _tell(path: Path, kind: str, meeting_id: str, title: Optional[str]) -> None:
+    """A push when the notes are ready or a step failed, so it doesn't wait unseen until the app is
+    opened. Best effort, like every push."""
+    push.notify(kind, meeting_id, path, title=title)
+
+
+def _job(path: Path, meeting_id: str) -> None:
+    """The step the meeting is at, and the one after it, until it is ready."""
+    while True:
+        found = _need(path, meeting_id)
+        if found["error"]:
+            return
+        if found["stage"] == "transcribing":
+            _transcribe(path, meeting_id)
+        elif found["stage"] == "writing":
+            _write(path, meeting_id)
+        else:
+            return
 
 
 _lock = threading.Lock()
@@ -422,8 +652,10 @@ def spawn(path: Path, meeting_id: str) -> None:
 
 def _fail(path: Path, meeting_id: str, message: str) -> None:
     try:
-        if meeting(path, meeting_id) is not None:
+        found = meeting(path, meeting_id)
+        if found is not None:
             _update(path, meeting_id, error=message)
+            _tell(path, "meeting_failed", meeting_id, found["title"])
     except Exception:
         logger.debug("memento: couldn't record the failure of %s", meeting_id, exc_info=True)
 
@@ -436,7 +668,7 @@ def resume(path: Path) -> None:
             return
         _resumed.add(str(path))
     for found in meetings(path):
-        if found["stage"] == "transcribing" and not found["error"]:
+        if found["stage"] in ("transcribing", "writing") and not found["error"]:
             spawn(path, found["id"])
 
 

@@ -60,6 +60,8 @@ class Categories(unittest.TestCase):
         self.assertEqual(push.category_of("research_scope"), "research_input")
         self.assertEqual(push.category_of("research_done", project=True), "research_done")
         self.assertEqual(push.category_of("research_failed"), "research_failed")
+        self.assertEqual(push.category_of("meeting_done"), "meeting_done")
+        self.assertEqual(push.category_of("meeting_failed", project=True), "meeting_failed")
 
     def test_every_kind_lands_in_a_category_that_exists(self):
         for kind in push.KINDS:

@@ -472,14 +472,22 @@ export function setPushFeature(feature: PushFeature, on: boolean) {
 
 /** Each feature's categories with their switch state on this device. */
 export function usePushFeatures() {
-  const prefs = useLiveQuery(async () => (await getSettings()).pushCategories, [])
-  return PUSH_FEATURES.map((feature) => {
-    const categories = PUSH_CATEGORIES.filter((c) => c.feature === feature.id).map((category) => ({
-      ...category,
-      checked: categoryOn(category, prefs),
-    }))
-    return { ...feature, categories, on: categories.filter((c) => c.checked).length }
-  })
+  const settings = useLiveQuery(async () => {
+    const { pushCategories, meetings } = await getSettings()
+    return { pushCategories, meetings }
+  }, [])
+  const prefs = settings?.pushCategories
+  return PUSH_FEATURES.filter((feature) => feature.id !== "meetings" || settings?.meetings).map(
+    (feature) => {
+      const categories = PUSH_CATEGORIES.filter((c) => c.feature === feature.id).map(
+        (category) => ({
+          ...category,
+          checked: categoryOn(category, prefs),
+        }),
+      )
+      return { ...feature, categories, on: categories.filter((c) => c.checked).length }
+    },
+  )
 }
 
 function useNativePermission(): PushPermission {

@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 36
+SCHEMA_VERSION = 37
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -478,4 +478,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    PRIMARY KEY (meeting_id, n)
                )"""
         )
+        # v37: the notes written from a meeting's transcript, as JSON (meetings.py).
+        meeting_columns = {row[1] for row in conn.execute("PRAGMA table_info(meetings)")}
+        if "notes" not in meeting_columns:
+            conn.execute("ALTER TABLE meetings ADD COLUMN notes TEXT")
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
