@@ -1394,6 +1394,8 @@ export interface Move {
   threadId: string
   at: number
   undone: boolean
+  /** Whether Undo is still offered: the thread's reply to this message hasn't finished. */
+  undoable: boolean
 }
 
 /** The messages triage moved out of a Main thread, oldest first. */
@@ -1403,6 +1405,19 @@ export async function getMoves(config: HermesConfig, sessionId: string): Promise
     { headers: headers(config), signal: AbortSignal.timeout(READ_TIMEOUT_MS) },
   )
   return readMoves((await response.json())?.moves)
+}
+
+/** Takes a moved message back: the host stops the thread's reply, and sends it to Main untriaged. */
+export async function undoMove(config: HermesConfig, sessionId: string, moveId: string) {
+  await request(
+    `${pluginRoot(config.baseUrl)}/sessions/${encodeURIComponent(sessionId)}/moves/${encodeURIComponent(moveId)}/undo`,
+    {
+      method: "POST",
+      headers: headers(config),
+      body: "{}",
+      signal: AbortSignal.timeout(READ_TIMEOUT_MS),
+    },
+  )
 }
 
 function readMoves(value: unknown): Move[] {
@@ -1418,6 +1433,7 @@ function readMoves(value: unknown): Move[] {
       threadId: row.thread,
       at: row.at,
       undone: Boolean(row.undone),
+      undoable: Boolean(row.undoable),
     })
   }
   return found

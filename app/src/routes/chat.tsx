@@ -109,7 +109,7 @@ import {
   updateConversation,
 } from "@/lib/db"
 import { compactionMarks } from "@/lib/compactions"
-import { moveMarks } from "@/lib/moves"
+import { moveMarks, undoMove } from "@/lib/moves"
 import { serverConfig } from "@/lib/connection"
 import { describeActivity } from "@/lib/format"
 import { supportsSteer, type HermesProject, type Move } from "@/lib/hermes"
@@ -313,6 +313,12 @@ export function ChatPage() {
       move={move}
       title={movedTitles?.get(move.threadId)}
       profileId={conversation?.profileId ?? ""}
+      onUndo={(m) =>
+        id &&
+        void undoMove(id, m.id).catch((error) =>
+          toast.error(error instanceof Error ? error.message : "Couldn't undo the move"),
+        )
+      }
     />
   )
   // Only a run can be steered, and only on a Hermes that has the route.

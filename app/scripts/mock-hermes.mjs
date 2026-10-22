@@ -2444,6 +2444,16 @@ function queueOf(sessionId) {
   return queues.get(sessionId)
 }
 const sessionRuns = (sessionId) => [...runs.values()].filter((run) => run.sessionId === sessionId)
+/** plugin/moves.py `phase` and `undoable`: open until the thread's reply to the message finishes. */
+function moveUndoable({ target, item, undone }) {
+  if (undone) return false
+  const queue = queues.get(target)
+  if (queue?.items.some((i) => i.id === item)) return true
+  const sent = queue?.sent.find((i) => i.id === item)
+  const status = sent && runs.get(sent.run_id)?.status
+  return ["running", "waiting_for_approval", "cancelled", "failed", "interrupted"].includes(status)
+}
+
 function pumpQueue(sessionId) {
   const queue = queues.get(sessionId)
   if (!queue) return
@@ -3930,8 +3940,47 @@ http
     if (PLUGIN && !profile && TRIAGE !== "off" && req.method === "GET" && movesRoute)
       return json(res, 200, {
         object: "memento.moves",
-        moves: moves.get(decodeURIComponent(movesRoute[1])) ?? [],
+        moves: (moves.get(decodeURIComponent(movesRoute[1])) ?? []).map(
+          ({ target, item, body: _body, attachments: _attachments, ...move }) => ({
+            ...move,
+            undoable: moveUndoable({ target, item, undone: move.undone }),
+          }),
+        ),
       })
+    const undoRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/moves\/([^/]+)\/undo$/.exec(
+      url.pathname,
+    )
+    if (PLUGIN && !profile && TRIAGE !== "off" && req.method === "POST" && undoRoute) {
+      const id = decodeURIComponent(undoRoute[1])
+      const move = (moves.get(id) ?? []).find((m) => m.id === decodeURIComponent(undoRoute[2]))
+      if (!move) return json(res, 404, { error: { message: "No such move." } })
+      if (move.undone) return json(res, 200, { object: "memento.move.undone", undone: true })
+      if (!moveUndoable(move))
+        return json(res, 409, { error: { message: "The thread has already replied to this message." } })
+      const queue = queueOf(move.target)
+      const waiting = queue.items.findIndex((item) => item.id === move.item)
+      if (waiting >= 0) queue.items.splice(waiting, 1)
+      else {
+        const sent = queue.sent.findIndex((item) => item.id === move.item)
+        const [gone] = sent >= 0 ? queue.sent.splice(sent, 1) : []
+        const run = gone && runs.get(gone.run_id)
+        if (run && ["running", "waiting_for_approval"].includes(run.status)) run.status = "cancelled"
+      }
+      move.undone = true
+      // Back in Main without a second triage, as the plugin queues it.
+      const main = queueOf(id)
+      main.items.push({
+        id: `q_${randomUUID().replace(/-/g, "").slice(0, 20)}`,
+        text: move.text,
+        attachments: move.attachments,
+        created_at: Date.now(),
+        body: move.body,
+      })
+      noteEvent("session", id)
+      noteEvent("session", move.target)
+      setTimeout(() => pumpQueue(id), 50)
+      return json(res, 200, { object: "memento.move.undone", undone: true })
+    }
     const triageRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/triage$/.exec(url.pathname)
     if (PLUGIN && !profile && TRIAGE !== "off" && req.method === "POST" && triageRoute) {
       const id = decodeURIComponent(triageRoute[1])
@@ -3994,6 +4043,10 @@ http
           thread: made ? made.id : thread[0],
           at: Date.now(),
           undone: false,
+          target,
+          item: item.id,
+          body: { ...(body ?? {}), session_id: id },
+          attachments: attachments ?? [],
         })
       moves.set(id, moved)
       noteEvent("session", id)

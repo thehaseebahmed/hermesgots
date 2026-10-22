@@ -206,6 +206,19 @@ def remove(path: Path, session_id: str, item_id: str) -> bool:
         conn.close()
 
 
+def remove_sent(path: Path, session_id: str, item_id: str) -> bool:
+    """Forgets a sent item, so the thread no longer lists the message as one it sent."""
+    conn = _open(path)
+    try:
+        cursor = conn.execute(
+            "DELETE FROM outbox WHERE id = ? AND session_id = ? AND run_id IS NOT NULL",
+            (item_id, session_id),
+        )
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
 def promote(path: Path, session_id: str, item_id: str) -> bool:
     """Puts an item first and lets a paused queue go again."""
     conn = _open(path)
