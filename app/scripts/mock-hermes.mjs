@@ -2836,7 +2836,7 @@ http
           "afk_pipeline",
           ...(TRIAGE !== "off" ? ["triage", "moves"] : []),
           ...(RESEARCH ? ["research", "research_followup", "research_rewrite", "research_compare"] : []),
-          ...(MEETINGS ? ["meetings"] : []),
+          ...(MEETINGS ? ["meetings", "meetings_ask"] : []),
           ...(MCPS
             ? [
                 "mcps",

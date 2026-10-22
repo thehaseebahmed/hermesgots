@@ -362,6 +362,68 @@ class MeetingsTest(unittest.TestCase):
         self.assertEqual(again["stage"], "ready")
         self.assertEqual(again["notes"]["topics"], [])
 
+    def ready(self):
+        lines = [
+            {"at": 0, "text": "Let's start with the beta date."},
+            {"at": 60, "text": "Thursday works if we freeze Tuesday."},
+        ]
+        found = self.written(lines, notes("S.", decisions=[{"text": "Beta Thursday", "cites": ["1:00"]}]), {"topics": []})
+        return found["id"]
+
+    def answered(self, meeting_id, question, *answers):
+        self.llm.answers.extend(answers)
+        meetings.ask(self.path, meeting_id, question)
+        meetings.spawn_answer(self.path, meeting_id)
+        for thread in __import__("threading").enumerate():
+            if thread.name.startswith("memento-meeting-ask"):
+                thread.join(5)
+        return meetings.meeting(self.path, meeting_id)["chat"]
+
+    def test_a_question_is_answered_with_the_stamps_the_transcript_has(self):
+        meeting_id = self.ready()
+        chat = self.answered(meeting_id, " What did we decide? ", {"answer": "Thursday.", "cites": ["[1:00]", "9:99"]})
+        self.assertEqual([(c["from"], c["text"], c["cites"]) for c in chat], [
+            ("user", "What did we decide?", []),
+            ("bot", "Thursday.", ["1:00"]),
+        ])
+        asked = [c for c in self.llm.calls if c["purpose"] == "memento.meetings.ask"][0]
+        self.assertIn("[1:00] Thursday works", asked["input"][0]["text"])
+
+    def test_a_question_that_cannot_be_answered_says_why(self):
+        meeting_id = self.ready()
+        chat = self.answered(meeting_id, "Anything?", ValueError("bad"), ValueError("bad"))
+        self.assertTrue(chat[-1]["text"].startswith("I couldn't answer that:"))
+
+    def test_a_question_needs_a_ready_meeting_and_waits_for_its_answer(self):
+        found = meetings.create(self.path, None, "Sync", None, None, [{"at": 0, "text": "x"}])
+        with self.assertRaises(meetings.MeetingError) as early:
+            meetings.ask(self.path, found["id"], "Why?")
+        self.assertEqual(early.exception.status, 409)
+        meeting_id = self.ready()
+        meetings.ask(self.path, meeting_id, "One?")
+        with self.assertRaises(meetings.MeetingError) as busy:
+            meetings.ask(self.path, meeting_id, "Two?")
+        self.assertEqual(busy.exception.status, 409)
+        with self.assertRaises(meetings.MeetingError):
+            meetings.ask(self.path, meeting_id, "  ")
+
+    def test_a_long_transcript_is_read_for_the_lines_a_question_names(self):
+        filler = "word " * 400
+        lines = [{"at": i * 10, "text": filler} for i in range(200)]
+        lines[120]["text"] = "The registry needs a status page soon."
+        picked = meetings.pick_lines(lines, "Does the registry need a status page?")
+        self.assertLess(len(picked), len(lines))
+        self.assertIn(lines[120], picked)
+        self.assertEqual(picked, sorted(picked, key=lambda line: line["at"]))
+        self.assertEqual(meetings.pick_lines(lines[:5], "anything"), lines[:5])
+
+    def test_resume_answers_a_question_a_restart_left_open(self):
+        meeting_id = self.ready()
+        meetings.ask(self.path, meeting_id, "Open?")
+        with mock.patch.object(meetings, "spawn_answer") as answer:
+            meetings.resume(self.path)
+        answer.assert_called_once_with(self.path, meeting_id)
+
     def test_a_model_that_never_answers_in_shape_fails_the_meeting(self):
         found = meetings.create(self.path, None, "Sync", None, None, [{"at": 0, "text": "x"}])
         self.llm.answers.extend([ValueError("bad"), ValueError("bad")])

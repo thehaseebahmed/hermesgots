@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 37
+SCHEMA_VERSION = 38
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -482,4 +482,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
         meeting_columns = {row[1] for row in conn.execute("PRAGMA table_info(meetings)")}
         if "notes" not in meeting_columns:
             conn.execute("ALTER TABLE meetings ADD COLUMN notes TEXT")
+        # v38: the questions asked about a meeting and the answers, in order (meetings.py).
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS meeting_chat (
+                   meeting_id TEXT NOT NULL,
+                   n INTEGER NOT NULL,
+                   role TEXT NOT NULL,
+                   text TEXT NOT NULL,
+                   cites TEXT NOT NULL DEFAULT '[]',
+                   at INTEGER NOT NULL,
+                   PRIMARY KEY (meeting_id, n)
+               )"""
+        )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

@@ -3,6 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router"
 import {
   ArrowLeftIcon,
+  ArrowUpIcon,
   AudioLinesIcon,
   CheckIcon,
   ChevronRightIcon,
@@ -15,11 +16,13 @@ import {
   FolderIcon,
   GitBranchIcon,
   ListIcon,
+  MailIcon,
   MenuIcon,
   MicIcon,
   PauseIcon,
   PlusIcon,
   RotateCcwIcon,
+  SparklesIcon,
   SquareIcon,
   Trash2Icon,
   type LucideIcon,
@@ -62,6 +65,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { createConversation, db } from "@/lib/db"
 import { startBlocked } from "@/lib/code"
+import { usePluginFeatureOn } from "@/lib/features"
 import { canRecord } from "@/lib/dictation"
 import { draftKey, flushDrafts, saveDraft } from "@/lib/drafts"
 import { formatRelative } from "@/lib/format"
@@ -75,7 +79,9 @@ import {
 import {
   addRecording,
   addTranscript,
+  askMeeting,
   clock,
+  isAsking,
   isFailed,
   isWorking,
   length,
@@ -95,6 +101,7 @@ import {
   useMeetings,
   useMeetingsEnabled,
   useNoAudio,
+  type Exchange,
   type Listed,
   type Meeting,
   type MeetingProject,
@@ -1035,6 +1042,22 @@ function MeetingView() {
   const beside = Boolean(useMeetingsPane())
   const now = useNow()
   const back = useCallback(() => up("/meetings"), [up])
+  const bots = useMeetingBots()
+  const asks = usePluginFeatureOn(
+    bots.find((b) => b.id === meeting?.profileId) ?? { baseUrl: "", apiKey: "" },
+    "meetings_ask",
+  )
+  const scroller = useRef<HTMLDivElement>(null)
+  const said = meeting?.chat?.length ?? 0
+  // A new line of the conversation scrolls into view.
+  useEffect(() => {
+    const node = scroller.current
+    if (!said || !node) return
+    node.scrollTo({
+      top: node.scrollHeight,
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+    })
+  }, [said])
   const [tab, setTab] = useState("notes")
   // The time a note cited, which the transcript tab opens at.
   const [focus, setFocus] = useState<number>()
@@ -1048,10 +1071,16 @@ function MeetingView() {
     setFocus(at)
     setTab("transcript")
   }
+  // A time an answer cites opens its topic there, or the transcript where there are no topics.
+  const topics = meeting.notes?.topics ?? []
+  const cite = (at: number) =>
+    topics.length
+      ? navigate(`/meetings/${meeting.id}/topics/${topicAt(topics, at).id}?at=${at}`)
+      : seek(at)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div ref={scroller} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <Header
           leading={beside ? null : <BackButton onClick={back} label="Back to Meetings" />}
           title={
@@ -1101,8 +1130,10 @@ function MeetingView() {
           ) : (
             <Working meeting={meeting} />
           )}
+          {asks && meeting.chat?.length ? <Conversation meeting={meeting} onSeek={cite} /> : null}
         </div>
       </div>
+      {asks && meeting.stage === "ready" && meeting.notes && <AskBar meeting={meeting} />}
     </div>
   )
 }
@@ -1781,6 +1812,114 @@ function TopicView({ meeting, notes, topic }: { meeting: Meeting; notes: Notes; 
             </Button>
           )}
         </div>
+      </div>
+    </div>
+  )
+}
+
+/** Questions asked about the meeting and the bot's answers. */
+function Conversation({ meeting, onSeek }: { meeting: Meeting; onSeek: (at: number) => void }) {
+  const chat: Exchange[] = meeting.chat ?? []
+  return (
+    <section className="flex flex-col gap-4 pt-2" aria-label="Questions">
+      {chat.map((line) =>
+        line.from === "user" ? (
+          <p
+            key={line.id}
+            className="max-w-[85%] self-end rounded-3xl rounded-br-lg bg-primary px-4 py-2.5 text-primary-foreground"
+          >
+            {line.text}
+          </p>
+        ) : (
+          <div key={line.id} className="flex gap-3">
+            <BotAvatar botId={meeting.bot.botId} />
+            <div className="min-w-0 flex-1 pt-0.5">
+              <p className="text-sm font-semibold">{meeting.bot.name}</p>
+              <p className="leading-relaxed whitespace-pre-wrap">
+                {line.text}
+                {line.cites.map((at) => (
+                  <Stamp key={at} at={at} onSeek={onSeek} />
+                ))}
+              </p>
+            </div>
+          </div>
+        ),
+      )}
+      {isAsking(meeting) && (
+        <div className="flex gap-3">
+          <BotAvatar botId={meeting.bot.botId} />
+          <p className="pt-2 text-muted-foreground">Thinking…</p>
+        </div>
+      )}
+    </section>
+  )
+}
+
+const PROMPTS = [
+  { icon: MailIcon, text: "Write the follow-up" },
+  { icon: DiamondIcon, text: "What did we decide?" },
+  { icon: FlagIcon, text: "What's still open?" },
+]
+
+/** Asks the bot about the meeting, from a suggestion or in your own words. */
+function AskBar({ meeting }: { meeting: Meeting }) {
+  const [text, setText] = useState("")
+  const busy = isAsking(meeting)
+  const ask = (question: string) => {
+    if (!question.trim() || busy) return
+    setText("")
+    askMeeting(meeting, question.trim()).catch((error) => {
+      setText(question)
+      toast.error(message(error, "Couldn't ask."))
+    })
+  }
+  return (
+    <div
+      data-toast-above
+      className="border-t bg-background/90 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur"
+    >
+      <div className="mx-auto flex max-w-2xl flex-col gap-2.5 px-4">
+        {!meeting.chat?.length && (
+          <div className="-mx-4 flex [scrollbar-width:none] gap-2 overflow-x-auto px-4">
+            {PROMPTS.map(({ icon: Icon, text: prompt }) => (
+              <Button
+                key={prompt}
+                variant="outline"
+                className="h-9 shrink-0 rounded-full"
+                onClick={() => ask(prompt)}
+              >
+                <Icon data-icon="inline-start" className="text-primary" />
+                {prompt}
+              </Button>
+            ))}
+          </div>
+        )}
+        <form
+          className="flex items-center gap-2 rounded-full border bg-card py-1.5 pr-1.5 pl-1.5 shadow-sm"
+          onSubmit={(event) => {
+            event.preventDefault()
+            ask(text)
+          }}
+        >
+          <BotAvatar botId={meeting.bot.botId} />
+          <input
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            placeholder={`Ask ${meeting.bot.name} about this meeting`}
+            aria-label="Ask about this meeting"
+            maxLength={2000}
+            className="h-10 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground md:text-[15px]"
+          />
+          <Button
+            type="submit"
+            size="icon-lg"
+            className="size-10 shrink-0 rounded-full"
+            disabled={!text.trim() || busy}
+            aria-label="Ask"
+          >
+            {busy ? <SparklesIcon className="motion-safe:animate-pulse" /> : <ArrowUpIcon />}
+          </Button>
+        </form>
       </div>
     </div>
   )

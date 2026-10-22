@@ -329,6 +329,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "research_rewrite",
                     "research_compare",
                     "meetings",
+                    "meetings_ask",
                     "community",
                     # A message sent from Main is sorted into a thread by the host; see triage.py.
                     *(["triage", "moves", "triage_model"] if triage.available() is None else []),
@@ -2194,6 +2195,21 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             meetings.spawn(path, meeting_id)
         return web.json_response({"object": "memento.meeting", "meeting": found})
 
+    async def ask_meeting(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        path, meeting_id = store_path(), request.match_info["meeting_id"]
+        try:
+            found = await asyncio.to_thread(meetings.ask, path, meeting_id, body.get("question"))
+        except meetings.MeetingError as error:
+            return _error(web, str(error), error.status)
+        meetings.spawn_answer(path, meeting_id)
+        return web.json_response({"object": "memento.meeting", "meeting": found}, status=202)
+
     async def finish_meeting(request: "web.Request") -> "web.Response":
         return await meeting_step(request, meetings.finish)
 
@@ -2213,6 +2229,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/meetings", create_meeting)
     app.router.add_get(f"{PREFIX}/meetings/{{meeting_id}}", get_meeting)
     app.router.add_post(f"{PREFIX}/meetings/{{meeting_id}}/parts", meeting_part)
+    app.router.add_post(f"{PREFIX}/meetings/{{meeting_id}}/ask", ask_meeting)
     app.router.add_post(f"{PREFIX}/meetings/{{meeting_id}}/finish", finish_meeting)
     app.router.add_post(f"{PREFIX}/meetings/{{meeting_id}}/retry", retry_meeting)
     app.router.add_post(f"{PREFIX}/meetings/{{meeting_id}}/remove", remove_meeting)

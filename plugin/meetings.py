@@ -44,7 +44,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from . import dictation, events, push
 from .store import connect
@@ -223,6 +223,12 @@ def _view(conn: sqlite3.Connection, row: sqlite3.Row, full: bool) -> Dict[str, A
     if full:
         found["transcript"] = json.loads(row["transcript"] or "[]")
         found["notes"] = json.loads(row["notes"]) if row["notes"] else None
+        found["chat"] = [
+            {"id": f"{row['id']}:{line['n']}", "from": line["role"], "text": line["text"], "cites": json.loads(line["cites"] or "[]")}
+            for line in conn.execute(
+                "SELECT n, role, text, cites FROM meeting_chat WHERE meeting_id = ? ORDER BY n", (row["id"],)
+            )
+        ]
     return found
 
 
@@ -333,6 +339,7 @@ def remove(path: Path, meeting_id: str) -> Optional[Dict[str, Any]]:
     conn = _open(path)
     try:
         conn.execute("DELETE FROM meeting_parts WHERE meeting_id = ?", (meeting_id,))
+        conn.execute("DELETE FROM meeting_chat WHERE meeting_id = ?", (meeting_id,))
         conn.execute("DELETE FROM meetings WHERE id = ?", (meeting_id,))
     finally:
         conn.close()
@@ -596,7 +603,9 @@ MERGE_SYSTEM = (
 )
 
 
-def _structured(system: str, text: str, purpose: str) -> Dict[str, Any]:
+def _structured(
+    system: str, text: str, purpose: str, schema: Dict[str, Any] = NOTES_SCHEMA
+) -> Dict[str, Any]:
     llm = getattr(ctx, "llm", None)
     if llm is None:
         raise MeetingError(no_notes() or "No model.", 501)
@@ -606,7 +615,7 @@ def _structured(system: str, text: str, purpose: str) -> Dict[str, Any]:
             result = llm.complete_structured(
                 instructions=system,
                 input=[{"type": "text", "text": text}],
-                json_schema=NOTES_SCHEMA,
+                json_schema=schema,
                 system_prompt=system,
                 max_tokens=4000,
                 temperature=0.2,
@@ -802,6 +811,162 @@ def write_topics(lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return topics
 
 
+# --- questions ----------------------------------------------------------------------------------
+
+MAX_QUESTION = 2000
+MAX_CHAT = 200
+MAX_ANSWER = 4000
+ASK_CHARS = 60000
+ASK_HISTORY = 6
+
+_ANSWER_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {"answer": {"type": "string"}, "cites": {"type": "array", "items": {"type": "string"}}},
+    "required": ["answer", "cites"],
+    "additionalProperties": False,
+}
+ASK_SYSTEM = (
+    "You answer questions about one meeting, from its notes and its transcript, whose lines start with "
+    "a [mm:ss] stamp. Use only what they say: when they do not answer the question, say so plainly "
+    "and do not guess. The speakers are not labelled: never guess who said something, and never invent "
+    "a name. Write for the person who was in the meeting, in plain sentences. When asked to write "
+    "something, such as a follow-up message, write it from what was decided and said. cites lists the "
+    "stamps of the transcript lines the answer rests on, copied exactly without brackets, e.g. 12:04; "
+    "use an empty list when the answer needs none."
+)
+_asking: Set[Tuple[str, str]] = set()
+
+
+def _asked(path: Path) -> List[str]:
+    """The meetings whose last question has no answer yet, as after a restart."""
+    conn = _open(path)
+    try:
+        rows = conn.execute(
+            """SELECT meeting_id FROM meeting_chat c
+               WHERE n = (SELECT MAX(n) FROM meeting_chat WHERE meeting_id = c.meeting_id)
+                 AND role = 'user'"""
+        ).fetchall()
+        return [row["meeting_id"] for row in rows]
+    finally:
+        conn.close()
+
+
+def ask(path: Path, meeting_id: str, question: Any) -> Dict[str, Any]:
+    """Records a question about a ready meeting; ``spawn_answer`` writes the answer."""
+    text = " ".join(str(question or "").split())
+    if not text:
+        raise MeetingError("Ask a question.")
+    if len(text) > MAX_QUESTION:
+        raise MeetingError(f"A question is at most {MAX_QUESTION} characters.")
+    reason = no_notes()
+    if reason:
+        raise MeetingError(reason, 501)
+    found = _need(path, meeting_id)
+    if found["stage"] != "ready" or not found["notes"]:
+        raise MeetingError("The meeting isn't written up yet.", 409)
+    chat = found["chat"]
+    if chat and chat[-1]["from"] == "user":
+        raise MeetingError("The last question hasn't been answered yet.", 409)
+    if len(chat) >= MAX_CHAT:
+        raise MeetingError("This meeting has had all the questions it can take.", 409)
+    _say(path, meeting_id, "user", text, [])
+    return _need(path, meeting_id)
+
+
+def _say(path: Path, meeting_id: str, role: str, text: str, cites: List[str]) -> None:
+    conn = _open(path)
+    try:
+        n = conn.execute("SELECT COALESCE(MAX(n), -1) + 1 FROM meeting_chat WHERE meeting_id = ?", (meeting_id,)).fetchone()[0]
+        conn.execute(
+            "INSERT INTO meeting_chat (meeting_id, n, role, text, cites, at) VALUES (?, ?, ?, ?, ?, ?)",
+            (meeting_id, n, role, text, json.dumps(cites), _now()),
+        )
+    finally:
+        conn.close()
+    events.note("meetings", meeting_id, path, True)
+
+
+def pick_lines(lines: List[Dict[str, Any]], question: str) -> List[Dict[str, Any]]:
+    """The transcript lines to read for a question: all of them when they fit, else the lines that
+    share the most words with it, each with its neighbours, back in order."""
+    if sum(len(line["text"]) + 8 for line in lines) <= ASK_CHARS:
+        return lines
+    words = {w for w in re.findall(r"[a-z0-9']+", question.lower()) if len(w) > 3}
+    scored = sorted(
+        range(len(lines)),
+        key=lambda i: -len(words & set(re.findall(r"[a-z0-9']+", lines[i]["text"].lower()))),
+    )
+    keep: Set[int] = set()
+    size = 0
+    for i in scored:
+        for j in (i - 1, i, i + 1):
+            if 0 <= j < len(lines) and j not in keep:
+                size += len(lines[j]["text"]) + 8
+                keep.add(j)
+        if size > ASK_CHARS:
+            break
+    return [lines[i] for i in sorted(keep)]
+
+
+def write_answer(found: Dict[str, Any], question: str) -> Dict[str, Any]:
+    """The model's answer, its cited stamps held to the transcript."""
+    lines = found["transcript"]
+    history = found["chat"][:-1][-ASK_HISTORY:]
+    parts = ["Notes:\n" + _written(found["notes"])]
+    if history:
+        parts.append(
+            "Earlier questions and answers:\n"
+            + "\n".join(f"{'Q' if line['from'] == 'user' else 'A'}: {line['text']}" for line in history)
+        )
+    parts.append(
+        "Transcript:\n" + "\n".join(f"[{stamp(line['at'])}] {line['text']}" for line in pick_lines(lines, question))
+    )
+    parts.append(f"Question: {question}")
+    raw = _structured(ASK_SYSTEM, "\n\n".join(parts), "ask", _ANSWER_SCHEMA)
+    valid = {stamp(line["at"]) for line in lines}
+    cites: List[str] = []
+    for cite in raw.get("cites") or []:
+        found_cite = _cite(cite)
+        if found_cite in valid and found_cite not in cites:
+            cites.append(found_cite)
+    answer = str(raw.get("answer") or "").strip()[:MAX_ANSWER]
+    if not answer:
+        raise MeetingError("The model gave no answer.", 502)
+    return {"text": answer, "cites": cites}
+
+
+def spawn_answer(path: Path, meeting_id: str) -> None:
+    """Answers the meeting's last question on a thread of its own."""
+    key = (str(path), meeting_id)
+    with _lock:
+        if key in _asking:
+            return
+        _asking.add(key)
+    profile = profile_of(path, meeting_id)
+
+    def go() -> None:
+        try:
+            with _scope(profile):
+                found = _need(path, meeting_id)
+                if not found["chat"] or found["chat"][-1]["from"] != "user":
+                    return
+                try:
+                    answer = write_answer(found, found["chat"][-1]["text"])
+                except MeetingError as error:
+                    answer = {"text": f"I couldn't answer that: {error}", "cites": []}
+                except Exception as error:
+                    logger.warning("memento: meeting %s question failed", meeting_id, exc_info=True)
+                    answer = {"text": f"I couldn't answer that: {error}", "cites": []}
+                _say(path, meeting_id, "bot", answer["text"], answer["cites"])
+        except MeetingError:
+            pass
+        finally:
+            with _lock:
+                _asking.discard(key)
+
+    threading.Thread(target=go, name=f"memento-meeting-ask-{meeting_id}", daemon=True).start()
+
+
 def _write(path: Path, meeting_id: str) -> None:
     found = _need(path, meeting_id)
     if not found["transcript"]:
@@ -884,6 +1049,8 @@ def resume(path: Path) -> None:
     for found in meetings(path):
         if found["stage"] in ("transcribing", "writing") and not found["error"]:
             spawn(path, found["id"])
+    for found in _asked(path):
+        spawn_answer(path, found)
 
 
 async def run(home: Path) -> None:
