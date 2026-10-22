@@ -94,7 +94,8 @@
 // spoken: POST dictation/take opens one after a moment (so the bar says "Preparing…"), each slice at
 // dictation/take/{take}/audio answers the next words of a fixed sentence, and the third slice closes a
 // phrase and says it is behind. Off by default, so every other flow sees the chunked host it expects.
-// GET /__mock/dictation-take lists the slices a take was sent.
+// GET /__mock/dictation-take lists the slices a take was sent, and `peak`, the most that were ever
+// being answered at once (1 when the app keeps one request in flight).
 // GET /api/plugins/memento/workflows lists the workflow library (presets first, read-only), POST
 // adds one, POST to its id rewrites one of the account's own — forking a preset into a copy — and DELETE takes
 // one away; each answers the whole list. A project names the workflow its work runs under through
@@ -2324,6 +2325,11 @@ const TAKE_ANSWERS = [
 const TAKE_TAIL = { words: "", phrases: [{ id: 2, text: "feature today." }], behind: false }
 const dictationTakes = new Map()
 const dictationSlices = []
+// Audio slices are answered after a moment, like a host decoding, and the most that were ever being
+// answered at once is how a test sees that the app keeps one request in flight.
+const SLICE_MS = 150
+let dictationBusy = 0
+let dictationPeak = 0
 // plugin/moves.py: the messages triage moved out of each Main session, for its Moved markers.
 const moves = new Map()
 // plugin/triage.py: MOCK_TRIAGE=off hides the feature, "new" opens a new thread, "thread" continues
@@ -4021,6 +4027,13 @@ http
           type: req.headers["content-type"],
           pause: url.searchParams.get("pause") === "1",
         })
+        dictationBusy += 1
+        dictationPeak = Math.max(dictationPeak, dictationBusy)
+        try {
+          await new Promise((resolve) => setTimeout(resolve, SLICE_MS))
+        } finally {
+          dictationBusy -= 1
+        }
         const answer = TAKE_ANSWERS[TAKE_ANSWERS.length - held.answers] ?? {
           words: "",
           phrases: [],
@@ -4378,7 +4391,11 @@ http
       return json(res, 200, { clips: dictationClips })
     }
     if (url.pathname === "/__mock/dictation-take" && req.method === "GET") {
-      return json(res, 200, { slices: dictationSlices, takes: [...dictationTakes.keys()] })
+      return json(res, 200, {
+        slices: dictationSlices,
+        takes: [...dictationTakes.keys()],
+        peak: dictationPeak,
+      })
     }
     // Dev only: POST { outcome } ends every pending approval without the app. "timeout" is a host
     // with the plugin (the run says so and carries on); "lost" one without it, which keeps the

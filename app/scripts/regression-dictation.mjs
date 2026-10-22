@@ -343,6 +343,10 @@ try {
       // The take lands where the caret was, and the tail phrase closed at Stop is part of it.
       assert.equal(await composer.inputValue(), "Note: Let us ship the dictation feature today.")
       await shot(page, `${label}-11-heard`)
+      // One request in flight: the host never had two slices to answer at once.
+      const heard = await (await fetch(`${streamMock}/__mock/dictation-take`)).json()
+      assert.ok(heard.slices.length > 1, "the take was sent slice by slice")
+      assert.equal(heard.peak, 1, "one slice in flight at a time")
 
       // Cancelled: nothing is inserted, and the mic is back.
       await composer.fill("")
