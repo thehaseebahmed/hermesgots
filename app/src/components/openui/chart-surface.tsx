@@ -4,7 +4,6 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
   Line,
   LineChart,
   Pie,
@@ -43,8 +42,9 @@ const columnsOf = ({ kind, series }: ChartProps): Column[] =>
     : series.map((s, i) => ({ key: `series-${i}`, label: s.name }))
 
 /**
- * A pie's config carries labels alone: its slices take the tokens directly, and a slice label is
- * arbitrary text where a cartesian series' generated key is safe to write as a CSS name.
+ * A pie's config carries labels alone: its slices take `--chart-N` from their own row, while a
+ * cartesian mark reads `var(--color-<key>)` back out of the config. A pie's key is the slice's
+ * own text — model-written, and a custom property cannot hold a space — so it is only a label.
  */
 function configOf(kind: ChartProps["kind"], columns: Column[]): ChartConfig {
   return Object.fromEntries(
@@ -71,6 +71,14 @@ function rowsOf(series: ChartSeries[], columns: Column[]) {
   })
 }
 
+/**
+ * A sector takes its fill from its own data row, which is what the legend and the tooltip read
+ * the colour back from. It is written as the token rather than `var(--color-<x>)` because an x
+ * value is arbitrary model-written text, and a custom property cannot have a space in its name.
+ */
+const slicesOf = (series: ChartSeries[]) =>
+  (series[0]?.points ?? []).map((point, i) => ({ ...point, fill: colour(i) }))
+
 const AXIS = { tickLine: false, axisLine: false, tickMargin: 4, fontSize: 11 } as const
 
 const MARGIN = { top: 4, right: 8, bottom: 16, left: 0 } as const
@@ -81,7 +89,7 @@ function ChartSurface({ props }: { props: ChartProps }) {
   const { xLabel, yLabel } = props
   const frame = (
     <>
-      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+      <CartesianGrid vertical={false} />
       <XAxis
         dataKey="x"
         name={xLabel}
@@ -94,7 +102,7 @@ function ChartSurface({ props }: { props: ChartProps }) {
         label={yLabel ? { value: yLabel, angle: -90, position: "insideLeft" } : undefined}
         {...AXIS}
       />
-      <ChartTooltip content={<ChartTooltipContent />} />
+      <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
       <ChartLegend content={<ChartLegendContent />} />
     </>
   )
@@ -104,19 +112,46 @@ function ChartSurface({ props }: { props: ChartProps }) {
       <ChartContainer config={config} className="aspect-auto h-full w-full">
         {props.kind === "pie" ? (
           <PieChart>
-            <ChartTooltip content={<ChartTooltipContent nameKey="x" />} />
-            <Pie data={props.series[0]?.points ?? []} dataKey="y" nameKey="x">
-              {columns.map((column, i) => (
-                <Cell key={column.key} fill={colour(i)} />
-              ))}
-            </Pie>
+            <ChartTooltip content={<ChartTooltipContent nameKey="x" hideLabel />} />
+            <Pie
+              data={slicesOf(props.series)}
+              dataKey="y"
+              nameKey="x"
+              labelLine={false}
+              // Recharts anchors a function label 20px beyond the sector edge. Drawing the pie at
+              // 70% leaves that 20px inside the bubble rather than clipped by its 224px height,
+              // and keeps the low labels clear of the band the legend reserves.
+              outerRadius="70%"
+              label={(slice) => {
+                // Slices under this share sit close enough that neighbouring numbers collide;
+                // the legend still names them.
+                if ((slice.percent ?? 0) < 0.06) return null
+                return (
+                  <text
+                    x={slice.x}
+                    y={slice.y}
+                    textAnchor={slice.textAnchor}
+                    dominantBaseline={slice.dominantBaseline}
+                    fontSize={11}
+                    fill="var(--foreground)"
+                  >
+                    {slice.payload.y}
+                  </text>
+                )
+              }}
+            />
             <ChartLegend content={<ChartLegendContent nameKey="x" />} />
           </PieChart>
         ) : props.kind === "bar" ? (
           <BarChart data={rowsOf(props.series, columns)} margin={MARGIN}>
             {frame}
             {columns.map((column) => (
-              <Bar key={column.key} dataKey={column.key} fill={`var(--color-${column.key})`} />
+              <Bar
+                key={column.key}
+                dataKey={column.key}
+                fill={`var(--color-${column.key})`}
+                radius={4}
+              />
             ))}
           </BarChart>
         ) : props.kind === "line" ? (
@@ -126,6 +161,7 @@ function ChartSurface({ props }: { props: ChartProps }) {
               <Line
                 key={column.key}
                 dataKey={column.key}
+                type="monotone"
                 stroke={`var(--color-${column.key})`}
                 strokeWidth={2}
                 dot={false}
@@ -139,9 +175,10 @@ function ChartSurface({ props }: { props: ChartProps }) {
               <Area
                 key={column.key}
                 dataKey={column.key}
+                type="natural"
                 stroke={`var(--color-${column.key})`}
                 fill={`var(--color-${column.key})`}
-                fillOpacity={0.2}
+                fillOpacity={0.4}
               />
             ))}
           </AreaChart>

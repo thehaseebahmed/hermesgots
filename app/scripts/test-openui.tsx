@@ -404,6 +404,23 @@ function chartBox(width: number) {
   }
 }
 
+/**
+ * A box for the two elements that size the chart and for nothing else: were the legend's height
+ * measured at the chart's own, the plot area would be left with none and no bar or curve would
+ * draw at all.
+ */
+function measuredChart(width: number) {
+  const original = Element.prototype.getBoundingClientRect
+  Element.prototype.getBoundingClientRect = function (this: Element) {
+    const box = original.call(this)
+    if (!this.matches("[data-slot=chart], .recharts-responsive-container")) return box
+    return { ...box, width, height: 224, right: width, bottom: 224, x: 0, y: 0 } as DOMRect
+  }
+  return () => {
+    Element.prototype.getBoundingClientRect = original
+  }
+}
+
 const SCROLLER = /overflow-(x-|y-)?(auto|scroll)/
 
 test("a chart draws at phone and tablet widths, its summary the text alternative", async () => {
@@ -523,6 +540,137 @@ test("a pie chart draws its slices, one per point", async () => {
       },
     )
     assert.equal(seen.fallbacks(), 0, "the pie drew: nothing was noted")
+  } finally {
+    restore()
+  }
+})
+
+const PHONES = "Phones lead the split."
+
+const SLICES: [string, number][] = [
+  ["Phone", 93],
+  ["Tablet", 6],
+  ["Watch", 1],
+]
+
+const SHARE = [
+  "# id: share",
+  "root = Stack([c])",
+  chart("pie", series("Share", SLICES), "", "", PHONES),
+].join("\n")
+
+test("a pie's sectors take their colour, one chart token each", async () => {
+  const restore = measuredChart(390)
+  try {
+    const seen = await screen(
+      [ask("Chart the split."), reply("reply", `The split:\n\n${block(SHARE)}`)],
+      async () => {
+        const sectors = () => [
+          ...(replyRow("The split:")?.querySelectorAll(".recharts-sector") ?? []),
+        ]
+        await drawn(() => sectors().length === 3, "the pie")
+        const row = replyRow("The split:")
+        assert.ok(row, "the reply is a row of the thread")
+        assert.equal(surfaceOf(row)?.getAttribute("aria-label"), PHONES, "the chart's summary")
+        const fills = sectors().map((sector) => sector.getAttribute("fill") ?? "")
+        for (const fill of fills)
+          assert.match(fill, /^var\(--chart-[1-5]\)$/, "every slice carries a colour, not a grey")
+        assert.equal(new Set(fills).size, 3, "and no two slices the same colour")
+        const legend = row.querySelector(".recharts-legend-wrapper")?.textContent ?? ""
+        for (const name of ["Phone", "Tablet", "Watch"])
+          assert.ok(legend.includes(name), `the legend names the ${name} slice`)
+      },
+    )
+    assert.equal(seen.fallbacks(), 0, "the pie drew: nothing was noted")
+  } finally {
+    restore()
+  }
+})
+
+test("a pie prints each slice's number on it, and none on a sliver", async () => {
+  const restore = measuredChart(390)
+  try {
+    const seen = await screen(
+      [ask("Chart the split."), reply("reply", `The split:\n\n${block(SHARE)}`)],
+      async () => {
+        const numbers = () =>
+          [...(replyRow("The split:")?.querySelectorAll("svg text") ?? [])]
+            .map((text) => text.textContent?.trim() ?? "")
+            .filter(Boolean)
+        await drawn(() => numbers().length >= 2, "the slice labels")
+        assert.deepEqual(
+          numbers(),
+          ["93", "6"],
+          "a number on every slice with room, and none on the sliver",
+        )
+      },
+    )
+    assert.equal(seen.fallbacks(), 0, "the pie drew: nothing was noted")
+  } finally {
+    restore()
+  }
+})
+
+const BARS = "Bars over the quarter."
+const CURVE = "A curve over the quarter."
+const WASH = "A wash under the curve."
+
+test("a bar is drawn with rounded corners, a line as a curve, an area with a faint fill", async () => {
+  const points = series("Sales", [
+    ["Q1", 10],
+    ["Q2", 25],
+    ["Q3", 18],
+  ])
+  const marks = (kind: string, summary: string) =>
+    `${kind} = Chart("${kind}", [${points}], "", "", "${summary}")`
+  const source = [
+    "# id: marks",
+    "root = Stack([bar, line, area])",
+    marks("bar", BARS),
+    marks("line", CURVE),
+    marks("area", WASH),
+  ].join("\n")
+  const restore = measuredChart(390)
+  try {
+    const seen = await screen(
+      [ask("Chart it three ways."), reply("reply", `Three ways:\n\n${block(source)}`)],
+      async () => {
+        const surfaces = () => [...(replyRow("Three ways:")?.querySelectorAll("[role=img]") ?? [])]
+        const chartOf = (summary: string) =>
+          surfaces().find((one) => one.getAttribute("aria-label") === summary)
+        const shapes = (summary: string, selector: string) => [
+          ...(chartOf(summary)?.querySelectorAll(selector) ?? []),
+        ]
+        await drawn(
+          () =>
+            shapes(BARS, "path.recharts-rectangle").length === 3 &&
+            shapes(CURVE, "path.recharts-line-curve").length === 1 &&
+            shapes(WASH, "path.recharts-area-area").length === 1,
+          "the three charts",
+        )
+        assert.deepEqual(
+          surfaces().map((one) => one.getAttribute("aria-label")),
+          [BARS, CURVE, WASH],
+          "each chart is one image named by its summary",
+        )
+        assert.deepEqual(
+          surfaces().map((one) => one.getAttribute("role")),
+          ["img", "img", "img"],
+          "all three keep the image role",
+        )
+        for (const bar of shapes(BARS, "path.recharts-rectangle"))
+          assert.match(bar.getAttribute("d") ?? "", /A 4,4/, "every bar's corners are rounded")
+        const line = shapes(CURVE, "path.recharts-line-curve")
+        assert.equal(line.length, 1, "the line draws one path")
+        const path = line[0].getAttribute("d") ?? ""
+        assert.match(path, /C/, "the line is drawn as a curve")
+        assert.doesNotMatch(path, /L/, "not as straight segments between the points")
+        const area = shapes(WASH, "path.recharts-area-area")
+        assert.equal(area.length, 1, "the area draws one shape")
+        assert.equal(area[0].getAttribute("fill-opacity"), "0.4", "its wash is faint")
+      },
+    )
+    assert.equal(seen.fallbacks(), 0, "all three drew: nothing was noted")
   } finally {
     restore()
   }
