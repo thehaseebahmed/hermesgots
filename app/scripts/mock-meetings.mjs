@@ -107,7 +107,7 @@ const view = (m, full) => ({
   duration: m.duration,
   created_at: m.created_at,
   updated_at: m.updated_at,
-  ...(full ? { transcript: m.transcript, notes: m.notes } : {}),
+  ...(full ? { transcript: m.transcript, notes: m.notes, chat: m.chat } : {}),
 })
 
 export const audioOff = () => process.env.MOCK_MEETINGS_AUDIO === "off"
@@ -166,6 +166,7 @@ export async function handleMeetings(req, res, path, { json, readBody, noteEvent
       flaky: /flaky/i.test(title),
       transcript: [],
       notes: null,
+      chat: [],
       created_at: now,
       updated_at: now,
     }
@@ -232,6 +233,33 @@ export async function handleMeetings(req, res, path, { json, readBody, noteEvent
     note(m.id)
     void run(m, note)
     return (answer(m), true)
+  }
+  if (action === "ask") {
+    const body = await readBody(req)
+    const question = String(body.question ?? "").trim()
+    if (!question) return (fail(400, "Ask a question."), true)
+    if (m.stage !== "ready") return (fail(409, "The meeting isn't written up yet."), true)
+    if (m.chat.at(-1)?.from === "user")
+      return (fail(409, "The last question hasn't been answered yet."), true)
+    m.chat.push({ id: `${m.id}:${m.chat.length}`, from: "user", text: question, cites: [] })
+    Object.assign(m, { updated_at: Date.now() })
+    note(m.id)
+    setTimeout(() => {
+      if (!meetings.has(m.id)) return
+      const decided = /decid/i.test(question)
+      m.chat.push({
+        id: `${m.id}:${m.chat.length}`,
+        from: "bot",
+        text: decided
+          ? "You decided on a Thursday beta with a Tuesday freeze, no sidebar changes before it, and no push for a finished run by default."
+          : "The transcript doesn't say.",
+        cites: decided ? ["0:21", "3:25", "5:09"] : [],
+      })
+      Object.assign(m, { updated_at: Date.now() })
+      note(m.id)
+    }, 700)
+    json(res, 202, { object: "memento.meeting", meeting: view(m, true) })
+    return true
   }
   if (action === "remove") {
     meetings.delete(m.id)

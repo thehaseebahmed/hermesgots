@@ -189,6 +189,18 @@ for (const [width, dark] of [
         `${width}: ${width >= 1280 ? "the list stays beside the meeting" : "the meeting replaces the list"}`,
       )
 
+      // The bot answers a question about the meeting, with the times it rests on.
+      await page.getByRole("button", { name: "What did we decide?" }).click()
+      await page.getByText("You decided on a Thursday beta").waitFor({ timeout: 10_000 })
+      assert.ok(await page.getByText("Thinking…").count() === 0, "the answer replaced the wait")
+      assert.equal(
+        await page.getByRole("button", { name: "What did we decide?" }).count(),
+        0,
+        "the suggestions go once a question is asked",
+      )
+      await shot("5a-ask")
+      pass(`${width}: the bot answers a question about the meeting`)
+
       // A cited time opens its topic's transcript at that line, and a topic row opens the topic.
       await page.getByRole("button", { name: "Show 0:21 in the transcript" }).first().click()
       await page.getByText("On the beta, I think Thursday still works").waitFor({ timeout: 5_000 })

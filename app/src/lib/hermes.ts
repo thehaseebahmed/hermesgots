@@ -1563,6 +1563,16 @@ export async function uploadMeetingChunk(
 }
 
 /** `finish` says every chunk is in, `retry` runs a failed step again and `remove` deletes it. */
+export async function meetingAsk(config: HermesConfig, id: string, question: string) {
+  const response = await request(`${meetingRoot(config, id)}/ask`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ question }),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  return (await response.json())?.meeting as Record<string, unknown> | undefined
+}
+
 export async function meetingAction(
   config: HermesConfig,
   id: string,

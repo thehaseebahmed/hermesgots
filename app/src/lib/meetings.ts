@@ -11,6 +11,7 @@ import {
   hasPluginFeature,
   listMeetings,
   meetingAction,
+  meetingAsk,
   uploadMeetingChunk,
 } from "@/lib/hermes"
 import { useAllLive, useAnyChange, useChanges, useLive } from "@/lib/live"
@@ -107,6 +108,17 @@ export interface Meeting {
   /** Only once the meeting has been read in full. */
   transcript: MeetingLine[]
   notes?: Notes
+  /** Questions asked about the meeting and the answers, once it has been read in full. */
+  chat?: Exchange[]
+}
+
+/** One line of the questions asked about a meeting: the user's, or the bot's answer. */
+export interface Exchange {
+  id: string
+  from: "user" | "bot"
+  text: string
+  /** Seconds into the meeting the answer rests on. */
+  cites: number[]
 }
 
 export interface MeetingProject {
@@ -197,6 +209,17 @@ export function toMeeting(raw: Record<string, unknown>, profile: Profile): Meeti
       return { id: `l${index}`, at: Number(entry.at) || 0, text: text(entry.text) }
     }),
     notes: toNotes(raw.notes),
+    chat: list(raw.chat).map((line, index) => {
+      const entry = (line ?? {}) as Record<string, unknown>
+      return {
+        id: text(entry.id) || `x${index}`,
+        from: entry.from === "user" ? "user" : "bot",
+        text: text(entry.text),
+        cites: list(entry.cites)
+          .map((cite) => stampSeconds(text(cite)))
+          .filter((at): at is number => at !== undefined),
+      }
+    }),
   }
 }
 
@@ -234,7 +257,7 @@ const sending = createStore<ReadonlySet<string>>(new Set())
 function put(meeting: Meeting) {
   const state = store.get()
   const own = state.lists[meeting.profileId] ?? []
-  const brief = { ...meeting, transcript: [], notes: undefined }
+  const brief = { ...meeting, transcript: [], notes: undefined, chat: undefined }
   const listed = own.some((m) => m.id === meeting.id)
     ? own.map((m) => (m.id === meeting.id ? brief : m))
     : [brief, ...own]
@@ -387,7 +410,7 @@ export function useMeeting(id: string) {
   )
   const live = useLive(profile)
   const changes = useChanges("meetings", profile)
-  const working = meeting ? isWorking(meeting) : false
+  const working = meeting ? isWorking(meeting) || isAsking(meeting) : false
   // A meeting listed but not yet read is read once, then only while it moves.
   const unread = found ? state.details[id] === undefined : false
   usePoll(
@@ -521,6 +544,16 @@ export async function addRecording(
 }
 
 /** Runs a failed step again; the host keeps the windows it has already transcribed. */
+/** Whether the host is still writing the answer to the last question. */
+export const isAsking = (meeting: Meeting) => meeting.chat?.at(-1)?.from === "user"
+
+/** Asks the bot a question about the meeting; the answer arrives on the next reads. */
+export async function askMeeting(meeting: Meeting, question: string) {
+  const profile = await configOf(meeting.profileId)
+  const raw = await meetingAsk(profile, meeting.id, question)
+  if (raw) put(toMeeting(raw, profile))
+}
+
 export async function retryMeeting(meeting: Meeting) {
   const profile = await configOf(meeting.profileId)
   const raw = await meetingAction(profile, meeting.id, "retry")
