@@ -62,6 +62,9 @@ commands, and observable proof.
 
 - [Chat](./chat.md) covers sending a message, the reply's arrival, Recents, drafts, a failed send
   and a reply that survives a reload.
+- [Bot threads](./threads.md) covers a bot opening on Main with its threads as cards at their start
+  times, opening a card and sending from one, `/thread`, a message that opens a thread, one moved
+  into an older thread, and the cards at tablet width in the dark theme.
 - [Approvals and questions](./approvals.md) covers what waits on the user: approvals in the sidebar
   and Code, allowing them, missed ones, and questions answered across reloads.
 - [MCP servers](./mcp-servers.md) covers a Bot's MCP tab: rows and health, gating, adding from the
