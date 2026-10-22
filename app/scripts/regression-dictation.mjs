@@ -316,7 +316,8 @@ try {
     await page.close()
   }
   // A host that hears the take while it is spoken: the bar says it is preparing, then fills with
-  // the words as they arrive, says it is behind once, and Stop puts the whole take in the field.
+  // the words as they arrive — a finished phrase tidied, a phrase whose cleanup failed as heard —
+  // says it is behind once, and Stop puts the whole take in the field.
   if (streamMock) {
     for (const [label, viewport, scheme] of [
       ["phone-light", { width: 390, height: 844 }, "light"],
@@ -346,29 +347,41 @@ try {
           if (text && window.__heard.at(-1) !== text) window.__heard.push(text)
         }, 40)
       })
-      await bar.getByText("Let us ship the dictation").waitFor({ timeout: 15_000 })
+      await bar.getByText("Let us ship 25 things.").waitFor({ timeout: 15_000 })
       await bar.getByText("Behind").waitFor()
       assert.equal(await bar.getAttribute("aria-live"), "off", "the transcript is read on request")
       await shot(page, `${label}-10-hearing`)
 
       await page.getByRole("button", { name: "Stop" }).click()
       await mic.waitFor({ timeout: 15_000 })
-      // The take lands where the caret was, and the tail phrase closed at Stop is part of it.
-      assert.equal(await composer.inputValue(), "Note: Let us ship the dictation feature today.")
+      // The take lands where the caret was: the phrase the host tidied, then the tail phrase its
+      // cleanup couldn't tidy, which is committed exactly as it was heard.
+      assert.equal(
+        await composer.inputValue(),
+        "Note: Let us ship 25 things. and then two more items",
+      )
+      assert.equal(
+        await page.getByText("um Let us", { exact: false }).count(),
+        0,
+        "the filler the host heard is not what the user reads",
+      )
       await shot(page, `${label}-11-heard`)
-      // Read at two moments: what the bar showed earlier starts what it showed later, so no word
-      // was replaced, reordered or taken away while the user was reading it.
+      // Read at two moments: a phrase the bar has shown keeps its text — it arrives tidied and is
+      // cleaned once — so the words still open are the only thing that changes under the reader.
       const moments = await page.evaluate(() => {
         window.clearInterval(window.__hearWatcher)
         return window.__heard
       })
       assert.ok(moments.length >= 2, `the bar was read at two moments (${JSON.stringify(moments)})`)
-      for (const [at, earlier] of moments.slice(0, -1).entries()) {
+      assert.ok(
+        moments.some((text) => text.includes("um Let us")),
+        `the words arrive as the host heard them (${JSON.stringify(moments)})`,
+      )
+      for (const text of moments.filter((seen) => seen.includes("Let us ship")))
         assert.ok(
-          moments[at + 1].startsWith(earlier),
-          `"${moments[at + 1]}" starts with "${earlier}"`,
+          text.includes("Let us ship 25 things."),
+          `"${text}" keeps the phrase the host tidied`,
         )
-      }
       assert.ok(
         moments.some((text) => text.split(" ").length > 1),
         `the take's words arrived over more than one moment (${JSON.stringify(moments)})`,

@@ -59,9 +59,10 @@ export function settled(transcript: DictationTranscript): DictationTranscript {
 
 /**
  * Folds one answer into a take. A closed phrase carries the words that were open in front of it, so
- * the open tail starts again after it; a phrase the take has already seen replaces that phrase's
- * text rather than appearing twice, which is what lets a phrase arrive raw and be replaced by its
- * cleaned text without the take rewriting itself.
+ * the open tail starts again after it. A finished phrase arrives already tidied (the host cleans it
+ * once, before it commits it), and a phrase the take has already seen replaces that phrase's text
+ * rather than appearing twice — the fold's own answer to a phrase that arrives again, which is also
+ * what lets a raw phrase be replaced by its cleaned text without the take rewriting itself.
  */
 export function hear(
   transcript: DictationTranscript,
