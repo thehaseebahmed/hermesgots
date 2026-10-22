@@ -119,13 +119,6 @@ def available() -> Optional[str]:
     return None
 
 
-def override_refused(error: Exception) -> bool:
-    """Whether a model call failed because the host's config doesn't allow the provider or model
-    override it asked for."""
-    name = type(error).__name__
-    return "Trust" in name or "Override" in name or "Denied" in name
-
-
 def llm_gate() -> Dict[str, bool]:
     """Whether the host config lets this plugin pick the provider and model of a model call
     (``plugins.entries.memento.llm.allow_*_override``). A call on the profile's own model needs
@@ -721,7 +714,8 @@ def _structured(purpose: str, system: str, instructions: str, text: str, schema:
             continue
         except Exception as error:
             name = type(error).__name__
-            if options and override_refused(error):
+            name = type(error).__name__
+            if options and ("Trust" in name or "Override" in name or "Denied" in name):
                 raise ResearchError(
                     f"{error} Allow it with `hermes plugins enable memento`, or pick Default.", 403
                 ) from None

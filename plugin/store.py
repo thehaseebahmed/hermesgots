@@ -9,9 +9,12 @@ missions with their evidence ledgers (``research.py``)."""
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from pathlib import Path
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 34
 
@@ -51,6 +54,7 @@ def get_setting(path: Path, key: str) -> Optional[Any]:
     try:
         return json.loads(row[0]) if row else None
     except ValueError:
+        logger.debug("memento: the %s setting isn't valid JSON", key)
         return None
 
 

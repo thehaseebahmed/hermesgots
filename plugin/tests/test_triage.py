@@ -339,6 +339,30 @@ class TriageModelTests(unittest.TestCase):
         self.assertEqual(decided, triage.NEW)
         self.assertEqual(len(llm.calls), 2)
 
+    def test_a_pick_that_stopped_working_falls_back_to_the_bots_own(self):
+        class Llm3(Llm):
+            def complete_structured(self, **kwargs):
+                self.calls.append(kwargs)
+                if "model" in kwargs:
+                    raise RuntimeError("model retired")
+                return SimpleNamespace(parsed={"decision": "stay"})
+
+        llm = Llm3()
+        with mock.patch.object(triage, "_llm", return_value=llm):
+            self.assertIsNone(triage.decide("hi", [], [], None, {"provider": "a", "model": "b"}))
+        self.assertEqual(len(llm.calls), 2)
+        self.assertNotIn("model", llm.calls[1])
+
+    def test_saving_a_held_pick_again_is_a_no_op_even_once_the_override_is_withheld(self):
+        self.set(
+            {"provider": "anthropic", "model": "haiku"}, results=[Result(True, "claude-haiku", "anthropic")]
+        )
+        withheld = {"model": False, "provider": False}
+        for again in ({"provider": "anthropic", "model": "haiku"}, {"provider": "anthropic", "model": "claude-haiku"}):
+            saved, calls = self.set(again, gate=withheld)
+            self.assertEqual(saved, {"provider": "anthropic", "model": "claude-haiku"})
+            self.assertEqual(calls["switch"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

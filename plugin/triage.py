@@ -194,18 +194,21 @@ def set_model(
     if pick is None:
         put_setting(path, MODEL_KEY, None)
         return None
+    held = get_setting(path, MODEL_KEY)
+    # A pick already held is a no-op, whether it is written as Hermes resolved it or as it was asked,
+    # and needs neither the permission nor another probe.
+    if isinstance(held, dict) and pick in (read_model(path), held.get("asked")):
+        return read_model(path)
     if not (gate.get("model") and gate.get("provider")):
         raise Withheld(
             "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable memento`."
         )
-    if read_model(path) == pick:
-        return pick
     from gateway.run import _load_gateway_config
 
     cfg = _load_gateway_config(config_path=config_path) or {}
     routed = host_model.check_pick(cfg, pick["provider"], pick["model"])
     resolved = {"provider": routed.target_provider, "model": routed.new_model}
-    put_setting(path, MODEL_KEY, resolved)
+    put_setting(path, MODEL_KEY, {**resolved, "asked": pick})
     return resolved
 
 
@@ -237,11 +240,12 @@ def decide(
     try:
         try:
             result = llm.complete_structured(**ask, **(model or {}))
-        except Exception as error:
-            if not (model and research.override_refused(error)):
+        except Exception:
+            if not model:
                 raise
-            # The host took the permission back after the pick: the bot's own model decides, if
-            # there is time left for it.
+            # The picked model failed (retired, no credentials, or the host took the override
+            # permission back): the bot's own model decides, if there is time left for it.
+            logger.debug("memento: the triage model failed, using the bot's own", exc_info=True)
             if deadline is not None and time.monotonic() > deadline:
                 return None
             result = llm.complete_structured(**ask)
