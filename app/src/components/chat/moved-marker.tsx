@@ -26,48 +26,31 @@ export function MovedMarker({
           {move.text}
         </BubbleContent>
       </Bubble>
-      {/* The bot's reply, a line like a tool group's: only the thread's name is a link. */}
-      <p className="min-h-11 py-3 text-sm leading-5 text-muted-foreground">
-        Moved to
-        {title ? (
-          <>
-            {" \u201c"}
-            <Link
-              to={`/c/${move.threadId}`}
-              state={{ bot: profileId }}
-              className="font-medium text-info underline-offset-2 outline-none hover:underline focus-visible:underline"
-            >
-              <MessagesSquareIcon className="mr-1 inline size-3.5 align-[-2px]" />
-              {title}
-            </Link>
-            {"\u201d"}
-          </>
-        ) : (
-          <>
-            {" "}
-            <Link
-              to={`/c/${move.threadId}`}
-              state={{ bot: profileId }}
-              className="font-medium text-info underline-offset-2 hover:underline"
-            >
-              a thread
-            </Link>
-          </>
-        )}
+      {/* The bot's reply, a line like a tool group's: only the thread's name is a link, and Undo is under it. */}
+      <div className="flex flex-col items-start text-sm leading-5 text-muted-foreground">
+        <p className="flex min-h-11 max-w-full items-center">
+          <span className="shrink-0">Moved to&nbsp;{title ? "\u201c" : ""}</span>
+          <Link
+            to={`/c/${move.threadId}`}
+            state={{ bot: profileId }}
+            className="flex min-w-0 items-center gap-1 font-medium text-info underline-offset-2 outline-none hover:underline focus-visible:underline"
+          >
+            <MessagesSquareIcon className="size-3.5 shrink-0" />
+            <span className="truncate">{title ?? "a thread"}</span>
+          </Link>
+          {title && <span className="shrink-0">{"\u201d"}</span>}
+        </p>
         {move.undoable && onUndo && (
-          <>
-            {" \u00b7 "}
-            <button
-              type="button"
-              onClick={() => onUndo(move)}
-              className="inline-flex items-center gap-1 font-medium text-info underline-offset-2 outline-none hover:underline focus-visible:underline"
-            >
-              <Undo2Icon className="size-3.5" />
-              Undo
-            </button>
-          </>
+          <button
+            type="button"
+            onClick={() => onUndo(move)}
+            className="-mt-2.5 flex min-h-11 items-center gap-1 font-medium text-info underline-offset-2 outline-none hover:underline focus-visible:underline"
+          >
+            <Undo2Icon className="size-3.5" />
+            Undo
+          </button>
         )}
-      </p>
+      </div>
     </div>
   )
 }
