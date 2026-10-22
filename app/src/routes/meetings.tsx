@@ -1,33 +1,22 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
-import { useLiveQuery } from "dexie-react-hooks"
-import { Navigate, useNavigate, useParams, useSearchParams } from "react-router"
+import { Navigate, useNavigate, useParams } from "react-router"
 import {
   ArrowLeftIcon,
-  ArrowUpIcon,
+  AudioLinesIcon,
   CheckIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
   ClipboardCopyIcon,
   DiamondIcon,
   EllipsisIcon,
   FileAudioIcon,
   FileTextIcon,
-  AudioLinesIcon,
   FlagIcon,
   FolderIcon,
-  GitBranchIcon,
-  MailIcon,
+  ListIcon,
   MenuIcon,
-  MicIcon,
-  NotebookPenIcon,
-  PauseIcon,
-  PlayIcon,
-  RotateCcwIcon,
-  SparklesIcon,
-  SquareIcon,
-  Trash2Icon,
   PlusIcon,
-  XIcon,
+  RotateCcwIcon,
+  Trash2Icon,
+  type LucideIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -37,7 +26,7 @@ import { useOpenDrawer } from "@/components/drawer-context"
 import { ExperimentalBadge } from "@/components/experimental-badge"
 import { ItemGroup, ItemRow, ItemSearch } from "@/components/item-list"
 import { itemGroups } from "@/lib/item-groups"
-import { FullscreenPopup, Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -55,7 +44,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Field, FieldLabel } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -63,41 +51,37 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Textarea } from "@/components/ui/textarea"
 import { formatRelative } from "@/lib/format"
 import {
-  askMeeting,
+  addRecording,
+  addTranscript,
   clock,
-  createMeeting,
-  heardAt,
+  isFailed,
   isWorking,
   length,
   matchesMeeting,
   meetingLine,
-  MOMENT_TITLES,
+  NOTE_SECTIONS,
   parseTranscript,
   removeMeeting,
   retryMeeting,
-  startAction,
   toMarkdown,
-  topicAt,
   useMeeting,
-  readyLine,
   useMeetingBot,
   useMeetingBots,
   useMeetingProjects,
   useMeetings,
   useMeetingsEnabled,
-  type Mark,
+  useNoAudio,
+  type Listed,
   type Meeting,
   type MeetingProject,
-  type Moment,
-  type MomentKind,
-  type Recap,
-  type Topic,
+  type NoteItem,
+  type Notes,
+  type NoteSection,
 } from "@/lib/meetings"
-import { getActiveProfile, setActiveProfile } from "@/lib/db"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import {
@@ -109,6 +93,9 @@ import {
 import { createSignal } from "@/lib/store"
 import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
+
+const message = (error: unknown, fallback: string) =>
+  error instanceof Error && error.message ? error.message : fallback
 
 /** Meetings is behind a Developer switch; with it off, its screens send you home. */
 function Gate({ children }: { children: ReactNode }) {
@@ -164,31 +151,6 @@ function BackButton({ onClick, label }: { onClick: () => void; label: string }) 
   )
 }
 
-/** Each topic's colour, in order, from the theme's status tokens. */
-const TONES = [
-  { span: "bg-info/45", dot: "bg-info" },
-  { span: "bg-success/45", dot: "bg-success" },
-  { span: "bg-warning/50", dot: "bg-warning" },
-  { span: "bg-merged/40", dot: "bg-merged" },
-]
-const tone = (index: number) => TONES[index % TONES.length]
-
-const MOMENT_LOOK: Record<MomentKind, { icon: typeof FlagIcon; color: string; label: string }> = {
-  decision: { icon: DiamondIcon, color: "text-merged", label: "Decision" },
-  action: { icon: CheckIcon, color: "text-primary", label: "Action" },
-  open: { icon: FlagIcon, color: "text-warning", label: "Flag" },
-}
-
-function MomentIcon({ kind, className }: { kind: MomentKind; className?: string }) {
-  const { icon: Icon, color } = MOMENT_LOOK[kind]
-  return (
-    <Icon
-      aria-hidden
-      className={cn("size-4 shrink-0", color, kind === "decision" && "fill-current", className)}
-    />
-  )
-}
-
 /** The bot's picture in a soft round frame. */
 function BotAvatar({ botId, className }: { botId: string; className?: string }) {
   return (
@@ -221,7 +183,7 @@ const newMeetingAsked = createSignal()
  */
 function MeetingsIndex() {
   const pane = useMeetingsPane()
-  const meetings = useMeetings()
+  const { meetings } = useMeetings()
   const now = useNow()
   if (!pane) return <MeetingsList />
   const ids = meetingGroups(meetings, now).flatMap((g) => g.items.map((m) => m.id))
@@ -259,9 +221,8 @@ function useSwap() {
 function MeetingsList({ pane }: { pane?: PaneState }) {
   const openDrawer = useOpenDrawer()
   const open = useSwap()
-  const meetings = useMeetings()
+  const { meetings, loaded, unsupported } = useMeetings()
   const [adding, setAdding] = useState(false)
-  const [recording, setRecording] = useState(false)
   // A fresh form each time it opens.
   const [form, setForm] = useState(0)
   const [query, setQuery] = useState("")
@@ -269,12 +230,17 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
   const now = useNow()
 
   // Each project once, in the order of its newest meeting.
-  const projects = [...new Map(meetings.map((m) => [m.projectId, m.projectName])).entries()]
+  const projects = [
+    ...new Map(
+      meetings.filter((m) => m.projectId).map((m) => [m.projectId!, m.projectName ?? "Project"]),
+    ).entries(),
+  ]
   const shown = meetings.filter(
     (m) => (!project || m.projectId === project) && matchesMeeting(m, query),
   )
   const groups = meetingGroups(shown, now)
   const filtering = Boolean(query.trim() || project)
+  const reason = Object.values(unsupported)[0]
 
   useEffect(
     () =>
@@ -308,6 +274,7 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
       />
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
+        {reason && <Banner>{reason}</Banner>}
         {meetings.length > 0 && (
           <div className="flex flex-col gap-3">
             <ItemSearch value={query} onChange={setQuery} label="Search meetings" />
@@ -335,7 +302,7 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
           </div>
         )}
 
-        {meetings.length === 0 && (
+        {meetings.length === 0 && loaded && !reason && (
           <p className="py-8 text-center text-sm text-muted-foreground">No meetings yet.</p>
         )}
         {meetings.length > 0 && shown.length === 0 && (
@@ -388,21 +355,7 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
           </Button>
         </div>
       </div>
-      <NewMeeting
-        key={form}
-        open={adding}
-        onOpenChange={setAdding}
-        onRecord={() => setRecording(true)}
-      />
-      {recording && (
-        <Recorder
-          onClose={() => setRecording(false)}
-          onDone={(id) => {
-            setRecording(false)
-            open(`/meetings/${id}`)
-          }}
-        />
-      )}
+      <NewMeeting key={form} open={adding} onOpenChange={setAdding} />
     </div>
   )
 }
@@ -434,36 +387,17 @@ function Chip({
 }
 
 /** Meetings by what they need (a failed one waits on you), then by when they happened. */
-function meetingGroups(meetings: Meeting[], now: number) {
+function meetingGroups(meetings: Listed[], now: number) {
   return itemGroups(
     meetings,
-    (m) => (m.stage === "failed" ? "waiting" : isWorking(m) ? "working" : undefined),
+    (m) => (isFailed(m) ? "waiting" : isWorking(m) ? "working" : undefined),
     (m) => m.createdAt,
     now,
   )
 }
 
-/** A meeting's topics as one thin strip, each as long as it ran. */
-function MiniStrip({ recap }: { recap: Recap }) {
-  return (
-    <span className="flex h-1.5 gap-0.5" aria-hidden>
-      {recap.topics.map((topic, index) => (
-        <span
-          key={topic.id}
-          className={cn("rounded-full", tone(index).dot)}
-          style={{ flexGrow: Math.max(1, topic.end - topic.start) }}
-        />
-      ))}
-    </span>
-  )
-}
-
-const SOURCE_ICONS = { recording: MicIcon, upload: FileAudioIcon, transcript: FileTextIcon }
-const SOURCE_LABELS = {
-  recording: "Recorded",
-  upload: "Uploaded recording",
-  transcript: "Transcript",
-}
+const SOURCE_ICONS = { upload: FileAudioIcon, transcript: FileTextIcon }
+const SOURCE_LABELS = { upload: "Uploaded recording", transcript: "Transcript" }
 
 function MeetingRow({
   meeting,
@@ -472,13 +406,13 @@ function MeetingRow({
   selected,
   onOpen,
 }: {
-  meeting: Meeting
+  meeting: Listed
   now: number
   showProject: boolean
   selected: boolean
   onOpen: () => void
 }) {
-  const failed = meeting.stage === "failed"
+  const failed = isFailed(meeting)
   const Source = SOURCE_ICONS[meeting.source]
   return (
     <ItemRow
@@ -498,17 +432,13 @@ function MeetingRow({
       }
       selected={selected}
       onOpen={onOpen}
-    >
-      {meeting.recap && (
-        <span className="mt-1 block">
-          <MiniStrip recap={meeting.recap} />
-        </span>
-      )}
-    </ItemRow>
+    />
   )
 }
 
-/** A meeting's project, as a full-width select. */
+const NO_PROJECT = "none"
+
+/** A meeting's project, as a full-width select; a meeting needn't have one. */
 function ProjectSelect({
   id,
   projects,
@@ -523,13 +453,20 @@ function ProjectSelect({
   return (
     <Select
       value={value}
-      items={projects.map((p) => ({ value: p.id, label: p.name }))}
+      items={[
+        { value: NO_PROJECT, label: "No project" },
+        ...projects.map((p) => ({ value: p.id, label: p.name })),
+      ]}
       onValueChange={(next) => next && onChange(next)}
     >
       <SelectTrigger id={id} className="h-11 w-full">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
+        <SelectItem value={NO_PROJECT}>
+          <FolderIcon className="size-5 text-muted-foreground" />
+          No project
+        </SelectItem>
         {projects.map((p) => (
           <SelectItem key={p.id} value={p.id}>
             <FolderIcon className="size-5 text-muted-foreground" />
@@ -539,30 +476,6 @@ function ProjectSelect({
       </SelectContent>
     </Select>
   )
-}
-
-/** The project a new meeting goes under: the one picked, else the first on offer. */
-function usePickedProject() {
-  const projects = useMeetingProjects()
-  const [picked, setPicked] = useState<string>()
-  const project = projects.find((p) => p.id === picked) ?? projects[0]
-  return { projects, project, pick: setPicked }
-}
-
-/** A file's length from its metadata; unknown (0) when the browser can't read it. */
-function audioLength(file: File) {
-  return new Promise<number>((resolve) => {
-    const url = URL.createObjectURL(file)
-    const audio = new Audio()
-    const done = (seconds: number) => {
-      URL.revokeObjectURL(url)
-      resolve(Number.isFinite(seconds) ? seconds : 0)
-    }
-    audio.preload = "metadata"
-    audio.onloadedmetadata = () => done(audio.duration)
-    audio.onerror = () => done(0)
-    audio.src = url
-  })
 }
 
 const sizeText = (bytes: number) =>
@@ -645,19 +558,25 @@ function DropZone({
   )
 }
 
-/** A recording or a transcript from the device, by its extension, and the project it's filed under. */
+/** A recording or a transcript from the device, by its extension, for the bot to write up. */
 function UploadForm({ onAdded }: { onAdded: () => void }) {
   const go = useSwap()
-  const bot = useMeetingBot()
-  const { projects, project, pick } = usePickedProject()
-  const [picked, setPicked] = useState<
-    { file: File; seconds: number } | { file: File; text: string }
-  >()
-  const parsed = picked && "text" in picked ? parseTranscript(picked.text) : undefined
+  const active = useMeetingBot()
+  const bots = useMeetingBots()
+  const [botId, setBotId] = useState<string>()
+  const profile =
+    bots.find((b) => b.id === botId) ?? bots.find((b) => b.id === active?.id) ?? bots[0]
+  const projects = useMeetingProjects(profile)
+  const noAudio = useNoAudio(profile)
+  const [projectId, setProjectId] = useState(NO_PROJECT)
+  const [busy, setBusy] = useState(false)
+  const [picked, setPicked] = useState<{ file: File; text?: string }>()
+  const parsed = picked?.text !== undefined ? parseTranscript(picked.text) : undefined
+  const refused = Boolean(picked && !parsed && noAudio)
 
   const choose = async (file: File) => {
     if (!isTranscript(file)) {
-      setPicked({ file, seconds: await audioLength(file) })
+      setPicked({ file })
       return
     }
     if (file.size > MAX_TRANSCRIPT_BYTES) {
@@ -667,31 +586,24 @@ function UploadForm({ onAdded }: { onAdded: () => void }) {
     setPicked({ file, text: await file.text() })
   }
 
-  const ready = picked && (!parsed || parsed.lines.length > 0)
+  const ready = Boolean(profile && picked && !refused && (!parsed || parsed.lines.length > 0))
 
-  const add = () => {
-    if (!project || !picked || !ready) return
+  const add = async () => {
+    if (!profile || !picked || !ready || busy) return
     const title = baseName(picked.file.name)
-    const meeting = parsed
-      ? createMeeting({
-          title,
-          project,
-          bot,
-          source: "transcript",
-          fileName: picked.file.name,
-          duration: parsed.duration,
-          transcript: parsed.lines,
-        })
-      : createMeeting({
-          title,
-          project,
-          bot,
-          source: "upload",
-          fileName: picked.file.name,
-          duration: "seconds" in picked ? picked.seconds : 0,
-        })
-    onAdded()
-    go(`/meetings/${meeting.id}`)
+    const project = projects.some((p) => p.id === projectId) ? projectId : undefined
+    setBusy(true)
+    try {
+      const meeting = parsed
+        ? await addTranscript(profile, { title, projectId: project, lines: parsed.lines })
+        : await addRecording(profile, { title, projectId: project, file: picked.file })
+      onAdded()
+      go(`/meetings/${meeting.id}`)
+    } catch (error) {
+      toast.error(message(error, "Couldn't add the meeting."))
+    } finally {
+      setBusy(false)
+    }
   }
 
   const detail = !picked
@@ -703,62 +615,16 @@ function UploadForm({ onAdded }: { onAdded: () => void }) {
             `${parsed.timed ? "" : "about "}${length(parsed.duration)}`,
           ].join(" · ")
         : "No lines found"
-      : [
-          "seconds" in picked && picked.seconds ? length(picked.seconds) : null,
-          sizeText(picked.file.size),
-        ]
-          .filter(Boolean)
-          .join(" · ")
+      : sizeText(picked.file.size)
 
   return (
     <form
       className="flex flex-col gap-5 px-6"
       onSubmit={(event) => {
         event.preventDefault()
-        add()
+        void add()
       }}
     >
-      <DropZone
-        accept={`${RECORDING_TYPES},${TRANSCRIPT_TYPES}`}
-        icon={picked && "text" in picked ? FileTextIcon : FileAudioIcon}
-        label="Choose a file"
-        file={picked?.file.name}
-        detail={detail}
-        onFile={(file) => void choose(file)}
-      />
-
-      {project && (
-        <Field>
-          <FieldLabel htmlFor="meeting-project">Project</FieldLabel>
-          <ProjectSelect
-            id="meeting-project"
-            projects={projects}
-            value={project.id}
-            onChange={pick}
-          />
-        </Field>
-      )}
-
-      <Button type="submit" size="lg" className="h-11 rounded-full" disabled={!ready}>
-        Add
-      </Button>
-    </form>
-  )
-}
-
-/** The bot that will sit in, and the cards to pick another. */
-function BotChoice() {
-  const bot = useMeetingBot()
-  const bots = useMeetingBots()
-  const activeId = useLiveQuery(async () => (await getActiveProfile())?.id, [])
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-4">
-        <Bot id={bot.botId} className="size-16 shrink-0" />
-        <p className="min-w-0 flex-1 text-lg leading-snug font-semibold tracking-tight">
-          {readyLine(bot.botId)}
-        </p>
-      </div>
       {bots.length > 1 && (
         <div
           className="-mx-6 flex [scrollbar-width:none] gap-2 overflow-x-auto px-6"
@@ -766,16 +632,19 @@ function BotChoice() {
           aria-label="Bot"
         >
           {bots.map((option) => {
-            const active = option.id === activeId
+            const on = option.id === profile?.id
             return (
               <button
                 key={option.id}
                 type="button"
-                aria-pressed={active}
-                onClick={() => void setActiveProfile(option.id)}
+                aria-pressed={on}
+                onClick={() => {
+                  setBotId(option.id)
+                  setProjectId(NO_PROJECT)
+                }}
                 className={cn(
                   "flex min-h-11 w-20 shrink-0 flex-col items-center gap-1 rounded-3xl border px-2 py-2 text-xs font-medium transition-colors",
-                  active ? "border-primary bg-primary/10" : "hover:bg-muted",
+                  on ? "border-primary bg-primary/10" : "hover:bg-muted",
                 )}
               >
                 <Bot id={option.botId} className="size-10" />
@@ -785,19 +654,43 @@ function BotChoice() {
           })}
         </div>
       )}
-    </div>
+
+      <DropZone
+        accept={`${RECORDING_TYPES},${TRANSCRIPT_TYPES}`}
+        icon={parsed ? FileTextIcon : FileAudioIcon}
+        label="Choose a file"
+        file={picked?.file.name}
+        detail={detail}
+        onFile={(file) => void choose(file)}
+      />
+      {refused && <Banner>{noAudio}</Banner>}
+
+      {projects.length > 0 && (
+        <Field>
+          <FieldLabel htmlFor="meeting-project">Project</FieldLabel>
+          <ProjectSelect
+            id="meeting-project"
+            projects={projects}
+            value={projectId}
+            onChange={setProjectId}
+          />
+        </Field>
+      )}
+
+      <Button type="submit" size="lg" className="h-11 rounded-full" disabled={!ready || busy}>
+        Add
+      </Button>
+    </form>
   )
 }
 
-/** A new meeting: record one with the bot in the room, or upload a recording or transcript. */
+/** A new meeting: a recording or a transcript for the bot to write up. */
 function NewMeeting({
   open,
   onOpenChange,
-  onRecord,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onRecord: () => void
 }) {
   return (
     <Popup open={open} onOpenChange={onOpenChange}>
@@ -805,303 +698,9 @@ function NewMeeting({
         <PopupHeader className="pb-2">
           <PopupTitle>New meeting</PopupTitle>
         </PopupHeader>
-        <Tabs defaultValue="record">
-          <TabsList>
-            <TabsTrigger value="record">Record</TabsTrigger>
-            <TabsTrigger value="upload">Upload</TabsTrigger>
-          </TabsList>
-          <TabsContent value="record" className="flex flex-col gap-5 px-6 pt-5">
-            <BotChoice />
-            <Button
-              size="lg"
-              className="h-11 rounded-full"
-              onClick={() => {
-                onOpenChange(false)
-                onRecord()
-              }}
-            >
-              <MicIcon data-icon="inline-start" />
-              Start recording
-            </Button>
-          </TabsContent>
-          <TabsContent value="upload" className="pt-5">
-            <UploadForm onAdded={() => onOpenChange(false)} />
-          </TabsContent>
-        </Tabs>
+        <UploadForm onAdded={() => onOpenChange(false)} />
       </PopupContent>
     </Popup>
-  )
-}
-
-const defaultTitle = () =>
-  `Meeting at ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
-
-/** A level that moves while recording: a stand-in until the app hears the room. */
-function useLevel(live: boolean) {
-  const [level, setLevel] = useState(0)
-  useEffect(() => {
-    if (!live || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
-    const timer = window.setInterval(() => setLevel(Math.random()), 180)
-    return () => window.clearInterval(timer)
-  }, [live])
-  return live ? level : 0
-}
-
-/**
- * Recording a meeting, full screen: the bot listening, what it last heard, and moments marked as
- * they happen. Only mounted while it's open, so every recording starts fresh.
- */
-function Recorder({ onClose, onDone }: { onClose: () => void; onDone: (id: string) => void }) {
-  const bot = useMeetingBot()
-  const { projects, project, pick } = usePickedProject()
-  const [placeholder] = useState(defaultTitle)
-  const [title, setTitle] = useState("")
-  const [typed, setTyped] = useState("")
-  const [writing, setWriting] = useState(false)
-  const [marks, setMarks] = useState<Mark[]>([])
-  const [elapsed, setElapsed] = useState(0)
-  const [paused, setPaused] = useState(false)
-  const [confirming, setConfirming] = useState(false)
-  const level = useLevel(!paused)
-
-  useEffect(() => {
-    if (paused) return
-    const timer = window.setInterval(() => setElapsed((s) => s + 1), 1000)
-    return () => window.clearInterval(timer)
-  }, [paused])
-
-  const leave = useCallback(() => {
-    if (elapsed > 0) setConfirming(true)
-    else onClose()
-  }, [elapsed, onClose])
-  useEffect(() => setBackGuard(() => (leave(), true)), [leave])
-
-  const mark = (kind: MomentKind) => {
-    setMarks((current) => [...current, { kind, at: elapsed }])
-    toast(`${MOMENT_LOOK[kind].label} marked at ${clock(elapsed)}`)
-  }
-
-  const end = () => {
-    if (!project) return
-    const meeting = createMeeting({
-      title: title.trim() || placeholder,
-      project,
-      bot,
-      source: "recording",
-      duration: elapsed,
-      typed,
-      marks,
-    })
-    onDone(meeting.id)
-  }
-
-  const heard = heardAt(elapsed)
-
-  return (
-    <FullscreenPopup
-      open
-      onOpenChange={(open) => !open && leave()}
-      className="bg-radial-[at_50%_35%] from-primary/15 via-background via-60% to-background"
-    >
-      <Header
-        className="bg-transparent backdrop-blur-none"
-        leading={
-          <Button
-            variant="outline"
-            size="icon-lg"
-            className="size-11 shrink-0 rounded-full bg-background/70"
-            onClick={leave}
-            aria-label="Discard recording"
-          >
-            <XIcon />
-          </Button>
-        }
-        title={
-          <Input
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            placeholder={placeholder}
-            aria-label="Title"
-            autoComplete="off"
-            className="h-11 border-0 bg-transparent px-0 text-base font-semibold shadow-none focus-visible:ring-0 dark:bg-transparent"
-          />
-        }
-        actions={
-          project && (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    variant="outline"
-                    className="h-11 max-w-36 shrink-0 rounded-full bg-background/70"
-                    aria-label={`Project: ${project.name}`}
-                  />
-                }
-              >
-                <FolderIcon data-icon="inline-start" className="text-muted-foreground" />
-                <span className="truncate">{project.name}</span>
-                <ChevronDownIcon data-icon="inline-end" className="text-muted-foreground" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-48">
-                {projects.map((p) => (
-                  <DropdownMenuItem key={p.id} className="min-h-11" onClick={() => pick(p.id)}>
-                    <FolderIcon />
-                    <span className="flex-1">{p.name}</span>
-                    {p.id === project.id && <CheckIcon />}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )
-        }
-      />
-
-      <div className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col items-center justify-center gap-6 overflow-y-auto px-4">
-        <div className="relative flex size-52 items-center justify-center" aria-hidden>
-          {[0, 1, 2].map((ring) => (
-            <span
-              key={ring}
-              className="absolute inset-0 rounded-full border-2 border-primary transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none"
-              style={{
-                transform: `scale(${1 + ring * 0.24 + level * 0.06 * (ring + 1)})`,
-                opacity: paused ? 0.06 : 0.2 - ring * 0.06,
-              }}
-            />
-          ))}
-          <Bot
-            id={bot.botId}
-            animate={!paused}
-            className={cn(
-              "size-36 drop-shadow-xl transition-[opacity,filter]",
-              paused && "opacity-60 grayscale",
-            )}
-          />
-        </div>
-
-        <div className="flex flex-col items-center gap-1">
-          <span className="flex items-center gap-2 text-sm font-semibold text-primary">
-            <span
-              className={cn(
-                "size-2 rounded-full",
-                paused ? "bg-muted-foreground" : "bg-destructive motion-safe:animate-pulse",
-              )}
-            />
-            {paused ? <span className="text-muted-foreground">Paused</span> : "Recording"}
-          </span>
-          <span className="text-6xl font-semibold tracking-tight tabular-nums">
-            {clock(elapsed)}
-          </span>
-        </div>
-
-        <p className="min-h-20 max-w-md text-center" aria-live="polite">
-          {heard.before && (
-            <span className="mb-1 line-clamp-1 block text-sm text-muted-foreground/70">
-              {heard.before}
-            </span>
-          )}
-          <span className={cn("text-lg leading-snug", paused && "text-muted-foreground")}>
-            {heard.line}
-          </span>
-        </p>
-      </div>
-
-      <div
-        data-toast-above
-        className="mx-auto flex w-full max-w-md flex-col gap-5 px-4 pt-4 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
-      >
-        <div className="grid grid-cols-3 gap-3">
-          {(["decision", "action", "open"] as MomentKind[]).map((kind) => {
-            const count = marks.filter((m) => m.kind === kind).length
-            return (
-              <Button
-                key={kind}
-                type="button"
-                variant="outline"
-                onClick={() => mark(kind)}
-                className="relative h-20 flex-col gap-1.5 rounded-3xl bg-card text-sm font-semibold shadow-sm active:scale-95 motion-reduce:transition-none"
-              >
-                <MomentIcon kind={kind} className="size-5 text-foreground" />
-                {MOMENT_LOOK[kind].label}
-                {count > 0 && (
-                  <span
-                    className="absolute -top-2 -right-2 flex size-6 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground tabular-nums"
-                    aria-label={`${count} marked`}
-                  >
-                    {count}
-                  </span>
-                )}
-              </Button>
-            )
-          })}
-        </div>
-        <div className="flex items-center justify-center gap-3">
-          <Button
-            variant="secondary"
-            size="icon-lg"
-            className="size-14 rounded-full"
-            onClick={() => setPaused((p) => !p)}
-            aria-label={paused ? "Resume" : "Pause"}
-          >
-            {paused ? <PlayIcon className="size-6" /> : <PauseIcon className="size-6" />}
-          </Button>
-          <Button
-            size="lg"
-            className="h-14 flex-1 rounded-full bg-foreground text-base text-background hover:bg-foreground/90"
-            disabled={elapsed < 1 || !project}
-            onClick={end}
-          >
-            <SquareIcon data-icon="inline-start" className="fill-current" />
-            End meeting
-          </Button>
-          <Button
-            variant="secondary"
-            size="icon-lg"
-            className="relative size-14 rounded-full"
-            onClick={() => setWriting(true)}
-            aria-label="Notes"
-          >
-            <NotebookPenIcon className="size-6" />
-            {typed.trim() && (
-              <span className="absolute top-3 right-3 size-2 rounded-full bg-primary" />
-            )}
-          </Button>
-        </div>
-      </div>
-
-      <Popup open={writing} onOpenChange={setWriting}>
-        <PopupContent size="md">
-          <PopupHeader className="pb-2">
-            <PopupTitle>Your notes</PopupTitle>
-          </PopupHeader>
-          <div className="flex flex-col gap-4 px-6">
-            <Textarea
-              value={typed}
-              onChange={(event) => setTyped(event.target.value)}
-              aria-label="Your notes"
-              autoFocus
-              className="min-h-48 resize-none rounded-3xl px-4 py-3 text-base md:text-[15px]"
-            />
-            <Button size="lg" className="h-11 rounded-full" onClick={() => setWriting(false)}>
-              Done
-            </Button>
-          </div>
-        </PopupContent>
-      </Popup>
-
-      <AlertDialog open={confirming} onOpenChange={setConfirming}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Discard this recording?</AlertDialogTitle>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Keep recording</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={onClose}>
-              Discard
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </FullscreenPopup>
   )
 }
 
@@ -1113,11 +712,11 @@ function stepOf(meeting: Meeting) {
   const step =
     meeting.stage === "uploading"
       ? 0
-      : meeting.stage === "writing"
-        ? 2
-        : meeting.stage === "ready"
-          ? 3
-          : 1
+      : meeting.stage === "transcribing"
+        ? 1
+        : meeting.stage === "writing"
+          ? 2
+          : 3
   if (meeting.source !== "transcript") return step
   return meeting.stage === "ready" ? 2 : 1
 }
@@ -1126,7 +725,7 @@ function stepOf(meeting: Meeting) {
 function Steps({ meeting }: { meeting: Meeting }) {
   const at = stepOf(meeting)
   const steps = meeting.source === "transcript" ? TRANSCRIPT_STEPS : STEPS
-  const failed = meeting.stage === "failed"
+  const failed = isFailed(meeting)
   return (
     <ol className="flex w-full items-center gap-2" aria-label="Progress">
       {steps.map((step, index) => (
@@ -1164,15 +763,6 @@ function Steps({ meeting }: { meeting: Meeting }) {
   )
 }
 
-/** One meeting: the bot at work on it, then its recap, timeline and topics. */
-export function MeetingPage() {
-  return (
-    <Gate>
-      <MeetingView />
-    </Gate>
-  )
-}
-
 function Gone() {
   return (
     <div className="flex flex-1 items-center justify-center p-6 text-muted-foreground">
@@ -1181,37 +771,41 @@ function Gone() {
   )
 }
 
+/** One meeting: the bot at work on it, then its notes and transcript. */
+export function MeetingPage() {
+  const { id = "" } = useParams()
+  // A fresh view for each meeting: the tab and the line a note cited belong to one.
+  return (
+    <Gate>
+      <MeetingView key={id} />
+    </Gate>
+  )
+}
+
 function MeetingView() {
   const { id = "" } = useParams()
-  const meeting = useMeeting(id)
-  const navigate = useNavigate()
+  const { meeting } = useMeeting(id)
   const { up } = useNav()
   const beside = Boolean(useMeetingsPane())
   const now = useNow()
-  const scroller = useRef<HTMLDivElement>(null)
   const back = useCallback(() => up("/meetings"), [up])
+  const [tab, setTab] = useState("notes")
+  // The time a note cited, which the transcript tab opens at.
+  const [focus, setFocus] = useState<number>()
   // Beside the list a meeting is the top-level screen, so back leaves the app.
   useEffect(() => (beside ? undefined : setBackGuard(() => (back(), true))), [back, beside])
   useRememberOpened("meetings", meeting?.id)
 
-  const said = meeting?.chat?.length ?? 0
-  useEffect(() => {
-    const node = scroller.current
-    if (!said || !node) return
-    node.scrollTo({
-      top: node.scrollHeight,
-      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
-    })
-  }, [said])
-
   if (!meeting) return <Gone />
 
-  const open = (topic: Topic, at?: number) =>
-    navigate(`/meetings/${meeting.id}/topics/${topic.id}${at === undefined ? "" : `?at=${at}`}`)
+  const seek = (at: number) => {
+    setFocus(at)
+    setTab("transcript")
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div ref={scroller} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <Header
           leading={beside ? null : <BackButton onClick={back} label="Back to Meetings" />}
           title={
@@ -1219,20 +813,40 @@ function MeetingView() {
           }
           subtitle={[
             meeting.projectName,
-            length(meeting.duration),
+            meeting.duration > 0 && length(meeting.duration),
             formatRelative(meeting.createdAt, now),
-          ].join(" · ")}
+          ]
+            .filter(Boolean)
+            .join(" · ")}
           actions={<MeetingMenu meeting={meeting} onRemoved={back} />}
         />
         <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 pt-2 pb-8">
-          {meeting.stage === "ready" && meeting.recap ? (
-            <RecapView meeting={meeting} recap={meeting.recap} onOpen={open} />
+          {meeting.stage === "ready" && !isFailed(meeting) ? (
+            meeting.notes ? (
+              <Tabs value={tab} onValueChange={(value) => setTab(value as string)}>
+                <TabsList>
+                  <TabsTrigger value="notes">Notes</TabsTrigger>
+                  <TabsTrigger value="transcript">Transcript</TabsTrigger>
+                </TabsList>
+                <TabsContent value="notes" className="flex flex-col gap-6 pt-5">
+                  <NotesView meeting={meeting} notes={meeting.notes} onSeek={seek} />
+                </TabsContent>
+                <TabsContent value="transcript" className="pt-3">
+                  <TranscriptView lines={meeting.transcript} focus={focus} />
+                </TabsContent>
+              </Tabs>
+            ) : (
+              <div className="flex flex-col gap-3" aria-label="Loading">
+                <Skeleton className="h-5 w-3/4" />
+                <Skeleton className="h-5 w-full" />
+                <Skeleton className="h-32 w-full rounded-3xl" />
+              </div>
+            )
           ) : (
             <Working meeting={meeting} />
           )}
         </div>
       </div>
-      {meeting.stage === "ready" && <AskBar meeting={meeting} />}
     </div>
   )
 }
@@ -1255,18 +869,18 @@ function MeetingMenu({ meeting, onRemoved }: { meeting: Meeting; onRemoved: () =
           <EllipsisIcon />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-48">
-          {meeting.recap && (
+          {meeting.notes && (
             <DropdownMenuItem
               className="min-h-11"
               onClick={() =>
                 navigator.clipboard
                   .writeText(toMarkdown(meeting))
-                  .then(() => toast("Recap copied"))
-                  .catch(() => toast.error("Couldn't copy the recap."))
+                  .then(() => toast("Notes copied"))
+                  .catch(() => toast.error("Couldn't copy the notes."))
               }
             >
               <ClipboardCopyIcon />
-              Copy recap
+              Copy notes
             </DropdownMenuItem>
           )}
           <DropdownMenuItem
@@ -1288,10 +902,11 @@ function MeetingMenu({ meeting, onRemoved }: { meeting: Meeting; onRemoved: () =
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
-              onClick={() => {
-                removeMeeting(meeting.id)
-                onRemoved()
-              }}
+              onClick={() =>
+                removeMeeting(meeting)
+                  .then(onRemoved)
+                  .catch((error) => toast.error(message(error, "Couldn't delete the meeting.")))
+              }
             >
               Delete
             </AlertDialogAction>
@@ -1305,7 +920,7 @@ function MeetingMenu({ meeting, onRemoved }: { meeting: Meeting; onRemoved: () =
 /** The bot at work on a meeting while the host uploads, transcribes and writes it up. */
 function Working({ meeting }: { meeting: Meeting }) {
   const { progress } = meeting
-  const failed = meeting.stage === "failed"
+  const failed = isFailed(meeting)
   return (
     <>
       <div className="flex flex-col items-center gap-5 rounded-[2rem] bg-radial-[at_50%_30%] from-primary/12 to-transparent to-70% px-4 pt-8 pb-6">
@@ -1335,154 +950,44 @@ function Working({ meeting }: { meeting: Meeting }) {
       {failed && (
         <Banner
           action={
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-9 rounded-full"
-              onClick={() => retryMeeting(meeting)}
-            >
-              <RotateCcwIcon data-icon="inline-start" />
-              Try again
-            </Button>
+            meeting.error ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 rounded-full"
+                onClick={() =>
+                  retryMeeting(meeting).catch((error) =>
+                    toast.error(message(error, "Couldn't try again.")),
+                  )
+                }
+              >
+                <RotateCcwIcon data-icon="inline-start" />
+                Try again
+              </Button>
+            ) : undefined
           }
         >
-          {meeting.error}
+          {meeting.error ?? "The upload didn't finish, so the host never got the whole recording."}
         </Banner>
       )}
-      {meeting.typed && <Typed text={meeting.typed} />}
     </>
   )
 }
 
-/** What the user typed while recording, as they typed it. */
-function Typed({ text }: { text: string }) {
-  return (
-    <section className="flex flex-col gap-2">
-      <h2 className="px-1 text-sm font-medium text-muted-foreground">Your notes</h2>
-      <p className="rounded-3xl bg-muted px-4 py-3 whitespace-pre-wrap">{text}</p>
-    </section>
-  )
+const SECTION_LOOK: Record<NoteSection["key"], { icon: LucideIcon; color: string }> = {
+  keyPoints: { icon: ListIcon, color: "text-muted-foreground" },
+  decisions: { icon: DiamondIcon, color: "text-merged" },
+  actions: { icon: CheckIcon, color: "text-primary" },
+  questions: { icon: FlagIcon, color: "text-warning" },
 }
 
-/** "3 decisions, 2 to do and 1 open." */
-function tally(recap: Recap) {
-  const count = (kind: MomentKind) => recap.moments.filter((m) => m.kind === kind).length
-  const parts = [
-    count("decision") && `${count("decision")} decision${count("decision") === 1 ? "" : "s"}`,
-    count("action") && `${count("action")} to do`,
-    count("open") && `${count("open")} left open`,
-  ].filter(Boolean) as string[]
-  if (!parts.length) return ""
-  return `${parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0]}.`
-}
-
-function RecapView({
-  meeting,
-  recap,
-  onOpen,
-}: {
-  meeting: Meeting
-  recap: Recap
-  onOpen: (topic: Topic, at?: number) => void
-}) {
-  const seek = (at: number) => onOpen(topicAt(recap, at), at)
-  return (
-    <>
-      <div className="flex gap-3">
-        <BotAvatar botId={meeting.bot.botId} />
-        <div className="min-w-0 flex-1 pt-0.5">
-          <p className="text-sm font-semibold">{meeting.bot.name}</p>
-          <p className="text-[15px] leading-relaxed">
-            {recap.lead} {tally(recap)}
-          </p>
-        </div>
-      </div>
-
-      <Timeline meeting={meeting} recap={recap} onOpen={onOpen} />
-
-      <MomentsCard meeting={meeting} recap={recap} onSeek={seek} />
-
-      <section className="flex flex-col gap-1">
-        <h2 className="px-1 pb-1 text-sm font-medium text-muted-foreground">Topics</h2>
-        {recap.topics.map((topic, index) => (
-          <TopicRow
-            key={topic.id}
-            topic={topic}
-            index={index}
-            moments={recap.moments.filter(
-              (m) => m.at !== undefined && topicAt(recap, m.at).id === topic.id,
-            )}
-            onOpen={() => onOpen(topic)}
-          />
-        ))}
-      </section>
-
-      {meeting.typed && <Typed text={meeting.typed} />}
-
-      {meeting.chat?.length ? <Conversation meeting={meeting} /> : null}
-    </>
-  )
-}
-
-/** The meeting laid out in time: its topics as spans, its moments pinned where they happened. */
-function Timeline({
-  meeting,
-  recap,
-  onOpen,
-}: {
-  meeting: Meeting
-  recap: Recap
-  onOpen: (topic: Topic, at?: number) => void
-}) {
-  const total = Math.max(meeting.duration, recap.topics.at(-1)?.end ?? 0, 1)
-  const placed = recap.moments.filter((m) => m.at !== undefined)
-  return (
-    <section className="rounded-3xl border bg-card px-4 pt-3 pb-3" aria-label="Timeline">
-      <div className="relative h-12">
-        {placed.map((moment) => (
-          <button
-            key={moment.id}
-            type="button"
-            onClick={() => onOpen(topicAt(recap, moment.at!), moment.at)}
-            aria-label={`${moment.text}, at ${clock(moment.at!)}`}
-            className="absolute top-0 flex size-6 -translate-x-1/2 items-center justify-center rounded-full after:absolute after:-inset-2.5 hover:bg-muted"
-            style={{ left: `${(moment.at! / total) * 100}%` }}
-          >
-            <MomentIcon kind={moment.kind} className={cn("size-3.5", moment.marked && "size-4")} />
-          </button>
-        ))}
-        <div className="absolute inset-x-0 bottom-0 flex h-5 gap-0.5">
-          {recap.topics.map((topic, index) => (
-            <button
-              key={topic.id}
-              type="button"
-              onClick={() => onOpen(topic)}
-              aria-label={topic.title}
-              className={cn(
-                "h-full rounded-md transition-opacity hover:opacity-80",
-                tone(index).span,
-              )}
-              style={{ flexGrow: Math.max(1, topic.end - topic.start), flexBasis: 0 }}
-            />
-          ))}
-        </div>
-      </div>
-      <div className="mt-2 flex justify-between text-xs text-muted-foreground tabular-nums">
-        <span>0:00</span>
-        <span>{clock(total / 2)}</span>
-        <span>{clock(total)}</span>
-      </div>
-    </section>
-  )
-}
-
-/** A time a line cites, which opens its topic there. */
+/** A time a note cites, which opens the transcript there. */
 function Stamp({ at, onSeek }: { at: number; onSeek: (at: number) => void }) {
   return (
     <button
       type="button"
       onClick={() => onSeek(at)}
-      aria-label={`Play from ${clock(at)}`}
+      aria-label={`Show ${clock(at)} in the transcript`}
       className="relative ml-1.5 inline-flex h-6 items-center rounded-full bg-primary/10 px-2 align-middle text-xs font-medium text-primary tabular-nums transition-colors after:absolute after:-inset-x-1 after:-inset-y-2.5 hover:bg-primary/20 dark:bg-success/15 dark:text-success"
     >
       {clock(at)}
@@ -1490,311 +995,100 @@ function Stamp({ at, onSeek }: { at: number; onSeek: (at: number) => void }) {
   )
 }
 
-/** What was decided, what's to do (each can start a session) and what's left open. */
-function MomentsCard({
-  meeting,
-  recap,
-  onSeek,
-}: {
-  meeting: Meeting
-  recap: Recap
-  onSeek: (at: number) => void
-}) {
-  const kinds = (Object.keys(MOMENT_TITLES) as MomentKind[]).filter((kind) =>
-    recap.moments.some((m) => m.kind === kind),
-  )
-  if (!kinds.length) return null
+function Unsourced() {
   return (
-    <div className="divide-y overflow-hidden rounded-3xl border bg-card">
-      {kinds.map((kind) => (
-        <section key={kind} className="flex flex-col gap-2 px-4 py-3.5">
-          <h2
-            className={cn(
-              "flex items-center gap-1.5 text-xs font-bold tracking-wide uppercase",
-              MOMENT_LOOK[kind].color,
-            )}
-          >
-            <MomentIcon kind={kind} className="size-3.5" />
-            {MOMENT_TITLES[kind]}
-          </h2>
-          <ul className="flex flex-col gap-2">
-            {recap.moments
-              .filter((m) => m.kind === kind)
-              .map((moment) =>
-                kind === "action" ? (
-                  <ActionRow
-                    key={moment.id}
-                    meeting={meeting}
-                    moment={moment}
-                    started={meeting.started?.includes(moment.id) ?? false}
-                    onSeek={onSeek}
-                  />
-                ) : (
-                  <li key={moment.id} className="leading-relaxed">
-                    {moment.text}
-                    {moment.at !== undefined && <Stamp at={moment.at} onSeek={onSeek} />}
-                    {moment.marked && <Marked />}
-                  </li>
-                ),
-              )}
-          </ul>
-        </section>
-      ))}
-    </div>
-  )
-}
-
-function Marked() {
-  return (
-    <span className="ml-1.5 inline-flex h-6 items-center rounded-full bg-muted px-2 align-middle text-xs font-medium text-muted-foreground">
-      You marked
+    <span className="ml-1.5 inline-flex h-6 items-center rounded-full bg-warning/15 px-2 align-middle text-xs font-medium text-warning">
+      Unsourced
     </span>
   )
 }
 
-function ActionRow({
-  meeting,
-  moment,
-  started,
+function NoteRow({
+  item,
+  action,
   onSeek,
 }: {
-  meeting: Meeting
-  moment: Moment
-  started: boolean
+  item: NoteItem
+  action: boolean
   onSeek: (at: number) => void
 }) {
   return (
-    <li className="flex items-center gap-3 rounded-2xl bg-muted/70 py-2.5 pr-2.5 pl-3.5">
-      <span className="min-w-0 flex-1">
-        <span className="block leading-snug font-medium">{moment.text}</span>
-        <span className="mt-0.5 flex flex-wrap items-center text-xs text-muted-foreground">
-          {[moment.owner, moment.marked && "You marked"].filter(Boolean).join(" · ")}
-          {moment.at !== undefined && <Stamp at={moment.at} onSeek={onSeek} />}
-        </span>
-      </span>
-      {started ? (
-        <span className="flex h-9 shrink-0 items-center gap-1.5 px-2 text-sm font-medium text-primary dark:text-success">
-          <CheckIcon className="size-4" />
-          Started
-        </span>
-      ) : (
-        <Button
-          size="sm"
-          className="h-9 shrink-0 rounded-full"
-          aria-label={`Start a session: ${moment.text}`}
-          onClick={() => {
-            startAction(meeting.id, moment.id)
-            toast(`Started a session in ${meeting.projectName}`)
-          }}
-        >
-          <GitBranchIcon data-icon="inline-start" />
-          Start
-        </Button>
+    <li className="leading-relaxed">
+      {item.text}
+      {action && item.owner && (
+        <span className="ml-1.5 text-sm text-muted-foreground">({item.owner})</span>
       )}
+      {item.cites.map((at) => (
+        <Stamp key={at} at={at} onSeek={onSeek} />
+      ))}
+      {item.unsourced && <Unsourced />}
     </li>
   )
 }
 
-function TopicRow({
-  topic,
-  index,
-  moments,
-  onOpen,
+/** The summary, then the host's fixed sections; an empty one says so. */
+function NotesView({
+  meeting,
+  notes,
+  onSeek,
 }: {
-  topic: Topic
-  index: number
-  moments: Moment[]
-  onOpen: () => void
+  meeting: Meeting
+  notes: Notes
+  onSeek: (at: number) => void
 }) {
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="flex w-full gap-3 rounded-3xl px-3 py-3 text-left transition-colors hover:bg-muted"
-    >
-      <span className={cn("w-1.5 shrink-0 rounded-full", tone(index).dot)} />
-      <span className="flex min-w-0 flex-1 flex-col gap-1">
-        <span className="flex items-baseline gap-2">
-          <span className="min-w-0 flex-1 font-semibold">{topic.title}</span>
-          <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-            {clock(topic.start)} · {length(topic.end - topic.start)}
-          </span>
-        </span>
-        <span className="text-sm leading-relaxed text-muted-foreground">{topic.summary}</span>
-        {moments.length > 0 && (
-          <span className="mt-1 flex flex-wrap gap-1.5">
-            {moments.map((m) => (
-              <span
-                key={m.id}
-                className="inline-flex h-6 max-w-full items-center gap-1 rounded-lg bg-muted px-2 text-xs font-medium"
-              >
-                <MomentIcon kind={m.kind} className="size-3" />
-                <span className="truncate">{m.text}</span>
-              </span>
-            ))}
-          </span>
-        )}
-      </span>
-      <ChevronRightIcon className="mt-0.5 size-4 shrink-0 self-center text-muted-foreground" />
-    </button>
-  )
-}
-
-/** Questions asked about the meeting and the bot's answers. */
-function Conversation({ meeting }: { meeting: Meeting }) {
-  const chat = meeting.chat ?? []
-  const waiting = chat.at(-1)?.from === "user"
-  return (
-    <section className="flex flex-col gap-4 pt-2" aria-label="Questions">
-      {chat.map((line) =>
-        line.from === "user" ? (
-          <p
-            key={line.id}
-            className="max-w-[85%] self-end rounded-3xl rounded-br-lg bg-primary px-4 py-2.5 text-primary-foreground"
-          >
-            {line.text}
-          </p>
-        ) : (
-          <div key={line.id} className="flex gap-3">
-            <BotAvatar botId={meeting.bot.botId} />
-            <div className="min-w-0 flex-1 pt-0.5">
-              <p className="text-sm font-semibold">{meeting.bot.name}</p>
-              <p className="leading-relaxed whitespace-pre-wrap">{line.text}</p>
-            </div>
-          </div>
-        ),
-      )}
-      {waiting && (
-        <div className="flex gap-3">
-          <BotAvatar botId={meeting.bot.botId} />
-          <p className="pt-2 text-muted-foreground">Thinking…</p>
+    <>
+      <div className="flex gap-3">
+        <BotAvatar botId={meeting.bot.botId} />
+        <div className="min-w-0 flex-1 pt-0.5">
+          <p className="text-sm font-semibold">{meeting.bot.name}</p>
+          <p className="text-[15px] leading-relaxed">{notes.summary}</p>
         </div>
-      )}
-    </section>
-  )
-}
-
-const PROMPTS = [
-  { icon: MailIcon, text: "Write the follow-up" },
-  { icon: DiamondIcon, text: "What did we decide?" },
-  { icon: FlagIcon, text: "What's still open?" },
-]
-
-/** Asks the bot about the meeting, from a suggestion or in your own words. */
-function AskBar({ meeting }: { meeting: Meeting }) {
-  const [text, setText] = useState("")
-  const busy = meeting.chat?.at(-1)?.from === "user"
-  const ask = (question: string) => {
-    if (!question.trim() || busy) return
-    setText("")
-    void askMeeting(meeting.id, question.trim())
-  }
-  return (
-    <div
-      data-toast-above
-      className="border-t bg-background/90 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur"
-    >
-      <div className="mx-auto flex max-w-2xl flex-col gap-2.5 px-4">
-        {!meeting.chat?.length && (
-          <div className="-mx-4 flex [scrollbar-width:none] gap-2 overflow-x-auto px-4">
-            {PROMPTS.map(({ icon: Icon, text: prompt }) => (
-              <Button
-                key={prompt}
-                variant="outline"
-                className="h-9 shrink-0 rounded-full"
-                onClick={() => ask(prompt)}
-              >
-                <Icon data-icon="inline-start" className="text-primary" />
-                {prompt}
-              </Button>
-            ))}
-          </div>
-        )}
-        <form
-          className="flex items-center gap-2 rounded-full border bg-card py-1.5 pr-1.5 pl-1.5 shadow-sm"
-          onSubmit={(event) => {
-            event.preventDefault()
-            ask(text)
-          }}
-        >
-          <BotAvatar botId={meeting.bot.botId} />
-          <input
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-            placeholder={`Ask ${meeting.bot.name} about this meeting`}
-            aria-label="Ask about this meeting"
-            className="h-10 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground md:text-[15px]"
-          />
-          <Button
-            type="submit"
-            size="icon-lg"
-            className="size-10 shrink-0 rounded-full"
-            disabled={!text.trim() || busy}
-            aria-label="Ask"
-          >
-            {busy ? <SparklesIcon className="motion-safe:animate-pulse" /> : <ArrowUpIcon />}
-          </Button>
-        </form>
       </div>
-    </div>
+      <div className="divide-y overflow-hidden rounded-3xl border bg-card">
+        {NOTE_SECTIONS.map(({ key, title }) => {
+          const { icon: Icon, color } = SECTION_LOOK[key]
+          return (
+            <section key={key} className="flex flex-col gap-2 px-4 py-3.5">
+              <h2
+                className={cn(
+                  "flex items-center gap-1.5 text-xs font-bold tracking-wide uppercase",
+                  color,
+                )}
+              >
+                <Icon aria-hidden className="size-3.5" />
+                {title}
+              </h2>
+              {notes[key].length ? (
+                <ul className="flex flex-col gap-2">
+                  {notes[key].map((item) => (
+                    <NoteRow key={item.id} item={item} action={key === "actions"} onSeek={onSeek} />
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-muted-foreground">None recorded</p>
+              )}
+            </section>
+          )
+        })}
+      </div>
+    </>
   )
 }
 
-/** A topic of a meeting: its summary and quote, and its transcript following the playback. */
-export function TopicPage() {
-  return (
-    <Gate>
-      <TopicScreen />
-    </Gate>
-  )
-}
-
-function TopicScreen() {
-  const { id = "", topic: topicId = "" } = useParams()
-  const meeting = useMeeting(id)
-  const topic = meeting?.recap?.topics.find((t) => t.id === topicId)
-  useRememberOpened("meetings", meeting?.id)
-  if (!meeting?.recap || !topic) return <Gone />
-  // A fresh player for each topic.
-  return <TopicView key={topic.id} meeting={meeting} recap={meeting.recap} topic={topic} />
-}
-
-const SPEEDS = [1, 1.5, 2]
-
-function TopicView({ meeting, recap, topic }: { meeting: Meeting; recap: Recap; topic: Topic }) {
-  const navigate = useNavigate()
-  const { up } = useNav()
-  const [params] = useSearchParams()
-  const from = params.get("at")
-  const [position, setPosition] = useState(() => (from === null ? topic.start : Number(from)))
-  const [playing, setPlaying] = useState(false)
-  const [speed, setSpeed] = useState(1)
-  const [tab, setTab] = useState(from === null ? "summary" : "transcript")
+/** The transcript as the host heard it, the line a note cited marked. */
+function TranscriptView({
+  lines,
+  focus,
+}: {
+  lines: Meeting["transcript"]
+  focus: number | undefined
+}) {
   const rows = useRef(new Map<string, HTMLLIElement>())
-  const back = useCallback(() => up(`/meetings/${meeting.id}`), [up, meeting.id])
-  useEffect(() => setBackGuard(() => (back(), true)), [back])
-
-  const index = recap.topics.indexOf(topic)
-  const next = recap.topics[index + 1]
-  const running = playing && position < topic.end
-  const lines = meeting.transcript.filter((l) => l.at >= topic.start && l.at < topic.end)
-  const current = lines.findLast((l) => l.at <= position)
-  const inTopic = recap.moments.filter(
-    (m) => m.at !== undefined && m.at >= topic.start && m.at < topic.end,
-  )
-
-  useEffect(() => {
-    if (!running) return
-    const timer = window.setInterval(
-      () => setPosition((p) => Math.min(topic.end, p + 0.25 * speed)),
-      250,
-    )
-    return () => window.clearInterval(timer)
-  }, [running, speed, topic.end])
-
+  const current = focus === undefined ? undefined : lines.findLast((l) => l.at <= focus)
   const currentId = current?.id
   useEffect(() => {
-    if (!currentId || tab !== "transcript") return
+    if (!currentId) return
     const frame = requestAnimationFrame(() =>
       rows.current.get(currentId)?.scrollIntoView({
         block: "center",
@@ -1802,171 +1096,32 @@ function TopicView({ meeting, recap, topic }: { meeting: Meeting; recap: Recap; 
       }),
     )
     return () => cancelAnimationFrame(frame)
-  }, [currentId, tab])
-
-  const seek = (at: number) => {
-    setPosition(at)
-    setTab("transcript")
-  }
-
+  }, [currentId])
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-        <Header
-          leading={<BackButton onClick={back} label={`Back to ${meeting.title}`} />}
-          title={<h1 className="truncate text-base font-semibold tracking-tight">{topic.title}</h1>}
-          subtitle={`Topic ${index + 1} of ${recap.topics.length} · ${clock(topic.start)} to ${clock(topic.end)}`}
-        />
-        <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 pb-8">
-          <Tabs value={tab} onValueChange={(value) => setTab(value as string)}>
-            <TabsList className="sticky top-[calc(max(0.75rem,env(safe-area-inset-top))+3.5rem)] z-[5] -mx-4 w-auto bg-background px-4">
-              <TabsTrigger value="summary">Summary</TabsTrigger>
-              <TabsTrigger value="transcript">Transcript</TabsTrigger>
-            </TabsList>
-            <TabsContent value="summary" className="flex flex-col gap-5 pt-5">
-              <p className="text-[17px] leading-relaxed">{topic.summary}</p>
-              {topic.quote && (
-                <button
-                  type="button"
-                  onClick={() => seek(topic.quote!.at)}
-                  className="flex flex-col gap-1 border-l-[3px] border-merged py-0.5 pl-4 text-left"
-                >
-                  <span className="text-lg leading-snug">“{topic.quote.text}”</span>
-                  <span className="text-sm text-muted-foreground tabular-nums">
-                    {clock(topic.quote.at)}
-                  </span>
-                </button>
-              )}
-              {inTopic.length > 0 && (
-                <ul className="flex flex-col gap-2.5">
-                  {inTopic.map((m) => (
-                    <li key={m.id} className="flex gap-2.5 leading-relaxed">
-                      <MomentIcon kind={m.kind} className="mt-1" />
-                      <span className="min-w-0">
-                        {m.text}
-                        <Stamp at={m.at!} onSeek={seek} />
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </TabsContent>
-            <TabsContent value="transcript" className="pt-3">
-              <ol className="flex flex-col">
-                {lines.map((line) => (
-                  <li
-                    key={line.id}
-                    ref={(node) => {
-                      if (node) rows.current.set(line.id, node)
-                      else rows.current.delete(line.id)
-                    }}
-                    className={cn(
-                      "-mx-1 rounded-2xl transition-colors",
-                      line.id === current?.id && "bg-primary/10",
-                    )}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setPosition(line.at)}
-                      className="flex w-full gap-4 px-3 py-2.5 text-left"
-                    >
-                      <span
-                        className={cn(
-                          "w-12 shrink-0 pt-0.5 text-xs text-muted-foreground tabular-nums",
-                          line.id === current?.id && "font-semibold text-primary dark:text-success",
-                        )}
-                      >
-                        {clock(line.at)}
-                      </span>
-                      <span
-                        className={cn(
-                          "min-w-0 leading-relaxed",
-                          line.id !== current?.id && "text-muted-foreground",
-                        )}
-                      >
-                        {line.text}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ol>
-            </TabsContent>
-          </Tabs>
-          {next && (
-            <Button
-              variant="outline"
-              className="mt-8 h-12 justify-between rounded-full px-5"
-              onClick={() =>
-                navigate(`/meetings/${meeting.id}/topics/${next.id}`, {
-                  replace: true,
-                  state: { quiet: true },
-                })
-              }
-            >
-              <span className="truncate">Next: {next.title}</span>
-              <ChevronRightIcon data-icon="inline-end" />
-            </Button>
+    <ol className="flex flex-col">
+      {lines.map((line) => (
+        <li
+          key={line.id}
+          ref={(node) => {
+            if (node) rows.current.set(line.id, node)
+            else rows.current.delete(line.id)
+          }}
+          className={cn(
+            "-mx-1 flex gap-4 rounded-2xl px-4 py-2.5 transition-colors",
+            line.id === currentId && "bg-primary/10",
           )}
-        </div>
-      </div>
-
-      <div
-        data-toast-above
-        className="pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
-        aria-label="Player"
-      >
-        <div className="mx-auto max-w-2xl px-4">
-          <div className="flex flex-col gap-2 rounded-3xl border bg-card px-3 py-2.5 shadow-lg">
-            <div className="flex items-center gap-3">
-              <Button
-                size="icon-lg"
-                className="size-11 shrink-0 rounded-full bg-foreground text-background hover:bg-foreground/90"
-                aria-label={running ? "Pause" : "Play"}
-                onClick={() => {
-                  if (position >= topic.end) setPosition(topic.start)
-                  setPlaying(!running)
-                }}
-              >
-                {running ? (
-                  <PauseIcon className="fill-current" />
-                ) : (
-                  <PlayIcon className="ml-0.5 fill-current" />
-                )}
-              </Button>
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-sm font-semibold">{topic.title}</span>
-                <span className="text-xs text-muted-foreground tabular-nums">
-                  {clock(position)} / {clock(meeting.duration)}
-                </span>
-              </span>
-              <Button
-                variant="secondary"
-                className="h-11 min-w-14 shrink-0 rounded-full tabular-nums"
-                aria-label={`Speed ${speed}×`}
-                onClick={() => setSpeed(SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length])}
-              >
-                {speed}×
-              </Button>
-            </div>
-            <span className="flex h-1 gap-0.5" aria-hidden>
-              {recap.topics.map((t, i) => (
-                <span
-                  key={t.id}
-                  className="relative overflow-hidden rounded-full bg-muted"
-                  style={{ flexGrow: Math.max(1, t.end - t.start), flexBasis: 0 }}
-                >
-                  <span
-                    className={cn("absolute inset-y-0 left-0", tone(i).dot)}
-                    style={{
-                      width: `${Math.min(100, Math.max(0, ((position - t.start) / Math.max(1, t.end - t.start)) * 100))}%`,
-                    }}
-                  />
-                </span>
-              ))}
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
+        >
+          <span
+            className={cn(
+              "w-12 shrink-0 pt-0.5 text-xs text-muted-foreground tabular-nums",
+              line.id === currentId && "font-semibold text-primary dark:text-success",
+            )}
+          >
+            {clock(line.at)}
+          </span>
+          <span className="min-w-0 leading-relaxed">{line.text}</span>
+        </li>
+      ))}
+    </ol>
   )
 }

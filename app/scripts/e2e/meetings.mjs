@@ -1,9 +1,10 @@
-// Meetings, the Developer-gated design mock: the sidebar row only with the switch on, the sample
-// meetings by when they happened, searched and filtered by project, a recap's timeline and a time opening its topic at that line, an action
-// started and a question answered, a recording with a marked moment walked through to its recap,
-// an uploaded recording, a transcript file and a pasted one, a failed meeting tried again, and Delete. At phone,
-// tablet (dark) and laptop widths, with no errors in the console.
-import { app, assert, flow, pass, settled } from "./lib.mjs"
+// Meetings on the mock plugin, behind the Developer switch: a transcript file written up as notes, a
+// recording sent in chunks and followed through its stages to the notes (a bullet with no source
+// marked, an owner the transcript never names said so), a cited time opening the transcript at that
+// line, a recording that fails once and is tried again, an upload nothing finished, search, and
+// Delete. At phone, tablet (dark) and laptop widths (the meeting beside the list from 1280px), with
+// no errors in the console.
+import { app, assert, flow, pass } from "./lib.mjs"
 
 /** A second of silence as a WAV file, so the browser can read its length. */
 function silence() {
@@ -34,10 +35,6 @@ Welcome to the retro.
 What went well this sprint?
 `
 
-const PASTED = `[00:03] Alex: Should the free plan keep three bots?
-[00:21] Sam: Two, and a third once you link a host.
-[00:47] Alex: Fine, let's try that for the beta.`
-
 const errors = []
 for (const [width, dark] of [
   [390, false],
@@ -55,10 +52,20 @@ for (const [width, dark] of [
       const toList = async () => {
         if (width < 1280) await page.getByRole("button", { name: "Back to Meetings" }).click()
       }
-      const newMeeting = async (tab) => {
+      const addFile = async (file) => {
         await page.getByRole("button", { name: "New meeting" }).click()
-        await page.getByRole("tab", { name: tab }).click()
+        await page.locator("input[type=file]").first().setInputFiles(file)
       }
+      // Adding goes to the new meeting; beside the list another one may already be open.
+      const add = async () => {
+        const before = page.url()
+        await page.getByRole("button", { name: "Add", exact: true }).click()
+        await page.waitForURL((url) => /\/meetings\/m_/.test(url.pathname) && url.href !== before, {
+          timeout: 5_000,
+        })
+      }
+      // A meeting's row in the list (beside the list its title is also the open meeting's heading).
+      const row = (title) => page.locator("li").filter({ hasText: title })
       const setSwitch = (meetings) =>
         page.evaluate(async (meetings) => {
           const { db } = await import("/src/lib/db.ts")
@@ -72,199 +79,136 @@ for (const [width, dark] of [
       pass(`${width}: hidden until the Developer switch is on`)
 
       await setSwitch(true)
-      // A second bot, so the cards that switch between them show.
-      await page.evaluate(async () => {
-        const { db } = await import("/src/lib/db.ts")
-        const [first] = await db.profiles.toArray()
-        await db.profiles.put({ ...first, id: "e2e-second", name: "Second", botId: "penny" })
-      })
       await page.goto(`${app}/meetings`)
-      await page.getByText("Weekly product sync").waitFor({ timeout: 15_000 })
-      if (width >= 1280) {
-        // The third pane is never empty: the top meeting is open.
-        await page.waitForURL("**/meetings/m_*", { timeout: 5_000 })
-        pass(`${width}: the first meeting opens beside the list`)
-        await page.goto(`${app}/meetings`)
-        await page.waitForURL("**/meetings/m_*", { timeout: 5_000 })
-      }
-      for (const group of ["Waiting on you", "Today", "Earlier"])
-        assert.ok(await page.getByRole("heading", { name: group }).isVisible(), group)
+      await page.getByRole("button", { name: "New meeting" }).first().waitFor({ timeout: 15_000 })
       if (width >= 1024)
         assert.ok(await page.getByRole("link", { name: "Meetings" }).isVisible(), "sidebar row")
       await shot("1-list")
-      pass(`${width}: the sample meetings show by when they happened`)
 
-      // New meeting is one sheet with two tabs; the bot's cards switch the bot sitting in.
-      await newMeeting("Record")
-      await shot("1c-new")
-      const cards = page.getByRole("group", { name: "Bot" })
-      await cards.getByRole("button", { name: "Second", exact: false }).click()
-      await page.getByText(/Kindly start/).waitFor({ timeout: 5_000 })
-      await cards.getByRole("button", { name: "Second", pressed: true }).waitFor({ timeout: 5_000 })
-      pass(`${width}: a card switches the bot and its line`)
-      await page.getByRole("button", { name: "Start recording" }).waitFor()
-      await page.keyboard.press("Escape")
-      await page.getByRole("button", { name: "Start recording" }).waitFor({ state: "detached" })
-
-      // Search reads the write-ups too, and a project chip narrows the list.
-      const search = page.getByRole("searchbox", { name: "Search meetings" })
-      await search.fill("tagline")
-      await page.getByText("Weekly product sync").waitFor({ state: "detached", timeout: 2_000 })
-      assert.ok(await page.getByText("Landing page review").isVisible())
-      await shot("1b-search")
-      await search.fill("nothing like this")
-      await page.getByText("No meetings match.").waitFor()
-      await page.getByRole("button", { name: "Show all" }).click()
-      await page.getByText("Weekly product sync").waitFor()
-      const projects = page.getByRole("group", { name: "Projects" })
-      await projects.getByRole("button", { name: "Website" }).click()
-      await page.getByText("Weekly product sync").waitFor({ state: "detached", timeout: 2_000 })
-      assert.ok(await page.getByText("Design crit: onboarding").isVisible())
-      await projects.getByRole("button", { name: "All" }).click()
-      await page.getByText("Weekly product sync").waitFor()
-      pass(`${width}: search and the project chips narrow the list`)
-
-      // A ready meeting: the bot's recap, the timeline and what to do.
-      await page.getByText("Weekly product sync").click()
-      await page.getByRole("heading", { name: "To do" }).waitFor({ timeout: 5_000 })
-      assert.ok(await page.getByRole("region", { name: "Timeline" }).isVisible())
-      await shot("2-recap")
-      pass(`${width}: a ready meeting opens on its recap and timeline`)
-
-      // From 1280px the list stays beside the meeting, with the open one marked.
-      const listed = page.getByRole("searchbox", { name: "Search meetings" })
-      if (width >= 1280) {
-        assert.ok(await listed.isVisible(), "list stays beside the meeting")
-        assert.equal(
-          await page.locator("[aria-current]").filter({ hasText: "Weekly product sync" }).count(),
-          1,
-        )
-        assert.equal(await page.getByRole("button", { name: "Back to Meetings" }).count(), 0)
-        const box = await listed.boundingBox()
-        assert.ok(box && box.x > 300 && box.x < 400, "list is a pane right of the sidebar")
-        await shot("2b-panes")
-      } else assert.equal(await listed.count(), 0, "list is replaced below 1280px")
-      pass(
-        `${width}: ${width >= 1280 ? "the list stays beside the meeting" : "the meeting replaces the list"}`,
-      )
-
-      // A time opens its topic with the transcript at that line.
-      await page.getByRole("button", { name: "Play from 1:52" }).first().click()
-      await page.getByRole("heading", { name: "The beta date" }).waitFor({ timeout: 5_000 })
-      const line = page.getByText("Yes, I'll send the tester link today.")
-      await line.waitFor({ timeout: 5_000 })
-      assert.equal(
-        await page.getByRole("tab", { name: "Transcript" }).getAttribute("aria-selected"),
-        "true",
-      )
-      await page.getByRole("button", { name: "Play", exact: true }).click()
-      await page.getByRole("button", { name: "Pause", exact: true }).waitFor({ timeout: 2_000 })
-      await settled(page)
-      assert.ok(await line.isVisible())
-      await shot("3-topic")
-      await page.getByRole("tab", { name: "Summary" }).click()
-      await page.getByText("Firebase push still isn't tested on a real phone.").waitFor()
-      pass(`${width}: a time opens its topic, playing from that line`)
-
-      // Start an action, and ask the bot about the meeting.
-      await page.getByRole("button", { name: "Back to Weekly product sync" }).click()
-      await page
-        .getByRole("button", { name: "Start a session: Send the Android tester link" })
-        .click()
-      await page.getByText("Started", { exact: true }).waitFor({ timeout: 5_000 })
-      await page.getByRole("button", { name: "What did we decide?" }).click()
-      await page.getByText("You decided:").waitFor({ timeout: 5_000 })
-      await shot("4-ask")
-      pass(`${width}: an action starts and the bot answers a question`)
-
-      // Record: mark a moment, write a note, end it and follow it to its recap.
-      await toList()
-      const listUrl = page.url()
-      await newMeeting("Record")
-      await page.getByRole("button", { name: "Start recording" }).click()
-      await page.getByText("Recording", { exact: true }).waitFor({ timeout: 5_000 })
-      // A full-screen popup over the list, not a screen of its own.
-      assert.equal(page.url(), listUrl, "recording is a popup, not a route")
-      const cover = await page.getByRole("dialog").boundingBox()
-      assert.ok(cover && cover.width >= width - 1 && cover.height >= (width < 768 ? 843 : 899))
-      await page.getByRole("textbox", { name: "Title" }).fill("Plan for the import flow")
-      await page.waitForTimeout(1_200)
-      await page.getByRole("button", { name: "Decision" }).click()
-      await page.getByLabel("1 marked").waitFor()
-      await page.getByRole("button", { name: "Notes" }).click()
-      await page
-        .getByRole("textbox", { name: "Your notes" })
-        .fill("import first\nno speaker names yet")
-      await page.getByRole("button", { name: "Done" }).click()
-      await shot("5-recording")
-      await page.getByRole("button", { name: "Pause" }).click()
-      await page.getByText("Paused", { exact: true }).waitFor()
-      await page.getByRole("button", { name: "End meeting" }).click()
-      await page.waitForURL("**/meetings/m_*", { timeout: 5_000 })
-      await page
-        .getByText(/Uploading|Transcribing/)
-        .first()
-        .waitFor({ timeout: 5_000 })
-      await shot("6-progress")
-      await page.getByRole("heading", { name: "To do" }).waitFor({ timeout: 20_000 })
-      assert.ok(await page.getByText("You marked").first().isVisible(), "the marked moment")
-      pass(`${width}: a recording with a marked moment is written up`)
-
-      // An audio file from the device.
-      await toList()
-      await newMeeting("Upload")
-      await page
-        .locator("input[type=file]")
-        .first()
-        .setInputFiles({ name: "standup.wav", mimeType: "audio/wav", buffer: silence() })
-      await page.getByText("standup.wav").waitFor({ timeout: 5_000 })
-      assert.equal(await page.getByLabel("Title").count(), 0, "just a file and a project")
-      await shot("7-add")
-      await page.getByRole("button", { name: "Add", exact: true }).click()
-      await page.waitForURL("**/meetings/m_*", { timeout: 5_000 })
-      await page.getByRole("heading", { name: "To do" }).waitFor({ timeout: 20_000 })
-      pass(`${width}: an added file is written up as notes`)
-
-      // A transcript is told by its extension: one file and a project, no mode to pick.
-      await toList()
-      await newMeeting("Upload")
-      const picker = page.locator("input[type=file]").first()
-      await picker.setInputFiles({
-        name: "retro.srt",
+      // A transcript file skips the upload and the transcription: one file, no mode to pick.
+      const retro = `retro-${width}`
+      await addFile({
+        name: `${retro}.srt`,
         mimeType: "application/x-subrip",
         buffer: Buffer.from(SRT),
       })
       await page.getByText("2 lines · 9 s").waitFor({ timeout: 5_000 })
-      await picker.setInputFiles({
-        name: "pricing-chat.txt",
-        mimeType: "text/plain",
-        buffer: Buffer.from(PASTED),
-      })
-      await page.getByText("3 lines · 50 s").waitFor()
-      await shot("7b-transcript")
-      await page.getByRole("button", { name: "Add", exact: true }).click()
-      await page.waitForURL("**/meetings/m_*", { timeout: 5_000 })
-      await page.getByText("pricing-chat").first().waitFor()
-      // Beside the list, the earlier upload's row says Transcribing, so only look when it's alone.
+      await shot("2-add")
+      await add()
+      // Wait on this meeting's own words: the one that was open is still on screen while the pane slides.
+      await page.getByText("2 lines were said").waitFor({ timeout: 15_000 })
+      // Beside the list the other meetings' rows are on screen, so look only when it's alone.
       if (width < 1280)
         assert.equal(await page.getByText(/Uploading|Transcribing/).count(), 0, "no upload step")
-      await page.getByRole("heading", { name: "To do" }).waitFor({ timeout: 10_000 })
-      pass(`${width}: a transcript file skips straight to the write-up`)
+      for (const section of ["Decisions", "Action items", "Open questions"])
+        assert.ok(await page.getByRole("heading", { name: section }).isVisible(), section)
+      assert.equal(await page.getByText("None recorded").count(), 3, "empty sections say so")
+      pass(`${width}: a transcript file is written up as notes`)
 
-      // The failed sample, tried again.
+      // A cited time opens the transcript at that line.
+      await page.getByRole("button", { name: "Show 0:05 in the transcript" }).click()
+      assert.equal(
+        await page.getByRole("tab", { name: "Transcript" }).getAttribute("aria-selected"),
+        "true",
+      )
+      await page.getByText("What went well this sprint?").waitFor({ timeout: 5_000 })
+      pass(`${width}: a cited time opens the transcript`)
+
+      // A recording goes up in chunks and moves through the host's stages to its notes.
       await toList()
-      await page.getByText("Call with an early tester").click()
-      await page.getByRole("button", { name: "Try again" }).waitFor({ timeout: 5_000 })
-      await shot("8-failed")
+      const standup = `standup-${width}`
+      await addFile({ name: `${standup}.wav`, mimeType: "audio/wav", buffer: silence() })
+      await page.getByText(`${standup}.wav`).waitFor({ timeout: 5_000 })
+      await add()
+      await page
+        .getByText(/Uploading|Transcribing/)
+        .first()
+        .waitFor({ timeout: 5_000 })
+      await shot("3-progress")
+      await page.getByText("A finished run does not push by default.").waitFor({ timeout: 20_000 })
+      assert.ok(await page.getByText("Unsourced").first().isVisible(), "a bullet with no source")
+      assert.ok(await page.getByText("(Owner not stated)").first().isVisible(), "no invented owner")
+      await shot("4-notes")
+      pass(`${width}: a recording is sent, transcribed and written up`)
+
+      await page.getByRole("button", { name: "Show 0:21 in the transcript" }).first().click()
+      await page.getByText("On the beta, I think Thursday still works").waitFor({ timeout: 5_000 })
+      await shot("5-transcript")
+
+      // From 1280px the list stays beside the meeting, with the open one marked.
+      const search = page.getByRole("searchbox", { name: "Search meetings" })
+      if (width >= 1280) {
+        assert.ok(await search.isVisible(), "list stays beside the meeting")
+        assert.equal(await page.getByRole("button", { name: "Back to Meetings" }).count(), 0)
+        const box = await search.boundingBox()
+        assert.ok(box && box.x > 300 && box.x < 400, "list is a pane right of the sidebar")
+        await shot("5b-panes")
+      } else assert.equal(await search.count(), 0, "list is replaced below 1280px")
+      pass(
+        `${width}: ${width >= 1280 ? "the list stays beside the meeting" : "the meeting replaces the list"}`,
+      )
+
+      // A step that fails says why, and Try again carries on from it.
+      await toList()
+      const flaky = `flaky-${width}`
+      await addFile({ name: `${flaky}.wav`, mimeType: "audio/wav", buffer: silence() })
+      await add()
+      await page
+        .getByText("The host couldn't transcribe part 2 of 3.")
+        .first()
+        .waitFor({ timeout: 20_000 })
+      await shot("6-failed")
       await page.getByRole("button", { name: "Try again" }).click()
-      await page.getByRole("heading", { name: "To do" }).waitFor({ timeout: 20_000 })
+      await page.getByText("A finished run does not push by default.").waitFor({ timeout: 20_000 })
       pass(`${width}: a failed meeting runs again`)
 
+      // An upload nothing is finishing: the page that was sending it is gone.
+      await toList()
+      const stuck = `stuck-${width}`
+      await page.evaluate(
+        async ({ title }) => {
+          const { db } = await import("/src/lib/db.ts")
+          const { pluginRoot } = await import("/src/lib/hermes.ts")
+          const [bot] = await db.profiles.toArray()
+          await fetch(`${pluginRoot(bot.baseUrl)}/meetings`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${bot.apiKey}` },
+            body: JSON.stringify({ title, parts: 2 }),
+          })
+        },
+        { title: stuck },
+      )
+      // A page that comes back reads the list again.
+      await page.reload()
+      await page.getByText(stuck).first().click({ timeout: 15_000 })
+      await page
+        .getByText(/The upload didn't finish/)
+        .first()
+        .waitFor({ timeout: 5_000 })
+      assert.equal(await page.getByRole("button", { name: "Try again" }).count(), 0)
+      await shot("7-stalled")
+      pass(`${width}: an upload nothing finished says so and can only be deleted`)
+
+      // Search narrows the list by title.
+      await toList()
+      await search.fill(retro)
+      await row(stuck).waitFor({ state: "detached", timeout: 2_000 })
+      assert.ok(await row(retro).first().isVisible())
+      await search.fill("nothing like this")
+      await page.getByText("No meetings match.").waitFor()
+      await page.getByRole("button", { name: "Show all" }).click()
+      await row(stuck).first().waitFor()
+      pass(`${width}: search narrows the list`)
+
+      await row(stuck).first().click()
       await page.getByRole("button", { name: "Meeting options" }).click()
       await page.getByRole("menuitem", { name: "Delete" }).click()
       await page.getByRole("button", { name: "Delete" }).click()
-      await page.waitForURL("**/meetings", { timeout: 5_000 })
-      assert.equal(await page.getByText("Call with an early tester").count(), 0)
+      await page.waitForURL(
+        (url) => url.pathname === "/meetings" || /\/meetings\/m_/.test(url.pathname),
+        { timeout: 5_000 },
+      )
+      await row(stuck).waitFor({ state: "detached", timeout: 10_000 })
       pass(`${width}: Delete removes a meeting`)
     },
     { viewport: { width, height: width < 768 ? 844 : 900 }, dark },

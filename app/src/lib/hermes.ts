@@ -1505,6 +1505,78 @@ export async function researchAction(
   return (await response.json())?.mission as Record<string, unknown> | undefined
 }
 
+function meetingRoot(config: HermesConfig, id?: string) {
+  const root = `${pluginRoot(config.baseUrl)}/meetings`
+  return id ? `${root}/${encodeURIComponent(id)}` : root
+}
+
+/** The bot's meetings on the plugin (`meetings.py`), without their transcripts and notes. */
+export async function listMeetings(config: HermesConfig, signal?: AbortSignal) {
+  const response = await request(meetingRoot(config), { headers: headers(config), signal })
+  const body = await response.json()
+  return {
+    meetings: Array.isArray(body?.meetings) ? (body.meetings as Record<string, unknown>[]) : [],
+    unavailable: typeof body?.unavailable === "string" ? body.unavailable : null,
+  }
+}
+
+/** A meeting with its transcript and notes. */
+export async function getMeeting(config: HermesConfig, id: string, signal?: AbortSignal) {
+  const response = await request(meetingRoot(config, id), { headers: headers(config), signal })
+  return (await response.json())?.meeting as Record<string, unknown>
+}
+
+/** Starts a meeting: `parts` chunks of audio to send, or a transcript the app already parsed. */
+export async function createMeetingOnHost(
+  config: HermesConfig,
+  body: {
+    title: string
+    project_id?: string
+    parts?: number
+    transcript?: { at: number; text: string }[]
+  },
+) {
+  const response = await request(meetingRoot(config), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  return (await response.json())?.meeting as Record<string, unknown>
+}
+
+/** One byte chunk of the recording, in order; the host joins them and cuts the audio itself. */
+export async function uploadMeetingChunk(
+  config: HermesConfig,
+  id: string,
+  n: number,
+  chunk: Blob,
+  signal?: AbortSignal,
+) {
+  const response = await request(`${meetingRoot(config, id)}/parts?n=${n}`, {
+    method: "POST",
+    headers: headers(config, { "Content-Type": chunk.type || "application/octet-stream" }),
+    body: chunk,
+    signal,
+  })
+  return (await response.json())?.meeting as Record<string, unknown>
+}
+
+/** `finish` says every chunk is in, `retry` runs a failed step again and `remove` deletes it. */
+export async function meetingAction(
+  config: HermesConfig,
+  id: string,
+  action: "finish" | "retry" | "remove",
+) {
+  const response = await request(`${meetingRoot(config, id)}/${action}`, {
+    method: "POST",
+    headers: headers(config),
+    body: "{}",
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  return (await response.json())?.meeting as Record<string, unknown> | undefined
+}
+
 /** Whether the host lets Gots pick the model of a call (`info`'s `research.writers`): a Research
  * rewrite, a judge, a bot's triage model. */
 export async function getResearchWriters(config: HermesConfig) {
