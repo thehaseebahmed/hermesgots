@@ -322,7 +322,7 @@ The pass that tidies a finished phrase — fillers, punctuation, casing, numbers
 _Avoid_: polish, post-processing, formatting, correction
 
 **Vocabulary**:
-The words a bot's dictation leans towards: names, product words, jargon. It biases what the host hears and how a phrase is cleaned up.
+The words a bot's dictation leans towards: names, product words, jargon. A short list, the bot's own, edited on its Dictation tab and sent with every take; it biases what the host hears and how a phrase is cleaned up.
 _Avoid_: dictionary, custom words, hint, keyterms
 
 **Host speech model**:

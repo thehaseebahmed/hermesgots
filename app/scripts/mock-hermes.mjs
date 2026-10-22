@@ -2323,6 +2323,22 @@ const TAKE_ANSWERS = [
   { words: " feature", phrases: [] },
 ]
 const TAKE_TAIL = { words: "", phrases: [{ id: 2, text: "feature today." }], behind: false }
+/**
+ * The answers a take hears. A bot's words are heard as they were listed, in front of the sentence:
+ * a host biased by its prompt spells the name the way the bot does, and the phrase that closes
+ * around them carries them, since a closed phrase replaces the words that were open in front of it.
+ */
+function takeAnswers(vocabulary) {
+  const lead = vocabulary.join(" ")
+  if (!lead) return TAKE_ANSWERS
+  return TAKE_ANSWERS.map((answer, index) => ({
+    ...answer,
+    words: index === 0 ? [lead, answer.words].filter(Boolean).join(" ") : answer.words,
+    phrases: answer.phrases.map((phrase) =>
+      index === 2 ? { ...phrase, text: `${lead} ${phrase.text}` } : phrase,
+    ),
+  }))
+}
 const dictationTakes = new Map()
 const dictationSlices = []
 // The vocabulary each take was opened with, kept after the take ends so a flow can read what the
@@ -4000,7 +4016,11 @@ http
         if (DICTATION === "fail")
           return json(res, 502, { error: { message: "The host's speech model didn't load." } })
         const take = `dt_mock_${dictationTakes.size + 1}`
-        dictationTakes.set(take, { answers: TAKE_ANSWERS.length, vocabulary })
+        dictationTakes.set(take, {
+          answers: TAKE_ANSWERS.length,
+          vocabulary,
+          script: takeAnswers(vocabulary),
+        })
         dictationStarts.push({ take, vocabulary })
         return json(res, 200, {
           object: "memento.dictation_take",
@@ -4041,24 +4061,12 @@ http
         } finally {
           dictationBusy -= 1
         }
-        const answer = TAKE_ANSWERS[TAKE_ANSWERS.length - held.answers] ?? {
+        const answer = held.script[TAKE_ANSWERS.length - held.answers] ?? {
           words: "",
           phrases: [],
         }
-        // A host biased by its prompt hears a listed name spelled as it was listed: the take's
-        // first words are the bot's own, before the sentence it would otherwise have heard.
-        const words =
-          held.answers === TAKE_ANSWERS.length && held.vocabulary.length
-            ? [held.vocabulary.join(" "), answer.words].filter(Boolean).join(" ")
-            : answer.words
         held.answers = Math.max(0, held.answers - 1)
-        return json(res, 200, {
-          object: "memento.dictation_audio",
-          take,
-          behind: false,
-          ...answer,
-          words,
-        })
+        return json(res, 200, { object: "memento.dictation_audio", take, behind: false, ...answer })
       }
     }
     const attachmentRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/attachments$/.exec(
