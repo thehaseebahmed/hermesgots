@@ -2416,12 +2416,9 @@ export async function transcribeClip(
   return typeof text === "string" ? text : ""
 }
 
-/** What a started take answers: the host has its model, and this is the take to send audio to. */
+/** What a started take answers: this is the take to send audio to. */
 export interface DictationTakeStart {
   take: string
-  ready: boolean
-  model?: string
-  language?: string
 }
 
 /** A take's answer to a slice: what it newly committed, and whether it is behind. */
@@ -2471,12 +2468,7 @@ export async function startDictationTake(
   const body = await response.json()
   const take = typeof body?.take === "string" ? body.take : ""
   if (!take) throw new Error("The bot's host didn't start the dictation.")
-  return {
-    take,
-    ready: Boolean(body.ready),
-    model: typeof body.model === "string" ? body.model : undefined,
-    language: typeof body.language === "string" ? body.language : undefined,
-  }
+  return { take }
 }
 
 /** One slice of a take's audio; `pause` marks the slice a pause in the speech landed in. */
