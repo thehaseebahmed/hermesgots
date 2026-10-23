@@ -1608,7 +1608,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "The recording is too long.", 413)
         hint = dictation.clean_hint(request.query.get("hint"))
         context = dictation.clean_context(request.query.get("context"))
-        vocabulary = dictation.clean_vocabulary(request.query.getall("vocabulary", []))
+        # The bot's words go through raw: `transcribe` is the seam every caller shares, so it is the
+        # one owner of cleaning them, and cleaning them here as well only said so twice.
+        vocabulary = request.query.getall("vocabulary", [])
         async with dictating:
             try:
                 result = await asyncio.to_thread(
@@ -1644,12 +1646,15 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         vocabulary = dictation.clean_vocabulary(body.get("vocabulary"))
         cleanup_model = None
         try:
+            # One switch to the worker, with the pick's read and the gate inside it: this runs on
+            # the app's own shrinking deadline, and two hops spend part of it.
             path = store_path()
-            gate = await asyncio.to_thread(research.llm_gate)
-            cleanup_model = await asyncio.to_thread(speech.applied_cleanup, path, gate)
+            cleanup_model = await asyncio.to_thread(
+                lambda: speech.applied_cleanup(path, research.llm_gate())
+            )
         except Exception:
             # A pick this host can't read costs the tidying its model, never the words themselves.
-            logger.debug("memento: couldn't read the dictation cleanup model", exc_info=True)
+            logger.warning("memento: couldn't read the dictation cleanup model", exc_info=True)
         try:
             result = await asyncio.to_thread(
                 dictation_cleanup.finish, body.get("text"), vocabulary, model=cleanup_model

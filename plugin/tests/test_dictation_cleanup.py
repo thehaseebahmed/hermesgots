@@ -9,32 +9,11 @@ shorter — leaving the phrase exactly as it was heard. No model, no network.
 from __future__ import annotations
 
 import time
-import types
 import unittest
 from unittest import mock
 
 from plugin import dictation_cleanup
-
-
-class FakeLlm:
-
-    def __init__(self, *answers) -> None:
-        self.answers = list(answers)
-        self.calls = []
-
-    def complete_structured(self, **kwargs):
-        self.calls.append(kwargs)
-        answer = self.answers.pop(0)
-        if isinstance(answer, Exception):
-            raise answer
-        return types.SimpleNamespace(parsed=answer)
-
-
-def with_model(*answers):
-    llm = FakeLlm(*answers)
-    return llm, mock.patch.object(
-        dictation_cleanup, "ctx", types.SimpleNamespace(llm=llm)
-    )
+from plugin.tests._helpers import with_model
 
 
 def tidied(phrase, answer, vocabulary=(), **options):
@@ -98,6 +77,15 @@ class InstructionsTest(unittest.TestCase):
         self.assertEqual(call["purpose"], "memento.dictation.cleanup")
         self.assertEqual(call["temperature"], 0)
         self.assertEqual(call["json_schema"], dictation_cleanup.SCHEMA)
+
+    def test_a_phrase_s_answer_budget_stays_a_phrase_s(self) -> None:
+        # A phrase is short, and its budget is what keeps a model from writing an essay about it.
+        llm, patch = with_model({"text": "Hello there."})
+        with patch:
+            dictation_cleanup.Cleaner()("um hello there")
+        self.assertEqual(llm.calls[0]["max_tokens"], dictation_cleanup.PHRASE_TOKENS)
+        self.assertEqual(llm.calls[0]["system_prompt"], dictation_cleanup.SYSTEM)
+        self.assertEqual(llm.calls[0]["instructions"], dictation_cleanup.INSTRUCTIONS)
 
 
 class IsTidyingTest(unittest.TestCase):

@@ -6,12 +6,33 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import ModuleType
-from typing import Any, Dict, Iterable, Optional, Sequence
+from types import ModuleType, SimpleNamespace
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 from unittest.mock import MagicMock, patch
 
-from plugin import pipeline, workflows
+from plugin import dictation_cleanup, pipeline, workflows
 from plugin.tasks import READY_LABEL
+
+
+class FakeLlm:
+    """A model that answers the calls scripted for it, in order: an answer, or the error it raises."""
+
+    def __init__(self, *answers: Any) -> None:
+        self.answers = list(answers)
+        self.calls: List[Dict[str, Any]] = []
+
+    def complete_structured(self, **kwargs: Any) -> Any:
+        self.calls.append(kwargs)
+        answer = self.answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return SimpleNamespace(parsed=answer)
+
+
+def with_model(*answers: Any):
+    """The cleanup's model scripted with ``answers``: the fake, and the patch that plants it."""
+    llm = FakeLlm(*answers)
+    return llm, patch.object(dictation_cleanup, "ctx", SimpleNamespace(llm=llm))
 
 
 def staged(

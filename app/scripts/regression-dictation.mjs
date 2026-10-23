@@ -64,14 +64,27 @@ function speech() {
   return path
 }
 
-const clips = async () => (await (await fetch(`${mock}/__mock/dictation`)).json()).clips
-const cleanups = async () => (await (await fetch(`${mock}/__mock/dictation`)).json()).cleanups
+/** What the mock host was asked for: the clips it heard, and the cleanups it tidied them with. */
+async function mockDictation() {
+  const { clips, cleanups } = await (await fetch(`${mock}/__mock/dictation`)).json()
+  return { clips, cleanups }
+}
 
 const PHONE = { width: 390, height: 844 }
 
 /** The bot this device's one profile is, so a flow can open its editor's own screen. */
 const botId = (page) =>
   page.evaluate(async () => (await (await import("/src/lib/db.ts")).db.profiles.toArray())[0].id)
+
+/** Adds a word on the bot's Dictation tab, where the words its dictation is written with are kept. */
+async function addWord(page, word) {
+  await page.goto(`${app}/settings/bots/${await botId(page)}/dictation`)
+  const tab = page.locator("[data-bot-dictation]")
+  await tab.waitFor({ timeout: 15_000 })
+  await tab.locator("#vocabulary-word").fill(word)
+  await tab.getByRole("button", { name: "Add" }).click()
+  await tab.getByRole("button", { name: `Remove ${word}` }).waitFor({ timeout: 5000 })
+}
 
 /** Every recorder errors 1.2 s into its stretch, as an encoder that dies mid-take does. */
 const recorderErrors = () => {
@@ -200,20 +213,20 @@ try {
   {
     const talker = await launch(chromium, true, [...fakeMic.slice(1), `--use-file-for-fake-audio-capture=${speech()}`])
     const page = await open(mock, PHONE, "light", talker)
-    const before = (await clips()).length
+    const before = (await mockDictation()).clips.length
     await page.getByRole("button", { name: "Voice", exact: true }).click()
     await page.getByRole("button", { name: "Stop" }).waitFor()
-    for (let end = Date.now() + 30_000; (await clips()).length - before < 2;) {
+    for (let end = Date.now() + 30_000; (await mockDictation()).clips.length - before < 2;) {
       assert.ok(Date.now() < end, "two pieces were cut at the pauses before Stop")
       await page.waitForTimeout(100)
     }
-    const sent = (await clips()).slice(before)
+    const sent = (await mockDictation()).clips.slice(before)
     assert.equal(sent.length, 2, "two pieces sent before Stop")
     assert.equal(sent[1].context, HEARD, "the second piece carries on from what the host heard")
     await page.waitForTimeout(1500)
     await page.getByRole("button", { name: "Stop" }).click()
     await page.getByRole("button", { name: "Voice", exact: true }).waitFor()
-    const all = (await clips()).slice(before)
+    const all = (await mockDictation()).clips.slice(before)
     assert.equal(all.length, 3)
     // One cleanup tidies the joined text, so the filler comes out at its start and the two pieces
     // that carried on from it are read as the host heard them.
@@ -228,7 +241,7 @@ try {
   {
     const page = await open(mock, PHONE, "light", browser, false, recorderErrors)
     const mic = page.getByRole("button", { name: "Voice", exact: true })
-    const before = (await clips()).length
+    const before = (await mockDictation()).clips.length
     await mic.click()
     await page.getByRole("button", { name: "Stop" }).waitFor()
     await page.getByRole("button", { name: "Retry" }).waitFor({ timeout: FAILED_MS })
@@ -243,13 +256,13 @@ try {
     await shot(page, "phone-light-9-recorder-failed")
 
     await retried(page)
-    assert.equal((await clips()).length, before + 1, "one phrase reached the host")
+    assert.equal((await mockDictation()).clips.length, before + 1, "one phrase reached the host")
 
     await mic.click()
     await page.getByRole("button", { name: "Retry" }).waitFor({ timeout: FAILED_MS })
     await page.getByRole("button", { name: "Discard" }).click()
     await mic.waitFor()
-    assert.equal((await clips()).length, before + 1, "Discard sent nothing")
+    assert.equal((await mockDictation()).clips.length, before + 1, "Discard sent nothing")
     assert.equal(await page.getByRole("textbox").last().inputValue(), SENTENCE)
     assert.equal(
       await page.evaluate(async () => (await import("/src/lib/db.ts")).db.dictations.count()),
@@ -335,13 +348,8 @@ try {
   // host's speech model picked there is the model in play after one (plugin/speech.py, #295).
   {
     const page = await open(mock, PHONE)
-    await page.goto(`${app}/settings/bots/${await botId(page)}/dictation`)
     const tab = page.locator("[data-bot-dictation]")
-    const words = tab.getByRole("list", { name: "Words" })
-    await tab.waitFor({ timeout: 15_000 })
-    await tab.locator("#vocabulary-word").fill("Gots")
-    await tab.getByRole("button", { name: "Add" }).click()
-    await words.getByRole("button", { name: "Remove Gots" }).waitFor({ timeout: 5000 })
+    await addWord(page, "Gots")
     await shot(page, "phone-light-18-dictation-word")
 
     await page.reload()
@@ -384,16 +392,11 @@ try {
   // (#461, ADR 0038).
   {
     const page = await open(mock, PHONE)
-    await page.goto(`${app}/settings/bots/${await botId(page)}/dictation`)
-    const tab = page.locator("[data-bot-dictation]")
-    await tab.waitFor({ timeout: 15_000 })
-    await tab.locator("#vocabulary-word").fill("Gots")
-    await tab.getByRole("button", { name: "Add" }).click()
-    await tab.getByRole("button", { name: "Remove Gots" }).waitFor({ timeout: 5000 })
+    await addWord(page, "Gots")
 
     await page.goto(app)
     const composer = page.getByRole("textbox").last()
-    const before = { clips: (await clips()).length, cleanups: (await cleanups()).length }
+    const before = await mockDictation()
     await page.getByRole("button", { name: "Voice", exact: true }).click()
     await page.getByRole("button", { name: "Stop" }).waitFor()
     await page.waitForTimeout(1200)
@@ -402,10 +405,11 @@ try {
     assert.equal(await composer.inputValue(), SENTENCE, "the cleanup's tidied text is what lands")
     await shot(page, "phone-light-20-vocabulary")
 
-    const sent = (await clips()).slice(before.clips)
+    const after = await mockDictation()
+    const sent = after.clips.slice(before.clips.length)
     assert.equal(sent.length, 1)
     assert.deepEqual(sent[0].vocabulary, ["Gots"], "the bot's word rode on the clip")
-    const tidied = (await cleanups()).slice(before.cleanups)
+    const tidied = after.cleanups.slice(before.cleanups.length)
     assert.equal(tidied.length, 1, "one cleanup ended the dictation")
     assert.equal(tidied[0].text, HEARD, "the cleanup was asked for the words as they were heard")
     assert.deepEqual(tidied[0].vocabulary, ["Gots"], "…and carried the bot's word too")

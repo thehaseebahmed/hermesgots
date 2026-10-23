@@ -16,7 +16,7 @@ import unittest
 from unittest import mock
 
 from plugin import dictation, dictation_cleanup
-from plugin.tests.test_dictation_cleanup import with_model
+from plugin.tests._helpers import with_model
 
 
 def hermes(**overrides):
@@ -235,10 +235,16 @@ class CleanupTest(unittest.TestCase):
             [
                 {
                     "type": "text",
-                    "text": "Vocabulary: Gots\nPhrase: um Gots ships twenty five on the third of March",
+                    "text": "Vocabulary: Gots\nDictation: um Gots ships twenty five on the third of March",
                 }
             ],
         )
+        self.assertEqual(
+            llm.calls[0]["system_prompt"],
+            dictation_cleanup.WHOLE_TEXT_SYSTEM,
+            "the model is told it tidies a finished dictation, not one phrase of one",
+        )
+        self.assertEqual(llm.calls[0]["instructions"], dictation_cleanup.WHOLE_TEXT_INSTRUCTIONS)
 
     def test_a_whole_text_is_tidied_in_one_call(self) -> None:
         tidied = (
@@ -249,7 +255,22 @@ class CleanupTest(unittest.TestCase):
             answer = dictation_cleanup.finish(self.HEARD)
         self.assertEqual(answer["text"], tidied)
         self.assertEqual(len(llm.calls), 1)
-        self.assertEqual(llm.calls[0]["input"][0]["text"], f"Phrase: {self.HEARD}")
+        self.assertEqual(llm.calls[0]["input"][0]["text"], f"Dictation: {self.HEARD}")
+
+    def test_a_several_hundred_word_dictation_s_answer_is_not_discarded(self) -> None:
+        # A ten-minute take is several hundred words. A budget sized for one phrase truncates the
+        # answer, the length check then fails, and the whole dictation silently lands untidied.
+        said = [f"word{index}" for index in range(300)]
+        heard = "um " + " ".join(said)
+        tidied = " ".join(said) + "."
+        llm, patch = with_model({"text": tidied})
+        with patch:
+            answer = dictation_cleanup.finish(heard)
+        self.assertEqual(answer["text"], tidied)
+        self.assertTrue(answer["cleaned"], "the tidied dictation is what lands")
+        budget = llm.calls[0]["max_tokens"]
+        self.assertGreater(budget, dictation_cleanup.PHRASE_TOKENS, "the budget scales with it")
+        self.assertLessEqual(budget, dictation_cleanup.MAX_TOKENS, "and stays bounded")
 
     def test_the_whole_text_budget_outlasts_a_phrase_s(self) -> None:
         self.assertGreater(

@@ -8,13 +8,12 @@ import {
   connection,
   find,
   findAll,
-  json,
   mount,
   seedSettings,
   settle,
   until,
 } from "./component-kit.tsx"
-import { installFakeMedia } from "./fake-dictation.ts"
+import { dictationHost, installFakeMedia, type DictationHostOptions } from "./fake-dictation.ts"
 
 installFakeMedia()
 
@@ -23,38 +22,18 @@ const bot = connection("dictation-failing")
 const HEARD = "um Let's ship the dictation feature today."
 const SENTENCE = "Let's ship the dictation feature today."
 
-function host() {
-  let clips = 0
-  let cleanups = 0
-  const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = new URL(String(input)).pathname
-    const method = (init?.method ?? "GET").toUpperCase()
-    if (path.endsWith("/plugins/memento/info"))
-      return json({
-        name: "memento",
-        features: ["dictation"],
-        dictation: { ready: true, model: "base" },
-      })
-    if (path.endsWith("/dictation/warm"))
-      return json({ object: "memento.dictation_warm", warmed: true, ms: 0 })
-    if (path.endsWith("/dictation/cleanup") && method === "POST") {
-      cleanups += 1
-      return json({ object: "memento.dictation_cleanup", text: SENTENCE, cleaned: true, ms: 40 })
-    }
-    if (path.endsWith("/dictation") && method === "POST") {
-      clips += 1
-      // The host runs out of memory on the first clip, and hears the second.
-      if (clips === 1)
-        return json(
-          { error: { message: "Local transcription failed: the model ran out of memory." } },
-          502,
-        )
-      return json({ object: "memento.dictation", text: HEARD, ms: 700 })
-    }
-    return json({}, 404)
-  }
-  globalThis.fetch = fetch as unknown as typeof globalThis.fetch
-  return { clips: () => clips, cleanups: () => cleanups }
+/**
+ * The host this take meets: the first clip runs out of memory, and the second is heard — the
+ * failure Retry is offered for, and the words that land once it is.
+ */
+function host(options: DictationHostOptions = {}) {
+  return dictationHost({
+    heard: HEARD,
+    tidied: SENTENCE,
+    clipFails: [1],
+    clipError: "Local transcription failed: the model ran out of memory.",
+    ...options,
+  })
 }
 
 const composer = (draftKey: string, sent: { text: string; attachments: Attachment[] }[]) => (
@@ -122,12 +101,12 @@ test("a clip the batch route couldn't transcribe says so, and the recording is r
     const line = await failedWith("Local transcription failed: the model ran out of memory.")
     assert.match(line, /Try again, or type it instead/, "the line says what to try")
     assert.ok(button("Discard"), "its recording is still kept, so it discards")
-    assert.equal(hosted.cleanups(), 0, "a take with no words is not tidied")
+    assert.equal(hosted.cleanups().length, 0, "a take with no words is not tidied")
 
     await click(textButton("Retry"))
     await until(async () => field()?.value === SENTENCE, "the clip's words, tidied")
-    assert.equal(hosted.clips(), 2, "the recording was sent again")
-    assert.equal(hosted.cleanups(), 1, "and the take was tidied once it was heard")
+    assert.equal(hosted.clips().length, 2, "the recording was sent again")
+    assert.equal(hosted.cleanups().length, 1, "and the take was tidied once it was heard")
     await until(async () => Boolean(button("Voice")), "the bar back to idle")
   })
 })

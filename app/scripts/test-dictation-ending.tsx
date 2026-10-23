@@ -8,8 +8,6 @@ import {
   click,
   connection,
   findAll,
-  find,
-  json,
   mount,
   seedSettings,
   settle,
@@ -17,7 +15,7 @@ import {
   type,
   until,
 } from "./component-kit.tsx"
-import { installFakeMedia } from "./fake-dictation.ts"
+import { dictationHost, installFakeMedia, type DictationHostOptions } from "./fake-dictation.ts"
 
 installFakeMedia()
 
@@ -28,58 +26,9 @@ const HEARD = "um Let us ship the dictation"
 const TIDIED = "Let us ship the dictation."
 const VOCABULARY = ["Gots"]
 
-interface HostOptions {
-  /** A clip answered, a host that fails it, or one that never answers it. */
-  clip?: "ok" | "fail" | "hang"
-  /** How long the host takes over a clip. */
-  clipAfter?: number
-  /** The end cleanup: a tidied answer, a refusal, an answer in the wrong shape, or none at all. */
-  cleanup?: "ok" | "fail" | "junk" | "hang"
-  /** How long the cleanup takes, so a Cancel can land inside it. */
-  cleanupAfter?: number
-}
-
-function host({ clip = "ok", clipAfter = 50, cleanup = "ok", cleanupAfter = 0 }: HostOptions = {}) {
-  const calls: { method: string; path: string; body: unknown; vocabulary: string[] }[] = []
-  const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(String(input))
-    const method = (init?.method ?? "GET").toUpperCase()
-    calls.push({
-      method,
-      path: url.pathname,
-      body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
-      vocabulary: url.searchParams.getAll("vocabulary"),
-    })
-    if (url.pathname.endsWith("/plugins/memento/info"))
-      return json({
-        name: "memento",
-        features: ["dictation"],
-        dictation: { ready: true, model: "base" },
-      })
-    if (url.pathname.endsWith("/dictation/warm"))
-      return json({ object: "memento.dictation_warm", warmed: true, ms: 0 })
-    if (url.pathname.endsWith("/dictation/cleanup") && method === "POST") {
-      if (cleanup === "hang") return new Promise<Response>(() => {})
-      if (cleanupAfter) await new Promise((done) => setTimeout(done, cleanupAfter))
-      if (cleanup === "fail")
-        return json({ error: { message: "Couldn't tidy the dictation." } }, 502)
-      if (cleanup === "junk") return json({ object: "memento.dictation_cleanup", text: 42 })
-      return json({ object: "memento.dictation_cleanup", text: TIDIED, cleaned: true, ms: 900 })
-    }
-    if (url.pathname.endsWith("/dictation") && method === "POST") {
-      if (clip === "hang") return new Promise<Response>(() => {})
-      if (clipAfter) await new Promise((done) => setTimeout(done, clipAfter))
-      if (clip === "fail") return json({ error: { message: "Local transcription failed." } }, 502)
-      return json({ object: "memento.dictation", text: HEARD, ms: 50 })
-    }
-    return json({}, 404)
-  }
-  globalThis.fetch = fetch as unknown as typeof globalThis.fetch
-  return {
-    calls,
-    clips: () => calls.filter((call) => call.path.endsWith("/dictation")),
-    cleanups: () => calls.filter((call) => call.path.endsWith("/dictation/cleanup")),
-  }
+/** This take's host: the words it hears and the tidied words it answers with. */
+function host(options: DictationHostOptions = {}) {
+  return dictationHost({ heard: HEARD, tidied: TIDIED, ...options })
 }
 
 const composer = (draftKey: string, sent: { text: string; attachments: Attachment[] }[]) => (
@@ -116,15 +65,6 @@ async function openTake(scope: ParentNode = document) {
   await until(async () => Boolean(bar(scope)), "the bar")
   // The fake recorder's first slice is a second in: without it the take has nothing to send.
   await new Promise((done) => setTimeout(done, 1200))
-}
-
-/** A wait longer than the take's own, for the case where the take spends all of it. */
-async function within(ms: number, check: () => Promise<boolean>, what: string) {
-  for (let end = Date.now() + ms; Date.now() < end; ) {
-    if (await check()) return
-    await new Promise((done) => setTimeout(done, 10))
-  }
-  assert.fail(`waited for ${what}`)
 }
 
 async function reset(...keys: string[]) {
@@ -254,7 +194,7 @@ test("a cleanup that hangs lands the words as the host heard them, inside the wa
     const started = Date.now()
 
     await click(button("Send"))
-    await within(SEND_WAIT_MS + 3000, async () => sent.length === 1, "the message sent")
+    await until(async () => sent.length === 1, "the message sent", SEND_WAIT_MS + 3000)
     const waited = Date.now() - started
     assert.equal(sent[0].text, HEARD, "the raw words are the fallback")
     assert.equal(hosted.cleanups().length, 1, "the cleanup was still asked for")
@@ -273,7 +213,7 @@ test("a clip the host never answers gives the composer back inside the wait", as
     const started = Date.now()
 
     await click(button("Send"))
-    await within(SEND_WAIT_MS + 3000, async () => Boolean(field()), "the composer back")
+    await until(async () => Boolean(field()), "the composer back", SEND_WAIT_MS + 3000)
     const waited = Date.now() - started
     assert.equal(field()?.value, "Before", "nothing was heard, so nothing lands")
     assert.equal(hosted.cleanups().length, 0, "a take with no words is not tidied")

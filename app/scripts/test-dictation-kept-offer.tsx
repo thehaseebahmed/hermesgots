@@ -9,12 +9,12 @@ import {
   connection,
   find,
   findAll,
-  json,
   mount,
   seedSettings,
   text,
   until,
 } from "./component-kit.tsx"
+import { dictationHost } from "./fake-dictation.ts"
 
 const CHAT = "c:chat-1"
 const DRAFT = "Before after"
@@ -22,25 +22,8 @@ const CARET = 7
 
 const config = connection("kept-take")
 
-function host() {
-  const clips: Blob[] = []
-  const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = new URL(String(input)).pathname
-    if (path.endsWith("/api/plugins/memento/info"))
-      return json({
-        name: "memento",
-        features: ["dictation"],
-        dictation: { ready: true, model: "base" },
-      })
-    if (path.endsWith("/api/plugins/memento/dictation") && init?.method === "POST") {
-      clips.push(init.body as Blob)
-      return json({ object: "memento.dictation", text: "hello there", ms: 700 })
-    }
-    return json({}, 404)
-  }
-  globalThis.fetch = fetch as unknown as typeof globalThis.fetch
-  return clips
-}
+/** The host a restored take asks: the words it hears, and nothing else it needs. */
+const host = () => dictationHost({ heard: "hello there" })
 
 async function seed(name: string, patch: Partial<SavedDictation> = {}) {
   await seedSettings()
@@ -82,15 +65,19 @@ const field = () => (find("textarea") as HTMLTextAreaElement | null)?.value
 
 test("a take the app was killed in is offered, and its text lands where it began", async () => {
   await seed("offered")
-  const clips = host()
+  const hosted = host()
   await mount(composer, async () => {
     assert.match(text(), /hasn't been transcribed yet/, "the bar offers the take")
     assert.equal(find("textarea"), null, "the bar takes the composer's place")
 
     await click(button("Retry"))
     await until(async () => field() === `Before hello there after`, "the words in the draft")
-    assert.equal(clips.length, 1, "one clip asked for")
-    assert.equal(await clips[0].text(), "first second", "the slices went as one recording")
+    assert.equal(hosted.clips().length, 1, "one clip asked for")
+    assert.equal(
+      await (hosted.clips()[0].body as Blob).text(),
+      "first second",
+      "the slices went as one recording",
+    )
     assert.equal(await db.dictations.count(), 0, "its text is in, so nothing is kept")
   })
 })
@@ -102,23 +89,27 @@ test("a take with its words already had is asked for only for the audio left", a
       { blob: new Blob(["second"], { type: "audio/webm" }), text: null },
     ],
   })
-  const clips = host()
+  const hosted = host()
   await mount(composer, async () => {
     await click(button("Retry"))
     await until(async () => field() === `Before said already hello there after`, "the words")
-    assert.equal(await clips[0].text(), "second", "only the piece without text is sent")
+    assert.equal(
+      await (hosted.clips()[0].body as Blob).text(),
+      "second",
+      "only the piece without text is sent",
+    )
   })
 })
 
 test("discarding a kept take removes it, and leaves the draft as it was", async () => {
   await seed("discarded")
-  const clips = host()
+  const hosted = host()
   await mount(composer, async () => {
     assert.match(text(), /hasn't been transcribed yet/)
     await click(find('[aria-label="Discard"]'))
     await until(async () => (await db.dictations.count()) === 0, "the take gone from the device")
     assert.equal(field(), DRAFT, "the draft is untouched")
-    assert.equal(clips.length, 0, "nothing was sent")
+    assert.equal(hosted.clips().length, 0, "nothing was sent")
   })
 })
 

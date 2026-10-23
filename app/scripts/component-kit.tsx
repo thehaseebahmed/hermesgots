@@ -127,8 +127,9 @@ export async function click(element: Element | null) {
   await settle()
 }
 
-export async function until(check: () => Promise<boolean>, what: string) {
-  for (let i = 0; i < 500; i += 1) {
+/** Polls `check` until it holds, and fails the test after `ms` — longer than the app's own wait. */
+export async function until(check: () => Promise<boolean>, what: string, ms = 5000) {
+  for (const end = Date.now() + ms; Date.now() < end; ) {
     if (await check()) return
     await new Promise((resolve) => setTimeout(resolve, 10))
   }

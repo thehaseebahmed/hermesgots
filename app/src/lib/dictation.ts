@@ -93,6 +93,11 @@ const TRANSCRIBE_MS = 120_000
  * Retry, which has nothing else to be bounded by.
  */
 const TIDY_MS = 12_000
+/**
+ * The least of a wait worth spending on a cleanup: below this the model call would be fired only
+ * to be discarded when the wait runs out, so the take lands the words as they were heard instead.
+ */
+const MIN_TIDY_MS = 1000
 const TYPES = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4", "audio/webm"]
 export const BARS = 32
 export const SAMPLE_MS = 50
@@ -229,6 +234,10 @@ export function joinText(...parts: string[]) {
     .join(" ")
 }
 
+/** A take's words as they stand: every piece's text so far, joined. */
+const takeText = (pieces: DictationPiece[]) =>
+  joinText(...pieces.map((piece) => piece.text ?? ""))
+
 /**
  * A promise given at most `ms` to resolve: what it answers, or undefined when the wait is up. A
  * take's ending is bounded by this rather than by the host answering, so a wedged host can't hold
@@ -286,7 +295,7 @@ export async function keptText(
   vocabulary: string[] = [],
   signal?: AbortSignal,
 ): Promise<string> {
-  const before = joinText(...pieces.map((piece) => piece.text ?? ""))
+  const before = takeText(pieces)
   const audio = keptAudio(pieces)
   if (!audio) return before
   const controller = new AbortController()
@@ -362,7 +371,7 @@ export function useChunkedDictation(
   config: HermesConfig,
   hint: string,
   key?: string,
-  vocabulary?: string[],
+  vocabulary: string[] = [],
   onCommitted?: (text: string) => void,
 ) {
   const [status, setStatus] = useState<DictationStatus>("idle")
@@ -393,7 +402,7 @@ export function useChunkedDictation(
         const index = current.pieces.findIndex((piece) => piece.text === null)
         if (index < 0) return true
         const piece = current.pieces[index]
-        const before = joinText(...current.pieces.slice(0, index).map((done) => done.text ?? ""))
+        const before = takeText(current.pieces.slice(0, index))
         const controller = new AbortController()
         current.upload = controller
         const timer = window.setTimeout(() => controller.abort(), TRANSCRIBE_MS)
@@ -404,7 +413,7 @@ export function useChunkedDictation(
             piece.blob,
             hint,
             before,
-            vocabulary ?? [],
+            vocabulary,
             controller.signal,
           )
           if (current.upload !== controller) return false
@@ -616,23 +625,24 @@ export function useChunkedDictation(
   /**
    * The take's text tidied whole by the host, inside the same wait as its pieces (ADR 0038).
    *
-   * A cleanup is not a piece: a refusal, a host without the route, an answer that isn't text or a
-   * wait that runs out lands the words as the host heard them, and never fails a take. The request
-   * is the take's own `upload`, so a Cancel lets it go too.
+   * `budgetMs` is what is left of the caller's wait, resolved to a budget by the caller. Under
+   * `MIN_TIDY_MS` there is no room for a model call — it would be fired only to be discarded, and
+   * the host would run on past the client's abort — so the words land as they were heard. A
+   * refusal, a host without the route, an answer that isn't text or a wait that runs out lands
+   * them too, and never fails a take. The request is the take's own `upload`, so a Cancel lets it
+   * go as well.
    */
-  const tidy = useCallback(async (current: Session, text: string, deadline?: number) => {
-    if (!text) return text
-    const budget = deadline === undefined ? TIDY_MS : Math.max(0, deadline - Date.now())
-    if (budget === 0) return text
+  const tidy = useCallback(async (current: Session, text: string, budgetMs = TIDY_MS) => {
+    if (!text || budgetMs < MIN_TIDY_MS) return text
     const controller = new AbortController()
     current.upload = controller
     const asking = tidyDictation(
       latest.current.config,
       text,
-      latest.current.vocabulary ?? [],
+      latest.current.vocabulary,
       controller.signal,
     ).catch(() => null)
-    const tidied = await within(asking, budget)
+    const tidied = await within(asking, budgetMs)
     if (current.upload !== controller) return text
     current.upload = null
     // The wait ran out, not the host's answer: the request is let go rather than landing late.
@@ -640,14 +650,26 @@ export function useChunkedDictation(
     return tidied ?? text
   }, [])
 
+  /** The take is over: its words land in the composer, it keeps nothing and the bar idles again. */
+  const land = useCallback(
+    (current: Session, text: string) => {
+      forget(current)
+      session.current = null
+      showIdle()
+      return text
+    },
+    [showIdle],
+  )
+
   /**
    * Waits for every piece's text and the cleanup that tidies it: the whole of it, or null with the
    * recording kept for `retry`.
    *
-   * `deadline` is when the caller stops waiting — a Send's short wait, a Stop's longer one — and it
-   * is one deadline for both: the pieces still with the host first, then the cleanup, and whatever
-   * is left of it. A wait that runs out abandons the take rather than holding the composer: the
-   * pieces whose text is in are the take, and the ones still with the host are let go (ADR 0038).
+   * `deadline` is when the caller stops waiting — a Send's short wait, a Stop's longer one — and
+   * it is one deadline for both: the pieces still with the host first, then the cleanup, and
+   * whatever is left of it, which is the budget the cleanup is resolved to. A wait that runs out
+   * abandons the take rather than holding the composer: the pieces whose text is in are the take,
+   * and the ones still with the host are let go (ADR 0038).
    */
   const settle = useCallback(
     async (current: Session, deadline?: number) => {
@@ -662,26 +684,16 @@ export function useChunkedDictation(
           : await within(draining, Math.max(0, deadline - Date.now()))
       if (session.current !== current) return null
       if (done) {
-        const text = await tidy(
-          current,
-          joinText(...current.pieces.map((piece) => piece.text ?? "")),
-          deadline,
-        )
+        const budget = deadline === undefined ? TIDY_MS : deadline - Date.now()
+        const text = await tidy(current, takeText(current.pieces), budget)
         if (session.current !== current) return null
-        forget(current)
-        session.current = null
-        showIdle()
-        return text
+        return land(current, text)
       }
       if (done === undefined && deadline !== undefined) {
         // The wait is up, not the host's answer: what has its text is the take, and a piece still
         // being heard is let go rather than holding the field. There is no room left to tidy it.
         stopUpload(current)
-        const text = joinText(...current.pieces.map((piece) => piece.text ?? ""))
-        forget(current)
-        session.current = null
-        showIdle()
-        return text
+        return land(current, takeText(current.pieces))
       }
       const heard = current.pieces.filter((piece) => piece.text !== null)
       if (heard.length) {
@@ -695,7 +707,7 @@ export function useChunkedDictation(
       void readDictationInfo(latest.current.config, true)
       return null
     },
-    [drain, showFailure, showIdle, tidy],
+    [drain, land, showFailure, tidy],
   )
 
   const replay = useCallback(
@@ -710,7 +722,7 @@ export function useChunkedDictation(
           latest.current.config,
           current.pieces,
           latest.current.hint,
-          latest.current.vocabulary ?? [],
+          latest.current.vocabulary,
           controller.signal,
         )
         if (current.upload !== controller) return null
