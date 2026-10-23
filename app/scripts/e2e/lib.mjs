@@ -342,6 +342,12 @@ function helpers(page) {
               length: last.content.length,
               content: last.content,
               reasoning: last.reasoning ?? "",
+              // A reply's thinking in runs, each with the span this device measured for it.
+              runs: (last.reasoningRuns ?? []).map((run) => ({
+                text: run.text,
+                afterToolId: run.afterToolId ?? null,
+                spanMs: run.spanMs ?? null,
+              })),
               tools: last.tools?.length ?? 0,
             }
           : null

@@ -65,8 +65,8 @@ Send these phrases in a chat message to trigger specific mock behaviors:
 | `plan` | Enters plan mode: agent reads, asks clarify questions, writes structured plan, leaves it pending |
 | `clean` / `delete` | Triggers approval request for `find /var/log -name '*.log.*' -mtime +90 -delete` |
 | `long` / `slow` | 20-step slow reply (1s per step) — tests stream resume after disconnect |
-| `think out loud` | Four paced reasoning pieces before the answer: one `reasoning.available` event per piece on a run, one `reasoning_content` delta per piece on a completion |
-| `think out loud` + `stall` | The same four pieces, then a 2.5s hold after the last with nothing else on the wire, so a client's thinking line is the only thing on it |
+| `think out loud` | Four paced reasoning pieces before the answer, with a `du -sh /var/log` call between the second and the third (recorded in the transcript with its result): one `reasoning.available` event per piece on a run, one `reasoning_content` delta per piece on a completion — so the thinking either side of the call is a run of its own |
+| `think out loud` + `stall` | The same four pieces and call, then a 2.5s hold after the last with nothing else on the wire, so a client's thinking rows are the only thing on it |
 | `draw the interface` | A reply carrying an interface: an `openui-lang` block with `# id: sales`, the receipt under it (long enough to scroll a phone's thread), a pause, then a patch block reusing that id — it changes the card and table in place and draws nothing where it sits — then a block naming a component the library doesn't have (it draws as the code the model sent), then a closing line. One reply, so a patch never arrives as a second message |
 | `fail` | Tool call fails with "Permission denied" |
 | `ask` | Single clarify question: "Which logs should I count as old?" |
