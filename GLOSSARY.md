@@ -380,9 +380,17 @@ _Avoid_: fake, stub, fixture
 ## Generative replies
 
 **Interface**:
-What a reply draws in place of a stretch of its text: a handful of Gots' own components — a card, a table, a list, a callout, a chart — chosen and filled by the model. A reply may carry more than one, in the order they appear, and one that can't be drawn is the text it came from.
+What a reply draws in place of a stretch of its text: a handful of Gots' own components — a card, a table, a list, a callout, a chart, a map — chosen and filled by the model. A reply may carry more than one, in the order they appear, and one that can't be drawn is the text it came from.
 _Avoid_: widget, generated UI, component tree, card set, view
 
 **Component library**:
 The components an interface may be made of, and what each takes and means. The app writes it once; the host tells it to the model. Not the app's Library, which is the files an agent made.
 _Avoid_: palette, vocabulary, catalogue, kit, widget set
+
+**Block**:
+One fenced stretch of interface code inside a reply's text. A finished block draws an interface, redraws an earlier one in its place, or draws nothing.
+_Avoid_: fence, code block, snippet
+
+**Patch**:
+A block that names an earlier interface's id and redraws that interface in its place; it draws nothing of its own.
+_Avoid_: update, diff, override
