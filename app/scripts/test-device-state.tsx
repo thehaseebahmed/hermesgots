@@ -69,11 +69,12 @@ test("the device state names a bot's Main, its threads and its host's answers, w
   assert.deepEqual(found.main?.messages, { user: 1, assistant: 1 }, "Main's messages are counted")
   assert.equal(found.threads, 1)
   assert.deepEqual(
-    found.chats.map((one) => one.id),
-    ["t1"],
-    "a project session is not a thread",
+    found.chats.map((one) => one.id).sort(),
+    [mainThreadId(bot.id), "t1"].sort(),
+    "the window holds the thread and any main-flagged chat, and no project session",
   )
   assert.equal(found.lastThread, "t1", "the pane's remembered thread rides along")
+  assert.equal(found.lastStored, "t1", "and so does what storage holds")
   assert.equal(found.plugin, "0.99.0", "the host's plugin version was read")
   assert.deepEqual(found.features, ["triage", "moves"], "the host's features were read")
 })

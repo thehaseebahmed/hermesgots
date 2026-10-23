@@ -236,8 +236,9 @@ export const lastThreadKey = (profileId: string) => `memento:last-thread:${profi
 
 /**
  * What a bot's third pane holds while the route is Main: the thread this device opened last for
- * that bot, and how many threads the bot has at all. A remembered thread that is gone, or is one of
- * another bot's, is no thread of this pane's — Main alone is better than the wrong chat.
+ * that bot, the thread storage holds even where the pane refuses it, and how many threads the bot
+ * has at all. A remembered thread that is gone, or is one of another bot's, is no thread of this
+ * pane's — Main alone is better than the wrong chat.
  */
 export async function lastOpened(profileId: string) {
   const threads = await db.conversations
@@ -245,15 +246,16 @@ export async function lastOpened(profileId: string) {
     .between([profileId, -Infinity], [profileId, Infinity])
     .filter((chat) => !chat.projectId && !chat.main)
     .count()
+  let stored: string | null = null
   let last: string | undefined
   try {
-    const id = localStorage.getItem(lastThreadKey(profileId))
-    const found = id ? await db.conversations.get(id) : undefined
+    stored = localStorage.getItem(lastThreadKey(profileId))
+    const found = stored ? await db.conversations.get(stored) : undefined
     if (found && found.profileId === profileId && !found.projectId && !found.main) last = found.id
   } catch {
     // Storage can be blocked; the pane then has Main alone.
   }
-  return { last, threads }
+  return { last, stored, threads }
 }
 
 export interface BotPane {

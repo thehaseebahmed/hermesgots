@@ -40,12 +40,17 @@ export interface DiagBot {
   features: string[] | null
   /** The thread this device's pane last opened for the bot, as the pane itself reads it. */
   lastThread: string | null
+  /** The thread storage holds for the pane, even where the pane refuses it. */
+  lastStored: string | null
   /** Its Main thread, read by its own id; null where this device has no Main row for it. */
   main: DiagChat | null
   /** How many threads the bot has, counted through the index. */
   threads: number
-  /** The threads themselves, most recently touched first, as far back as the window reached. */
+  /** The newest chats, most recently touched first, as far back as the window reached; Main may
+   * be among them. */
   chats: DiagChat[]
+  /** Its own reads failed, so what sits above is what could be read around them. */
+  unread?: true
 }
 
 export interface DiagDevice {
@@ -98,6 +103,8 @@ export interface DiagHost {
   features: string[] | null
   /** The thread the pane last opened for the bot, as the pane itself reads it. */
   lastThread: string | null
+  /** The thread storage holds for the pane, even where the pane refuses it. */
+  lastStored: string | null
 }
 
 export function diagBot(input: {
@@ -108,8 +115,10 @@ export function diagBot(input: {
   main: DiagChat | null
   /** How many threads the bot has, counted through the index. */
   threads: number
+  /** Whether the bot's own reads failed, leaving what follows as what could be read. */
+  unread?: boolean
 }): DiagBot {
-  const { profile, host, chats, main, threads } = input
+  const { profile, host, chats, main, threads, unread } = input
   const built: DiagBot = {
     id: profile.id,
     name: profile.name,
@@ -119,10 +128,12 @@ export function diagBot(input: {
     plugin: host.plugin,
     features: host.features,
     lastThread: host.lastThread,
+    lastStored: host.lastStored,
     main,
     threads,
     chats,
   }
+  if (unread) built.unread = true
   if (profile.disabled) built.disabled = true
   if (profile.muted) built.muted = true
   return built

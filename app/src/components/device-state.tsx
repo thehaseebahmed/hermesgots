@@ -11,6 +11,7 @@ import {
   type DiagBot,
   type DiagChat,
   type DiagDevice,
+  type DiagHost,
 } from "@/lib/diagnostics"
 import {
   conversationsOf,
@@ -20,7 +21,7 @@ import {
   mainThreadId,
   type Profile,
 } from "@/lib/db"
-import { getPluginInfo } from "@/lib/hermes"
+import { getPluginInfo, type PluginInfo } from "@/lib/hermes"
 import { isNative } from "@/lib/native"
 import { lastOpened } from "@/lib/threads"
 import { MIN_PLUGIN_VERSION } from "@/lib/version"
@@ -36,13 +37,27 @@ async function messageCounts(id: string) {
   return { user, assistant }
 }
 
+/** The host-and-pane answers one bot's state carries, with nulls where nothing was answered. */
+const hostOf = (
+  profile: Profile,
+  info: PluginInfo | null,
+  pane: { last?: string; stored: string | null },
+): DiagHost => ({
+  configured: hasServer(profile),
+  pluginVersion: profile.pluginVersion ?? null,
+  plugin: info?.version ?? null,
+  features: info?.features ?? null,
+  lastThread: pane.last ?? null,
+  lastStored: pane.stored,
+})
+
 async function botState(profile: Profile): Promise<DiagBot> {
   const configured = hasServer(profile)
   const [rows, pane, mainRow, info] = await Promise.all([
-    // Main is filtered out of this window, so it is read by its own id beside it.
+    // Main is read by its own id; a stray main-flagged chat still rides in the window.
     conversationsOf(profile.id)
       .reverse()
-      .filter((chat) => !chat.projectId && !chat.main)
+      .filter((chat) => !chat.projectId)
       .limit(CHATS)
       .toArray(),
     lastOpened(profile.id),
@@ -51,35 +66,18 @@ async function botState(profile: Profile): Promise<DiagBot> {
   ])
   const chats: DiagChat[] = rows.map((chat) => diagChat(chat))
   const main = mainRow ? await diagChat(mainRow, await messageCounts(mainRow.id)) : null
-  return diagBot({
-    profile,
-    host: {
-      configured,
-      pluginVersion: profile.pluginVersion ?? null,
-      plugin: info?.version ?? null,
-      features: info?.features ?? null,
-      lastThread: pane.last ?? null,
-    },
-    chats,
-    main,
-    threads: pane.threads,
-  })
+  return diagBot({ profile, host: hostOf(profile, info, pane), chats, main, threads: pane.threads })
 }
 
-/** A bot whose own reads failed: named and configured, and nothing claimed about what it holds. */
+/** A bot whose own reads failed: named and configured, and marked unread rather than empty. */
 const unreadBot = (profile: Profile): DiagBot =>
   diagBot({
     profile,
-    host: {
-      configured: hasServer(profile),
-      pluginVersion: profile.pluginVersion ?? null,
-      plugin: null,
-      features: null,
-      lastThread: null,
-    },
+    host: hostOf(profile, null, { stored: null }),
     chats: [],
     main: null,
     threads: 0,
+    unread: true,
   })
 
 /** Everything the device holds that a bug about a stuck screen needs to be read from afar. */

@@ -50,7 +50,8 @@ test("a bot's state separates Main from its threads and never carries its key or
       pluginVersion: null,
       plugin: "0.99.0",
       features: ["triage", "moves"],
-      lastThread: null,
+      lastThread: "t1",
+      lastStored: "t1",
     },
     chats,
     main,
@@ -58,6 +59,8 @@ test("a bot's state separates Main from its threads and never carries its key or
   })
   assert.equal(built.main?.id, "main-bot-1", "Main is named as its own field")
   assert.equal(built.threads, 1, "the thread count is what the reader counted")
+  assert.equal(built.lastThread, "t1", "the pane's answer rides")
+  assert.equal(built.lastStored, "t1", "and so does what storage holds")
   assert.deepEqual(
     built.chats.map((one) => one.id),
     ["t1"],
@@ -83,6 +86,7 @@ test("a bot without a Main, or an answer, still reads", () => {
       plugin: null,
       features: null,
       lastThread: null,
+      lastStored: null,
     },
     chats: [diagChat(chat("t1", 2_000))],
     main: null,
@@ -93,6 +97,26 @@ test("a bot without a Main, or an answer, still reads", () => {
   assert.equal(built.plugin, null, "an absent answer reads as null, not as a missing field")
   assert.equal(built.lastThread, null)
   assert.equal(built.disabled, undefined, "a switch that is off rides as no field")
+})
+
+test("a bot whose own reads failed says so rather than claiming emptiness", () => {
+  const built = diagBot({
+    profile,
+    host: {
+      configured: true,
+      pluginVersion: null,
+      plugin: null,
+      features: null,
+      lastThread: null,
+      lastStored: null,
+    },
+    chats: [],
+    main: null,
+    threads: 0,
+    unread: true,
+  })
+  assert.equal(built.unread, true, "an unread bot is marked, not mistaken for a fresh one")
+  assert.deepEqual(built.chats, [])
 })
 
 const device = () => ({
