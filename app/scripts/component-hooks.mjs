@@ -81,11 +81,35 @@ globalThis.__HERMES_ENV__ = {
 Object.defineProperty(dom.window, "innerWidth", { value: 390, writable: true, configurable: true })
 Object.defineProperty(dom.window, "innerHeight", { value: 844, writable: true, configurable: true })
 
+/**
+ * jsdom has no layout, so a box reports no size and a `ResizeObserver` is never called. The stub
+ * records the observers a screen made, and `resized()` in the kit fires them, so a test can hand a
+ * measuring component the sizes a browser would have reported.
+ */
+const observers = []
+globalThis.__resizeObservers = observers
+
 class ResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
+  constructor(callback) {
+    this.callback = callback
+    this.watching = []
+    observers.push(this)
+  }
+  observe(target) {
+    this.watching.push(target)
+  }
+  unobserve(target) {
+    this.watching = this.watching.filter((one) => one !== target)
+  }
+  disconnect() {
+    this.watching = []
+  }
+  /** Reports a resize to the component watching these boxes, as a browser would. */
+  report() {
+    if (this.watching.length) this.callback([], this)
+  }
 }
+
 Object.defineProperty(globalThis, "ResizeObserver", {
   value: ResizeObserver,
   writable: true,

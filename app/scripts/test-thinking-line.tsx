@@ -7,10 +7,13 @@ import {
   chatScreen,
   click,
   expanded,
+  find,
+  findText,
   json,
   lineLabel,
   mount,
   onlyThinkingLine,
+  resized,
   seedChat,
   settle,
   thinkingLines,
@@ -22,6 +25,18 @@ const ASK = "Where does the parser read a reply?"
 const REASONING = "Read `parse.ts` first, then its blocks."
 const SECOND = "Its blocks are what matter."
 const ANSWER = "The parser reads it, then keeps its blocks."
+
+/** Thinking written the way a model writes it: bold, a list and a fence, no plain parallel to them. */
+const MARKDOWN = [
+  "**Read the parser first**, then its blocks:",
+  "",
+  "- `parse.ts` keeps the scan",
+  "- its blocks are what matter",
+  "",
+  "```ts",
+  "const blocks = markdownBlocks(text)",
+  "```",
+].join("\n")
 
 const run = (text: string, extra: Partial<ReasoningRun> = {}): ReasoningRun => ({ text, ...extra })
 
@@ -113,6 +128,24 @@ async function stream(id: string) {
   await settle()
 }
 
+/** The box the opened run's words sit in, and the two things a run too tall for it draws. */
+const cap = () => find("[data-slot=thinking-cap]")
+const fade = () => find("[data-slot=thinking-fade]")
+const more = () => findText("button", "Show more")
+
+/** The size a browser would report for a box; a DOM without layout has none to report. */
+function sized(element: Element, size: { client: number; scroll: number }) {
+  Object.defineProperty(element, "clientHeight", { value: size.client, configurable: true })
+  Object.defineProperty(element, "scrollHeight", { value: size.scroll, configurable: true })
+}
+
+/** The thread's own scroll box: what a reader scrolls, and what the row's end is kept in view of. */
+const viewport = () => {
+  const found = find("[data-slot=message-scroller-viewport]")
+  assert.ok(found, "the thread has a scroll box")
+  return found
+}
+
 test("a streaming reply's run streams open and the working line stands down", async () => {
   host()
   const id = "streaming"
@@ -121,7 +154,11 @@ test("a streaming reply's run streams open and the working line stands down", as
     const line = onlyThinkingLine()
     assert.equal(lineLabel(line), "Thinking…", "still thinking, so no duration yet")
     assert.equal(expanded(line), "true", "and open, as the thinking arrives")
-    assert.match(reasoned(line).textContent ?? "", /Read `parse\.ts` first/, "its thinking readable")
+    assert.match(
+      reasoned(line).textContent ?? "",
+      /then its blocks/,
+      "its thinking readable",
+    )
     assert.equal(
       document.querySelector('[aria-live="polite"]'),
       null,
@@ -460,6 +497,152 @@ test("a coding session draws no line where the same reply in a chat draws one", 
     assert.match(screenText(), /The parser reads it/, "the session still draws the reply")
     assert.equal(thinkingLines().length, 0, "with no thinking line")
   })
+})
+
+test("an opened run reads as markdown, the way the reply's own answer does", async () => {
+  host()
+  await screen(
+    undefined,
+    turn({ id: "markdown", reasoningRuns: [run(MARKDOWN)], content: ANSWER }),
+    async () => {
+      assert.equal(expanded(onlyThinkingLine()), "false", "an answered reply starts folded")
+      await click(onlyThinkingLine())
+      // The renderer is the app's own, loaded off the startup path; ask for it as a reply does.
+      await import("@/components/chat/markdown-renderer")
+      await settle()
+
+      const body = reasoned(onlyThinkingLine())
+      assert.equal(
+        body.querySelector("strong")?.textContent,
+        "Read the parser first",
+        "**bold** draws as a <strong>, not as its markers",
+      )
+      const items = [...body.querySelectorAll("li")].map((one) => one.textContent?.trim())
+      assert.deepEqual(
+        items,
+        ["parse.ts keeps the scan", "its blocks are what matter"],
+        "a list draws as list items",
+      )
+      assert.match(
+        body.querySelector("pre code")?.textContent ?? "",
+        /markdownBlocks\(text\)/,
+        "a fence draws as code, as it does in the reply",
+      )
+      assert.doesNotMatch(
+        body.textContent ?? "",
+        /\*\*|```|- `parse/,
+        "with no markdown left reading as text",
+      )
+      assert.match(screenText(), new RegExp(ANSWER), "the answer is still drawn under it")
+    },
+  )
+})
+
+test("a run taller than its cap draws a fade and a Show more, which reveals the rest", async () => {
+  host()
+  await screen(
+    undefined,
+    turn({ id: "capped", reasoningRuns: [run(MARKDOWN)], content: ANSWER }),
+    async () => {
+      await click(onlyThinkingLine())
+      const box = cap()
+      assert.ok(box, "the opened run's words sit in their own box")
+      assert.match(box.className, /max-h-\[30dvh\]/, "capped against the screen's own height")
+      assert.equal(fade(), null, "nothing is hidden yet, so no fade")
+      assert.equal(more(), null, "and nothing to reveal")
+
+      // A browser measures the box; this one has to be told. The run is three times its cap.
+      sized(box, { client: 240, scroll: 720 })
+      await resized("[data-slot=thinking-cap]")
+      assert.ok(fade(), "a fade at the edge the rest of the run falls past")
+      const control = more()
+      assert.ok(control, "and a Show more under it")
+      assert.equal(lineLabel(control), "Show more", "worded plainly")
+
+      await click(control)
+      assert.equal(more(), null, "revealing the rest drops the control")
+      assert.equal(fade(), null, "and the fade with it")
+      assert.doesNotMatch(
+        cap()?.className ?? "",
+        /max-h-/,
+        "and the cap, so the whole run reads inline",
+      )
+      assert.match(
+        reasoned(onlyThinkingLine()).textContent ?? "",
+        /markdownBlocks\(text\)/,
+        "the last of it still there",
+      )
+    },
+  )
+})
+
+test("opening a run lands on its newest words, and the tail follows until a scroll up", async () => {
+  host()
+  const id = "following"
+  const into: ScrollIntoViewOptions[] = []
+  const scrolled = HTMLElement.prototype.scrollIntoView
+  const media = globalThis.matchMedia
+  HTMLElement.prototype.scrollIntoView = function (options?: boolean | ScrollIntoViewOptions) {
+    if (typeof options === "object" && options?.block === "end") into.push(options)
+  }
+  try {
+    await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)] }), async () => {
+      await stream(id)
+      // Fold it and open it again, the way a reader opens a row: opening is what lands on the end.
+      await click(onlyThinkingLine())
+      into.length = 0
+      await click(onlyThinkingLine())
+      assert.equal(into.at(-1)?.block, "end", "opening puts the run's end in view")
+      assert.equal(into.at(-1)?.behavior, "smooth", "gliding there, as the thread's own moves do")
+
+      // The words arrive: the row's end is put back in view as it grows.
+      into.length = 0
+      await db.messages.put({
+        ...(await db.messages.get(id))!,
+        reasoningRuns: [run(`${REASONING} Then the blocks.`)],
+      })
+      await settle()
+      await resized("[data-slot=thinking-body]")
+      assert.ok(into.length > 0, "growth keeps the end of the row in view")
+
+      // A reader scrolling the thread up leaves the follow where it was: it stays off for this row.
+      const view = viewport()
+      view.dispatchEvent(new window.WheelEvent("wheel", { deltaY: -120, bubbles: true }))
+      into.length = 0
+      await db.messages.put({
+        ...(await db.messages.get(id))!,
+        reasoningRuns: [run(`${REASONING} Then the blocks. Its scan is cheap.`)],
+      })
+      await settle()
+      await resized("[data-slot=thinking-body]")
+      assert.equal(into.length, 0, "a scroll up stops the follow, for good")
+
+      // Opening it again re-arms it.
+      await click(onlyThinkingLine())
+      into.length = 0
+      await click(onlyThinkingLine())
+      assert.ok(into.length > 0, "and opening the row again follows it once more")
+    })
+
+    // With motion asked against, the same landing happens without an animation.
+    const reduced = (query: string) => {
+      const answer = media(query)
+      if (query !== "(prefers-reduced-motion: reduce)") return answer
+      return { ...answer, matches: true }
+    }
+    globalThis.matchMedia = reduced
+    window.matchMedia = reduced
+    await screen(undefined, turn({ id: "no-motion", reasoningRuns: [run(REASONING)], content: ANSWER }), async () => {
+      into.length = 0
+      await click(onlyThinkingLine())
+      assert.equal(into.at(-1)?.block, "end", "still the run's end")
+      assert.equal(into.at(-1)?.behavior, "auto", "placed with no motion at all")
+    })
+  } finally {
+    HTMLElement.prototype.scrollIntoView = scrolled
+    globalThis.matchMedia = media
+    window.matchMedia = media
+  }
 })
 
 test("with reduced motion asked for, a tap still opens the row and a second folds it", async () => {
